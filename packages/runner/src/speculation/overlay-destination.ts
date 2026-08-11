@@ -428,6 +428,7 @@ export class SpeculationOverlayDestination
     eventId: string,
     outcome: { kind: "refused"; reason: string },
   ): void {
+    if (this.#closed) return;
     this.#untrackIntent(space, sidecarId, eventId);
     this.retireIntent(space, eventId);
     this.#notifyIntentOutcome({

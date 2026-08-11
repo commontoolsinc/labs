@@ -94,13 +94,19 @@ const RETRY_CAP_MS = 10_000;
  * only delays delivery (dedupe keeps the resend sound), while
  * mis-classifying a transient as refused would LOSE a user intent. */
 const REFUSED_ERROR_NAMES = new Set([
-  // Deterministic server verdicts: resubmitting the identical append
-  // can never succeed (shape violations, admission refusals).
+  // PROVABLY deterministic server verdicts only: resubmitting the
+  // identical append can never succeed (shape violations, admission
+  // refusals, CFC commit-rule refusals). The server's catch-all
+  // "TransactionError" is NOT here — it names any unclassified
+  // exception (a sqlite I/O fault, an engine bug), which a resend may
+  // well clear; treating it as refused would LOSE a user intent on a
+  // transient server fault (events.md §5's drop predicate is "cannot
+  // run at all", never "the attempt faulted"). "ConflictError" is
+  // likewise transient-shaped: a readless, precondition-less append
+  // cannot deterministically conflict.
   "ProtocolError",
   "RowLabelCommitError",
   "PreconditionFailedError",
-  "TransactionError",
-  "ConflictError",
 ]);
 
 export class EventAppendQueue {
@@ -110,8 +116,13 @@ export class EventAppendQueue {
   readonly #nextLocalSeq: () => number;
   readonly #onRefused?: (append: QueuedEventAppend, reason: string) => void;
   readonly #queue: QueuedEventAppend[] = [];
+  /** Keyed PER ENTRY OBJECT, not per eventId: duplicate-eventId fires
+   * are a DESIGNED flow (events.md §5's duplicate submission), and a
+   * per-id map would leak the first fire's outcome forever — wedging
+   * every barrier its promise was registered with. Reloaded entries
+   * carry no resolver (their firers are gone). */
   readonly #outcomes = new Map<
-    string,
+    QueuedEventAppend,
     (outcome: EventAppendOutcome) => void
   >();
   #clientSeq = 0;
@@ -123,6 +134,9 @@ export class EventAppendQueue {
    * pending forever, wedging dispose-time sanitizers). */
   #retryRelease: (() => void) | undefined;
   #loaded: Promise<void>;
+  /** The tail of the save chain — `persisted` awaits it (tests, and
+   * any caller that must observe durability before proceeding). */
+  #lastPersist: Promise<void> = Promise.resolve();
 
   constructor(options: {
     space: string;
@@ -171,6 +185,12 @@ export class EventAppendQueue {
     return this.#loaded;
   }
 
+  /** Resolves when every save issued SO FAR has settled (durability
+   * observation; a crash never waits for it). */
+  get persisted(): Promise<void> {
+    return this.#lastPersist;
+  }
+
   nextClientSeq(): number {
     return this.#clientSeq++;
   }
@@ -187,7 +207,7 @@ export class EventAppendQueue {
     };
     const { promise, resolve } = Promise.withResolvers<EventAppendOutcome>();
     this.#queue.push(entry);
-    this.#outcomes.set(entry.eventId, resolve);
+    this.#outcomes.set(entry, resolve);
     this.#persist();
     this.#kick();
     return promise;
@@ -206,10 +226,23 @@ export class EventAppendQueue {
     }
     this.#retryRelease?.();
     this.#retryRelease = undefined;
+    // Settle every outstanding outcome promise: a pending-commit
+    // barrier holding one must release at teardown (the intents
+    // themselves stay persisted for the next queue instance — closed
+    // is not refused, so no echo is withdrawn).
+    for (const [entry, resolve] of [...this.#outcomes.entries()]) {
+      this.#outcomes.delete(entry);
+      resolve({ delivered: false, refused: "event queue closed" });
+    }
   }
 
   #persist(): void {
-    void this.#store.save(this.#space, this.#queue).catch((error) => {
+    // Serialized BEHIND the constructor's load: a save racing the load
+    // would write only the fresh entries, clobbering the predecessor's
+    // persisted backlog (the LT9 loss the seam exists to prevent).
+    this.#lastPersist = this.#loaded.then(() =>
+      this.#store.save(this.#space, this.#queue)
+    ).catch((error) => {
       logger.warn("event-queue-save-failed", () => [
         `event queue save for ${this.#space} failed; a reload before ` +
         "delivery may lose the queued intent (LT9 durability degraded)",
@@ -282,9 +315,9 @@ export class EventAppendQueue {
     const index = this.#queue.indexOf(entry);
     if (index >= 0) this.#queue.splice(index, 1);
     this.#persist();
-    const resolve = this.#outcomes.get(entry.eventId);
+    const resolve = this.#outcomes.get(entry);
     if (resolve !== undefined) {
-      this.#outcomes.delete(entry.eventId);
+      this.#outcomes.delete(entry);
       resolve(outcome);
     }
   }

@@ -45,6 +45,12 @@ import type {
   StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
+
+/** Consecutive cold-view deferrals before a drained event hardens into
+ * events.md §5's DROP (see #eventDeferrals). Each deferral is one full
+ * input-driven wave cycle, so the creation race has this many commits'
+ * worth of arrival time. */
+const EVENT_DEFERRAL_DROP_THRESHOLD = 8;
 import { markRuntimeInjectedEventKeys } from "../cell.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import {
@@ -216,6 +222,16 @@ export class SpaceServer implements TransactionSealDestination {
   /** Consequence-notice seals in flight (the error/drop/skip arms):
    * awaited before the wave closes so their marks ride THIS wave. */
   readonly #eventNoticeWork = new Set<Promise<unknown>>();
+  /** Consecutive DEFERRALS per eventId (cold-view piece loads). The
+   * deferral arm exists for the creation race (OW19's conflation
+   * caution: a not-yet-created piece and a never-startable one are
+   * indistinguishable by id), so a bounded number of waves must pass
+   * before a deferral hardens into events.md §5's DROP — the race
+   * resolves within a few input-driven cycles, while a permanently
+   * unstartable piece would otherwise re-drain forever (no notice, no
+   * park). Cleared on activation (a fresh runtime re-tries from
+   * scratch) and on any non-deferred outcome. */
+  readonly #eventDeferrals = new Map<string, number>();
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
    * at seal). Admitted to the outbox after the wave's commit step;
@@ -396,6 +412,7 @@ export class SpaceServer implements TransactionSealDestination {
     // §6 step 4 (Phase 3): undelivered events — stream head past the
     // per-stream eventWatermark — reprocess. The scan is the same
     // discovery the per-wave drain runs; activation only ARMS it.
+    this.#eventDeferrals.clear();
     const pendingEventDocs = Engine.selectPendingStreamEventDocs(engine);
     if (pendingEventDocs.length > 0) {
       this.#eventScanOwed = true;
@@ -645,12 +662,22 @@ export class SpaceServer implements TransactionSealDestination {
           ],
         }).withTx(tx).set(true);
       } catch (error) {
+        // The mark IS the exactly-once record (events.md §4: no window
+        // where an event is both consumed and replayable). Letting the
+        // handler's consequences commit UNMARKED would re-run them on
+        // the next drain — double consequences. Abort the tx instead:
+        // the dispatch's error arm seals the error consequence (the
+        // notice tx re-attempts the mark), and if that fails too the
+        // entry simply stays pending — re-drained, never doubled.
         logger.warn("event-mark-failed", () => [
           `consequenced mark for ${info.eventId} failed at stamp time; ` +
-          "the event will reprocess (exactly-once still holds — the " +
-          "unmarked entry stays above the watermark)",
+          "aborting the handler tx (unmarked consequences would " +
+          "re-run — events.md §4)",
           error,
         ]);
+        tx.abort(
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
     }
   }
@@ -1157,12 +1184,35 @@ export class SpaceServer implements TransactionSealDestination {
                 streamEntry,
                 onFailure: (outcome) => {
                   if (outcome.kind === "deferred") {
-                    // No consequence: the entry stays pending and the
-                    // next wave re-drains it (the cold-view creation
-                    // race — OW19's conflation caution).
-                    this.#eventScanOwed = true;
+                    const deferrals =
+                      (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
+                    this.#eventDeferrals.set(entry.eventId, deferrals);
+                    if (deferrals < EVENT_DEFERRAL_DROP_THRESHOLD) {
+                      // No consequence: the entry stays pending and the
+                      // next wave re-drains it (the cold-view creation
+                      // race — OW19's conflation caution).
+                      this.#eventScanOwed = true;
+                      return;
+                    }
+                    // The race window is long past: no runnable handler
+                    // exists — events.md §5's drop predicate. The
+                    // notice un-renders the echo and un-wedges the
+                    // stream (and the park criterion).
+                    this.#eventDeferrals.delete(entry.eventId);
+                    this.#sealEventConsequenceNotice(
+                      runtime,
+                      entry,
+                      streamEntry,
+                      {
+                        kind: "dropped",
+                        message: "no runnable handler after " +
+                          `${deferrals} deferred load attempts: ` +
+                          outcome.message,
+                      },
+                    );
                     return;
                   }
+                  this.#eventDeferrals.delete(entry.eventId);
                   this.#sealEventConsequenceNotice(
                     runtime,
                     entry,

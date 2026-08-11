@@ -1982,7 +1982,8 @@ const validateEventAppends = (
       if (
         commitClass !== "derived" &&
         (entry.consequenced !== undefined || entry.error !== undefined ||
-          entry.status !== undefined || entry.reason !== undefined)
+          entry.status !== undefined || entry.reason !== undefined ||
+          entry.deliveryFailures !== undefined)
       ) {
         throw new ProtocolError(
           `event append ${entry.eventId} pre-supplies processing fields ` +
@@ -2914,14 +2915,18 @@ const applyCommitTransaction = (
   // recomputed HERE, inside the commit's own transaction — the
   // consequence marks and the advance are atomic by construction, and a
   // requeued entry (whose mark rolled back with its contribution) holds
-  // the frontier. The frontier is the model's rule verbatim: the
-  // highest seq S such that EVERY entry at or below S is consequenced;
-  // entries sharing one commit seq advance only together. Seq-less
-  // entries (the stage-G interim arm) hold no frontier position — their
-  // dedupe rides the consequenced flag alone. The recompute OVERRIDES
-  // any watermark value the commit body carried: the frontier is
-  // derived state, and admission owns it (a producer-supplied value
-  // that disagrees is a bug corrected, never trusted).
+  // the frontier. The frontier is the model's rule verbatim: ADVANCE
+  // the stored value to the highest seq S such that every entry above
+  // the stored value and at or below S is consequenced; entries
+  // sharing one commit seq advance only together. Seq-less entries
+  // (the stage-G interim arm) hold no frontier position — their dedupe
+  // rides the consequenced flag alone. The STORED value is the floor,
+  // exactly as in the model (`commitWave`'s `let wm =
+  // st.eventWatermark`): the recompute never lowers it, so a derived
+  // producer that wrote a too-high watermark is trusted — the accepted
+  // single-deriver threat posture (only the lease holder commits
+  // derived; watermark forgery is protocol.md §1's accepted authored
+  // intrusion, and this is its derived twin).
   if (commitClass === "derived") {
     maintainStreamEventWatermarks(engine, branch, seq, sessionId, revisions);
   }

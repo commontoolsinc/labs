@@ -15,8 +15,11 @@
 //   it);
 // - the ERROR arm: a throwing handler's error IS the consequence
 //   (events.md §5) — the entry carries it, the stream does not wedge;
-// - the DROP arm: an event with no runnable handler gets the
-//   `{status: "dropped", reason}` notice (events.md §5's predicate);
+// - the DROP arm: an event whose piece can NEVER start defers for the
+//   bounded creation-race window, then hardens into the
+//   `{status: "dropped", reason}` notice (events.md §5's predicate;
+//   OW19's conflation caution bounds the deferral, it does not erase
+//   the drop);
 // - the SKIP arm: an at-or-below-horizon duplicate admission is
 //   skipped at processing, counted `skippedIdempotent`, and passed by
 //   the frontier (events.md §4/§5; the model's C2-dedupe pin);
@@ -607,7 +610,49 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
-  it("same-space cascade (LT1): the served handler's send commits a durable wave-carried entry with the INHERITED actor; the next wave processes it — exactly once", async () => {
+  it("the DROP arm: an event whose piece can never start defers through the creation-race window, then drops with the events.md §5 notice", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    host = newHost();
+    // An entry whose stream points at a doc that IS no piece and never
+    // will be: the drain defers (cold-view creation race) for the
+    // bounded window, then hardens into the drop notice.
+    const delivered = await server.commitDelegatedAppend({
+      targetSpace: space,
+      targetStream: "of:stream-events:never-a-piece",
+      targetStreamLink: { id: "of:no-such-piece", path: ["stream"] },
+      eventId: "evt-unrunnable",
+      payload: {},
+      actingPrincipal: aliceSigner.did(),
+      actingSession: "drop-session",
+      capabilityRef: "cap-drop",
+      sessionId: `service:${space}`,
+      localSeq: 990_100,
+    });
+    expect(delivered.deduped).toBe(false);
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, {
+          id: "of:stream-events:never-a-piece",
+        })?.value as StreamEventsDocValue | undefined;
+        const entry = value?.entries?.[0];
+        return entry?.status === "dropped" &&
+          entry?.consequenced === true &&
+          value?.eventWatermark === entry?.seq;
+      },
+      "the dropped-event notice + frontier pass (non-wedging)",
+      30_000,
+    );
+    const entry = (Engine.read(engine, {
+      id: "of:stream-events:never-a-piece",
+    })?.value as StreamEventsDocValue).entries![0];
+    expect(entry.reason).toContain("no runnable handler");
+    // The space can PARK again: the drop cleared the undelivered-events
+    // criterion (a perpetual deferral would wedge it active forever).
+    expect(Engine.selectPendingStreamEventDocs(engine).length).toBe(0);
+  });
+
+  it("same-space cascade (LT1): the served handler's send commits a durable wave-carried entry with the INHERITED actor — processed exactly once", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
     const { argument, result } = await standUp(clientRuntime, CASCADE_PATTERN, {

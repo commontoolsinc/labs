@@ -913,13 +913,34 @@ Delta 2026-08-10 — Phase 3 (events-down, D-v2-1; the phase PR):
   injectable store whose default is in-memory — the same persistence
   class as `sessionId` today, protocol §5's sessionId persistence
   being pre-existing spec debt; the browser adapter lands with it);
-  (iv) same-space emitted entries process NEXT wave (LT1's
-  budget-exhausted fallback as the standing shape) — same-wave
-  processing is a recorded follow-up.
+  (iv) same-space emitted entries PROCESS IN THEIR OWN WAVE: the
+  batch marks an emitted entry consequenced iff its handler's
+  contribution survived the wave (requeued runs leave it unmarked
+  for the next drain — C8b/C8d); (v) `runtimeInjectedEventKeys` on
+  the entry converts a process-local trust mark into client-asserted
+  wire provenance the drain re-mints — threat-model-consistent (the
+  client could equally assert locally today) but a WIDENING, flagged;
+  (vi) the OW14 notice's CARRIAGE is a direct engine derived commit
+  from the outbox (the completion-commit precedent), not a
+  later-wave write — flagged with its field shape; (vii) `events.*`
+  counter semantics: `processed` counts DRAINED (thrown handlers and
+  re-drained requeues re-count), `appended` re-counts scan-covered
+  entries across re-activations — gates assert `>=`, never equality;
+  (viii) sidecar-log COMPACTION (events §4's allowance) is not
+  implemented — the per-wave pending scan and the index-addressed
+  consequence marks are both sized by the uncompacted log, and the
+  compaction follow-up must revisit the wave's sidecar rebase
+  refinement and the drain's index addressing together; (ix) the
+  backlog-collapse disablement gates on the FLAG (all events), not
+  per-durable-id — conservative (losing collapse loses no intent);
+  ledger L8's alternative stays open.
 - The engine's per-stream `eventWatermark` is DERIVED state: the
   contiguous consequenced frontier recomputed inside every derived
   commit that touches a sidecar (the model's commit-step rule
-  verbatim); a producer-supplied value is corrected, never trusted.
+  verbatim, INCLUDING its stored-value floor — the recompute never
+  lowers the stored watermark, so a lease holder that wrote a
+  too-high value is trusted: the single-deriver threat posture,
+  protocol §1's accepted-intrusion twin).
 - runtime-mapping N26 discharged: the receipt create-only +
   origin-committed precondition mechanisms are disabled under the
   flag (`eventWatermark` subsumes); the receipt VALUE surface and

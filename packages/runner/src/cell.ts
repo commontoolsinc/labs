@@ -1492,7 +1492,17 @@ export class CellImpl<T extends FabricValue>
         const sidecarId = streamEntriesDocId(stream);
         const space = resolvedToValueLink.space;
         const replica = this.runtime.storageManager.open(space).replica;
-        if (replica.enqueueEventAppend !== undefined) {
+        if (replica.enqueueEventAppend === undefined) {
+          // Fail CLOSED (the cross-space arm's posture): a flag-ON
+          // fire that cannot commit its event would silently lose the
+          // user's intent — refuse loudly instead (events.md §1, §7).
+          throw new Error(
+            "event fire refused: the storage provider does not support " +
+              "event appends, and a flag-ON fire commits ONLY the event " +
+              "(events.md §7)",
+          );
+        }
+        {
           const overlay = this.runtime.speculationOverlay;
           overlay?.trackIntent(space, sidecarId, firedEventId);
           const eventId = firedEventId;
@@ -1587,6 +1597,34 @@ export class CellImpl<T extends FabricValue>
               op: "append",
               count: 1,
             });
+            // Same-wave processing (LT1, D-v2-2: "the loop is simply
+            // not idle until all events are processed"): queue the
+            // emitted event in-process too. Its handler runs in THIS
+            // wave; the batch build marks the entry consequenced IFF
+            // that run's contribution SURVIVED the wave (wave.ts) — a
+            // requeued run leaves the entry unmarked and the next
+            // wave's drain re-runs it (C8b), and an emitter that
+            // requeues withdraws the entry with its own contribution
+            // (C8d). No streamEntry on the stamp: the entry has no
+            // durable index yet — the batch owns the mark.
+            this.runtime.scheduler.queueEvent(
+              resolvedToValueLink,
+              event,
+              false,
+              undefined,
+              false,
+              {
+                eventId: emittedId,
+                served: {
+                  firedAt: {
+                    ...(acting?.user !== undefined
+                      ? { user: acting.user }
+                      : {}),
+                    session: acting?.session ?? "server",
+                  },
+                },
+              },
+            );
           } else {
             // Cross-space: the outbox's durable row (FP1), carrying the
             // acting identity — actor inheritance crosses spaces
@@ -1595,6 +1633,17 @@ export class CellImpl<T extends FabricValue>
             // capabilityRef is structural presence (grant RESOLUTION
             // is the OW13 owed hardening; no per-doc grant store
             // exists yet).
+            // DEPENDENCY MARKER (the scheduler-instance follow-up,
+            // OW17/P2-F): today every derivation run carries NO acting
+            // identity, so `acting === undefined` truthfully means "a
+            // chain with no actor anywhere" and the OW15 declaration
+            // below is sound. The day per-instance demanded runs
+            // supply acting identities (LT6: a user-instance run's
+            // emission carries the user), this derivation must keep
+            // reading the RUN's acting identity — deriving
+            // userlessness from a MISSING supply would misdeclare a
+            // user's emission sessionless-space-scope and destroy the
+            // actor at delivery.
             const userless = acting?.user === undefined;
             const row: OutboxAppendRow = {
               targetSpace: resolvedToValueLink.space,
@@ -1638,6 +1687,9 @@ export class CellImpl<T extends FabricValue>
             destination.stageOutboundAppend(this.tx, row);
           }
           this.cleanup?.();
+          const [cancel, addCancel] = useCancelGroup();
+          this.cleanup = cancel;
+          this.listeners.forEach((callback) => addCancel(callback(event)));
           return this as unknown as Cell<T>;
         }
       }

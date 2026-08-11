@@ -404,11 +404,14 @@ describe("Phase 2 speculation overlay", () => {
     );
     expect(overlay!.entryCount(space)).toBeGreaterThanOrEqual(1);
     // The durable half of the doc the handler wrote did NOT change:
-    // reading the STORE view (the engine) shows the seed value only.
-    const argDoc = Engine.read(engine, { id: "of:handler-arg" });
-    expect(
-      (argDoc?.value as { value?: number } | undefined)?.value ?? 0,
-    ).toBe(0);
+    // reading the STORE view (the engine) shows the seed value only —
+    // by the cell's REAL hash-derived id, and asserting the doc EXISTS
+    // (a wrong-id read would pass vacuously through `?? 0`).
+    const argDoc = Engine.read(engine, {
+      id: argument.getAsNormalizedFullLink().id,
+    });
+    expect(argDoc).not.toBeNull();
+    expect((argDoc?.value as { value?: number } | undefined)?.value).toBe(0);
     cancelDemand();
   });
 

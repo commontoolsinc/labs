@@ -1524,17 +1524,40 @@ export class WaveAccumulator
     // Same-space emitted entries (LT1): every surviving op that appends
     // a seq-LESS entry into a stream sidecar carries a NEW event — the
     // engine's admission requires its declaration to stamp the stream
-    // seq (a rewrite — an already-stamped entry — needs none).
+    // seq (a rewrite — an already-stamped entry — needs none). An
+    // entry whose event was PROCESSED IN THIS WAVE — a surviving
+    // event-handler contribution carries its eventId — is marked
+    // `consequenced` in the batch op (a CLONE; the sealed arrays are
+    // caller-shared), so the entry and its consequences commit
+    // together (events.md §2's "an entry processed in its own wave
+    // commits together with its consequences"; the engine admits
+    // derived new appends already consequenced). A run that REQUEUED
+    // is not a survivor: its entry lands unmarked and the next wave's
+    // drain re-runs it (C8b); an emitter that requeued withdrew the
+    // entry with its contribution (C8d).
+    const survivedEventIds = new Set<string>();
+    for (const contribution of this.#survivors(requeued, droppedWhole)) {
+      if (
+        contribution.context.kind === "event-handler" &&
+        contribution.context.eventId !== undefined
+      ) {
+        survivedEventIds.add(contribution.context.eventId);
+      }
+    }
     const eventAppends: Array<{ id: string; eventId: string }> = [];
-    for (const operation of operations) {
-      if (operation.op === "sqlite" || operation.op === "delete") continue;
-      if (!operation.id.startsWith(STREAM_ENTRIES_DOC_PREFIX)) continue;
+    for (const [opIndex, original] of operations.entries()) {
+      if (original.op === "sqlite" || original.op === "delete") continue;
+      if (!original.id.startsWith(STREAM_ENTRIES_DOC_PREFIX)) continue;
+      // Clone before any possible mark: the batch holds the SEALED
+      // commits' own op objects (shared with replica overlays).
+      const operation = structuredClone(original);
+      operations[opIndex] = operation;
       const entryLists: unknown[][] = [];
       if (operation.op === "set") {
         const value = (operation.value as { value?: { entries?: unknown[] } })
           ?.value;
         if (Array.isArray(value?.entries)) entryLists.push(value.entries);
-      } else {
+      } else if (operation.op === "patch") {
         for (const patch of operation.patches) {
           if (
             (patch.op === "append" || patch.op === "add-unique") &&
@@ -1553,14 +1576,19 @@ export class WaveAccumulator
         }
       }
       for (const list of entryLists) {
-        for (const candidate of list) {
+        for (const [entryIndex, candidate] of list.entries()) {
           const entry = candidate as {
             eventId?: string;
             seq?: number;
+            consequenced?: boolean;
           } | null;
           if (
-            entry !== null && typeof entry === "object" &&
-            typeof entry.eventId === "string" && entry.seq === undefined &&
+            entry === null || typeof entry !== "object" ||
+            typeof entry.eventId !== "string" || entry.seq !== undefined
+          ) {
+            continue;
+          }
+          if (
             !eventAppends.some((decl) =>
               decl.id === operation.id && decl.eventId === entry.eventId
             )
@@ -1569,6 +1597,16 @@ export class WaveAccumulator
               id: operation.id,
               eventId: entry.eventId,
             });
+          }
+          if (
+            entry.consequenced !== true &&
+            survivedEventIds.has(entry.eventId)
+          ) {
+            // Same-wave processing: mark the CLONE in place. `list` is
+            // the clone's own array (cloneSidecarOp below), so the
+            // sealed originals stay pristine.
+            (list[entryIndex] as { consequenced?: boolean })
+              .consequenced = true;
           }
         }
       }

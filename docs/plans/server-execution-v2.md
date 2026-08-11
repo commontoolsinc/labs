@@ -522,17 +522,22 @@ Tasks:
 - [x] Handler fire commits the event only (payload + target stream);
       admission = append authority + CAS. LANDED 2026-08-10: the fire
       fork (cell.ts) commits a stamped append to the stream's sidecar
-      doc via the fired-order event queue (offline-durable behind the
-      LT9 store seam); the scheduler tell is the discriminator — a
-      send from a scheduler-stamped run commits nothing.
+      doc via the fired-order event queue. LT9's durability rides an
+      injectable STORE SEAM whose default is in-memory — the same
+      persistence class as `sessionId` today (protocol §5's sessionId
+      persistence is pre-existing spec debt; the browser adapter lands
+      with it, and until then a reload loses queued intents). The
+      scheduler tell is the discriminator — a send from a
+      scheduler-stamped run commits nothing.
 - [x] Server processes events — client-committed and server-originated
       (`stream.send()`) through the same path. LANDED 2026-08-10: the
       SpaceServer's sidecar scan drains BOTH producers (and delegated
       deliveries, and crash recovery) through one path; same-space
-      emissions ride LT1's wave carriage (the committed entry is
-      durable input the next wave drains — same-wave processing is a
-      recorded follow-up); cross-space emissions stage FP1 rows with
-      acting carriage.
+      emissions ride LT1's wave carriage AND process in their own wave
+      (the emitted entry commits already-consequenced when its
+      handler's contribution survived; a requeued run leaves it
+      unmarked for the next wave's drain — C8b/C8d); cross-space
+      emissions stage FP1 rows with acting carriage.
 - [x] Client handler run demoted to speculative echo. LANDED
       2026-08-10: F10 deleted — the overlay destination diverts
       event-handler runs like derivation runs, tagged

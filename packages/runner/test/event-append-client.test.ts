@@ -159,6 +159,67 @@ describe("event-append queue (events.md §5, LT9)", () => {
     queue.close();
   });
 
+  it("duplicate-eventId fires each settle their own outcome (the per-entry keying — a per-id map would wedge the pending-commit barrier)", async () => {
+    let calls = 0;
+    const queue = new EventAppendQueue({
+      space,
+      transact: () => {
+        calls += 1;
+        return calls === 1 ? Promise.resolve() : Promise.reject(
+          namedError("EventAppendDuplicateError", "duplicate"),
+        );
+      },
+      nextLocalSeq: (() => {
+        let seq = 1;
+        return () => seq++;
+      })(),
+    });
+    const first = queue.enqueue(appendOf("evt-same"));
+    const second = queue.enqueue(appendOf("evt-same"));
+    expect(await first).toEqual({ delivered: true });
+    expect(await second).toEqual({ delivered: true, deduped: true });
+    queue.close();
+  });
+
+  it("the server catch-all 'TransactionError' is TRANSIENT — a fault clears on resend, never losing the intent", async () => {
+    let failures = 0;
+    const queue = new EventAppendQueue({
+      space,
+      transact: () => {
+        if (failures < 1) {
+          failures += 1;
+          return Promise.reject(
+            namedError("TransactionError", "sqlite I/O fault"),
+          );
+        }
+        return Promise.resolve();
+      },
+      nextLocalSeq: (() => {
+        let seq = 1;
+        return () => seq++;
+      })(),
+    });
+    expect(await queue.enqueue(appendOf("evt-fault"))).toEqual({
+      delivered: true,
+    });
+    queue.close();
+  });
+
+  it("close() settles every outstanding outcome (a pending-commit barrier holding one must release at teardown)", async () => {
+    const queue = new EventAppendQueue({
+      space,
+      transact: () => Promise.reject(namedError("ConnectionError", "offline")),
+      nextLocalSeq: () => 1,
+    });
+    const pending = queue.enqueue(appendOf("evt-stuck"));
+    await waitUntil(() => queue.pending.length === 1, "the entry to queue");
+    queue.close();
+    const outcome = await pending;
+    expect(outcome.delivered).toBe(false);
+    // The intent itself stays persisted for a successor queue.
+    expect(queue.pending.length).toBe(1);
+  });
+
   it("LT9: intents persisted by a dead predecessor discharge FIRST, in fired order, from the shared store", async () => {
     const store: EventAppendQueueStore = memoryEventAppendQueueStore();
     // Predecessor: everything fails transient — the intents stay queued
@@ -173,8 +234,9 @@ describe("event-append queue (events.md §5, LT9)", () => {
     void dead.enqueue(appendOf("evt-old-2"));
     await waitUntil(
       () => dead.pending.length === 2,
-      "the predecessor to persist its backlog",
+      "the predecessor to queue its backlog",
     );
+    await dead.persisted;
     dead.close();
 
     // Successor over the SAME store: the reloaded intents discharge
@@ -201,6 +263,82 @@ describe("event-append queue (events.md §5, LT9)", () => {
     // Everything delivered ⇒ the store drained (a queue that empties).
     expect((await store.load(space)).length).toBe(0);
     revived.close();
+  });
+});
+
+describe("intent outcome consumption (events.md §5's client signal)", () => {
+  // Destination-level pins over a stub runtime: the notice scan, the
+  // retirement calls, the subscriber signal, and the sink release —
+  // the "client MUST be signaled" machinery (events.md §5) that the
+  // e2e suites exercise only incidentally (the watermark backstop
+  // also retires echoes there, so without these pins the mechanism
+  // was feature-deletion-survivable).
+  it("consequenced retires; dropped/errored retire AND signal; the sidecar sink releases with its last tracked id", async () => {
+    const { SpeculationOverlayDestination } = await import(
+      "../src/speculation/overlay-destination.ts"
+    );
+    const sinks = new Map<
+      string,
+      { cb: (value: unknown) => void; cancelled: boolean }
+    >();
+    const runtimeStub = {
+      getCellFromLink: (link: { id: string }) => ({
+        sink: (cb: (value: unknown) => void) => {
+          const record = { cb, cancelled: false };
+          sinks.set(link.id, record);
+          return () => {
+            record.cancelled = true;
+          };
+        },
+      }),
+      storageManager: { open: () => ({ replica: {} }) },
+    } as never;
+    const destination = new SpeculationOverlayDestination(runtimeStub);
+    const outcomes: string[] = [];
+    const unsubscribe = destination.subscribeIntentOutcomes((outcome) => {
+      outcomes.push(`${outcome.kind}:${outcome.eventId}`);
+    });
+    const SPACE = "did:key:stub" as never;
+
+    destination.trackIntent(SPACE, "of:stream-events:a", "evt-1");
+    destination.trackIntent(SPACE, "of:stream-events:a", "evt-2");
+    destination.trackIntent(SPACE, "of:stream-events:a", "evt-3");
+    expect(sinks.has("of:stream-events:a")).toBe(true);
+
+    const feed = (entries: unknown[]) =>
+      sinks.get("of:stream-events:a")!.cb({ entries });
+    // consequenced: retires silently (no outcome signal).
+    feed([{ eventId: "evt-1", consequenced: true }]);
+    // errored: retires AND signals.
+    feed([
+      { eventId: "evt-1", consequenced: true },
+      { eventId: "evt-2", consequenced: true, error: "boom" },
+    ]);
+    // dropped: retires AND signals; the LAST tracked id releases the
+    // sink.
+    feed([
+      { eventId: "evt-1", consequenced: true },
+      { eventId: "evt-2", consequenced: true, error: "boom" },
+      { eventId: "evt-3", status: "dropped", reason: "gone" },
+    ]);
+    expect(outcomes).toEqual(["errored:evt-2", "dropped:evt-3"]);
+    expect(sinks.get("of:stream-events:a")!.cancelled).toBe(true);
+
+    // The refusal path (a deterministic admission refusal at
+    // discharge): retires + signals without any store state.
+    destination.trackIntent(SPACE, "of:stream-events:b", "evt-r");
+    destination.resolveIntent(SPACE, "of:stream-events:b", "evt-r", {
+      kind: "refused",
+      reason: "undeclared",
+    });
+    expect(outcomes).toEqual([
+      "errored:evt-2",
+      "dropped:evt-3",
+      "refused:evt-r",
+    ]);
+    expect(sinks.get("of:stream-events:b")!.cancelled).toBe(true);
+    unsubscribe();
+    destination.close();
   });
 });
 
