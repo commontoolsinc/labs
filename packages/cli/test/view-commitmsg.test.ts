@@ -269,6 +269,25 @@ async function git(
   return new TextDecoder().decode(o.stdout);
 }
 
+/**
+ * Pins the configuration a commit object is built from, so the configuration a
+ * contributor happens to have cannot reach into a throwaway repository. Signing
+ * matters beyond the identity: a signature records its own creation time, so a
+ * signed commit hashes differently every second, and producing one waits on the
+ * agent holding the key.
+ */
+async function configureRepo(root: string) {
+  await git(root, ["config", "user.email", "t@t.test"]);
+  await git(root, ["config", "user.name", "Test"]);
+  await git(root, ["config", "commit.gpgsign", "false"]);
+}
+
+/** Creates a throwaway repository with that configuration already in place. */
+async function initRepo(root: string) {
+  await git(root, ["init", "-q"]);
+  await configureRepo(root);
+}
+
 async function installHook(root: string, name: string, script: string) {
   const path = `${root}/.git/hooks/${name}`;
   await Deno.writeTextFile(path, `#!/bin/sh\n${script}\n`);
@@ -324,9 +343,7 @@ exec ${shellQuote(realGitPath)} "$@"
 Deno.test("realGit: reads HEAD and amends the message, keeping the tree", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await Deno.writeTextFile(`${root}/f.txt`, "a\nb\n");
     await git(root, ["add", "f.txt"]);
     await git(root, ["commit", "-q", "-m", "original"]);
@@ -363,9 +380,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const journal = `${root}/hook-journal`;
       await installHook(
@@ -396,9 +411,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const helperMarker = `${root}/helper-ran`;
       const helper = `${root}/.git/check`;
@@ -438,9 +451,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const hooksName = " custom-hooks ";
       await git(root, ["config", "core.hooksPath", hooksName]);
@@ -472,9 +483,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const hooksName = "custom hooks";
       await git(root, ["config", "core.hooksPath", hooksName]);
@@ -509,9 +518,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const marker = `${root}/post-commit-ran`;
       await installHook(
@@ -548,9 +555,7 @@ Deno.test({
     const other = await Deno.makeTempDir();
     try {
       for (const repository of [root, other]) {
-        await git(repository, ["init", "-q"]);
-        await git(repository, ["config", "user.email", "t@t.test"]);
-        await git(repository, ["config", "user.name", "Test"]);
+        await initRepo(repository);
         await git(repository, [
           "commit",
           "-q",
@@ -593,9 +598,7 @@ Deno.test({
     const other = await Deno.makeTempDir();
     try {
       for (const repository of [root, other]) {
-        await git(repository, ["init", "-q"]);
-        await git(repository, ["config", "user.email", "t@t.test"]);
-        await git(repository, ["config", "user.name", "Test"]);
+        await initRepo(repository);
         await git(repository, [
           "commit",
           "-q",
@@ -646,9 +649,7 @@ Deno.test({
     const linked = `${parent}/linked`;
     try {
       await Deno.mkdir(root);
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       await git(root, ["worktree", "add", "-q", "-b", "linked", linked]);
       await git(root, ["config", "extensions.worktreeConfig", "true"]);
@@ -717,9 +718,9 @@ Deno.test("realGit: accepts an amend that reproduces the same commit object", as
     const fixedDate = "2001-01-01T00:00:00+00:00";
     Deno.env.set("GIT_AUTHOR_DATE", fixedDate);
     Deno.env.set("GIT_COMMITTER_DATE", fixedDate);
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    // Fixing the dates here, on top of the identity and signing that initRepo
+    // pins, leaves the object id a function of the content alone.
+    await initRepo(root);
     await Deno.writeTextFile(`${root}/f.txt`, "same\n");
     await git(root, ["add", "f.txt"]);
     await git(root, ["commit", "-q", "-m", "same"]);
@@ -744,9 +745,7 @@ Deno.test("realGit: accepts an amend that reproduces the same commit object", as
 Deno.test("realGit: preserves non-UTF-8 commit message bytes", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await git(root, ["config", "i18n.commitEncoding", "ISO-8859-1"]);
     const file = `${root}/f.txt`;
     await Deno.writeTextFile(file, "before\n");
@@ -797,9 +796,7 @@ Deno.test("realGit: preserves non-UTF-8 commit message bytes", async () => {
 Deno.test("realGit: labels edited commit messages as UTF-8", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await git(root, ["config", "i18n.commitEncoding", "ISO-8859-1"]);
     await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
     const runner = realGit(root);
@@ -828,9 +825,7 @@ Deno.test("realGit: labels edited commit messages as UTF-8", async () => {
 Deno.test("realGit: amends a valid empty commit", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
     const runner = realGit(root);
     const head = runner.headSha();
@@ -854,8 +849,7 @@ Deno.test("realGit: amends reftable commits and preserves staged state", async (
   try {
     if (!await initReftable(root)) return;
 
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await configureRepo(root);
     await Deno.writeTextFile(`${root}/selected.txt`, "original selected\n");
     await Deno.writeTextFile(`${root}/unrelated.txt`, "original unrelated\n");
     await git(root, ["add", "selected.txt", "unrelated.txt"]);
@@ -903,8 +897,7 @@ Deno.test("realGit: amends a detached reftable HEAD", async () => {
   const root = await Deno.makeTempDir();
   try {
     if (!await initReftable(root)) return;
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await configureRepo(root);
     await Deno.writeTextFile(`${root}/f.txt`, "original\n");
     await git(root, ["add", "f.txt"]);
     await git(root, ["commit", "-q", "-m", "original"]);
@@ -937,8 +930,7 @@ Deno.test("realGit: amends reftable commits in a linked worktree", async () => {
   try {
     await Deno.mkdir(root);
     if (!await initReftable(root)) return;
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await configureRepo(root);
     await Deno.writeTextFile(`${root}/f.txt`, "original\n");
     await git(root, ["add", "f.txt"]);
     await git(root, ["commit", "-q", "-m", "original"]);
@@ -971,8 +963,7 @@ Deno.test({
     const root = await Deno.makeTempDir();
     try {
       if (!await initReftable(root)) return;
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await configureRepo(root);
       await Deno.writeTextFile(`${root}/f.txt`, "original\n");
       await git(root, ["add", "f.txt"]);
       await git(root, ["commit", "-q", "-m", "original"]);
@@ -1009,8 +1000,7 @@ Deno.test({
     const root = await Deno.makeTempDir();
     try {
       if (!await initReftable(root)) return;
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await configureRepo(root);
       await Deno.writeTextFile(`${root}/f.txt`, "original\n");
       await git(root, ["add", "f.txt"]);
       await git(root, ["commit", "-q", "-m", "original"]);
@@ -1056,8 +1046,7 @@ Deno.test({
         } else {
           await git(root, ["init", "-q"]);
         }
-        await git(root, ["config", "user.email", "t@t.test"]);
-        await git(root, ["config", "user.name", "Test"]);
+        await configureRepo(root);
         await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
         await installHook(
           root,
@@ -1095,8 +1084,7 @@ Deno.test({
         } else {
           await git(root, ["init", "-q"]);
         }
-        await git(root, ["config", "user.email", "t@t.test"]);
-        await git(root, ["config", "user.name", "Test"]);
+        await configureRepo(root);
         const path = `${root}/f.txt`;
         await Deno.writeTextFile(path, "original\n");
         await git(root, ["add", "f.txt"]);
@@ -1146,8 +1134,7 @@ Deno.test({
         } else {
           await git(root, ["init", "-q"]);
         }
-        await git(root, ["config", "user.email", "t@t.test"]);
-        await git(root, ["config", "user.name", "Test"]);
+        await configureRepo(root);
         await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
         const marker = `${root}/.git/nested-expiry-hook-ran`;
         await installHook(
@@ -1195,8 +1182,7 @@ Deno.test({
         } else {
           await git(root, ["init", "-q"]);
         }
-        await git(root, ["config", "user.email", "t@t.test"]);
-        await git(root, ["config", "user.name", "Test"]);
+        await configureRepo(root);
         await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
         const marker = `${root}/.git/reference-hook-ran`;
         await installHook(
@@ -1244,8 +1230,7 @@ Deno.test({
         } else {
           await git(root, ["init", "-q"]);
         }
-        await git(root, ["config", "user.email", "t@t.test"]);
-        await git(root, ["config", "user.name", "Test"]);
+        await configureRepo(root);
         await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
         const runner = realGit(root);
         const original = runner.headSha();
@@ -1276,7 +1261,7 @@ git reflog expire --expire=now --all`,
 Deno.test("realGit: preserves pager insertion order around a workspace insertion", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
+    await initRepo(root);
     const runner = realGit(root);
     assert(runner.applyFileChanges, "the real Git runner applies file changes");
     assertEquals(
@@ -1296,7 +1281,7 @@ Deno.test("realGit: preserves pager insertion order around a workspace insertion
 Deno.test("realGit: rejects an insertion at a hidden deletion boundary", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
+    await initRepo(root);
     const runner = realGit(root);
 
     assertThrows(
@@ -1318,9 +1303,7 @@ Deno.test("realGit: rejects an insertion at a hidden deletion boundary", async (
 Deno.test("realGit: amends selected files and preserves unrelated staged changes", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await Deno.writeTextFile(`${root}/selected.txt`, "old selected\n");
     await Deno.writeTextFile(`${root}/unrelated.txt`, "old unrelated\n");
     await git(root, ["add", "selected.txt", "unrelated.txt"]);
@@ -1359,9 +1342,7 @@ Deno.test("realGit: amends selected files and preserves unrelated staged changes
 Deno.test("realGit: commits exact pager contents while preserving staged and unstaged edits in the same file", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     const path = `${root}/selected.txt`;
     await Deno.writeTextFile(path, "one\ntwo\nthree\nfour\nfive\n");
     await git(root, ["add", "selected.txt"]);
@@ -1406,9 +1387,7 @@ Deno.test("realGit: commits exact pager contents while preserving staged and uns
 Deno.test("realGit: refuses a pager edit that conflicts with a staged edit", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     const path = `${root}/selected.txt`;
     await Deno.writeTextFile(path, "one\ntwo\nthree\n");
     await git(root, ["add", "selected.txt"]);
@@ -1446,9 +1425,7 @@ Deno.test("realGit: refuses a pager edit that conflicts with a staged edit", asy
 Deno.test("realGit: refuses to merge content into a staged file type change", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     const path = `${root}/selected.txt`;
     await Deno.writeTextFile(path, "target");
     await git(root, ["add", "selected.txt"]);
@@ -1495,9 +1472,7 @@ Deno.test("realGit: refuses to merge content into a staged file type change", as
 Deno.test("realGit: merges content through a staged executable mode change", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     const path = `${root}/selected.txt`;
     await Deno.writeTextFile(path, "original\n");
     await git(root, ["add", "selected.txt"]);
@@ -1531,9 +1506,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/back\\slash.txt`;
       await Deno.writeTextFile(path, "old\n");
       await git(root, ["add", "--", "back\\slash.txt"]);
@@ -1559,9 +1532,7 @@ Deno.test({
   fn: async () => {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const link = `${root}/link.txt`;
       const target = `${root}/target.txt`;
       Deno.writeTextFileSync(link, "link head\n");
@@ -1595,9 +1566,7 @@ Deno.test({
   fn: async () => {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await Deno.mkdir(`${root}/subalias`);
       await Deno.writeTextFile(`${root}/f.txt`, "root head\n");
       await Deno.writeTextFile(`${root}/subalias/f.txt`, "alias head\n");
@@ -1624,9 +1593,7 @@ Deno.test({
 Deno.test("realGit: reads and writes selected files through clean filters", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await git(root, ["config", "filter.caps.clean", "tr a-z A-Z"]);
     await git(root, ["config", "filter.caps.smudge", "tr A-Z a-z"]);
     await Deno.writeTextFile(`${root}/.gitattributes`, "*.dat filter=caps\n");
@@ -1741,9 +1708,7 @@ describe("realGit binary input", () => {
 Deno.test("realGit: handles an index path beginning with a stage prefix", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     const path = `${root}/1:f.txt`;
     await Deno.writeTextFile(path, "original\n");
     await git(root, ["add", "--", "1:f.txt"]);
@@ -1762,9 +1727,7 @@ Deno.test("realGit: handles an index path beginning with a stage prefix", async 
 Deno.test("realGit: preserves assume-unchanged and skip-worktree index flags", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await Deno.writeTextFile(`${root}/assume.txt`, "old assume\n");
     await Deno.writeTextFile(`${root}/skip.txt`, "old skip\n");
     await git(root, ["add", "assume.txt", "skip.txt"]);
@@ -1798,9 +1761,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/f.txt`;
       await Deno.writeTextFile(path, "original\n");
       await git(root, ["add", "f.txt"]);
@@ -1836,9 +1797,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/f.txt`;
       await Deno.writeTextFile(path, "original\n");
       await git(root, ["add", "f.txt"]);
@@ -1877,9 +1836,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/f.txt`;
       await Deno.writeTextFile(path, "original\n");
       await git(root, ["add", "f.txt"]);
@@ -1924,9 +1881,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/f.txt`;
       await Deno.writeTextFile(path, "original\n");
       await git(root, ["add", "f.txt"]);
@@ -1966,9 +1921,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await Deno.writeTextFile(`${root}/f.txt`, "original\n");
       await git(root, ["add", "f.txt"]);
       await git(root, ["commit", "-q", "-m", "original"]);
@@ -1993,9 +1946,7 @@ Deno.test({
 Deno.test("realGit: refuses a different branch at the same commit", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await Deno.writeTextFile(`${root}/f.txt`, "original\n");
     await git(root, ["add", "f.txt"]);
     await git(root, ["commit", "-q", "-m", "original"]);
@@ -2026,9 +1977,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await Deno.writeTextFile(`${root}/f.txt`, "original\n");
       await git(root, ["add", "f.txt"]);
       await git(root, ["commit", "-q", "-m", "original"]);
@@ -2064,9 +2013,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await Deno.writeTextFile(`${root}/f.txt`, "original\n");
       await git(root, ["add", "f.txt"]);
       await git(root, ["commit", "-q", "-m", "original"]);
@@ -2108,9 +2055,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await Deno.writeTextFile(`${root}/f.txt`, "original\n");
       await git(root, ["add", "f.txt"]);
       await git(root, ["commit", "-q", "-m", "original"]);
@@ -2157,9 +2102,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await Deno.writeTextFile(`${root}/f.txt`, "base\n");
       await git(root, ["add", "f.txt"]);
       await git(root, ["commit", "-q", "-m", "base"]);
@@ -2235,9 +2178,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await Deno.writeTextFile(`${root}/f.txt`, "original\n");
       await git(root, ["add", "f.txt"]);
       await git(root, ["commit", "-q", "-m", "original"]);
@@ -2267,9 +2208,7 @@ Deno.test({
 Deno.test("realGit: Git refuses amend while resolving a conflicted merge", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await Deno.writeTextFile(`${root}/f.txt`, "base\n");
     await git(root, ["add", "f.txt"]);
     await git(root, ["commit", "-q", "-m", "base"]);
@@ -2330,9 +2269,7 @@ Deno.test("realGit: validates selected paths before reading commit contents", as
   const root = await Deno.makeTempDir();
   const outside = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await Deno.writeTextFile(`${root}/tracked.txt`, "tracked\n");
     await git(root, ["add", "tracked.txt"]);
     await git(root, ["commit", "-q", "-m", "original"]);
@@ -2391,9 +2328,7 @@ Deno.test("realGit: reports unavailable optional Git queries", () => {
 Deno.test("realGit: rejects a stale expected HEAD", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
     const runner = realGit(root);
     const head = runner.headSha();
@@ -2413,9 +2348,7 @@ Deno.test("realGit: rejects a stale expected HEAD", async () => {
 Deno.test("realGit: preserves a selected path staged for deletion", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     const path = `${root}/selected.txt`;
     await Deno.writeTextFile(path, "original\n");
     await git(root, ["add", "selected.txt"]);
@@ -2449,9 +2382,7 @@ Deno.test("realGit: preserves a selected path staged for deletion", async () => 
 Deno.test("realGit: rejects both multi-stage and lone unmerged index entries", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     const path = `${root}/selected.txt`;
     await Deno.writeTextFile(path, "original\n");
     await git(root, ["add", "selected.txt"]);
@@ -2503,9 +2434,7 @@ Deno.test("realGit: rejects both multi-stage and lone unmerged index entries", a
 Deno.test("realGit: rejects a selected path that HEAD does not contain", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
     const path = `${root}/new.txt`;
     await Deno.writeTextFile(path, "workspace\n");
@@ -2532,7 +2461,7 @@ Deno.test("realGit: rejects a selected path that HEAD does not contain", async (
 Deno.test("realGit: a no-op pager change keeps the committed contents", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
+    await initRepo(root);
     const runner = realGit(root);
 
     assertEquals(
@@ -2552,7 +2481,7 @@ Deno.test("realGit: a no-op pager change keeps the committed contents", async ()
 Deno.test("realGit: fallback merge handles insertions around added and empty content", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
+    await initRepo(root);
     const runner = realGit(root);
     const path = `${root}/selected.txt`;
 
@@ -2581,7 +2510,7 @@ Deno.test("realGit: fallback merge handles insertions around added and empty con
 Deno.test("realGit: fallback merge rejects a deletion inside a pager replacement", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
+    await initRepo(root);
 
     assertThrows(
       () =>
@@ -2602,9 +2531,7 @@ Deno.test("realGit: fallback merge rejects a deletion inside a pager replacement
 Deno.test("realGit: preserves a staged version that already matches the pager", async () => {
   const root = await Deno.makeTempDir();
   try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
+    await initRepo(root);
     const path = `${root}/selected.txt`;
     await Deno.writeTextFile(path, "original\n");
     await git(root, ["add", "selected.txt"]);
@@ -2640,8 +2567,7 @@ Deno.test({
         } else {
           await git(root, ["init", "-q"]);
         }
-        await git(root, ["config", "user.email", "t@t.test"]);
-        await git(root, ["config", "user.name", "Test"]);
+        await configureRepo(root);
         await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
         const marker = `${root}/fallback-hook-ran`;
         await installHook(
@@ -2679,9 +2605,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       await installHook(
         root,
@@ -2713,9 +2637,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       await installHook(
         root,
@@ -2753,9 +2675,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const runner = realGit(root);
       const branch = runner.headRef!();
@@ -2793,9 +2713,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const runner = realGit(root);
       const branch = runner.headRef!();
@@ -2835,9 +2753,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const journalMarker = `${root}/journal-removed`;
       const reflogMarker = `${root}/reflogs-removed`;
@@ -2886,9 +2802,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/selected.txt`;
       await Deno.writeTextFile(path, "original\n");
       await git(root, ["add", "selected.txt"]);
@@ -2930,9 +2844,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       await git(root, ["commit", "-q", "--allow-empty", "-m", "original"]);
       const runner = realGit(root);
       const branch = runner.headRef!();
@@ -2966,9 +2878,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/selected.txt`;
       await Deno.writeTextFile(path, "original\n");
       await git(root, ["add", "selected.txt"]);
@@ -3006,9 +2916,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/tracked.txt`;
       await Deno.writeTextFile(path, "tracked\n");
       await git(root, ["add", "tracked.txt"]);
@@ -3078,7 +2986,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
+      await initRepo(root);
       const path = `${root}/selected.txt`;
       await withGitShim(
         `if test "$1" = merge-file; then
@@ -3158,9 +3066,7 @@ Deno.test({
   async fn() {
     const root = await Deno.makeTempDir();
     try {
-      await git(root, ["init", "-q"]);
-      await git(root, ["config", "user.email", "t@t.test"]);
-      await git(root, ["config", "user.name", "Test"]);
+      await initRepo(root);
       const path = `${root}/selected.txt`;
       await Deno.writeTextFile(path, "original\n");
       await git(root, ["add", "selected.txt"]);
