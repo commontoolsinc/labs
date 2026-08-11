@@ -340,7 +340,10 @@ merges as-is, amends `closedWorldEventRejection`, or retreats — all three are
 costed on #5307 — and it owes an item renumber, then a baseline re-record as its
 final step. A caller naming a reference (item 11, #5560) waits on confirming
 that a sigil resolves through a *declared* event field rather than an untyped
-one.
+one; it decides nothing item 1 decides — a declared result makes an *output*
+self-describing, this is what an *input* accepts — but it shares
+`schema-injection.ts` with that emission, so the one-file rule applies to the
+pair and one holder suits both.
 
 **Carried alongside, not sequenced.** A capability probe that covers nothing
 (#5534) is a test asserting something it cannot observe, so it reports green
