@@ -208,6 +208,17 @@ Enforcement is also a ratchet. Any code holding a `Cell` can reach
 rather than succeeding
 (`packages/runner/src/storage/extended-storage-transaction.ts`).
 
+The obvious objection to all of this is that none of it is new. Flow
+control has been understood for decades and has mostly stayed in
+research systems, because the labels multiply and writing policies that
+compose takes expertise. That cost is real and it has not gone away.
+What changed is who pays it, and how often. A model will grind against
+the compiler with more patience than a person has, and what it produces
+is a file: once a pattern satisfies the checker it satisfies it for
+everyone who runs it. The labor becomes machine time spent once rather
+than expertise spent per team, which is the difference between a
+technique that stays in the lab and one that ships.
+
 ## Across machines: carry the reference, not the bytes
 
 A label is only useful if it survives leaving the machine that made it.
