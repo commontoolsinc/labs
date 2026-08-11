@@ -7,7 +7,10 @@ import { toCompactDebugString } from "@/value-debug.ts";
 import { CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
-import type { ReconstructionContext } from "@/codec-common/interface.ts";
+import type {
+  FabricCodec,
+  ReconstructionContext,
+} from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { type FabricValue } from "@/interface.ts";
@@ -100,6 +103,40 @@ class TestTerminalCodec extends BaseTerminalCodec<string> {
   }
 }
 
+/**
+ * Codec satisfying the interface without extending either base class, for the
+ * cases pinning that the registry refuses one. Its members are never reached.
+ */
+const UNCLASSIFIABLE_CODEC: FabricCodec<string> = {
+  get uniqueHandledClass(): Constructor | undefined {
+    return FabricRegExp;
+  },
+
+  get recognizedTypeTag(): string | undefined {
+    return "unclassifiable@1";
+  },
+
+  canEncode(_value: FabricValue): boolean {
+    return true;
+  },
+
+  tagForValue(_value: FabricValue): string {
+    return "unclassifiable@1";
+  },
+
+  encode(_value: FabricValue): string {
+    throw new Error("Unimplemented.");
+  },
+
+  decode(
+    _typeTag: string,
+    _state: string,
+    _context: ReconstructionContext,
+  ): FabricValue {
+    throw new Error("Unimplemented.");
+  },
+};
+
 describe("CodecRegistry", () => {
   describe("codec-kind classification", () => {
     // Which kind a codec is comes from the base class it extends, and this is
@@ -147,6 +184,29 @@ describe("CodecRegistry", () => {
 
       expect(registry.codecFromTag("nonterm@1")).toEqual({ nonterminal });
       expect(registry.codecFromTag("term@1")).toEqual({ terminal });
+    });
+
+    it("throws given a codec that extends neither base class", () => {
+      const registry = new CodecRegistry<string>();
+
+      expect(() => registry.register(UNCLASSIFIABLE_CODEC)).toThrow(
+        "Shouldn't happen: codec extends neither",
+      );
+    });
+
+    it("throws given an unclassifiable codec registered by primitive", () => {
+      const registry = new CodecRegistry<string>();
+
+      expect(() => registry.registerPrimitive("bigint", UNCLASSIFIABLE_CODEC))
+        .toThrow("Shouldn't happen: codec extends neither");
+    });
+
+    it("throws given an unclassifiable codec passed to `extend()`", () => {
+      const registry = new CodecRegistry<string>();
+
+      expect(() => registry.extend(UNCLASSIFIABLE_CODEC)).toThrow(
+        "Shouldn't happen: codec extends neither",
+      );
     });
   });
 

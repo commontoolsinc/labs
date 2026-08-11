@@ -5,6 +5,7 @@ import type {
   RegistrableCodec,
   TerminalCodec,
 } from "./interface.ts";
+import { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
@@ -279,13 +280,30 @@ export class CodecRegistry<Encoded> {
    * Pairs a codec with its kind. The kind comes from which base class the
    * codec extends, which is the same declaration that fixed its `encode()` and
    * `decode()` signatures, so the two cannot disagree.
+   *
+   * That makes extending one of the two bases a requirement, which the
+   * parameter type does not express: it names the interfaces, and an object
+   * satisfying one of those without extending anything has no kind to read.
+   * Uses "death before confusion" on that case rather than picking a default,
+   * because a codec silently taken for the kind it is not would have its state
+   * expanded, or left unexpanded, in whole-value encodings far from here.
+   *
+   * @throws If `codec` extends neither base class.
    */
   static #matched<Encoded>(
     codec: RegistrableCodec<Encoded>,
   ): MatchedCodec<Encoded> {
-    return (codec instanceof BaseTerminalCodec)
-      ? { terminal: codec as TerminalCodec<Encoded> }
-      : { nonterminal: codec as NonterminalCodec };
+    if (codec instanceof BaseTerminalCodec) {
+      return { terminal: codec as TerminalCodec<Encoded> };
+    } else if (codec instanceof BaseNonterminalCodec) {
+      return { nonterminal: codec as NonterminalCodec };
+    }
+
+    throw new Error(
+      "Shouldn't happen: codec extends neither `BaseNonterminalCodec` nor " +
+        "`BaseTerminalCodec`, so it declares no kind: " +
+        `\`${codec.constructor.name}\``,
+    );
   }
 
   /** Gets the codec out of a match, for the parts that need only dispatch. */
