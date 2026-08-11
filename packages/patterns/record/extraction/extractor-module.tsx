@@ -212,9 +212,11 @@ If no text is visible, return an empty string.`;
  * Schema for recommendations-based extraction.
  * Instead of a flat field extraction, the LLM returns an array of recommendations
  * with confidence scores and explanations.
+ *
+ * Use `as const` for schema literal to satisfy generateObject's type
+ * expectations. Do NOT annotate with JSONSchema - that type is incompatible
+ * with generateObject's schema param.
  */
-// Use `as const` for schema literal to satisfy generateObject's type expectations.
-// Do NOT annotate with JSONSchema - that type is incompatible with generateObject's schema param.
 const RECOMMENDATIONS_SCHEMA = {
   type: "object",
   properties: {

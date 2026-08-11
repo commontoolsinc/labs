@@ -44,15 +44,6 @@ const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
 );
 
 /**
- * PollOptionCard renders one complete ranked restaurant option row.
- *
- * Use it when a parent pattern already owns option, vote, viewer, and admin
- * state and wants composed UI for voting and admin-only remove/history actions.
- * This is not a standalone vote engine; durable mutations happen through the
- * input streams supplied by the parent.
- */
-
-/**
  * Inputs for one rendered ranked option row.
  *
  * The parent owns all durable and shared UI state. This pattern receives one
@@ -121,6 +112,14 @@ export interface PollOptionCardOutput {
   artSyncState?: PollOptionArtSyncState;
 }
 
+/**
+ * PollOptionCard renders one complete ranked restaurant option row.
+ *
+ * Use it when a parent pattern already owns option, vote, viewer, and admin
+ * state and wants composed UI for voting and admin-only remove/history actions.
+ * This is not a standalone vote engine; durable mutations happen through the
+ * input streams supplied by the parent.
+ */
 export default pattern<PollOptionCardInput, PollOptionCardOutput>(
   (
     {
