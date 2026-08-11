@@ -21,7 +21,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
 import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
@@ -209,7 +209,7 @@ describe("JsonCodec", () => {
       }
     }
 
-    class ProbeDecomposingCodec extends BaseFabricCodec {
+    class ProbeDecomposingCodec extends BaseDecomposingCodec {
       /** State most recently handed to `decode()`. */
       received: FabricValue = null;
 

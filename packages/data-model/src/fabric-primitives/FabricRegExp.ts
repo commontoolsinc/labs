@@ -6,7 +6,7 @@ import type {
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
 import {
   type DecomposingCodec,
   type ReconstructionContext,
@@ -135,7 +135,7 @@ export class FabricRegExp extends BaseFabricPrimitive
   //
 
   static #codec = Object.freeze(
-    new (class RegExpCodec extends BaseFabricCodec {
+    new (class RegExpCodec extends BaseDecomposingCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);

@@ -6,12 +6,24 @@ import type { FabricInstance, FabricValue } from "@/interface.ts";
 export const CODEC: unique symbol = Symbol("data-model.codec");
 
 /**
- * The value-matching half of a codec: everything the codec system consults to
- * decide _whether_ a codec applies and _what tag_ to write, as opposed to the
- * transformation itself. Both kinds of codec supply it identically, which is
- * why it is factored out rather than written twice.
+ * Interface for codecs (encoder-decoder objects). These are objects which can
+ * extract "essential state" out of values (objects per se or otherwise) and
+ * also take such "essential state" and produce values that are equivalent (in
+ * a context-dependent sense) to the values that state was extracted from.
+ *
+ * `Encoded` is the domain that essential state lives in. Every codec has the
+ * same shape whatever that domain is -- the same matching members, the same
+ * pair of transformations -- and the domain is the only thing that varies.
+ * {@link DecomposingCodec} and {@link TerminalCodec} name the two ways it is
+ * instantiated in practice, and are where the consequences are written down.
+ *
+ * The domain does not by itself say what the codec system should do with a
+ * state, and it cannot: the domains overlap, in that an all-string record
+ * satisfies `FabricValue` and JSON's value type alike. That is settled instead
+ * by which base class a codec extends, recorded once by
+ * {@link CodecRegistry#register} and handed back as a {@link MatchedCodec}.
  */
-export interface CodecDispatch {
+export interface FabricCodec<Encoded> {
   /**
    * The unique _direct_ class of instances, if any, that is associated with the
    * format this instance encodes. The codec system uses this to make a quick
@@ -23,7 +35,7 @@ export interface CodecDispatch {
   /**
    * The unique wire format tag that is associated with the format this instance
    * decodes from, or `undefined` for a codec with no single tag. When defined,
-   * the codec system uses it to mark state produced by `encode()` and (by
+   * the codec system uses it to mark state produced by {@link #encode} and (by
    * default) routes state so marked back to this instance (or an equivalent)
    * for decoding; a codec with no tag is not registered for tag-based decode
    * dispatch.
@@ -41,85 +53,22 @@ export interface CodecDispatch {
    * instances each carry their own per-instance tag reads it from the value.
    */
   tagForValue(value: FabricValue): string;
-}
 
-/**
- * Interface for codecs (encoder-decoder objects) that **decompose**. These are
- * objects which can extract "essential state" out of values (objects per se or
- * otherwise) and also take such "essential state" and produce values that are
- * equivalent (in a context-dependent sense) to the values that state was
- * extracted from.
- *
- * The state is itself made of fabric values, which the walker goes on to
- * encode in turn. So a codec of this kind settles nothing about how those
- * values are ultimately written down, and one instance serves every wire
- * format. `FabricError` is the clearest case: its state carries `cause` and
- * every `extraEntries()` pair, so it can hold arbitrary nested values, and
- * only the walker can know what to do with them.
- *
- * Its counterpart is {@link TerminalCodec}.
- */
-export interface DecomposingCodec extends CodecDispatch {
   /**
    * Decodes a value from the given essential state, which is (alleged /
    * supposed) to be a value that was produced by an earlier call to
    * {@link #encode} on a compatible class to this one. The result is expected
-   * to be a _shallow_ decoding. The codec system handles recursively
+   * to be a _shallow_ decoding; the codec system handles recursively
    * converting `state` contents as necessary.
    *
    * The given `typeTag` is what was associated with the given `state` and does
    * not necessarily correspond to {@link #recognizedTypeTag} (depending on how
    * an instance of this class got hooked up).
-   */
-  decode(
-    typeTag: string,
-    state: FabricValue,
-    context: ReconstructionContext,
-  ): FabricValue;
-
-  /**
-   * Encodes the given value, returning its essential state. This is only ever
-   * called after {@link #canEncode} has confirmed that `value` is encodable by
-   * this instance. The result is expected to be a _shallow_ encoding. The codec
-   * system handles recursion as necessary.
-   */
-  encode(value: FabricValue): FabricValue;
-}
-
-/**
- * Interface for codecs that **terminate**: their state is already in the
- * domain of one particular wire format, `Encoded`, and the walker passes it
- * through untouched rather than encoding it further.
- *
- * A codec of this kind is therefore bound to a single format, and a class
- * needing one supplies a separate instance per format it participates in.
- * `FabricBytes` is the clearest case: JSON's codec produces a base64url
- * string, where a format that carries bytes natively wants the bytes
- * themselves, and no one codec can answer both.
- *
- * Which of the two kinds a codec is cannot be recovered by examining a state
- * it produced, because the domains overlap -- an all-string record satisfies
- * `FabricValue` and JSON's value type alike. So a codec declares its kind by
- * extending `BaseTerminalCodec` or `BaseFabricCodec`, the same declaration
- * that fixes its `encode()` and `decode()` signatures, and
- * {@link CodecRegistry} reads it once at registration.
- *
- * `Encoded` ranges over the wire formats' own value types, and `FabricValue`
- * is not among them: that is the walker's _input_ domain, so a state of that
- * type means "encode this in turn," which is the opposite of terminating.
- * `TerminalCodec<FabricValue>` accordingly names nothing that should exist,
- * and is not a spelling of {@link DecomposingCodec}.
- */
-export interface TerminalCodec<Encoded> extends CodecDispatch {
-  /**
-   * Decodes a value from the given essential state. Counterpart to
-   * {@link DecomposingCodec#decode}, except that `state` arrives exactly as it
-   * came off the wire, un-walked.
    *
-   * `state` is the format's full value type rather than whatever this codec
-   * emits, because decoding is dispatched on a tag read from untrusted input:
-   * a payload can carry any state at all under this codec's tag. Rejecting
-   * what does not fit is part of the job.
+   * `state` is the whole of `Encoded` rather than the narrower thing
+   * {@link #encode} emits, because decoding is dispatched on a tag read from
+   * untrusted input: a payload can carry any state at all under this codec's
+   * tag. Rejecting what does not fit is part of the job.
    */
   decode(
     typeTag: string,
@@ -128,23 +77,62 @@ export interface TerminalCodec<Encoded> extends CodecDispatch {
   ): FabricValue;
 
   /**
-   * Encodes the given value, returning its essential state, already in the
-   * format's own domain. Counterpart to {@link DecomposingCodec#encode}.
+   * Encodes the given value, returning its essential state. This is only ever
+   * called after {@link #canEncode} has confirmed that `value` is encodable by
+   * this instance. The result is expected to be a _shallow_ encoding; the
+   * codec system handles recursion as necessary.
    */
   encode(value: FabricValue): Encoded;
 }
 
 /**
- * A codec of either kind, for a registry over the wire format whose value type
- * is `Encoded`. This is what a mixed roster holds and what
- * {@link CodecRegistry#extend} accepts, and it is the type to name when a
- * codec's kind is not (yet) distinguished.
+ * A codec that **decomposes**: its essential state is itself made of fabric
+ * values, which the walker goes on to encode in turn.
  *
- * Nothing narrows it: a codec's kind is settled by which base class it extends,
- * and a holder that needs to act on the difference gets a
- * {@link MatchedCodec} from a registry rather than interrogating a codec.
+ * Instantiating {@link FabricCodec} at `FabricValue` is what says so, because
+ * that is the walker's own input domain: handing the walker a state of that
+ * type is handing it more work of exactly the kind it already does. A codec of
+ * this kind therefore settles nothing about how those values are ultimately
+ * written down, and one instance serves every wire format.
+ *
+ * `FabricError` is the clearest case. Its state carries `cause` and every
+ * `extraEntries()` pair, so it can hold arbitrary nested values -- including
+ * other instances -- and only the walker can know what to do with them.
  */
-export type FabricCodec<Encoded> = DecomposingCodec | TerminalCodec<Encoded>;
+export type DecomposingCodec = FabricCodec<FabricValue>;
+
+/**
+ * A codec that **terminates**: its essential state is already in the domain of
+ * one particular wire format, and the walker passes it through untouched.
+ *
+ * Instantiating {@link FabricCodec} at a format's own value type is what says
+ * so. Such a codec is bound to that one format, and a class needing one
+ * supplies a separate instance per format it participates in.
+ *
+ * `FabricBytes` is the clearest case: JSON's codec produces a base64url
+ * string, where a format that carries bytes natively wants the bytes
+ * themselves, and no one codec can answer both.
+ *
+ * This is an alias rather than a distinct interface because the difference is
+ * not in the shape of a codec but in what its state means to the walker. A
+ * class declares which it is by the base class it extends; see
+ * {@link MatchedCodec}.
+ */
+export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
+
+/**
+ * A codec of either kind, over the wire format whose value type is `Encoded`.
+ * This is what a mixed roster holds and what {@link CodecRegistry#extend}
+ * accepts.
+ *
+ * The union is needed because {@link FabricCodec} is invariant in `Encoded` --
+ * the parameter appears in both an argument and a return position -- so a
+ * `DecomposingCodec` is not assignable to `FabricCodec<Encoded>` for any
+ * format's `Encoded`, and the two arms have to be named separately.
+ */
+export type RegistrableCodec<Encoded> =
+  | DecomposingCodec
+  | TerminalCodec<Encoded>;
 
 /**
  * A codec paired with its kind, as {@link CodecRegistry} hands one back. The

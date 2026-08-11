@@ -12,7 +12,7 @@ import { isPlainObject } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
 import {
   type DecomposingCodec,
   type ReconstructionContext,
@@ -136,7 +136,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   }
 
   static #codec = Object.freeze(
-    new (class HashCodec extends BaseFabricCodec {
+    new (class HashCodec extends BaseDecomposingCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Hash, FabricHash);

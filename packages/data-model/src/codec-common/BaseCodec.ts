@@ -1,16 +1,20 @@
 import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
-import type { CodecDispatch } from "./interface.ts";
+import type { FabricCodec, ReconstructionContext } from "./interface.ts";
 
 /**
- * Base class supplying the value-matching half of a codec (see
- * {@link CodecDispatch}), which both kinds implement identically. It declares
- * no `encode()` or `decode()`, because those are exactly where the two kinds
- * differ; extend {@link BaseFabricCodec} or {@link BaseTerminalCodec} rather
- * than this, so that the choice of kind is made by the `extends` clause and
- * cannot drift from the signatures beneath it.
+ * Base class for `FabricCodec` which provides commonly-needed functionality:
+ * the matching members, and a `tagForValue()` that answers with the codec's
+ * one recognized tag.
+ *
+ * It is abstract in `encode()` and `decode()` and, deliberately, in identity:
+ * extend {@link BaseDecomposingCodec} or {@link BaseTerminalCodec} rather than this
+ * directly. Those two are what tell the codec system whether a state is more
+ * work for the walker or the walker's final answer, a difference no signature
+ * can carry -- and extending one of them fixes the `Encoded` domain in the
+ * same stroke, so the declaration and its consequence cannot drift apart.
  */
-export abstract class BaseCodecDispatch implements CodecDispatch {
+export abstract class BaseCodec<Encoded> implements FabricCodec<Encoded> {
   #recognizedTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
@@ -63,4 +67,14 @@ export abstract class BaseCodecDispatch implements CodecDispatch {
     }
     return this.#recognizedTypeTag;
   }
+
+  /** @inheritDoc */
+  abstract decode(
+    typeTag: string,
+    state: Encoded,
+    context: ReconstructionContext,
+  ): FabricValue;
+
+  /** @inheritDoc */
+  abstract encode(value: FabricValue): Encoded;
 }

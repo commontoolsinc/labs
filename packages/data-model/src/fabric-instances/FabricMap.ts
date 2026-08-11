@@ -9,7 +9,7 @@ import {
   type DecomposingCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -68,7 +68,7 @@ export class FabricMap
   }
 
   static #codec = Object.freeze(
-    new (class FabricMapCodec extends BaseFabricCodec {
+    new (class FabricMapCodec extends BaseDecomposingCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Map, FabricMap);

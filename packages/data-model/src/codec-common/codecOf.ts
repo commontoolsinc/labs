@@ -3,7 +3,7 @@ import {
   CODEC,
   type DecomposingCodec,
   type FabricClassWithCodec,
-  type FabricCodec,
+  type RegistrableCodec,
 } from "./interface.ts";
 
 /**
@@ -14,6 +14,7 @@ import {
  * @param value The value whose class's codec is wanted.
  */
 export function codecOf(value: FabricSpecialObject): DecomposingCodec;
+
 /**
  * Gets the `[CODEC]` for the given value's class, falling back to the codec
  * bound to `altCodec` when there is none.
@@ -38,14 +39,14 @@ export function codecOf(value: FabricSpecialObject): DecomposingCodec;
 export function codecOf<Encoded>(
   value: FabricSpecialObject,
   altCodec: symbol,
-): FabricCodec<Encoded>;
+): RegistrableCodec<Encoded>;
 export function codecOf<Encoded>(
   value: FabricSpecialObject,
   altCodec?: symbol,
-): FabricCodec<Encoded> {
+): RegistrableCodec<Encoded> {
   const cls = value.constructor as unknown as
     & Partial<FabricClassWithCodec>
-    & Partial<Record<symbol, FabricCodec<Encoded>>>;
+    & Partial<Record<symbol, RegistrableCodec<Encoded>>>;
   const codec = cls[CODEC] ??
     ((altCodec === undefined) ? undefined : cls[altCodec]);
 

@@ -5,7 +5,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 
 import { toCompactDebugString } from "@/value-debug.ts";
 import { CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
 import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -17,7 +17,7 @@ import { type FabricValue } from "@/interface.ts";
  * fast path from the linear-scan slow path. `encode`/`decode` are never
  * exercised by the registry, so they throw.
  */
-class TestCodec extends BaseFabricCodec {
+class TestCodec extends BaseDecomposingCodec {
   canEncodeCalled = false;
   readonly #accept: FabricValue | undefined;
 

@@ -1,21 +1,16 @@
-import type { FabricValue } from "@/interface.ts";
-import type { ReconstructionContext, TerminalCodec } from "./interface.ts";
-import { BaseCodecDispatch } from "./BaseCodecDispatch.ts";
+import { BaseCodec } from "./BaseCodec.ts";
+import type { TerminalCodec } from "./interface.ts";
 
 /**
- * Base class for `TerminalCodec` which provides commonly-needed functionality.
- * A subclass's state is already in the domain of the wire format `Encoded`, so
- * the instance belongs to that format alone.
+ * Base class for a `TerminalCodec`: one whose essential state is already in
+ * the domain of the wire format `Encoded`, so the walker passes it through
+ * untouched. An instance belongs to that format alone.
+ *
+ * It adds nothing to {@link BaseCodec} but its own identity, and the identity
+ * is the point: `CodecRegistry` reads it to know that a state coming out of
+ * here is the answer rather than more work.
  */
-export abstract class BaseTerminalCodec<Encoded> extends BaseCodecDispatch
+export abstract class BaseTerminalCodec<Encoded> extends BaseCodec<Encoded>
   implements TerminalCodec<Encoded> {
-  /** @inheritDoc */
-  abstract decode(
-    typeTag: string,
-    state: Encoded,
-    context: ReconstructionContext,
-  ): FabricValue;
-
-  /** @inheritDoc */
-  abstract encode(value: FabricValue): Encoded;
+  // This space intentionally left blank.
 }

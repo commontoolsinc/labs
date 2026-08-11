@@ -14,7 +14,7 @@ import {
 } from "./BaseFabricInstance.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import {
   CODEC,
@@ -111,7 +111,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   //
 
   static #codec = Object.freeze(
-    new (class LinkCodec extends BaseFabricCodec {
+    new (class LinkCodec extends BaseDecomposingCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Link, FabricLink);

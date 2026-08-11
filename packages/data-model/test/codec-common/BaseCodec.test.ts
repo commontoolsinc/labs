@@ -2,14 +2,14 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseCodec } from "@/codec-common/BaseCodec.ts";
 import type { ReconstructionContext } from "@/codec-common/interface.ts";
 
 /**
- * Minimal concrete `BaseFabricCodec` for exercising the base class's own
- * behavior. `encode` / `decode` are not under test here, so they throw.
+ * Minimal concrete `BaseCodec` for exercising the base class's own behavior.
+ * `encode` / `decode` are not under test here, so they throw.
  */
-class TestCodec extends BaseFabricCodec {
+class TestCodec extends BaseCodec<FabricValue> {
   encode(_value: FabricValue): FabricValue {
     throw new Error("Unimplemented.");
   }
@@ -23,7 +23,7 @@ class TestCodec extends BaseFabricCodec {
   }
 }
 
-describe("BaseFabricCodec", () => {
+describe("BaseCodec", () => {
   describe("instance members", () => {
     describe("recognizedTypeTag", () => {
       it("returns the tag passed to the constructor", () => {

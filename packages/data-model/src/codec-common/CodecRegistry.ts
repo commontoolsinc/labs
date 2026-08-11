@@ -1,9 +1,8 @@
 import type { FabricValue } from "@/interface.ts";
 import type {
-  CodecDispatch,
   DecomposingCodec,
-  FabricCodec,
   MatchedCodec,
+  RegistrableCodec,
   TerminalCodec,
 } from "./interface.ts";
 import { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
@@ -59,7 +58,7 @@ function constructorOf(
 }
 
 /**
- * Registry of `FabricCodec`s. Provides tag-based lookup for decoding, and
+ * Registry of codecs. Provides tag-based lookup for decoding, and
  * primitive-type and class matching for encoding.
  *
  * An instance is mutable while it is being built and immutable once
@@ -90,7 +89,7 @@ export class CodecRegistry<Encoded> {
    * in which case the codec is left unindexed for the corresponding lookup;
    * note that a codec with no `uniqueHandledClass` is unreachable for encoding.
    */
-  register(codec: FabricCodec<Encoded>): void {
+  register(codec: RegistrableCodec<Encoded>): void {
     this.#assertNotFrozen();
 
     const matched = CodecRegistry.#matched<Encoded>(codec);
@@ -113,7 +112,7 @@ export class CodecRegistry<Encoded> {
    */
   registerPrimitive(
     type: PrimitiveTypeName,
-    codec: FabricCodec<Encoded>,
+    codec: RegistrableCodec<Encoded>,
   ): void {
     this.#assertNotFrozen();
 
@@ -166,8 +165,8 @@ export class CodecRegistry<Encoded> {
    */
   extend(
     ...codecs: readonly (
-      | FabricCodec<Encoded>
-      | readonly FabricCodec<Encoded>[]
+      | RegistrableCodec<Encoded>
+      | readonly RegistrableCodec<Encoded>[]
     )[]
   ): CodecRegistry<Encoded> {
     const result = new CodecRegistry<Encoded>();
@@ -185,7 +184,7 @@ export class CodecRegistry<Encoded> {
           result.register(codec);
         }
       } else {
-        result.register(arg as FabricCodec<Encoded>);
+        result.register(arg as RegistrableCodec<Encoded>);
       }
     }
 
@@ -208,7 +207,7 @@ export class CodecRegistry<Encoded> {
   }
 
   /**
-   * Finds how to encode the given value: a `FabricCodec` that can encode it,
+   * Finds how to encode the given value: a matched codec that can encode it,
    * {@link SELF_REP} if it is a self-representing primitive, or `undefined` if
    * neither matches (the caller falls through to structural handling for
    * arrays and plain objects, or fails for an unencodable value).
@@ -281,14 +280,18 @@ export class CodecRegistry<Encoded> {
    * codec extends, which is the same declaration that fixed its `encode()` and
    * `decode()` signatures, so the two cannot disagree.
    */
-  static #matched<Encoded>(codec: FabricCodec<Encoded>): MatchedCodec<Encoded> {
+  static #matched<Encoded>(
+    codec: RegistrableCodec<Encoded>,
+  ): MatchedCodec<Encoded> {
     return (codec instanceof BaseTerminalCodec)
       ? { terminal: codec as TerminalCodec<Encoded> }
       : { decomposing: codec as DecomposingCodec };
   }
 
   /** Gets the codec out of a match, for the parts that need only dispatch. */
-  static #codecOfMatch<Encoded>(matched: MatchedCodec<Encoded>): CodecDispatch {
+  static #codecOfMatch<Encoded>(
+    matched: MatchedCodec<Encoded>,
+  ): RegistrableCodec<Encoded> {
     return ("terminal" in matched) ? matched.terminal : matched.decomposing;
   }
 }

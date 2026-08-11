@@ -10,11 +10,12 @@
 
 export {
   CODEC,
-  type CodecDispatch,
   type DecomposingCodec,
   type FabricClassWithCodec,
   type FabricCodec,
+  type MatchedCodec,
   type ReconstructionContext,
+  type RegistrableCodec,
   type SerializationContext,
   type TerminalCodec,
 } from "./interface.ts";
@@ -22,8 +23,8 @@ export {
 export { codecOf } from "./codecOf.ts";
 export { CODEC_META_TAGS } from "./codec-meta-tags.ts";
 export { CODEC_TYPE_TAGS } from "./codec-type-tags.ts";
-export { BaseCodecDispatch } from "./BaseCodecDispatch.ts";
-export { BaseFabricCodec } from "./BaseFabricCodec.ts";
+export { BaseCodec } from "./BaseCodec.ts";
+export { BaseDecomposingCodec } from "./BaseDecomposingCodec.ts";
 export { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
 export {

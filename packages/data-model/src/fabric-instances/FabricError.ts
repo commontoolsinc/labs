@@ -15,7 +15,7 @@ import {
   type DecomposingCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
@@ -437,7 +437,7 @@ export class FabricError extends FabricNativeWrapper<Error>
   }
 
   static #codec = Object.freeze(
-    new (class FabricErrorCodec extends BaseFabricCodec {
+    new (class FabricErrorCodec extends BaseDecomposingCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Error, FabricError);

@@ -10,7 +10,7 @@ import {
   type DecomposingCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 
@@ -54,7 +54,7 @@ export class UnknownValue extends ExplicitTagValue {
   }
 
   static #codec = Object.freeze(
-    new (class UnknownValueCodec extends BaseFabricCodec {
+    new (class UnknownValueCodec extends BaseDecomposingCodec {
       /** Constructs an instance. */
       constructor() {
         // No preferred wire tag: an `UnknownValue` round-trips to its
