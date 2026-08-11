@@ -255,12 +255,6 @@ export class CellHandle<T = unknown> {
     );
   }
 
-  /**
-   * Subscribe to cell value changes.
-   * The callback is called immediately with the current value (even if undefined)
-   * and whenever the value changes.
-   * The callback's return value (if a Cancel function) is called before the next update.
-   */
   /** The cell's current display CFC label, for label-aware subscribers. */
   get cfcLabel(): CfcLabelView | undefined {
     return this.#cfcLabel;
@@ -271,6 +265,12 @@ export class CellHandle<T = unknown> {
     return this.#wantsCfcLabel;
   }
 
+  /**
+   * Subscribe to cell value changes.
+   * The callback is called immediately with the current value (even if undefined)
+   * and whenever the value changes.
+   * The callback's return value (if a Cancel function) is called before the next update.
+   */
   subscribe(
     callback: (
       value: T | undefined,

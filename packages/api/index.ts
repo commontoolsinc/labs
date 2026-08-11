@@ -1639,10 +1639,6 @@ export type FactoryInput<T> =
     : T);
 
 /**
- * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
- * wrapped in any number of Reactive layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
- */
-/**
  * Recursively unwraps AnyBrandedCell types at any nesting level.
  * UnwrapCell<AnyBrandedCell<AnyBrandedCell<string>>> = string
  * UnwrapCell<AnyBrandedCell<{ a: AnyBrandedCell<number> }>> = { a: AnyBrandedCell<number> }
@@ -2612,17 +2608,13 @@ export interface HandlerFunction {
  * computed(() => expr) becomes a lift-applied computation with closure
  * extraction.
  */
-/**
- * This is the surface a PATTERN sees — `commonfabric` resolves to this file, so
- * these overloads and `builder/module.ts`'s `action()` must carry the same
- * signatures. They are maintained by hand and drift silently: an overload
- * present only in the builder is invisible to every pattern, which is how the
- * result overload below was initially missed.
- */
+// This is the surface a PATTERN sees — `commonfabric` resolves to this file, so
+// these overloads and `builder/module.ts`'s `action()` must carry the same
+// signatures. They are maintained by hand and drift silently: an overload
+// present only in the builder is invisible to every pattern, which is how the
+// result overload below was initially missed.
 export type ActionFunction = {
-  // Overload 1: Zero-parameter callback returns Stream<void>
   (fn: () => void): Stream<void>;
-  // Overload 2: Parameterized callback returns Stream<E>
   <E>(fn: (event: E) => void): Stream<E>;
   // Overload 3: a declared result, reached only by naming both type arguments.
   // Never inferred — a concise arrow body returns whatever its last call
