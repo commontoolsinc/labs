@@ -156,9 +156,9 @@ class DebugStringifier {
           let fullTag;
           try {
             // A `FabricPrimitive` binds no `[CODEC]`, so its JSON codec
-            // stands in for the tag. That is a borrowed answer -- a rendering
-            // has no reason to look JSON-ish -- and becomes the right one
-            // once primitives carry a codec bound for debug output.
+            // supplies the tag here.
+            // TODO(danfuzz): Replace `JSON_CODEC` with `DEBUG_CODEC` once the
+            // latter exists.
             fullTag = codecOf(value, JSON_CODEC).tagForValue(value);
           } catch {
             // Never let the debug formatter throw; fall back to the class name.
