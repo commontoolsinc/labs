@@ -55,7 +55,9 @@ logged, never leaves the verified runtime, only ever sent to the one
 place that issued it, and only in the one field that place expects. That
 is the whole list. Any program can hold that token now, including one a
 model wrote thirty seconds ago, because the rules ride with the data
-instead of with the program's good intentions.
+instead of with the program's good intentions. In the fabric, how your
+data may be used is structurally aligned with your interests — not
+promised to be, or audited to be. Structurally.
 
 Identity is a keypair, not an account. There is nothing to suspend, and
 no one to ask.

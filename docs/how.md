@@ -12,6 +12,13 @@ the code's author, which is the only reason it is safe to run a program a
 model wrote thirty seconds ago. Policies stop being something an
 application enforces and become something the data carries.
 
+Put together, those are different physics of trust from the ones all
+networked software runs on today, and they produce a property worth
+stating plainly: how your data may be used becomes structurally aligned
+with your interests. Structurally, in the specific sense that it does not
+rest on the program behaving well, on its author having meant well, or on
+anyone reading the terms.
+
 This document is the runtime that does that. Every path below is in this
 repository, every command was run to produce the output shown, and the
 snippets are verbatim from the file named, reflowed to fit. Where a
