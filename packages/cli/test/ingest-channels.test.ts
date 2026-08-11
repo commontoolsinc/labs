@@ -17,6 +17,7 @@ import { sha256 } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import {
   type ChannelConfig,
+  controlPlaneUrl,
   listChannels,
   mintChannel,
   newRequestId,
@@ -116,6 +117,59 @@ afterAll(async () => {
 });
 
 describe("resolveSpaceDid", () => {
+  describe("control-plane URL construction", () => {
+    // A root-absolute path resolved against a base URL discards the base's own
+    // path, so a deployment served under a prefix had every command addressed at
+    // the origin — failing as a 404 from somewhere else rather than as a
+    // configuration error.
+    it("keeps the configured base path", () => {
+      expect(
+        controlPlaneUrl(new URL("https://host.example/fabric"), "mint").href,
+      )
+        .toBe("https://host.example/fabric/api/ingest-channels/mint");
+    });
+
+    it("handles a trailing slash, a bare origin, and a nested prefix", () => {
+      for (
+        const [base, expected] of [
+          [
+            "https://host.example/fabric/",
+            "/fabric/api/ingest-channels/revoke",
+          ],
+          ["https://host.example", "/api/ingest-channels/revoke"],
+          ["https://host.example/", "/api/ingest-channels/revoke"],
+          ["https://host.example/a/b", "/a/b/api/ingest-channels/revoke"],
+        ] as const
+      ) {
+        expect(controlPlaneUrl(new URL(base), "revoke").pathname, base)
+          .toBe(expected);
+      }
+    });
+
+    it("does not mutate the caller's URL", () => {
+      const base = new URL("https://host.example/fabric");
+      controlPlaneUrl(base, "list");
+      expect(base.href).toBe("https://host.example/fabric");
+    });
+
+    // The proof commits to the URL, so signing one path and sending another is
+    // not merely a wrong endpoint — it would fail to verify.
+    it("signs the same pathful URL it sends to", async () => {
+      await withStubbedFetch(
+        { body: { channels: [] } },
+        async (calls) => {
+          await listChannels({
+            ...config,
+            apiUrl: new URL("https://host.example/fabric"),
+          });
+          expect(calls[0].url.pathname).toBe(
+            "/fabric/api/ingest-channels/list",
+          );
+        },
+      );
+    });
+  });
+
   it("passes a did:key through untouched", async () => {
     expect(await resolveSpaceDid(config.identityPath, SPACE_DID)).toBe(
       SPACE_DID,

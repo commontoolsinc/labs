@@ -16,6 +16,21 @@ import { loadIdentity } from "./identity.ts";
 
 const BASE = "/api/ingest-channels";
 
+/**
+ * Join the control-plane path onto the configured API base, KEEPING the base's
+ * own path.
+ *
+ * `new URL("/api/…", "https://host/fabric")` resolves the root-absolute path
+ * against the origin and silently drops `/fabric`, so a deployment served under
+ * a path prefix has every command addressed at the wrong endpoint — and it
+ * fails as a 404 from somewhere else, not as a configuration error.
+ */
+export const controlPlaneUrl = (apiUrl: URL, verb: string): URL => {
+  const url = new URL(apiUrl);
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}${BASE}/${verb}`;
+  return url;
+};
+
 export interface ChannelConfig {
   apiUrl: URL;
   identityPath: string;
@@ -80,7 +95,7 @@ async function call<T>(
   verb: string,
   payload: Record<string, unknown>,
 ): Promise<T> {
-  const url = new URL(`${BASE}/${verb}`, config.apiUrl);
+  const url = controlPlaneUrl(config.apiUrl, verb);
   const identity = await loadIdentity(config.identityPath);
   // The proof commits to the body hash, so the bytes signed and the bytes sent
   // must be identical — serialize once.

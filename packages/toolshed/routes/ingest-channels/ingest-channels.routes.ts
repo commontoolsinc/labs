@@ -77,6 +77,20 @@ const commonResponses = {
     description:
       "Replayed requestId, or this deployment cannot write to the space",
   },
+  // Both of these come from middleware mounted ahead of the handler, so no
+  // handler code returns them and they are easy to omit from the contract —
+  // but a client sees them and has to tell them apart. 413 is the body limit,
+  // which runs BEFORE signature verification so an oversized body costs no
+  // Ed25519 work; 422 is stoker's `defaultHook` answering a zod failure, which
+  // runs AFTER auth, so it is only reachable with a valid proof.
+  [HttpStatusCodes.REQUEST_TOO_LONG]: {
+    ...jsonError,
+    description: "Request body exceeds the limit (checked before auth)",
+  },
+  [HttpStatusCodes.UNPROCESSABLE_ENTITY]: {
+    ...jsonError,
+    description: "Body failed schema validation (checked after auth)",
+  },
   [HttpStatusCodes.TOO_MANY_REQUESTS]: {
     ...jsonError,
     description: "Rate limited",
@@ -152,7 +166,15 @@ export const list = createRoute({
           schema: z.object({ channels: z.array(channelSummary) }),
         },
       },
-      description: "Channels this caller minted. Never includes secretHash.",
+      description:
+        "Without `space`: the channels this caller minted, live ones only — " +
+        "the owner index is pruned on revoke because its length is the " +
+        "live-channel cap. With `space`: EVERY channel targeting that space " +
+        "whoever minted it, including revoked ones, which is how a space's " +
+        "current owner discovers a channel minted by someone whose access has " +
+        "since been removed, and the only place a revoked channel's " +
+        "`revision` can be read. Requires owning the space. Never includes " +
+        "secretHash.",
     },
     ...commonResponses,
   },

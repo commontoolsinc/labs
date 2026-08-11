@@ -40,6 +40,33 @@ describe("token bucket", () => {
     expect(limiter.take("a")).toBe(true);
   });
 
+  // Refill is elapsed-time arithmetic, so a clock that steps BACKWARDS — an NTP
+  // correction, an operator setting the date — refilled a spent bucket by a
+  // negative amount and drove it below empty, leaving it denied for longer than
+  // the configured interval. The bucket this most matters for is revoke's,
+  // where an extended false denial leaves live the credential the caller is
+  // trying to kill.
+  it("does not go below empty when the clock jumps backwards", () => {
+    let clock = 1_000_000;
+    const limiter = createRateLimiter({
+      capacity: 2,
+      refillPerSecond: 1,
+      now: () => clock,
+    });
+    expect([limiter.take("a"), limiter.take("a")]).toEqual([true, true]);
+    expect(limiter.take("a")).toBe(false);
+
+    // An hour backwards. Naive arithmetic banks -3600 tokens here.
+    clock -= 3_600_000;
+    expect(limiter.take("a")).toBe(false);
+
+    // One normal second must still buy exactly one token, as it would have if
+    // the jump had never happened.
+    clock += 1_000;
+    expect(limiter.take("a")).toBe(true);
+    expect(limiter.take("a")).toBe(false);
+  });
+
   it("never refills past capacity", () => {
     let clock = 0;
     const limiter = createRateLimiter({

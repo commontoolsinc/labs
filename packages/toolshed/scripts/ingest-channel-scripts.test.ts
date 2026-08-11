@@ -19,6 +19,10 @@ import {
   runAudit,
 } from "./audit-ingest-channels.ts";
 import {
+  main as provisionMain,
+  provisionChannel,
+} from "./provision-ingest-channel.ts";
+import {
   defaultRuntime as retireRuntime,
   main as retireMain,
   retireChannels,
@@ -405,5 +409,159 @@ describe("ingest channel operator scripts", () => {
     const stored = await getRegistration(runtime, serviceSpace, "ing_a");
     expect(stored?.revocations?.length).toBe(1);
     expect(stored?.revocations?.[0].by).toBe("did:key:zA");
+  });
+
+  // The break-glass path. It bypasses the ownership check entirely, so the
+  // lifecycle state it carries forward is the only thing standing between an
+  // operator re-provision and silently un-revoking a retired channel, dropping
+  // its history, or issuing a credential that never expires.
+  describe("provision-ingest-channel", () => {
+    const SPACE = "did:key:z6MkspaceProvisionAAAA";
+    const provision = (over: Record<string, unknown> = {}) =>
+      provisionChannel(runtime, serviceSpace, {
+        space: SPACE,
+        installId: "phone-1",
+        ...over,
+      });
+
+    it("refuses bad input before touching storage", async () => {
+      for (
+        const bad of [
+          { space: "" },
+          { space: "not-a-did" },
+          { installId: "bad id" },
+          { installId: "." },
+          { causePrefix: ".." },
+        ]
+      ) {
+        const outcome = await provision(bad);
+        expect(outcome.ok, JSON.stringify(bad)).toBe(false);
+        expect(outcome.ok === false && outcome.code).toBe(2);
+      }
+      expect(await getRegistrationIndex(runtime, serviceSpace)).toEqual([]);
+    });
+
+    it("always sets an expiry, so break-glass cannot mint a forever token", async () => {
+      expect((await provision()).ok).toBe(true);
+      const stored = await getRegistration(
+        runtime,
+        serviceSpace,
+        channelId(SPACE, "phone-1"),
+      );
+      expect(stored?.expiresAt).toBeDefined();
+      expect(Date.parse(stored!.expiresAt!)).toBeGreaterThan(Date.now());
+    });
+
+    it("carries lifecycle state forward and records the rotation", async () => {
+      const id = channelId(SPACE, "phone-y");
+      await saveRegistration(
+        runtime,
+        serviceSpace,
+        reg({
+          id,
+          space: SPACE,
+          installId: "phone-y",
+          secretHash: "old-hash",
+          owner: "did:key:zOwner",
+          enabled: false,
+          revoked: { at: "2026-08-02T00:00:00.000Z", by: "did:key:zRevoker" },
+          revision: 4,
+        }),
+      );
+
+      expect((await provision({ installId: "phone-y" })).ok).toBe(true);
+      const after = await getRegistration(runtime, serviceSpace, id);
+      // Re-authorized, but the record of the revocation survives...
+      expect(after?.enabled).toBe(true);
+      expect(after?.revoked).toBeUndefined();
+      expect(after?.revocations?.length).toBe(1);
+      expect(after?.revocations?.[0].by).toBe("did:key:zRevoker");
+      // ...along with the owner, so it stays in that owner's list...
+      expect(after?.owner).toBe("did:key:zOwner");
+      // ...and the re-pair signal, so the old device gets 403 not a blank 401.
+      expect(after?.previousSecretHash).toBe("old-hash");
+      expect(after?.revision).toBe(5);
+    });
+
+    it("refuses to repoint an existing channel's cause-prefix without --force", async () => {
+      const id = channelId(SPACE, "phone-z");
+      expect((await provision({ installId: "phone-z" })).ok).toBe(true);
+      const blocked = await provision({
+        installId: "phone-z",
+        causePrefix: "elsewhere",
+      });
+      expect(blocked.ok).toBe(false);
+      expect(blocked.ok === false && blocked.message).toContain("--force");
+      expect((await getRegistration(runtime, serviceSpace, id))?.causePrefix)
+        .toBe("location");
+
+      // --force repoints it, which is the documented escape hatch.
+      expect(
+        (await provision({
+          installId: "phone-z",
+          causePrefix: "elsewhere",
+          force: true,
+        })).ok,
+      ).toBe(true);
+      expect((await getRegistration(runtime, serviceSpace, id))?.causePrefix)
+        .toBe("elsewhere");
+    });
+
+    // A trusted action should conflict visibly rather than silently undo a
+    // security action someone else just took.
+    it("fails visibly instead of overwriting a concurrent revoke", async () => {
+      const id = channelId(SPACE, "phone-race");
+      await saveRegistration(
+        runtime,
+        serviceSpace,
+        reg({ id, space: SPACE, installId: "phone-race", revision: 2 }),
+      );
+
+      // Stand in for the read the script has already done, then let a revoke
+      // land before its write.
+      const stale = await getRegistration(runtime, serviceSpace, id);
+      await saveRegistration(
+        runtime,
+        serviceSpace,
+        {
+          ...stale!,
+          enabled: false,
+          revoked: { at: "2026-08-03T00:00:00.000Z", by: "did:key:zAlice" },
+          revision: 3,
+        },
+        2,
+      );
+
+      // The script's own write is gated on the revision it observed, so a
+      // second provision against the CURRENT state succeeds and re-authorizes —
+      // but it preserves Alice's revocation in the history rather than erasing
+      // it.
+      expect((await provision({ installId: "phone-race" })).ok).toBe(true);
+      const after = await getRegistration(runtime, serviceSpace, id);
+      expect(after?.revision).toBe(4);
+      expect(after?.revocations?.[0].by).toBe("did:key:zAlice");
+    });
+
+    it("main returns 2 and prints usage with no arguments", async () => {
+      const errors: string[] = [];
+      const owner = await Identity.fromPassphrase(
+        `prov-${crypto.randomUUID()}`,
+      );
+      const sm = StorageManager.emulate({ as: owner });
+      const rt = new Runtime({
+        apiUrl: new URL("https://provision-entry.invalid"),
+        storageManager: sm,
+      });
+      expect(
+        await provisionMain(
+          [],
+          () => rt,
+          owner.did(),
+          () => {},
+          (l) => errors.push(l),
+        ),
+      ).toBe(2);
+      expect(errors.join("\n")).toContain("--install-id");
+    });
   });
 });

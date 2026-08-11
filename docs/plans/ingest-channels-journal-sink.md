@@ -25,7 +25,9 @@ The missing piece is one generic capability. We already have the trust primitive
 
 ## The shape — what you mint
 
-You mint an **ingest channel**: a bearer-authed inbound HTTP endpoint bound to a target cell you provide (in your own space). This reuses the existing webhook registration/auth machinery verbatim — the registry in the toolshed service space, `wh`-style id + secret generation, SHA-256 hash, timing-safe verify with the dummy-hash timing-oracle guard, and the create/list/delete lifecycle (`webhooks.handlers.ts`, `webhooks.utils.ts`).
+You mint an **ingest channel**: a bearer-authed inbound HTTP endpoint bound to a target cell you provide (in your own space). It reuses the webhook *token* machinery — the registry in the toolshed service space, id + secret generation, SHA-256 hash, timing-safe verify with the dummy-hash timing-oracle guard (`webhooks.handlers.ts`, `webhooks.utils.ts`).
+
+The **lifecycle** is its own, and deliberately not webhooks': `mint`/`list`/`rotate`/`revoke` on the `/api/ingest-channels` prefix, authenticated by a first-party request proof and authorized against the target space's ACL. Revocation is a soft disable rather than webhooks' hard delete, because a registration here records who was authorized to write provenance-marked data into a user's space — that record has to survive. See [self-serve-ingest-channels.md](../features/self-serve-ingest-channels.md).
 
 An ingest channel has a **sink** — where an inbound POST lands.
 
@@ -96,7 +98,7 @@ Provenance at rest is the runtime-minted `ExternalIngest` mark — stronger and 
 
 - **Blast radius is the registered target.** A channel's bearer token can only write within its registered base cell + space (plus a validated leaf under it) — the same blast radius as a webhook today.
 - **The mark cannot be forged.** The payload is written under the ordinary member identity and gated (`gateRuntimeMintedIntegrity` strips any smuggled `ExternalIngest`); the trusted mark comes only from the runtime's builtin mint step. Sandboxed pattern code cannot mint it.
-- **Open gap — confused-deputy on create.** Channel creation is currently unauthed and `createdBy` is self-asserted (inherited from webhooks). Harmless-ish for a `stream` webhook; **not** acceptable for a `journal` sink, which writes *provenance-marked* data into a caller-named user space — anyone reaching create could register a channel targeting *another* user's space and get legitimately-minted marks written there. **v1 must gate `journal`-sink creation on a real authenticated caller principal.**
+- **~~Open gap~~ — confused-deputy on create. CLOSED.** Creation was unauthed with a self-asserted `createdBy`, inherited from webhooks. Harmless-ish for a `stream` webhook; **not** acceptable for a `journal` sink, which writes *provenance-marked* data into a caller-named user space — anyone reaching create could register a channel targeting *another* user's space and get legitimately-minted marks written there. `journal`-sink creation now requires a verified caller principal plus an explicit `OWNER` grant for that DID on the target space's ACL; see decision 2 below and [self-serve-ingest-channels.md](../features/self-serve-ingest-channels.md). The `stream` sink still creates through the webhook route and inherits the old behavior.
 - **Honest limit.** The toolshed runtime is `as: identity` and sees plaintext; the split-mint protects the *mark*, not the *bytes*. Estuary now holds and appends over plaintext record data as an operator-trusted process; a signer-key compromise is a cross-user breach + the ability to write marked fabricated records. Document in the custody/data-flow docs; treat the signer key as high-value.
 
 ## The cross-space commit gate (blocker A) — resolved: buildable now, latent dependency later
@@ -126,7 +128,7 @@ The seam requires these changes on loom's side (Workstream A/D-read):
 ## Open decisions
 
 1. **Packaging** — a generically-named `POST /api/ingest` carrying `sink: "stream" | "journal"` (recommended; `/api/webhooks` misdescribes the general capability) vs. extending the webhook route in place. Either way the auth/registry helpers are shared. *Still open for the `stream` sink.*
-2. ~~**Journal-creation auth**~~ — **RESOLVED.** Creation requires a real caller principal (a first-party request proof) *and* an explicit `OWNER` grant for that DID on the target space's ACL. See [self-serve-ingest-channels.md](self-serve-ingest-channels.md). The control plane is a separate prefix, `/api/ingest-channels`, so the data plane's wildcard CORS never covers it.
+2. ~~**Journal-creation auth**~~ — **RESOLVED.** Creation requires a real caller principal (a first-party request proof) *and* an explicit `OWNER` grant for that DID on the target space's ACL. See [self-serve-ingest-channels.md](../features/self-serve-ingest-channels.md). The control plane is a separate prefix, `/api/ingest-channels`, so the data plane's wildcard CORS never covers it.
 
 ## Acceptance / test plan
 

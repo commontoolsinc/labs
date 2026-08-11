@@ -39,72 +39,99 @@ import {
 } from "@/routes/ingest/ingest.utils.ts";
 import { DEFAULT_TTL_DAYS } from "@/routes/ingest-channels/ingest-channels.utils.ts";
 
-const flags = parseArgs(Deno.args, {
-  string: ["space", "install-id", "cause-prefix", "name"],
-  boolean: ["force"],
-});
+const USAGE =
+  "usage: deno task provision-ingest-channel --space <did:key:...> " +
+  "--install-id <id> [--cause-prefix location] [--name <label>] [--force]";
 
-const space = flags.space;
-const installId = flags["install-id"];
-if (!space || !installId) {
-  console.error(
-    "usage: deno task provision-ingest-channel --space <did:key:...> " +
-      "--install-id <id> [--cause-prefix location] [--name <label>] [--force]",
-  );
-  Deno.exit(2);
-}
-// A typo'd space durably writes marked data into a garbage space (loom's reader
-// silently orphaned); installId is the mark's audience AND a `\n`-separated input
-// to channelId, so whitespace/newlines corrupt the cross-repo join key.
-if (!space.startsWith("did:")) {
-  console.error(`Invalid --space '${space}': must be a DID (did:...).`);
-  Deno.exit(2);
-}
-if (!isValidSegment(installId)) {
-  console.error(
-    `Invalid --install-id '${installId}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
-  );
-  Deno.exit(2);
-}
-const causePrefix = flags["cause-prefix"] ?? "location";
-const name = flags.name ?? `ingest-${installId}`;
+const defaultRuntime = () =>
+  new Runtime({
+    apiUrl: new URL(env.MEMORY_URL),
+    storageManager: StorageManager.open({
+      memoryHost: new URL(env.MEMORY_URL),
+      as: identity,
+    }),
+  });
 
-// causePrefix is the other half of the `${causePrefix}/${partition}` cause that
-// loom must recompute to read the cells — hold it to the same clean-segment rule
-// as the partition so an operator typo can't silently orphan the read path.
-if (!isValidSegment(causePrefix)) {
-  console.error(
-    `Invalid --cause-prefix '${causePrefix}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
-  );
-  Deno.exit(2);
+export interface ProvisionRequest {
+  space: string;
+  installId: string;
+  causePrefix?: string;
+  name?: string;
+  force?: boolean;
 }
 
-const runtime = new Runtime({
-  apiUrl: new URL(env.MEMORY_URL),
-  storageManager: StorageManager.open({
-    memoryHost: new URL(env.MEMORY_URL),
-    as: identity,
-  }),
-});
+export type ProvisionOutcome =
+  | { ok: true; id: string; name: string; causePrefix: string; secret: string }
+  | { ok: false; code: 1 | 2; message: string };
 
-try {
-  // Deterministic id: re-running for the same space+install rotates the token in
-  // place (overwrites the one registration) rather than leaving a stale one live.
+/**
+ * The provisioning write itself. BORROWS the runtime rather than owning it —
+ * `main` below constructs and disposes one, but the lifecycle behaviour here
+ * (carrying expiry and revocation history forward, refusing to overwrite a
+ * concurrent revoke) is what a test needs to reach, and a function that
+ * disposes its caller's runtime cannot be tested against stored state.
+ */
+export async function provisionChannel(
+  runtime: Runtime,
+  serviceSpace: string,
+  request: ProvisionRequest,
+): Promise<ProvisionOutcome> {
+  const { space, installId } = request;
+  // A typo'd space durably writes marked data into a garbage space (loom's
+  // reader silently orphaned); installId is the mark's audience AND a
+  // `\n`-separated input to channelId, so whitespace/newlines corrupt the
+  // cross-repo join key.
+  if (!space || !installId) return { ok: false, code: 2, message: USAGE };
+  if (!space.startsWith("did:")) {
+    return {
+      ok: false,
+      code: 2,
+      message: `Invalid --space '${space}': must be a DID (did:...).`,
+    };
+  }
+  if (!isValidSegment(installId)) {
+    return {
+      ok: false,
+      code: 2,
+      message:
+        `Invalid --install-id '${installId}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
+    };
+  }
+  const causePrefix = request.causePrefix ?? "location";
+  const name = request.name ?? `ingest-${installId}`;
+
+  // causePrefix is the other half of the `${causePrefix}/${partition}` cause
+  // that loom must recompute to read the cells — hold it to the same
+  // clean-segment rule as the partition so an operator typo can't silently
+  // orphan the read path.
+  if (!isValidSegment(causePrefix)) {
+    return {
+      ok: false,
+      code: 2,
+      message:
+        `Invalid --cause-prefix '${causePrefix}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
+    };
+  }
+
+  // Deterministic id: re-running for the same space+install rotates the token
+  // in place (overwrites the one registration) rather than leaving a stale one
+  // live.
   const id = channelId(space, installId);
 
   // Re-provisioning with a different --cause-prefix would rotate the token AND
   // silently move where data lands (orphaning loom's existing read path), since
   // channelId derives from (space, installId) only. Refuse unless --force.
-  const existing = await getRegistration(runtime, identity.did(), id);
-  if (existing && existing.causePrefix !== causePrefix && !flags.force) {
-    console.error(
-      `Channel ${id} already exists with cause-prefix '${existing.causePrefix}', ` +
+  const existing = await getRegistration(runtime, serviceSpace, id);
+  if (existing && existing.causePrefix !== causePrefix && !request.force) {
+    return {
+      ok: false,
+      code: 2,
+      message:
+        `Channel ${id} already exists with cause-prefix '${existing.causePrefix}', ` +
         `not '${causePrefix}'. Re-run with --force to repoint (this orphans the ` +
         `old read path), or keep the existing prefix.`,
-    );
-    Deno.exit(2);
+    };
   }
-  if (existing) console.log(`rotating token for existing channel ${id}`);
 
   const { secret, secretHash } = generateIngestSecret();
 
@@ -120,7 +147,7 @@ try {
     : new Date(now.getTime() + DEFAULT_TTL_DAYS * 86_400_000).toISOString();
 
   try {
-    await saveRegistration(runtime, identity.did(), {
+    await saveRegistration(runtime, serviceSpace, {
       id,
       name,
       space,
@@ -130,15 +157,14 @@ try {
       secretHash,
       // Re-provisioning an existing channel replaces its secret, so it IS a
       // rotation and must leave the re-pair signal behind. Without it a device
-      // still holding the old token gets the equalized 401 — indistinguishable
-      // from "unknown channel" — on the single most likely path to reach it,
-      // which is exactly the case `previousSecretHash` exists for. The
-      // self-serve rotate path already does this; the operator path is the one
-      // an operator reaches for when a device is already misbehaving.
+      // still holding the old token gets the equalized 401 —
+      // indistinguishable from "unknown channel" — on the single most likely
+      // path to reach it, which is exactly the case `previousSecretHash`
+      // exists for.
       ...(existing?.secretHash !== undefined
         ? { previousSecretHash: existing.secretHash }
         : {}),
-      createdBy: identity.did(),
+      createdBy: serviceSpace,
       createdAt: existing?.createdAt ?? now.toISOString(),
       enabled: true,
       expiresAt,
@@ -169,31 +195,66 @@ try {
       // Admin is trusted, but a trusted action should conflict visibly rather
       // than silently undo a security action someone else just took. A revoke
       // landing between the read above and this write is exactly that case.
-      console.error(
-        `\nChannel ${id} changed while this command was running — most likely ` +
+      return {
+        ok: false,
+        code: 1,
+        message:
+          `\nChannel ${id} changed while this command was running — most likely ` +
           `revoked. Nothing was written.\nRe-run to act on the current state.`,
-      );
-      Deno.exit(1);
+      };
     }
     throw error;
   }
   await runtime.storageManager.synced();
-
-  const url = `${env.API_URL}/api/ingest/${id}`;
-  console.log("\nIngest channel provisioned.\n");
-  console.log(`  id:          ${id}`);
-  console.log(`  name:        ${name}`);
-  console.log(`  space:       ${space}`);
-  console.log(`  causePrefix: ${causePrefix}`);
-  console.log(`  installId:   ${installId}`);
-  console.log(`  URL:         ${url}`);
-  console.log(
-    `\n  token (shown once — hand to the beacon, sent as 'Authorization: Bearer <token>'):\n\n    ${secret}\n`,
-  );
-  console.log(
-    "  (re-running with the same --space and --install-id rotates this channel's\n" +
-      "   token in place; the previous token stops working.)\n",
-  );
-} finally {
-  await runtime.dispose();
+  return { ok: true, id, name, causePrefix, secret };
 }
+
+/** Returns an exit code rather than calling `Deno.exit`, so it is testable. */
+export async function main(
+  args: string[],
+  makeRuntime: () => Runtime = defaultRuntime,
+  serviceSpace: string = identity.did(),
+  log: (line: string) => void = console.log,
+  logError: (line: string) => void = console.error,
+): Promise<number> {
+  const flags = parseArgs(args, {
+    string: ["space", "install-id", "cause-prefix", "name"],
+    boolean: ["force"],
+  });
+
+  const runtime = makeRuntime();
+  try {
+    const outcome = await provisionChannel(runtime, serviceSpace, {
+      space: flags.space ?? "",
+      installId: flags["install-id"] ?? "",
+      causePrefix: flags["cause-prefix"],
+      name: flags.name,
+      force: flags.force,
+    });
+    if (!outcome.ok) {
+      logError(outcome.message);
+      return outcome.code;
+    }
+
+    const url = `${env.API_URL}/api/ingest/${outcome.id}`;
+    log("\nIngest channel provisioned.\n");
+    log(`  id:          ${outcome.id}`);
+    log(`  name:        ${outcome.name}`);
+    log(`  space:       ${flags.space}`);
+    log(`  causePrefix: ${outcome.causePrefix}`);
+    log(`  installId:   ${flags["install-id"]}`);
+    log(`  URL:         ${url}`);
+    log(
+      `\n  token (shown once — hand to the beacon, sent as 'Authorization: Bearer <token>'):\n\n    ${outcome.secret}\n`,
+    );
+    log(
+      "  (re-running with the same --space and --install-id rotates this channel's\n" +
+        "   token in place; the previous token stops working.)\n",
+    );
+    return 0;
+  } finally {
+    await runtime.dispose();
+  }
+}
+
+if (import.meta.main) Deno.exit(await main(Deno.args));

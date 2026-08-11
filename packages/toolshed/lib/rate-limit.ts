@@ -19,6 +19,12 @@ export interface RateLimiterOptions {
    * Clock source, injectable so refill behaviour can be tested by advancing a
    * counter rather than sleeping. A timing-dependent test of a rate limiter is
    * flaky by construction, and the repo's waiting guidance rules sleeps out.
+   *
+   * Defaults to a MONOTONIC clock, not `Date.now`. Refill is computed from
+   * elapsed time, so a wall-clock adjustment — NTP correction, DST on a
+   * misconfigured host, an operator setting the date — moves it backwards and
+   * a spent bucket refills by a negative amount. `performance.now()` cannot
+   * step backwards.
    */
   now?: () => number;
 }
@@ -38,7 +44,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     capacity,
     refillPerSecond,
     maxKeys = 10_000,
-    now = Date.now,
+    now = () => performance.now(),
   } = options;
   // Insertion order is iteration order, so the first key is the LRU once every
   // touch re-inserts.
@@ -50,7 +56,13 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       const existing = buckets.get(key);
       const bucket: Bucket = existing ?? { tokens: capacity, updatedAt: at };
       if (existing) {
-        const elapsedSeconds = (at - existing.updatedAt) / 1000;
+        // Clamped at zero as well as defaulting to a monotonic clock, because
+        // the clock is injectable and a caller can still supply a wall clock.
+        // Refilling by a negative amount drives a spent bucket BELOW empty, so
+        // it stays denied for longer than the configured interval — and the
+        // bucket this protects is revoke's, where an extended false denial
+        // leaves a credential the caller is trying to kill alive.
+        const elapsedSeconds = Math.max(0, at - existing.updatedAt) / 1000;
         bucket.tokens = Math.min(
           capacity,
           existing.tokens + elapsedSeconds * refillPerSecond,
