@@ -154,6 +154,23 @@ describe("schema-view", () => {
           ],
         } as const,
       ],
+      [
+        // The branch narrowing picks says nothing about `radius`; the schema
+        // around the union does, and it applies to whichever branch matched.
+        "a property the union's own schema rejects",
+        { kind: "circle", radius: "bad" },
+        {
+          type: "object",
+          properties: {
+            kind: { type: "string" },
+            radius: { type: "number" },
+          },
+          anyOf: [
+            { type: "object", required: ["kind"] },
+            { type: "object", required: ["side"] },
+          ],
+        } as const,
+      ],
     ];
 
     for (const [name, value, schema] of cases) {

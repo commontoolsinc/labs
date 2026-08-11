@@ -55,6 +55,7 @@ import { type Runtime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   canBranchMatch,
+  combineSchema,
   mergeAnyOfBranchSchemas,
   opaqueLeafMissesRequired,
   schemaTypeMatchesValueType,
@@ -149,6 +150,38 @@ const typeAccepts = (declared: unknown, actual: string): boolean => {
 };
 
 /**
+ * The branch a union narrowed to, carrying the union's own keywords.
+ *
+ * A union sits inside a schema that constrains the value as well: its
+ * `properties`, `required` and `default` apply to whichever branch matches. A
+ * branch alone therefore accepts values the schema rejects — an outer
+ * `properties.radius.type: "number"` beside a branch that only requires
+ * `radius` would let `{ radius: "bad" }` through, where an eager read drops the
+ * property. Eager traversal evaluates each branch against the schema around it;
+ * combining here is that rule, decided on the schema instead of the value.
+ *
+ * The union's `$defs` ride along whatever the combination kept of them: a
+ * branch is routinely a `$ref` into them, and the schema it resolves to can
+ * hold further refs — `RenderNode` refers to itself — which have nowhere to
+ * point once the definitions are gone.
+ */
+const branchWithOuter = (
+  schema: JSONSchemaObj,
+  branch: JSONSchema,
+): JSONSchema => {
+  const { anyOf: _anyOf, oneOf: _oneOf, ...outer } = schema;
+  const combined = combineSchema(outer as JSONSchemaObj, branch);
+  if (!isRecord(combined) || !isRecord(schema.$defs)) return combined;
+  return {
+    ...combined as JSONSchemaObj,
+    $defs: {
+      ...schema.$defs,
+      ...(isRecord(combined.$defs) ? combined.$defs : {}),
+    },
+  };
+};
+
+/**
  * Collapse a union onto a branch that declares `asCell`, when one does.
  *
  * An optional handle — `Cell<T> | undefined` — generates as a union whose one
@@ -172,9 +205,7 @@ const preferAsCellBranch = (schema: JSONSchema): JSONSchema => {
     const chosen = resolved.find((branch) =>
       ContextualFlowControl.getAsCellValues(branch).length > 0
     )!;
-    return isRecord(chosen) && isRecord(schema.$defs)
-      ? { ...chosen as JSONSchemaObj, $defs: schema.$defs }
-      : chosen;
+    return branchWithOuter(schema, chosen);
   }
   return schema;
 };
@@ -232,11 +263,7 @@ const narrowForValue = (
   const branches = rawBranches.map((branch) => resolveBranch(branch, schema));
   const matching = branches.filter((branch) => canBranchMatch(branch, value));
   if (matching.length === 0) return false;
-  const withDefs = (branch: JSONSchema): JSONSchema =>
-    isRecord(branch) && isRecord(schema.$defs)
-      ? { ...branch as JSONSchemaObj, $defs: schema.$defs }
-      : branch;
-  if (matching.length === 1) return withDefs(matching[0]);
+  if (matching.length === 1) return branchWithOuter(schema, matching[0]);
   // Prefer a branch that declares `asCell`. An eager read evaluates every
   // matching branch and picks the cell among the results (`mergeMatches`);
   // merging the SCHEMAS instead leaves the marker off the merged top level, so
@@ -246,7 +273,7 @@ const narrowForValue = (
   const asCellBranch = matching.find((branch) =>
     ContextualFlowControl.getAsCellValues(branch).length > 0
   );
-  if (asCellBranch !== undefined) return withDefs(asCellBranch);
+  if (asCellBranch !== undefined) return branchWithOuter(schema, asCellBranch);
   return mergeAnyOfBranchSchemas(matching as JSONSchema[], schema) ?? schema;
 };
 
