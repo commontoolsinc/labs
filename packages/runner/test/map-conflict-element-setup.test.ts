@@ -274,6 +274,12 @@ describe("map element setup across a commit conflict", () => {
       result.key("items").withTx(appendTx).set([1, 2]);
       rtB.prepareTxForCommit(appendTx);
       const appendCommit = appendTx.commit();
+      // The deferred waits here and below carry no bound, per the suite's
+      // ban on timeouts. The clock preload (test/clock-preload.ts) is the
+      // backstop: it freezes wall-clock timers armed from test files, and
+      // auto-advance drains the event loop when nothing can progress, so a
+      // wait whose resolver never fires fails the test promptly as a
+      // pending promise instead of holding the suite.
       await firstConflict.promise;
       expect(
         conflicts.length,
