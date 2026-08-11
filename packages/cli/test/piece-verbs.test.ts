@@ -61,6 +61,29 @@ const SEARCH_RESULT: JSONSchema = {
   properties: { summary: { type: "string" } },
 };
 
+const CREATE_NOTE_RESULT: JSONSchema = {
+  type: "object",
+  properties: { note: { type: "object" } },
+  required: ["note"],
+};
+
+/** One compiled result property as the builder serializes a stream: an alias
+ * to a derived internal cell, named by its cause. Taken from what
+ * `patternManager.compilePattern` actually emits for a CTS `action` — both the
+ * result property and the handler node's `$event` carry this same shape. */
+function streamAlias(cause: unknown, schema: JSONSchema | true = true) {
+  return { $alias: { partialCause: cause, scope: "space", path: [], schema } };
+}
+
+/** A compiled pattern double. `getPattern()` resolves a real `Pattern`, which
+ * is CALLABLE with `result`/`nodes` hung off it — a plain object here would
+ * pass a lister that rejects the shape the runtime actually hands it. */
+function compiledPattern(
+  graph: { result: Record<string, unknown>; nodes: unknown[] },
+) {
+  return Object.assign(() => {}, graph);
+}
+
 describe("listPieceCallables", () => {
   it("lists handlers and tools with schemas; excludes data; result shadows input", async () => {
     const resultRoot = cell(
@@ -177,6 +200,137 @@ describe("listPieceCallables", () => {
     expect(setup.on).toBe("input");
     // Plain data is not a verb.
     expect(verbs.some((v) => v.name === "topicCount")).toBe(false);
+  });
+
+  it("reports a handler's declared result as its outputSchema", async () => {
+    // A handler's declared result is not on its cell — it rides the module of
+    // the node the handler compiled to. The listing finds that node by
+    // matching its `$event` input against the result property exposing the
+    // same stream, so `publicName` below resolves through its CAUSE and not
+    // through its property name: the two deliberately disagree, because a
+    // name-keyed lookup would answer every other case in this test correctly.
+    const resultRoot = cell(
+      {
+        createNote: { $stream: true },
+        touch: { $stream: true },
+        publicName: { $stream: true },
+        shared: { $stream: true },
+      },
+      {
+        type: "object",
+        properties: {
+          createNote: ADD_TOPIC_EVENT,
+          touch: { type: "object" },
+          publicName: { type: "object" },
+          shared: { type: "object" },
+        },
+      },
+    );
+    const pattern = compiledPattern({
+      result: {
+        createNote: streamAlias({ stream: "createNote" }, ADD_TOPIC_EVENT),
+        touch: streamAlias({ stream: "touch" }),
+        publicName: streamAlias({ stream: "internalCause" }),
+        shared: streamAlias({ stream: "shared" }),
+        noteCount: streamAlias("noteCount", { type: "number" }),
+      },
+      nodes: [
+        {
+          module: { wrapper: "handler", resultSchema: CREATE_NOTE_RESULT },
+          // The event link carries the schema for the position it is read at;
+          // identity is the cause, so a differing schema must not defeat the
+          // match.
+          inputs: { $event: streamAlias({ stream: "createNote" }) },
+          outputs: {},
+        },
+        // Declares nothing: the value-less shape.
+        {
+          module: { wrapper: "handler" },
+          inputs: { $event: streamAlias({ stream: "touch" }) },
+          outputs: {},
+        },
+        {
+          module: { wrapper: "handler", resultSchema: SEARCH_RESULT },
+          inputs: { $event: streamAlias({ stream: "internalCause" }) },
+          outputs: {},
+        },
+        // Two handlers on one stream: nothing names a single verb's result,
+        // so the row keeps none rather than picking a winner.
+        {
+          module: { wrapper: "handler", resultSchema: SEARCH_RESULT },
+          inputs: { $event: streamAlias({ stream: "shared" }) },
+          outputs: {},
+        },
+        {
+          module: { wrapper: "handler" },
+          inputs: { $event: streamAlias({ stream: "shared" }) },
+          outputs: {},
+        },
+        // A compute node over ordinary data — no `$event` at all.
+        {
+          module: { type: "javascript", resultSchema: { type: "number" } },
+          inputs: { list: streamAlias("notes") },
+          outputs: streamAlias("noteCount"),
+        },
+      ],
+    });
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
+      getPattern: () => Promise.resolve(pattern),
+    };
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-789",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+
+    const byName = new Map(listing.verbs.map((verb) => [verb.name, verb]));
+    expect(byName.get("createNote")?.outputSchema).toEqual(CREATE_NOTE_RESULT);
+    expect(byName.get("publicName")?.outputSchema).toEqual(SEARCH_RESULT);
+    expect(byName.get("touch")?.outputSchema).toBeUndefined();
+    expect(byName.get("shared")?.outputSchema).toBeUndefined();
+    // A declared result is an own property only when there is one: a row with
+    // no result must not carry the key at all.
+    expect(Object.hasOwn(byName.get("touch")!, "outputSchema")).toBe(false);
+    // Data stays out of the listing whatever its node declares.
+    expect(byName.has("noteCount")).toBe(false);
+  });
+
+  it("lists a piece whose pattern cannot be resolved", async () => {
+    // The graph is advisory the way the source identity is: without it a row
+    // loses its declared result, never its place in the listing.
+    const resultRoot = cell(
+      { createNote: { $stream: true } },
+      { type: "object", properties: { createNote: ADD_TOPIC_EVENT } },
+    );
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
+      getPattern: () =>
+        Promise.reject(new Error("piece missing pattern identity")),
+    };
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-790",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+    expect(listing.verbs.map((verb) => verb.name)).toEqual(["createNote"]);
+    expect(listing.verbs[0].outputSchema).toBeUndefined();
   });
 
   it("returns an empty list for a piece with no callables", async () => {

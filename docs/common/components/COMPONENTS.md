@@ -468,7 +468,10 @@ provenance will refuse them.
 
 The menu comes with `cf-render`. Importing the component registers it. It mounts
 itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
-it.
+it. While the menu or one of its panels is open, the addressed piece carries an
+animated light sweep and soft color glow. The visual layer sits over the piece,
+does not receive pointer events, and does not change its size or layout. The
+menu closes if that renderer disconnects or begins showing another piece.
 
 The innermost rendered piece claims the click, so right-clicking a tile inside a
 piece addresses the tile. Three cases keep the browser's own menu instead: a

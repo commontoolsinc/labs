@@ -109,13 +109,6 @@ All blank by default. Each integration is gated on its `_CLIENT_ID` /
 | `PLAID_REDIRECT_URI` | _(unset)_ | Optional. |
 | `PLAID_SYNC_ALL_TRANSACTIONS` | `false` | Sync full history vs. incremental. |
 
-### Notification webhooks
-
-| Var | Purpose |
-|---|---|
-| `LLM_HEALTH_DISCORD_WEBHOOK` | LLM health monitor alerts. |
-| `HOSTNAME` | Included in alerts so multi-host deploys are distinguishable. |
-
 ---
 
 ## Identity & auth

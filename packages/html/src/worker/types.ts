@@ -210,6 +210,9 @@ export interface ChildNodeState {
 
   /** Source cell for reactive child nodes; used to decide same-key reuse. */
   cell?: Cell<unknown>;
+
+  /** Whether this element provides a piece boundary to its descendants. */
+  hasPieceBoundary?: boolean;
 }
 
 /**

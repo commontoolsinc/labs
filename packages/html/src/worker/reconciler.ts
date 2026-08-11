@@ -89,6 +89,23 @@ const TEXT_INTEGRITY_PROP_SINKS: ReadonlyMap<string, ReadonlySet<string>> =
   new Map([
     ["cf-chat-message", new Set(["name", "content"])],
   ]);
+
+function isNestedPatternOutput(value: unknown, cell: Cell<unknown>): boolean {
+  if (
+    typeof value !== "object" || value === null || !(UI in value) ||
+    !(value as Record<PropertyKey, unknown>)[UI]
+  ) return false;
+
+  try {
+    const patternIdentity = cell.getMetaRaw("patternIdentity");
+    return typeof patternIdentity === "object" && patternIdentity !== null &&
+      typeof (patternIdentity as Record<string, unknown>).identity ===
+        "string" &&
+      typeof (patternIdentity as Record<string, unknown>).symbol === "string";
+  } catch {
+    return false;
+  }
+}
 // Props whose live DOM value can drift from the authored VDOM value
 // independently of any worker-side change — user input (`value`), scrolling
 // (`scrollTop`/`scrollLeft`), or browser / custom-element state (`checked`,
@@ -758,6 +775,40 @@ export class WorkerReconciler {
       propName,
       cellRef: this.cellRefForBinding(cell),
     }];
+  }
+
+  /** Keep the nested pattern's whole result cell on its existing root node. */
+  private updatePieceBoundary(
+    childState: ChildNodeState,
+    resolvedChild: unknown,
+    resultCell: Cell<unknown>,
+  ): void {
+    const shouldBind = isNestedPatternOutput(resolvedChild, resultCell);
+    if (!childState.elementState) return;
+
+    if (shouldBind) {
+      childState.hasPieceBoundary = true;
+      this.queueOps([{
+        op: "set-piece-boundary",
+        nodeId: childState.elementState.nodeId,
+        cellRef: this.cellRefForBinding(resultCell),
+      }]);
+    } else if (childState.hasPieceBoundary) {
+      childState.hasPieceBoundary = false;
+      this.queueOps([{
+        op: "clear-piece-boundary",
+        nodeId: childState.elementState.nodeId,
+      }]);
+    }
+  }
+
+  /** Follow a link-valued child to the result cell whose UI is rendered. */
+  private resolveCellForBinding(cell: Cell<unknown>): Cell<unknown> {
+    try {
+      return cell.resolveAsCell();
+    } catch {
+      return cell;
+    }
   }
 
   private cellRefForBinding(cell: Cell<unknown>): CellRef {
@@ -3487,9 +3538,15 @@ export class WorkerReconciler {
       isText: false,
       cancel,
       cell,
+      hasPieceBoundary: false,
     };
 
     let currentCancel: Cancel | undefined;
+    let currentContentState:
+      | "rendered"
+      | "policy-blocked"
+      | "integrity-blocked"
+      | undefined;
 
     // §4.9.3 Stage 2: on each render, watch the ACL docs of the spaces this
     // cell is labeled with, so a fail-closed over-block upgrades to an admit
@@ -3499,16 +3556,11 @@ export class WorkerReconciler {
 
     const renderResolved = (resolvedChild: unknown, forced = false) => {
       const isInitialRender = childState.nodeId === -1;
-
-      // Dedupe updates. A forced re-eval (an ACL sync/change) bypasses the
-      // value-identity check: the value is unchanged but the render DECISION
-      // may have flipped.
-      if (
-        !forced && !isInitialRender &&
-        Object.is(resolvedChild, childState.currentValue)
-      ) {
-        return;
-      }
+      const resultCell = this.resolveCellForBinding(cell);
+      const valueUnchanged = Object.is(
+        resolvedChild,
+        childState.currentValue,
+      );
       childState.currentValue = resolvedChild;
       this.watchCellMembership(
         cell,
@@ -3516,8 +3568,31 @@ export class WorkerReconciler {
         addCancel,
         () => renderResolved(childState.currentValue, true),
       );
+      const blockedByPolicy = !this.canRenderCellUnderPolicy(cell, policy);
+      const blockedByIntegrity = !blockedByPolicy &&
+        this.shouldBlockTextFromCell(resolvedChild, cell, policy);
 
-      if (!this.canRenderCellUnderPolicy(cell, policy)) {
+      if (
+        !forced && !isInitialRender && valueUnchanged
+      ) {
+        if (blockedByPolicy && currentContentState === "policy-blocked") {
+          return;
+        }
+        if (
+          blockedByIntegrity && currentContentState === "integrity-blocked"
+        ) {
+          return;
+        }
+        if (
+          !blockedByPolicy && !blockedByIntegrity &&
+          currentContentState === "rendered"
+        ) {
+          this.updatePieceBoundary(childState, resolvedChild, resultCell);
+          return;
+        }
+      }
+
+      if (blockedByPolicy) {
         if (!isInitialRender) {
           if (currentCancel) {
             currentCancel();
@@ -3530,12 +3605,14 @@ export class WorkerReconciler {
         childState.nodeId = -1;
         childState.elementState = undefined;
         childState.isText = false;
+        childState.hasPieceBoundary = false;
 
         const blockedState = this.createBlockedPlaceholder(ctx, policy);
         childState.nodeId = blockedState.nodeId;
         childState.elementState = blockedState;
         childState.isText = false;
         currentCancel = blockedState.cancel;
+        currentContentState = "policy-blocked";
 
         const beforeId = this.findNextSiblingId(
           parentState.children,
@@ -3550,7 +3627,7 @@ export class WorkerReconciler {
         return;
       }
 
-      if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
+      if (blockedByIntegrity) {
         if (!isInitialRender) {
           if (currentCancel) {
             currentCancel();
@@ -3563,6 +3640,7 @@ export class WorkerReconciler {
         childState.nodeId = -1;
         childState.elementState = undefined;
         childState.isText = false;
+        childState.hasPieceBoundary = false;
 
         const blockedState = this.createBlockedPlaceholder(
           ctx,
@@ -3573,6 +3651,7 @@ export class WorkerReconciler {
         childState.elementState = blockedState;
         childState.isText = false;
         currentCancel = blockedState.cancel;
+        currentContentState = "integrity-blocked";
 
         const beforeId = this.findNextSiblingId(
           parentState.children,
@@ -3607,7 +3686,9 @@ export class WorkerReconciler {
         }
 
         // Case 2: VNode in-place update (same tag)
-        if (childState.elementState) {
+        if (
+          childState.elementState && currentContentState === "rendered"
+        ) {
           const newVNode = this.extractVNode(
             resolvedChild as WorkerRenderNode,
           );
@@ -3638,6 +3719,7 @@ export class WorkerReconciler {
                 policyChildren.blocked;
               childState.elementState.sourceChildren = sanitized.children;
               childState.elementState.sourceProps = sanitized.props;
+              this.updatePieceBoundary(childState, resolvedChild, resultCell);
               // Same tag - update props in place
               this.updatePropsInPlace(
                 ctx,
@@ -3697,6 +3779,8 @@ export class WorkerReconciler {
       childState.nodeId = -1;
       childState.elementState = undefined;
       childState.isText = false;
+      childState.hasPieceBoundary = false;
+      currentContentState = undefined;
 
       if (resolvedChild === null || resolvedChild === undefined) {
         return;
@@ -3730,6 +3814,8 @@ export class WorkerReconciler {
         childState.elementState = newState.elementState;
         childState.isText = newState.isText;
         currentCancel = newState.cancel;
+        currentContentState = "rendered";
+        this.updatePieceBoundary(childState, resolvedChild, resultCell);
 
         // Always insert the child into its parent. On initial render,
         // updateChildren also emits insert-child but may see nodeId=-1

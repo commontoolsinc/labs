@@ -130,26 +130,27 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 ## Quick Command Reference
 
-| Operation          | Command                                                                                              |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| Type check         | `deno task cf check pattern.tsx --no-run`                                                            |
-| Deploy new         | `deno task cf piece new pattern.tsx --root . --repository REPO -i key -a url -s space`               |
-| Update existing    | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
-| Inspect state      | `deno task cf piece inspect --piece ID ...`                                                          |
-| Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
-| Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                             |
-| Project fields     | `deno task cf piece get --piece ID items --select id,title ...`                                      |
-| Read an address    | `deno task cf piece get --piece ID --select 'topic@,topic.title' ...`                                |
-| Read addresses     | `deno task cf piece get --piece ID items --schema '{"type":"array","items":{"$link":true}}' ...`     |
-| Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
-| Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
-| Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
-| Shape a result     | `deno task cf piece call --piece ID --select topic.title addTopic ...`                               |
-| List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                     |
-| Trigger recompute  | `deno task cf piece step --piece ID ...`                                                             |
-| List pieces        | `deno task cf piece ls -i key -a url -s space`                                                       |
-| Visualize          | `deno task cf piece map ...`                                                                         |
-| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)              |
+| Operation          | Command                                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Type check         | `deno task cf check pattern.tsx --no-run`                                                                                    |
+| Test pattern       | `deno task cf test pattern.test.tsx`                                                                                         |
+| Deploy new         | `deno task cf piece new pattern.tsx --test pattern.test.tsx --root . --repository REPO -i key -a url -s space`               |
+| Update existing    | `deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
+| Inspect state      | `deno task cf piece inspect --piece ID ...`                                                                                  |
+| Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                                            |
+| Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                                                     |
+| Project fields     | `deno task cf piece get --piece ID items --select id,title ...`                                                              |
+| Read an address    | `deno task cf piece get --piece ID --select 'topic@,topic.title' ...`                                                        |
+| Read addresses     | `deno task cf piece get --piece ID items --schema '{"type":"array","items":{"$link":true}}' ...`                             |
+| Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                                                     |
+| Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                                          |
+| Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                                         |
+| Shape a result     | `deno task cf piece call --piece ID --select topic.title addTopic ...`                                                       |
+| List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                                             |
+| Trigger recompute  | `deno task cf piece step --piece ID ...`                                                                                     |
+| List pieces        | `deno task cf piece ls -i key -a url -s space`                                                                               |
+| Visualize          | `deno task cf piece map ...`                                                                                                 |
+| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)                                      |
 
 ## Check Command Flags
 
@@ -183,18 +184,26 @@ deno task cf check pattern.tsx --verbose-errors     # Detailed error context
 
 ## Core Workflow: setsrc vs new
 
-**Critical pattern:** After initial deployment, use `setsrc` to iterate:
+**Critical pattern:** Run every authored test before deployment. After initial
+deployment, use `setsrc` to iterate and repeat the complete set of attached test
+entries:
 
 ```bash
+# Before every deployment
+deno task cf test pattern.test.tsx
+
 # First time only
-deno task cf piece new pattern.tsx ...
+deno task cf piece new pattern.tsx --test pattern.test.tsx ...
 # Output: Created piece bafyreia... <- Save this ID!
 
 # ALL subsequent iterations
-deno task cf piece setsrc pattern.tsx --piece bafyreia... ...
+deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --piece bafyreia... ...
 ```
 
-**Why:** `new` creates duplicate pieces. `setsrc` updates in-place.
+**Why:** `new` creates duplicate pieces. `setsrc` updates in-place. `--test`
+packages and type-checks a test entry but does not run it. Repeat the flag for
+every authored test entry. Each `setsrc` describes a complete new source
+revision, so omitting the flags drops those test roots from that revision.
 
 `setsrc` normally rejects incompatible argument/result schema changes and
 retained links whose durable contracts no longer fit. For an intentional
@@ -209,11 +218,13 @@ intentional breaking migration.
 ### Source location metadata
 
 The local-source deployment commands `piece new`, `piece setsrc`, and custom
-`piece set-home` accept `--root` plus `--repository`. Use the repository
-checkout root for `--root`; this preserves `source.entry` as a path inside the
+`piece set-home` accept repeatable `--test` flags as well as `--root` and
+`--repository`. Attach every authored pattern test. Use the repository checkout
+root for `--root`; this preserves `source.entry` as a path inside the
 repository. `--repository` is stored exactly as supplied in `source.repository`
 and is never inferred from Git configuration. On `setsrc`, omitting
 `--repository` preserves the existing value; supplying it replaces the value.
+Test flags are different: every source update must repeat the complete list.
 `piece inspect --json` and `piece ls --json` expose the resulting structured
 source locator.
 
@@ -359,18 +370,20 @@ deno task cf piece step --piece ID ...  # Required!
 deno task cf piece inspect --piece ID ...
 ```
 
-**Handler testing workflow** (deploy → call → step → inspect):
+**Handler testing workflow** (automated test → deploy → call → step → inspect):
 
 ```bash
-# 1. Deploy
-deno task cf piece new pattern.tsx -i key -a url -s space
-# 2. Call a handler
+# 1. Run the authored automated test
+deno task cf test pattern.test.tsx
+# 2. Deploy with the test attached
+deno task cf piece new pattern.tsx --test pattern.test.tsx -i key -a url -s space
+# 3. Call a handler
 deno task cf piece call --piece ID handlerName '{"arg": "value"}' ...
-# 3. Step to process
+# 4. Step to process
 deno task cf piece step --piece ID ...
-# 4. Inspect result
+# 5. Inspect result
 deno task cf piece inspect --piece ID ...
-# 5. Repeat 2-4 for each handler
+# 6. Repeat 3-5 for each handler
 ```
 
 See `docs/common/workflows/handlers-cli-testing.md` for the full workflow and
