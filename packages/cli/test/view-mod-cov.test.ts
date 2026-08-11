@@ -5,6 +5,8 @@
  * closure directly to exercise both the diff and source semantics paths.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
 import { plainTextLanguage } from "../lib/view/languages/plain-text/language.ts";
 import { buildView, ViewError } from "../lib/view/mod.ts";
@@ -39,6 +41,24 @@ Deno.test("buildView: an ordinary pipe with no file is read-only plain text", ()
   );
   assertEquals(r.semantics(), undefined);
   assertEquals(r.editSource.editable, false);
+});
+
+Deno.test("buildView: decodes buffered text after byte detection completes", () => {
+  const text = "#!/usr/bin/env python3\ndef greet():\n    pass\n";
+  const bytes = new TextEncoder().encode(text);
+  const view = buildView({
+    kind: "bytes",
+    bytes,
+    byteLanguageDetectionComplete: true,
+    extent: { byteLength: bytes.length, complete: true },
+  });
+
+  assert(
+    view.doc.lines.flatMap((line) => line.spans).some((span) =>
+      span.cls === "storageKeyword" && span.text === "def"
+    ),
+    "text decoding still applies shebang language selection",
+  );
 });
 
 Deno.test("buildView: source syntax is not guessed from content", () => {
@@ -80,6 +100,33 @@ Deno.test("buildView: transformed compiler output keeps the TypeScript default",
     r.doc,
     "read-only reparsing keeps the selected language",
   );
+});
+
+describe("decoded buildView input", () => {
+  it("keeps transformed and diff selectors visible after a UTF-8 BOM", () => {
+    const withBom = (text: string): Uint8Array =>
+      new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...new TextEncoder().encode(text),
+      ]);
+    const transformed = buildView(withBom(TRANSFORMED));
+    expect(
+      transformed.doc.structure.some((node) => node.kind === "section"),
+    ).toBe(true);
+
+    const diffText = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-const value = 1;
++const value = 2;
+`;
+    const diff = buildView(withBom(diffText));
+    expect(diff.editSource.isDiff).toBe(true);
+    expect(diff.doc.text).toBe(diffText);
+  });
 });
 
 Deno.test("buildView: a virtual filename selects piped source without making it editable", () => {

@@ -5,11 +5,14 @@
  * conditional branch is asserted on its real output.
  */
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import {
   fileSource,
   readonlySource,
   shortName,
 } from "../lib/view/editsource.ts";
+import { binaryLanguage } from "../lib/view/languages/binary/language.ts";
 
 Deno.test("fileSource.dirtyLabels: empty when unchanged, the filename when changed", () => {
   const src = fileSource("/tmp/some/dir/example.ts");
@@ -80,6 +83,26 @@ Deno.test("fileSource.revert: keeps an in-range cursor unchanged", () => {
   assertEquals(reverted, { text: original, cursorLine: 1 });
 });
 
+describe("fileSource.save() with a read-only language", () => {
+  it("leaves the file unchanged", () => {
+    const dir = Deno.makeTempDirSync();
+    const path = `${dir}/payload.data`;
+    const bytes = new Uint8Array([0x41, 0x00, 0xff]);
+    try {
+      Deno.writeFileSync(path, bytes);
+      const source = fileSource(path, binaryLanguage);
+
+      expect(source.editable).toBe(false);
+      expect(source.save("replacement", [])).toBe(
+        "Binary data is shown as a hex dump and cannot be edited.",
+      );
+      expect(Deno.readFileSync(path)).toEqual(bytes);
+    } finally {
+      Deno.removeSync(dir, { recursive: true });
+    }
+  });
+});
+
 Deno.test("readonlySource.parse: parses text into a Document without a path", () => {
   const reason =
     "This view is of a pipe — there is no underlying file to edit.";
@@ -89,7 +112,7 @@ Deno.test("readonlySource.parse: parses text into a Document without a path", ()
   assertEquals(src.label, null);
   assertEquals(src.reason, reason);
   assertEquals(
-    src.save("anything"),
+    src.save("anything", []),
     reason,
     "save is a no-op returning reason",
   );

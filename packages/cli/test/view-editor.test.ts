@@ -154,6 +154,92 @@ Deno.test("editor: backspace deletes and Enter splits the line", () => {
   assertEquals(s.view().cursor, { line: 1, col: 0 });
 });
 
+Deno.test("editor: edits text before CRLF transport but can edit a final carriage return", () => {
+  const encoder = new TextEncoder();
+  const cases = [
+    { input: "new\r\n", expected: "ne\r\n" },
+    { input: "new\r", expected: "new" },
+  ];
+  for (const testCase of cases) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      Deno.writeFileSync(path, encoder.encode(testCase.input));
+      const source = fileSource(path);
+      const session = editSession(testCase.input, source);
+      press(session, "e", "end", "backspace", "f3");
+
+      assertEquals(
+        Deno.readFileSync(path),
+        encoder.encode(testCase.expected),
+      );
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
+});
+
+Deno.test("editor: structural edits treat CRLF as one line boundary", () => {
+  const encoder = new TextEncoder();
+  const cases = [
+    {
+      keys: ["end", "enter"],
+      expected: "ab\r\n\r\ncd\r\n",
+    },
+    {
+      keys: ["end", "delete"],
+      expected: "abcd\r\n",
+    },
+    {
+      keys: ["down", "home", "backspace"],
+      expected: "abcd\r\n",
+    },
+    {
+      keys: ["end", "ctrl-k"],
+      expected: "abcd\r\n",
+    },
+    {
+      keys: ["down", "down", "enter"],
+      expected: "ab\r\ncd\r\n\r\n",
+    },
+  ];
+  for (const testCase of cases) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      const input = "ab\r\ncd\r\n";
+      Deno.writeFileSync(path, encoder.encode(input));
+      const source = fileSource(path);
+      const session = editSession(input, source);
+      press(session, "e", ...testCase.keys, "f3");
+
+      assertEquals(Deno.readFileSync(path), encoder.encode(testCase.expected));
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
+});
+
+Deno.test("editor: Enter at an unterminated EOF inherits nearby CRLF", () => {
+  const encoder = new TextEncoder();
+  for (
+    const testCase of [
+      { input: "first\r\nlast", expected: "first\r\nlast\r\n" },
+      { input: "first\r\nlast\r", expected: "first\r\nlast\r\r\n" },
+    ]
+  ) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      Deno.writeFileSync(path, encoder.encode(testCase.input));
+      const source = fileSource(path);
+      const session = editSession(testCase.input, source);
+      press(session, "e", "down", "end", "enter", "f3");
+
+      assertEquals(Deno.readFileSync(path), encoder.encode(testCase.expected));
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
+});
+
 Deno.test("editor: Ctrl-K kills to end of line, Ctrl-Y yanks it back", () => {
   const { src } = memSource();
   const s = editSession("hello world\n", src);

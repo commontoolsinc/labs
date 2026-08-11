@@ -3,7 +3,12 @@
 // driven frame by frame, the timers fire on demand, the clock is fixed, and the
 // file reads and writes are captured in memory. No network, no filesystem, no
 // waiting.
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertMatch,
+  assertStringIncludes,
+} from "@std/assert";
 import type { Ctx } from "../types.ts";
 import { buildSnapshot, discordOnline, loadHistory } from "./discord-online.ts";
 
@@ -304,8 +309,14 @@ Deno.test("discord online: a snapshot -> good; the reloaded history draws the ch
     // because the file was reloaded.
     assertEquals(v.duration, 2 * DAY);
     assertStringIncludes(v.extra ?? "", "<svg");
-    assertStringIncludes(v.extra ?? "", `background:${VISITOR_GREY}`);
-    assertStringIncludes(v.extra ?? "", "background:#2ecc71"); // the team role's own color
+    assertMatch(
+      v.extra ?? "",
+      new RegExp(`background:light-dark\\(#[0-9a-f]{6},${VISITOR_GREY}\\)`),
+    );
+    assertMatch(
+      v.extra ?? "",
+      /background:light-dark\(#[0-9a-f]{6},#2ecc71\)/,
+    ); // the team role's own color
     // With the chart drawn the counts sit at each line's end, not in the subline.
     assertStringIncludes(v.extra ?? "", "team + ");
 

@@ -33,6 +33,7 @@ import {
 } from "./commitmsg.ts";
 import type { Highlighter, Language } from "./languages/language.ts";
 import { languageForFile } from "./languages/language.ts";
+import type { LineEndingProvenance } from "./editbuffer.ts";
 import type {
   EditableSource,
   EditPolicy,
@@ -184,6 +185,16 @@ export function diffSource(
     return null;
   };
 
+  const parsedHunkAt = (
+    lines: readonly string[],
+    row: number,
+  ): { model: DiffModel; hunk: DiffHunk } | null => {
+    const model = classify(lines).model;
+    if (!model) return null;
+    const parsed = hunkAt(model, row)?.hunk;
+    return parsed && row > parsed.headerLine ? { model, hunk: parsed } : null;
+  };
+
   const policy: EditPolicy = {
     editStart: (lines, row) => {
       const kind = kindOf(lines, row);
@@ -206,6 +217,10 @@ export function diffSource(
         : null;
     },
     regionKind: kindOf,
+    hunkAt: parsedHunkAt,
+    hasUtf8Bom: (lines, row) =>
+      editableHunkInfo(classify(lines).model, saveHunks, row)
+        ?.newFileHasUtf8Bom,
     insertPrefix: "+",
     messageIndent: MESSAGE_INDENT,
   };
@@ -219,30 +234,52 @@ export function diffSource(
     isDiff: true,
     editable: true,
     policy,
-    parse: (text) => reparse(ws, text, cache, completeFiles),
+    logicalEnd: (lines, row) =>
+      diffLogicalEnd(classify(lines).model, lines, row),
+    parse: (text, lineEndings) =>
+      reparse(ws, text, cache, completeFiles, "source", lineEndings),
     ...renderedView,
     // Live highlighting recolours the lines an edit changes and reuses the seed
     // (buildDiffDocument's colours, including the file/hunk headers and the
     // workspace-file syntax highlighting) for the rest. Languages whose colour
     // can cross lines re-highlight the complete file. The full parse on
     // pause restores workspace-verified spans across the edit.
-    createHighlighter: (text, seed) =>
-      createDiffHighlighter(text, seed, edit.oldFileLines, completeFiles),
+    createHighlighter: (text, seed, lineEndings) =>
+      createDiffHighlighter(
+        text,
+        seed,
+        edit.oldFileLines,
+        completeFiles,
+        lineEndings,
+      ),
     dirtyLabels: (original, current) =>
       [
         ...collectFileOutputs(
           current,
           expectedFiles,
           saveHunks,
+          diffLineEndingProvenance(current, expectedFiles, saveHunks),
           changedHunkIndices(original, current),
         ).keys(),
       ].map(shortName),
-    revert: (original, current, cursorLine, scope) =>
-      revert(original, current, cursorLine, scope),
+    revert: (original, current, cursorLine, scope, lineEndings) =>
+      revert(
+        original,
+        current,
+        cursorLine,
+        scope,
+        lineEndings,
+        diffLineEndingProvenance(original, expectedFiles, saveHunks),
+      ),
     expandContext: (current, baseline, cursorLine, up) =>
       expandContext(ws, cache, saveHunks, current, baseline, cursorLine, up),
     expandRoom: (current) => expandRoom(ws, cache, saveHunks, current),
-    save: (text, baseline, options) => {
+    lineEndingProvenance: (text) =>
+      diffLineEndingProvenance(text, expectedFiles, saveHunks),
+    save: (text, lineEndings, baseline, options) => {
+      if (!lineEndings || lineEndings.length !== text.split("\n").length) {
+        throw new Error("Edited diff row provenance is incomplete.");
+      }
       const changedHunks = baseline === undefined
         ? undefined
         : changedHunkIndices(baseline, text);
@@ -256,6 +293,7 @@ export function diffSource(
         text,
         expectedFiles,
         saveHunks,
+        lineEndings,
         changedHunks,
       );
       const advancedHunks = changes.size === 0
@@ -325,6 +363,7 @@ export function diffSource(
           text,
           expectedFiles,
           saveHunks,
+          lineEndings,
           amendedHunks,
         );
         for (const path of amendedPaths) {
@@ -366,7 +405,7 @@ export function diffSource(
       try {
         for (const write of writes) {
           attempted.push(write);
-          Deno.writeTextFileSync(write.path, write.contents);
+          writeWorkspaceFile(ws, write.path, write.contents);
         }
 
         let amended: string | null = null;
@@ -402,7 +441,7 @@ export function diffSource(
               );
               continue;
             }
-            Deno.writeTextFileSync(write.path, write.before);
+            writeWorkspaceFile(ws, write.path, write.before);
           } catch (rollbackError) {
             rollbackErrors.push(String(rollbackError));
           }
@@ -540,17 +579,36 @@ function revert(
   current: string,
   cursorLine: number,
   scope: RevertScope,
-): { text: string; cursorLine: number } | null {
+  currentLineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+  baselineLineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+): {
+  text: string;
+  cursorLine: number;
+  lineEndings: readonly (LineEndingProvenance | undefined)[];
+} | null {
   if (original === current) return null;
   const baseLines = original.split("\n");
+  const retainedBaselineLineEndings = retainBaselineLineEndings(
+    original,
+    current,
+    baselineLineEndings,
+    currentLineEndings,
+  );
   if (scope === "all") {
     return {
       text: original,
       cursorLine: Math.min(cursorLine, baseLines.length - 1),
+      lineEndings: retainedBaselineLineEndings,
     };
   }
   if (scope === "message") {
-    return revertMessage(baseLines, current.split("\n"), cursorLine);
+    return revertMessage(
+      baseLines,
+      current.split("\n"),
+      cursorLine,
+      retainedBaselineLineEndings,
+      currentLineEndings,
+    );
   }
   const cur = parseDiff(current);
   const base = parseDiff(original);
@@ -570,14 +628,21 @@ function revert(
     return null;
   }
 
-  const splice = (cs: number, ce: number, bs: number, be: number) => ({
-    text: [
-      ...curLines.slice(0, cs),
-      ...baseLines.slice(bs, be + 1),
-      ...curLines.slice(ce + 1),
-    ].join("\n"),
-    cursorLine: cs,
-  });
+  const splice = (cs: number, ce: number, bs: number, be: number) => {
+    return {
+      text: [
+        ...curLines.slice(0, cs),
+        ...baseLines.slice(bs, be + 1),
+        ...curLines.slice(ce + 1),
+      ].join("\n"),
+      cursorLine: cs,
+      lineEndings: [
+        ...currentLineEndings.slice(0, cs),
+        ...retainedBaselineLineEndings.slice(bs, be + 1),
+        ...currentLineEndings.slice(ce + 1),
+      ],
+    };
+  };
 
   // Reverting a whole file, or a cursor that sits on the file headers.
   const hunkIdx = scope === "chunk"
@@ -604,6 +669,51 @@ function revert(
   );
 }
 
+/** Carry saved provenance for old-side rows that remain visible in a diff. */
+function retainBaselineLineEndings(
+  baseline: string,
+  current: string,
+  baselineLineEndings: readonly (LineEndingProvenance | undefined)[],
+  currentLineEndings: readonly (LineEndingProvenance | undefined)[],
+): Array<LineEndingProvenance | undefined> {
+  const retained = baseline.split("\n").map((_, index) =>
+    baselineLineEndings[index]
+  );
+  const baselineModel = parseDiff(baseline);
+  const currentModel = parseDiff(current);
+  if (!baselineModel || !currentModel) return retained;
+  for (const [fileIndex, baselineFile] of baselineModel.files.entries()) {
+    const currentFile = currentModel.files[fileIndex];
+    if (!currentFile) continue;
+    for (const [hunkIndex, baselineHunk] of baselineFile.hunks.entries()) {
+      const currentHunk = currentFile.hunks[hunkIndex];
+      if (!currentHunk) continue;
+      const byOldLine = new Map<number, LineEndingProvenance>();
+      for (
+        let row = currentHunk.headerLine + 1;
+        row <= currentHunk.endLine;
+        row++
+      ) {
+        const oldLine = currentModel.lines[row]?.oldLine;
+        const ending = currentLineEndings[row];
+        if (oldLine !== undefined && ending !== undefined) {
+          byOldLine.set(oldLine, ending);
+        }
+      }
+      for (
+        let row = baselineHunk.headerLine + 1;
+        row <= baselineHunk.endLine;
+        row++
+      ) {
+        if (retained[row] !== undefined) continue;
+        const oldLine = baselineModel.lines[row]?.oldLine;
+        if (oldLine !== undefined) retained[row] = byOldLine.get(oldLine);
+      }
+    }
+  }
+  return retained;
+}
+
 /** Restore the commit message the cursor is in to its original text. The
  * messages are matched to the original by document order (like files and
  * hunks), so a `git log -p` with several commits reverts the right one. */
@@ -611,7 +721,13 @@ function revertMessage(
   baseLines: readonly string[],
   curLines: readonly string[],
   cursorLine: number,
-): { text: string; cursorLine: number } | null {
+  baselineLineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+  currentLineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+): {
+  text: string;
+  cursorLine: number;
+  lineEndings: readonly (LineEndingProvenance | undefined)[];
+} | null {
   const curMsgs = findCommitMessages(curLines);
   const idx = curMsgs.findIndex((m) =>
     cursorLine >= m.start && cursorLine <= m.end
@@ -627,6 +743,11 @@ function revertMessage(
       ...curLines.slice(cur.end + 1),
     ].join("\n"),
     cursorLine: cur.start,
+    lineEndings: [
+      ...currentLineEndings.slice(0, cur.start),
+      ...baselineLineEndings.slice(base.start, base.end + 1),
+      ...currentLineEndings.slice(cur.end + 1),
+    ],
   };
 }
 
@@ -641,6 +762,8 @@ function hunkFooting(
   index: number,
 ): {
   fileLines: string[];
+  fileLineEndings: FileLineEnding[];
+  fileHasTrailingNewline: boolean;
   range: MutableHunk;
   downFrom: number;
   room: HunkRoom;
@@ -651,6 +774,7 @@ function hunkFooting(
   const content = cache?.get(absPath)?.fileText ?? ws.read(absPath);
   if (content === null) return null;
   const fileLines = content.split("\n");
+  const fileLineEndings = fileContentLines(content).map((line) => line.ending);
   const fileLen = fileLines.length > 0 && fileLines[fileLines.length - 1] === ""
     ? fileLines.length - 1
     : fileLines.length;
@@ -683,6 +807,8 @@ function hunkFooting(
   const nextStart = next ? spliceStart(next) : fileLen;
   return {
     fileLines,
+    fileLineEndings,
+    fileHasTrailingNewline: content.endsWith("\n"),
     range,
     downFrom,
     room: {
@@ -770,7 +896,14 @@ function expandContext(
   if (!at) return null;
   const footing = hunkFooting(ws, cache, hunks, at.file, at.index);
   if (!footing) return null;
-  const { fileLines, range, downFrom, room } = footing;
+  const {
+    fileLines,
+    fileLineEndings,
+    fileHasTrailingNewline,
+    range,
+    downFrom,
+    room,
+  } = footing;
   const { up: upAvail, down: downAvail } = room;
   const target = at.hunk;
   const index = at.index;
@@ -787,10 +920,25 @@ function expandContext(
   const k = Math.min(amount, up ? upAvail : downAvail);
   if (k <= 0) return null;
 
-  const ctx =
-    (up
-      ? fileLines.slice(spliceStart(range) - k, spliceStart(range))
-      : fileLines.slice(downFrom, downFrom + k)).map((l) => ` ${l}`);
+  const contextStart = up ? spliceStart(range) - k : downFrom;
+  const revealedLines = fileLines.slice(contextStart, contextStart + k);
+  const revealedLineEndings = fileLineEndings.slice(
+    contextStart,
+    contextStart + k,
+  );
+  const ctx = expansionBodyLines(revealedLines, target, range, up);
+  const currentUsesCrlfTransport = current.split("\n")[target.headerLine]
+    ?.endsWith("\r") === true;
+  const revealsUnterminatedEof = !up && !fileHasTrailingNewline &&
+    contextStart + k === fileLines.length;
+  if (revealsUnterminatedEof) {
+    appendNoNewlineMarker(ctx, currentUsesCrlfTransport);
+  }
+  const insertedLineEndings = expansionLineEndingProvenance(
+    ctx,
+    revealedLineEndings,
+    currentUsesCrlfTransport,
+  );
   // Which file lines those are, counting from one, while `range` still holds
   // where the hunk started — growing it upwards moves that.
   const revealed = up
@@ -802,16 +950,26 @@ function expandContext(
   const baseHunks = parseDiff(baseline)?.files.flatMap((f) => f.hunks) ?? [];
   const baseHunk = baseHunks[index];
   if (!baseHunk) return null;
-  const text = applyExpansion(current, index, up, ctx, k, target.endLine + 1);
+  const baseCtx = expansionBodyLines(revealedLines, baseHunk, range, up);
+  if (revealsUnterminatedEof) {
+    appendNoNewlineMarker(
+      baseCtx,
+      baseline.split("\n")[baseHunk.headerLine]?.endsWith("\r") === true,
+    );
+  }
+  const text = applyExpansion(current, target, up, ctx, k);
   const newBaseline = applyExpansion(
     baseline,
-    index,
+    baseHunk,
     up,
-    ctx,
+    baseCtx,
     k,
-    baseHunk.endLine + 1,
   );
   if (text === null || newBaseline === null) return null;
+  if (revealsUnterminatedEof) {
+    hunks[index].oldNoTrailingNewline = true;
+    hunks[index].newNoTrailingNewline = true;
+  }
   const zeroCount = hunks[index].newCount === 0;
   hunks[index].newCount += k;
   if (zeroCount) {
@@ -822,6 +980,7 @@ function expandContext(
   // The revealed lines land just after the hunk header (up) or just after its
   // last body line (down), both in current-text coordinates.
   const insertedAt = up ? target.headerLine + 1 : target.endLine + 1;
+  const insertedRows = ctx.length;
   // Those lines may have been the last between this hunk and its neighbour, in
   // which case the two now touch and the header between them describes nothing.
   // The header that goes is the one at the join: this hunk's own when the lines
@@ -831,7 +990,7 @@ function expandContext(
   // Where a line of the old text ends up: down by the lines that went in above
   // it, and back up over a header that is no longer between them.
   const moved = (n: number) =>
-    n + (n >= insertedAt ? k : 0) -
+    n + (n >= insertedAt ? insertedRows : 0) -
     (removedAt !== null && n > removedAt ? 1 : 0);
   // A cursor can rest on a hunk's header. When an upward reveal met the hunk
   // above and the two joined, that header is the one the join removed, so
@@ -852,18 +1011,89 @@ function expandContext(
     // one in the body rides down ahead of them.
     cursorLine: cursorAfter,
     insertedAt,
-    inserted: k,
+    inserted: insertedRows,
+    insertedLineEndings,
     up,
     removedAt,
     revealed,
   };
 }
 
+/** Render revealed file lines at one hunk boundary. Encoding BOMs are visible
+ * markers on file line zero. When the old and new sides place that boundary at
+ * different file lines, a removed/added pair carries their separate markers. */
+function expansionBodyLines(
+  lines: readonly string[],
+  hunk: DiffHunk,
+  range: MutableHunk,
+  up: boolean,
+): string[] {
+  const oldStart = sideStart(hunk.oldStart, hunk.oldCount);
+  const newStart = sideStart(hunk.newStart, hunk.newCount);
+  const insertedOldStart = up
+    ? oldStart - lines.length
+    : oldStart + hunk.oldCount;
+  const insertedNewStart = up
+    ? newStart - lines.length
+    : newStart + hunk.newCount;
+  return lines.flatMap((line, offset) => {
+    const oldLine = `${
+      insertedOldStart + offset === 0 && range.oldFileHasUtf8Bom ? "\uFEFF" : ""
+    }${line}`;
+    const newLine = `${
+      insertedNewStart + offset === 0 && range.newFileHasUtf8Bom ? "\uFEFF" : ""
+    }${line}`;
+    return oldLine === newLine
+      ? [` ${newLine}`]
+      : [`-${oldLine}`, `+${newLine}`];
+  });
+}
+
+/** Attach each revealed workspace ending to its generated diff rows. */
+function expansionLineEndingProvenance(
+  lines: readonly string[],
+  revealed: readonly FileLineEnding[],
+  diffUsesCrlfTransport: boolean,
+): Array<LineEndingProvenance | undefined> {
+  let newSideIndex = 0;
+  return lines.map((line) => {
+    if (line[0] !== " " && line[0] !== "+" && line[0] !== "-") {
+      return undefined;
+    }
+    const ending = revealed[newSideIndex];
+    if (line[0] !== "-") newSideIndex++;
+    if (ending === undefined) return undefined;
+    return {
+      ending,
+      bodyCarriesCrlfEnding: ending === "\r\n" && !diffUsesCrlfTransport,
+    };
+  });
+}
+
+/** Add Git's marker after context that reaches an unterminated file end. */
+function appendNoNewlineMarker(lines: string[], crlfDiff: boolean): void {
+  if (lines.length === 0) return;
+  const transport = crlfDiff ? "\r" : "";
+  const marker = `\\ No newline at end of file${transport}`;
+  const paired = lines.at(-1)?.startsWith("+") &&
+    lines.at(-2)?.startsWith("-");
+  if (paired) {
+    const removed = `${lines[lines.length - 2]}${transport}`;
+    const added = `${lines[lines.length - 1]}${transport}`;
+    lines.splice(lines.length - 2, 2, removed, marker, added, marker);
+    return;
+  }
+  lines[lines.length - 1] += transport;
+  lines.push(marker);
+}
+
 /** Take the `@@` header off the second of two hunks and give its counts to the
  * first, leaving one hunk where there were two. Null when the text does not hold
- * them back to back — anything between the first's last line and the second's
- * header would land inside the joined body. The counts come from the parsed
- * hunks rather than a re-read of the header line, which the parse already read. */
+ * them back to back with the same line transport. Anything between the first's
+ * last line and the second's header would land inside the joined body. Mixed
+ * transports need separate headers so each body retains its exact bytes. The
+ * counts come from the parsed hunks rather than a re-read of the header line,
+ * which the parse already read. */
 function dropHeaderBetween(
   text: string,
   first: number,
@@ -879,6 +1109,8 @@ function dropHeaderBetween(
   // The first hunk's trailing context (its enclosing function) carries over.
   const lines = text.split("\n");
   const headerEnding = lines[a.headerLine]?.endsWith("\r") ? "\r" : "";
+  const nextHeaderEnding = lines[b.headerLine]?.endsWith("\r") ? "\r" : "";
+  if (headerEnding !== nextHeaderEnding) return null;
   const header = `@@ -${a.oldStart},${a.oldCount + b.oldCount} +${a.newStart},${
     a.newCount + b.newCount
   } @@${a.context ? ` ${a.context}` : ""}${headerEnding}`;
@@ -921,32 +1153,18 @@ function joinAdjacent(
   return { text: joined.text, baseline: joinedBase.text };
 }
 
-/** Insert `ctx` context lines at the top (`up`) or just before `bodyEnd` (the
- * line after the hunk's last body line) of the `index`-th hunk in `text`,
- * growing that hunk header's counts by `k`. Null when the hunk or its header
- * cannot be found. */
+/** Insert `ctx` context lines at the top or bottom of a parsed hunk and grow
+ * its header counts by `k`. */
 function applyExpansion(
   text: string,
-  index: number,
+  hunk: DiffHunk,
   up: boolean,
   ctx: string[],
   k: number,
-  bodyEnd: number,
 ): string | null {
   const lines = text.split("\n");
-  let gi = -1;
-  let h = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (/^@@ -\d/.test(lines[i])) {
-      gi++;
-      if (gi === index) {
-        h = i;
-        break;
-      }
-    }
-  }
-  // `index` is a hunk index from parseDiff, whose HUNK_RE is strictly stronger
-  // than the `/^@@ -\d/` scan above, so the scan always reaches it; h is set.
+  const h = hunk.headerLine;
+  const bodyEnd = hunk.endLine + 1;
   const headerEnding = lines[h].endsWith("\r") ? "\r" : "";
   const headerText = headerEnding ? lines[h].slice(0, -1) : lines[h];
   const m = headerText.match(
@@ -996,6 +1214,7 @@ export function createDiffHighlighter(
   seed?: readonly Line[],
   oldFileLines?: readonly (readonly Line[] | null)[],
   completeFiles?: DiffHighlightFiles,
+  initialLineEndings?: readonly (LineEndingProvenance | undefined)[],
 ): Highlighter {
   let text = initialText;
   const completeHighlighters = new Map<string, Highlighter>();
@@ -1019,13 +1238,18 @@ export function createDiffHighlighter(
       oldFileLines,
       completeFiles,
       completeHighlighters,
+      undefined,
+      initialLineEndings,
     );
   }
   return {
     get lines() {
       return lines;
     },
-    update(next: string): readonly Line[] {
+    update(
+      next: string,
+      lineEndings?: readonly (LineEndingProvenance | undefined)[],
+    ): readonly Line[] {
       if (next === text) return lines;
       const oldRaw = text.split("\n");
       const newRaw = next.split("\n");
@@ -1069,6 +1293,7 @@ export function createDiffHighlighter(
         completeFiles,
         completeHighlighters,
         localEdit,
+        lineEndings,
       );
       text = next;
       return lines;
@@ -1173,6 +1398,7 @@ function rehighlightTouchedHunks(
   completeFiles?: DiffHighlightFiles,
   completeHighlighters?: Map<string, Highlighter>,
   localEdit?: LocalDiffLineEdit,
+  lineEndings?: readonly (LineEndingProvenance | undefined)[],
 ): void {
   if (!model) return;
   const changedLast = Math.max(changedStart, changedEnd - 1);
@@ -1278,6 +1504,11 @@ function rehighlightTouchedHunks(
           rawLines.join("\n"),
           completeFiles.fileText,
           completeFiles.hunks,
+          lineEndings ?? diffLineEndingProvenance(
+            rawLines.join("\n"),
+            completeFiles.fileText,
+            completeFiles.hunks,
+          ),
         )).get(path)
         : undefined;
       if (completeText !== undefined && path && completeFiles) {
@@ -1439,16 +1670,26 @@ function editableHunkRegion(
   lineText: string,
   row: number,
 ): "hunk" | "removed" | null {
+  const info = editableHunkInfo(model, saveHunks, row);
+  if (!info) return null;
+  const c = lineText[0];
+  if (c === "+" || c === " ") return "hunk";
+  return c === "-" && canResurrect(info) ? "removed" : null;
+}
+
+/** The writable hunk containing a diff row. */
+function editableHunkInfo(
+  model: DiffModel | null,
+  saveHunks: readonly MutableHunk[],
+  row: number,
+): MutableHunk | null {
   if (!model) return null;
   let gi = 0;
   for (const f of model.files) {
     for (const h of f.hunks) {
       if (row > h.headerLine && row <= h.endLine) {
         const info = saveHunks[gi];
-        if (!info || !isWritable(info)) return null;
-        const c = lineText[0];
-        if (c === "+" || c === " ") return "hunk";
-        return c === "-" && canResurrect(info) ? "removed" : null;
+        return info && isWritable(info) ? info : null;
       }
       gi++;
     }
@@ -1465,9 +1706,35 @@ function editableStart(
   lineText: string,
   row: number,
 ): number | null {
-  return editableHunkRegion(model, saveHunks, lineText, row) === "hunk"
-    ? 1
-    : null;
+  const info = editableHunkInfo(model, saveHunks, row);
+  if (!info || (lineText[0] !== "+" && lineText[0] !== " ")) {
+    return null;
+  }
+  return info.newFileHasUtf8Bom === true &&
+      model?.lines[row]?.newLine === 0 && lineText[1] === "\uFEFF"
+    ? 2
+    : 1;
+}
+
+/** The last source column before CRLF transport in editable diff text. */
+function diffLogicalEnd(
+  model: DiffModel | null,
+  lines: readonly string[],
+  row: number,
+): number {
+  const line = lines[row] ?? "";
+  const length = [...line].length;
+  if (!line.endsWith("\r")) return length;
+  const hunk = model ? hunkAt(model, row)?.hunk : undefined;
+  const noTrailingNewline = lines[row + 1]?.replace(/\r$/, "") ===
+    "\\ No newline at end of file";
+  if (
+    hunk && row > hunk.headerLine && noTrailingNewline &&
+    !lines[hunk.headerLine]?.endsWith("\r")
+  ) {
+    return length;
+  }
+  return row < lines.length - 1 ? length - 1 : length;
 }
 
 /**
@@ -1590,6 +1857,7 @@ function reparse(
   cache?: WorkspaceCache,
   completeFiles?: DiffHighlightFiles,
   viewMode: ViewMode = "source",
+  lineEndings?: readonly (LineEndingProvenance | undefined)[],
 ): Document {
   const model = parseDiff(text);
   // An edit keeps every line's marker, so the text still parses as a diff; if a
@@ -1603,6 +1871,11 @@ function reparse(
     text,
     completeFiles.fileText,
     completeFiles.hunks,
+    lineEndings ?? diffLineEndingProvenance(
+      text,
+      completeFiles.fileText,
+      completeFiles.hunks,
+    ),
   );
   const statefulPaths = new Set<string>();
   let hunkIndex = 0;
@@ -1632,8 +1905,16 @@ function reparse(
       const edited = statefulEdits.get(path);
       return edited === undefined ? ws.read(path) : edited;
     },
+    ...(ws.hasUtf8Bom
+      ? { hasUtf8Bom: (path: string) => ws.hasUtf8Bom!(path) }
+      : {}),
     ...(ws.readBlob
       ? { readBlob: (object: string) => ws.readBlob!(object) }
+      : {}),
+    ...(ws.blobHasUtf8Bom
+      ? {
+        blobHasUtf8Bom: (object: string) => ws.blobHasUtf8Bom!(object),
+      }
       : {}),
     ...(ws.readBlobs
       ? {
@@ -1652,6 +1933,18 @@ function reparse(
   ).doc;
 }
 
+function writeWorkspaceFile(
+  ws: DiffWorkspace,
+  path: string,
+  text: string,
+): void {
+  if (ws.write) {
+    ws.write(path, text);
+  } else {
+    Deno.writeTextFileSync(path, text);
+  }
+}
+
 function changedStatefulFileOutputs(
   editedFiles: ReadonlyMap<string, string>,
   baselines: ReadonlyMap<string, string>,
@@ -1668,8 +1961,102 @@ interface FileSplice {
   startIndex: number;
   newCount: number;
   newSide: string[];
-  noTrailingNewline: boolean;
-  crlfTransport: boolean;
+  lineEndings: Array<LineEndingProvenance | undefined>;
+  noTrailingNewline?: boolean;
+  fallbackEnding: "\n" | "\r\n";
+}
+
+type FileLineEnding = "" | "\n" | "\r\n";
+
+interface FileContentLine {
+  text: string;
+  ending: FileLineEnding;
+}
+
+/** Split file contents while keeping each line's exact newline separate. */
+function fileContentLines(text: string): FileContentLine[] {
+  if (text.length === 0) return [];
+  const raw = text.split("\n");
+  const trailingNewline = text.endsWith("\n");
+  if (trailingNewline) raw.pop();
+  return raw.map((line, index) => {
+    const hasNewline = index < raw.length - 1 || trailingNewline;
+    if (hasNewline && line.endsWith("\r")) {
+      return { text: line.slice(0, -1), ending: "\r\n" };
+    }
+    return { text: line, ending: hasNewline ? "\n" : "" };
+  });
+}
+
+/** Choose the closest newline style to a replaced file range. */
+function nearbyLineEnding(
+  lines: readonly FileContentLine[],
+  start: number,
+  count: number,
+  fallback: Exclude<FileLineEnding, "">,
+): Exclude<FileLineEnding, ""> {
+  for (const line of lines.slice(start, start + count)) {
+    if (line.ending !== "") return line.ending;
+  }
+  for (let index = start - 1; index >= 0; index--) {
+    const ending = lines[index]?.ending;
+    if (ending) return ending;
+  }
+  for (let index = start + count; index < lines.length; index++) {
+    const ending = lines[index]?.ending;
+    if (ending) return ending;
+  }
+  return fallback;
+}
+
+function nearbyProvenanceEnding(
+  index: number,
+  provenance: readonly (LineEndingProvenance | undefined)[],
+  fallback: Exclude<FileLineEnding, "">,
+): Exclude<FileLineEnding, ""> {
+  for (let current = index - 1; current >= 0; current--) {
+    const ending = provenance[current]?.ending;
+    if (ending) return ending;
+  }
+  for (let current = index + 1; current < provenance.length; current++) {
+    const ending = provenance[current]?.ending;
+    if (ending) return ending;
+  }
+  return fallback;
+}
+
+function baselineLineProvenance(
+  body: string,
+  original: FileContentLine | undefined,
+  diffUsesCrlfTransport: boolean,
+): LineEndingProvenance | undefined {
+  if (!original) return undefined;
+  return {
+    ending: original.ending,
+    bodyCarriesCrlfEnding: !diffUsesCrlfTransport &&
+      original.ending === "\r\n" &&
+      body.endsWith("\r"),
+  };
+}
+
+/** Give an edited diff row the newline carried by its baseline row. */
+function reconstructedFileLine(
+  body: string,
+  provenance: LineEndingProvenance | undefined,
+  needsEnding: boolean,
+  nearbyEnding: Exclude<FileLineEnding, "">,
+): FileContentLine {
+  let text = body;
+  let ending = provenance?.ending ?? "";
+  if (provenance?.bodyCarriesCrlfEnding && text.endsWith("\r")) {
+    text = text.slice(0, -1);
+  } else if (!provenance && needsEnding && text.endsWith("\r")) {
+    text = text.slice(0, -1);
+    ending = "\r\n";
+  }
+  if (!needsEnding) ending = "";
+  else if (ending === "") ending = nearbyEnding;
+  return { text, ending };
 }
 
 /** A copy of {@link DiffHunkInfo} the diff source keeps mutable: expanding a
@@ -1680,6 +2067,8 @@ interface MutableHunk {
   newStart: number;
   newCount: number;
   verified: boolean;
+  oldFileHasUtf8Bom?: boolean;
+  newFileHasUtf8Bom?: boolean;
   oldNoTrailingNewline?: boolean;
   newNoTrailingNewline?: boolean;
   /** The nearest preceding commit header in the source text. */
@@ -1702,7 +2091,12 @@ function canResurrect(hunk: MutableHunk): boolean {
 /** The zero-based workspace coordinate of a unified-diff new-side range. A
  * zero-count range names the line before its insertion point. */
 function spliceStart(hunk: Pick<MutableHunk, "newStart" | "newCount">): number {
-  return hunk.newCount === 0 ? hunk.newStart : hunk.newStart - 1;
+  return sideStart(hunk.newStart, hunk.newCount);
+}
+
+/** The zero-based file coordinate of either side of a unified-diff range. */
+function sideStart(start: number, count: number): number {
+  return count === 0 ? start : start - 1;
 }
 
 function rangesOverlap(a: MutableHunk, b: MutableHunk): boolean {
@@ -1796,6 +2190,95 @@ function hunkCommitOwners(
   });
 }
 
+function hunkNewSide(
+  rawLines: readonly string[],
+  model: DiffModel,
+  hunk: DiffHunk,
+  info: MutableHunk,
+): {
+  lines: string[];
+  sourceRows: number[];
+  noTrailingNewline?: boolean;
+  fallbackEnding: "\n" | "\r\n";
+} {
+  const lines: string[] = [];
+  const sourceRows: number[] = [];
+  let noTrailingNewline: boolean | undefined;
+  const crlfTransport = rawLines[hunk.headerLine]?.endsWith("\r") === true;
+  let finalNewSideLine = -1;
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const kind = model.lines[line]?.kind;
+    if (kind === "ctx" || kind === "add") finalNewSideLine = line;
+  }
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const kind = model.lines[line]?.kind;
+    if (kind === "ctx" || kind === "add") {
+      let body = rawLines[line].slice(1);
+      if (crlfTransport && body.endsWith("\r")) {
+        body = body.slice(0, -1);
+      }
+      const sourceLine = model.lines[line]?.newLine;
+      lines.push(
+        sourceLine === 0 && info.newFileHasUtf8Bom === true
+          ? body.replace(/^\uFEFF/, "")
+          : body,
+      );
+      sourceRows.push(line);
+    }
+    if (
+      kind === "meta" && line - 1 === finalNewSideLine &&
+      (info.oldNoTrailingNewline || info.newNoTrailingNewline) &&
+      rawLines[line].replace(/\r$/, "") === "\\ No newline at end of file"
+    ) {
+      noTrailingNewline = true;
+    }
+  }
+  return {
+    lines,
+    sourceRows,
+    noTrailingNewline,
+    fallbackEnding: crlfTransport ? "\r\n" : "\n",
+  };
+}
+
+/** Map editable diff rows to the exact endings of their workspace rows. */
+function diffLineEndingProvenance(
+  text: string,
+  fileText: ReadonlyMap<string, string>,
+  hunks: readonly MutableHunk[],
+): Array<LineEndingProvenance | undefined> {
+  const rawLines = text.split("\n");
+  const provenance = rawLines.map(() => undefined) as Array<
+    LineEndingProvenance | undefined
+  >;
+  const model = parseDiff(text);
+  let hunkIndex = 0;
+  for (const file of model?.files ?? []) {
+    for (const hunk of file.hunks) {
+      const info = hunks[hunkIndex++];
+      if (!info?.absPath) continue;
+      const base = fileText.get(info.absPath);
+      if (base === undefined) continue;
+      const fileLines = fileContentLines(base);
+      if (
+        spliceStart(info) + info.newCount === fileLines.length + 1 &&
+        (base === "" || base.endsWith("\n"))
+      ) {
+        fileLines.push({ text: "", ending: "" });
+      }
+      const side = hunkNewSide(rawLines, model!, hunk, info);
+      for (const [index, sourceRow] of side.sourceRows.entries()) {
+        provenance[sourceRow] = baselineLineProvenance(
+          side.lines[index],
+          fileLines[spliceStart(info) + index],
+          side.fallbackEnding === "\r\n",
+        );
+      }
+    }
+  }
+  return provenance;
+}
+
 /**
  * Rebuild each changed file from the edited diff. The edited diff's hunks are
  * matched to the hunks recorded at open, in document order — robust to `git log
@@ -1819,6 +2302,7 @@ function collectFileOutputs(
   text: string,
   fileText: ReadonlyMap<string, string>,
   hunks: readonly MutableHunk[],
+  lineEndings: readonly (LineEndingProvenance | undefined)[],
   changedHunks?: ReadonlySet<number>,
 ): Map<string, string> {
   const model = parseDiff(text);
@@ -1826,43 +2310,20 @@ function collectFileOutputs(
   const byFile = new Map<string, FileSplice[]>();
   let hunkIndex = 0;
   for (const file of model?.files ?? []) {
-    let finalNewSideLine = -1;
-    for (let i = file.headerLine; i <= file.endLine; i++) {
-      const kind = model!.lines[i]?.kind;
-      if (kind === "ctx" || kind === "add") finalNewSideLine = i;
-    }
     for (const hunk of file.hunks) {
       const index = hunkIndex++;
       const info = hunks[index];
       const include = changedHunks === undefined || changedHunks.has(index);
       if (!include || !info || !isWritable(info) || !info.absPath) continue;
-      const newSide: string[] = [];
-      let noTrailingNewline = false;
-      for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
-        const kind = model!.lines[i]?.kind;
-        // Context and added lines are the new side; the leading marker is
-        // stripped (an empty context line carries none, so slicing it stays
-        // empty). The no-newline marker applies to the new file only after its
-        // final new-side line.
-        if (kind === "ctx" || kind === "add") {
-          newSide.push(rawLines[i].slice(1));
-        }
-        if (
-          kind === "meta" && i - 1 === finalNewSideLine &&
-          (info.oldNoTrailingNewline || info.newNoTrailingNewline) &&
-          rawLines[i].replace(/\r$/, "") ===
-            "\\ No newline at end of file"
-        ) {
-          noTrailingNewline = true;
-        }
-      }
+      const current = hunkNewSide(rawLines, model!, hunk, info);
       const list = byFile.get(info.absPath) ?? [];
       list.push({
         startIndex: spliceStart(info),
         newCount: info.newCount,
-        newSide,
-        noTrailingNewline,
-        crlfTransport: rawLines[hunk.headerLine].endsWith("\r"),
+        newSide: current.lines,
+        lineEndings: current.sourceRows.map((row) => lineEndings[row]),
+        noTrailingNewline: current.noTrailingNewline,
+        fallbackEnding: current.fallbackEnding,
       });
       byFile.set(info.absPath, list);
     }
@@ -1872,26 +2333,51 @@ function collectFileOutputs(
   for (const [path, splices] of byFile) {
     const base = fileText.get(path);
     if (base === undefined) continue;
-    const fileLines = base.split("\n");
-    const baseLineCount = fileLines.at(-1) === ""
-      ? fileLines.length - 1
-      : fileLines.length;
-    for (const h of [...splices].sort((a, b) => b.startIndex - a.startIndex)) {
-      fileLines.splice(h.startIndex, h.newCount, ...h.newSide);
-    }
-    const noNewlineAtEof = splices.find((h) =>
-      h.noTrailingNewline && h.startIndex + h.newCount === baseLineCount
+    const fileLines = fileContentLines(base);
+    const representedLineCount = Math.max(
+      0,
+      ...splices.map((splice) => splice.startIndex + splice.newCount),
     );
-    if (noNewlineAtEof) {
-      if (fileLines.at(-1) === "") fileLines.pop();
-      const last = fileLines.length - 1;
-      if (
-        noNewlineAtEof.crlfTransport && fileLines[last]?.endsWith("\r")
-      ) {
-        fileLines[last] = fileLines[last].slice(0, -1);
-      }
+    if (
+      representedLineCount === fileLines.length + 1 &&
+      (base === "" || base.endsWith("\n"))
+    ) {
+      fileLines.push({ text: "", ending: "" });
     }
-    out.set(path, fileLines.join("\n"));
+    const baseLineCount = fileLines.length;
+    for (const h of [...splices].sort((a, b) => b.startIndex - a.startIndex)) {
+      const ending = nearbyLineEnding(
+        fileLines,
+        h.startIndex,
+        h.newCount,
+        h.fallbackEnding,
+      );
+      const reachesEof = h.startIndex + h.newCount === baseLineCount;
+      const replacement = h.newSide.map((body, index) => {
+        const inherited = h.lineEndings[index];
+        const finalFileLine = reachesEof && index === h.newSide.length - 1;
+        const needsEnding = !finalFileLine
+          ? true
+          : h.noTrailingNewline === true
+          ? false
+          : inherited !== undefined
+          ? inherited.ending !== ""
+          : h.newCount > 0
+          ? base.endsWith("\n")
+          : true;
+        return reconstructedFileLine(
+          body,
+          inherited,
+          needsEnding,
+          nearbyProvenanceEnding(index, h.lineEndings, ending),
+        );
+      });
+      fileLines.splice(h.startIndex, h.newCount, ...replacement);
+    }
+    out.set(
+      path,
+      fileLines.map((line) => `${line.text}${line.ending}`).join(""),
+    );
   }
   return out;
 }

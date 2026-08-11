@@ -304,6 +304,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
   — binary artifact file and byte transfer snapshot before the per-binary
   workflow split, July 2026.
+- [2026-08-scheduler-liveness-maintenance.md](development/performance/2026-08-scheduler-liveness-maintenance.md)
+  — why deriving demand refcounts from the roots on every change cost a growing
+  list cubic work, and what incremental maintenance measured instead, August
+  2026.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`

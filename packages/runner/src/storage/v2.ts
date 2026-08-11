@@ -142,6 +142,7 @@ import {
 } from "./v2-remote-session.ts";
 import * as V2Transaction from "./v2-transaction.ts";
 import { normalizeCellScope } from "../scope.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 
 export { watchIdForEntry } from "./v2-watch.ts";
@@ -516,8 +517,8 @@ export interface Options {
    */
   memoryHost: URL;
   /**
-   * Optional space DID → host base URL overrides. A space listed here
-   * opens its storage connection against that host; absent map or
+   * Optional map from space DIDs to HTTP or HTTPS origin overrides. A space
+   * listed here opens its storage connection against that host; absent map or
    * absent entry initially resolves to `memoryHost`. The map is fixed for
    * the manager's lifetime. A first late hint can replace a provisional
    * `memoryHost` route for an unseeded space before that route issues a
@@ -846,7 +847,7 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Record a runtime-learned HTTP or HTTPS host hint for a space (e.g. from
+   * Records a runtime-learned HTTP or HTTPS origin for a space (e.g. from
    * the home-space site table). Returns true when the hint is accepted or
    * confirms a configured or previously accepted route. Refusals:
    *
@@ -861,17 +862,17 @@ export class StorageManager implements IStorageManager {
    * Idempotent when the hint matches what is already in effect.
    */
   registerSpaceHost(space: MemorySpace, host: string): boolean {
-    let normalized: string;
+    let route: URL;
     try {
-      const parsed = new URL(host);
-      storageAddressForHost(parsed);
-      normalized = parsed.toString();
+      route = normalizeSpaceHost(host);
     } catch (cause) {
+      if (!(cause instanceof SpaceHostValidationError)) throw cause;
       throw new Error(
-        `Invalid host for space ${space}: "${host}"`,
+        `Invalid host for space ${space}`,
         { cause },
       );
     }
+    const normalized = route.toString();
     const seeded = this.#seedHosts[space];
     if (seeded !== undefined) {
       return new URL(seeded).toString() === normalized;

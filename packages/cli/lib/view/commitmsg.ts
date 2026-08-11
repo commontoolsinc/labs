@@ -5,6 +5,11 @@
  * message of the HEAD commit be edited in place; saving amends that commit.
  */
 import { basename, dirname, isAbsolute, join, relative } from "@std/path";
+import {
+  decodeLanguageInput,
+  readOnlyReasonFor,
+} from "./languages/language.ts";
+import type { DecodedLanguageSource } from "./languages/decoder.ts";
 
 /** The indent git puts before every commit-message line. */
 export const MESSAGE_INDENT = "    ";
@@ -422,12 +427,24 @@ export function realGit(cwd: string): GitRunner {
     if (!match) throw new Error(`git tree entry is invalid for ${path}`);
     return { mode: match[1], object: match[2] };
   };
-  const readFilteredBlob = (object: string, path: string): string =>
-    run(
-      ["cat-file", "--filters", `--path=${path}`, object],
-      undefined,
-      repoRoot(),
+  const readFilteredBlob = (
+    object: string,
+    path: string,
+  ): DecodedLanguageSource => {
+    const decoded = decodeLanguageInput(
+      path,
+      runBytes(
+        ["cat-file", "--filters", `--path=${path}`, object],
+        undefined,
+        repoRoot(),
+      ),
     );
+    const readOnlyReason = readOnlyReasonFor(decoded.language);
+    if (readOnlyReason !== undefined) {
+      throw new Error(readOnlyReason);
+    }
+    return decoded.source;
+  };
   const setIndexEntry = (
     path: string,
     entry: IndexEntry | null,
@@ -760,7 +777,7 @@ export function realGit(cwd: string): GitRunner {
     fileAtCommit(commit, path) {
       const rel = repoPath(path);
       const entry = treeEntry(commit, rel);
-      return entry ? readFilteredBlob(entry.object, rel) : null;
+      return entry ? readFilteredBlob(entry.object, rel).text : null;
     },
     applyFileChanges,
     amendCommit(
@@ -1022,13 +1039,17 @@ exit "$status"
         after: IndexEntry | null;
       }> = [];
       let contentNumber = 0;
-      const tempFile = (contents: string): string => {
+      const tempFile = (contents: Uint8Array): string => {
         const path = join(tempDir, `content-${contentNumber++}`);
-        Deno.writeTextFileSync(path, contents);
+        Deno.writeFileSync(path, contents);
         return path;
       };
-      const hash = (contents: string, repoPath: string): string => {
-        const contentPath = tempFile(contents);
+      const hash = (
+        contents: string,
+        repoPath: string,
+        encode: (text: string) => Uint8Array,
+      ): string => {
+        const contentPath = tempFile(encode(contents));
         return run(
           ["hash-object", "-w", `--path=${repoPath}`, contentPath],
           undefined,
@@ -1053,9 +1074,9 @@ exit "$status"
             "current HEAD",
             "-L",
             "pager version",
-            tempFile(indexed),
-            tempFile(original),
-            tempFile(amended),
+            tempFile(encoder.encode(indexed)),
+            tempFile(encoder.encode(original)),
+            tempFile(encoder.encode(amended)),
           ],
           cwd: root,
           stdout: "piped",
@@ -1130,16 +1151,21 @@ exit "$status"
               `Pager edits conflict with a staged file type change in ${path}; no commit was amended.`,
             );
           }
-          const after = before === null ? null : {
+          const headBlob = readFilteredBlob(headEntry.object, path);
+          const indexedBlob = before === null
+            ? null
+            : readFilteredBlob(before.object, path);
+          const after = before === null || indexedBlob === null ? null : {
             mode: before.mode,
             object: hash(
               mergeIndex(
                 path,
-                readFilteredBlob(before.object, path),
-                readFilteredBlob(headEntry.object, path),
+                indexedBlob.text,
+                headBlob.text,
                 contents,
               ),
               path,
+              indexedBlob.encode,
             ),
             assumeUnchanged: before.assumeUnchanged,
             skipWorktree: before.skipWorktree,
@@ -1148,7 +1174,7 @@ exit "$status"
             path,
             commit: {
               mode: headEntry.mode,
-              object: hash(contents, path),
+              object: hash(contents, path, headBlob.encode),
             },
             before,
             after,
