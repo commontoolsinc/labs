@@ -23,6 +23,9 @@ already inside. Nobody had to conspire; the rule did the work, and the
 entity that is supposed to be working for you ends up holding power over
 you.
 
+Our current physics of trust are insanely hard to navigate, even for
+professionals. Our current physics of trust are dangerous by default.
+
 The patches never addressed it, because they could not. A permission
 prompt is responsibility laundering — technically you consented, and the
 consent is hollow, and the company you consented to may belong to
