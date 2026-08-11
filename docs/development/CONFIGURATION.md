@@ -166,6 +166,12 @@ Retracted, malformed, and ownerless ACLs fail closed.
 Normal fresh named-space bootstrap currently creates
 `{ [activeUser]: "OWNER", "*": "WRITE" }` so new non-home spaces are public
 read/write until ACL management has a UI. Home bootstrap remains owner-only.
+The wildcard is a default, not a fixture: the space's owner can narrow it today
+with `cf acl remove ANYONE` (see
+[tutorial chapter 10](../tutorial/10-identity-and-security.md#reading-and-changing-a-spaces-acl)).
+Whatever writes the ACL must send it as a single whole-document replacement —
+the server's admission rules for ACL commits are INV-12 and INV-13 in
+[`docs/specs/memory-v2/09-invariants.md`](../specs/memory-v2/09-invariants.md).
 
 ---
 

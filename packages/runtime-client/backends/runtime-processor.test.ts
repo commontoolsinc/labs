@@ -7,7 +7,7 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
@@ -202,15 +202,22 @@ describe("renderConfidentialityResolverFor (H3b)", () => {
       // Seed the granted space's ACL doc (entity id == space DID) with a READ
       // grant for the acting user. The denied space gets no ACL doc at all —
       // its bytes may still be resident, but residency is not read authority.
-      const aclCell = runtime.getCellFromLink({
-        id: `of:${grantedSpace}`,
-        path: [],
-        space: grantedSpace as MemorySpace,
-      });
+      //
+      // Seeded as a path-`[]` full-document write — the shape hydration
+      // delivers, and the one `ACLManager` uses. A value-surface write is
+      // decomposed into `op: "patch"`, which the memory server refuses for the
+      // ACL document (INV-12), so the runner's write chokepoint rejects it.
       const tx = runtime.edit();
-      aclCell.withTx(tx).set({
-        [grantedSpace]: "OWNER",
-        [cfcSigner.did()]: "READ",
+      tx.writeOrThrow({
+        space: grantedSpace as MemorySpace,
+        id: `of:${grantedSpace}` as URI,
+        type: "application/json",
+        path: [],
+      }, {
+        value: {
+          [grantedSpace]: "OWNER",
+          [cfcSigner.did()]: "READ",
+        },
       });
       await tx.commit();
       await runtime.idle();
@@ -257,15 +264,19 @@ describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
     const { runtime, storageManager } = createRuntime();
     const grantedSpace = "did:key:z6MkGrantedSpaceForProviderTest";
     try {
-      const aclCell = runtime.getCellFromLink({
-        id: `of:${grantedSpace}`,
-        path: [],
-        space: grantedSpace as MemorySpace,
-      });
+      // Path-`[]` full-document write: the ACL document's required write shape
+      // (INV-12). See the note in the resolver test above.
       const tx = runtime.edit();
-      aclCell.withTx(tx).set({
-        [grantedSpace]: "OWNER",
-        [cfcSigner.did()]: "READ",
+      tx.writeOrThrow({
+        space: grantedSpace as MemorySpace,
+        id: `of:${grantedSpace}` as URI,
+        type: "application/json",
+        path: [],
+      }, {
+        value: {
+          [grantedSpace]: "OWNER",
+          [cfcSigner.did()]: "READ",
+        },
       });
       await tx.commit();
       await runtime.idle();

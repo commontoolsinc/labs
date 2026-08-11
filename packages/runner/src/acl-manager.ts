@@ -1,14 +1,19 @@
 import {
   type ACL,
+  aclDocId,
   type ACLUser,
   type DID,
   hasConcreteOwner,
   isACL,
 } from "@commonfabric/memory/acl";
 import type { Capability, URI } from "@commonfabric/memory/interface";
-import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
+import {
+  cloneIfNecessary,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import type { Cell } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";
+import type { IMemorySpaceAddress } from "./storage/interface.ts";
 
 export class ACLManager {
   #runtime: Runtime;
@@ -67,14 +72,43 @@ export class ACLManager {
   }
 
   async #write(mutate: (current: ACL | null) => ACL): Promise<void> {
+    // The memory server requires an ACL mutation to be a single whole-document
+    // `set` on `of:<space>`, rejecting anything else with "ACL mutations must
+    // replace the space-scoped ACL document". Writing through the value
+    // surface does not produce one: `normalizeAndDiff` decomposes a
+    // `Cell.set()` into per-key write details at `["value", <user>]`, and the
+    // commit builder turns those into `op: "patch"`. Genesis only worked
+    // because it hand-rolls a raw `set` and bypasses the commit builder
+    // entirely, so every post-genesis grant and revoke failed.
+    //
+    // Address the whole document (path `[]`) instead. That takes the
+    // whole-document branch in the commit builder and emits the `set` the
+    // server's storage invariant asks for.
+    const address: IMemorySpaceAddress = {
+      space: this.#spaceDid,
+      id: aclDocId(this.#spaceDid) as URI,
+      type: "application/json",
+      path: [],
+    };
     const result = await this.#runtime.editWithRetry((tx) => {
       // `editWithRetry` reruns this callback after catching up from a
       // conflict. Re-read and derive the replacement in every attempt so a
       // retry merges with the winning ACL instead of replaying a stale,
       // precomputed whole-document value over it.
-      const aclCell = this.#getCell().withTx(tx);
-      const current = this.#validateStoredACL(aclCell.get());
-      aclCell.set(mutate(current));
+      const envelope = tx.readOrThrow(address) as
+        | { readonly value?: unknown }
+        | undefined;
+      const current = this.#validateStoredACL(envelope?.value);
+      // Spread the stored envelope rather than writing a bare `{ value }`: a
+      // whole-document write replaces every sibling field, so constructing the
+      // envelope from scratch would silently drop `["cfc"]` (the persisted
+      // label map) or `source` if either is ever set on the ACL document.
+      // Neither exists on it today — this keeps that from becoming a latent
+      // way to erase a label on every grant.
+      tx.writeOrThrow(address, {
+        ...(envelope ?? {}),
+        value: mutate(current),
+      } as FabricValue);
     });
     if (result.error) {
       const error = new Error(result.error.message, { cause: result.error });
@@ -87,7 +121,7 @@ export class ACLManager {
 
   #getCell(): Cell<unknown> {
     return this.#runtime.getCellFromLink({
-      id: `of:${this.#spaceDid}` as URI,
+      id: aclDocId(this.#spaceDid) as URI,
       path: [],
       space: this.#spaceDid,
     });

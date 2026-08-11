@@ -17,7 +17,8 @@ where those properties are stated once.
 
 - **Reference invariants by ID** (e.g. `INV-1`) in PR descriptions, review
   comments, code comments, and tickets whenever a change touches commit
-  admission, conflict detection, dependency recording, or client replay.
+  admission (including ACL admission), conflict detection, dependency
+  recording, or client replay.
 - **Every entry names its soundness direction.** Most invariants are
   asymmetric: one direction of approximation is safe (costs a retry), the
   other is corruption. An optimization is admissible only if it moves
@@ -311,6 +312,114 @@ replay.
 Soundness direction: none — exact.
 
 Checked by: engine and reconnect unit tests.
+
+### INV-12 — ACL mutation commit shape
+
+> A commit that touches a space's ACL document (entity id `of:<space>`) is
+> admitted only if it is, all at once: the **only** operation in the commit;
+> an `op: "set"` on exactly that id, with `scope` `"space"` or absent; on the
+> default branch (`branch` absent or `""`); and carrying a value that
+> satisfies `isACL` and retains at least one **concrete** (non-`"*"`) OWNER.
+> Every other shape — a patch, a delete, a different scope, a mixed ACL/data
+> commit, a non-default branch, an ownerless or malformed result — is a
+> `ProtocolError`.
+
+This is `04-protocol.md` §4.5.1's normative sentence ("A valid ACL mutation is
+a whole-document, space-scoped replacement on the default branch and must
+retain at least one concrete OWNER") restated as a checkable entry, because it
+is the invariant a client is most likely to violate without knowing the rule
+exists.
+
+The clauses are checked in this order, each rejecting with a `ProtocolError`
+carrying a distinct message (so a message identifies the clause):
+
+| Clause | Rejection message |
+| --- | --- |
+| default branch | `ACL mutations are only valid on the default branch` |
+| exactly one operation | `ACL mutations must be an ACL-only commit` |
+| whole-document `set` on `of:<space>`, scope space-or-absent | `ACL mutations must replace the space-scoped ACL document` |
+| result is a valid ACL with a concrete OWNER | `ACL must be valid and retain at least one concrete OWNER` |
+
+It holds in **both** `observe` and `enforce`, and is skipped only when
+`MEMORY_ACL_MODE` is `off`. The code states its own reason for keeping it
+outside the mode dial: it is a *storage* invariant, not an access decision —
+"an invalid ACL or an ordinary first write would make later enforcement
+ambiguous or impossible" (`#validateAclCommit`'s doc comment). The shape check
+also runs *before* the OWNER capability check on the same commit, so a
+malformed ACL write reports `ProtocolError` even from a principal that has no
+OWNER capability at all.
+
+On the whole-document clause specifically, one mechanical observation is
+available and no stated rationale is: the validity clause inspects
+`operation.value?.value` — the document the operation itself carries — and of
+the four operation shapes only `SetOperation` carries one (`patch` carries
+patch ops, `delete` and `sqlite` carry no document). So under whole-document
+replacement the value the server validates *is* the document the commit
+produces. That is an observation about the current check, not recovered
+intent: the rule arrived with ACL enforcement in #4670 (`4eb3026d1`) with no
+separately stated motivation, and no spec gives one. Anyone proposing to relax
+it owes the argument #4670 did not record.
+
+Layer: server admission (`#validateAclCommit` in
+`packages/memory/v2/server.ts`); client emission (`ACLManager` in
+`packages/runner/src/acl-manager.ts`, which satisfies the rule by addressing
+the whole document at path `[]` — a write through the ordinary value surface
+decomposes into per-key `op: "patch"` details and is refused).
+
+Soundness direction: none — an exact admission predicate, with a real cost on
+each side. Over-rejection is not merely a retry: a client that cannot produce
+the accepted shape has no route to change the ACL at all, which is what
+happened while `ACLManager` wrote through the value surface — every
+post-genesis grant and revoke failed, and the wildcard a named space is born
+with could not be removed. Over-acceptance lets the ACL document reach a state
+no admission check ever validated.
+
+Checked by: example-based server tests only — no oracle, TLA+, or differential
+coverage. `packages/memory/test/v2-server-acl-test.ts`: "ACL mutations must
+preserve a concrete owner" (rejects `delete`, `patch`, `scope: "user"`, and
+empty / wildcard-only-owner / downgraded-owner / invalid-capability values) and
+"ACL mutations are default-branch ACL-only commits" (rejects a non-default
+branch and a mixed ACL+data commit, asserting the data operation did not land).
+Client side, `packages/runner/test/memory-v2-acl-mutation.test.ts` asserts the
+emitted operation *shape and count* against a real server, not just the
+resulting value.
+
+### INV-13 — ACL genesis precedence and authority
+
+> A space's ACL document must exist before any ordinary write is admitted, and
+> the commit that creates it must come from the space's own identity or from an
+> identity the deployment has designated. Concretely:
+> with ACL state missing and server sequence 0, a commit that does **not**
+> touch `of:<space>` is refused; and a commit that **does** touch it while ACL
+> state is missing is refused unless the session's principal is the space DID
+> itself or a configured service DID (`acl.serviceDids` /
+> `MEMORY_SERVICE_DIDS`).
+
+Genesis is the one commit with no prior ACL to authorize it, so its authority
+is derived rather than granted. Both clauses reject with an
+`AuthorizationError`: `Space <space> requires an ACL genesis commit before
+ordinary writes` for the precedence clause, and `Only the space identity or a
+service DID may initialize <space>` for the authority clause. Like INV-12 this
+is enforced in `observe` as well as `enforce`, for the reason quoted there.
+
+The precedence clause binds only at server sequence 0. A *populated* space that
+never had an ACL is not forced through genesis; it falls under the temporary
+pre-launch compatibility rule in `04-protocol.md` §4.5.1 (authenticated
+READ/WRITE, never OWNER). Retracted, malformed, and ownerless ACL state is not
+equivalent to missing state — it fails closed rather than reopening genesis.
+
+Layer: server admission (`#validateAclCommit`). The operator `writeDocument`
+path enforces the same precedence separately and additionally refuses *any*
+direct write to the ACL document, so genesis cannot be performed off-protocol.
+
+Soundness direction: none — exact.
+
+Checked by: example-based server tests only.
+`packages/memory/test/v2-server-acl-test.ts`: "an ordinary opener cannot claim
+or write a new space", "the space identity initializes a private space",
+"service DIDs have implicit OWNER and do not claim spaces", "acl observe:
+fresh-space genesis remains a hard invariant", "direct writes cannot create or
+mutate ACL state", "a retracted ACL fails closed instead of becoming public".
 
 ## Change discipline
 
