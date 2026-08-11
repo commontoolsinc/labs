@@ -340,9 +340,46 @@ Three shapes break this, each of which looks harmless while being written:
   declaration, so the other is invisible wherever documentation is rendered.
   Merge them if both say something worth keeping.
 
-The one exception is a tool directive — `// deno-lint-ignore`,
-`// deno-fmt-ignore`, `// @ts-types` — which has to sit on the line
-immediately before the code it governs, and so has nowhere else to go.
+Two things are exceptions. A tool directive — `// deno-lint-ignore`,
+`// deno-fmt-ignore`, `// @ts-types` — has to sit on the line immediately
+before the code it governs, and so has nowhere else to go.
+
+The other is narrower than it first sounds. One doc comment covers a whole
+overload set, and `//` labels say which signature is which. Every label but
+one follows a declaration, so the rule never reached them; the exception is
+for the first label alone, which has nowhere to sit but between the doc
+comment and the first signature:
+
+```ts
+// Shown at module scope.
+
+/**
+ * Reads a topping off a donut, by one key or by two.
+ *
+ * One signature per depth, so that type evaluation cannot recurse without
+ * bound.
+ */
+// One key.
+export function topping<T, K1 extends keyof T>(donut: T, k1: K1): T[K1];
+// Two keys.
+export function topping<T, K1 extends keyof T, K2 extends keyof T[K1]>(
+  donut: T,
+  k1: K1,
+  k2: K2,
+): T[K1][K2];
+// deno-lint-ignore no-explicit-any
+export function topping(donut: any, ...keys: PropertyKey[]): any {
+  return keys.reduce((value, key) => value[key], donut);
+}
+```
+
+A label earns that place by saying which member this is, in a list where the
+signatures are hard to tell apart at a glance. One that only restates the
+signature beneath it is not doing that work, and goes — even if it leaves the
+rest of a numbered series behind, because the numbering was never the point.
+
+A remark about the set as a whole is not a label, whichever line it sits on.
+It belongs in the doc comment, which is the thing that covers the set.
 
 A doc comment with no declaration under it at all is the same defect from the
 other direction. To title a region of a file or a class, use a section marker,

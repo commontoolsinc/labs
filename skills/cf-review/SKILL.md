@@ -207,7 +207,8 @@ recurse and time out CI). Run `deno fmt` and `deno lint` on touched files.
 the one place it is easy to see. A definition added directly under an existing
 doc comment takes that comment over and leaves the declaration it was written
 for undocumented; a `//` note wedged in between splits the contract from its
-subject. Two doc comments in a row are the loudest tell — only the nearer one
+subject, unless it is a label picking out one member of an overload set, which
+is allowed. Two doc comments in a row are the loudest tell — only the nearer one
 survives into rendered documentation. See
 `docs/development/code-comment-style.md`, "Where one goes".
 
