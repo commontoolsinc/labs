@@ -1,3 +1,21 @@
+/**
+ * The corpus that holds `findJsonUnfaithfulValues` to a whitelist rather than
+ * a hunt for bad numbers.
+ *
+ * Most of these cases carry no offending numeric leaf at all and are still
+ * altered by `JSON.stringify`: a dropped `undefined`, an array hole, a
+ * symbol-keyed or non-index property, a `toJSON` hook, a class instance whose
+ * data lives in private fields, a cycle. A blacklist passes every one of them,
+ * so they are what distinguishes the two designs and why they are here.
+ *
+ * Several pin a boundary in the other direction, where reporting would be
+ * wrong: an array's own `length`, a non-enumerable index, and a shared (but
+ * acyclic) reference are all faithful. Pointers are checked for nesting and
+ * for `~` and `/` escaping, since an unactionable pointer makes a correct
+ * report useless. `isPureJson` is asserted to agree with the list rather than
+ * being tested independently, so the two cannot drift.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
