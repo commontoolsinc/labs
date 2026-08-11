@@ -8,9 +8,12 @@ reference. The CLI, a webhook, and the ingest path reach the same handler and
 cannot** — they validate structurally, and the payload they *do* accept stores a
 detached copy instead of an edge, reporting success.
 
-**The ask:** move that resolution to the boundary every external caller crosses,
-and settle one encoding. There are three spellings of "an address goes here" and
-only one is accepted inbound.
+**The ask:** move that resolution to the boundary every external caller crosses.
+
+**One constraint, not a second decision:** what is accepted inbound has to
+include the shape a read already emits. Otherwise a caller still cannot submit
+the address it was just handed, and the capability does not compose. Which
+spelling wins is the implementer's call.
 
 **Decide first:** whether accepting a caller-named address is a confinement
 question. If it is, this is the wrong-sized change and CFC owns it. If it is
@@ -50,20 +53,20 @@ second-class:
 The same handler, reached two ways, accepts a reference from one and not the
 other. Nothing about the verb differs; only the door the caller came through.
 
-## One concept, three encodings
+### Why the round trip is a constraint rather than a preference
 
-The divergence has already started, which is the more expensive half.
+Two spellings of an address are already in use, and they do not meet:
 
 | Spelling | Where | Direction |
 | --- | --- | --- |
 | `{"@link": "…"}` | `llm-dialog` | in **and** out |
 | `{"$link": {id, space, scope, path}}` | shaped reads ([shaped reads](shaped-reads-and-verb-results.md)) | out only |
-| `{"/": {"link@1": {…}}}` | the runtime's internal envelope | neither — internal form |
 
-Three ways to write "an address goes here," none of them agreeing, and only one
-accepted inbound. A consumer that renders with one and submits with another —
-which is what any caller reading a `$link` result and calling a verb would do —
-has no route that works.
+So a caller that reads a result and submits the address it was handed has no
+route that works — the form it received is not a form anything accepts. Picking
+a spelling is the implementer's call; accepting the one a read emits is what
+makes the capability compose, and it is the property
+[CLI surface shape](cli-surface-shape.md) already states for commands.
 
 ## What this costs today, measured
 
