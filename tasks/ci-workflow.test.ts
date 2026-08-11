@@ -1,4 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
+import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
 
 function jobBlock(workflow: string, jobId: string): string {
   const jobsStart = workflow.indexOf("jobs:\n");
@@ -132,6 +134,81 @@ Deno.test("Coverage Comment follows the CI workflow by name", async () => {
   assert(name, "workflow name not found");
 
   assertStringIncludes(comment, `    workflows: ["${name[1]}"]\n`);
+});
+
+Deno.test("coverage requirements follow sharded test matrices", async () => {
+  const contents = await workflow("deno.yml");
+  const jobs = [
+    ["test", "coverage-profile-workspace-"],
+    ["runner-test", "coverage-profile-runner-"],
+    [
+      "generated-patterns-integration-test",
+      "coverage-profile-generated-patterns-",
+    ],
+    ["pattern-integration-test", "coverage-profile-pattern-integration-"],
+  ] as const;
+
+  for (const [jobId, artifactPrefix] of jobs) {
+    const job = jobBlock(contents, jobId);
+    const shardMatch = job.match(/^ {8}shard: \[([0-9, ]+)\]$/m);
+    const totalMatch = job.match(/^ {8}total: \[(\d+)\]$/m);
+    assert(shardMatch, `${jobId} shard matrix not found`);
+    assert(totalMatch, `${jobId} total matrix not found`);
+
+    const shards = shardMatch[1].split(",").map((value) =>
+      Number(value.trim())
+    );
+    const total = Number(totalMatch[1]);
+    if (jobId === "pattern-integration-test") {
+      assertEquals(
+        total,
+        PATTERN_INTEGRATION_SHARD_COUNT,
+        "pattern integration matrix must use its measured weight profile",
+      );
+    }
+    assertEquals(
+      shards,
+      Array.from({ length: total }, (_, index) => index + 1),
+      `${jobId} must list every shard exactly once`,
+    );
+    assertStringIncludes(
+      job,
+      `name: ${artifactPrefix}\${{ matrix.shard }}`,
+    );
+    assertEquals(
+      EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
+        name.startsWith(artifactPrefix)
+      ),
+      shards.map((shard) => `${artifactPrefix}${shard}`),
+      `${jobId} coverage requirements must match its matrix`,
+    );
+  }
+});
+
+Deno.test("sharded pattern caches follow their shard topology", async () => {
+  const contents = await workflow("deno.yml");
+  const topology = "-${{ matrix.total }}-${{ matrix.shard }}-";
+  for (
+    const [jobId, selector] of [
+      [
+        "generated-patterns-integration-test",
+        "'tasks/select-generated-pattern-files.ts'",
+      ],
+      [
+        "pattern-integration-test",
+        "'tasks/select-pattern-integration-files.ts'",
+      ],
+    ] as const
+  ) {
+    const job = jobBlock(contents, jobId);
+    assertEquals(job.split(topology).length - 1, 2);
+    const key = job.match(/^ {10}key: (.+)$/m);
+    assert(key, `${jobId} cache key not found`);
+    assertStringIncludes(key[1], selector);
+    const restoreKeys = job.match(/restore-keys: \|\n((?: {12}.+\n)+)/);
+    assert(restoreKeys, `${jobId} restore prefixes not found`);
+    assertEquals(restoreKeys[1].trim().split("\n").length, 1);
+  }
 });
 
 Deno.test("Dashboard publishes only from main, never from a pull request", async () => {
