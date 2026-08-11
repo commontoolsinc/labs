@@ -404,11 +404,19 @@ export function diffAndUpdate(
   // the raw write path, reached by `Cell.set()` and the collection operations;
   // the pattern-driven paths (a run's result, its argument) do the same at
   // their own boundaries.
+  //
+  // A query result is a leaf to that walk, because it is one to the diff
+  // below: `normalizeAndDiff()` replaces such a value with the sigil link it
+  // names without reading a member of it. Each member read on one resolves
+  // through this transaction and is recorded on it as a dependency the commit
+  // has to check.
   const changes = normalizeAndDiff(
     runtime,
     tx,
     link,
-    flattenBuilderArtifacts(newValue),
+    flattenBuilderArtifacts(newValue, {
+      isLeaf: isCellResultForDereferencing,
+    }),
     context,
     readOptions,
     { seen: new Map(), nextAnchorId: anchorIds },
