@@ -248,6 +248,15 @@ export function takeSchemaRefusalTx(tx: object): unknown {
   return undefined;
 }
 
+// Only this refusal, and only where it is the one recorded: a view that catches
+// a mismatch it asked for is the one clearing it, and a different refusal held
+// on the same transaction is somebody else's and still owed to the runner.
+export function clearSchemaRefusalTx(tx: object, refusal: unknown): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (schemaRefusals.get(layer) === refusal) schemaRefusals.delete(layer);
+  }
+}
+
 export function isLazyMaterializationTx(tx: object): boolean {
   // Walk the chain rather than testing the object: a wrapper built over a
   // transaction that was marked earlier has never been marked itself, and must

@@ -19,10 +19,15 @@
  *
  * Everything below that is checked where the reader touches it. A subtree the
  * reader never reads is never validated — the deliberate cost of not
- * materializing what nobody wants. A reader that does touch data the schema no
- * longer describes gets a {@link SchemaMismatchError}, and the read that failed
- * is registered before it throws, so whatever depends on this read runs again
- * when the missing data arrives.
+ * materializing what nobody wants.
+ *
+ * A mismatch the reader does touch surfaces at the nearest enclosing property,
+ * which is where an eager read decides the same question. Under a `required`
+ * property it becomes a {@link SchemaMismatchError}; under an optional one it
+ * reads as `undefined`, because an eager read leaves a property whose traversal
+ * fails out of the object rather than voiding it. Either way the read that
+ * failed is registered first, so whatever depends on it runs again when the
+ * missing data arrives.
  *
  * The root is the exception: a mismatch there yields `undefined`, which is what
  * an eager read yields for the same data, so the runner's existing
@@ -511,6 +516,7 @@ function createObjectView(
   synced: boolean,
 ): unknown {
   const schema = link.schema;
+  const required = new Set(requiredKeys(schema));
   const child = (key: string): unknown => {
     const narrowed = childSchema(schema, key);
     if (isExcluded(narrowed)) return undefined;
@@ -533,7 +539,26 @@ function createObjectView(
         rebaseCfcLabelView(cfcLabelView, [key]),
       );
     }
-    return readChild(runtime, tx, link, key, narrowed, cfcLabelView, synced);
+    if (required.has(key)) {
+      return readChild(runtime, tx, link, key, narrowed, cfcLabelView, synced);
+    }
+    // A property the schema does not require reads as `undefined` when the data
+    // underneath does not match it. That is what an eager read leaves behind: a
+    // property whose traversal fails is left out of the object, and only a
+    // `required` one takes the object down with it. Refusing here instead would
+    // stop a reader the eager path runs — a field waiting on a computed that has
+    // not produced is the ordinary case, not a fault.
+    try {
+      return readChild(runtime, tx, link, key, narrowed, cfcLabelView, synced);
+    } catch (error) {
+      if (!isSchemaMismatchError(error)) throw error;
+      // The view asked for this read and the view is answering for it, so the
+      // refusal never reaches the reader and must not survive on the
+      // transaction. The read it registered does survive, which is what brings
+      // the reader back when the data arrives.
+      tx.clearSchemaRefusal(error);
+      return undefined;
+    }
   };
 
   return new Proxy({} as Record<string, unknown>, {

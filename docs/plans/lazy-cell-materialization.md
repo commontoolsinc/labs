@@ -104,6 +104,22 @@ existing read path already records the activity before it inspects the value
 a read of an absent path registers; the lazy view must make sure it issues that
 read rather than short-circuiting on the container's key set.
 
+It binds every way of answering "nothing is there", not just the refusal. A key
+the container does not hold, and a value replaced by the schema's `default`,
+both have to register the read they are standing in for: the entry point takes
+the value without telling the scheduler, so a view that answers from the schema
+and returns registers nothing, and the reader goes on reading its default however
+late the value arrives. Each is one line, and each was missing once.
+
+Point 2 is the other one worth stating plainly, because a view meets it in a
+place an eager read does not. Eager traversal walks THROUGH a link and combines
+the link's schema into the selector as it crosses (`combineOptionalSchema`); a
+view re-enters `validateAndTransform` per property, so the entry point has to do
+that combining itself. Handing the view the link's schema alone loses whatever
+the reader asked for that the link's own schema does not name — a `title` read
+off a piece typed by its registration reads as a property the schema does not
+select, and the reader gets `undefined` for data that is right there.
+
 ### What the view promises
 
 **Root guard, then touch-scoped.** At materialization the view validates the
@@ -116,6 +132,17 @@ runner's existing `isValidArgument` gate handles it with no new machinery.
 Below the root, every check happens where the reader touches. Reading a
 container validates that container's `required` keys; reading a leaf validates
 its type; reading a property the schema excludes yields `undefined`.
+
+**A mismatch surfaces at the nearest enclosing property, and only a `required`
+one refuses.** An eager read leaves a property whose traversal fails out of the
+object it belongs to and carries on; the object collapses only when the property
+that failed was `required`. A view answers the same way: the failure travels up
+to the property that owns it, and there it either reads as `undefined` or, if
+the schema requires that property, refuses on past it. Refusing an optional
+property instead would stop a reader the eager path runs, and a field waiting on
+a computed that has not produced yet is the ordinary case rather than a fault.
+The read that failed is registered either way, so the reader comes back when the
+data arrives.
 
 State the delta plainly, because it is the one behavior change a pattern author
 can observe: **a mismatch in a subtree the reader never touches no longer stops
@@ -186,6 +213,12 @@ produced a schema refusal", with the detail for diagnostics) that survives any
 `try`/`catch` in the reader's body and any `await` in an async one. The runner
 checks the mark after the body returns, and treats a marked transaction as a
 refusal regardless of what the body handed back.
+
+The view withdraws the mark for a refusal it catches itself — the optional
+property above, whose answer is `undefined` rather than a refusal. The mark is
+for a refusal the reader saw, so it has to go with the throw it belonged to, and
+withdrawing it clears only that exact refusal: another one held on the same
+transaction is somebody else's and still owed to the runner.
 
 Disposition of a refusal:
 
@@ -404,31 +437,22 @@ diffing and the scheduler's own reads keep eager semantics.
       reachable by `EXPERIMENTAL_LAZY_MATERIALIZATION` or
       `RuntimeOptions.experimental`.
 - [x] Landed default-off with both suites green.
-- [ ] Default-on. The runner unit suite passes with the flag on, and the whole
-      integration suite passes with it off. With it on by default,
-      `deno task integration` is 3 of 7: `patterns`, `cli`, `generated-patterns`
-      and `pattern-tests` fail, 22 of 120 pattern tests among them. Two error
-      shapes account for nearly all of it:
-
-      - `Cannot destructure property '<x>' of 'undefined'` — a HANDLER receives
-        an undefined event. Handlers were deliberately left eager, so the route
-        by which one sees an undefined payload under this flag is not yet
-        understood and is the first thing to chase.
-      - `Cannot read properties of undefined (reading 'length')` — the string
-        `.length` case below.
-
-      What is NOT the cause, having been tested: an argument being refused for a
-      missing field. A refusal routes into the same disposition as an argument
-      that did not resolve, and that works. The failing readers are not refused
-      — they read a field the schema does not require, which is simply absent
-      because its computed has not produced yet.
-
-- [ ] Read `.length` off a string through the synthesized
-      `{properties:{length}}` shape a pattern's `.length` access generates. The
-      value is a redirect link to `<doc>/label/length`, and a string's `length`
-      is not a stored path, so the view hands back `{}`.
-      `gideon-tests/proxy-length-repro` pins it and is 12 of 14 with the fix
-      above.
+- [ ] Default-on. Every divergence that stood in the way is closed, and both
+      suites pass with the flag on; flipping the default is its own change.
+      Each divergence was a place a view answered from less than an eager read
+      had: the schema of the last link hop uncombined, a `default` read out of a
+      union branch an eager read never evaluates, an optional property refused
+      where an eager read drops it, and three reads that were answered without
+      being registered. None of them was the "argument refused for a missing
+      field" story the earlier note here guessed at — that disposition worked
+      from the start.
+- [x] Read `.length` off a string. `.length` on a string output lowers to a link
+      ending in that segment, and a string's `length` is not a stored path, so
+      the store cannot serve the address the link resolves to. Eager traversal
+      computes it from the string in passing (`getAtPath`); the value read after
+      link resolution now applies the same rule, which is also where an eager
+      read of such a link used to answer `undefined`.
+      `gideon-tests/proxy-length-repro` pins it.
 - [ ] Soak on default-on before removing the flag.
 
 ## Testing
@@ -450,9 +474,15 @@ Four properties carry most of the confidence:
 - **Frugality.** Reading one scalar from a large argument registers reads for
   the path touched and its containers, and for nothing else. Assert on the
   registered read set, not on timing.
-- **Refusal.** A touched mismatch refuses, marks the transaction, survives being
-  caught by reader code, and leaves behind the dependency that re-triggers the
-  node. Assert the re-trigger by writing the missing data and observing the run.
+- **Refusal.** A touched mismatch under a `required` property refuses, marks the
+  transaction, survives being caught by reader code, and leaves behind the
+  dependency that re-triggers the node. Assert the re-trigger by writing the
+  missing data and observing the run. Under an optional property the same
+  mismatch reads as `undefined`, leaves no mark, and still leaves the dependency.
+- **Dependency on absence.** Every way of answering "nothing is there" —
+  refusal, absent key, declared default — registers the read it stands in for.
+  The cheapest assertion is on the registered read set; the honest one writes
+  the value afterwards and observes the reader run.
 - **Snapshot.** A view taken before a write reads pre-write state; the pin does
   not disturb later writes.
 

@@ -50,6 +50,7 @@ import {
   getTransactionWriteDetails,
 } from "./transaction-inspection.ts";
 import {
+  clearSchemaRefusalTx,
   isInternalVerifierRead,
   isLazyMaterializationTx,
   markLazyMaterializationTx,
@@ -893,6 +894,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   takeSchemaRefusal(): unknown {
     return takeSchemaRefusalTx(this);
+  }
+
+  clearSchemaRefusal(refusal: unknown): void {
+    clearSchemaRefusalTx(this, refusal);
   }
 
   private recordReadScope(address: Pick<IMemorySpaceAddress, "scope">): void {
@@ -2279,6 +2284,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   takeSchemaRefusal(): unknown {
     return takeSchemaRefusalTx(this) ?? this.wrapped.takeSchemaRefusal();
+  }
+
+  clearSchemaRefusal(refusal: unknown): void {
+    clearSchemaRefusalTx(this, refusal);
+    this.wrapped.clearSchemaRefusal(refusal);
   }
 
   markCfcRelevant(reason?: string): void {

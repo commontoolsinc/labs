@@ -1243,6 +1243,17 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   noteSchemaRefusal(refusal: unknown): void;
   takeSchemaRefusal(): unknown;
 
+  /**
+   * Withdraw a refusal that never reached the reader.
+   *
+   * A view refuses at the property it is reading and decides at the property
+   * above whether that refusal escapes: one the schema does not require reads
+   * as `undefined` instead, which is what an eager read leaves behind. The
+   * record has to go with the throw it belonged to. Clears only if this exact
+   * refusal is the one held.
+   */
+  clearSchemaRefusal(refusal: unknown): void;
+
   //
   // CFC recording / ownership-transfer API
   //

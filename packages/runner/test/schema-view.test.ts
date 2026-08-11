@@ -272,6 +272,7 @@ describe("schema-view", () => {
         { inner: { b: 1 } },
         {
           type: "object",
+          required: ["inner"],
           properties: {
             inner: {
               type: "object",
@@ -297,12 +298,13 @@ describe("schema-view", () => {
       }
     });
 
-    it("throws when the reader touches a value of the wrong type", async () => {
+    it("throws when the reader touches a required value of the wrong type", async () => {
       const read = await seeded(
-        "wrong-type",
+        "wrong-type-required",
         { n: "not a number" },
         {
           type: "object",
+          required: ["n"],
           properties: { n: { type: "number" } },
         } as const,
       );
@@ -312,6 +314,34 @@ describe("schema-view", () => {
         const value = lazy.get() as { n: unknown };
         expect(() => value.n).toThrow("Schema mismatch");
       } finally {
+        await lazy.tx.commit();
+      }
+    });
+
+    it("reads an optional value of the wrong type as undefined, as an eager read does", async () => {
+      // An eager read leaves a property whose traversal fails out of the
+      // object; only a `required` one takes the object down with it. Refusing
+      // an optional one instead would stop a reader the eager path runs.
+      const read = await seeded(
+        "wrong-type-optional",
+        { n: "not a number", ok: 1 },
+        {
+          type: "object",
+          properties: { n: { type: "number" }, ok: { type: "number" } },
+        } as const,
+      );
+
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        expect((eager.get() as { n: unknown }).n).toBeUndefined();
+        expect((lazy.get() as { n: unknown }).n).toBeUndefined();
+        expect((lazy.get() as { ok: number }).ok).toBe(1);
+        // Nothing was refused, so the run is not disposed of as an argument
+        // that did not resolve.
+        expect(lazy.tx.takeSchemaRefusal()).toBeUndefined();
+      } finally {
+        await eager.tx.commit();
         await lazy.tx.commit();
       }
     });
@@ -358,6 +388,7 @@ describe("schema-view", () => {
         { inner: { b: 1 } },
         {
           type: "object",
+          required: ["inner"],
           properties: {
             inner: {
               type: "object",
