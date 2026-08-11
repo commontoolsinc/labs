@@ -31,7 +31,32 @@ and its own verbs, so the thing a create hands back is itself callable.
 
 ```tsx
 // Shown for illustration only.
-/** One work item. */
+
+// ── The board ──────────────────────────────────────────────────────────────
+
+/** What a caller supplies at creation. Everything else the board derives. */
+interface BoardInput {
+  items?: ItemOutput[];
+}
+
+/** The board holds ROOT items only. Everything deeper is reached through an
+ *  item's `children`, which is why an unshaped read of `items` expands the
+ *  whole tree — the cost shaped reads exist to bound. */
+interface BoardOutput {
+  items: ItemOutput[];
+  addItem: Stream<{ title: string }, { item: ItemOutput }>;
+}
+
+// ── An item ────────────────────────────────────────────────────────────────
+
+/** What a caller supplies. `status`, `notes`, `children` and `blockedOn` are
+ *  the pattern's own state, not inputs — a caller changes them through verbs. */
+interface ItemInput {
+  title: string;
+  parent?: ItemOutput | null;
+}
+
+/** One work item, as the board projects it. */
 interface ItemOutput {
   title: string;
   /** "open" until a verb changes it — "done" or "archived". */
@@ -48,12 +73,14 @@ interface ItemOutput {
   blockedOn: ItemOutput[];
 }
 
-/** The board holds ROOT items only. Everything deeper is reached through
- *  `children`, which is why an unshaped read of `items` expands the whole
- *  tree — the cost shaped reads exist to bound. */
-interface BoardOutput {
-  items: ItemOutput[];
-  addItem: Stream<{ title: string }, { item: ItemOutput }>;
+/** An item is itself callable. This is what a create hands back, so the
+ *  address the board returns is one you can immediately call verbs on. */
+interface ItemVerbs extends ItemOutput {
+  addChild: Stream<{ title: string }, { item: ItemOutput }>;
+  recordNote: Stream<{ body: string }, { note: Note; noteCount: number }>;
+  finish: Stream<{ body?: string }, { at: number; openBelow: number }>;
+  blockOn: Stream<{ on: ItemOutput }, { blocked: ItemOutput; on: ItemOutput }>;
+  archive: Stream<void>;
 }
 ```
 
