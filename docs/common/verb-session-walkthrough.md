@@ -66,36 +66,49 @@ JSON input:
   { title: string; parent?: string }
 
 Flags after `--`:
-  --title <string>    Required. One line naming the work.
-  --parent <string>   Optional. Where the item files. Omit for a root item.
+  --title <string>    Required.
+  --parent <string>   Optional.
 
 Output:
   No output on success.
 ```
 
-The flags, their types, their required-ness and their descriptions are all
-derived. Nothing is authored per pattern: `parseInputFlags` builds a descriptor
-per input-schema property, and the prose comes from the author's JSDoc, which
-the schema generator attaches as `description`.
+The flags, their types and their required-ness are derived. Nothing is authored
+per pattern: `parseInputFlags` builds a descriptor per input-schema property.
+
+**The prose is not there, and that is measured.** `specificFlagLines` *would*
+render a `description` beside each flag — it reads one through
+`schemaDescription` — but no description ever reaches it. Write both kinds of
+JSDoc on an event and neither arrives:
 
 ```tsx
 // Shown as interface or class members.
 /** One line naming the work. */
 title: string;
-/** Where the item files. Omit for a root item. */
-parent?: string;
 ```
 
-Two things are wrong with that page rather than missing from it.
+- A **property** comment reaches the compiled pattern, where
+  `$defs.<Event>.properties.title.description` carries it, and is **stripped**
+  from the schema `cf piece call … --help` reads. Same schema, no description.
+- An **interface-level** comment — the one that would say what the verb is
+  *for* — does not reach the compiled pattern at all. Its `$defs.<Event>`
+  entry has no `description`.
+
+So the help page shows `--title <string>  Required.` and stops.
+
+Three things are wrong with that page rather than missing from it.
 
 **`Output:` is false.** `add` declares a result and returns one; the value
 arrives on `invocation.result`. The handler branch of `renderPieceCallHelp`
 prints the fixed string regardless.
 
-**The verb's purpose is absent.** A JSDoc comment on the event interface becomes
-a root-level `description` on the schema, and `cf piece verbs --json` carries it
-over the wire — but `schemaDescription` is consulted only per property, so the
-rendered page drops it. `cf` can say what `add` takes and not what it is for.
+**A flag's prose never arrives**, per the measurement above — the renderer is
+ready for it and the generator does not supply it.
+
+**The verb's purpose is absent**, and unlike the flags it is absent from the
+source of truth as well: an event interface's own doc comment is dropped in
+emission, so there is nothing downstream to render. `cf` can say what `add`
+takes and not what it is for.
 
 ## 3. Complete against the live piece **[today]**
 
@@ -195,7 +208,8 @@ Declared results make an **output** self-describing; this is about what an
 | Gap | Needs |
 | --- | --- |
 | `Output:` claims a handler returns nothing | Nothing — it is wrong, not missing |
-| A verb's purpose absent from its help page | Nothing — the description is already in the schema and on the wire |
+| A flag's prose absent from its help page | An emission fix — the renderer already reads a `description`; the schema the CLI is served has none |
+| A verb's purpose absent from its help page | An emission fix, then a renderer one — an event interface's doc comment reaches neither |
 | Result fields listed in help | A declared result |
 | `--select` completion, and refusal before the call | A declared result |
 | An address accepted as an argument | The round-trip property above |
