@@ -59,6 +59,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   calling a verb adds — and at
   [CLI surface shape](cli-surface-shape.md) for the command surface and an
   additive path to it. Start here rather than at either part.
+- [References as arguments](references-as-arguments.md) proposes lifting
+  address resolution out of the LLM dialog builtin, which already does it, and
+  into the boundary every external caller crosses. An LLM can hand a pattern a
+  reference; the CLI, a webhook, and the ingest path cannot reach the same
+  handler the same way, and three encodings for "an address goes here" have
+  already diverged. It carries the measurement, the size, and the gate-by-gate
+  evidence that the refusal is drift rather than policy — the dispatch gate
+  already accepts link values; the outer gates never got the option.
 - [Verb calls: working notes](verb-result-selection.md) holds the call-specific
   investigation those documents do not carry: what produces a receipt and what
   its existence proves, how a receipt's address is derived, and the error and
