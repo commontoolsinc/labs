@@ -470,7 +470,7 @@ describe("stage G outbox + sqlite discharge", () => {
     x.withTx(tx1).set({ value: 1 });
     wave.enqueueOutboundAppend(tx1, {
       targetSpace,
-      targetStream: "of:deliver-stream",
+      targetStream: "of:stream-events:deliver",
       eventId: "evt-d1",
       payload: { n: 7 },
       actingPrincipal: "user:alice",
@@ -492,7 +492,7 @@ describe("stage G outbox + sqlite discharge", () => {
     // closed) — and the delivery commit's envelope session is the
     // service holder (LT5), class authored.
     const targetEngine = await server.engineForSpace(targetSpace);
-    const doc = Engine.read(targetEngine, { id: "of:deliver-stream" });
+    const doc = Engine.read(targetEngine, { id: "of:stream-events:deliver" });
     const entries =
       (doc?.value as { entries?: Array<Record<string, unknown>> })?.entries ??
         [];
@@ -533,7 +533,7 @@ describe("stage G outbox + sqlite discharge", () => {
     x.withTx(tx2).set({ value: 2 });
     wave2.enqueueOutboundAppend(tx2, {
       targetSpace,
-      targetStream: "of:deliver-stream",
+      targetStream: "of:stream-events:deliver",
       eventId: "evt-d1",
       payload: { n: 7 },
       actingPrincipal: "user:alice",
@@ -551,7 +551,7 @@ describe("stage G outbox + sqlite discharge", () => {
     // to.
     const { outbox: recovered } = newOutbox();
     await recovered.deliverPendingAppends();
-    const after = Engine.read(targetEngine, { id: "of:deliver-stream" });
+    const after = Engine.read(targetEngine, { id: "of:stream-events:deliver" });
     const afterEntries =
       (after?.value as { entries?: Array<unknown> })?.entries ?? [];
     expect(afterEntries.length).toBe(1);
@@ -742,7 +742,7 @@ describe("stage G outbox + sqlite discharge", () => {
       createdSeq: 1,
       rows: [{
         targetSpace,
-        targetStream: "of:transport-stream",
+        targetStream: "of:stream-events:transport",
         eventId: "evt-tr1",
         payload: { n: 3 },
         actingPrincipal: "user:alice",
@@ -784,7 +784,7 @@ describe("stage G outbox + sqlite discharge", () => {
     const { outbox } = newOutbox();
     await outbox.deliverPendingAppends();
     const targetEngine = await server.engineForSpace(targetSpace);
-    const doc = Engine.read(targetEngine, { id: "of:transport-stream" });
+    const doc = Engine.read(targetEngine, { id: "of:stream-events:transport" });
     const entries = (doc?.value as { entries?: Array<unknown> })?.entries ?? [];
     expect(entries.length).toBe(1);
     expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)

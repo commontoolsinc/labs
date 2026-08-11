@@ -62,7 +62,7 @@ const waitUntil = async (
 
 const pendingRow = (eventId: string) => ({
   targetSpace,
-  targetStream: "of:space-server-stream",
+  targetStream: "of:stream-events:space-server",
   eventId,
   payload: { via: "recovery seam" },
   actingPrincipal: "user:alice",
@@ -214,7 +214,7 @@ describe("stage G SpaceServer recovery seams", () => {
       "the activation re-send to retire the row",
     );
     const targetEngine = await server.engineForSpace(targetSpace);
-    const doc = Engine.read(targetEngine, { id: "of:space-server-stream" });
+    const doc = Engine.read(targetEngine, { id: "of:stream-events:space-server" });
     const entries = (doc?.value as { entries?: Array<Record<string, unknown>> })
       ?.entries ?? [];
     expect(entries.length).toBe(1);
@@ -262,7 +262,7 @@ describe("stage G SpaceServer recovery seams", () => {
       "the owed post-wave drain to deliver the row",
     );
     const targetEngine = await server.engineForSpace(targetSpace);
-    const doc = Engine.read(targetEngine, { id: "of:space-server-stream" });
+    const doc = Engine.read(targetEngine, { id: "of:stream-events:space-server" });
     const entries = (doc?.value as { entries?: Array<unknown> })?.entries ?? [];
     expect(entries.length).toBe(1);
   });
