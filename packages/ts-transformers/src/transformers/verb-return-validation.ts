@@ -117,11 +117,6 @@ function verbCallback(
 }
 
 /**
- * `return <expr>` statements that return from the verb body itself — nested
- * function-likes return to their own callers and are not descended into. The
- * literal `undefined` counts as control flow, not a value.
- */
-/**
  * The shapes a forgotten result declaration actually takes: expressions that
  * are plain data by construction. Calls, identifiers, property reads, JSX,
  * `new`, and anything else stay unjudged — those are the launch/navigation/
@@ -172,6 +167,11 @@ function isDefinitelyPlainShaped(expr: ts.Expression): boolean {
     expr.kind === ts.SyntaxKind.NullKeyword;
 }
 
+/**
+ * `return <expr>` statements that return from the verb body itself — nested
+ * function-likes return to their own callers and are not descended into. The
+ * literal `undefined` counts as control flow, not a value.
+ */
 function topLevelValueReturns(body: ts.Block): ts.ReturnStatement[] {
   const found: ts.ReturnStatement[] = [];
   const walk = (node: ts.Node): void => {

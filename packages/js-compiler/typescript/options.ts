@@ -7,25 +7,25 @@ export const TARGET = ScriptTarget.ES2023;
 
 export const getCompilerOptions = (): CompilerOptions => {
   return {
-    /**
-     * Typechecking
-     */
+    //
+    // Typechecking
+    //
 
     strict: true,
     strictNullChecks: true,
     strictFunctionTypes: true,
 
-    /**
-     * Module
-     */
+    //
+    // Module
+    //
 
     // Per-module CommonJS bodies — the inputs the ESM module-record loader
     // and verifier consume.
     module: MODULE_KIND,
 
-    /**
-     * Emit
-     */
+    //
+    // Emit
+    //
 
     removeComments: true,
     // Belt-and-suspenders on authoring paths; the pipeline's explicit checks
@@ -57,9 +57,9 @@ export const getCompilerOptions = (): CompilerOptions => {
     // Generate separate source map instead of inline
     inlineSourceMap: false,
 
-    /**
-     * JavaScript
-     */
+    //
+    // JavaScript
+    //
 
     allowJs: true,
     // Authored `.js` sources emit their compiled body under the SAME name
@@ -71,17 +71,17 @@ export const getCompilerOptions = (): CompilerOptions => {
     // collide on one output, e.g. `/a.ts` + `/a.js`.)
     suppressOutputPathCheck: true,
 
-    /**
-     * Interop
-     */
+    //
+    // Interop
+    //
 
     forceConsistentCasingInFileNames: true,
     esModuleInterop: true,
     isolatedModules: false,
 
-    /**
-     * Language and Environment
-     */
+    //
+    // Language and Environment
+    //
 
     jsx: JsxEmit.React,
     jsxFactory: "h",
