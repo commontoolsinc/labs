@@ -115,13 +115,6 @@ const WORDS = [
   "yield",
 ];
 
-/**
- * Distance back to the topics a given one cites. The strides are coprime with
- * each other and with the vocabulary length, so citations spread across the
- * board instead of collecting into a few chains.
- */
-const CROSSREF_STRIDES = [1, 5, 11, 23, 47];
-
 /** Title of the topic at `index`, the same for a board of any size. */
 export function topicTitle(index: number): string {
   return `Topic ${String(index).padStart(4, "0")} ${
@@ -131,9 +124,20 @@ export function topicTitle(index: number): string {
 
 /**
  * Indices of the topics the topic at `index` cites on a board of `topicCount`
- * topics. Only earlier topics can be cited: a body is written at creation, when
- * no later topic has a fid yet. Only the newest {@link DEFAULT_CITING_TOPICS}
- * cite at all.
+ * topics, newest citation first. Only earlier topics can be cited: a body is
+ * written at creation, when no later topic has a fid yet. Only the newest
+ * `citingTopics` cite at all.
+ *
+ * The citations are spread evenly over everything earlier, so one reaches the
+ * far end of the board as readily as it reaches the neighbour, and the crossref
+ * join has to look at scattered entries rather than a run of adjacent ones. The
+ * first is always the immediate predecessor, which is the link the navigation
+ * benchmark follows.
+ *
+ * A topic cites `crossrefsPerTopic` siblings whenever it has that many earlier
+ * ones to cite, and every earlier sibling when it does not. The count is
+ * therefore bounded only by the board, and the shortfall near the start of one
+ * is exact rather than incidental.
  */
 export function crossrefTargets(
   index: number,
@@ -148,10 +152,11 @@ export function crossrefTargets(
   },
 ): number[] {
   if (index < topicCount - citingTopics) return [];
+  const earlier = index;
+  const count = Math.min(crossrefsPerTopic, earlier);
   const targets: number[] = [];
-  for (const stride of CROSSREF_STRIDES.slice(0, crossrefsPerTopic)) {
-    const target = index - stride;
-    if (target >= 0) targets.push(target);
+  for (let citation = 0; citation < count; citation++) {
+    targets.push(index - 1 - Math.floor((citation * earlier) / count));
   }
   return targets;
 }

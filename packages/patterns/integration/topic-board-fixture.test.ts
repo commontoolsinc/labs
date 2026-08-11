@@ -11,8 +11,11 @@ import {
 // than in a test.
 describe("topic-board-fixture", () => {
   describe("topicTitle", () => {
-    it("returns the same title for an index on boards of any size", () => {
-      expect(topicTitle(7)).toBe(topicTitle(7));
+    it("returns a title carrying the index, zero-padded to four digits", () => {
+      // The benchmark waits for this exact string to appear on the page, so
+      // the format is part of the contract rather than a presentation choice.
+      expect(topicTitle(7)).toBe("Topic 0007 handoff");
+      expect(topicTitle(1234)).toBe("Topic 1234 kernel");
     });
 
     it("returns a distinct title for each of the first thousand indices", () => {
@@ -65,17 +68,52 @@ describe("topic-board-fixture", () => {
       expect(new Set(targets).size).toBe(targets.length);
     });
 
+    it("returns as many citations as were asked for", () => {
+      // No fixed ceiling: a density the board can satisfy is satisfied, so a
+      // fixture never quietly carries a lighter citation load than requested.
+      for (const crossrefsPerTopic of [1, 5, 8, 20, 99]) {
+        const targets = crossrefTargets(100, {
+          topicCount: 101,
+          crossrefsPerTopic,
+          citingTopics: 1,
+        });
+        expect(targets.length).toBe(crossrefsPerTopic);
+        expect(new Set(targets).size).toBe(crossrefsPerTopic);
+      }
+    });
+
+    it("returns every earlier topic when asked for more than exist", () => {
+      expect(
+        crossrefTargets(3, {
+          topicCount: 4,
+          crossrefsPerTopic: 10,
+          citingTopics: 1,
+        }).toSorted((a, b) => a - b),
+      ).toEqual([0, 1, 2]);
+    });
+
+    it("spreads citations across everything earlier", () => {
+      // Adjacent targets would leave the far end of the board uncited, and the
+      // crossref join scanning one contiguous run instead of the whole corpus.
+      const targets = crossrefTargets(100, {
+        topicCount: 101,
+        crossrefsPerTopic: 5,
+        citingTopics: 1,
+      });
+      expect(targets).toEqual([99, 79, 59, 39, 19]);
+    });
+
     it("returns nothing when no topic is asked to cite", () => {
       expect(crossrefTargets(29, { topicCount: 30, citingTopics: 0 }))
         .toEqual([]);
     });
 
-    it("drops targets that fall before the start of the board", () => {
-      expect(crossrefTargets(1, {
+    it("returns nothing for the first topic, which has nothing to cite", () => {
+      expect(crossrefTargets(0, {
         topicCount: 2,
         crossrefsPerTopic: 5,
         citingTopics: 2,
-      })).toEqual([0]);
+      })).toEqual([]);
     });
   });
 });
