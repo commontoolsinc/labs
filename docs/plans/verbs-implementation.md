@@ -107,7 +107,8 @@ pricing, so the pricing needs to be the honest one.
 
 ## Ready to build
 
-Unblocked, small, and independent of the decision above.
+Unblocked and independent of the decision above. Not all small — items 2 and
+11 are both (M); what these share is that nothing gates them.
 
 **2. An unrecognized projection key is refused.** *(M)* Two denylists are
 consulted and every key in neither is accepted and ignored, so a typo selects
@@ -191,6 +192,67 @@ other command accepts, which this is the occasion to make the declared shape.
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
 
+**11. A caller may name a reference.** *(M)* A verb whose event declares
+`Writable<T>` is callable by a model and by nothing else. `traverseAndCellify`
+(`packages/runner/src/builtins/llm-dialog.ts`) resolves `{"@link": …}` into a
+live cell before dispatch, so the LLM boundary has a complete round trip; the
+CLI rejects the address and the webhook path forwards it unresolved. The
+shape-matching payload the CLI *does* accept stores a detached copy and reports
+success.
+
+*The refusal is drift, not policy.* `closedWorldEventRejection`
+(`packages/runner/src/runner.ts`) validates a present event payload with
+`acceptOpaqueValue: (value) => isCellLink(value)` — a link passes unjudged,
+because its target cannot be read at dispatch. `verbInputSchemaError`
+(`packages/cli/lib/callable.ts`) calls the same `validateSchemaValue` with two
+arguments, so the options object defaults to `{}`. Same validator; the outer
+gate never got the option. The design is
+[references as arguments](references-as-arguments.md).
+
+*Measured: `send()` already resolves a native sigil.* A raw sigil link riding
+an event payload reaches the handler as the **resolved target**, not an
+envelope — probed against a local toolshed with an `any`-typed event field, so
+nothing gated it: the handler saw the target's own properties and read its
+`title`. That settles the question
+[references as arguments](references-as-arguments.md) flagged untested, and it
+means the door is already open under the native spelling. This item names a
+capability rather than adding one.
+
+Four parts. Two are independent of everything:
+
+- **Refuse the structural copy.** Correct under any road, needs no vocabulary
+  and no gate change, and converts silent corruption into an error.
+- **Give the CLI gate the option the dispatch gate already passes.** One
+  argument at one call site — and on the measurement above, *sufficient on its
+  own* for the native sigil spelling, since the gate is the only thing between
+  that payload and a `send()` that already resolves it. Worth confirming
+  against a declared field rather than the `any` the probe used.
+- **Lift resolution to a shared home**, beside `parseLink` and the LLM-friendly
+  pair in `packages/runner/src/link-utils.ts`. This is what admits the *other*
+  spellings — the `$link` shape a read emits, and the LLM-friendly form — so it
+  serves composition rather than basic capability.
+- **Fix event-schema emission.** An inline `Writable<{…}>` disappears from the
+  emitted properties entirely. That half is independent and needed under any
+  road, doubly once event schemas close, since a field the schema does not name
+  cannot be supplied at all. Only the `asCell` marker hangs on the decision
+  below.
+
+*One decision inside the item:* schema-blind or schema-directed resolution.
+Schema-blind is proven twice — `traverseAndCellify` and the dispatch gate;
+schema-directed is checkable and refuses a typo. It decides whether the `asCell`
+marker is required or merely useful, so reach it before starting that half.
+
+*A constraint rather than a decision:* what is accepted inbound must include the
+shape a read emits, or a caller cannot submit the address it was just handed.
+
+*CFC gets a notification, not a ruling* — an existing capability widening from
+the user's own model session to external principals.
+
+*Exit:* `cf piece call --piece <root> addPiece '{"piece": <address>}'` registers
+the piece — the root pattern's own verb, reachable today by `pieces.add` from
+inside the runtime and by a model through the dialog builtin, and by no other
+caller.
+
 ## Landed, and what consumes it
 
 **6. The read layer.** The shared read step, address markers with the
@@ -238,6 +300,7 @@ joins them.
 | 5 | 4 | the fourth and fifth arrivals inherit whatever a read costs |
 | 10 | 1 | listing rows carry a handler's `outputSchema`; the plumbing exists for tools already |
 | 1 | — | decided; 8 and 10 are no longer provisional, and item 10 carries the revisit condition |
+| 11 | — | independent of 1 in what it decides — declared results make an *output* self-describing, this is what an *input* accepts — but shares `schema-injection.ts` with item 1's emission (#5501), so one holder suits both |
 
 Items 2, 3 and 5 touch one file heavily and want to land one at a time rather
 than in parallel. Item 4 is the only one that touches the call envelope.

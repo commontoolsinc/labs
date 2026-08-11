@@ -182,12 +182,21 @@ before it spends the invocation id. Nothing there elects to refuse references.
 (`packages/toolshed/routes/webhooks/webhooks.utils.ts`) forwards the raw
 payload with no gate and no traversal.
 
-**And "data cannot name a cell" is not a core invariant.** A sigil link is a
-link wherever it appears in stored data (`isLinkRef`,
-`packages/data-model/src/cell-rep.ts`). Whether a sigil riding a webhook
-payload survives `send()` as a live edge is untested; if it does, that door is
-already open under the native spelling, and this plan names a capability rather
-than adds one.
+**And "data cannot name a cell" is not a core invariant — measured.** A sigil
+link is a link wherever it appears in stored data (`isLinkRef`,
+`packages/data-model/src/cell-rep.ts`), and a sigil riding an event payload
+survives `send()` as a **live edge**: probed against a local toolshed with an
+`any`-typed event field, so no gate intervened, the handler received the
+resolved target — its own properties, and its `title` read back. The door is
+already open under the native spelling, so this plan names a capability rather
+than adding one.
+
+That also bounds what the gate change alone buys. The CLI's gate is the only
+thing between a sigil payload and a `send()` that already resolves it, so
+aligning it should make the native spelling work end to end without any
+resolution work — worth confirming against a declared field rather than the
+`any` the probe used. Shared resolution then serves the *other* spellings,
+which is composition rather than basic capability.
 
 What remains for whoever owns CFC is a notification, not a ruling: opening the
 outer doors widens an existing exposure — an external principal, not just the
