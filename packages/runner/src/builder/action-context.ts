@@ -1,3 +1,18 @@
+import { isDeno } from "@commonfabric/utils/env";
+import {
+  type AsyncLocalStore,
+  FallbackAsyncLocalStore,
+} from "@commonfabric/utils/async-local-store";
+import { getTopFrame } from "./pattern.ts";
+
+// Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
+// otherwise. The `await import` stays here (not in the shared utils module): a
+// top-level await in widely-imported utils stalls Deno module evaluation.
+const ActionWindowStorage =
+  (isDeno()
+    ? (await import("node:async_hooks")).AsyncLocalStorage
+    : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
+
 /**
  * Ambient marker for "a runner Action (lift/handler invocation) is currently
  * executing user code" — the window in which minting NEW builder artifacts is
@@ -22,22 +37,6 @@
  * mints — including under the non-Deno fallback store, whose window
  * conservatively spans the whole pending action promise.
  */
-
-import { isDeno } from "@commonfabric/utils/env";
-import {
-  type AsyncLocalStore,
-  FallbackAsyncLocalStore,
-} from "@commonfabric/utils/async-local-store";
-import { getTopFrame } from "./pattern.ts";
-
-// Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
-// otherwise. The `await import` stays here (not in the shared utils module): a
-// top-level await in widely-imported utils stalls Deno module evaluation.
-const ActionWindowStorage =
-  (isDeno()
-    ? (await import("node:async_hooks")).AsyncLocalStorage
-    : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
-
 const actionWindow = new ActionWindowStorage<true>();
 
 /**
