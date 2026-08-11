@@ -208,8 +208,8 @@ the one place it is easy to see. A definition added directly under an existing
 doc comment takes that comment over and leaves the declaration it was written
 for undocumented; a `//` note wedged in between splits the contract from its
 subject, unless it is a label picking out one member of an overload set, which
-is allowed for. Two doc comments in a row are the loudest tell — only the nearer
-one survives into rendered documentation. See
+is allowed. Two doc comments in a row are the loudest tell — only the nearer one
+survives into rendered documentation. See
 `docs/development/code-comment-style.md`, "Where one goes".
 
 ### 6. Craft & conventions
