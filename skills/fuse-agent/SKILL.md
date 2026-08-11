@@ -256,9 +256,10 @@ wishes. Use them to leave notes about things noticed without necessarily acting.
 
 **Deploy and configure via CF CLI:**
 
-`annotation.tsx` is an existing support pattern in this workflow. If it is
-changed, add and run automated pattern tests first, then attach every new test
-entry with repeatable `--test` flags here and on later `setsrc` updates.
+`annotation.tsx` currently has no authored test entry, so the unchanged support
+pattern deployment below has no `--test` flag. If you change its behavior, first
+create and run an automated pattern test. Then attach every test entry with
+repeatable `--test` flags here and on every later `setsrc` update.
 
 ```bash
 ID=$(cf piece new packages/patterns/annotation.tsx \
