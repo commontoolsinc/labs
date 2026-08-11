@@ -210,32 +210,47 @@ const preferAsCellBranch = (schema: JSONSchema): JSONSchema => {
   return schema;
 };
 
-/** A branch with its `$ref` resolved against the union's own `$defs`. */
+/**
+ * A branch with its `$ref` resolved, against the union's `$defs` or its own.
+ *
+ * A branch that will not resolve narrows to `false` — nothing matches it. It
+ * cannot be left as it was: a bare `$ref` declares no `type` and no `required`,
+ * so it survives matching, becomes the narrowed schema, and then throws out of
+ * `schemaAtPath` the moment the reader touches a property — a raw error, not
+ * the refusal the runner knows how to dispose of. Failing the branch closed is
+ * also where the eager path lands: its prefilter defers ("we'll properly
+ * complain later" in `canBranchMatch`) and traversal then fails the branch it
+ * cannot resolve. A view has no later, so it decides here.
+ */
 const resolveBranch = (
   branch: JSONSchema,
   parent: JSONSchemaObj,
 ): JSONSchema => {
-  if (!isRecord(branch) || !("$ref" in branch) || !isRecord(parent.$defs)) {
-    return branch;
+  if (!isRecord(branch) || !("$ref" in branch)) return branch;
+  const roots = [
+    ...(isRecord(parent.$defs)
+      ? [{ $defs: parent.$defs } as JSONSchemaObj]
+      : []),
+    branch as JSONSchemaObj,
+  ];
+  for (const root of roots) {
+    try {
+      const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+        branch as JSONSchemaObj,
+        root,
+      );
+      if (isRecord(resolved)) return resolved;
+    } catch {
+      // Try the next root; the warning below covers exhausting them.
+    }
   }
-  try {
-    const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
-      branch as JSONSchemaObj,
-      { $defs: parent.$defs } as JSONSchemaObj,
-    );
-    return isRecord(resolved) ? resolved : branch;
-  } catch (error) {
-    // An unresolvable ref stays as it was, so matching keeps the branch: a
-    // schema this runtime cannot read is not evidence that the data fails it,
-    // and narrowing the branch away would refuse a read the eager path serves.
-    // It is worth saying out loud, though — an unresolvable ref means a schema
-    // document that did not replicate.
-    logger.warn(
-      "schema-view",
-      () => ["unresolvable $ref in a union branch", branch, error],
-    );
-    return branch;
-  }
+  // Worth saying out loud: an unresolvable ref means a schema document that
+  // did not replicate, not data that happens not to match.
+  logger.warn(
+    "schema-view",
+    () => ["unresolvable $ref in a union branch", branch],
+  );
+  return false;
 };
 
 /**

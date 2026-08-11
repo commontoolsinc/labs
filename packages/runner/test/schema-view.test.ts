@@ -672,6 +672,60 @@ describe("schema-view", () => {
     });
   });
 
+  describe("a $ref the schema cannot resolve", () => {
+    it("matches nothing where it is a branch of a union", async () => {
+      const read = await seeded(
+        "unresolvable-branch",
+        { inner: { a: 1 } },
+        {
+          type: "object",
+          properties: {
+            inner: {
+              anyOf: [
+                { $ref: "#/$defs/Missing" },
+                { type: "object", required: ["never"] },
+              ],
+            },
+          },
+        } as const,
+      );
+
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        // Neither branch can describe this value: one names a definition the
+        // schema does not carry, the other requires a key it does not have.
+        expect((eager.get() as { inner?: { a?: number } }).inner?.a)
+          .toBeUndefined();
+        expect((lazy.get() as { inner?: { a?: number } }).inner?.a)
+          .toBeUndefined();
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
+    it("matches nothing where it is the whole schema", async () => {
+      const read = await seeded(
+        "unresolvable-root",
+        { a: 1 },
+        { $ref: "#/$defs/Missing" } as const,
+      );
+
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        // A schema the runtime cannot read is not the same as no schema, which
+        // would hand back the value untouched.
+        expect(eager.get()).toBeUndefined();
+        expect(lazy.get()).toBeUndefined();
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+  });
+
   describe("a link that carries a schema of its own", () => {
     it("keeps the property the reader asked for and the link's schema does not name", async () => {
       // Crossing a link is where an eager read combines the link's schema into

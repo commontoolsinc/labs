@@ -407,6 +407,19 @@ export function resolveSchema(
   let resolvedSchema = schema;
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+    if (resolved === undefined) {
+      // The ref names a definition this schema does not carry. That is not the
+      // same as no schema, which lets every value through untouched — it is a
+      // schema the runtime cannot read, and a value cannot be shown to match
+      // one of those. `false` selects nothing, which is the answer traversal
+      // already gives a top-level ref it fails to resolve; returning
+      // `undefined` here instead handed the reader the raw value.
+      logger.warn(
+        "unresolvable $ref in a schema; nothing matches it",
+        schema.$ref,
+      );
+      return false;
+    }
     if (!isRecord(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
