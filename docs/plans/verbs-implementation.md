@@ -39,7 +39,6 @@ a driver needs to know what is already moving before scheduling anything new.
 | PR | What | State |
 | --- | --- | --- |
 | #5629 | a verb listing row carries the handler's declared result | item 10, the consumer half of the declared result. Collides with #5623, which relocates a doc comment in the same region of `packages/cli/lib/piece.ts`; the collision is a real git conflict rather than a silent merge, and whichever lands second keeps both |
-| #5609 | a rejected position is not a required one | split out of #5504, because the defect it fixes is on main. A `$link` marker beside any other projection key returns nothing: the rejected position stays in the source's `required`, so the projected schema is unsatisfiable and the whole selection reads as absent |
 | #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
@@ -48,24 +47,16 @@ folded into #5470's squash; the shared read step it factored out is on main as
 `packages/cli/lib/cell-selection.ts`. A reader who goes looking for #5458 should
 not conclude the step was dropped.
 
-**Two are back out: #5469 and #5505 were reverted by #5582.** They merged
-twenty-six seconds apart, each green on a base that did not contain the other,
-and the tree they made together type-failed — #5469 replaced `invocationId`
-with an `invocation: {id, session}` pair, and #5505 added nine `piece call`
-selection tests written against the old name. The revert restored the 22 files
-they touched byte-for-byte.
+**The invocation pair and call selection are both on main**, re-landed together
+by #5610. `scopeCallerEventId` takes the `{id, session}` pair rather than the id
+alone, so two callers choosing the same word — `add-comment-1` is the word two
+agents both pick — no longer compute one address and read one receipt. `piece
+call` takes `--select` / `--schema` / `--filter` beside it.
 
-Two consequences a driver has to carry:
-
-- **`piece call` has no `--select` / `--schema` / `--filter` again.** That is a
-  landed piece of item 6 going back out, not just a test fix.
-- **The address change is no longer underneath anything.** `scopeCallerEventId`
-  derives from `{caller, id, path, space}` with no identity in the address, so
-  two callers choosing the same word — `add-comment-1` is the word two agents
-  both pick — compute one address and read one receipt, and the second is told
-  its call settled when it never ran. Item 4 was sequenced after item 7
-  precisely so that a published address had stopped moving. **That precondition
-  is gone, and item 4 must not start until it returns.**
+**So item 4's precondition holds: a published receipt address has stopped
+moving.** That is what item 4 was sequenced after item 7 to wait for, and the
+wait is over. What it cost to get there is the merge-race hazard recorded under
+"How this is driven" below, which is the part worth carrying forward.
 
 ## The decision that was waiting, and the condition it carries
 
@@ -254,17 +245,15 @@ caller.
 
 ## Landed, and what consumes it
 
-**6. The read layer.** The shared read step, address markers with the
-deepest-link rule, container inference, the flag split, entity-URI intake and
-the `@` suffix are on main. One piece is not: call selection went back out with
-#5505's revert.
+**6. The read layer.** On main in full: the shared read step, address markers
+with the deepest-link rule, container inference, the flag split, entity-URI
+intake, the `@` suffix, and call selection.
 
-**7. Session-scoped invocation ids.** **Reverted** — #5469 is out of main
-again. It is the one address-changing commit, and the whole plan is ordered
-around landing it before anything publishes a receipt address. Until it is
-back, a receipt address is derived without identity in it, so it is not yet
-something a caller can safely be handed. Item 4 depends on this; nothing else
-does.
+**7. Session-scoped invocation ids.** On main (#5610). It is the one
+address-changing commit, and the whole plan is ordered around landing it before
+anything publishes a receipt address — so a receipt address now carries
+identity and is something a caller can safely be handed. Item 4 depends on
+this; nothing else does.
 
 **8. Descriptive receipt schemas.** On main. Plain results only — a verb
 returning anything reactive gets none, which is what item 1 decides.
@@ -295,8 +284,8 @@ joins them.
 
 | Item | After | Why |
 | --- | --- | --- |
-| 6 | — | landed but for call selection, which #5582 reverted |
-| 7 | — | **reverted; must land again before 4 can start** |
+| 6 | — | landed |
+| 7 | — | landed; item 4's precondition holds |
 | 8, 9 | — | independent |
 | 2 | 6 | changes what the flags accept |
 | 3 | 6 | completes the suppression property |
