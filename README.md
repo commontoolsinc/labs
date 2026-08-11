@@ -26,8 +26,8 @@ Three ways in, depending on how much you want:
 - [**How it works**](docs/how.md) — the same argument as code: a real pattern,
   what the compiler emits for it, where the runtime checks the result, and what
   is not built yet. Every snippet is verbatim from a file in this repository.
-- [**The long form**](docs/inverting-the-physics-of-trust.md) — the physics,
-  the hardware, and the objections.
+- [**The long form**](docs/inverting-the-physics-of-trust.md) — the physics, the
+  hardware, and the objections.
 
 ### Core Concepts
 
