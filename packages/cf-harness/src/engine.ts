@@ -1275,6 +1275,8 @@ export class CfHarnessEngine {
         path: string,
         options?: { allowMissing?: boolean },
       ) => this.#isHostPathWithinArtifactRoot(path, options),
+      imageAttachmentSnapshotDir: this.artifactStore
+        ?.imageAttachmentSnapshotDir,
       doesHostPathIntersectArtifactRoot: (
         path: string,
         options?: { allowMissing?: boolean },
