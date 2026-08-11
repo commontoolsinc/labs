@@ -15,8 +15,14 @@ import {
   updatePageTitle,
 } from "../../shared/mod.ts";
 import { GlobalShortcutsController } from "../lib/global-shortcuts-controller.ts";
-import { type Cancel, NAME, PageHandle } from "@commonfabric/runtime-client";
+import {
+  type Cancel,
+  type ErrorNotification,
+  NAME,
+  PageHandle,
+} from "@commonfabric/runtime-client";
 import { prepareNamedSpace } from "../lib/named-space.ts";
+import type { LoadError } from "./BodyView.ts";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -58,15 +64,22 @@ export class XAppView extends BaseView {
   @property({ attribute: false })
   accessor keyStore: KeyStore | undefined = undefined;
 
+  @property({ attribute: false })
+  accessor spaceLoadError: LoadError | undefined = undefined;
+
+  @property({ attribute: false })
+  accessor runtimeLoadErrors: readonly ErrorNotification[] = [];
+
+  @property({ attribute: false })
+  accessor preserveRuntimeErrorsForNextViewChange: (() => void) | undefined =
+    undefined;
+
   @state()
   accessor pieceTitle: string | undefined = undefined;
 
   @property({ attribute: false })
   private accessor titleSubscription: CellEventTarget<string> | undefined =
     undefined;
-
-  @state()
-  private accessor _patternError: Error | undefined = undefined;
 
   @state()
   private accessor _slugRevision = 0;
@@ -77,6 +90,7 @@ export class XAppView extends BaseView {
   private slugSubscriptionKey: string | undefined = undefined;
   private slugSubscriptionToken = 0;
   private slugTargetKey: string | undefined = undefined;
+  private selectedPatternTargetId: string | undefined = undefined;
 
   private debuggerController = new DebuggerController(this);
   private _keyboard = new GlobalShortcutsController(this);
@@ -136,25 +150,27 @@ export class XAppView extends BaseView {
       | undefined
     > => {
       if (!rt || !space) return;
-      this._patternError = undefined;
-      await prepareNamedSpace(app, rt, space);
-      if ("pieceSlug" in app.view && app.view.pieceSlug) {
-        try {
+      this.selectedPatternTargetId = undefined;
+      try {
+        await prepareNamedSpace(app, rt, space);
+        if ("pieceSlug" in app.view && app.view.pieceSlug) {
           const pieceId = slugIdForSpace(space, app.view.pieceSlug);
+          const target = await rt.getPattern(space, pieceId, { start: false });
+          if (signal.aborted) return;
+          this.selectedPatternTargetId = target.id();
           const pattern = await rt.getPattern(space, pieceId);
           // Track as recently visited (fire-and-forget) — but not after
           // the view moved on, or the write lands in the wrong space.
           if (!signal.aborted) rt.trackRecentPiece(space, pieceId);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
-        } catch (e) {
-          if (!signal.aborted) {
-            this._patternError = e as any;
-          }
         }
-      }
-      if ("pieceId" in app.view && app.view.pieceId) {
-        try {
+        if ("pieceId" in app.view && app.view.pieceId) {
+          const target = await rt.getPattern(space, app.view.pieceId, {
+            start: false,
+          });
+          if (signal.aborted) return;
+          this.selectedPatternTargetId = target.id();
           const pattern = await rt.getPattern(space, app.view.pieceId);
           const slug = await rt.getSlug(space, app.view.pieceId);
           if (!signal.aborted && slug) {
@@ -164,11 +180,12 @@ export class XAppView extends BaseView {
           if (!signal.aborted) rt.trackRecentPiece(space, app.view.pieceId);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
-        } catch (e) {
-          if (!signal.aborted) {
-            this._patternError = e as any;
-          }
         }
+      } catch (error) {
+        if (!signal.aborted && !rt.signal.aborted) {
+          console.error("[AppView] Failed to load selected piece:", error);
+        }
+        throw error;
       }
     },
     // _slugRevision is a rerun trigger only — keep it after the
@@ -304,10 +321,9 @@ export class XAppView extends BaseView {
 
     let targetKey: string;
     try {
-      const pattern = await rt.refreshPattern(
-        space,
-        slugIdForSpace(space, slug),
-      );
+      const slugId = slugIdForSpace(space, slug);
+      rt.invalidatePattern(space, slugId);
+      const pattern = await rt.getPattern(space, slugId, { start: false });
       targetKey = pattern.id();
     } catch (error) {
       if (rt.signal.aborted) {
@@ -385,6 +401,7 @@ export class XAppView extends BaseView {
     } catch {
       return;
     }
+    this.preserveRuntimeErrorsForNextViewChange?.();
     if ("spaceName" in view) {
       replaceNavigation({ spaceName: view.spaceName, pieceSlug: slug });
     } else if ("spaceDid" in view) {
@@ -485,10 +502,73 @@ export class XAppView extends BaseView {
     }
   }
 
+  private getRuntimeLoadError(): LoadError | undefined {
+    const event = this.runtimeLoadErrors.findLast((candidate) =>
+      this.runtimeErrorMatchesView(candidate)
+    );
+    if (!event) return;
+
+    return {
+      kind: event.pieceId && !isViewingDefaultPatternView(this.app.view)
+        ? "piece"
+        : "space",
+      error: event,
+    };
+  }
+
+  private runtimeErrorMatchesView(event: ErrorNotification): boolean {
+    if (!event.space || event.space !== this.space) return false;
+
+    const isDefaultView = isViewingDefaultPatternView(this.app.view);
+    const reportedPieceId = event.pieceId?.replace(/^of:/, "");
+    if (reportedPieceId) {
+      const addressedPieceIds = isDefaultView
+        ? [this._spaceRootPattern.value?.id()]
+        : "pieceSlug" in this.app.view
+        ? [
+          this.slugTargetKey ?? this.selectedPatternTargetId ??
+            (this._selectedPattern.status === TaskStatus.COMPLETE
+              ? this._selectedPattern.value?.id()
+              : undefined),
+        ]
+        : [
+          this._selectedPattern.status === TaskStatus.COMPLETE
+            ? this._selectedPattern.value?.id()
+            : undefined,
+          this.selectedPatternTargetId,
+          "pieceId" in this.app.view ? this.app.view.pieceId : undefined,
+        ];
+      const knownPieceIds = addressedPieceIds.filter((id) => id !== undefined);
+      if (
+        knownPieceIds.length > 0 &&
+        !knownPieceIds.some((id) => id?.replace(/^of:/, "") === reportedPieceId)
+      ) {
+        return false;
+      }
+      if (
+        knownPieceIds.length === 0
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   override render() {
     const config = this.app.config ?? {};
     const { activePattern, spaceRootPattern } = this._patterns.value ?? {};
     const embedded = isEmbeddedView(this.app.view);
+    const isViewingDefaultPattern = isViewingDefaultPatternView(this.app.view);
+    const patternLoadError: LoadError | undefined = isViewingDefaultPattern
+      ? this._spaceRootPattern.status === TaskStatus.ERROR
+        ? { kind: "space", error: this._spaceRootPattern.error }
+        : undefined
+      : this._selectedPattern.status === TaskStatus.ERROR
+      ? { kind: "piece", error: this._selectedPattern.error }
+      : undefined;
+    const loadError = this.spaceLoadError ?? patternLoadError;
+    const runtimeLoadError = loadError ? undefined : this.getRuntimeLoadError();
     this.#setTitleSubscription(activePattern);
 
     const authenticated = html`
@@ -496,7 +576,8 @@ export class XAppView extends BaseView {
         .rt="${this.rt}"
         .activePattern="${activePattern}"
         .spaceRootPattern="${spaceRootPattern}"
-        .patternError="${this._patternError}"
+        .loadError="${loadError}"
+        .runtimeError="${runtimeLoadError}"
         .showShellPieceListView="${config.showShellPieceListView ?? false}"
         .showSidebar="${config.showSidebar ?? false}"
         .embedded="${embedded}"
@@ -516,7 +597,6 @@ export class XAppView extends BaseView {
     const spaceDid = this.app && "spaceDid" in this.app.view
       ? this.app.view.spaceDid
       : undefined;
-    const isViewingDefaultPattern = isViewingDefaultPatternView(this.app.view);
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">
