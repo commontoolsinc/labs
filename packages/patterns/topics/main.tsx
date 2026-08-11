@@ -187,30 +187,50 @@ const crossrefRows = lift(
       list.map((t) => topicCorpus(t)),
       payloads,
     );
-    const rows: TopicCrossref[] = [];
+    // Built as `unknown[]` because what goes in is a cell and what a reader
+    // receives is the row: the array holds links, and the declared result type
+    // is what a consumer resolves them to. Same shape as the `as TopicPiece`
+    // casts on the references below, which TypeScript expresses directly only
+    // because those types are structurally related and `Cell<T>`/`T` are not.
+    const rows: unknown[] = [];
     list.forEach((t, i) => {
       if (!t) return;
-      rows.push({
-        fid: payloads[i] ? `fid1:${payloads[i]}` : "",
-        topic: t as TopicPiece,
-        title: t.title,
-        createdAt: t.createdAt,
-        createdBy: t.createdBy,
-        commentCount: t.commentCount ?? 0,
-        lastActivityAt: t.lastActivityAt ?? 0,
-        refsOut: refsOut[i].map((j) => list[j] as TopicPiece),
-        referencedBy: referencedBy[i].map((j) => list[j] as TopicPiece),
-        refsOutLinks: refsOut[i].map((j) => ({
-          fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-          title: list[j].title,
-        })),
-        referencedByLinks: referencedBy[i].map((j) => ({
-          fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-          title: list[j].title,
-        })),
-      });
+      // Each row goes in a cell caused by the topic it describes, and the array
+      // holds a LINK to that cell rather than the row inline. That is what the
+      // `map` builtin keys element runs by: it reads each element's normalized
+      // link, so a link resolves to the row's own entity and stays the same
+      // wherever the row sits, while an inline value resolves to the array
+      // position and makes identity positional. The board sorts by activity, so
+      // every append is a prepend — inline rows re-key every card and rebuild
+      // its whole subtree; linked rows keep theirs and the run is reused.
+      //
+      // A topic whose fid has not resolved yet (mid-sync) has no stable cause,
+      // so it falls back to its position — positional identity for exactly the
+      // rows that have no identity yet, which is what they have today anyway.
+      const cause = payloads[i] ? payloads[i] : ["unresolved-topic-row", i];
+      rows.push(
+        Writable.for<TopicCrossref>(cause).set({
+          fid: payloads[i] ? `fid1:${payloads[i]}` : "",
+          topic: t as TopicPiece,
+          title: t.title,
+          createdAt: t.createdAt,
+          createdBy: t.createdBy,
+          commentCount: t.commentCount ?? 0,
+          lastActivityAt: t.lastActivityAt ?? 0,
+          refsOut: refsOut[i].map((j) => list[j] as TopicPiece),
+          referencedBy: referencedBy[i].map((j) => list[j] as TopicPiece),
+          refsOutLinks: refsOut[i].map((j) => ({
+            fid: payloads[j] ? `fid1:${payloads[j]}` : "",
+            title: list[j].title,
+          })),
+          referencedByLinks: referencedBy[i].map((j) => ({
+            fid: payloads[j] ? `fid1:${payloads[j]}` : "",
+            title: list[j].title,
+          })),
+        }),
+      );
     });
-    return rows;
+    return rows as TopicCrossref[];
   },
 );
 
