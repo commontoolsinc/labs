@@ -57,12 +57,22 @@ const MARKERS: Array<[RegExp, Context]> = [
 const EXCERPT_MARKER = /^<!--\s*check-docs:\s*excerpts\s*-->\s*$/;
 
 // The declaration must be prose, not a fenced example — otherwise `check.md`,
-// which documents the marker by showing it, would opt itself out.
+// which documents the marker by showing it, would opt itself out. A fence
+// closes only on the same character it opened with, at least as long, which
+// matters because getting it wrong desynchronizes the rest of the file and
+// turns a fenced example into a document-wide opt-out.
 function declaresExcerpts(source: string): boolean {
-  let fenced = false;
+  let open: { char: string; len: number } | undefined;
   for (const line of source.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    else if (!fenced && EXCERPT_MARKER.test(line)) return true;
+    const fence = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      const char = fence[1][0];
+      const len = fence[1].length;
+      if (!open) open = { char, len };
+      else if (char === open.char && len >= open.len) open = undefined;
+      continue;
+    }
+    if (!open && EXCERPT_MARKER.test(line)) return true;
   }
   return false;
 }
