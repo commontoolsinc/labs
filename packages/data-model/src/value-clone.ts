@@ -242,9 +242,9 @@ export function cloneHelper(
     default:
       // All valid `FabricValue` types are handled above.
       throw new Error(
-        `Cannot clone: \`${
-          (value as object).constructor?.name ?? typeof value
-        }\``,
+        `Cannot clone: ${
+          backtickQuote((value as object).constructor?.name ?? typeof value)
+        }`,
       );
   }
 }
@@ -510,7 +510,9 @@ export function cloneForMutation<T extends FabricValue>(
         "missing-segment",
         i,
         "undefined",
-        `\`cloneForMutation()\`: missing path segment \`${key}\` at ` +
+        `\`cloneForMutation()\`: missing path segment ${
+          backtickQuote(key)
+        } at ` +
           `index \`${i}\``,
       );
     }

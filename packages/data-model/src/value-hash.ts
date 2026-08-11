@@ -25,6 +25,7 @@ import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 import { codecOf } from "@/codec-common/index.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import { backtickQuote } from "./value-debug.ts";
 
 //
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -340,9 +341,9 @@ function feedObjectValue(
       // Nothing else is handled. As of this writing, specifically missing are
       // `Map`, `Set`, and `Error`.
       throw new Error(
-        `\`hashOf()\`: unsupported object type \`${
-          value?.constructor?.name ?? typeof value
-        }\``,
+        `\`hashOf()\`: unsupported object type ${
+          backtickQuote(value?.constructor?.name ?? typeof value)
+        }`,
       );
     }
   }

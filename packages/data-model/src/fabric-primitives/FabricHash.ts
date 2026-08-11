@@ -19,6 +19,7 @@ import {
 } from "@/codec-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { backtickQuote } from "@/value-debug.ts";
 
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -125,7 +126,9 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   static fromString(source: string): FabricHash {
     const colonIndex = source.indexOf(":");
     if (colonIndex === -1) {
-      throw new ReferenceError(`Invalid content hash string: \`${source}\``);
+      throw new ReferenceError(
+        `Invalid content hash string: ${backtickQuote(source)}`,
+      );
     }
     const tag = source.substring(0, colonIndex);
     const hashBase64url = source.substring(colonIndex + 1);

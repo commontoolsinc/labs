@@ -24,6 +24,7 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { backtickQuote } from "./value-debug.ts";
 
 /**
  * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
@@ -363,9 +364,9 @@ export function shallowFabricFromNativeValue(
       // Unrecognized object types (`Map`, `Set`, class instances, etc.) --
       // not valid `FabricValue`. Death before confusion!
       throw new Error(
-        `Not representable as a \`FabricValue\`: \`${
-          (value as object).constructor?.name ?? typeof value
-        }\` (not a recognized fabric type)`,
+        `Not representable as a \`FabricValue\`: ${
+          backtickQuote((value as object).constructor?.name ?? typeof value)
+        } (not a recognized fabric type)`,
       );
   }
 }
