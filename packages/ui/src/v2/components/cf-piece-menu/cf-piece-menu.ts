@@ -80,13 +80,24 @@ const SPACE_ACCESS_ENTRY: MenuEntry = {
 const DETACH_ENTRY = {
   label: "Stop following source",
   testId: "piece-menu-detach-source",
+  action: "detach",
 } as const;
 
-/** The entries a piece menu shows, including detach for a followed piece. */
+const CLONE_ENTRY = {
+  label: "Clone into new space",
+  testId: "piece-menu-clone",
+  action: "clone",
+} as const;
+
+type PieceMenuEntry = MenuEntry | typeof CLONE_ENTRY | typeof DETACH_ENTRY;
+
+/** The entries a piece menu shows, including its lifecycle actions. */
 export function pieceMenuEntries(
   hasOrigin = false,
-): readonly (MenuEntry | typeof DETACH_ENTRY)[] {
-  return hasOrigin ? [...ENTRIES, DETACH_ENTRY] : ENTRIES;
+): readonly PieceMenuEntry[] {
+  return hasOrigin
+    ? [...ENTRIES, CLONE_ENTRY, DETACH_ENTRY]
+    : [...ENTRIES, CLONE_ENTRY];
 }
 
 /**
@@ -805,6 +816,12 @@ export class CFPieceMenu extends BaseElement {
   private accessor sourceActionPending = false;
 
   @state()
+  private accessor clonePending = false;
+
+  @state()
+  private accessor cloneError: string | undefined = undefined;
+
+  @state()
   private accessor sourceActionError: string | undefined = undefined;
 
   @state()
@@ -907,6 +924,7 @@ export class CFPieceMenu extends BaseElement {
       highlightTarget?: Element;
     },
   ): void {
+    if (this.clonePending) return;
     const target = highlightTarget ?? highlightedPiece;
     if (
       highlightedPiece && target && target !== highlightedPiece &&
@@ -928,6 +946,8 @@ export class CFPieceMenu extends BaseElement {
     this.payloadText = "";
     this.sourceRead = undefined;
     this.sourceActionPending = false;
+    this.clonePending = false;
+    this.cloneError = undefined;
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
@@ -939,6 +959,7 @@ export class CFPieceMenu extends BaseElement {
 
   /** Hide the menu and forget the piece it was describing. */
   close(): void {
+    if (this.clonePending) return;
     this.#setHighlightedPiece(undefined, undefined);
     this.hidden = true;
     this.panel = undefined;
@@ -948,6 +969,8 @@ export class CFPieceMenu extends BaseElement {
     this.#resetPieceState();
     this.sourceRead = undefined;
     this.sourceActionPending = false;
+    this.clonePending = false;
+    this.cloneError = undefined;
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
@@ -1707,6 +1730,35 @@ export class CFPieceMenu extends BaseElement {
     }
   }
 
+  /** Clone the selected piece into a unique named space and open the copy. */
+  async cloneIntoFreshSpace(
+    spaceName = `piece-copy-${crypto.randomUUID()}`,
+  ): Promise<void> {
+    const cell = this.cell;
+    if (!cell || this.clonePending) return;
+    const token = this.readToken;
+    this.clonePending = true;
+    this.cloneError = undefined;
+    try {
+      const runtime = cell.runtime();
+      const destinationSpace = await runtime.resolveSpaceName(spaceName);
+      const clone = await runtime.clonePiece(
+        cell.id(),
+        cell.space(),
+        destinationSpace,
+      );
+      if (token !== this.readToken) return;
+      this.clonePending = false;
+      this.close();
+      navigate({ spaceName, pieceId: clone.id() });
+    } catch (error) {
+      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      this.cloneError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (token === this.readToken) this.clonePending = false;
+    }
+  }
+
   protected override render() {
     if (this.hidden || !this.cell) return nothing;
     return html`
@@ -1761,16 +1813,27 @@ export class CFPieceMenu extends BaseElement {
               class="menu-item"
               role="menuitem"
               test-id="${entry.testId}"
-              ?disabled="${this.sourceActionPending}"
+              ?disabled="${this.sourceActionPending || this.clonePending}"
               @click="${() =>
                 "panel" in entry
                   ? this.showPanel(entry.panel)
+                  : entry.action === "clone"
+                  ? this.cloneIntoFreshSpace()
                   : this.changeSource({ kind: "detach" })}"
             >
-              ${entry.label}
+              ${"action" in entry && entry.action === "clone" &&
+                  this.clonePending
+                ? "Cloning…"
+                : entry.label}
             </button>
           `
-        )}
+        )} ${this.cloneError
+          ? html`
+            <p class="error">
+              Could not clone this piece: ${this.cloneError}
+            </p>
+          `
+          : nothing}
         <div class="menu-divider" role="separator"></div>
         <button
           class="menu-item"

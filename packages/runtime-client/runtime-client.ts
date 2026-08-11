@@ -339,6 +339,21 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.source;
   }
 
+  /** Create a fresh-state copy that follows the selected piece's source. */
+  async clonePiece(
+    pieceId: string,
+    sourceSpace: DID,
+    destinationSpace: DID,
+  ): Promise<PageHandle> {
+    const response = await this.#conn.request<RequestType.PieceClone>({
+      type: RequestType.PieceClone,
+      pieceId,
+      sourceSpace,
+      destinationSpace,
+    });
+    return new PageHandle(this, response.page);
+  }
+
   /**
    * Change a piece's source lifecycle state and return the resulting source
    * view. An incompatible candidate is returned as a warning without mutation.

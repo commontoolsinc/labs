@@ -143,9 +143,12 @@ untested here by design — it lands and is tested with CT-1830.
 **Contract.** A right-click on a piece rendered by `cf-render` opens
 `cf-piece-menu` for that piece. **View source** shows the piece's retained
 authored files. **Origin and history** shows its active origin and recorded
-source revisions. A piece with an active origin also has **Stop following
-source**. That action keeps the exact current source and clears the active
-origin.
+source revisions. **Clone into new space** creates a fresh-state copy in a
+unique named space owned by the current user, then navigates to it. The copy
+follows the selected piece when that piece is detached. When the selected piece
+already follows an origin, the copy follows that same origin. A piece with an
+active origin also has **Stop following source**. That action keeps the exact
+current source and clears the active origin.
 
 Historical entries can restore an exact retained source version or resume
 following an earlier web or fabric origin. Each entry can show its exact
@@ -157,8 +160,9 @@ reviewed code and source-state snapshot. If the piece's actual retained input
 does not satisfy the candidate's argument schema, the runtime rejects the
 transition instead. The input must be repaired before that source can be
 selected. Nothing is required of the host to get these controls. Importing
-`cf-render` registers the menu. The menu reads and changes the piece through
-`RuntimeClient.getPieceSource()`, `RuntimeClient.getPieceSourceRevision()`, and
+`cf-render` registers the menu. The menu reads, clones, and changes the piece
+through `RuntimeClient.getPieceSource()`,
+`RuntimeClient.getPieceSourceRevision()`, `RuntimeClient.clonePiece()`, and
 `RuntimeClient.updatePieceSource()` on the runtime the piece already runs in.
 
 After the piece-specific entries, a divider separates **Space access rights...**.

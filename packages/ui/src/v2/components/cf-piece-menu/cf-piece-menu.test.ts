@@ -300,20 +300,23 @@ function pieceCell(
     ) => Promise<SpaceAclView>;
   } = {},
 ): CellHandle {
+  const runtime = {
+    getPieceSource: read,
+    getPieceSourceRevision: readRevision,
+    updatePieceSource: update,
+    getSpaceAcl: getAccess,
+    setSpaceAclEntry: setAccess,
+    removeSpaceAclEntry: removeAccess,
+    signal: {
+      get aborted() {
+        return typeof aborted === "function" ? aborted() : aborted;
+      },
+    },
+  };
   return {
     id: () => "of:fid1:piece",
     space: () => SPACE,
-    runtime: () => ({
-      getPieceSource: read,
-      getPieceSourceRevision: readRevision,
-      updatePieceSource: update,
-      getSpaceAcl: getAccess,
-      setSpaceAclEntry: setAccess,
-      removeSpaceAclEntry: removeAccess,
-      signal: {
-        aborted: typeof aborted === "function" ? aborted() : aborted,
-      },
-    }),
+    runtime: () => runtime,
     equals(other: unknown) {
       return other === this;
     },
@@ -364,12 +367,13 @@ function geometryProbe(
 }
 
 describe("piece menu entries", () => {
-  it("offers exactly the four entries, in order", () => {
+  it("offers the panels and clone action in order", () => {
     expect(pieceMenuEntries().map((entry) => entry.label)).toEqual([
       "View source",
       "Origin and history",
       "Data",
       "Actions",
+      "Clone into new space",
     ]);
   });
 
@@ -379,6 +383,7 @@ describe("piece menu entries", () => {
       "piece-menu-origin",
       "piece-menu-data",
       "piece-menu-actions",
+      "piece-menu-clone",
     ]);
   });
 
@@ -388,6 +393,7 @@ describe("piece menu entries", () => {
       "Origin and history",
       "Data",
       "Actions",
+      "Clone into new space",
       "Stop following source",
     ]);
     expect(pieceMenuEntries(true).at(-1)?.testId).toBe(
@@ -595,6 +601,94 @@ describe("the menu a right-click opens", () => {
     const rendered = shows(menu);
     expect(rendered).toContain("Stop following source");
     expect(rendered).toContain("piece-menu-detach-source");
+  });
+
+  it("clones into a named space and navigates to the new piece", async () => {
+    const requests: unknown[] = [];
+    const navigations: unknown[] = [];
+    const onNavigate = (event: Event) => {
+      navigations.push((event as CustomEvent).detail);
+    };
+    const cell = pieceCell();
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(
+        pieceId: string,
+        sourceSpace: typeof SPACE,
+        destinationSpace: typeof SPACE,
+      ): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = (name) => {
+      requests.push({ kind: "resolve", name });
+      return Promise.resolve(SPACE);
+    };
+    runtime.clonePiece = (pieceId, sourceSpace, destinationSpace) => {
+      requests.push({
+        kind: "clone",
+        pieceId,
+        sourceSpace,
+        destinationSpace,
+      });
+      return Promise.resolve({ id: () => "fid1:clone" });
+    };
+    globalThis.addEventListener("cf-navigate", onNavigate);
+    try {
+      const menu = openMenu(cell);
+      await menu.cloneIntoFreshSpace("copied-piece");
+    } finally {
+      globalThis.removeEventListener("cf-navigate", onNavigate);
+    }
+
+    expect(requests).toEqual([
+      { kind: "resolve", name: "copied-piece" },
+      {
+        kind: "clone",
+        pieceId: "of:fid1:piece",
+        sourceSpace: SPACE,
+        destinationSpace: SPACE,
+      },
+    ]);
+    expect(navigations).toEqual([{
+      spaceName: "copied-piece",
+      pieceId: "fid1:clone",
+    }]);
+  });
+
+  it("does not strand a clone when the menu is dismissed during the request", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const navigations: unknown[] = [];
+    const onNavigate = (event: Event) => {
+      navigations.push((event as CustomEvent).detail);
+    };
+    const cell = pieceCell();
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = async () => {
+      entered.resolve();
+      await release.promise;
+      return { id: () => "fid1:clone" };
+    };
+    globalThis.addEventListener("cf-navigate", onNavigate);
+    try {
+      const menu = openMenu(cell);
+      const cloning = menu.cloneIntoFreshSpace("copied-piece");
+      await entered.promise;
+      menu.close();
+      release.resolve();
+      await cloning;
+    } finally {
+      release.resolve();
+      globalThis.removeEventListener("cf-navigate", onNavigate);
+    }
+
+    expect(navigations).toEqual([{
+      spaceName: "copied-piece",
+      pieceId: "fid1:clone",
+    }]);
   });
 });
 

@@ -34,6 +34,7 @@ import type {
 } from "./storage/interface.ts";
 import {
   buildSourceDocs,
+  COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
   deriveModuleDelegations,
   getCompileCacheRuntimeVersion,
@@ -49,6 +50,8 @@ import {
   writeSourceAndCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
+import { readStoredCfcMetadata } from "./cfc/metadata.ts";
+import type { CfcMetadata } from "./cfc/types.ts";
 import {
   isFabricImportSpecifier,
   parseFabricRef,
@@ -66,6 +69,21 @@ const logger = getLogger("pattern-manager");
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
 const PATTERN_COVERAGE_CACHE_VARIANT = "pattern-coverage";
+
+/** Whether copying source bytes would discard a meaningful stored CFC label. */
+export function sourceCfcMetadataProhibitsCrossSpaceCopy(
+  metadata: CfcMetadata | undefined,
+): boolean {
+  return metadata?.labelMap.entries.some((entry) => {
+    const confidentiality = entry.label.confidentiality ?? [];
+    const integrity = entry.label.integrity ?? [];
+    if (confidentiality.length > 0) return true;
+    if (integrity.length === 0) return false;
+    return entry.path.length !== 1 ||
+      entry.path[0] !== "delegatedModuleIdentities" ||
+      integrity.some((atom) => atom !== COMPILED_INTEGRITY_ATOM);
+  }) ?? false;
+}
 
 function throwableStorageError(error: CommitError): Error {
   if (error instanceof Error) return error;
@@ -2102,6 +2120,7 @@ export class PatternManager {
   async getPatternSourceProgramByIdentity(
     entryIdentity: string,
     space: MemorySpace,
+    destinationSpace?: MemorySpace,
   ): Promise<
     {
       main: string;
@@ -2118,6 +2137,26 @@ export class PatternManager {
         entryIdentity,
         readTx,
       );
+      if (
+        sourceDocs !== undefined && destinationSpace !== undefined &&
+        destinationSpace !== space
+      ) {
+        for (const identity of sourceDocs.keys()) {
+          const metadata = readStoredCfcMetadata(readTx, {
+            space,
+            id: sourceDocKey(identity),
+          });
+          const prohibited = sourceCfcMetadataProhibitsCrossSpaceCopy(
+            metadata,
+          );
+          if (prohibited) {
+            throw new Error(
+              `pattern source ${entryIdentity} carries CFC provenance that ` +
+                `cannot be copied from ${space} to ${destinationSpace}`,
+            );
+          }
+        }
+      }
     } finally {
       readTx.abort?.("get-pattern-source-files read complete");
     }

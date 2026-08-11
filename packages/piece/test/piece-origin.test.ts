@@ -47,6 +47,12 @@ const DEFAULT_APP_SOURCE = [
   "",
 ].join("\n");
 
+const FOLLOW_SOURCE = [
+  "import { pattern } from 'commonfabric';",
+  "export default pattern<{ value?: number }>(() => ({ marker: 1 + 0 }));",
+  "",
+].join("\n");
+
 /**
  * Serve pattern source from memory, so the resolver and runtime.fetch need no
  * network. Mirrors the stub in pattern-source-provenance.test.ts.
@@ -183,21 +189,67 @@ describe("resolvePieceOriginSource", () => {
     );
   });
 
-  it("rejects cross-space refollow until source replication is checked", async () => {
+  it("reads a mutable piece's source from its explicit space", async () => {
     const otherSpace = "did:key:z6MkspaceBBBB" as MemorySpace;
+    const reads: string[] = [];
     const runtime = {
       hostForSpace: () => new URL("https://toolshed.test"),
+      getCellFromEntityId: (space: string) => {
+        reads.push(`piece:${space}`);
+        return {
+          sync: () => Promise.resolve(),
+          getMetaRaw: (name: string) =>
+            name === "patternIdentity"
+              ? { identity: HASH, symbol: "upstream" }
+              : undefined,
+        };
+      },
+      patternManager: {
+        getPatternSourceProgramByIdentity: (
+          _identity: string,
+          space: string,
+        ) => {
+          reads.push(`source:${space}`);
+          return Promise.resolve({
+            main: "/main.tsx",
+            files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+          });
+        },
+      },
     } as unknown as Runtime;
-    await expect(
-      resolvePieceOriginSource(
-        runtime,
-        SPACE,
-        `cf:/${otherSpace}/of:fid1:${HASH}`,
-        "default",
-      ),
-    ).rejects.toThrow(
-      "following a source from another space requires checked source replication",
+    const resolved = await resolvePieceOriginSource(
+      runtime,
+      SPACE,
+      `cf:/${otherSpace}/of:fid1:${HASH}`,
+      "default",
     );
+
+    expect(resolved.pattern).toEqual({ identity: HASH, symbol: "upstream" });
+    expect(resolved.program.mainExport).toBe("upstream");
+    expect(reads).toEqual([`piece:${otherSpace}`, `source:${otherSpace}`]);
+  });
+
+  it("does not register an unaccepted host while resolving another space", async () => {
+    const otherSpace = "did:key:z6MkspaceBBBB" as MemorySpace;
+    const registrations: unknown[] = [];
+    const runtime = {
+      mappedHostFor: () => undefined,
+      hostForSpace: () => new URL("https://toolshed.test"),
+      registerSpaceHost: (...args: unknown[]) => {
+        registrations.push(args);
+        return true;
+      },
+    } as unknown as Runtime;
+
+    await expect(resolvePieceOriginSource(
+      runtime,
+      SPACE,
+      `cf://other.test/${otherSpace}/of:fid1:${HASH}`,
+      "default",
+    )).rejects.toThrow(
+      `the cross-space host other.test is not an accepted route for ${otherSpace}`,
+    );
+    expect(registrations).toEqual([]);
   });
 
   it("rejects a named space without resolving or registering it", async () => {
@@ -680,5 +732,423 @@ describe("reading a piece's source state", () => {
     const state = await readPieceSourceState(runtime, cell);
     expect(state.history).toHaveLength(1);
     expect(state.history[0].origin).toBeUndefined();
+  });
+
+  it("clones into another space and follows the selected piece", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { input: { label: "before" } });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    const clone = await source.cloneTo(destination);
+    const sourceState = await readPieceSourceState(runtime, source.getCell());
+    const cloneState = await readPieceSourceState(runtime, clone.getCell());
+
+    expect(cloneState.space).toBe(destination.getSpace());
+    expect(cloneState.pattern).toEqual(sourceState.pattern);
+    expect(cloneState.origin).toEqual({
+      url:
+        `cf:/${controller.getSpace()}/${source.getCell().getAsNormalizedFullLink().id}`,
+      kind: "fabric-piece",
+    });
+
+    const resolved = await resolvePieceOriginSource(
+      runtime,
+      destination.getSpace(),
+      cloneState.origin!.url,
+      cloneState.pattern!.symbol,
+    );
+    expect(resolved.pattern).toEqual(sourceState.pattern);
+  });
+
+  it("passes an existing upstream origin through to a clone", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { origin: "https://example.test/upstream.tsx" });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-origin-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    const clone = await source.cloneTo(destination);
+    const state = await readPieceSourceState(runtime, clone.getCell());
+
+    expect(state.origin).toEqual({
+      url: "https://example.test/upstream.tsx",
+      kind: "web",
+    });
+  });
+
+  it("qualifies a relative fabric origin before copying it to another space", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { origin: `cf:of:fid1:${HASH}` });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-relative-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    const clone = await source.cloneTo(destination);
+    const state = await readPieceSourceState(runtime, clone.getCell());
+
+    expect(state.origin?.url).toBe(
+      `cf:/${controller.getSpace()}/of:fid1:${HASH}`,
+    );
+  });
+
+  it("rejects a clone when the selected piece changes during source loading", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-race-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const manager = runtime.patternManager;
+    const original = manager.getPatternSourceProgramByIdentity.bind(manager);
+    manager.getPatternSourceProgramByIdentity = (async (...args) => {
+      entered.resolve();
+      await release.promise;
+      return await original(...args);
+    }) as typeof manager.getPatternSourceProgramByIdentity;
+
+    try {
+      const cloning = source.cloneTo(destination);
+      await entered.promise;
+      const tx = runtime.edit();
+      source.getCell().withTx(tx).setMetaRaw(
+        "patternSource",
+        "https://example.test/changed.tsx",
+      );
+      runtime.prepareTxForCommit(tx);
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+      release.resolve();
+      await expect(cloning).rejects.toThrow(
+        "piece source changed while it was being cloned",
+      );
+    } finally {
+      release.resolve();
+      manager.getPatternSourceProgramByIdentity = original;
+    }
+  });
+
+  it("updates a running clone when the selected piece changes source", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: FOLLOW_SOURCE }],
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-update-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+    const clone = await source.cloneTo(destination);
+    await runtime.patternUpdater.idle();
+    const updatedSource = FOLLOW_SOURCE.replace("1 + 0", "2 + 0");
+
+    await source.setPattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: updatedSource }],
+    });
+    await runtime.idle();
+    await runtime.patternUpdater.idle();
+    await runtime.idle();
+
+    const sourceState = await readPieceSourceState(runtime, source.getCell());
+    const cloneState = await readPieceSourceState(runtime, clone.getCell());
+    expect(cloneState.pattern).toEqual(sourceState.pattern);
+    expect(cloneState.history.at(-1)?.operation).toBe("origin-update");
+  });
+
+  it("converges on the newest source change while an update is loading", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: FOLLOW_SOURCE }],
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-coalesce-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+    const clone = await source.cloneTo(destination);
+    await runtime.patternUpdater.idle();
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const manager = runtime.patternManager;
+    const original = manager.getPatternSourceProgramByIdentity.bind(manager);
+    let held = false;
+    manager.getPatternSourceProgramByIdentity = (async (...args) => {
+      if (args[2] === destination.getSpace() && !held) {
+        held = true;
+        entered.resolve();
+        await release.promise;
+      }
+      return await original(...args);
+    }) as typeof manager.getPatternSourceProgramByIdentity;
+
+    try {
+      await source.setPattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: FOLLOW_SOURCE.replace("1 + 0", "2 + 0"),
+        }],
+      });
+      await entered.promise;
+      await source.setPattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: FOLLOW_SOURCE.replace("1 + 0", "3 + 0"),
+        }],
+      });
+      release.resolve();
+      await runtime.patternUpdater.idle();
+      await runtime.idle();
+      await runtime.patternUpdater.idle();
+
+      expect(getPatternIdentityRef(clone.getCell())).toEqual(
+        getPatternIdentityRef(source.getCell()),
+      );
+    } finally {
+      release.resolve();
+      manager.getPatternSourceProgramByIdentity = original;
+    }
+  });
+
+  it("detects an upstream change made before its source sink is installed", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: FOLLOW_SOURCE }],
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-subscribe-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    const sourceCell = source.getCell();
+    const sourceLink = sourceCell.getAsNormalizedFullLink();
+    const runtimeWithMutableLookup = runtime as Runtime & {
+      getCellFromEntityId: Runtime["getCellFromEntityId"];
+    };
+    const originalLookup = runtime.getCellFromEntityId.bind(runtime);
+    runtimeWithMutableLookup.getCellFromEntityId = ((
+      space: Parameters<Runtime["getCellFromEntityId"]>[0],
+      id: Parameters<Runtime["getCellFromEntityId"]>[1],
+    ) =>
+      space === sourceLink.space && id === sourceLink.id
+        ? sourceCell
+        : originalLookup(space, id)) as Runtime["getCellFromEntityId"];
+    const originalSinkMeta = sourceCell.sinkMeta.bind(sourceCell);
+    const sinkCaptured = Promise.withResolvers<void>();
+    let installCapturedSink: (() => void) | undefined;
+    let cancelCapturedSink: (() => void) | undefined;
+    sourceCell.sinkMeta = ((field, callback, options) => {
+      if (field === "patternIdentity" && installCapturedSink === undefined) {
+        installCapturedSink = () => {
+          cancelCapturedSink = originalSinkMeta(field, callback, options);
+        };
+        sinkCaptured.resolve();
+        return () => cancelCapturedSink?.();
+      }
+      return originalSinkMeta(field, callback, options);
+    }) as typeof sourceCell.sinkMeta;
+
+    try {
+      const clone = await source.cloneTo(destination);
+      await sinkCaptured.promise;
+      await runtime.patternUpdater.idle();
+      await source.setPattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: FOLLOW_SOURCE.replace("1 + 0", "2 + 0"),
+        }],
+      });
+      installCapturedSink!();
+      await runtime.idle();
+      await runtime.patternUpdater.idle();
+      await runtime.idle();
+
+      expect(getPatternIdentityRef(clone.getCell())).toEqual(
+        getPatternIdentityRef(source.getCell()),
+      );
+    } finally {
+      cancelCapturedSink?.();
+      sourceCell.sinkMeta = originalSinkMeta;
+      runtimeWithMutableLookup.getCellFromEntityId = originalLookup;
+    }
+  });
+
+  it("stops following upstream changes when the clone stops", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: FOLLOW_SOURCE }],
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-stop-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+    const clone = await source.cloneTo(destination);
+    await runtime.patternUpdater.idle();
+    const stoppedPattern = getPatternIdentityRef(clone.getCell());
+
+    runtime.runner.stop(clone.getCell());
+    await source.setPattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: FOLLOW_SOURCE.replace("1 + 0", "2 + 0"),
+      }],
+    });
+    await runtime.idle();
+    await runtime.patternUpdater.idle();
+
+    expect(getPatternIdentityRef(clone.getCell())).toEqual(stoppedPattern);
+  });
+
+  it("cancels a source update already loading when the clone stops", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: FOLLOW_SOURCE }],
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-stop-load-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+    const clone = await source.cloneTo(destination);
+    await runtime.patternUpdater.idle();
+    const stoppedPattern = getPatternIdentityRef(clone.getCell());
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const manager = runtime.patternManager;
+    const original = manager.getPatternSourceProgramByIdentity.bind(manager);
+    manager.getPatternSourceProgramByIdentity = (async (...args) => {
+      if (args[2] === destination.getSpace()) {
+        entered.resolve();
+        await release.promise;
+      }
+      return await original(...args);
+    }) as typeof manager.getPatternSourceProgramByIdentity;
+
+    try {
+      await source.setPattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: FOLLOW_SOURCE.replace("1 + 0", "2 + 0"),
+        }],
+      });
+      await entered.promise;
+      runtime.runner.stop(clone.getCell());
+      release.resolve();
+      await runtime.patternUpdater.idle();
+      await runtime.idle();
+
+      expect(getPatternIdentityRef(clone.getCell())).toEqual(stoppedPattern);
+    } finally {
+      release.resolve();
+      manager.getPatternSourceProgramByIdentity = original;
+    }
+  });
+
+  it("re-subscribes when a clone restarts before its old check settles", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: FOLLOW_SOURCE }],
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-restart-load-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+    const clone = await source.cloneTo(destination);
+    await runtime.patternUpdater.idle();
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const manager = runtime.patternManager;
+    const original = manager.getPatternSourceProgramByIdentity.bind(manager);
+    manager.getPatternSourceProgramByIdentity = (async (...args) => {
+      if (args[2] === destination.getSpace()) {
+        entered.resolve();
+        await release.promise;
+      }
+      return await original(...args);
+    }) as typeof manager.getPatternSourceProgramByIdentity;
+
+    try {
+      await source.setPattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: FOLLOW_SOURCE.replace("1 + 0", "2 + 0"),
+        }],
+      });
+      await entered.promise;
+      runtime.runner.stop(clone.getCell());
+      await runtime.runner.start(clone.getCell());
+      release.resolve();
+      await runtime.patternUpdater.idle();
+      await runtime.idle();
+      await runtime.patternUpdater.idle();
+      await runtime.idle();
+
+      expect(getPatternIdentityRef(clone.getCell())).toEqual(
+        getPatternIdentityRef(source.getCell()),
+      );
+    } finally {
+      release.resolve();
+      manager.getPatternSourceProgramByIdentity = original;
+    }
   });
 });

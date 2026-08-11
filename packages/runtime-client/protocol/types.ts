@@ -91,6 +91,7 @@ export enum RequestType {
   PageSynced = "page:synced",
   PieceGetSource = "piece:getSource",
   PieceGetSourceRevision = "piece:getSourceRevision",
+  PieceClone = "piece:clone",
   PieceUpdateSource = "piece:updateSource",
   SpaceGetAcl = "space:getAcl",
   SpaceSetAclEntry = "space:setAclEntry",
@@ -704,6 +705,14 @@ export interface PieceGetSourceRevisionRequest extends BaseRequest {
   revisionId: string;
 }
 
+/** Create a fresh-state copy of a piece in another space. */
+export interface PieceCloneRequest extends BaseRequest {
+  type: RequestType.PieceClone;
+  sourceSpace: DID;
+  pieceId: string;
+  destinationSpace: DID;
+}
+
 /** How a piece's origin URL resolves. */
 export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
 
@@ -975,6 +984,7 @@ export type IPCClientRequest =
   | PageSyncedRequest
   | PieceGetSourceRequest
   | PieceGetSourceRevisionRequest
+  | PieceCloneRequest
   | PieceUpdateSourceRequest
   | SpaceGetAclRequest
   | SpaceSetAclEntryRequest
@@ -1345,6 +1355,10 @@ export type Commands = {
   [RequestType.PieceGetSourceRevision]: {
     request: PieceGetSourceRevisionRequest;
     response: PieceSourceRevisionResponse;
+  };
+  [RequestType.PieceClone]: {
+    request: PieceCloneRequest;
+    response: PageResponse;
   };
   [RequestType.PieceUpdateSource]: {
     request: PieceUpdateSourceRequest;

@@ -7,9 +7,43 @@ import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
+import {
+  sourceCfcMetadataProhibitsCrossSpaceCopy,
+} from "../src/pattern-manager.ts";
+import { COMPILED_INTEGRITY_ATOM } from "../src/compilation-cache/cell-cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+describe("PatternManager cross-space source policy", () => {
+  const metadata = (
+    path: string[],
+    label: { confidentiality?: unknown[]; integrity?: unknown[] },
+  ) =>
+    ({
+      version: 1,
+      labelMap: { entries: [{ path, label, origin: "declared" }] },
+    }) as never;
+
+  it("rejects confidentiality and non-compiler integrity labels", () => {
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      metadata(["code"], { confidentiality: ["private-source"] }),
+    )).toBe(true);
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      metadata(["code"], { integrity: ["reviewed-source"] }),
+    )).toBe(true);
+  });
+
+  it("allows only the compiler's delegation attestation", () => {
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      metadata(
+        ["delegatedModuleIdentities"],
+        { integrity: [COMPILED_INTEGRITY_ATOM] },
+      ),
+    )).toBe(false);
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(undefined)).toBe(false);
+  });
+});
 
 describe("PatternManager program persistence", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;

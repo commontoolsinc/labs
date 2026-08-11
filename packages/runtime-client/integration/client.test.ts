@@ -447,6 +447,35 @@ describe("RuntimeClient", () => {
       assertEquals(revisionSource.files, source.files);
     });
 
+    it("clones a piece into another named space and follows it", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+      const sourcePage = await rt.createPage(TEST_PROGRAM, session.space, {
+        run: true,
+      });
+      const destinationName = `piece-clone-${crypto.randomUUID()}`;
+      const destinationSpace = await rt.resolveSpaceName(destinationName);
+
+      const clone = await rt.clonePiece(
+        sourcePage.id(),
+        session.space,
+        destinationSpace,
+      );
+      const source = await rt.getPieceSource(sourcePage.id(), session.space);
+      const cloned = await rt.getPieceSource(clone.id(), destinationSpace);
+
+      assertEquals(cloned.space, destinationSpace);
+      assertEquals(cloned.pattern, source.pattern);
+      assertEquals(cloned.origin, {
+        url: `cf:/${session.space}/${sourcePage.cell().id()}`,
+        kind: "fabric-piece",
+      });
+      assertEquals(
+        cloned.history.map((revision) => revision.operation),
+        ["create"],
+      );
+    });
+
     it("detaches a followed root through the runtime-client protocol", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);

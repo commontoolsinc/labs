@@ -52,7 +52,11 @@ import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
 } from "../schema-compatibility.ts";
-import { resolvePieceOriginSource } from "./piece-origin.ts";
+import {
+  qualifyFabricOrigin,
+  readPieceOrigin,
+  resolvePieceOriginSource,
+} from "./piece-origin.ts";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 
 interface PieceCellIo {
@@ -2842,6 +2846,45 @@ export class PieceController<T = unknown> {
 
   getCell(): Cell<T> {
     return this.#cell;
+  }
+
+  /**
+   * Create a fresh-state copy in `destination` that tracks the same source.
+   * A detached piece becomes the copy's mutable fabric origin. A piece that
+   * already tracks an origin passes that origin through, so both copies point
+   * at the same update source.
+   */
+  async cloneTo(destination: PiecesController): Promise<PieceController<T>> {
+    await this.#cell.sync();
+    const snapshot = getPieceSourceSnapshot(this.#cell);
+    if (snapshot === undefined) {
+      throw new Error("piece missing pattern identity");
+    }
+    const sourceSpace = this.#pieces.getSpace();
+    const trackedOrigin = readPieceOrigin(
+      this.#pieces.runtime,
+      this.#cell,
+    )?.url;
+    const origin = trackedOrigin === undefined
+      ? `cf:/${sourceSpace}/${this.#cell.getAsNormalizedFullLink().id}`
+      : qualifyFabricOrigin(trackedOrigin, sourceSpace);
+    const program = await this.#pieces.runtime.patternManager
+      .getPatternSourceProgramByIdentity(
+        snapshot.pattern.identity,
+        sourceSpace,
+        destination.getSpace(),
+      );
+    if (program === undefined) {
+      throw new Error("piece source is not available");
+    }
+    const current = getPieceSourceSnapshot(this.#cell);
+    if (current === undefined || !samePieceSourceSnapshot(snapshot, current)) {
+      throw new Error("piece source changed while it was being cloned");
+    }
+    return await destination.create<T>(
+      { ...program, mainExport: snapshot.pattern.symbol },
+      { origin },
+    );
   }
 
   /** Return a stable reference to the pattern currently running this piece. */
