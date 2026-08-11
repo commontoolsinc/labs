@@ -322,19 +322,21 @@ export function resolveSourceLocationFromStack(
   return { location: null };
 }
 
-/** Declare a module
+/**
+ * Declare a module
+ *
+ * Function-first form, matching pattern()/handler() convention: the callback
+ * leads, schemas trail and are optional. The argument/result schemas are plain
+ * JSONSchema values that are NOT materialized into the callback input type —
+ * the callback's own (or transformer-inferred) type stands. The no-input form
+ * is `lift(fn, false)`: argumentSchema:false makes the no-arg application valid
+ * (the runner's isValidArgument check passes on `argumentSchema === false`),
+ * which is how computed-origin (zero-capture) lifts lower.
  *
  * @param implementation A function that takes an input and returns a result
  *
  * @returns A module node factory that also serializes as module.
  */
-// Function-first form, matching pattern()/handler() convention: the callback
-// leads, schemas trail and are optional. The argument/result schemas are plain
-// JSONSchema values that are NOT materialized into the callback input type — the
-// callback's own (or transformer-inferred) type stands. The no-input form is
-// `lift(fn, false)`: argumentSchema:false makes the no-arg application valid
-// (the runner's isValidArgument check passes on `argumentSchema === false`),
-// which is how computed-origin (zero-capture) lifts lower.
 export function lift<T, R>(
   implementation: (input: T) => R,
   argumentSchema?: JSONSchema,
@@ -662,9 +664,7 @@ export const assert: (fn: () => boolean) => Reactive<AssertRecord> = (
  * @param _event - A function that receives an event and performs side effects
  * @throws Error if called directly (CTS must be enabled for action() to work)
  */
-// Overload 1: Zero-parameter callback returns Stream<void>
 export function action(_event: () => void): Stream<void>;
-// Overload 2: Parameterized callback returns Stream<E>
 export function action<E>(_event: (event: E) => void): Stream<E>;
 // Overload 3: a declared result, reached only by supplying both type arguments
 // explicitly — `action<AddTopic, TopicRef>((e) => { ...; return ref })`.

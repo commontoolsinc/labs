@@ -1081,14 +1081,6 @@ export class Engine extends EventTarget {
   }
 
   /**
-   * Evaluate a verified ESM record graph: load it synchronously via `importNow`
-   * in a locked-down compartment whose globals are the hardened runtime globals
-   * (runtime-module records, already in the graph, supply the trusted host
-   * APIs), and return the entry namespace as `main` plus the per-module export
-   * map. The graph was security-verified at compile time, so verification is
-   * not repeated.
-   */
-  /**
    * Evaluate a verified ESM record graph (public so the PatternManager can run
    * compile → cache write-back → evaluate as discrete steps). Thin wrapper over
    * {@link evaluateGraph} with the source-compile registration strategy: module
@@ -1131,6 +1123,11 @@ export class Engine extends EventTarget {
    * ({@link evaluateCachedModules}); `ctx` supplies the path/identity handling
    * that differs between them (prefixed authored paths vs prefix-free cached
    * identities). The graph is assumed already security-verified.
+   *
+   * The graph loads synchronously via `importNow` in a locked-down compartment
+   * whose globals are the hardened runtime globals (runtime-module records,
+   * already in the graph, supply the trusted host APIs). The entry namespace
+   * comes back as `main`, alongside the per-module export map.
    */
   private evaluateGraph(
     graph: CompiledModuleGraph,

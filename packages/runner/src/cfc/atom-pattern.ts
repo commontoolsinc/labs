@@ -41,10 +41,11 @@ import {
  * across one match (or across patterns in a conjunction) must bind
  * structurally equal values — this IS the post-match equality constraint
  * between variables (§4.3.3 `constraints`, plan B1 "constraint correlation").
+ *
+ * NOT a `CfcAtom`: a pattern is atom-shaped but admits things an atom cannot
+ * -- `{ var }` placeholders, and an explicitly-`undefined` field, which is an
+ * absence check (`CfcJsonValue` has no `undefined`).
  */
-// NOT a `CfcAtom`: a pattern is atom-shaped but admits things an atom cannot
-// -- `{ var }` placeholders, and an explicitly-`undefined` field, which is an
-// absence check (`CfcJsonValue` has no `undefined`).
 export type AtomPattern = unknown;
 
 /** A binding environment produced by matching (spec §4.3.3 `Bindings`). */

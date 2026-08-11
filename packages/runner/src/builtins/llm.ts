@@ -869,25 +869,6 @@ export function llm(
 }
 
 /**
- * Generate text via an LLM.
- *
- * A simplified alternative to `llm` that takes a single prompt string and
- * optional system message, returning plain text rather than a structured
- * content array.
- *
- * Returns the complete result as `result` (string) and the incremental result
- * as `partial` (string). `pending` is true while a request is pending.
- *
- * @param prompt - The user prompt/message to send to the LLM.
- * @param system - Optional system message.
- * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
- * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
- *
- * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
- *   As individual docs, representing `pending` state, final `result` and
- *   incrementally updating `partial` result.
- */
-/**
  * Resolve the effective native-model-tool ids for a request from the friendly
  * `search` flag (shorthand for Google Search grounding) plus any explicit
  * `nativeModelToolIds`. Returns undefined when none are requested.
@@ -942,6 +923,25 @@ function extractGroundingSources(
   return out.length > 0 ? out : undefined;
 }
 
+/**
+ * Generate text via an LLM.
+ *
+ * A simplified alternative to `llm` that takes a single prompt string and
+ * optional system message, returning plain text rather than a structured
+ * content array.
+ *
+ * Returns the complete result as `result` (string) and the incremental result
+ * as `partial` (string). `pending` is true while a request is pending.
+ *
+ * @param prompt - The user prompt/message to send to the LLM.
+ * @param system - Optional system message.
+ * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
+ * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
+ *
+ * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
+ *   As individual docs, representing `pending` state, final `result` and
+ *   incrementally updating `partial` result.
+ */
 export function generateText(
   inputsCell: Cell<BuiltInGenerateTextParams>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,

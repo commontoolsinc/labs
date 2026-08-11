@@ -349,7 +349,6 @@ const mintedRuntimeInjectedEventKeys = (
  * Module augmentation for runtime-specific cell methods.
  * These augmentations add implementation details specific to the runner runtime.
  */
-
 declare module "@commonfabric/api" {
   /**
    * Augment Writable to add runtime-specific write methods with onCommit callbacks
@@ -660,6 +659,20 @@ function parseSqliteInsertColumns(sql: string): string[] | undefined {
 }
 
 /**
+ * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer
+ * (delegating the back-pointer case to query-result-proxy's `getCellOrThrow`).
+ * Shared by the write path (`encodeSqliteParams`) and `cf-link.ts`'s
+ * `encodeCfLinkValue` so `db.exec` and the `sqliteQuery` builtin agree on what
+ * counts as a bound cell. (Lives here because it needs `isCell` /
+ * `instanceof CellImpl`; cf-link.ts already imports from cell.ts.)
+ */
+export function asBoundCell(value: unknown): Cell<unknown> | undefined {
+  if (isCell(value)) return value as Cell<unknown>;
+  if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
+  return undefined;
+}
+
+/**
  * Encode SQLite bind params for the wire: a cell bound to a `_cf_link` column is
  * encoded to an absolute sigil-link string; a cell bound to any other column
  * throws; an `undefined` value throws (the pending-value guard — `null` is
@@ -674,20 +687,6 @@ function parseSqliteInsertColumns(sql: string): string[] | undefined {
  * would corrupt a non-link column). Use an explicit column list or named params
  * (`:col`) to bind a Cell in those statements.
  */
-/**
- * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer
- * (delegating the back-pointer case to query-result-proxy's `getCellOrThrow`).
- * Shared by the write path (`encodeSqliteParams`) and `cf-link.ts`'s
- * `encodeCfLinkValue` so `db.exec` and the `sqliteQuery` builtin agree on what
- * counts as a bound cell. (Lives here because it needs `isCell` /
- * `instanceof CellImpl`; cf-link.ts already imports from cell.ts.)
- */
-export function asBoundCell(value: unknown): Cell<unknown> | undefined {
-  if (isCell(value)) return value as Cell<unknown>;
-  if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
-  return undefined;
-}
-
 export function encodeSqliteParams(
   sql: string,
   params?: ReadonlyArray<unknown> | Record<string, unknown>,
@@ -2740,10 +2739,6 @@ export class CellImpl<T extends FabricValue>
   }
 
   /**
-   * Map over an array cell, creating a new derived array.
-   * Similar to Array.prototype.map but works with Reactives.
-   */
-  /**
    * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
    * this DB handle as the `db` input (sugar over the `sqliteQuery` factory,
    * mirroring how `.map` threads `this` as `list`). The `<Row>` result schema is
@@ -2785,6 +2780,10 @@ export class CellImpl<T extends FabricValue>
     >;
   }
 
+  /**
+   * Map over an array cell, creating a new derived array.
+   * Similar to Array.prototype.map but works with Reactives.
+   */
   map<S>(
     _fn: (
       element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,

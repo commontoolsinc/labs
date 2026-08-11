@@ -5299,12 +5299,13 @@ export class Runner {
    * replace the order with `[child2, parent]`, dropping `child1` to after the
    * parent (orderedCommitSpaces appends unlisted written spaces), which would
    * make the parent's link to `child1` durable before `child1`'s target.
+   *
+   * Public so the pattern builder (builder/pattern.ts
+   * `optIntoInSpaceMultiSpaceCommit`) can opt a transaction into a multi-space
+   * commit the moment a handler's `.inSpace(...)` target resolves — before the
+   * cross-space write executes (e.g. appending to the home `profiles` list,
+   * whose elements live in their own spaces).
    */
-  // Public so the pattern builder (builder/pattern.ts
-  // `optIntoInSpaceMultiSpaceCommit`) can opt a transaction into a multi-space
-  // commit the moment a handler's `.inSpace(...)` target resolves — before the
-  // cross-space write executes (e.g. appending to the home `profiles` list,
-  // whose elements live in their own spaces).
   enableCrossSpaceChildCommit(
     tx: IExtendedStorageTransaction,
     childSpace: MemorySpace,

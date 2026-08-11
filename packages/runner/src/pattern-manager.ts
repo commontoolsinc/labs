@@ -652,6 +652,17 @@ export class PatternManager {
   }
 
   /**
+   * The pattern-coverage collector to instrument a compile with: a per-call
+   * option wins, else the runtime-level default (`RuntimeOptions.patternCoverage`).
+   * Undefined leaves the compile uninstrumented.
+   */
+  private patternCoverageFor(
+    options?: TypeScriptHarnessProcessOptions,
+  ): PatternCoverageCollector | undefined {
+    return options?.patternCoverage ?? this.runtime.patternCoverage;
+  }
+
+  /**
    * Compile + evaluate a program's modules AND register the evaluated artifacts,
    * returning the full module namespace (`EvaluateResult`).
    *
@@ -670,17 +681,6 @@ export class PatternManager {
    * `Engine.compileAndEvaluateModules` only to inspect serialized/verified output
    * *without running* (engine unit tests), where stamping entry refs is unwanted.
    */
-  /**
-   * The pattern-coverage collector to instrument a compile with: a per-call
-   * option wins, else the runtime-level default (`RuntimeOptions.patternCoverage`).
-   * Undefined leaves the compile uninstrumented.
-   */
-  private patternCoverageFor(
-    options?: TypeScriptHarnessProcessOptions,
-  ): PatternCoverageCollector | undefined {
-    return options?.patternCoverage ?? this.runtime.patternCoverage;
-  }
-
   async compileAndRegisterModules(
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
