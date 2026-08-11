@@ -171,12 +171,33 @@ Do generation A's 39 first, then generation B's 34, then the board. Keeping
 the two transitions separable means that if one storms you know which;
 interleaving them blurs that signal for no benefit.
 
+Run every authored test against the migration source before changing the clone.
+Stop if any test fails. Keep the complete flag set on every topic and board
+revision:
+
+```bash
+deno task cf test packages/patterns/topics/multi-user.test.tsx
+deno task cf test packages/patterns/topics/topics-rejections.test.tsx
+deno task cf test packages/patterns/topics/topics.test.tsx
+
+TOPICS_TEST_ARGS=(
+  --test packages/patterns/topics/multi-user.test.tsx
+  --test packages/patterns/topics/topics-rejections.test.tsx
+  --test packages/patterns/topics/topics.test.tsx
+)
+```
+
+The quoted `"${TOPICS_TEST_ARGS[@]}"` expansion repeats every `--test` entry.
+Deployment packages and type-checks attached tests but does not run them.
+
 ```bash
 # each of the 73 topics, one at a time, against the CLONE's api-url
 deno task cf piece setsrc packages/patterns/topics/topic.tsx \
+  "${TOPICS_TEST_ARGS[@]}" \
   --piece <topic-fid> --api-url http://localhost:8010 --space <did> …
 # then, last:
 deno task cf piece setsrc packages/patterns/topics/main.tsx \
+  "${TOPICS_TEST_ARGS[@]}" \
   --piece fid1:jtdD-… --api-url http://localhost:8010 --space <did> …
 ```
 

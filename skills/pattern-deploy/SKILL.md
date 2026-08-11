@@ -43,21 +43,35 @@ With `CF_API_URL` and `CF_IDENTITY` exported (see the cf skill), you can drop
 deno task cf check pattern.tsx --no-run
 ```
 
+**Run and collect automated pattern tests:**
+
+```bash
+deno task cf test packages/patterns/[name]/main.test.tsx
+```
+
+New or changed pattern behavior must have automated coverage. Find every
+authored `*.test.tsx` entry, run each one, and repeat `--test` for each entry in
+the deployment commands below. Manual handler checks do not replace this step.
+
 **Deploy new pattern (first time only):**
 
 ```bash
-deno task cf piece new packages/patterns/[name]/main.tsx --identity cf.key --api-url $CF_API_URL --space <space>
+deno task cf piece new packages/patterns/[name]/main.tsx --test packages/patterns/[name]/main.test.tsx --identity cf.key --api-url $CF_API_URL --space <space>
 # Output: Created piece bafyreia... <- SAVE this piece ID
 ```
 
 **Update deployed pattern (all subsequent iterations):**
 
 ```bash
-deno task cf piece setsrc packages/patterns/[name]/main.tsx --piece <ID> --identity cf.key --api-url $CF_API_URL --space <space>
+deno task cf piece setsrc packages/patterns/[name]/main.tsx --test packages/patterns/[name]/main.test.tsx --piece <ID> --identity cf.key --api-url $CF_API_URL --space <space>
 ```
 
 `--piece` is required for `setsrc` — never "update" by re-running `piece new`,
 which creates a duplicate piece.
+
+`--test` packages and type-checks a test but does not run it. Every `setsrc`
+defines the complete source revision, so repeat all test flags on every update
+or the new revision will omit those test roots.
 
 **Inspect piece state:**
 
@@ -94,5 +108,7 @@ deno task cf piece --help
 ## Done When
 
 - Piece deploys without errors
+- Every automated pattern test passes
+- Every authored test entry is attached to the deployed source revision
 - State inspects correctly
 - Handlers respond to CLI calls

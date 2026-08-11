@@ -6,48 +6,66 @@
  * - Parses cf command output and suggests next steps.
  */
 
-const rawInput = await new Response(Deno.stdin.readable).text();
-let input: {
-  tool_input?: { command?: string };
-  tool_response?: { stdout?: string; stderr?: string };
-} = {};
+function suggestionForCommandSegment(command: string): string {
+  const attachedTests = /(?:^|\s)--test(?:=|\s)/.test(command);
+  const testSuggestion = attachedTests
+    ? "Attached tests are packaged, not run. Confirm every entry passed with 'cf test'."
+    : "No tests were attached. For new or changed source, write and run pattern tests, then deploy with repeatable '--test'.";
 
-try {
-  input = JSON.parse(rawInput);
-} catch {
-  Deno.exit(0);
+  if (command.includes("piece new")) {
+    if (!attachedTests && /\.test\.[cm]?[jt]sx?["']?(?:\s|$)/.test(command)) {
+      return "Test pattern deployed as the executable diagnostic entry. Next, inspect its action and assertion cells.";
+    }
+    return `${testSuggestion} Next, use 'cf piece inspect' to view state or 'cf piece call' to test handlers.`;
+  }
+  if (command.includes("piece setsrc")) {
+    return `${testSuggestion} Next, use 'cf piece step' to trigger re-evaluation, then 'cf piece inspect' to verify.`;
+  }
+  if (command.includes("piece set-home") && !command.includes("--reset")) {
+    return `${testSuggestion} Next, open the home space and verify the custom home pattern.`;
+  }
+  if (command.includes("piece set ")) {
+    return "State set. Run 'cf piece step' to trigger re-evaluation before reading computed values.";
+  }
+  if (command.includes("piece inspect")) {
+    return "State inspected. Use 'cf piece call handlerName' to test handlers or 'cf piece set' to modify state.";
+  }
+  return "";
 }
 
-const command = input.tool_input?.command || "";
+export function suggestionForPatternUserCommand(command: string): string {
+  if (!command.includes("cf piece")) return "";
 
-// Only process cf commands.
-if (!command.includes("cf piece")) {
-  Deno.exit(0);
+  return command
+    .replace(/\\\r?\n/g, " ")
+    .split(/&&|\|\||[;\r\n]/)
+    .map((segment) => suggestionForCommandSegment(segment))
+    .filter(Boolean)
+    .join(" ");
 }
 
-let suggestion = "";
+if (import.meta.main) {
+  const rawInput = await new Response(Deno.stdin.readable).text();
+  let input: {
+    tool_input?: { command?: string };
+    tool_response?: { stdout?: string; stderr?: string };
+  } = {};
 
-if (command.includes("piece new")) {
-  suggestion =
-    "Piece created. Next: use 'cf piece inspect' to view state or 'cf piece call' to test handlers.";
-} else if (command.includes("piece setsrc")) {
-  suggestion =
-    "Source updated. Next: use 'cf piece step' to trigger re-evaluation, then 'cf piece inspect' to verify.";
-} else if (command.includes("piece set ")) {
-  suggestion =
-    "State set. Run 'cf piece step' to trigger re-evaluation before reading computed values.";
-} else if (command.includes("piece inspect")) {
-  suggestion =
-    "State inspected. Use 'cf piece call handlerName' to test handlers or 'cf piece set' to modify state.";
+  try {
+    input = JSON.parse(rawInput);
+  } catch {
+    Deno.exit(0);
+  }
+
+  const suggestion = suggestionForPatternUserCommand(
+    input.tool_input?.command || "",
+  );
+  if (suggestion) {
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: suggestion,
+      },
+    }));
+  }
 }
-
-if (suggestion) {
-  console.log(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext: suggestion,
-    },
-  }));
-}
-
-Deno.exit(0);

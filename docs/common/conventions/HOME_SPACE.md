@@ -129,12 +129,20 @@ The home space's default pattern is the home experience itself — by default,
 the CF CLI:
 
 ```bash
-# Deploy a custom home pattern
-cf piece set-home -i ./my.key -a http://localhost:8000 ./my-home.tsx
+# Run its automated pattern test
+cf test ./my-home.test.tsx
+
+# Deploy a custom home pattern with the test attached
+cf piece set-home -i ./my.key -a http://localhost:8000 \
+  --test ./my-home.test.tsx ./my-home.tsx
 
 # Reset to the system default
 cf piece set-home -i ./my.key -a http://localhost:8000 --reset
 ```
+
+Write automated tests for new or changed home-pattern behavior. Repeat
+`--test` for every authored test entry. Deployment packages and type-checks
+the tests but does not run them, so run each entry with `cf test` first.
 
 Under the hood, `set-home` calls `PiecesController.recreateDefaultPattern()`
 with the compiled program. This tears down the existing default pattern, creates
@@ -172,8 +180,9 @@ To share identity between browser and CLI:
 #    history and the process list:
 deno run -A packages/cli/mod.ts id from-mnemonic -- phrase.txt > ./browser.key
 
-# 3. Use that key with cf
-cf piece set-home -i ./browser.key -a http://localhost:8000 ./my-home.tsx
+# 3. Use that key with cf, retaining the tested source package
+cf piece set-home -i ./browser.key -a http://localhost:8000 \
+  --test ./my-home.test.tsx ./my-home.tsx
 ```
 
 Note: `cf id derive <passphrase>` will NOT produce the same identity as the
