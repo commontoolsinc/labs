@@ -7,6 +7,7 @@
  * the full algorithm.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   createHasher,
   type IncrementalHasher,
@@ -25,7 +26,6 @@ import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
 import { codecOf } from "@/codec-common/index.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { backtickQuote } from "./value-debug.ts";
 
 //
 // Type tag bytes (Section 2 of the byte-level spec)

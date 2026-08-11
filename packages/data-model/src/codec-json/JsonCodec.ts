@@ -1,8 +1,9 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
-import { backtickQuote, toCompactDebugString } from "@/value-debug.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,

@@ -4,6 +4,7 @@
  * entity-id reference form.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isPlainObject,
   isRecord,
@@ -12,7 +13,6 @@ import {
 import { FabricHash } from "@/fabric-primitives/index.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import type { FabricPlainObject } from "@/interface.ts";
-import { backtickQuote } from "@/value-debug.ts";
 
 //
 // Configuration flags

@@ -29,27 +29,3 @@ export function parseCodeSpan(markdown: string): string {
     ? content.slice(1, -1)
     : content;
 }
-
-/**
- * Extracts the single code span embedded in `message`, given the `before` and
- * `after` text that brackets it. Throws if the message does not have that
- * shape, which is itself the failure a caller wants reported.
- */
-export function codeSpanIn(
-  message: string,
-  before: string,
-  after: string = "",
-): string {
-  const start = message.indexOf(before);
-  if (start === -1) {
-    throw new Error(`Message does not contain ${before}: ${message}`);
-  }
-
-  const from = start + before.length;
-  const to = (after === "") ? message.length : message.indexOf(after, from);
-  if (to === -1) {
-    throw new Error(`Message does not contain ${after}: ${message}`);
-  }
-
-  return parseCodeSpan(message.slice(from, to));
-}

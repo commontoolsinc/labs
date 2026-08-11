@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isInstance,
   isRecord,
@@ -24,7 +25,6 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { backtickQuote } from "./value-debug.ts";
 
 /**
  * Helper for `shallowFabricFromNativeValue()`, which rejects native objects

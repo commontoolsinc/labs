@@ -1,10 +1,11 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { backtickQuote, toDebugKindString } from "./value-debug.ts";
+import { toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
 export interface CloneOptions {
