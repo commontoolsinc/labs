@@ -13,8 +13,7 @@ The benchmark `Immutable cell - storage manager setup and cleanup only`, in
 `packages/runner/test/cell-immutable.bench.ts`, rose about tenfold between the
 benchmark runs for `ae805e236` and `de7465bb3` on 3 and 4 August 2026. It is
 the largest single step in the window the dashboard's benchmark headline was
-decomposed over, recorded in
-[`2026-08-benchmark-headline-decomposition.md`](2026-08-benchmark-headline-decomposition.md).
+decomposed over on 7 August 2026.
 
 Each row below is the nearest benchmark run either side of the boundary on
 that processor. The runners take turns, so the two runs in a row are days
