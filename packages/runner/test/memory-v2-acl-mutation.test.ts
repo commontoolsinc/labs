@@ -668,3 +668,23 @@ Deno.test("ACL mutation still cannot remove the last concrete owner", async () =
     await ctx.dispose();
   }
 });
+
+Deno.test("ACLManager returns the committed ACL when an owner removes themself", async () => {
+  const ctx = await withGenesisedSpace("runner-acl-mutation-self-remove");
+  const bob = await Identity.fromPassphrase(
+    "runner-acl-mutation-self-remove bob",
+  );
+  try {
+    await ctx.acl.remove("*");
+    await ctx.acl.set(bob.did(), "OWNER");
+
+    const committed = await ctx.acl.remove(ctx.user.did());
+
+    assertEquals(committed, {
+      [bob.did()]: "OWNER",
+    });
+    assertEquals(await ctx.readStoredAcl(), committed);
+  } finally {
+    await ctx.dispose();
+  }
+});

@@ -5,6 +5,7 @@ import type {
   CellRef,
   PieceSourceView,
   RuntimeClient,
+  SpaceAclView,
 } from "@commonfabric/runtime-client";
 import {
   CFPieceMenu,
@@ -94,6 +95,21 @@ function clickTestId(menu: CFPieceMenu, testId: string): unknown {
 }
 
 const SPACE = "did:key:z6Mk-piece-menu" as const;
+const OWNER = "did:key:z6Mk-piece-menu-owner" as const;
+const VIEWER = "did:key:z6Mk-piece-menu-viewer" as const;
+
+const OWNER_ACCESS: SpaceAclView = {
+  space: SPACE,
+  principal: OWNER,
+  acl: { [OWNER]: "OWNER", "*": "WRITE" },
+  canEdit: true,
+};
+
+const VIEWER_ACCESS: SpaceAclView = {
+  ...OWNER_ACCESS,
+  principal: VIEWER,
+  canEdit: false,
+};
 
 const SOURCE: PieceSourceView = {
   space: SPACE,
@@ -118,6 +134,9 @@ function pieceCell(
   {
     aborted = false,
     update = () => Promise.resolve({ source: SOURCE }),
+    getAccess = () => Promise.resolve(OWNER_ACCESS),
+    setAccess = () => Promise.resolve(OWNER_ACCESS),
+    removeAccess = () => Promise.resolve(OWNER_ACCESS),
   }: {
     aborted?: boolean | (() => boolean);
     update?: (
@@ -131,6 +150,16 @@ function pieceCell(
       confirmationToken?: string;
       executionWarning?: string;
     }>;
+    getAccess?: () => Promise<SpaceAclView>;
+    setAccess?: (
+      space: typeof SPACE,
+      user: string,
+      capability: "READ" | "WRITE" | "OWNER",
+    ) => Promise<SpaceAclView>;
+    removeAccess?: (
+      space: typeof SPACE,
+      user: string,
+    ) => Promise<SpaceAclView>;
   } = {},
 ): CellHandle {
   return {
@@ -139,6 +168,9 @@ function pieceCell(
     runtime: () => ({
       getPieceSource: read,
       updatePieceSource: update,
+      getSpaceAcl: getAccess,
+      setSpaceAclEntry: setAccess,
+      removeSpaceAclEntry: removeAccess,
       signal: {
         aborted: typeof aborted === "function" ? aborted() : aborted,
       },
@@ -233,6 +265,19 @@ describe("the menu a right-click opens", () => {
       expect(rendered).toContain(entry.label);
       expect(rendered).toContain(entry.testId);
     }
+    expect(rendered).toContain("menu-divider");
+    expect(rendered).toContain("Space access rights...");
+    expect(rendered).toContain("piece-menu-space-access");
+  });
+
+  it("places space access after the piece actions and divider", () => {
+    const rendered = shows(openMenu());
+    expect(rendered.indexOf("Actions")).toBeLessThan(
+      rendered.indexOf("menu-divider"),
+    );
+    expect(rendered.indexOf("menu-divider")).toBeLessThan(
+      rendered.indexOf("Space access rights..."),
+    );
   });
 
   it("shows nothing until it is opened, or once closed", () => {
@@ -299,7 +344,7 @@ describe("the menu a right-click opens", () => {
     expect(piece.has("data-cf-piece-menu-open")).toBe(false);
   });
 
-  it("removes the highlight when its overlay disconnects", () => {
+  it("closes and removes the highlight when its overlay disconnects", () => {
     const menu = newMenu();
     const piece = highlightProbe();
     menu.open({
@@ -312,6 +357,25 @@ describe("the menu a right-click opens", () => {
     menu.disconnectedCallback();
 
     expect(piece.has("data-cf-piece-menu-open")).toBe(false);
+    expect(shows(menu)).toBe("");
+  });
+
+  it("drops an access read that resolves after disconnect", async () => {
+    let resolveAccess!: (access: SpaceAclView) => void;
+    const menu = openMenu(pieceCell(undefined, {
+      getAccess: () =>
+        new Promise((resolve) => {
+          resolveAccess = resolve;
+        }),
+    }));
+    const read = menu.showPanel("access");
+    expect(shows(menu)).toContain("Reading access rights");
+
+    menu.disconnectedCallback();
+    resolveAccess(OWNER_ACCESS);
+    await read;
+
+    expect(shows(menu)).toBe("");
   });
 
   it("draws a clipped fixed highlight over a nested pattern root", () => {
@@ -388,6 +452,65 @@ describe("the menu a right-click opens", () => {
     const rendered = shows(menu);
     expect(rendered).toContain("Stop following source");
     expect(rendered).toContain("piece-menu-detach-source");
+  });
+});
+
+describe("the space access panel", () => {
+  it("shows the ACL without editing controls to a non-owner", async () => {
+    const menu = openMenu(pieceCell(undefined, {
+      getAccess: () => Promise.resolve(VIEWER_ACCESS),
+    }));
+
+    await menu.showPanel("access");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Space access rights");
+    expect(rendered).toContain(OWNER);
+    expect(rendered).toContain("Anyone (*)");
+    expect(rendered).toContain("Only a space owner can change them");
+    expect(rendered).not.toContain("space-access-add-form");
+    expect(rendered).not.toContain("space-access-remove");
+  });
+
+  it("shows ACL editing controls to an owner", async () => {
+    const menu = openMenu();
+
+    await menu.showPanel("access");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("you have OWNER access");
+    expect(rendered).toContain("space-access-add-form");
+    expect(rendered).toContain("space-access-remove");
+    expect(rendered).toContain(`${OWNER} (you)`);
+  });
+
+  it("updates the rendered ACL after setting and removing entries", async () => {
+    const reader = "did:key:z6Mk-piece-menu-reader";
+    const mutations: unknown[] = [];
+    const withReader: SpaceAclView = {
+      ...OWNER_ACCESS,
+      acl: { ...OWNER_ACCESS.acl, [reader]: "READ" },
+    };
+    const menu = openMenu(pieceCell(undefined, {
+      setAccess: (space, user, capability) => {
+        mutations.push({ kind: "set", space, user, capability });
+        return Promise.resolve(withReader);
+      },
+      removeAccess: (space, user) => {
+        mutations.push({ kind: "remove", space, user });
+        return Promise.resolve(OWNER_ACCESS);
+      },
+    }));
+    await menu.showPanel("access");
+
+    await menu.setSpaceAccessEntry(reader, "READ");
+    expect(shows(menu)).toContain(reader);
+    await menu.removeSpaceAccessEntry(reader);
+    expect(shows(menu)).not.toContain(reader);
+    expect(mutations).toEqual([
+      { kind: "set", space: SPACE, user: reader, capability: "READ" },
+      { kind: "remove", space: SPACE, user: reader },
+    ]);
   });
 });
 

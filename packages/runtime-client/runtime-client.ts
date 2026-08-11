@@ -39,6 +39,8 @@ import {
   type PieceSourceView,
   type PieceUpdateSourceResponse,
   RequestType,
+  type SpaceAclCapability,
+  type SpaceAclView,
   TelemetryNotification,
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
@@ -338,6 +340,43 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
         ? {}
         : { confirmationToken: options.confirmationToken }),
     });
+  }
+
+  /** Read a space's ACL and whether the active principal may change it. */
+  async getSpaceAcl(space: DID): Promise<SpaceAclView> {
+    const response = await this.#conn.request<RequestType.SpaceGetAcl>({
+      type: RequestType.SpaceGetAcl,
+      space,
+    });
+    return response.access;
+  }
+
+  /** Add or replace one entry in a space ACL. */
+  async setSpaceAclEntry(
+    space: DID,
+    user: string,
+    capability: SpaceAclCapability,
+  ): Promise<SpaceAclView> {
+    const response = await this.#conn.request<RequestType.SpaceSetAclEntry>({
+      type: RequestType.SpaceSetAclEntry,
+      space,
+      user,
+      capability,
+    });
+    return response.access;
+  }
+
+  /** Remove one entry from a space ACL. */
+  async removeSpaceAclEntry(
+    space: DID,
+    user: string,
+  ): Promise<SpaceAclView> {
+    const response = await this.#conn.request<RequestType.SpaceRemoveAclEntry>({
+      type: RequestType.SpaceRemoveAclEntry,
+      space,
+      user,
+    });
+    return response.access;
   }
 
   async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {

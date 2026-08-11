@@ -581,6 +581,94 @@ describe("piece source state", () => {
   });
 });
 
+describe("space ACL state", () => {
+  it("reports owner controls from the active principal's ACL entry", async () => {
+    const space = "did:key:z6Mk-runtime-processor-acl" as const;
+    const owner = "did:key:z6Mk-runtime-processor-owner" as const;
+    const runtime = {
+      userIdentityDID: owner,
+      storageManager: { synced: () => Promise.resolve() },
+      getCellFromLink: () => ({
+        sync: () => Promise.resolve(),
+        get: () => ({ [owner]: "OWNER", "*": "WRITE" }),
+      }),
+    };
+    const processor = {
+      getSpaceCtx: () => ({ getSpace: () => space }),
+      runtime,
+    };
+
+    const response = await (RuntimeProcessor.prototype as any)
+      .handleSpaceGetAcl.call(processor, {
+        type: RequestType.SpaceGetAcl,
+        space,
+      });
+
+    expect(response.access).toEqual({
+      space,
+      principal: owner,
+      acl: { [owner]: "OWNER", "*": "WRITE" },
+      canEdit: true,
+    });
+  });
+
+  it("keeps wildcard writers read-only in the ACL view", async () => {
+    const space = "did:key:z6Mk-runtime-processor-acl" as const;
+    const owner = "did:key:z6Mk-runtime-processor-owner" as const;
+    const writer = "did:key:z6Mk-runtime-processor-writer" as const;
+    const processor = {
+      getSpaceCtx: () => ({ getSpace: () => space }),
+      runtime: {
+        userIdentityDID: writer,
+        storageManager: { synced: () => Promise.resolve() },
+        getCellFromLink: () => ({
+          sync: () => Promise.resolve(),
+          get: () => ({ [owner]: "OWNER", "*": "WRITE" }),
+        }),
+      },
+    };
+
+    const response = await (RuntimeProcessor.prototype as any)
+      .handleSpaceGetAcl.call(processor, {
+        type: RequestType.SpaceGetAcl,
+        space,
+      });
+
+    expect(response.access.canEdit).toBe(false);
+  });
+
+  it("rejects malformed ACL mutations before opening the space", async () => {
+    const processor = {
+      getSpaceCtx: () => {
+        throw new Error("space must not be opened");
+      },
+    };
+
+    await expect(
+      (RuntimeProcessor.prototype as any).handleSpaceSetAclEntry.call(
+        processor,
+        {
+          type: RequestType.SpaceSetAclEntry,
+          space: "did:key:z6Mk-runtime-processor-acl",
+          user: "not-a-did",
+          capability: "WRITE",
+        },
+      ),
+    ).rejects.toThrow("user must be `*` or a valid DID");
+    await expect(
+      (RuntimeProcessor.prototype as any).handleSpaceSetAclEntry.call(
+        processor,
+        {
+          type: RequestType.SpaceSetAclEntry,
+          space: "did:key:z6Mk-runtime-processor-acl",
+          user: "did:key:z6Mk-runtime-processor-reader",
+          capability: "ADMIN",
+        },
+      ),
+    ).rejects.toThrow("capability must be `READ`, `WRITE`, or `OWNER`");
+  });
+});
+
 describe("page slug metadata", () => {
   it("reads slug metadata from the page document root", async () => {
     const reads: unknown[] = [];

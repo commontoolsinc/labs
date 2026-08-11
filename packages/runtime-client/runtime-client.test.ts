@@ -158,6 +158,59 @@ describe("RuntimeClient.updatePieceSource", () => {
   });
 });
 
+describe("RuntimeClient space ACL methods", () => {
+  it("sends read, set, and remove requests to the worker", async () => {
+    const access = {
+      space: "did:key:z6Mk-runtime-client-acl",
+      principal: "did:key:z6Mk-runtime-client-owner",
+      acl: { "did:key:z6Mk-runtime-client-owner": "OWNER" },
+      canEdit: true,
+    };
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ access });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    const space = access.space as never;
+
+    expect(await client.getSpaceAcl(space)).toBe(access);
+    expect(
+      await client.setSpaceAclEntry(
+        space,
+        "did:key:z6Mk-runtime-client-reader",
+        "READ",
+      ),
+    ).toBe(access);
+    expect(
+      await client.removeSpaceAclEntry(
+        space,
+        "did:key:z6Mk-runtime-client-reader",
+      ),
+    ).toBe(access);
+
+    expect(requests).toEqual([
+      { type: RequestType.SpaceGetAcl, space },
+      {
+        type: RequestType.SpaceSetAclEntry,
+        space,
+        user: "did:key:z6Mk-runtime-client-reader",
+        capability: "READ",
+      },
+      {
+        type: RequestType.SpaceRemoveAclEntry,
+        space,
+        user: "did:key:z6Mk-runtime-client-reader",
+      },
+    ]);
+  });
+});
+
 describe("RuntimeClient.resolveSpaceName", () => {
   it("resolves the name inside the worker runtime", async () => {
     const space = "did:key:z6Mk-runtime-client-named-space";
