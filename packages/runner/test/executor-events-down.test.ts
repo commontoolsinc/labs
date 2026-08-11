@@ -124,6 +124,7 @@ describe("Phase 3 events-down (serving side)", () => {
     new ExecutorHost({
       server,
       serviceIdentity: serviceSigner.did(),
+      // deno-lint-ignore require-await
       createRuntime: async () => {
         const manager = EmulatedStorageManager.connectTo(server, {
           as: serviceSigner,
@@ -248,8 +249,8 @@ describe("Phase 3 events-down (serving side)", () => {
       },
       "the entry to consequence and the stream watermark to advance",
     );
-    const sidecar = Engine.read(engine, { id: sidecarId })?.value as
-      StreamEventsDocValue;
+    const sidecar = Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue;
     const entry = sidecar.entries![0];
     expect(entry.firedAt?.user).toBe(aliceSigner.did());
     expect(entry.error).toBeUndefined();
@@ -282,8 +283,7 @@ describe("Phase 3 events-down (serving side)", () => {
     // watermark backstop — withdrew it) and the authoritative value
     // renders through the store.
     await waitUntil(
-      () =>
-        (clientRuntime.speculationOverlay?.entryCount(space) ?? 0) === 0,
+      () => (clientRuntime.speculationOverlay?.entryCount(space) ?? 0) === 0,
       "the echo to retire",
     );
     await waitUntil(
@@ -415,8 +415,8 @@ describe("Phase 3 events-down (serving side)", () => {
       },
       "the error consequence + frontier advance",
     );
-    const value = Engine.read(engine, { id: sidecarId })?.value as
-      StreamEventsDocValue;
+    const value = Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue;
     expect(value.entries![0].error).toContain("handler exploded");
     // No consequence write landed: the arg doc holds the seed value.
     const doc = Engine.read(engine, {
@@ -454,8 +454,9 @@ describe("Phase 3 events-down (serving side)", () => {
       },
       "the original to consequence",
     );
-    const original = (Engine.read(engine, { id: sidecarId })?.value as
-      StreamEventsDocValue).entries![0];
+    const original =
+      (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+        .entries![0];
 
     // The at-or-below-horizon duplicate: redelivered via the delegated
     // path (the outbox's re-send shape) AFTER the watermark passed the
@@ -546,8 +547,9 @@ describe("Phase 3 events-down (serving side)", () => {
       },
       "both events to consequence",
     );
-    const entries = (Engine.read(engine, { id: sidecarId })?.value as
-      StreamEventsDocValue).entries!;
+    const entries =
+      (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
+        .entries!;
     const actors = new Set(entries.map((entry) => entry.firedAt?.user));
     expect(actors.has(aliceSigner.did())).toBe(true);
     expect(actors.has(bobSigner.did())).toBe(true);
@@ -647,9 +649,10 @@ describe("Phase 3 events-down (serving side)", () => {
     // The cascade entry carries the INHERITED actor (events.md §2:
     // events run as the session they originated from) — the root
     // (user, session) preserved hop by hop.
-    const cascadeEntries = sidecarIdsIn(engine).flatMap((id) =>
-      ((Engine.read(engine, { id })?.value as StreamEventsDocValue)
-        .entries ?? [])
+    const cascadeEntries = sidecarIdsIn(engine).flatMap((
+      id,
+    ) => ((Engine.read(engine, { id })?.value as StreamEventsDocValue)
+      .entries ?? [])
     );
     expect(cascadeEntries.length).toBe(2);
     for (const entry of cascadeEntries) {

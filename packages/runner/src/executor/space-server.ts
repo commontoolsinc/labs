@@ -647,8 +647,8 @@ export class SpaceServer implements TransactionSealDestination {
       } catch (error) {
         logger.warn("event-mark-failed", () => [
           `consequenced mark for ${info.eventId} failed at stamp time; ` +
-            "the event will reprocess (exactly-once still holds — the " +
-            "unmarked entry stays above the watermark)",
+          "the event will reprocess (exactly-once still holds — the " +
+          "unmarked entry stays above the watermark)",
           error,
         ]);
       }
@@ -1044,18 +1044,18 @@ export class SpaceServer implements TransactionSealDestination {
       } catch (error) {
         logger.warn("event-sidecar-sync-failed", () => [
           `sidecar sync for ${doc.id} failed; its events defer to the ` +
-            "next wave",
+          "next wave",
           error,
         ]);
         this.#eventScanOwed = true;
         continue;
       }
       // The FULL stored log — mark indices address positions in it.
-      const stored =
-        ((Engine.read(engine, { id: doc.id })?.value ?? {}) as
-          StreamEventsDocValue).entries ?? [];
+      const stored = ((Engine.read(engine, { id: doc.id })?.value ??
+        {}) as StreamEventsDocValue).entries ?? [];
       const runnable = [...doc.entries].sort(
-        (a, b) => (a.seq ?? Number.MAX_SAFE_INTEGER) -
+        (a, b) =>
+          (a.seq ?? Number.MAX_SAFE_INTEGER) -
           (b.seq ?? Number.MAX_SAFE_INTEGER),
       );
       for (const entry of runnable) {
@@ -1085,8 +1085,7 @@ export class SpaceServer implements TransactionSealDestination {
           space,
           id: entry.stream.id as NormalizedFullLink["id"],
           path: [...entry.stream.path],
-          scope: (entry.stream.scope ?? "space") as
-            NormalizedFullLink["scope"],
+          scope: (entry.stream.scope ?? "space") as NormalizedFullLink["scope"],
         };
         try {
           await runtime.getCellFromLink({
@@ -1099,82 +1098,82 @@ export class SpaceServer implements TransactionSealDestination {
           // A cold stream doc defers like a cold piece load below.
         }
         try {
-        // The mark the stamper will write is index-addressed against
-        // the REPLICA view: verify the view holds this entry at this
-        // index before dispatch (a lagging view defers — never a ghost
-        // write).
-        const viewEntry = runtime.getCellFromLink<
-          { eventId?: string } | undefined
-        >({
-          space,
-          id: doc.id as never,
-          scope: "space",
-          path: ["entries", String(index)],
-        }).get();
-        if (viewEntry?.eventId !== entry.eventId) {
-          logger.warn("event-view-lag", () => [
-            `drain deferring ${entry.eventId}: replica view holds ` +
+          // The mark the stamper will write is index-addressed against
+          // the REPLICA view: verify the view holds this entry at this
+          // index before dispatch (a lagging view defers — never a ghost
+          // write).
+          const viewEntry = runtime.getCellFromLink<
+            { eventId?: string } | undefined
+          >({
+            space,
+            id: doc.id as never,
+            scope: "space",
+            path: ["entries", String(index)],
+          }).get();
+          if (viewEntry?.eventId !== entry.eventId) {
+            logger.warn("event-view-lag", () => [
+              `drain deferring ${entry.eventId}: replica view holds ` +
               `${JSON.stringify(viewEntry)} at index ${index}`,
-          ]);
-          this.#eventScanOwed = true;
-          continue;
-        }
-        runtime.scheduler.queueEvent(
-          link,
-          entry.payload,
-          // No scheduler-side backoff: a transiently-failed seal leaves
-          // the entry unconsequenced and durable, and the post-wave
-          // re-arm rescans it — the wave IS the retry cadence.
-          false,
-          undefined,
-          false,
-          {
-            eventId: entry.eventId,
-            ...(entry.runtimeInjectedEventKeys !== undefined
-              ? {
-                // Re-mint the carried provenance in THIS runtime (the
-                // mint is a process-local trust mark): the entry's keys
-                // were committed under the firing client's own
-                // admission, the same in-process trust the client-side
-                // gate ran under.
-                runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(
-                  entry.runtimeInjectedEventKeys,
-                ),
-              }
-              : {}),
-            served: {
-              ...(entry.firedAt !== undefined
+            ]);
+            this.#eventScanOwed = true;
+            continue;
+          }
+          runtime.scheduler.queueEvent(
+            link,
+            entry.payload,
+            // No scheduler-side backoff: a transiently-failed seal leaves
+            // the entry unconsequenced and durable, and the post-wave
+            // re-arm rescans it — the wave IS the retry cadence.
+            false,
+            undefined,
+            false,
+            {
+              eventId: entry.eventId,
+              ...(entry.runtimeInjectedEventKeys !== undefined
                 ? {
-                  firedAt: {
-                    ...(entry.firedAt.user !== undefined
-                      ? { user: entry.firedAt.user }
-                      : {}),
-                    ...(entry.firedAt.session !== undefined
-                      ? { session: entry.firedAt.session }
-                      : {}),
-                  },
+                  // Re-mint the carried provenance in THIS runtime (the
+                  // mint is a process-local trust mark): the entry's keys
+                  // were committed under the firing client's own
+                  // admission, the same in-process trust the client-side
+                  // gate ran under.
+                  runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(
+                    entry.runtimeInjectedEventKeys,
+                  ),
                 }
                 : {}),
-              streamEntry,
-              onFailure: (outcome) => {
-                if (outcome.kind === "deferred") {
-                  // No consequence: the entry stays pending and the
-                  // next wave re-drains it (the cold-view creation
-                  // race — OW19's conflation caution).
-                  this.#eventScanOwed = true;
-                  return;
-                }
-                this.#sealEventConsequenceNotice(
-                  runtime,
-                  entry,
-                  streamEntry,
-                  { kind: outcome.kind, message: outcome.message },
-                );
+              served: {
+                ...(entry.firedAt !== undefined
+                  ? {
+                    firedAt: {
+                      ...(entry.firedAt.user !== undefined
+                        ? { user: entry.firedAt.user }
+                        : {}),
+                      ...(entry.firedAt.session !== undefined
+                        ? { session: entry.firedAt.session }
+                        : {}),
+                    },
+                  }
+                  : {}),
+                streamEntry,
+                onFailure: (outcome) => {
+                  if (outcome.kind === "deferred") {
+                    // No consequence: the entry stays pending and the
+                    // next wave re-drains it (the cold-view creation
+                    // race — OW19's conflation caution).
+                    this.#eventScanOwed = true;
+                    return;
+                  }
+                  this.#sealEventConsequenceNotice(
+                    runtime,
+                    entry,
+                    streamEntry,
+                    { kind: outcome.kind, message: outcome.message },
+                  );
+                },
               },
             },
-          },
-        );
-        queued += 1;
+          );
+          queued += 1;
         } catch (drainError) {
           logger.warn("drain-debug", () => ["per-entry threw", drainError]);
           this.#eventScanOwed = true;
@@ -1236,7 +1235,7 @@ export class SpaceServer implements TransactionSealDestination {
       const sealed = tx.commit().catch((error) => {
         logger.warn("event-notice-seal-failed", () => [
           `consequence notice for ${entry.eventId} failed to seal; the ` +
-            "entry stays pending and the next wave re-drains it",
+          "entry stays pending and the next wave re-drains it",
           error,
         ]);
       });
@@ -1247,7 +1246,7 @@ export class SpaceServer implements TransactionSealDestination {
     } catch (error) {
       logger.warn("event-notice-failed", () => [
         `consequence notice for ${entry.eventId} could not be staged; ` +
-          "the entry stays pending and the next wave re-drains it",
+        "the entry stays pending and the next wave re-drains it",
         error,
       ]);
     }

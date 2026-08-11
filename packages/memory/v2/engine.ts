@@ -42,10 +42,6 @@ import {
   type Operation,
   type PatchOp,
   ProtocolError,
-  STREAM_ENTRIES_DOC_PREFIX,
-  type StreamEventEntry,
-  type StreamEventFiredAt,
-  type StreamEventsDocValue,
   type Reference,
   resolvePrincipalSessionKey,
   resolveScopeKey,
@@ -53,6 +49,10 @@ import {
   scopeOfScopeKey,
   type SessionId,
   type SqliteOperation,
+  STREAM_ENTRIES_DOC_PREFIX,
+  type StreamEventEntry,
+  type StreamEventFiredAt,
+  type StreamEventsDocValue,
   tableDeclaresRowLabel,
 } from "../v2.ts";
 
@@ -1649,9 +1649,9 @@ SELECT id, scope_key
 FROM head
 WHERE branch = :branch AND id LIKE :prefix AND op != 'delete'
 `).all({
-    branch,
-    prefix: `${STREAM_ENTRIES_DOC_PREFIX}%`,
-  }) as Array<{ id: string; scope_key: string }>;
+      branch,
+      prefix: `${STREAM_ENTRIES_DOC_PREFIX}%`,
+    }) as Array<{ id: string; scope_key: string }>;
   const pending: PendingStreamEventDoc[] = [];
   for (const head of heads) {
     const state = readState(engine, {
@@ -1777,8 +1777,7 @@ const validateEventAppends = (
     scopeKeyByOpIndex: ReadonlyMap<number, string>;
   },
 ): Map<number, EventAppendStamp[]> => {
-  const { commit, commitClass, branch, principal, sessionId, delegated } =
-    args;
+  const { commit, commitClass, branch, principal, sessionId, delegated } = args;
   const decls = commit.eventAppends ?? [];
   const plan = new Map<number, EventAppendStamp[]>();
   const flagOn = getServerExecutionConfig();
@@ -1816,7 +1815,6 @@ const validateEventAppends = (
   for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op === "sqlite") continue;
     if (!isStreamEntriesDocId(operation.id)) continue;
-    const opScope = normalizeScope(operation.scope);
 
     // The sidecar-doc write guard (the stamping claim's other half —
     // events.md §1's "a forged actor is UNREPRESENTABLE"): processing
@@ -2604,7 +2602,9 @@ const applyCommitTransaction = (
           "(protocol.md §2's delegated row)",
       );
     }
-    if (delegated.capabilityRef === undefined || delegated.capabilityRef === "") {
+    if (
+      delegated.capabilityRef === undefined || delegated.capabilityRef === ""
+    ) {
       // Grant presence is MANDATORY on every delegated batch — the
       // sessionless-space-scope carve-out below lifts only the acting
       // PRINCIPAL, never the grant (protocol.md §2, SHAPE RULED
@@ -2992,9 +2992,10 @@ const maintainStreamEventWatermarks = (
       }
     }
     if (
-      frontier === (typeof value.eventWatermark === "number"
-        ? value.eventWatermark
-        : undefined)
+      frontier ===
+        (typeof value.eventWatermark === "number"
+          ? value.eventWatermark
+          : undefined)
     ) {
       continue;
     }

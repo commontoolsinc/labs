@@ -414,7 +414,7 @@ export class SpeculationOverlayDestination
     } catch (error) {
       logger.warn("intent-sink-failed", () => [
         `intent sidecar sink for ${space} failed; echo retirement for ` +
-          "its events rides the watermark backstop only",
+        "its events rides the watermark backstop only",
         error,
       ]);
     }

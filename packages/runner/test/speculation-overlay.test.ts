@@ -116,6 +116,9 @@ describe("Phase 2 speculation overlay", () => {
     await server.close();
   });
 
+  // Kept for symmetry with the other suites; the remaining tests build
+  // their clients explicitly (each pins its own flag posture).
+  // deno-lint-ignore no-unused-vars
   const openClient = () => {
     clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,

@@ -29,7 +29,10 @@ import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { waitForSettled, watermarkCell } from "@commonfabric/runner/executor/watermark";
+import {
+  waitForSettled,
+  watermarkCell,
+} from "@commonfabric/runner/executor/watermark";
 import type { MemorySpace } from "@commonfabric/runner";
 import {
   initializePiecesController,

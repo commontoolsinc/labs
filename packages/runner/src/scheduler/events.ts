@@ -1223,9 +1223,7 @@ export async function dispatchQueuedEvent(state: {
         try {
           served?.onFailure?.({
             kind: "error",
-            message: error instanceof Error
-              ? error.message
-              : String(error),
+            message: error instanceof Error ? error.message : String(error),
           });
         } catch (callbackError) {
           logger.error(

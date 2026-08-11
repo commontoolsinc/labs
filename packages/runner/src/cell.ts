@@ -44,10 +44,7 @@ import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
-import {
-  mintEventId,
-  scopeCallerEventId,
-} from "./scheduler/event-identity.ts";
+import { mintEventId, scopeCallerEventId } from "./scheduler/event-identity.ts";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import { waveRunContextOf } from "./executor/wave.ts";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";

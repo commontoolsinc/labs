@@ -155,7 +155,7 @@ export class EventAppendQueue {
     }).catch((error) => {
       logger.warn("event-queue-load-failed", () => [
         `event queue load for ${this.#space} failed; queued intents ` +
-          "from a previous session (if any) are not recovered",
+        "from a previous session (if any) are not recovered",
         error,
       ]);
     });
@@ -212,7 +212,7 @@ export class EventAppendQueue {
     void this.#store.save(this.#space, this.#queue).catch((error) => {
       logger.warn("event-queue-save-failed", () => [
         `event queue save for ${this.#space} failed; a reload before ` +
-          "delivery may lose the queued intent (LT9 durability degraded)",
+        "delivery may lose the queued intent (LT9 durability degraded)",
         error,
       ]);
     });
@@ -239,9 +239,7 @@ export class EventAppendQueue {
         attempt = 0;
       } catch (error) {
         const name = (error as { name?: string })?.name ?? "";
-        const message = error instanceof Error
-          ? error.message
-          : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         if (name === "EventAppendDuplicateError") {
           // The first append landed; its consequences are (or will be)
           // the authoritative outcome (events.md §5).
@@ -252,7 +250,7 @@ export class EventAppendQueue {
         if (REFUSED_ERROR_NAMES.has(name)) {
           logger.warn("event-append-refused", () => [
             `event append ${head.eventId} refused deterministically; ` +
-              "dropped from the queue",
+            "dropped from the queue",
             { name, message },
           ]);
           this.#settle(head, { delivered: false, refused: message });

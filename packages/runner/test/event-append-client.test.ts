@@ -165,8 +165,7 @@ describe("event-append queue (events.md §5, LT9)", () => {
     // (and persisted) at close.
     const dead = new EventAppendQueue({
       space,
-      transact: () =>
-        Promise.reject(namedError("ConnectionError", "offline")),
+      transact: () => Promise.reject(namedError("ConnectionError", "offline")),
       nextLocalSeq: () => 1,
       store,
     });

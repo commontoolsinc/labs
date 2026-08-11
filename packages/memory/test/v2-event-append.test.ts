@@ -55,8 +55,8 @@ import {
   resetServerExecutionConfig,
   setServerExecutionConfig,
   STREAM_ENTRIES_DOC_PREFIX,
-  type StreamEventEntry,
   streamEntriesDocId,
+  type StreamEventEntry,
   type StreamEventsDocValue,
 } from "../v2.ts";
 
@@ -261,19 +261,22 @@ Deno.test("event-append admission: the authored row, end to end", async (t) => {
       },
     );
 
-    await t.step("the dedupe-horizon CAS refuses an above-horizon duplicate", () => {
-      assertThrows(
-        () =>
-          applyCommit(engine, {
-            sessionId: SESSION,
-            space: SPACE,
-            principal: ALICE,
-            commit: appendCommit(5, [entryOf("evt-1")]),
-          }),
-        EventAppendDuplicateError,
-        "duplicates a stream entry above the dedupe horizon",
-      );
-    });
+    await t.step(
+      "the dedupe-horizon CAS refuses an above-horizon duplicate",
+      () => {
+        assertThrows(
+          () =>
+            applyCommit(engine, {
+              sessionId: SESSION,
+              space: SPACE,
+              principal: ALICE,
+              commit: appendCommit(5, [entryOf("evt-1")]),
+            }),
+          EventAppendDuplicateError,
+          "duplicates a stream entry above the dedupe horizon",
+        );
+      },
+    );
 
     await t.step(
       "replay of the SAME (sessionId, localSeq) append returns the stored result — never its own duplicate",
@@ -357,21 +360,24 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
       );
     });
 
-    await t.step("a declaration with no matching appended entry is refused", () => {
-      assertThrows(
-        () =>
-          authored(2, {
-            operations: [{
-              op: "set",
-              id: "of:plain" as never,
-              value: { value: { n: 1 } } as never,
-            }],
-            eventAppends: [{ id: SIDECAR, eventId: "evt-ghost" }],
-          }),
-        ProtocolError,
-        "without a matching appended entry",
-      );
-    });
+    await t.step(
+      "a declaration with no matching appended entry is refused",
+      () => {
+        assertThrows(
+          () =>
+            authored(2, {
+              operations: [{
+                op: "set",
+                id: "of:plain" as never,
+                value: { value: { n: 1 } } as never,
+              }],
+              eventAppends: [{ id: SIDECAR, eventId: "evt-ghost" }],
+            }),
+          ProtocolError,
+          "without a matching appended entry",
+        );
+      },
+    );
 
     await t.step("duplicate declarations in one commit are refused", () => {
       assertThrows(
@@ -407,14 +413,16 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
       },
     );
 
-    await t.step("a pre-supplied entry seq is refused (forged ordering)", () => {
-      assertThrows(
-        () =>
-          authored(5, appendCommit(5, [entryOf("evt-d", { seq: 999 })])),
-        ProtocolError,
-        "pre-supplies the stream seq",
-      );
-    });
+    await t.step(
+      "a pre-supplied entry seq is refused (forged ordering)",
+      () => {
+        assertThrows(
+          () => authored(5, appendCommit(5, [entryOf("evt-d", { seq: 999 })])),
+          ProtocolError,
+          "pre-supplies the stream seq",
+        );
+      },
+    );
 
     await t.step(
       "pre-supplied processing fields are refused (forged consequences)",
@@ -427,8 +435,7 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
           ]
         ) {
           assertThrows(
-            () =>
-              authored(6, appendCommit(6, [entryOf("evt-e", overrides)])),
+            () => authored(6, appendCommit(6, [entryOf("evt-e", overrides)])),
             ProtocolError,
             "pre-supplies processing fields",
           );
@@ -439,9 +446,12 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
     await t.step("an entry without a stream link is refused", () => {
       assertThrows(
         () =>
-          authored(7, appendCommit(7, [
-            entryOf("evt-f", { stream: undefined as never }),
-          ])),
+          authored(
+            7,
+            appendCommit(7, [
+              entryOf("evt-f", { stream: undefined as never }),
+            ]),
+          ),
         ProtocolError,
         "carries no stream link",
       );
@@ -450,9 +460,12 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
     await t.step("an entry without an eventId is refused", () => {
       assertThrows(
         () =>
-          authored(8, appendCommit(8, [
-            entryOf("", {}),
-          ])),
+          authored(
+            8,
+            appendCommit(8, [
+              entryOf("", {}),
+            ]),
+          ),
         ProtocolError,
         "without an eventId",
       );

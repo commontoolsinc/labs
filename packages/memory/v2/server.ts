@@ -29,9 +29,6 @@ import {
   type Operation,
   parseMemoryProtocolFlags,
   resolveScopeKey,
-  type StreamEventEntry,
-  type StreamEventsDocValue,
-  type StreamLinkRef,
   type ResponseMessage,
   type ScopeKey,
   scopeKeyApplicableTo,
@@ -53,6 +50,9 @@ import {
   type SqliteRegisterDiskSourceRequest,
   type SqliteRegisterDiskSourceResult,
   type SqliteResultColumn,
+  type StreamEventEntry,
+  type StreamEventsDocValue,
+  type StreamLinkRef,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -2491,8 +2491,7 @@ export class Server {
           // classified by the LAST op this commit applied to it: that op
           // produced the head this commit leaves behind, so it alone
           // decides the flush-time echo shape.
-          const committedWrites: Array<{ id: string; scopeKey: ScopeKey }> =
-            [];
+          const committedWrites: Array<{ id: string; scopeKey: ScopeKey }> = [];
           const dirtyOps = new Map<string, DirtyOp>();
           for (const operation of message.commit.operations) {
             if (operation.op === "sqlite") continue;
@@ -2514,15 +2513,16 @@ export class Server {
           // loop classifies it (serving-loop.md §3) and the host's
           // undelivered-events activation criterion fires even with no
           // live session (serving-loop.md §1).
-          const admittedEventAppends =
-            (message.commit.eventAppends ?? []).map((decl) => ({
-              id: decl.id,
-              scopeKey: resolveScopeKey(decl.scope, {
-                principal: session.principal,
-                sessionId: message.sessionId,
-              }),
-              eventId: decl.eventId,
-            }));
+          const admittedEventAppends = (message.commit.eventAppends ?? []).map((
+            decl,
+          ) => ({
+            id: decl.id,
+            scopeKey: resolveScopeKey(decl.scope, {
+              principal: session.principal,
+              sessionId: message.sessionId,
+            }),
+            eventId: decl.eventId,
+          }));
           this.#notifyCommitAdmitted({
             space: message.space,
             seq: commit.seq,
