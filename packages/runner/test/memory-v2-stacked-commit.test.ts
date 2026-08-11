@@ -162,9 +162,19 @@ type ResultRecord = {
 };
 
 // The staleness-bearing top of a pending read's dependency set: the highest
-// listed layer (scalar reads are their own top).
-const localSeqTop = (read: { localSeq: number | number[] }): number =>
-  Array.isArray(read.localSeq) ? Math.max(...read.localSeq) : read.localSeq;
+// listed layer (scalar reads are their own top). The scripted transports
+// never advertise `inferredPendingDependencies`, so a localSeq-less read
+// reaching this double is a harness bug, not a scripted scenario.
+const localSeqTop = (read: { localSeq?: number | number[] }): number => {
+  if (read.localSeq === undefined) {
+    throw new Error(
+      "inferred-shape pending read reached the declared-shape double",
+    );
+  }
+  return Array.isArray(read.localSeq)
+    ? Math.max(...read.localSeq)
+    : read.localSeq;
+};
 
 class ScriptedServerModel {
   connectionCount = 0;
@@ -279,7 +289,7 @@ class ScriptedServerModel {
       // in packages/memory/test/v2-pending-read-basis-overadvance.test.ts.)
       const layers = Array.isArray(read.localSeq)
         ? read.localSeq
-        : [read.localSeq];
+        : [localSeqTop(read)];
       let basis: AppliedRecord | undefined;
       let unresolved: number | undefined;
       for (const layer of layers) {
@@ -562,7 +572,13 @@ type Harness = ReturnType<typeof createHarness>;
 // contract with MarkerContractTransport and push their markers explicitly.
 class MarkerContractTransport extends ScriptedModelTransport {
   protected override helloFlags() {
-    return { ...getMemoryProtocolFlags(), verdictCatchUpMarkers: true };
+    // Markers on, inference still off: the scripted model keeps mirroring
+    // the declared dependency shape.
+    return {
+      ...getMemoryProtocolFlags(),
+      verdictCatchUpMarkers: true,
+      inferredPendingDependencies: false,
+    };
   }
 }
 
@@ -4854,6 +4870,120 @@ Deno.test("memory v2 stacked commits: surviving independent patch does not resur
     );
     expectVisible(harness, { A: { items: { theirs: "w", mine: "hello" } } });
   } finally {
+    await harness.close();
+  }
+});
+
+// A CT-1910 server: every current capability including server-inferred
+// pending dependencies. The scripted model keeps its DECLARED-shape mirror,
+// so tests here script verdicts with `skipReadValidation` when the wire
+// carries no dependency arrays for it to validate.
+class InferredDependencyTransport extends ScriptedModelTransport {
+  protected override helloFlags() {
+    return { ...super.helloFlags(), inferredPendingDependencies: true };
+  }
+}
+
+Deno.test("memory v2 stacked commits: a server advertising inferredPendingDependencies receives localSeq-less pending reads carrying the verdict watermark", async () => {
+  const harness = await createHarness({
+    transport: (model) => new InferredDependencyTransport(model),
+  });
+  try {
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, { kind: "accept" });
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+    const c3 = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("c3"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(c3.localSeq, {
+      kind: "accept",
+      skipReadValidation: true,
+    });
+
+    await assertResultOk(c1.promise);
+    await assertResultOk(c2.promise);
+    await assertResultOk(c3.promise);
+
+    // The wire read dropped its dependency array (the server infers it) and
+    // kept the true confirmed basis; the commit attests the verdict
+    // watermark from BUILD time — c3 was built while c1 and c2 were still
+    // in flight, so it could attest nothing beyond their floor.
+    const sent = harness.model.applied.get(c3.localSeq);
+    assertExists(sent);
+    assertEquals(sent.commit.reads.pending.length, 1);
+    assertEquals(sent.commit.reads.pending[0].localSeq, undefined);
+    assertEquals(sent.commit.reads.pending[0].basisSeq, 0);
+    assertEquals(sent.commit.verdictsThrough, c1.localSeq - 1);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: the verdict watermark advances only after a rejection's drop and cascade have run", async () => {
+  const harness = await createHarness({
+    transport: (model) => new InferredDependencyTransport(model),
+  });
+  try {
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, { kind: "rejectConflict" });
+    await assertConflict(c1.promise);
+
+    // Built after c1's rejection was fully processed client-side: the
+    // watermark passes it. A marker-based watermark could not make this
+    // claim for rejection kinds the server never stamps markers for.
+    const c2 = beginSet(harness, DOCS.B, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+    await assertResultOk(c2.promise);
+
+    const sent = harness.model.applied.get(c2.localSeq);
+    assertExists(sent);
+    assertEquals(sent.commit.verdictsThrough, c1.localSeq);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: the client cascade still runs on internal dependency arrays under inferred emission", async () => {
+  const harness = await createHarness({
+    transport: (model) => new InferredDependencyTransport(model),
+  });
+  const gate = Promise.withResolvers<void>();
+  try {
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "rejectConflict",
+      responseGate: gate.promise,
+    });
+    const c2 = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("c2"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    // c2's wire carries no dependency array, so only the CLIENT knows it
+    // sat on c1's optimistic write. Its scripted accept never resolves; the
+    // pin is that c1's rejection cascades c2 locally regardless.
+    harness.model.setOutcome(c2.localSeq, {
+      kind: "accept",
+      skipReadValidation: true,
+      responseGate: new Promise<void>(() => {}),
+    });
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(c2.localSeq),
+      "c2 reached the wire",
+    );
+    gate.resolve();
+
+    await assertConflict(c1.promise);
+    const cascaded = await c2.promise;
+    assertExists(cascaded.error);
+    assertEquals(hasPendingOverlay(harness, DOCS.A), false);
+  } finally {
+    gate.resolve();
     await harness.close();
   }
 });

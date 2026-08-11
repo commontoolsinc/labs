@@ -49,15 +49,27 @@ const nextSessionToken = (): SessionToken =>
 export class SessionRegistry {
   readonly #ttlMs: number;
   #sessions = new Map<string, SessionState>();
+  /** Fires after a session leaves the registry — TTL expiry and outright
+   * removal alike — so owners of per-session state keyed outside the
+   * registry (e.g. the engine's CT-1910 inference retention) can release
+   * it. Never fires for a resume: `open` replaces the entry in place. */
+  readonly #onRemoved?: (session: SessionState) => void;
 
-  constructor(options: { ttlMs?: number } = {}) {
+  constructor(
+    options: {
+      ttlMs?: number;
+      onRemoved?: (session: SessionState) => void;
+    } = {},
+  ) {
     this.#ttlMs = options.ttlMs ?? 30_000;
+    this.#onRemoved = options.onRemoved;
   }
 
   #prune(now = Date.now()): void {
     for (const [key, session] of this.#sessions) {
       if (session.expiresAt !== null && session.expiresAt <= now) {
         this.#sessions.delete(key);
+        this.#onRemoved?.(session);
       }
     }
   }
@@ -161,7 +173,12 @@ export class SessionRegistry {
 
   /** Remove a session outright (e.g. its principal lost access). */
   remove(space: string, sessionId: string): void {
-    this.#sessions.delete(sessionKey(space, sessionId));
+    const key = sessionKey(space, sessionId);
+    const session = this.#sessions.get(key);
+    this.#sessions.delete(key);
+    if (session !== undefined) {
+      this.#onRemoved?.(session);
+    }
   }
 
   updateSeenSeq(

@@ -45,6 +45,7 @@ was last checked against the code.
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`ownWriteEcho`](#ownwriteecho) | `setOwnWriteEchoConfig()` (server-side only, not negotiated) | on | Robin McCollum (CT-1965) | remove the switch once the echo has field-soaked | implemented, on by default |
+| [`inferredPendingDependencies`](#inferredpendingdependencies) | `setInferredPendingDependenciesConfig()` (server-side advertisement; the capability itself is negotiated at hello) | on | Robin McCollum (CT-1910) | retire the switch once inferred emission has field-soaked; retire array emission once inference servers are the floor | implemented, on by default |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
@@ -657,6 +658,29 @@ the per-epic implementation notes).
 - **Status on 2026-08-08.** Implemented and on by default.
 - **Path to removal.** After the echo has soaked in production, delete the
   config trio and the suppression branch it re-enables.
+
+### `inferredPendingDependencies`
+
+- **Toggle via.** `setInferredPendingDependenciesConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts). The config controls
+  only the server's ADVERTISEMENT of the `inferredPendingDependencies` hello
+  capability; validation of the inferred wire shape is build-inherent and
+  stays on either way, so turning the config off sends new clients back to
+  declared `localSeq` arrays without stranding any in-flight traffic.
+- **Added by.** Robin McCollum, for CT-1910.
+- **Purpose.** Server-inferred pending dependencies
+  (`docs/specs/memory-v2/03-commit-model.md` §3.6.3): pending reads omit the
+  declared dependency array, the commit attests a `verdictsThrough` watermark,
+  and the server judges the composite against its per-session retention of
+  rejected commits. Off restores declared-array emission — the pre-CT-1910
+  wire shape — for newly connecting clients.
+- **Current default and planned end state.** On by default. The switch exists
+  as a rollout lever while inferred emission field-soaks.
+- **Status on 2026-08-10.** Implemented and on by default.
+- **Path to removal.** After inferred emission has soaked, delete the config
+  trio and advertise unconditionally; separately, retire client array
+  emission once inference-capable servers are the deployment floor (arrays
+  stay accepted as legacy input indefinitely).
 
 ### `syncSchemaTableV2`
 

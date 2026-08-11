@@ -155,8 +155,26 @@ exclude only true predecessor own-session commits (localSeq below the
 reader's — an own write accepted out of submission order conflicts like a
 foreign write).
 
-Checked by: the TLA+ model (all three recording modes); stacked-commit unit
-tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`).
+The WIRE-declaration clauses above bind the declared shapes only. Under
+the `inferredPendingDependencies` capability (03-commit-model.md §3.6.3)
+the server computes the dependency set itself — rejected candidates from
+its per-session retention judged against the commit's `verdictsThrough`
+watermark, staleness from the declared true basis — so there is no
+client-chosen array left to get wrong. The client-side RECORDING clause
+(a) still binds in full: the drop cascade runs on the recorded set, and it
+is the sole guard for layers that never reached the wire. The inference
+rule's own soundness obligations — retention until watermark passage,
+monotonic watermarks, conservative overflow dooming, the in-order
+submission premise — are stated in §3.6.3 and pinned by
+`packages/memory/test/v2-inferred-pending-dependencies.test.ts` and the
+differential harness's inferred-shape traffic.
+
+Checked by: the TLA+ model (all three DECLARED recording modes — the
+inferred shape sits outside current model coverage until the model grows
+an in-flight verdict channel, the INV-6 refinement); stacked-commit unit
+tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`); the
+differential harness (`v2-differential-consistency.test.ts`), whose
+generator emits legacy, declared-basis, and inferred shapes.
 
 ### INV-4 — Cascade totality
 
@@ -190,6 +208,14 @@ This ordering is what makes the top-of-stack staleness basis sound (INV-3(b)
 depends on it): every own-session layer below a reader resolves at or before
 the basis layer's seq, so the scan interval past the basis contains no
 own-session commits.
+
+It is also the completeness premise of inferred pending dependencies
+(03-commit-model.md §3.6.3): at an inferred-shape commit's decision, every
+lower same-session localSeq is decided, so the server's decided-commit
+record is the whole candidate set. The engine enforces the premise for
+that shape — an inferred-shape commit at or below the session's highest
+decided localSeq is a protocol error unless it re-sends a retained
+rejection (the lost-verdict replay).
 
 Layer: server session queueing (`03-commit-model.md` §3.6.3 — the current
 implementation rejects rather than holds, which preserves the ordering

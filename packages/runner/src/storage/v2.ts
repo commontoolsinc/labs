@@ -701,9 +701,9 @@ const scalarizeLocalSeq = (localSeq: number | number[]): number =>
   Array.isArray(localSeq) ? Math.max(...localSeq) : localSeq;
 
 const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
-  const hasStack = (reads: { localSeq: number | number[] }[]): boolean =>
+  const hasStack = (reads: { localSeq?: number | number[] }[]): boolean =>
     reads.some((read) => Array.isArray(read.localSeq));
-  const scalarizeReads = <Read extends { localSeq: number | number[] }>(
+  const scalarizeReads = <Read extends { localSeq?: number | number[] }>(
     reads: Read[],
   ): Read[] =>
     reads.map((read) =>
@@ -745,6 +745,51 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
         ),
       }
       : {}),
+  };
+};
+
+// Wire-compat helper for pre-CT-1910 traffic: the internal commit carries the
+// verdict watermark unconditionally, but a wire shape that still declares its
+// dependency arrays has no use for it, and keeping those bytes identical to
+// pre-watermark clients keeps replay comparison and old-server behavior
+// byte-for-byte unchanged.
+const stripVerdictsThrough = (commit: ClientCommit): ClientCommit => {
+  if (commit.verdictsThrough === undefined) {
+    return commit;
+  }
+  const { verdictsThrough: _verdictsThrough, ...rest } = commit;
+  return rest;
+};
+
+// The CT-1910 inferred wire shape: pending reads drop their declared
+// dependency arrays (the server infers them from its own decided-commit
+// record, judged against the commit's verdict watermark) and keep only the
+// true confirmed basis for the staleness scan. Client-side machinery is
+// untouched — the in-flight registry and drop cascade still run on the
+// internal commit's arrays, which remain the load-bearing guard for layers
+// that never reach the wire. Scheduler-observation batches keep their
+// declared arrays: observation entries carry no per-entry watermark, and
+// they are droppable bookkeeping, not semantic writes.
+const inferPendingDependencyShape = (commit: ClientCommit): ClientCommit => {
+  if (
+    commit.reads.pending.length === 0 ||
+    commit.verdictsThrough === undefined ||
+    commit.reads.pending.every((read) => read.localSeq === undefined)
+  ) {
+    return commit;
+  }
+  return {
+    ...commit,
+    reads: {
+      confirmed: commit.reads.confirmed,
+      pending: commit.reads.pending.map((read) => {
+        if (read.localSeq === undefined) {
+          return read;
+        }
+        const { localSeq: _localSeq, ...rest } = read;
+        return rest;
+      }),
+    },
   };
 };
 
@@ -2072,6 +2117,18 @@ class SpaceReplica implements ISpaceReplica {
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
+  // LocalSeqs allocated from #nextLocalSeq whose fate the pending-stack
+  // bookkeeping has not fully processed: an accept's verdict not yet
+  // received, or a rejection's drop-and-cascade not yet run. The verdict
+  // watermark a commit attests (CT-1910, `verdictsThrough`) is the largest
+  // W with every localSeq at or below W settled — one entry unsettled at
+  // build time caps W below it, because that entry could still turn out to
+  // be an unprocessed rejection. This is deliberately NOT
+  // #caughtUpLocalSeq: markers cover only accepts and conflict rejections,
+  // so a marker-based watermark would never pass a ProtocolError-rejected
+  // commit and every later reader of its documents would be doomed forever
+  // — the livelock the watermark exists to break.
+  #unsettledFates = new Set<number>();
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
@@ -3011,7 +3068,7 @@ class SpaceReplica implements ISpaceReplica {
     ) {
       return Promise.resolve({ ok: {} });
     }
-    const localSeq = this.#nextLocalSeq++;
+    const localSeq = this.allocateLocalSeq();
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
     >();
@@ -3029,6 +3086,9 @@ class SpaceReplica implements ISpaceReplica {
     this.#unsettledSchedulerObservations.add(entry);
     void pending.promise.then(() => {
       this.#unsettledSchedulerObservations.delete(entry);
+      // The entry's fate rides its batch envelope's verdict (or a
+      // capability-gated drop); either way it is processed here.
+      this.settleFate(localSeq);
     });
     this.scheduleSchedulerObservationFlush();
     return pending.promise;
@@ -3092,7 +3152,7 @@ class SpaceReplica implements ISpaceReplica {
         ? this.#schedulerObservationBatch.length
         : nextGeneration,
     );
-    const localSeq = this.#nextLocalSeq++;
+    const localSeq = this.allocateLocalSeq();
     const commit: ClientCommit = {
       localSeq,
       reads: { confirmed: [], pending: [] },
@@ -3193,12 +3253,42 @@ class SpaceReplica implements ISpaceReplica {
     this.#schedulerObservationFlushPromise = promise;
     this.#commitPromises.add(promise);
     promise.finally(() => {
+      // Covers the envelope's capability-gated early returns, which never
+      // reach settleAccept/finalizeRejection; settling twice is a no-op.
+      this.settleFate(localSeq);
       this.#commitPromises.delete(promise);
       if (this.#schedulerObservationFlushPromise === promise) {
         this.#schedulerObservationFlushPromise = undefined;
       }
     });
     return promise;
+  }
+
+  private allocateLocalSeq(): number {
+    const localSeq = this.#nextLocalSeq++;
+    this.#unsettledFates.add(localSeq);
+    return localSeq;
+  }
+
+  private settleFate(localSeq: number): void {
+    this.#unsettledFates.delete(localSeq);
+  }
+
+  /** The verdict watermark to attest on a commit being built at `localSeq`
+   * (CT-1910): every fate strictly below the lowest still-unsettled
+   * allocation has been processed, so W is that bound minus one — or
+   * everything below the commit itself when nothing else is outstanding.
+   * Snapshotted at BUILD time; a fate settling between build and send must
+   * not raise it, because the composite was captured before that verdict
+   * was processed. */
+  private verdictFrontierBefore(localSeq: number): number {
+    let lowest = localSeq;
+    for (const unsettled of this.#unsettledFates) {
+      if (unsettled < lowest) {
+        lowest = unsettled;
+      }
+    }
+    return lowest - 1;
   }
 
   private async commitOperations(
@@ -3223,7 +3313,7 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
-    const localSeq = this.#nextLocalSeq++;
+    const localSeq = this.allocateLocalSeq();
     // Observations created after this direct commit form a later batch.
     this.#schedulerObservationBatchGeneration++;
     if (source !== undefined) {
@@ -3233,6 +3323,7 @@ class SpaceReplica implements ISpaceReplica {
       ["commitOperations", "buildCommit"],
       (): ClientCommit => ({
         localSeq,
+        verdictsThrough: this.verdictFrontierBefore(localSeq),
         reads: this.buildReads(source, localSeq),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
@@ -3359,7 +3450,7 @@ class SpaceReplica implements ISpaceReplica {
         for (const layer of read.localSeq) {
           dependencies.add(layer);
         }
-      } else {
+      } else if (read.localSeq !== undefined) {
         dependencies.add(read.localSeq);
       }
     }
@@ -3530,13 +3621,24 @@ class SpaceReplica implements ISpaceReplica {
         ) {
           return { ok: {} };
         }
-        // Wire-compat: only a server advertising `pendingReadStacks` can
-        // resolve array dependency sets — otherwise collapse each to its
-        // top-of-stack element before sending.
-        const wireCommit = client.serverFlags?.pendingReadStacks === true
-          ? commit
-          : scalarizePendingReadStacks(commit);
-        if (wireCommit !== commit && inFlight !== undefined) {
+        // Wire-shape ladder, newest capability first. Inferred dependencies
+        // (CT-1910): the server reconstructs the dependency set itself, so
+        // the arrays stay client-side and the commit's verdict watermark
+        // rides instead. Declared arrays: only a server advertising
+        // `pendingReadStacks` can resolve them — otherwise collapse each to
+        // its top-of-stack element before sending. The two legacy shapes
+        // strip the watermark to stay byte-identical to pre-CT-1910
+        // clients.
+        const scalarized =
+          client.serverFlags?.inferredPendingDependencies !== true &&
+          client.serverFlags?.pendingReadStacks !== true;
+        const wireCommit =
+          client.serverFlags?.inferredPendingDependencies === true
+            ? inferPendingDependencyShape(commit)
+            : scalarized
+            ? scalarizePendingReadStacks(stripVerdictsThrough(commit))
+            : stripVerdictsThrough(commit);
+        if (scalarized && inFlight !== undefined) {
           // Old-server hold (split-brain guard): the scalarized wire omits
           // the lower layers, so the server could durably ACCEPT a commit
           // this client is about to cascade-reject — the caller would see a
@@ -3801,6 +3903,10 @@ class SpaceReplica implements ISpaceReplica {
     // the drop catches every dependant; transitivity emerges from recursion
     // (a victim's own finalizeRejection lands back here with its localSeq).
     this.cascadeDroppedDependency(localSeq);
+    // Only now is this rejection "processed" in the verdict-watermark sense
+    // (CT-1910): the drop and its cascade have run, so a commit built after
+    // this point provably excludes the rejected layer.
+    this.settleFate(localSeq);
     if (before !== undefined) {
       const changes = before.compare(this);
       // The revert snapshots CURRENT confirmed state (which already includes
@@ -4364,6 +4470,11 @@ class SpaceReplica implements ISpaceReplica {
     applied: AppliedCommit,
     resolveAtVerdict = false,
   ): Promise<void> {
+    // The fate is known here even when the APPLICATION parks on marker
+    // coverage: the verdict watermark only has to prove rejections were
+    // processed before a composite was built, and an accepted layer imposes
+    // no such premise.
+    this.settleFate(localSeq);
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
     // no subscribed watch view, no frames arrive at all — there is no

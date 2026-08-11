@@ -1042,7 +1042,9 @@ export class Server {
       };
     },
   ) {
-    this.#sessions = options.sessions ?? new SessionRegistry();
+    this.#sessions = options.sessions ?? new SessionRegistry({
+      onRemoved: (session) => this.#releaseSessionInference(session),
+    });
     this.#store = options.store;
   }
 
@@ -1317,6 +1319,21 @@ export class Server {
         "unauthorized",
       );
     }
+  }
+
+  /** Releases the engine-held CT-1910 inference retention when a session
+   * leaves the registry: a removed session can never submit again, so its
+   * retained rejections prove nothing to any future commit. The engine
+   * promise resolves asynchronously; a space whose engine never opened (or
+   * already closed) simply has no state to release. */
+  #releaseSessionInference(
+    session: { space: string; id: string; principal?: string },
+  ): void {
+    this.#engines.get(session.space)?.then((engine) =>
+      Engine.clearSessionInference(engine, session.id, session.principal)
+    ).catch(() => {
+      // An engine that failed to open holds no inference state.
+    });
   }
 
   #revokeDeauthorizedSessions(

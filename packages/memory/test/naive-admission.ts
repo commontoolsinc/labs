@@ -26,6 +26,15 @@
 //     09-invariants.md and kept here as the reference for legacy traffic.
 //   - Scope and branch dimensions are not modeled; the generator stays on
 //     the default branch and space scope.
+//   - Inferred dependencies (CT-1910, the localSeq-less shape): the model
+//     keeps every rejected commit's touched-doc set per session and dooms a
+//     reader iff some rejected same-session commit L with
+//     verdictsThrough < L < reader.localSeq touched the read's document.
+//     Watermarks are per-session MONOTONIC: the effective watermark is the
+//     max over every attested value (the engine prunes retention at that
+//     max, so a later stale attestation cannot resurrect a retired entry).
+//     Staleness for the inferred shape is the `basisSeq` scan above,
+//     unchanged.
 
 import type { ClientCommit, Operation, PatchOp } from "../v2.ts";
 
@@ -47,11 +56,18 @@ export interface NaiveHistory {
   accepted: NaiveCommit[];
   /** sessionId -> localSeq -> resolution seq (accepted commits only). */
   resolution: Map<string, Map<number, number>>;
+  /** sessionId -> rejected commits' touched-doc sets, ascending localSeq
+   * (the CT-1910 inference candidates). */
+  rejected: Map<string, Array<{ localSeq: number; touchedIds: Set<string> }>>;
+  /** sessionId -> highest attested verdict watermark (monotonic). */
+  watermarks: Map<string, number>;
 }
 
 export const emptyHistory = (): NaiveHistory => ({
   accepted: [],
   resolution: new Map(),
+  rejected: new Map(),
+  watermarks: new Map(),
 });
 
 export type NaiveVerdict =
@@ -139,6 +155,48 @@ export const naiveAdmit = (
   }
   const sessionRes = history.resolution.get(sessionId);
   for (const read of commit.reads.pending) {
+    if (read.localSeq === undefined) {
+      // Inferred shape (CT-1910): dependency soundness comes from the
+      // rejected-commit rule; staleness from the declared true basis.
+      if (read.basisSeq === undefined) {
+        return {
+          accepted: false,
+          reason: `inferred read on ${read.id} names no basisSeq`,
+        };
+      }
+      if (commit.verdictsThrough === undefined) {
+        return {
+          accepted: false,
+          reason: `inferred read on ${read.id} without verdictsThrough`,
+        };
+      }
+      const watermark = Math.max(
+        commit.verdictsThrough,
+        history.watermarks.get(sessionId) ?? 0,
+      );
+      for (const entry of history.rejected.get(sessionId) ?? []) {
+        if (entry.localSeq >= commit.localSeq) break;
+        if (entry.localSeq <= watermark) continue;
+        if (entry.touchedIds.has(read.id)) {
+          return {
+            accepted: false,
+            reason:
+              `rejected pending dependency inferred: ${entry.localSeq} touched ${read.id}`,
+          };
+        }
+      }
+      const cs = conflictSeq(history, read.id, read.path, read.basisSeq, {
+        sessionId,
+        beforeLocalSeq: commit.localSeq,
+      });
+      if (cs !== null) {
+        return {
+          accepted: false,
+          reason: `stale pending read: ${read.id} vs seq ${cs}`,
+        };
+      }
+      continue;
+    }
     const layers = Array.isArray(read.localSeq)
       ? read.localSeq
       : [read.localSeq];
@@ -188,6 +246,43 @@ export const naiveRecord = (
     history.resolution.set(sessionId, sessionRes);
   }
   sessionRes.set(commit.localSeq, seq);
+  noteAttestedWatermark(history, sessionId, commit);
+};
+
+/** Records an engine-rejected commit's touched-doc set — the CT-1910
+ * inference candidates a later inferred-shape reader is judged against. */
+export const naiveRecordRejected = (
+  history: NaiveHistory,
+  sessionId: string,
+  commit: ClientCommit,
+): void => {
+  const touchedIds = new Set<string>();
+  for (const op of commit.operations) {
+    if (op.op !== "sqlite") touchedIds.add(op.id);
+  }
+  let entries = history.rejected.get(sessionId);
+  if (!entries) {
+    entries = [];
+    history.rejected.set(sessionId, entries);
+  }
+  entries.push({ localSeq: commit.localSeq, touchedIds });
+  entries.sort((a, b) => a.localSeq - b.localSeq);
+  noteAttestedWatermark(history, sessionId, commit);
+};
+
+// A watermark counts from the commit that CARRIED it whatever its fate:
+// the engine prunes retention at attestation time on accept and reject
+// alike.
+const noteAttestedWatermark = (
+  history: NaiveHistory,
+  sessionId: string,
+  commit: ClientCommit,
+): void => {
+  if (commit.verdictsThrough === undefined) return;
+  const current = history.watermarks.get(sessionId) ?? 0;
+  if (commit.verdictsThrough > current) {
+    history.watermarks.set(sessionId, commit.verdictsThrough);
+  }
 };
 
 // --- Reference value semantics (INV-9's naive fold) ---------------------

@@ -162,6 +162,16 @@ this build) and defaults to `false` when absent: against an older server that
 stamps markers only for conflicts, the client applies verdicts immediately
 instead of parking them.
 
+`inferredPendingDependencies` advertises that pending reads may use the
+inferred shape of `03-commit-model.md` §3.6.3 — no declared `localSeq`
+array, `basisSeq` required, the commit carrying a `verdictsThrough`
+watermark — with the server computing the dependency set from its own
+record of the session's decided commits. It defaults to `false` when
+absent; a client that sees it absent keeps declaring the full array (or the
+scalar downgrade below `pendingReadStacks`). Validation of the inferred
+shape is build-inherent; the ADVERTISEMENT is configuration, the rollout
+lever that steers what clients emit without redeploying either side.
+
 ### 4.1.2 Logical Sessions and Resume
 
 Pending-read resolution, idempotent replay, and live sync are scoped to a

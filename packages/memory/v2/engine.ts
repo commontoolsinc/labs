@@ -693,6 +693,18 @@ WHERE session_id = :session_id
   AND local_seq = :local_seq
 `;
 
+// Seeds a session's in-memory inference state (CT-1910) after an engine
+// restart: accepted commits below this bound are decided by construction,
+// and rejected ones left no row — their retention died with the process,
+// which is safe because the session itself cannot outlive the process
+// either (SessionRegistry is in-memory), so no inferred-shape commit from
+// the old session's stream can arrive afterwards.
+const SELECT_MAX_LOCAL_SEQ = `
+SELECT COALESCE(MAX(local_seq), 0) AS local_seq
+FROM "commit"
+WHERE session_id = :session_id
+`;
+
 // True-basis (CT-1910) variants of the conflict scans: identical intervals,
 // but writes produced by the reader's own session's TRUE PREDECESSORS
 // (`local_seq` below the reader's) are excluded — the accepted own layers
@@ -827,6 +839,7 @@ interface PreparedStatements {
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
   selectLatestSnapshot: PreparedStatement;
+  selectMaxLocalSeq: PreparedStatement;
   selectNextSeq: PreparedStatement;
   selectPatchConflicts: PreparedStatement;
   selectPatchConflictsExcludingSession: PreparedStatement;
@@ -849,7 +862,58 @@ export type Engine = {
   snapshotRetention: number;
   legacyCommitMetadataRefsRequired: boolean;
   statements: PreparedStatements;
+  /**
+   * Per-session inference state for server-inferred pending dependencies
+   * (CT-1910), keyed by commit session key. In-memory on purpose: a
+   * rejected commit leaves no durable row, and a session cannot outlive
+   * the process, so retention scoped to the process is retention scoped to
+   * every session that could reference it. Entries are pruned as sessions'
+   * attested watermarks pass them and dropped wholesale on session close
+   * ({@link clearSessionInference}).
+   */
+  inference: Map<string, SessionInferenceState>;
 };
+
+/**
+ * What the engine remembers about one session's decided commits so it can
+ * infer pending dependencies (CT-1910) without wire declarations.
+ */
+export type SessionInferenceState = {
+  /**
+   * Rejected commits' write footprints, ascending by localSeq. `touched`
+   * holds `branch\0scopeKey\0id` keys — document granularity, matching the
+   * declared-array shape's coupling (a rejected layer dooms every reader
+   * of the document, influencing path or not).
+   */
+  rejected: Array<{ localSeq: number; touched: Set<string> }>;
+  /**
+   * Highest verdict watermark the session has attested. Watermarks are
+   * monotonic per session — a later commit claiming a lower W does not
+   * resurrect pruned entries.
+   */
+  watermark: number;
+  /**
+   * Highest localSeq this session has had decided (accepted or rejected).
+   * The inference premise — every candidate below an arriving commit is
+   * already decided — holds only under in-order submission (§3.9), so an
+   * inferred-shape commit at or below this bound that is not a lost-verdict
+   * re-send of a retained rejection is a protocol error.
+   */
+  maxDecidedLocalSeq: number;
+  /**
+   * Retention-overflow floor: rejected entries at or below this localSeq
+   * were discarded to bound memory. A watermark below the floor cannot
+   * prove the discarded interval holds no rejected toucher, so such
+   * commits are doomed conservatively (over-rejection is the sound
+   * direction).
+   */
+  rejectedFloor: number;
+};
+
+/** Rejected-commit footprints retained per session before the oldest are
+ * folded into `rejectedFloor`. Generous relative to any real in-flight
+ * window; small enough that a rejection storm cannot grow unbounded. */
+const REJECTED_RETENTION_CAP = 1024;
 
 export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
@@ -1225,6 +1289,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
   selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
+  selectMaxLocalSeq: database.prepare(SELECT_MAX_LOCAL_SEQ),
   selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
   selectPatchConflicts: database.prepare(SELECT_PATCH_CONFLICTS),
   selectPatchConflictsExcludingSession: database.prepare(
@@ -2344,6 +2409,7 @@ export const open = async (
     snapshotRetention,
     legacyCommitMetadataRefsRequired: commitMetadataRefsRequired(database),
     statements: prepareStatements(database),
+    inference: new Map(),
   };
 };
 
@@ -2540,10 +2606,173 @@ export const applyCommit = (
   engine: Engine,
   options: ApplyCommitOptions,
 ): AppliedCommit => {
-  return engine.database.transaction(applyCommitTransaction).immediate(
-    engine,
-    options,
+  try {
+    const applied = engine.database.transaction(applyCommitTransaction)
+      .immediate(
+        engine,
+        options,
+      );
+    noteAcceptedCommit(engine, options);
+    return applied;
+  } catch (error) {
+    // Inference bookkeeping (CT-1910) lives OUTSIDE the transaction: the
+    // in-memory maps are not covered by SQLite rollback, so mutating them
+    // only after the commit's fate is final keeps them agreeing with the
+    // durable log.
+    noteRejectedCommit(engine, options);
+    throw error;
+  }
+};
+
+const inferenceStateFor = (
+  engine: Engine,
+  sessionKey: string,
+): SessionInferenceState => {
+  let state = engine.inference.get(sessionKey);
+  if (!state) {
+    const row = engine.statements.selectMaxLocalSeq.get({
+      session_id: sessionKey,
+    }) as { local_seq: number };
+    state = {
+      rejected: [],
+      watermark: 0,
+      maxDecidedLocalSeq: row.local_seq,
+      rejectedFloor: 0,
+    };
+    engine.inference.set(sessionKey, state);
+  }
+  return state;
+};
+
+const touchedDocKey = (
+  branch: BranchName,
+  scopeKey: string,
+  id: EntityId,
+): string => `${branch}\0${scopeKey}\0${id}`;
+
+/** The document footprint of a commit's write-class operations; empty for
+ * observation-only, sqlite-only, and precondition-only commits (`sqlite`
+ * ops produce no revision, so no pending doc read can sit on them). */
+const commitDocFootprint = (
+  branch: BranchName,
+  commit: ClientCommit,
+  context: { principal: string | undefined; sessionId: SessionId },
+): Set<string> => {
+  const touched = new Set<string>();
+  for (const operation of commit.operations) {
+    if (operation.op === "sqlite") {
+      continue;
+    }
+    touched.add(
+      touchedDocKey(
+        branch,
+        resolveScopeKey(operation.scope, context),
+        operation.id,
+      ),
+    );
+  }
+  return touched;
+};
+
+const noteAcceptedCommit = (
+  engine: Engine,
+  { sessionId, principal, commit }: ApplyCommitOptions,
+): void => {
+  const sessionKey = resolveCommitSessionKey(sessionId, principal);
+  const state = engine.inference.get(sessionKey);
+  if (!state) {
+    // Nothing retained and nothing to reconcile; lazy seeding (which reads
+    // the commit log, now including this accept) covers the bound.
+    return;
+  }
+  state.maxDecidedLocalSeq = Math.max(
+    state.maxDecidedLocalSeq,
+    commit.localSeq,
   );
+  // A lost-verdict re-send that landed on revalidation: the localSeq is
+  // decided-accepted now, so its earlier rejection record no longer
+  // describes a dropped layer.
+  const replayed = state.rejected.findIndex((entry) =>
+    entry.localSeq === commit.localSeq
+  );
+  if (replayed >= 0) {
+    state.rejected.splice(replayed, 1);
+  }
+  pruneByWatermark(state, commit.verdictsThrough);
+};
+
+const noteRejectedCommit = (
+  engine: Engine,
+  { sessionId, principal, commit }: ApplyCommitOptions,
+): void => {
+  const sessionKey = resolveCommitSessionKey(sessionId, principal);
+  // A replay mismatch (or any other throw) on a commit that is durably
+  // accepted is not a rejection of that commit — never poison retention
+  // with an accepted localSeq.
+  const accepted = engine.statements.selectPendingResolution.get({
+    session_id: sessionKey,
+    local_seq: commit.localSeq,
+  });
+  if (accepted) {
+    return;
+  }
+  const state = inferenceStateFor(engine, sessionKey);
+  state.maxDecidedLocalSeq = Math.max(
+    state.maxDecidedLocalSeq,
+    commit.localSeq,
+  );
+  const branch = commit.branch ?? DEFAULT_BRANCH;
+  const touched = commitDocFootprint(branch, commit, { principal, sessionId });
+  // Footprint-empty rejections are retained too: the entry is what lets a
+  // lost-verdict re-send through the in-order guard for revalidation.
+  const existing = state.rejected.find((entry) =>
+    entry.localSeq === commit.localSeq
+  );
+  if (existing) {
+    for (const key of touched) {
+      existing.touched.add(key);
+    }
+  } else {
+    state.rejected.push({ localSeq: commit.localSeq, touched });
+    state.rejected.sort((a, b) => a.localSeq - b.localSeq);
+    while (state.rejected.length > REJECTED_RETENTION_CAP) {
+      const dropped = state.rejected.shift()!;
+      state.rejectedFloor = Math.max(state.rejectedFloor, dropped.localSeq);
+    }
+  }
+  pruneByWatermark(state, commit.verdictsThrough);
+};
+
+/** Watermarks are per-session monotonic truth: once the session attests W,
+ * every future commit's rule ignores rejections at or below W, so their
+ * retention is dead weight regardless of the fate of the commit that
+ * carried the attestation. */
+const pruneByWatermark = (
+  state: SessionInferenceState,
+  verdictsThrough: number | undefined,
+): void => {
+  if (
+    typeof verdictsThrough !== "number" ||
+    !Number.isInteger(verdictsThrough) ||
+    verdictsThrough <= state.watermark
+  ) {
+    return;
+  }
+  state.watermark = verdictsThrough;
+  state.rejected = state.rejected.filter((entry) =>
+    entry.localSeq > verdictsThrough
+  );
+};
+
+/** Drops a closed session's inference state (CT-1910). The server calls
+ * this when it removes the session; retention for a session that can no
+ * longer submit commits proves nothing to anyone. */
+export const clearSessionInference = (
+  engine: Engine,
+  sessionId: SessionId,
+  principal?: string,
+): void => {
+  engine.inference.delete(resolveCommitSessionKey(sessionId, principal));
 };
 
 export type UpsertSchedulerObservationOptions = {
@@ -5128,6 +5357,26 @@ const applyCommitTransaction = (
     };
   }
 
+  // The verdict watermark (CT-1910) is validated for every commit that
+  // carries it, whatever the read shape: a malformed attestation is a
+  // protocol violation, and one at or past the commit's own localSeq
+  // claims the client processed a verdict for a commit it had not yet
+  // built.
+  if (commit.verdictsThrough !== undefined) {
+    if (
+      !Number.isInteger(commit.verdictsThrough) || commit.verdictsThrough < 0
+    ) {
+      throw new ProtocolError(
+        `commit ${commit.localSeq} carries a malformed verdictsThrough: ${commit.verdictsThrough}`,
+      );
+    }
+    if (commit.verdictsThrough >= commit.localSeq) {
+      throw new ProtocolError(
+        `commit ${commit.localSeq} attests verdictsThrough ${commit.verdictsThrough} at or past itself`,
+      );
+    }
+  }
+
   // Preconditions gate every commit shape, including the observation-only
   // fast paths below — a descendant of an uncommitted origin must not
   // persist anything, observations included.
@@ -5633,8 +5882,16 @@ const pendingReadBasisSeq = (
 // protocol violation regardless of which validator (ordinary commit or
 // scheduler observation) encounters them.
 const pendingReadLayers = (
-  read: { id: string; localSeq: number | number[] },
+  read: { id: string; localSeq?: number | number[] },
 ): number[] => {
+  // The inferred (localSeq-less) shape is handled before this helper on the
+  // ordinary-commit path; every other caller — scheduler observations
+  // included — requires the declared shape.
+  if (read.localSeq === undefined) {
+    throw new ProtocolError(
+      `pending read on ${read.id} names no localSeq`,
+    );
+  }
   const layers = Array.isArray(read.localSeq) ? read.localSeq : [read.localSeq];
   if (layers.length === 0) {
     throw new ProtocolError(
@@ -5661,7 +5918,95 @@ const resolvePendingReads = (
 ): Array<{ localSeq: number; seq: number }> => {
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
+  // Server-inferred dependencies (CT-1910): a localSeq-less pending read
+  // shifts dependency soundness from declared resolution edges to the
+  // inference rule — reject iff a same-session commit L with
+  // watermark < L < this commit's localSeq touched the read's document and
+  // was rejected. L at or below the watermark was dropped by the client's
+  // cascade before this composite was built; L above it would be a premise
+  // the client had not yet learned was false. The rule's completeness rests
+  // on in-order submission (§3.9): at this commit's decision, every lower
+  // same-session localSeq is decided, so "decided and retained-rejected" is
+  // the whole candidate set. Never-sent layers need no server-side check —
+  // a composite that included one was cascade-dropped client-side with it
+  // and never reached the wire.
+  let inference:
+    | { state: SessionInferenceState; watermark: number }
+    | undefined;
+  if (commit.reads.pending.some((read) => read.localSeq === undefined)) {
+    const watermark = commit.verdictsThrough;
+    if (watermark === undefined) {
+      throw new ProtocolError(
+        `commit ${commit.localSeq} carries an inferred-shape pending read but no verdictsThrough`,
+      );
+    }
+    const state = inferenceStateFor(engine, sessionKey);
+    if (
+      commit.localSeq <= state.maxDecidedLocalSeq &&
+      !state.rejected.some((entry) => entry.localSeq === commit.localSeq)
+    ) {
+      throw new ProtocolError(
+        `inferred-shape commit ${commit.localSeq} arrived out of submission order (decided through ${state.maxDecidedLocalSeq})`,
+      );
+    }
+    if (watermark < state.rejectedFloor) {
+      // Retention overflowed past what this watermark can vouch for; the
+      // discarded interval may hide a rejected toucher, so doom
+      // conservatively — over-rejection is the sound direction, and the
+      // retry attests a fresher watermark.
+      throw new ConflictError(
+        `rejected-commit retention overflowed past the attested watermark ${watermark}`,
+      );
+    }
+    inference = { state, watermark };
+  }
+
   for (const read of commit.reads.pending) {
+    if (read.localSeq === undefined) {
+      const trueBasis = pendingReadBasisSeq(engine, read);
+      if (trueBasis === undefined) {
+        throw new ProtocolError(
+          `pending read on ${read.id} omits both localSeq and basisSeq`,
+        );
+      }
+      const scopeKey = resolveScopeKey(read.scope, { principal, sessionId });
+      const docKey = touchedDocKey(branch, scopeKey, read.id);
+      for (const entry of inference!.state.rejected) {
+        if (entry.localSeq >= commit.localSeq) {
+          break;
+        }
+        if (entry.localSeq <= inference!.watermark) {
+          continue;
+        }
+        if (entry.touched.has(docKey)) {
+          throw new ConflictError(
+            `rejected pending dependency inferred: localSeq ${entry.localSeq} touched ${read.id} past watermark ${
+              inference!.watermark
+            }`,
+          );
+        }
+      }
+      // Staleness is the declared basisSeq shape's scan, unchanged: the
+      // full interval (basisSeq, head] with predecessor-only own-session
+      // exclusion.
+      const conflictSeq = findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        scopeKey,
+        trueBasis,
+        read.path,
+        read.nonRecursive ?? false,
+        { sessionKey, beforeLocalSeq: commit.localSeq },
+      );
+      if (conflictSeq !== null) {
+        throw new ConflictError(
+          `stale pending read: ${read.id} from basis ${trueBasis} conflicted with seq ${conflictSeq}`,
+        );
+      }
+      continue;
+    }
+
     // An array localSeq names EVERY pending layer the read's view sat on:
     // each element must have resolved to an accepted commit, and staleness
     // is checked exactly once, from the basis §3.6.3 selects — the declared
