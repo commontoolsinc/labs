@@ -182,6 +182,14 @@ export interface NodeState {
   /** Original authored props, used to recompute child render policy. */
   sourceProps?: WorkerVNode["props"];
 
+  /**
+   * Whether this node is the synthetic wrapper the reconciler puts around an
+   * array of children, rather than an element the author wrote. Only a wrapper
+   * may be reused for a new array: an authored element that happens to share
+   * the wrapper's tag holds the author's props and children, not a list.
+   */
+  isArrayWrapper?: boolean;
+
   /** Text-integrity boundaries that blocked this whole rendered node. */
   textIntegrityBlockedFor?: ReadonlySet<number>;
 

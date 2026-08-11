@@ -124,6 +124,165 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
+    "keeps existing rows when a child Cell's array grows by one",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      // A fresh object each call: a recomputed list hands the reconciler new
+      // VNodes that carry the same content, which is what keys it by content.
+      const row = (id: string): WorkerVNode => ({
+        type: "vnode",
+        name: "li",
+        props: { "data-row": id },
+        children: [id],
+      });
+
+      const listCell = new MockCell([row("a"), row("b")]);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "ul",
+        props: {},
+        children: [listCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      const rowsOf = (ops: VDomOp[]) =>
+        ops.filter((op) => "tagName" in op && op.tagName === "li");
+      const initialRows = rowsOf(collector.getOpsOfType("create-element"));
+      assertEquals(initialRows.length, 2, "both rows render initially");
+
+      collector.clear();
+      listCell.set([row("a"), row("b"), row("c")]);
+      await t.settle();
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").length,
+        0,
+        "appending a row must not remove the array wrapper or any row",
+      );
+      assertEquals(
+        rowsOf(collector.getOpsOfType("create-element")).length,
+        1,
+        "only the appended row is created; the first two are reused",
+      );
+    },
+  );
+
+  await t.step(
+    "replaces an authored element when a child Cell becomes an array",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      // Shares the array wrapper's tag, so only the wrapper marker tells the
+      // reconciler this span is the author's element and not a list container.
+      const childCell = new MockCell({
+        type: "vnode",
+        name: "span",
+        props: { id: "authored" },
+        children: ["one"],
+      });
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      const authored = collector.getOpsOfType("create-element").find((op) =>
+        "tagName" in op && op.tagName === "span"
+      );
+      const authoredId = authored && "nodeId" in authored
+        ? authored.nodeId
+        : -1;
+
+      collector.clear();
+      childCell.set([{
+        type: "vnode",
+        name: "li",
+        props: {},
+        children: ["a"],
+      }]);
+      await t.settle();
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").some((op) =>
+          "nodeId" in op && op.nodeId === authoredId
+        ),
+        true,
+        "an authored span must not be adopted as the array wrapper",
+      );
+    },
+  );
+
+  await t.step(
+    "stops treating a wrapper as one once an authored node takes it over",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+
+      const childCell = new MockCell([{
+        type: "vnode",
+        name: "li",
+        props: {},
+        children: ["a"],
+      }]);
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell],
+      });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await t.settle();
+
+      // The wrapper is a span, so this authored span takes it over in place.
+      childCell.set({
+        type: "vnode",
+        name: "span",
+        props: { id: "authored" },
+        children: ["one"],
+      });
+      await t.settle();
+
+      const adopted = collector.getOpsOfType("create-element").find((op) =>
+        "tagName" in op && op.tagName === "span"
+      );
+      const adoptedId = adopted && "nodeId" in adopted ? adopted.nodeId : -1;
+
+      collector.clear();
+      childCell.set([{
+        type: "vnode",
+        name: "li",
+        props: {},
+        children: ["b"],
+      }]);
+      await t.settle();
+
+      assertEquals(
+        collector.getOpsOfType("remove-node").some((op) =>
+          "nodeId" in op && op.nodeId === adoptedId
+        ),
+        true,
+        "a span carrying authored props must not be reused as a wrapper",
+      );
+    },
+  );
+
+  await t.step(
     "updates child Cell VNode in place when tag matches",
     async () => {
       const collector = createOpsCollector();

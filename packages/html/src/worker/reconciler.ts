@@ -3719,6 +3719,11 @@ export class WorkerReconciler {
                 policyChildren.blocked;
               childState.elementState.sourceChildren = sanitized.children;
               childState.elementState.sourceProps = sanitized.props;
+              // Taking over a wrapper for an authored node of the same tag is
+              // sound -- the props below replace the wrapper's own -- but the
+              // node stops being a wrapper, and a later array must not adopt
+              // the authored props it now carries.
+              childState.elementState.isArrayWrapper = false;
               this.updatePieceBoundary(childState, resolvedChild, resultCell);
               // Same tag - update props in place
               this.updatePropsInPlace(
@@ -3750,6 +3755,38 @@ export class WorkerReconciler {
               return;
             }
           }
+        }
+
+        // Case 3: array in-place update (same wrapper). A mapped list resolves
+        // to an array rather than to a VNode, so Case 2 never sees it. Keeping
+        // the wrapper hands the array to the keyed reconciler, which reuses
+        // every row whose key is unchanged; replacing it instead rebuilds the
+        // whole list for a one-row change.
+        //
+        // Only a wrapper qualifies, and only while it holds rendered content
+        // rather than a placeholder. The reconciler synthesizes it with fixed
+        // props, so nothing about it can change but its children, and the child
+        // policy it stored still holds -- it carries no policy-bearing props to
+        // derive a new one from.
+        //
+        // An array cannot be a nested pattern's output, which is an object
+        // carrying `UI`, so reaching here leaves no piece boundary to update.
+        if (
+          Array.isArray(resolvedChild) &&
+          childState.elementState?.isArrayWrapper &&
+          currentContentState === "rendered"
+        ) {
+          const wrapper = childState.elementState;
+          const children = resolvedChild as WorkerRenderNode[];
+          wrapper.sourceChildren = children;
+          this.updateChildrenInPlace(
+            ctx,
+            wrapper,
+            children,
+            new Set(visited),
+            wrapper.childRenderPolicy,
+          );
+          return;
         }
       }
 
@@ -3877,6 +3914,7 @@ export class WorkerReconciler {
         policy,
       );
       if (!state) return null;
+      state.isArrayWrapper = true;
 
       return {
         nodeId: state.nodeId,
