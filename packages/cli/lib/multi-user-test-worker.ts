@@ -47,6 +47,11 @@ import {
 } from "./compile-byte-cache.ts";
 import { buildActionEvent } from "./trusted-test-event.ts";
 import {
+  type FetchMockEntry,
+  makeMockFetch,
+  readFetchMocks,
+} from "./fetch-mock.ts";
+import {
   appendLoggerDeltaMessages,
   type LoggerErrorWarnSnapshot,
   snapshotLoggerErrorWarnCounts,
@@ -118,6 +123,10 @@ const markersCells = new Map<string, Cell<Record<string, boolean>>>();
 let selfParticipant: string | undefined;
 let stepCells: Cell<unknown>[] = [];
 let patternCoverage: PatternCoverageCollector | undefined;
+// Test-declared fetch mocks (`fetchMocks` export), populated after compile;
+// the runtime's injected fetch closes over this and falls through to the
+// real fetch until set.
+let fetchMockEntries: FetchMockEntry[] | undefined;
 let patternCoveragePath: string | undefined;
 let patternCoverageRoot: string | undefined;
 const runtimeErrors: string[] = [];
@@ -263,6 +272,16 @@ const handlers: Record<
       // internally (see createStorageAddressResolver).
       memoryHost: new URL(args.apiUrl as string),
     });
+    // Fetch mocking, mirroring the single-user runner (test-runner.ts): a
+    // test opts in by exporting a module-scope `fetchMocks` array. It can't
+    // be read until after compile, so the injected fetch closes over a
+    // late-populated entries list and falls through to the real fetch until
+    // (and unless) the test declares mocks. Every worker mocks identically —
+    // whichever runtime's builtin performs the fetch resolves against the
+    // same entries.
+    const realFetch = globalThis.fetch.bind(globalThis);
+    const mockFetch = makeMockFetch(() => fetchMockEntries, realFetch);
+
     // `runtimePresets.patternTest` carries the shared first-party posture
     // (CT-1814), including the enforce-explicit CFC pin this site previously
     // restated — and the same env-honored experimental flags as the
@@ -272,6 +291,7 @@ const handlers: Record<
       apiUrl: new URL(import.meta.url),
       storageManager: storageManager as never,
       experimental: experimentalOptionsFromEnv(Deno.env.get),
+      fetch: mockFetch,
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
       moduleByteCache: getDefaultModuleByteCache(),
     }));
@@ -324,6 +344,10 @@ const handlers: Record<
       { patternCoverage },
     );
     const { main } = evalResult;
+    // Read the test's opt-in fetch mocks now (after compile, before the run):
+    // the entries must be in place before any pattern runs so a builtin fetch
+    // fired during the initial settle resolves against the mock.
+    fetchMockEntries = readFetchMocks(main);
     // Channel 2: snapshot logger counts AFTER compile, before the run phase.
     loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
     consoleCaptureActive = true;

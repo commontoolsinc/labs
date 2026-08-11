@@ -19,10 +19,12 @@ A poll's durable state belongs to **one deployed piece instance in one space**,
 addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
 So "share the state" = "everyone points at the same piece"; "copy the state" =
 "move that piece's values into a new piece." It all lives in **`PerSpace` input
-cells**, shared by everyone in the space: `question`, `options`, `votes`,
-`users`, `participantProfiles` (the object-wrapped directory of live canonical
-profile links for profile-backed joiners), `adminName`, and **`visits`** (the
-"Recently eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
+cells**, shared by everyone in the space: `question`, `options` (each option
+embeds its persisted generated-art thumbnail as a ~10 kB `imageUrl` data URL
+once the host's client has generated it), `votes`, `users`,
+`participantProfiles` (the object-wrapped directory of live canonical profile
+links for profile-backed joiners), `adminName`, and **`visits`** (the "Recently
+eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
 **`myName`**, which is **`PerUser`** (keyed by your DID).
 
 All of these survive an in-place `setsrc` (Option A) and — because `visits` is
@@ -32,7 +34,7 @@ now an ordinary `PerSpace` cell — can all be copied to another piece via the C
 ## The live pieces
 
 Two hosts run the poll, at different paces. **These are deployment pointers, not
-stable identifiers — current as of 2026-08-04.** A piece is tied to one
+stable identifiers — current as of 2026-08-10.** A piece is tied to one
 space/server and can be reset, wedged, or lost; if one 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
@@ -44,9 +46,22 @@ pattern source. Iterate here.
 
 ```
 space:  team-lunch
-piece:  fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ
-url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ
+piece:  fid1:_SMX10_gPNl3FQldFenAT_vrpPnaZs7qUNXUAb_5c1c
+url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:_SMX10_gPNl3FQldFenAT_vrpPnaZs7qUNXUAb_5c1c
 ```
+
+> **Build-compatibility note:** the generated-art auto-persist trigger attaches
+> `onLoad` to a raw `<img>` through a spread cast over a module-scope bound
+> handler (see `sendGeneratedArt` in poll-option-card.tsx) INSTEAD of a typed
+> attribute, on purpose: jsx.d.ts's event block is still the `@TODO(events)`
+> backlog, pieces store authored source, and every runtime type-checks that
+> source at load — a typed `onLoad` attribute would make the piece refuse to
+> load (`Failed to load piece — Could not load pattern <hash>#default`) on any
+> server build predating the typing (verified live against such a rapids build).
+> The renderer wires any `on*` prop whose value is a handler stream, so the cast
+> changes nothing at runtime. If `onLoad` ever lands in jsx.d.ts, wait until
+> every deploy target carries it before switching the pattern to the typed
+> attribute.
 
 ### `estuary` — the stately instance, holding the real poll
 
@@ -99,7 +114,7 @@ url:    https://toolshed.saga-castor.ts.net/team-lunch/fid1:zJT0lRy-Hd6p_ZsK_h6C
 ```bash
 export CF_API_URL=https://rapids.saga-castor.ts.net/   # fast-moving instance; estuary.saga-castor.ts.net holds the populated poll; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ    # rapids; current as of 2026-08-03
+PIECE=fid1:_SMX10_gPNl3FQldFenAT_vrpPnaZs7qUNXUAb_5c1c    # rapids; current as of 2026-08-10
 SPACE=team-lunch
 ```
 
@@ -343,11 +358,12 @@ work.
 Per-option cuisine art is generated in the browser, and only on the **host's**
 client: `generated-art.tsx` requests `/api/ai/img` via `fetchBinary` under a 30s
 mutex, and skips the request entirely for any option that already carries a
-stored image. The host keeps a thumbnail with the card's keep action, which
-fires `setOptionImage` to persist the data URL onto that option's `imageUrl`;
-every other viewer reads the stored value rather than generating its own. Art
-therefore costs at most one request per option across the whole poll, not one
-per option per viewer.
+stored image. The freshly generated thumbnail persists automatically: the card
+renders a hidden trigger img over the data URL, and the browser's `load` event
+sends the admin-gated, idempotent `setOptionImage` handler — no keep click —
+writing it onto that option's `imageUrl`. Every other viewer reads the stored
+value rather than generating its own, so art costs at most one request per
+option across the whole poll, not one per option per viewer.
 
 For the deeper aggregate + write-conflict findings that still apply to a poll
 with many options and voters, see willkelly's perf investigation in

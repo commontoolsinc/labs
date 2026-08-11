@@ -37,7 +37,7 @@ const recordSetOptionImage = handler<
 >((event, { lastEvent }) => lastEvent.set(event));
 
 // Carries a stored image so this admin-viewer card takes the stored-art path
-// (no generation request).
+// (no generation request, no persist trigger).
 const STORED_OPTION: Option = {
   id: "opt-sushi",
   title: "Sushi Place",
@@ -46,10 +46,20 @@ const STORED_OPTION: Option = {
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
 };
 
-// Nothing stored: the admin card generates via the mocked endpoint below.
+// Nothing stored: the admin card generates via the mocked endpoint below and
+// renders the hidden auto-persist trigger img.
 const GENERATING_OPTION: Option = {
   id: "opt-tacos",
   title: "Taco Truck",
+  addedByName: "Alex",
+  imageUrl: "",
+};
+
+// Nothing stored AND rendered by a non-admin card: neither generation nor
+// the persist trigger may appear.
+const NON_ADMIN_OPTION: Option = {
+  id: "opt-ramen",
+  title: "Ramen Bar",
   addedByName: "Alex",
   imageUrl: "",
 };
@@ -197,19 +207,22 @@ export default pattern(() => {
     ) !== undefined
   );
 
-  // Stored art ⇒ artSyncState "stored" ⇒ no keep affordance.
-  const assert_no_keep_button_when_stored = assert(() =>
+  // Stored art ⇒ artSyncState "stored" (surfaced on the root's
+  // `data-art-state` attribute) ⇒ no persist trigger.
+  const assert_stored_card_has_no_trigger = assert(() =>
     readValue(card.artSyncState) === "stored" &&
-    findNodeByProp(
-        card[UI],
-        "aria-label",
-        "Keep this art (host)",
-      ) === undefined
+    propValue(
+        findNodeByProp(card[UI], "data-option-title", "Sushi Place"),
+        "data-art-state",
+      ) === "stored" &&
+    findNodeByProp(card[UI], "data-art-persist-trigger", "opt-sushi") ===
+      undefined
   );
 
   // The generation path: an admin card with nothing stored generates (mocked
   // endpoint), surfaces the live fetch state through `artSyncState` (a direct
-  // fetch-derived read — post-CT-1836), and shows the keep affordance.
+  // fetch-derived read — post-CT-1836), and renders the hidden auto-persist
+  // trigger img over the generated data URL.
   const generatingCard = PollOptionCard({
     option: GENERATING_OPTION,
     rank: 2,
@@ -224,34 +237,68 @@ export default pattern(() => {
     setOptionImage,
   });
 
-  const assert_keep_button_when_generated = assert(() =>
-    readValue(generatingCard.artSyncState) === "generated" &&
-    findNodeByProp(
-        generatingCard[UI],
-        "aria-label",
-        "Keep this art (host)",
-      ) !== undefined
-  );
-
-  const action_keep_generated_art = action(() => {
-    const button = findNodeByProp(
+  const assert_trigger_renders_when_generated = assert(() => {
+    const trigger = findNodeByProp(
       generatingCard[UI],
-      "aria-label",
-      "Keep this art (host)",
+      "data-art-persist-trigger",
+      "opt-tacos",
     );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    return readValue(generatingCard.artSyncState) === "generated" &&
+      trigger !== undefined &&
+      propValue(trigger, "src") === GENERATED_IMAGE_DATA_URL &&
+      propsOf(trigger)?.onLoad !== undefined;
+  });
+
+  // Simulate the browser's `load` event by sending into the trigger's onLoad
+  // stream (the VNode harness has no real DOM; the browser-fired event and
+  // this send reach the identical lowered handler). The handler closes over
+  // the card's state, so the payload it emits — not this send — carries the
+  // option id and data URL.
+  const action_fire_trigger_load = action(() => {
+    const trigger = findNodeByProp(
+      generatingCard[UI],
+      "data-art-persist-trigger",
+      "opt-tacos",
+    );
+    const onLoad = propsOf(trigger)?.onLoad;
+    if (typeof onLoad === "object" && onLoad !== null && "send" in onLoad) {
+      (onLoad as { send: (event: Record<string, never>) => void }).send({});
     }
   });
 
-  const assert_keep_sends_generated_image = assert(() => {
+  const assert_load_sends_generated_image = assert(() => {
     const event = readValue(lastSetOptionImage);
     return typeof event === "object" && event !== null &&
       readValue((event as SetOptionImageEvent).optionId) === "opt-tacos" &&
       readValue((event as SetOptionImageEvent).imageUrl) ===
         GENERATED_IMAGE_DATA_URL;
   });
+
+  // A non-admin card over an empty option neither generates nor renders the
+  // trigger: the gate (`shouldGenerate`) holds.
+  const nonAdminCard = PollOptionCard({
+    option: NON_ADMIN_OPTION,
+    rank: 3,
+    me: "Blake",
+    isJoined: true,
+    isAdmin: false,
+    votes,
+    removeConfirmTarget,
+    castVote,
+    removeOption,
+    logVisit,
+    setOptionImage,
+  });
+
+  const assert_non_admin_card_has_no_trigger = assert(() =>
+    readValue(nonAdminCard.artSyncState) === "" &&
+    findNodeByProp(
+        nonAdminCard[UI],
+        "data-art-persist-trigger",
+        "opt-ramen",
+      ) ===
+      undefined
+  );
 
   return {
     tests: [
@@ -270,12 +317,14 @@ export default pattern(() => {
       // Drives the generating card's mocked fetch to completion (and gives
       // both cards' art state a settle beat before it is read directly).
       { settle: true },
-      { assertion: assert_no_keep_button_when_stored },
-      { assertion: assert_keep_button_when_generated },
-      { action: action_keep_generated_art },
-      { assertion: assert_keep_sends_generated_image },
+      { assertion: assert_stored_card_has_no_trigger },
+      { assertion: assert_trigger_renders_when_generated },
+      { action: action_fire_trigger_load },
+      { assertion: assert_load_sends_generated_image },
+      { assertion: assert_non_admin_card_has_no_trigger },
     ],
     card,
     generatingCard,
+    nonAdminCard,
   };
 });
