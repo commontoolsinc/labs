@@ -57,7 +57,7 @@ describe("toIndentedDebugString (direct wrapper coverage)", () => {
   it("renders an exotic (non-plain) value without throwing", () => {
     const inst = new FabricEpochNsec(123456789n);
     expect(() => toIndentedDebugString(inst)).not.toThrow();
-    expect(toIndentedDebugString(inst)).toBe("/EpochNsec(...)");
+    expect(toIndentedDebugString(inst)).toBe("/FabricEpochNsec(...)");
   });
 
   it("renders a circular reference as `<circle>` rather than throwing", () => {

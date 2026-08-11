@@ -123,7 +123,7 @@ describe("value-debug", () => {
 
     it("renders a `FabricPrimive` in `/Name` form", () => {
       const inst = new FabricEpochNsec(123456789n);
-      expect(toCompactDebugString(inst)).toBe("/EpochNsec(...)");
+      expect(toCompactDebugString(inst)).toBe("/FabricEpochNsec(...)");
     });
 
     it("renders a non-plain non-fabric objectg in `new Name` form", () => {
@@ -497,7 +497,7 @@ describe("custom inspector", () => {
   // by a TODO there; delegating means this surface inherits the fix.
   it("renders a FabricPrimitive as its debug string, not `{}`", () => {
     const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-    expect(Deno.inspect(bytes)).toBe("/Bytes(...)");
+    expect(Deno.inspect(bytes)).toBe("/FabricBytes(...)");
   });
 
   it("renders a FabricInstance as its debug string, not `{}`", () => {
@@ -507,7 +507,9 @@ describe("custom inspector", () => {
 
   it("renders when nested in containers", () => {
     const bytes = new FabricBytes(new Uint8Array([9]));
-    expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /Bytes(...) }");
-    expect(Deno.inspect([bytes, bytes])).toBe("[ /Bytes(...), /Bytes(...) ]");
+    expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /FabricBytes(...) }");
+    expect(Deno.inspect([bytes, bytes])).toBe(
+      "[ /FabricBytes(...), /FabricBytes(...) ]",
+    );
   });
 });

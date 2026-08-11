@@ -15,7 +15,8 @@
 import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
-import type { ReconstructionContext } from "./codec-common/interface.ts";
+import { CODEC, type ReconstructionContext } from "./codec-common/interface.ts";
+import { JSON_CODEC } from "./fabric-primitives/BaseFabricPrimitive.ts";
 import { EmptyReconstructionContext } from "./codec-common/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import { JsonCodec } from "./codec-json/JsonCodec.ts";
@@ -40,9 +41,11 @@ import { codecClasses as instanceCodecClasses } from "./fabric-instances/index.t
  * `UnknownValue` by the encoding context rather than tag-routed.
  */
 export function createDefaultJsonRegistry(): CodecRegistry {
+  // Each roster is read through the symbol its classes bind: a primitive's
+  // codec is per-format, an instance's is not.
   return createBaseJsonRegistry().extend([
-    ...primitiveCodecClasses(),
-    ...instanceCodecClasses(),
+    ...primitiveCodecClasses().map((cls) => cls[JSON_CODEC]),
+    ...instanceCodecClasses().map((cls) => cls[CODEC]),
   ]);
 }
 

@@ -1,8 +1,8 @@
+import { JSON_CODEC } from "@/fabric-primitives/BaseFabricPrimitive.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -168,8 +168,8 @@ describe("FabricHash", () => {
       });
     });
 
-    describe("[CODEC]", () => {
-      const codec = FabricHash[CODEC];
+    describe("`[JSON_CODEC]`", () => {
+      const codec = FabricHash[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Hash;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 

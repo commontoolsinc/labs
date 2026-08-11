@@ -154,7 +154,9 @@ class DebugStringifier {
           // some of the instance's actual state instead of an opaque `(...)`.
           let fullTag;
           try {
-            fullTag = codecOf(value).tagForValue(value);
+            // A `FabricPrimitive` binds no `[CODEC]`, so it lands on the class
+            // name; only a `FabricInstance` has a tag to offer here.
+            fullTag = codecOf(value)?.tagForValue(value) ?? className;
           } catch {
             // Never let the debug formatter throw; fall back to the class name.
             fullTag = className;

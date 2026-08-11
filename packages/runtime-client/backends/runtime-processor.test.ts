@@ -990,12 +990,12 @@ describe("sanitizeForPostMessage", () => {
 
     it("names a `FabricBytes` rather than showing an empty record", () => {
       expect(sanitizeForPostMessage(new FabricBytes(new Uint8Array([1, 2, 3]))))
-        .toBe("/Bytes(...)");
+        .toBe("/FabricBytes(...)");
     });
 
     it("names a `FabricEpochNsec` nested in a record", () => {
       expect(sanitizeForPostMessage({ when: new FabricEpochNsec(1_000n) }))
-        .toEqual({ when: "/EpochNsec(...)" });
+        .toEqual({ when: "/FabricEpochNsec(...)" });
     });
 
     it("names a `FabricError`, the `FabricInstance` arm", () => {

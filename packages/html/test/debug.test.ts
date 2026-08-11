@@ -18,7 +18,7 @@ describe("debug", () => {
   describe("formatTree", () => {
     it("names a `FabricBytes` standing where a node would", () => {
       expect(formatTree(new FabricBytes(new Uint8Array([1, 2, 3]))))
-        .toBe("/Bytes(...)");
+        .toBe("/FabricBytes(...)");
     });
 
     it("names a `FabricError`, the `FabricInstance` arm", () => {
@@ -30,7 +30,7 @@ describe("debug", () => {
 
     it("indents a named special object like any other node", () => {
       expect(formatTree(new FabricBytes(new Uint8Array([1])), 2))
-        .toBe("    /Bytes(...)");
+        .toBe("    /FabricBytes(...)");
     });
 
     it("names a special object held as a render prop", () => {
@@ -39,7 +39,7 @@ describe("debug", () => {
         props: { when: new FabricEpochNsec(1_000n) },
       };
 
-      expect(formatTree(node)).toContain("when=/EpochNsec(...)");
+      expect(formatTree(node)).toContain("when=/FabricEpochNsec(...)");
     });
   });
 });

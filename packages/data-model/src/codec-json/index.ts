@@ -9,6 +9,7 @@ export { seemsLikeJsonEncodedFabricValue } from "./impl.ts";
 // it registers. Each of the four exists because JSON cannot carry the type it
 // handles, so each belongs to the format rather than to the shared machinery.
 export { createBaseJsonRegistry } from "./createBaseJsonRegistry.ts";
+export { jsonCodecOf } from "./jsonCodecOf.ts";
 export { BigIntCodec } from "./BigIntCodec.ts";
 export { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
 export { SymbolCodec } from "./SymbolCodec.ts";

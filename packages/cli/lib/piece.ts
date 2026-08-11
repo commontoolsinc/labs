@@ -43,7 +43,7 @@ import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { codecOf } from "@commonfabric/data-model/codec-common";
+import { jsonCodecOf } from "@commonfabric/data-model/codec-json";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { getCarriedCfcLabelView } from "@commonfabric/runner/cfc";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -914,7 +914,15 @@ async function searchTextMatches(
         }
       }
       try {
-        representations.push({ value: codecOf(current).encode(current) });
+        // The JSON codec, because these representations exist to be searched
+        // as text: a `FabricPrimitive` yields its encoded form only under
+        // `[JSON_CODEC]`. Absent under both symbols, the value cannot be
+        // represented at all, which is worth reporting rather than skipping.
+        const codec = jsonCodecOf(current);
+        if (codec === undefined) {
+          throw new Error(`No codec for \`${current.constructor.name}\`.`);
+        }
+        representations.push({ value: codec.encode(current) });
       } catch (error) {
         reportReadError?.(error);
       }

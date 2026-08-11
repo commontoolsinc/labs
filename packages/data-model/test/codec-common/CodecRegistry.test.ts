@@ -6,11 +6,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import {
-  CODEC,
-  type FabricClassWithCodec,
-  type ReconstructionContext,
-} from "@/codec-common/interface.ts";
+import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { type FabricValue } from "@/interface.ts";
@@ -174,17 +170,6 @@ describe("CodecRegistry", () => {
   });
 
   describe("`extend()`", () => {
-    // A class whose static `[CODEC]` is a `TestCodec`, which is what
-    // `extend()` accepts.
-    function classWithCodec(tag: string): FabricClassWithCodec {
-      const codec = new TestCodec(tag, undefined);
-      return {
-        get [CODEC]() {
-          return codec;
-        },
-      };
-    }
-
     it("returns a different instance", () => {
       const base = new CodecRegistry();
       expect(base.extend([])).not.toBe(base);
@@ -209,16 +194,16 @@ describe("CodecRegistry", () => {
       expect(extended.codecFromValue("florp")).toBe(SELF_REP);
     });
 
-    it("registers the given classes' codecs", () => {
-      const added = classWithCodec("added@1");
+    it("registers the given codecs", () => {
+      const added = new TestCodec("added@1", undefined);
       const extended = new CodecRegistry().extend([added]);
 
-      expect(extended.codecFromTag("added@1")).toBe(added[CODEC]);
+      expect(extended.codecFromTag("added@1")).toBe(added);
     });
 
     it("leaves the base without the added registrations", () => {
       const base = new CodecRegistry();
-      base.extend([classWithCodec("added@1")]);
+      base.extend([new TestCodec("added@1", undefined)]);
 
       expect(base.codecFromTag("added@1")).toBe(undefined);
     });

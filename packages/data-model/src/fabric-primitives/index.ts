@@ -1,7 +1,8 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
+
+import type { FabricPrimitiveClassWithJsonCodec } from "./BaseFabricPrimitive.ts";
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 
-import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
 import type { FabricPrimitive } from "@/interface.ts";
 import { FabricBytes } from "./FabricBytes.ts";
 import { FabricEpochDays } from "./FabricEpochDays.ts";
@@ -18,23 +19,24 @@ export { FabricEpochDays } from "./FabricEpochDays.ts";
 
 /**
  * The concrete primitive classes whose instances are available over the wire,
- * each via its static `[CODEC]`. This is the curated source of truth for which
+ * each via its static `[JSON_CODEC]`. This is the curated source of truth for which
  * primitive types participate in serialization: add a class here once it gains
- * a `[CODEC]`.
+ * a `[JSON_CODEC]`.
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function codecClasses(): readonly FabricClassWithCodec[] {
+export function codecClasses(): readonly FabricPrimitiveClassWithJsonCodec[] {
   return CODEC_CLASSES;
 }
 
-const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
-  FabricBytes,
-  FabricHash,
-  FabricEpochNsec,
-  FabricEpochDays,
-  FabricRegExp,
-]);
+const CODEC_CLASSES: readonly FabricPrimitiveClassWithJsonCodec[] = Object
+  .freeze([
+    FabricBytes,
+    FabricHash,
+    FabricEpochNsec,
+    FabricEpochDays,
+    FabricRegExp,
+  ]);
 
 /**
  * The `type` name in this system's schema dialect for a `FabricPrimitive`

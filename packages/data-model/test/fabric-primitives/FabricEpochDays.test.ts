@@ -1,10 +1,10 @@
+import { JSON_CODEC } from "@/fabric-primitives/BaseFabricPrimitive.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
-import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -49,8 +49,8 @@ describe("FabricEpochDays", () => {
   });
 
   describe("static members", () => {
-    describe("[CODEC]", () => {
-      const codec = FabricEpochDays[CODEC];
+    describe("`[JSON_CODEC]`", () => {
+      const codec = FabricEpochDays[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochDays;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 

@@ -1,9 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import {
-  CODEC,
-  type FabricClassWithCodec,
-  type FabricCodec,
-} from "./interface.ts";
+import type { FabricCodec } from "./interface.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
 /**
@@ -138,9 +134,14 @@ export class CodecRegistry {
    * assembled: extending what a factory returns is what keeps a caller from
    * omitting, by accident, everything that factory put there.
    *
-   * @param classes Classes whose static `[CODEC]` is to be registered.
+   * Takes codecs rather than the classes carrying them, because which symbol
+   * a class binds its codec to is the caller's business: a `FabricPrimitive`
+   * binds per wire format, a `FabricInstance` binds once. Keeping that choice
+   * out here is what lets this module stay format-agnostic.
+   *
+   * @param codecs The codecs to register in addition.
    */
-  extend(classes: readonly FabricClassWithCodec[]): CodecRegistry {
+  extend(codecs: readonly FabricCodec[]): CodecRegistry {
     const result = new CodecRegistry();
 
     for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
@@ -150,8 +151,8 @@ export class CodecRegistry {
     }
     for (const type of this.#selfRepTypes) result.#selfRepTypes.add(type);
 
-    for (const cls of classes) {
-      result.register(cls[CODEC]);
+    for (const codec of codecs) {
+      result.register(codec);
     }
 
     // Frozen as a statement rather than by returning `Object.freeze()`'s
