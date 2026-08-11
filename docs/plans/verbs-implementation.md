@@ -33,13 +33,14 @@ belongs in one document even when the reasoning belongs in two.
 
 ## State
 
-Three pull requests remain open against this work. They are listed here because
+Four pull requests remain open against this work. They are listed here because
 a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
 | #5501 | a verb's declared result reaches its module | ready; the decision below is made, and the producer half is green |
-| #5504 | `@` marks a position in a field list | open; two `notes@` per-element walkthrough assertions fail against a live toolshed — the behaviour's first contact with a real server |
+| #5504 | `@` marks a position in a field list | green, walkthrough 38/38 against a live toolshed. The two `notes@` assertions that failed there were the feature, not the test: a pattern result stores each field as a redirect link into the argument document, so the compose walk never saw the array. Markers now align against the source schema, as the mask already did |
+| #5609 | a rejected position is not a required one | split out of #5504, because the defect it fixes is on main. A `$link` marker beside any other projection key returns nothing: the rejected position stays in the source's `required`, so the projected schema is unsatisfiable and the whole selection reads as absent |
 | #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
