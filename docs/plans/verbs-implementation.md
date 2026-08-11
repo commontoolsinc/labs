@@ -33,53 +33,77 @@ belongs in one document even when the reasoning belongs in two.
 
 ## State
 
-Twelve pull requests are open against this work. They are listed here because a
-driver needs to know what is already moving before scheduling anything new.
+Four pull requests remain open against this work. They are listed here because
+a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5307 | closed-world verb event schemas | code is gate-clear, 336/336 patterns; held for confirmation of the recorded skew policy, the one question named open |
-| #5309 | wrapper-tier and deprecated listing marks | current; compat classification landed ahead of emission. Shipped as specced with one measured narrowing — the inference needs a **void event** as well as a session-scoped binding, or the rule marks `topics.addTopic`, a headless verb that merely clears the composer draft after a create. That conjunct is the PR's named veto point |
-| #5458 | the shared read step, factored out | open |
-| #5459 | `--piece` accepts the `of:` entity URI | open |
-| #5468 | receipts carry a descriptive schema | open |
-| #5469 | invocation ids scoped to a session | open |
-| #5470 | `$link` marks a position for its address | open |
-| #5497 | a projection keyword names its container | open |
-| #5500 | `--select` and `--schema` split | open |
-| #5501 | a verb's declared result reaches its module | **draft — the open decision** |
-| #5504 | `@` marks a position in a field list | open |
-| #5505 | `piece call` takes the selection flags | open |
+| #5501 | a verb's declared result reaches its module | ready; the decision below is made, and the producer half is green |
+| #5504 | `@` marks a position in a field list | green, walkthrough 38/38 against a live toolshed. The two `notes@` assertions that failed there were the feature, not the test: a pattern result stores each field as a redirect link into the argument document, so the compose walk never saw the array. Markers now align against the source schema, as the mask already did |
+| #5609 | a rejected position is not a required one | split out of #5504, because the defect it fixes is on main. A `$link` marker beside any other projection key returns nothing: the rejected position stays in the source's `required`, so the projected schema is unsatisfiable and the whole selection reads as absent |
+| #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
 
-## The decision everything else waits behind
+**Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
+#5500 are on main. #5458 is closed rather than merged because its rename was
+folded into #5470's squash; the shared read step it factored out is on main as
+`packages/cli/lib/cell-selection.ts`. A reader who goes looking for #5458 should
+not conclude the step was dropped.
 
-**1. Does a verb's declared result reach the runtime?** *(#5501, draft)*
+**Two are back out: #5469 and #5505 were reverted by #5582.** They merged
+twenty-six seconds apart, each green on a base that did not contain the other,
+and the tree they made together type-failed — #5469 replaced `invocationId`
+with an `invocation: {id, session}` pair, and #5505 added nine `piece call`
+selection tests written against the old name. The revert restored the 22 files
+they touched byte-for-byte.
 
-The result-schema emission built in July was withdrawn for three recorded
-reasons: the value path did not need it, a keyword in durable schemas and
-append-only baselines would hard-commit a shape the Fabric-types stream
-evolution is expected to replace, and the compatibility rules built alongside it
-would have refused its later removal.
+Two consequences a driver has to carry:
 
-#5501 is a different road to the same property — an existing field on a node's
-module rather than a new dialect keyword, with the compatibility gate untouched
-— and the first two objections are answered on that road. What it buys is
-narrower than first claimed: a `$link` marker already renders an address and
-already suppresses the fetch without it. What it adds is narrowing on field
-selection, and checking a selection before the call rather than after.
+- **`piece call` has no `--select` / `--schema` / `--filter` again.** That is a
+  landed piece of item 6 going back out, not just a test fix.
+- **The address change is no longer underneath anything.** `scopeCallerEventId`
+  derives from `{caller, id, path, space}` with no identity in the address, so
+  two callers choosing the same word — `add-comment-1` is the word two agents
+  both pick — compute one address and read one receipt, and the second is told
+  its call settled when it never ran. Item 4 was sequenced after item 7
+  precisely so that a published address had stopped moving. **That precondition
+  is gone, and item 4 must not start until it returns.**
 
-Three things hang off the answer:
+## The decision that was waiting, and the condition it carries
 
-- whether `cf piece verbs` can carry result schemas, which its own issue defers
-  until this exists;
-- whether a receipt for a verb returning anything reactive is describable at
-  all, since the descriptive derivation runs only where the result is plain;
-- whether items 8 and 9 below are worth their cost, since both improve a
-  description nothing yet consumes.
+**1. A verb's declared result reaches the runtime.** *(#5501)* Decided — and
+the timing framing was confirmed rather than merely tolerated: the durable form
+is where this eventually lands, so the only live question was whether to wire it
+before then.
 
-It is a draft rather than a proposal because it needs the owner who made the
-withdrawal call. Until then it blocks nothing, but it makes three other
-decisions provisional.
+The July emission was withdrawn because a keyword in durable schemas and
+append-only baselines would hard-commit a shape, and the compatibility rules
+built alongside it would have refused its removal. Both objections attach to
+where the shape was written. A module field enters no durable schema, so no
+baseline records it and the gate has no rule to apply — which is why this road
+was open when that one was not.
+
+**The approval is conditional, and the condition binds work that is not built
+yet.** It was given as: if it is easy to add now, go for it; but if it creates
+more things to chase down, revisit rather than push through.
+
+The producer half satisfies that already — #5501 is built and green. **The
+unknown is the consumer half, item 10.** A tool's pattern rides in the callable
+cell's own value, so its branch just reads it; a handler's module lives in the
+compiled graph, so the handler branch needs the verb's node looked up there.
+That lookup is new code rather than a field already sitting in reach. If it
+turns awkward, that is exactly the case the condition names, and the instruction
+is to raise it rather than absorb it. Raising it early costs nothing; absorbing
+it quietly spends the goodwill this decision was made on.
+
+*What this unblocks.* Items 8 and 10 stop being provisional, and verb discovery
+closes — `cf piece verbs` can answer both halves of its question.
+
+*A correction owed to this document.* It priced the decision as "narrower than
+first claimed", naming only narrowing on field selection and the pre-call check.
+That is right about the value path and omits the command surface: the derivable
+default, completion, and a help page that currently tells a caller the opposite
+of the truth. A reader weighing the revisit condition will check it against this
+pricing, so the pricing needs to be the honest one.
 
 ## Ready to build
 
@@ -167,20 +191,22 @@ other command accepts, which this is the occasion to make the declared shape.
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
 
-## Landed, pending merge
+## Landed, and what consumes it
 
-**6. The read layer.** #5458, #5470, #5497, #5500, #5504, #5505, #5459 — the
-shared read step, address markers with the deepest-link rule, container
-inference, the flag split, the `@` suffix, call selection, and entity-URI
-intake. All built and restacked onto current main. The first six are one
-stack; #5459 is independent of it and of everything else here.
+**6. The read layer.** The shared read step, address markers with the
+deepest-link rule, container inference, the flag split, and entity-URI intake
+are on main. Two pieces are not: the `@` suffix (#5504) is still open, and call
+selection went back out with #5505's revert.
 
-**7. Session-scoped invocation ids.** #5469. The one address-changing commit;
-it lands alone, ahead of anything that publishes a receipt address, so no caller
-holds one that moves.
+**7. Session-scoped invocation ids.** **Reverted** — #5469 is out of main
+again. It is the one address-changing commit, and the whole plan is ordered
+around landing it before anything publishes a receipt address. Until it is
+back, a receipt address is derived without identity in it, so it is not yet
+something a caller can safely be handed. Item 4 depends on this; nothing else
+does.
 
-**8. Descriptive receipt schemas.** #5468. Plain results only — a verb returning
-anything reactive gets none, which is what item 1 decides.
+**8. Descriptive receipt schemas.** On main. Plain results only — a verb
+returning anything reactive gets none, which is what item 1 decides.
 
 **9. Closed-world event schemas and listing marks.** #5307 and #5309, from the
 verb contract arc. Both unblocked; both wanted a courtesy review rather than a
@@ -203,16 +229,15 @@ joins them.
 
 | Item | After | Why |
 | --- | --- | --- |
-| 6 (stack) | — | the stack merges bottom-up: #5458 → #5470 → #5497 → #5500 → {#5504, #5505} |
-| 6 (#5459) | — | not in the stack; entity-URI intake stands alone and merges whenever |
-| 7 | — | independent of 6; must precede 4 |
+| 6 | — | landed but for #5504, and for call selection, which #5582 reverted |
+| 7 | — | **reverted; must land again before 4 can start** |
 | 8, 9 | — | independent |
 | 2 | 6 | changes what the flags accept |
 | 3 | 6 | completes the suppression property |
 | 4 | 7 | publishes an address, so the address must have stopped moving |
 | 5 | 4 | the fourth and fifth arrivals inherit whatever a read costs |
 | 10 | 1 | listing rows carry a handler's `outputSchema`; the plumbing exists for tools already |
-| 1 | — | blocks nothing; makes 8 and item 10 provisional |
+| 1 | — | decided; 8 and 10 are no longer provisional, and item 10 carries the revisit condition |
 
 Items 2, 3 and 5 touch one file heavily and want to land one at a time rather
 than in parallel. Item 4 is the only one that touches the call envelope.
@@ -240,6 +265,37 @@ handler-schema fixtures were compiled before event schemas closed, so once
 #5307 lands they gain `additionalProperties: false` on their event literals.
 Whichever merges second owes a golden regeneration. That is a note on the pair,
 not an edge in the table above.
+
+**Two PRs can each be green and still break main together.** CI judges a PR
+against a base, so when one branch narrows a type and another still writes to
+the old shape, both stay green until they meet. #5469 and #5505 merged
+twenty-six seconds apart and #5582 reverted both. Nothing in the checks catches
+it; the only thing that does is a driver noticing that two open PRs touch one
+vocabulary, and merging them far enough apart that the second rebases onto the
+first. The tell is a green PR whose base predates a merge that changed
+something it writes to — a rename is the obvious case, but any narrowing
+counts.
+
+The cost is worse than a red gate, because the stale field arrives as an
+*excess property*, silently dropped rather than rejected. The nine tests #5505
+added did not merely fail to compile: they dispatched with no invocation at all
+and awaited a receipt that could never arrive. Type-checking is the only gate
+that sees an excess property. A `--no-check` suite sees a value that is simply
+absent — and the package suites run `--no-check`, so `172 passed | 0 failed`
+reads identically either side of this bug and is not evidence about it.
+
+**A test that inspects stored shape is testing the harness, not the runtime.**
+A pattern result stores each field as a redirect link into the argument
+document, while a unit fixture writes the value inline. So a check reading
+`position.stored` succeeds against the fixture and never fires against a real
+server. Anything asserting on how a value is *stored*, rather than on what a
+read *returns*, wants a live-server case before it is believed.
+
+This is the same shape as the rejected-position defect split out as #5609: the
+`boardSchema` fixture declares no `required` while a generated pattern schema
+does, so every fixture in that file agreed with the bug and the suite could
+only confirm it. Twice now the fixture has been the thing that was wrong. When
+a test cannot fail, the fixture is the first place to look.
 
 **A squash merge invalidates the fork point of everything stacked on it.**
 Rebasing a child with `git rebase <new-base>` then replays commits the base
@@ -273,8 +329,8 @@ July result-schema work, and what #5309 got right by hand.
 
 ## What comes after
 
-This plan is exhausted when items 1-5 are decided or built and the twelve open
-pull requests have landed. Two arcs are queued behind it, and naming their
+This plan is exhausted when items 1-5 are decided or built and the open pull
+requests have landed. Two arcs are queued behind it, and naming their
 triggers here is what keeps them from being dropped when this document stops
 being read.
 
