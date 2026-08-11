@@ -64,6 +64,12 @@ export interface SchedulerSubscribeOptions {
   noDebounce?: boolean;
   throttle?: number;
   changeGroup?: ChangeGroup;
+  initiallyDormant?: boolean;
+}
+
+export interface SchedulerActionSubscription {
+  cancel: Cancel;
+  activate(options: { runInitial: boolean }): void;
 }
 
 export interface SchedulerResubscribeOptions {
@@ -115,13 +121,19 @@ export function subscribePullSchedulerAction(
   action: Action,
   immediateLog: ReactivityLog | undefined,
   options: SchedulerSubscribeOptions = {},
-): Cancel {
+): SchedulerActionSubscription {
   const {
     isEffect = false,
     debounce,
     noDebounce,
     throttle,
+    initiallyDormant = false,
   } = options;
+
+  const subscriptionToken = state.subscriptionState.nodes.beginSubscription(
+    action,
+    initiallyDormant,
+  );
 
   updateSchedulerActionChangeGroup(
     state.subscriptionState,
@@ -134,10 +146,14 @@ export function subscribePullSchedulerAction(
     action,
     isEffect,
     {
-      queueExecution: true,
+      queueExecution: !initiallyDormant,
       queueComputation: state.subscriptionState.getIdempotencyCheckMode(),
+      dormant: initiallyDormant,
     },
   );
+  if (initiallyDormant) {
+    state.subscriptionState.nodes.setStatus(action, "clean");
+  }
   state.adoptGateConfig(action);
 
   if (debounce !== undefined) {
@@ -155,16 +171,21 @@ export function subscribePullSchedulerAction(
   if (record) {
     record.declaredReads = resolveDeclaredReads(action);
   }
-  const parentRecord = state.subscriptionState.nodes.parentOf(action);
-  if (
-    !actionIsEffect &&
-    record &&
-    parentRecord &&
-    isLive(state.subscriptionState.dependencyGraphState, parentRecord)
-  ) {
-    state.markProvisionalDemand(record);
+  const seedParentDemand = () => {
+    const currentRecord = state.subscriptionState.nodes.get(action);
+    const parentRecord = state.subscriptionState.nodes.parentOf(action);
+    if (
+      actionIsEffect ||
+      !currentRecord ||
+      !parentRecord ||
+      !isLive(state.subscriptionState.dependencyGraphState, parentRecord)
+    ) {
+      return;
+    }
+    state.markProvisionalDemand(currentRecord);
     state.queueExecution();
-  }
+  };
+  if (!initiallyDormant) seedParentDemand();
 
   logger.debug(
     "schedule",
@@ -176,10 +197,11 @@ export function subscribePullSchedulerAction(
   );
 
   const surface = resolveRegistrationSurface(action, immediateLog);
+  const seedPending = !actionIsEffect && surface.length === 0 && !immediateLog;
   if (!actionIsEffect && surface.length > 0) {
     state.writeIndex.setSurface(action, surface);
     state.registerWriterDependents(action, surface);
-  } else if (!actionIsEffect && !immediateLog) {
+  } else if (seedPending && !initiallyDormant) {
     state.pending.add(action);
   }
 
@@ -202,7 +224,7 @@ export function subscribePullSchedulerAction(
     );
   }
 
-  state.markInvalid(action);
+  if (!initiallyDormant) state.markInvalid(action);
 
   const actionId = state.getActionId(action);
   state.submitSubscribeTelemetry({
@@ -211,7 +233,51 @@ export function subscribePullSchedulerAction(
     isEffect: actionIsEffect,
   });
 
-  return () => state.unsubscribe(action);
+  let activated = !initiallyDormant;
+  let canceled = false;
+  return {
+    cancel() {
+      if (canceled) return;
+      canceled = true;
+      const owned = state.subscriptionState.nodes.cancelSubscription(
+        action,
+        subscriptionToken,
+      );
+      if (!owned) return;
+      state.unsubscribe(action);
+    },
+    activate({ runInitial }) {
+      if (canceled || activated || !initiallyDormant) return;
+      const invalidated = state.subscriptionState.nodes
+        .activateDormantSubscription(action, subscriptionToken);
+      if (invalidated === undefined) return;
+      activated = true;
+      notifyNodeLivenessChange(
+        state.subscriptionState.dependencyGraphState,
+        action,
+        false,
+      );
+      const shouldRun = runInitial || invalidated;
+      if (shouldRun) seedParentDemand();
+      const currentRecord = state.subscriptionState.nodes.get(action);
+      if (
+        currentRecord &&
+        isLive(
+          state.subscriptionState.dependencyGraphState,
+          currentRecord,
+        ) &&
+        hasInvalidUpstream(
+          state.subscriptionState.dependencyGraphState,
+          action,
+        )
+      ) {
+        state.queueExecution();
+      }
+      if (!shouldRun) return;
+      if (seedPending) state.pending.add(action);
+      state.markInvalid(action);
+    },
+  };
 }
 
 export function resolveRegistrationSurface(
@@ -322,7 +388,11 @@ export function updateSchedulerActionType(
   state: SchedulerActionTypeState,
   action: Action,
   isEffect: boolean | undefined,
-  options: { queueExecution?: boolean; queueComputation?: boolean } = {},
+  options: {
+    queueExecution?: boolean;
+    queueComputation?: boolean;
+    dormant?: boolean;
+  } = {},
 ): boolean {
   const kind: NodeKind = isEffect === true ||
       state.nodes.isKnownEffect(action)
@@ -332,7 +402,9 @@ export function updateSchedulerActionType(
   const wasLive = existing
     ? isLive(state.dependencyGraphState, existing)
     : false;
-  state.nodes.register(action, kind);
+  state.nodes.register(action, kind, undefined, {
+    dormant: options.dormant,
+  });
   notifyNodeLivenessChange(state.dependencyGraphState, action, wasLive);
   const actionIsEffect = kind === "effect";
 

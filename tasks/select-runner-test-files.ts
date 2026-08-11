@@ -26,11 +26,17 @@ export async function listRunnerTests(): Promise<{ name: string }[]> {
   const testDir = new URL("../packages/runner/test/", import.meta.url);
   const files: { name: string }[] = [];
 
-  for await (const entry of Deno.readDir(testDir)) {
-    if (entry.isFile && entry.name.endsWith(".test.ts")) {
-      files.push({ name: entry.name });
+  const visit = async (directory: URL, prefix = ""): Promise<void> => {
+    for await (const entry of Deno.readDir(directory)) {
+      const name = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory) {
+        await visit(new URL(`${entry.name}/`, directory), name);
+      } else if (entry.isFile && entry.name.endsWith(".test.ts")) {
+        files.push({ name });
+      }
     }
-  }
+  };
+  await visit(testDir);
 
   files.sort((a, b) => a.name.localeCompare(b.name));
   return files;

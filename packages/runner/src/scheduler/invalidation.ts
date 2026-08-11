@@ -8,6 +8,7 @@ import type {
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
+import { invalidCauseKey } from "./invalid-cause.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
 import { shaperInstanceGroupKey } from "./wake-shaping.ts";
 import type {
@@ -253,20 +254,6 @@ export function markInvalid(
   if (record.status === "clean") {
     nodes.setStatus(action, "invalid");
   }
-}
-
-/**
- * Dedup key for a pending invalid cause. Scope participates (an
- * omitted scope normalizes to `space`, matching storage), and JSON keeps
- * path segments unambiguous: ["a","b"] never collides with ["a/b"].
- */
-function invalidCauseKey(address: IMemorySpaceAddress): string {
-  return JSON.stringify([
-    address.space,
-    address.scope ?? "space",
-    address.id,
-    address.path,
-  ]);
 }
 
 /**

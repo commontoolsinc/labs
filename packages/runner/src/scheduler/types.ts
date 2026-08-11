@@ -10,6 +10,7 @@ import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
+import type { InitialRunGate } from "./initial-run-gate.ts";
 
 export interface TelemetryAnnotations {
   pattern: Pattern;
@@ -66,6 +67,8 @@ export type EventHandler =
      * inputs reachable only through the event can be covered too.
      */
     presyncInputs?: (event: any) => Promise<void>;
+    /** Hold queued deliveries until this handler's setup transaction settles. */
+    initialRunGate?: InitialRunGate;
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
@@ -221,6 +224,8 @@ export type QueuedEvent = {
    * handlers cannot overtake it.
    */
   handlerLoadPending?: boolean;
+  /** The handler is registered, but its setup transaction is still pending. */
+  initialRunGatePending?: boolean;
   /** Internal exactly-once guard for terminal pre-dispatch drops. */
   finalOutcomeNotified?: boolean;
   /**

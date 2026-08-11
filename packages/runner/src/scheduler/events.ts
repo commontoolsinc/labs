@@ -111,7 +111,41 @@ export function isHeadEventParked(
 ): boolean {
   const headEvent = state.eventQueue[0];
   return headEvent?.handlerLoadPending === true ||
+    headEvent?.initialRunGatePending === true ||
     (headEvent?.notBefore !== undefined && headEvent.notBefore > now);
+}
+
+function parkForInitialRunGate(
+  state: SchedulerEventQueueState,
+  queuedEvent: QueuedEvent,
+): void {
+  const gate = queuedEvent.handler.initialRunGate;
+  if (!gate || gate.status() === "released") return;
+  if (gate.status() === "cancelled") {
+    dropQueuedEvent(
+      state,
+      queuedEvent,
+      `Event dropped: handler setup for ${queuedEvent.eventLink.id} did not commit`,
+    );
+    return;
+  }
+
+  queuedEvent.initialRunGatePending = true;
+  gate.onSettle((status) => {
+    if (
+      queuedEvent.finalOutcomeNotified ||
+      !state.eventQueue.includes(queuedEvent)
+    ) return;
+    delete queuedEvent.initialRunGatePending;
+    if (status === "cancelled") {
+      dropQueuedEvent(
+        state,
+        queuedEvent,
+        `Event dropped: handler setup for ${queuedEvent.eventLink.id} did not commit`,
+      );
+    }
+    state.queueExecution();
+  });
 }
 
 export interface EventDependencyPreflightResult {
@@ -385,6 +419,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     if (args.originTx !== undefined) {
       state.recordLineageEvent(args.originTx, queuedEvent);
     }
+    parkForInitialRunGate(state, queuedEvent);
     state.queueExecution();
     return;
   }
@@ -429,6 +464,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           queuedEvent.handler = loadedHandler;
           queuedEvent.action = (tx) => loadedHandler(tx, args.event);
           delete queuedEvent.handlerLoadPending;
+          parkForInitialRunGate(state, queuedEvent);
         } else {
           dropQueuedEvent(
             state,
@@ -800,6 +836,10 @@ export async function processPullQueuedEventDuringExecute(
   // The head reserved its FIFO slot before its handler's piece loaded. Piece
   // completion hydrates the same object and queues a fresh execution tick.
   if (queuedEvent.handlerLoadPending) return;
+
+  // The handler is available so events can reserve their FIFO position, but
+  // its setup writes are not visible until the gate opens.
+  if (queuedEvent.initialRunGatePending) return;
 
   // Head is parked on in-flight closure loads; loadsSettled re-queues after
   // success or drops the event after an explicit load failure.

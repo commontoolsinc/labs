@@ -23,6 +23,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
+import { createInitialRunGate } from "../src/scheduler/initial-run-gate.ts";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -105,6 +106,94 @@ describe("event handling", () => {
     expect(eventCount).toBe(2);
     expect(eventCell.get()).toBe(0); // Events are _not_ written to cell
     expect(eventResultCell.get()).toBe(2);
+  });
+
+  it("keeps events queued until the handler setup gate opens", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "initial gate queued event",
+      undefined,
+      tx,
+    );
+    const gate = createInitialRunGate();
+    const received: number[] = [];
+    const handler: EventHandler = (_tx, event) => received.push(event);
+    handler.initialRunGate = gate.gate;
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 4);
+    await clock.settle();
+    expect(received).toEqual([]);
+
+    gate.release();
+    await runtime.scheduler.idleWithPendingCommits();
+    expect(received).toEqual([4]);
+  });
+
+  it("settles queued events when the handler setup gate is cancelled", () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "cancelled initial gate queued event",
+      undefined,
+      tx,
+    );
+    const gate = createInitialRunGate();
+    const handler: EventHandler = () => {
+      throw new Error("cancelled handler ran");
+    };
+    handler.initialRunGate = gate.gate;
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+    let outcome: IExtendedStorageTransaction | undefined;
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      5,
+      true,
+      (settledTx) => {
+        outcome = settledTx;
+      },
+    );
+    gate.cancel();
+
+    expect(outcome?.status().status).toBe("error");
+  });
+
+  it("drops events immediately when the handler setup gate is already cancelled", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "already cancelled initial gate queued event",
+      undefined,
+      tx,
+    );
+    const gate = createInitialRunGate();
+    let handlerCalls = 0;
+    const handler: EventHandler = () => handlerCalls++;
+    handler.initialRunGate = gate.gate;
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+    gate.cancel();
+    let outcome: IExtendedStorageTransaction | undefined;
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      6,
+      true,
+      (settledTx) => {
+        outcome = settledTx;
+      },
+    );
+
+    expect(outcome?.status().status).toBe("error");
+    await clock.settle();
+    expect(handlerCalls).toBe(0);
   });
 
   it("awaits presyncInputs before running the handler body", async () => {

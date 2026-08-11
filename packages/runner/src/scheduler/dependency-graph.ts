@@ -42,6 +42,9 @@ export type SchedulerDemandState =
 /**
  * True when `node` carries demand on its own, independent of any reader.
  *
+ * Dormant nodes are never roots, including effects and materializers. They do
+ * not carry or relay demand until their subscription activates.
+ *
  * A root needs no incoming reference to stay live, which is why granting or
  * withdrawing demand can treat it as a fixed point rather than walking through
  * it.
@@ -50,16 +53,17 @@ function isDemandRoot(
   state: SchedulerLivenessState,
   node: SchedulerNode,
 ): boolean {
-  return state.nodes.isEffect(node.action) ||
-    node.provisionalDemand ||
-    state.materializerIndex.isMaterializer(node.action);
+  return !node.dormant &&
+    (state.nodes.isEffect(node.action) ||
+      node.provisionalDemand ||
+      state.materializerIndex.isMaterializer(node.action));
 }
 
 export function isLive(
   state: SchedulerLivenessState,
   node: SchedulerNode,
 ): boolean {
-  if (!isRegisteredNode(state, node)) return false;
+  if (!isRegisteredNode(state, node) || node.dormant) return false;
 
   return isDemandRoot(state, node) || node.liveRefs > 0;
 }
@@ -148,7 +152,7 @@ export function setNodeProvisionalDemand(
  * Propagate demand from nodes that just became live to the writers they read.
  *
  * Each seed contributes one reference to each of its writers; a writer that
- * crosses from dormant to live passes the same contribution further upstream.
+ * crosses from not live to live passes the same contribution further upstream.
  * A node is enqueued only on that crossing, so a cycle settles instead of
  * looping: once live, later increments find it already live.
  */
@@ -160,6 +164,11 @@ function propagateDemand(
 
   while (stack.length > 0) {
     const reader = stack.pop()!;
+    const readerRecord = state.nodes.get(reader);
+    if (
+      !readerRecord || !isRegisteredNode(state, readerRecord) ||
+      readerRecord.dormant
+    ) continue;
     const writers = state.reverseDependencies.get(reader);
     if (!writers) continue;
     for (const writer of writers) {
@@ -169,7 +178,7 @@ function propagateDemand(
       const wasLive = isLive(state, record);
       livenessWork.nodeWrites++;
       record.liveRefs++;
-      if (!wasLive) stack.push(writer);
+      if (!wasLive && !record.dormant) stack.push(writer);
     }
   }
 }
@@ -195,7 +204,7 @@ function grantDemandFrom(
  * anything inside, and its support can be taken at face value. Clearing the
  * region and re-seeding from roots inside it plus live readers outside is
  * therefore both diamond-accurate and cycle-safe — a rootless cycle finds no
- * seed and settles dormant — while touching only the affected region.
+ * seed and becomes not live — while touching only the affected region.
  */
 function withdrawDemandFrom(
   state: SchedulerDemandState,
@@ -245,7 +254,7 @@ function withdrawDemandFrom(
         }
       }
     }
-    if (supported) seeds.push(action);
+    if (supported && !record.dormant) seeds.push(action);
   }
 
   propagateDemand(state, seeds);
@@ -434,7 +443,9 @@ export function registerDependentEdge(
     const wasLive = isLive(state, writerRecord);
     livenessWork.nodeWrites++;
     writerRecord.liveRefs++;
-    if (!wasLive) grantDemandFrom(state, writer);
+    if (!wasLive && !writerRecord.dormant) {
+      grantDemandFrom(state, writer);
+    }
   }
   return true;
 }
@@ -499,10 +510,12 @@ export function unregisterDependentEdge(
  * whole graph.
  *
  * Walk reader→writer edges from the roots to form the root-reachable set, then
- * count each reachable node's live direct readers. This is the definition
- * `liveRefs` carries. Nothing on the maintenance path calls it — granting and
- * withdrawing demand hold the same state incrementally — so it stands as the
- * reference those updates are checked against.
+ * count each reachable node's live direct readers. Dormant nodes are excluded
+ * from the roots and stop upstream propagation. They retain direct references
+ * from live readers so activation can resume propagation from current state.
+ * This is the definition `liveRefs` carries. Nothing on the maintenance path
+ * calls it — granting and withdrawing demand hold the same state incrementally
+ * — so it stands as the reference those updates are checked against.
  */
 export function recomputeLiveRefs(state: SchedulerLivenessState): void {
   const records = [...state.nodes.nodes()];
@@ -512,11 +525,7 @@ export function recomputeLiveRefs(state: SchedulerLivenessState): void {
   for (const record of records) {
     livenessWork.nodeWrites++;
     record.liveRefs = 0;
-    if (
-      state.nodes.isEffect(record.action) ||
-      record.provisionalDemand ||
-      state.materializerIndex.isMaterializer(record.action)
-    ) {
+    if (!record.dormant && isDemandRoot(state, record)) {
       reachable.add(record.action);
       stack.push(record.action);
     }
@@ -532,12 +541,17 @@ export function recomputeLiveRefs(state: SchedulerLivenessState): void {
       if (!writerRecord || !isRegisteredNode(state, writerRecord)) continue;
       if (!reachable.has(writer)) {
         reachable.add(writer);
-        stack.push(writer);
+        if (!writerRecord.dormant) stack.push(writer);
       }
     }
   }
 
   for (const reader of reachable) {
+    const readerRecord = state.nodes.get(reader);
+    if (
+      !readerRecord || !isRegisteredNode(state, readerRecord) ||
+      readerRecord.dormant
+    ) continue;
     const writers = state.reverseDependencies.get(reader);
     if (!writers) continue;
     for (const writer of writers) {

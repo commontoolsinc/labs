@@ -50,6 +50,7 @@ import {
   type PersistedSchedulerObservationSnapshot,
 } from "./scheduler/persistent-observation.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
+import type { InitialRunGate } from "./scheduler/initial-run-gate.ts";
 import {
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
@@ -878,6 +879,7 @@ type SchedulerRehydrationSubscriptionOptions = {
   awaitSyncBeforeInitialRun?: {
     space: MemorySpace;
   };
+  initialRunGate?: InitialRunGate;
 };
 
 // Whether resumed nodes should hold their initial run until the space syncs,
@@ -900,6 +902,7 @@ type RunnerRunOptions = {
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
+  initialRunGate?: InitialRunGate;
 };
 
 // Placeholder standing in for an argument slot whose stored raw value is a
@@ -2423,6 +2426,7 @@ export class Runner {
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
+      initialRunGate?: InitialRunGate;
     } = {},
   ): Cancel {
     const {
@@ -2487,11 +2491,16 @@ export class Runner {
       // patternIdentity hot-swap must register fresh under the same durable
       // piece identity rather than replaying the old implementation's cache.
       const schedulerRehydration = initialSchedulerRehydrationAvailable
-        ? options.schedulerRehydration ?? this.schedulerRehydrationOptions(
-          resultCell,
-          undefined,
-          options.awaitSyncBeforeInitialRun,
-        )
+        ? {
+          ...(options.schedulerRehydration ?? this.schedulerRehydrationOptions(
+            resultCell,
+            undefined,
+            options.awaitSyncBeforeInitialRun,
+          )),
+          ...(options.initialRunGate
+            ? { initialRunGate: options.initialRunGate }
+            : {}),
+        }
         : this.schedulerRehydrationOptions(resultCell);
       initialSchedulerRehydrationAvailable = false;
       try {
@@ -3162,6 +3171,7 @@ export class Runner {
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       schedulePatternUpdate: options.schedulePatternUpdate,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
+      initialRunGate: options.initialRunGate,
     });
   }
 
@@ -5790,6 +5800,7 @@ export class Runner {
       reads,
       writes,
       streamLink,
+      schedulerRehydration,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
     const handler = (tx: IExtendedStorageTransaction, event: any) => {
@@ -6022,6 +6033,7 @@ export class Runner {
     // window (per-pattern coalescing, W3). The result cell is stable per
     // instance, so all of one instance's handlers share this id.
     const instanceLink = resultCell.getAsNormalizedFullLink();
+    const initialRunGate = schedulerRehydration.initialRunGate;
     const wrappedHandler = Object.assign(handler, {
       reads,
       writes,
@@ -6032,6 +6044,7 @@ export class Runner {
         ownerSpace: instanceLink.space,
       },
       ...(presyncInputs !== undefined && { presyncInputs }),
+      ...(initialRunGate !== undefined && { initialRunGate }),
     });
 
     const schedulerReads = this.collectArgumentSchedulerReadLinks(
@@ -7130,6 +7143,7 @@ export class Runner {
         awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
           schedulerRehydration,
         ),
+        initialRunGate: schedulerRehydration.initialRunGate,
       },
     );
 

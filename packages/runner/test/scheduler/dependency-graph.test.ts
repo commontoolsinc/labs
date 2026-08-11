@@ -2,10 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   type DependencyGraphState,
+  groupReadsByEntity,
   isLive,
+  livenessWork,
   notifyNodeLivenessChange,
   recomputeLiveRefs,
   registerDependentEdge,
+  resetLivenessWork,
   setNodeProvisionalDemand,
   unregisterDependentEdge,
 } from "../../src/scheduler/dependency-graph.ts";
@@ -83,6 +86,40 @@ function named(name: string): Action {
 }
 
 describe("dependency-graph", () => {
+  describe("liveness work counters", () => {
+    it("resets every liveness work counter", () => {
+      livenessWork.nodeWrites = 3;
+      livenessWork.edgeVisits = 4;
+      livenessWork.operations = 5;
+
+      resetLivenessWork();
+
+      expect(livenessWork).toEqual({
+        nodeWrites: 0,
+        edgeVisits: 0,
+        operations: 0,
+      });
+    });
+  });
+
+  describe("groupReadsByEntity()", () => {
+    it("keeps paths for the same entity together", () => {
+      const first = {
+        space: "did:key:space" as const,
+        scope: "space" as const,
+        id: "of:first" as const,
+        path: ["a"],
+      };
+      const second = { ...first, path: ["b"] };
+      const third = { ...first, id: "of:second" as const, path: [] };
+
+      expect([...groupReadsByEntity([first, second, third]).values()]).toEqual([
+        [first, second],
+        [third],
+      ]);
+    });
+  });
+
   describe("registerDependentEdge()", () => {
     it("gives the writer a reference when the reader is live", () => {
       const { nodes, state } = createGraph();
@@ -97,7 +134,7 @@ describe("dependency-graph", () => {
       expect(isLive(state, nodes.get(writer)!)).toBe(true);
     });
 
-    it("gives the writer no reference when the reader is dormant", () => {
+    it("gives the writer no reference when the reader is not live", () => {
       const { nodes, state } = createGraph();
       const writer = named("writer");
       const reader = named("reader");
@@ -119,7 +156,7 @@ describe("dependency-graph", () => {
       nodes.register(middle, "computation");
       nodes.register(sink, "effect");
 
-      // Wire from the dormant end, so demand only arrives with the last edge.
+      // Wire from the inactive end, so demand only arrives with the last edge.
       registerDependentEdge(state, source, middle);
       expect(isLive(state, nodes.get(source)!)).toBe(false);
 
@@ -128,6 +165,51 @@ describe("dependency-graph", () => {
       expect(nodes.get(middle)?.liveRefs).toBe(1);
       expect(nodes.get(source)?.liveRefs).toBe(1);
       expect(isLive(state, nodes.get(source)!)).toBe(true);
+    });
+
+    it("stops downstream demand at a dormant writer", () => {
+      const { nodes, state } = createGraph();
+      const source = named("source");
+      const middle = named("middle");
+      const sink = named("sink");
+      nodes.register(source, "computation");
+      nodes.register(middle, "computation", undefined, { dormant: true });
+      nodes.register(sink, "effect");
+      registerDependentEdge(state, source, middle);
+
+      registerDependentEdge(state, middle, sink);
+
+      expect(nodes.get(middle)?.liveRefs).toBe(1);
+      expect(nodes.get(source)?.liveRefs).toBe(0);
+      expect(isLive(state, nodes.get(middle)!)).toBe(false);
+      expect(isLive(state, nodes.get(source)!)).toBe(false);
+      expectMatchesFullRebuild(state, "demand added below dormant node");
+
+      nodes.register(middle, "computation", undefined, { dormant: false });
+      notifyNodeLivenessChange(state, middle, false);
+      expect(nodes.get(source)?.liveRefs).toBe(1);
+      expect(isLive(state, nodes.get(source)!)).toBe(true);
+      expectMatchesFullRebuild(state, "dormant node activated");
+    });
+
+    it("does not count a dormant reader in an independently live branch", () => {
+      const { nodes, state } = createGraph();
+      const source = named("source");
+      const middle = named("middle");
+      const sink = named("sink");
+      const directReader = named("directReader");
+      nodes.register(source, "computation");
+      nodes.register(middle, "computation", undefined, { dormant: true });
+      nodes.register(sink, "effect");
+      nodes.register(directReader, "effect");
+      registerDependentEdge(state, source, middle);
+      registerDependentEdge(state, middle, sink);
+      registerDependentEdge(state, source, directReader);
+
+      expect(nodes.get(middle)?.liveRefs).toBe(1);
+      expect(nodes.get(source)?.liveRefs).toBe(1);
+      expectMatchesFullRebuild(state, "dormant branch beside live branch");
+      expect(nodes.get(source)?.liveRefs).toBe(1);
     });
   });
 
@@ -168,7 +250,55 @@ describe("dependency-graph", () => {
   });
 
   describe("notifyNodeLivenessChange()", () => {
-    it("carries demand upstream when a dormant node becomes a materializer", () => {
+    it("withdraws and restores demand with subscription dormancy", () => {
+      const { nodes, state } = createGraph();
+      const writer = named("writer");
+      const reader = named("reader");
+      nodes.register(writer, "computation");
+      nodes.register(reader, "effect");
+      registerDependentEdge(state, writer, reader);
+      expect(nodes.get(writer)?.liveRefs).toBe(1);
+
+      nodes.register(reader, "effect", undefined, { dormant: true });
+      notifyNodeLivenessChange(state, reader, true);
+      expect(nodes.get(writer)?.liveRefs).toBe(0);
+      expect(isLive(state, nodes.get(reader)!)).toBe(false);
+
+      nodes.register(reader, "effect", undefined, { dormant: false });
+      notifyNodeLivenessChange(state, reader, false);
+      expect(nodes.get(writer)?.liveRefs).toBe(1);
+      expect(isLive(state, nodes.get(reader)!)).toBe(true);
+    });
+
+    it("withdraws upstream demand when a demanded node becomes dormant", () => {
+      const { nodes, state } = createGraph();
+      const source = named("source");
+      const middle = named("middle");
+      const sink = named("sink");
+      nodes.register(source, "computation");
+      nodes.register(middle, "computation");
+      nodes.register(sink, "effect");
+      registerDependentEdge(state, source, middle);
+      registerDependentEdge(state, middle, sink);
+      expect(nodes.get(source)?.liveRefs).toBe(1);
+
+      nodes.register(middle, "computation", undefined, { dormant: true });
+      notifyNodeLivenessChange(state, middle, true);
+
+      expect(nodes.get(middle)?.liveRefs).toBe(1);
+      expect(nodes.get(source)?.liveRefs).toBe(0);
+      expect(isLive(state, nodes.get(middle)!)).toBe(false);
+      expect(isLive(state, nodes.get(source)!)).toBe(false);
+      expectMatchesFullRebuild(state, "demanded node made dormant");
+
+      nodes.register(middle, "computation", undefined, { dormant: false });
+      notifyNodeLivenessChange(state, middle, false);
+      expect(nodes.get(source)?.liveRefs).toBe(1);
+      expect(isLive(state, nodes.get(source)!)).toBe(true);
+      expectMatchesFullRebuild(state, "demanded node reactivated");
+    });
+
+    it("carries demand upstream when an inactive node becomes a materializer", () => {
       const { nodes, state, setMaterializer } = createGraph();
       const source = named("source");
       const materializer = named("materializer");

@@ -1,4 +1,5 @@
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import { invalidCauseKey } from "./invalid-cause.ts";
 import type { Action } from "./types.ts";
 
 export type NodeKind = "computation" | "effect";
@@ -29,6 +30,8 @@ export interface SchedulerNode {
   kind: NodeKind;
   parentAction?: Action;
   children?: Set<Action>;
+  /** Blocks execution and upstream demand propagation until activation. */
+  dormant: boolean;
   status: NodeStatus;
   declaredReads: IMemorySpaceAddress[];
   invalidCauses: IMemorySpaceAddress[];
@@ -37,6 +40,12 @@ export interface SchedulerNode {
   provisionalDemandPass?: number;
   gate: SchedulerGateState;
   passRuns: number;
+}
+
+interface DormantSubscriptionState {
+  token: object;
+  invalidated: boolean;
+  invalidCauses: Map<string, IMemorySpaceAddress>;
 }
 
 export class NodeRegistry {
@@ -52,6 +61,11 @@ export class NodeRegistry {
   // registered node. Membership tracks both status AND active membership:
   // a removed node drops out even though its record persists in `records`.
   private invalidNodes = new Set<Action>();
+  private dormantSubscriptions = new WeakMap<
+    Action,
+    DormantSubscriptionState
+  >();
+  private subscriptionTokens = new WeakMap<Action, object>();
   // Source of monotonic registration ordinals (see SchedulerNode.ordinal).
   private nextOrdinal = 0;
 
@@ -62,6 +76,7 @@ export class NodeRegistry {
     action: Action,
     kind: NodeKind,
     parentAction?: Action,
+    options: { dormant?: boolean } = {},
   ): SchedulerNode {
     const existing = this.records.get(action);
     if (existing) {
@@ -77,6 +92,9 @@ export class NodeRegistry {
           );
         }
       }
+      if (options.dormant !== undefined) {
+        existing.dormant = options.dormant;
+      }
       this.activate(existing);
       return existing;
     }
@@ -85,6 +103,7 @@ export class NodeRegistry {
       action,
       ordinal: this.nextOrdinal++,
       kind,
+      dormant: options.dormant ?? false,
       status: "never-ran",
       declaredReads: [],
       invalidCauses: [],
@@ -128,6 +147,64 @@ export class NodeRegistry {
 
   get(action: Action): SchedulerNode | undefined {
     return this.records.get(action);
+  }
+
+  beginSubscription(action: Action, dormant: boolean): object {
+    this.dormantSubscriptions.delete(action);
+    const token = {};
+    this.subscriptionTokens.set(action, token);
+    if (!dormant) return token;
+    this.dormantSubscriptions.set(action, {
+      token,
+      invalidated: false,
+      invalidCauses: new Map(),
+    });
+    return token;
+  }
+
+  deferDormantInvalidation(
+    action: Action,
+    cause?: IMemorySpaceAddress,
+  ): boolean {
+    const dormant = this.dormantSubscriptions.get(action);
+    if (!dormant) return false;
+    dormant.invalidated = true;
+    if (cause !== undefined) {
+      dormant.invalidCauses.set(invalidCauseKey(cause), cause);
+    }
+    return true;
+  }
+
+  activateDormantSubscription(
+    action: Action,
+    token: object,
+  ): boolean | undefined {
+    const dormant = this.dormantSubscriptions.get(action);
+    if (!dormant || dormant.token !== token) return undefined;
+    this.dormantSubscriptions.delete(action);
+    const record = this.records.get(action);
+    if (record) {
+      record.dormant = false;
+      for (const [key, cause] of dormant.invalidCauses) {
+        const alreadyPresent = record.invalidCauses.some((existing) =>
+          invalidCauseKey(existing) === key
+        );
+        if (!alreadyPresent) record.invalidCauses.push(cause);
+      }
+    }
+    return dormant.invalidated;
+  }
+
+  cancelSubscription(action: Action, token: object): boolean {
+    if (this.subscriptionTokens.get(action) !== token) return false;
+    this.subscriptionTokens.delete(action);
+    this.dormantSubscriptions.delete(action);
+    return true;
+  }
+
+  clearSubscription(action: Action): void {
+    this.subscriptionTokens.delete(action);
+    this.dormantSubscriptions.delete(action);
   }
 
   /**

@@ -123,6 +123,7 @@ import {
 import type { ExecuteContinuationState } from "./continuation.ts";
 import { applyPullExecuteContinuation } from "./continuation.ts";
 import { SchedulerGates } from "./gates.ts";
+import type { InitialRunGate } from "./initial-run-gate.ts";
 import {
   markInvalid as markInvalidRecord,
   type StorageNotificationState,
@@ -321,6 +322,10 @@ type SchedulerRegisterOptions = {
   // instantiation side effects (starting child runs) that a clean skip would
   // strand. See docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
   resumeMode?: "always-run";
+  // Keep a newly registered action dormant until its setup transaction has
+  // committed. The gate has no timer; its owner releases or cancels it from
+  // the transaction outcome.
+  initialRunGate?: InitialRunGate;
 };
 
 function isReactivityLog(value: unknown): value is ReactivityLog {
@@ -428,6 +433,7 @@ export class Scheduler {
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
   private offBudgetRetries = new WeakMap<Action, number>();
+  private initialRunGateCancels = new WeakMap<Action, Cancel>();
 
   // Effect/computation tracking for pull-based scheduling
   private nodes = new NodeRegistry();
@@ -693,6 +699,11 @@ export class Scheduler {
       maybeOptions,
     );
     const { rehydrateFromStorage } = options;
+    const initialRunGate = options.initialRunGate;
+    const initiallyDormant = initialRunGate !== undefined &&
+      !initialRunGate.isReleased();
+    this.initialRunGateCancels.get(action)?.();
+    this.initialRunGateCancels.delete(action);
     const previousObservationIdentityKey = this
       .observationIdentityKeyForAction(action);
     // Tag the action with its owning pattern instance. rehydrateFromStorage
@@ -726,9 +737,10 @@ export class Scheduler {
       noDebounce: options.noDebounce,
       throttle: options.throttle,
       changeGroup: options.changeGroup,
+      initiallyDormant,
     };
     this.updateMaterializerRegistration(action);
-    const cancel = subscribePullSchedulerAction(
+    const subscription = subscribePullSchedulerAction(
       this.subscribeActionState,
       action,
       dependencies,
@@ -754,7 +766,19 @@ export class Scheduler {
     if (!rehydrated && options.awaitSyncBeforeInitialRun) {
       this.holdInitialRunUntilSynced(action, options.awaitSyncBeforeInitialRun);
     }
-    return cancel;
+    if (!initiallyDormant || !initialRunGate) return subscription.cancel;
+
+    const cancelRelease = initialRunGate.onRelease(() => {
+      subscription.activate({ runInitial: !rehydrated });
+    });
+    this.initialRunGateCancels.set(action, cancelRelease);
+    return () => {
+      if (this.initialRunGateCancels.get(action) === cancelRelease) {
+        this.initialRunGateCancels.delete(action);
+      }
+      cancelRelease();
+      subscription.cancel();
+    };
   }
 
   // Hold a resumed action's initial run until its space finishes syncing. The
@@ -1182,6 +1206,9 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
+    this.initialRunGateCancels.get(action)?.();
+    this.initialRunGateCancels.delete(action);
+    this.nodes.clearSubscription(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.materializers.clearAction(action);
     // Drop the adoption index entry only if it still points at this action
@@ -2746,6 +2773,7 @@ export class Scheduler {
     action: Action,
     cause?: IMemorySpaceAddress,
   ): void {
+    if (this.nodes.deferDormantInvalidation(action, cause)) return;
     this.markActionInvalid(action, cause);
 
     if (this.nodes.effects.has(action) && this.gates.getDebounce(action)) {

@@ -22,6 +22,7 @@ import {
   schedulerImplementationFingerprint,
   schedulerRuntimeFingerprint,
 } from "../src/scheduler/run.ts";
+import { createInitialRunGate } from "../src/scheduler/initial-run-gate.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type {
@@ -724,6 +725,223 @@ describe("persistent scheduler observations", () => {
         true,
       );
       expect(testRuntime.runtime.scheduler.getStats().pending).toBe(0);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("runs only gated dirty and failed observations after release", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const subscribe = (
+        name: string,
+        snapshotState: "clean" | "dirty" | "failed",
+      ) => {
+        let runs = 0;
+        const action = Object.assign(
+          {
+            [name]: function () {
+              runs++;
+            },
+          }[name] as Action,
+          { writes: [writeLink] },
+        );
+        const gate = createInitialRunGate();
+        const observation = buildSchedulerActionObservation({
+          ownerSpace: space,
+          actionId: name,
+          actionKind: "effect",
+          branch: "",
+          pieceId: `space:${name}`,
+          processGeneration: 1,
+          implementationFingerprint: schedulerImplementationFingerprint(
+            action,
+            name,
+            undefined,
+          ),
+          runtimeFingerprint: schedulerRuntimeFingerprint(),
+          observedAtSeq: 5,
+          transactionKind: "action-run",
+          currentKnownWrites: [writeAddress],
+          transactionLog: {
+            reads: [readAddress],
+            shallowReads: [],
+            writes: [],
+          },
+          ...(snapshotState === "failed"
+            ? { status: "failed", errorFingerprint: "error:test" }
+            : {}),
+        });
+        testRuntime.runtime.scheduler.subscribe(action, {
+          reads: [],
+          shallowReads: [],
+          writes: [],
+        }, {
+          isEffect: true,
+          initialRunGate: gate.gate,
+          rehydrateFromStorage: {
+            space,
+            pieceId: observation.pieceId,
+            processGeneration: 1,
+            ...currentSnapshotOracle,
+            snapshotsByActionId: new Map([[
+              name,
+              [{
+                executionContextKey: "session:test:test",
+                observation,
+                ...(snapshotState === "dirty" ? { directDirtySeq: 7 } : {}),
+              }],
+            ]]),
+          },
+        });
+        return { gate, runs: () => runs };
+      };
+
+      const clean = subscribe("gatedCleanObservation", "clean");
+      const dirty = subscribe("gatedDirtyObservation", "dirty");
+      const failed = subscribe("gatedFailedObservation", "failed");
+      await testRuntime.runtime.idle();
+      expect(clean.runs()).toBe(0);
+      expect(dirty.runs()).toBe(0);
+      expect(failed.runs()).toBe(0);
+
+      clean.gate.release();
+      dirty.gate.release();
+      failed.gate.release();
+      await testRuntime.runtime.idle();
+      expect(clean.runs()).toBe(0);
+      expect(dirty.runs()).toBe(1);
+      expect(failed.runs()).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("keeps upstream work dormant until a clean reader activates", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      let writerRuns = 0;
+      const writer = Object.assign(function dormantUpstreamWriter() {
+        writerRuns++;
+      }, { writes: [writeLink] });
+      testRuntime.runtime.scheduler.subscribe(writer);
+
+      let readerRuns = 0;
+      const reader: Action = function gatedCleanReader() {
+        readerRuns++;
+      };
+      const actionId = "gatedCleanReader";
+      const gate = createInitialRunGate();
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        actionId,
+        actionKind: "effect",
+        branch: "",
+        pieceId: "space:gated-clean-reader",
+        processGeneration: 1,
+        implementationFingerprint: schedulerImplementationFingerprint(
+          reader,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        currentKnownWrites: [],
+        transactionLog: {
+          reads: [writeAddress],
+          shallowReads: [],
+          writes: [],
+        },
+      });
+      testRuntime.runtime.scheduler.subscribe(reader, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+        initialRunGate: gate.gate,
+        rehydrateFromStorage: {
+          space,
+          pieceId: observation.pieceId,
+          processGeneration: 1,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            actionId,
+            [{ executionContextKey: "session:test:test", observation }],
+          ]]),
+        },
+      });
+
+      await testRuntime.runtime.idle();
+      expect(writerRuns).toBe(0);
+      expect(readerRuns).toBe(0);
+
+      gate.release();
+      await testRuntime.runtime.idle();
+      expect(writerRuns).toBe(1);
+      expect(readerRuns).toBe(0);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("does not retain parent demand for a clean gated child", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      let childRuns = 0;
+      const child = Object.assign(function cleanGatedChild() {
+        childRuns++;
+      }, { writes: [writeLink] });
+      const actionId = "cleanGatedChild";
+      const gate = createInitialRunGate();
+      const observation = buildSchedulerActionObservation({
+        ownerSpace: space,
+        actionId,
+        actionKind: "computation",
+        branch: "",
+        pieceId: "space:clean-gated-child",
+        processGeneration: 1,
+        implementationFingerprint: schedulerImplementationFingerprint(
+          child,
+          actionId,
+          undefined,
+        ),
+        runtimeFingerprint: schedulerRuntimeFingerprint(),
+        observedAtSeq: 5,
+        transactionKind: "action-run",
+        currentKnownWrites: [writeAddress],
+        transactionLog: { reads: [], shallowReads: [], writes: [] },
+      });
+      const parent: Action = () => {
+        testRuntime.runtime.scheduler.subscribe(child, {
+          reads: [],
+          shallowReads: [],
+          writes: [],
+        }, {
+          initialRunGate: gate.gate,
+          rehydrateFromStorage: {
+            space,
+            pieceId: observation.pieceId,
+            processGeneration: 1,
+            ...currentSnapshotOracle,
+            snapshotsByActionId: new Map([[
+              actionId,
+              [{ executionContextKey: "session:test:test", observation }],
+            ]]),
+          },
+        });
+      };
+      testRuntime.runtime.scheduler.subscribe(parent, { isEffect: true });
+      await testRuntime.runtime.idle();
+
+      gate.release();
+      await testRuntime.runtime.idle();
+      const record = (testRuntime.runtime.scheduler as unknown as {
+        nodes: { get(action: Action): { provisionalDemand: boolean } };
+      }).nodes.get(child);
+      expect(childRuns).toBe(0);
+      expect(record.provisionalDemand).toBe(false);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }

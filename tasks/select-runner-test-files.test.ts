@@ -102,3 +102,17 @@ Deno.test("every real runner test file is covered exactly once across shards", a
     );
   }
 });
+
+Deno.test("runner test discovery includes nested test directories", async () => {
+  const files = await listRunnerTests();
+  const names = files.map((file) => file.name);
+
+  assertEquals(
+    names.includes("scheduler/dependency-graph.test.ts"),
+    true,
+  );
+  assertEquals(
+    names.includes("scheduler/node-record.test.ts"),
+    true,
+  );
+});

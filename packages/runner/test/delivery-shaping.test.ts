@@ -571,6 +571,57 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
+  it("settles every commit callback collapsed into the backlog tail", async () => {
+    const runtime = makeRuntime();
+    try {
+      const { tx, linkRef, received } = streamWithHandler(
+        runtime,
+        "w4/commit-callbacks",
+      );
+      await tx.commit();
+      for (let i = 1; i <= MAX_EVENT_BACKLOG_PER_STREAM; i++) {
+        runtime.scheduler.queueEvent(linkRef, { n: i });
+      }
+
+      const settled: string[] = [];
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { n: MAX_EVENT_BACKLOG_PER_STREAM + 1 },
+        true,
+        () => settled.push("first"),
+      );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { n: MAX_EVENT_BACKLOG_PER_STREAM + 2 },
+        true,
+        () => {
+          settled.push("throwing");
+          throw new Error("collapsed callback failed");
+        },
+      );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { n: MAX_EVENT_BACKLOG_PER_STREAM + 3 },
+        true,
+        () => settled.push("last"),
+      );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { n: MAX_EVENT_BACKLOG_PER_STREAM + 4 },
+      );
+
+      await runtime.idle();
+
+      expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
+      expect(received[received.length - 1]).toEqual({
+        n: MAX_EVENT_BACKLOG_PER_STREAM + 4,
+      });
+      expect(settled).toEqual(["first", "throwing", "last"]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   // The collapse is last-wins for the event TIME as well as the payload: a
   // dispatched handler must read the instant of the event it actually runs, not
   // the first event that happened to occupy the collapsed slot. These events are

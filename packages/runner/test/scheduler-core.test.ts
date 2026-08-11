@@ -24,6 +24,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { getDirectTransactionReactivityLog } from "../src/storage/transaction-inspection.ts";
 import { PASS_RUN_BUDGET } from "../src/scheduler/constants.ts";
+import { createInitialRunGate } from "../src/scheduler/initial-run-gate.ts";
 
 // Seed stored CFC metadata via an ungated path-[] full-document write (the
 // shape hydration delivers it), reading the current doc first so the value
@@ -110,6 +111,258 @@ describe("scheduler", () => {
     await c.pull();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
+  });
+
+  it("holds one initial run without blocking unrelated actions", async () => {
+    const gate = createInitialRunGate();
+    let heldRuns = 0;
+    let unrelatedRuns = 0;
+    const held: Action = () => {
+      heldRuns++;
+    };
+    const unrelated: Action = () => {
+      unrelatedRuns++;
+    };
+
+    runtime.scheduler.subscribe(held, {
+      isEffect: true,
+      initialRunGate: gate.gate,
+    });
+    runtime.scheduler.subscribe(unrelated, { isEffect: true });
+    await runtime.scheduler.idle();
+
+    expect(heldRuns).toBe(0);
+    expect(unrelatedRuns).toBe(1);
+
+    gate.release();
+    await runtime.scheduler.idle();
+    expect(heldRuns).toBe(1);
+  });
+
+  it("clears a dormant subscription when it is cancelled", async () => {
+    const gate = createInitialRunGate();
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+    };
+
+    const cancel = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+      initialRunGate: gate.gate,
+    });
+    cancel();
+    runtime.scheduler.subscribe(action, { isEffect: true });
+    await runtime.scheduler.idle();
+
+    expect(runs).toBe(1);
+  });
+
+  it("keeps a registration dormant when its gate was cancelled", async () => {
+    const gate = createInitialRunGate();
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+    };
+    gate.cancel();
+
+    const cancel = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+      initialRunGate: gate.gate,
+    });
+    await runtime.scheduler.idle();
+
+    expect(runs).toBe(0);
+    cancel();
+  });
+
+  it("lets only the current dormant registration activate", async () => {
+    const staleGate = createInitialRunGate();
+    const currentGate = createInitialRunGate();
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+    };
+
+    runtime.scheduler.subscribe(action, {
+      isEffect: true,
+      initialRunGate: staleGate.gate,
+    });
+    const cancel = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+      initialRunGate: currentGate.gate,
+    });
+    staleGate.release();
+    await runtime.scheduler.idle();
+    expect(runs).toBe(0);
+
+    currentGate.release();
+    await runtime.scheduler.idle();
+    expect(runs).toBe(1);
+    cancel();
+  });
+
+  it("does not let stale setup cancellation remove its replacement", async () => {
+    const staleGate = createInitialRunGate();
+    const currentGate = createInitialRunGate();
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+    };
+
+    const cancelStale = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+      initialRunGate: staleGate.gate,
+    });
+    const cancelCurrent = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+      initialRunGate: currentGate.gate,
+    });
+
+    cancelStale();
+    currentGate.release();
+    await runtime.scheduler.idle();
+
+    expect(runs).toBe(1);
+    cancelCurrent();
+  });
+
+  it("lets an active registration supersede a dormant one", async () => {
+    const gate = createInitialRunGate();
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+    };
+
+    const cancelDormant = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+      initialRunGate: gate.gate,
+    });
+    const cancelActive = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+    });
+    cancelDormant();
+    await runtime.scheduler.idle();
+    expect(runs).toBe(1);
+
+    gate.release();
+    await runtime.scheduler.idle();
+    expect(runs).toBe(1);
+    cancelActive();
+  });
+
+  it("does not let an old active registration cancel its replacement", async () => {
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+    };
+
+    const cancelOld = runtime.scheduler.subscribe(action, { isEffect: true });
+    const cancelCurrent = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+    });
+    cancelOld();
+    await runtime.scheduler.idle();
+
+    expect(runs).toBe(1);
+    cancelCurrent();
+  });
+
+  it("keeps cancellation ownership after a gated registration activates", async () => {
+    const gate = createInitialRunGate();
+    let runs = 0;
+    const action: Action = () => {
+      runs++;
+    };
+
+    const cancelActivated = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+      initialRunGate: gate.gate,
+    });
+    gate.release();
+    await runtime.scheduler.idle();
+    expect(runs).toBe(1);
+
+    const cancelCurrent = runtime.scheduler.subscribe(action, {
+      isEffect: true,
+    });
+    cancelActivated();
+    runtime.scheduler.invalidateAction(action);
+    await runtime.scheduler.idle();
+
+    expect(runs).toBe(2);
+    cancelCurrent();
+  });
+
+  it("prevents release after direct unsubscribe", async () => {
+    for (const isEffect of [false, true]) {
+      const gate = createInitialRunGate();
+      let runs = 0;
+      const action: Action = () => {
+        runs++;
+      };
+      runtime.scheduler.subscribe(action, {
+        isEffect,
+        initialRunGate: gate.gate,
+      });
+
+      runtime.scheduler.unsubscribe(action);
+      gate.release();
+      await runtime.scheduler.idle();
+
+      expect(runs).toBe(0);
+      expect(runtime.scheduler.getStats().pending).toBe(0);
+    }
+  });
+
+  it("restores parent demand when a dormant computation activates", async () => {
+    const gate = createInitialRunGate();
+    const output = runtime.getCell<number>(
+      space,
+      "dormant child output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+    let childRuns = 0;
+    const child: Action = () => {
+      childRuns++;
+    };
+    Object.assign(child, {
+      writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+    });
+    const parent: Action = () => {
+      runtime.scheduler.subscribe(child, {
+        initialRunGate: gate.gate,
+      });
+    };
+
+    runtime.scheduler.subscribe(parent, { isEffect: true });
+    await runtime.scheduler.idle();
+    expect(childRuns).toBe(0);
+
+    gate.release();
+    await runtime.scheduler.idle();
+    expect(childRuns).toBe(1);
+  });
+
+  it("releases every initial-run callback when one callback throws", () => {
+    const gate = createInitialRunGate();
+    const calls: string[] = [];
+    gate.gate.onRelease(() => {
+      calls.push("first");
+      throw new Error("first callback failed");
+    });
+    gate.gate.onRelease(() => {
+      calls.push("second");
+    });
+
+    expect(() => gate.release()).toThrow("first callback failed");
+    expect(calls).toEqual(["first", "second"]);
+
+    gate.release();
+    expect(calls).toEqual(["first", "second"]);
   });
 
   it("schedule shouldn't run immediately", async () => {
