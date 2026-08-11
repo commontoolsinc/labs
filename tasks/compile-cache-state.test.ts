@@ -158,7 +158,7 @@ Deno.test("pattern integration cache follows sources and shard selector", async 
   const job = workflow.slice(start, end);
   assert(
     job.includes(
-      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/select-pattern-integration-files.ts')",
+      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/select-pattern-integration-files.ts', 'tasks/weighted-shards.ts')",
     ),
     "pattern integration cache must rotate when source or file assignment changes",
   );

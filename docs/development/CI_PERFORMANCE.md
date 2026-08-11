@@ -77,14 +77,14 @@ every case, so the ordinary local command remains unsharded.
 every job. Those files select their cases through
 `packages/patterns/integration/pattern-integration-shard.ts`. The selector tests
 verify that every real integration file follows one of these two contracts.
-Measured file assignments for the current matrix live in
-`PATTERN_INTEGRATION_SHARD_ASSIGNMENTS`. Files added after the latest timing
-profile are distributed round-robin until the table assigns them.
+Measured starting loads and file weights for the current matrix live
+in `tasks/select-pattern-integration-files.ts`. Files added after the latest
+timing profile receive the default weight until a later profile measures them.
 
 Use internal sharding for a single file with many independent, expensive cases.
 Moving that file intact between jobs moves the delay without dividing it. Keep
-independent end-to-end files in the measured assignment table when their run
-times are large enough that count-based round-robin cannot balance them.
+Keep independent end-to-end files in the measured weight table when their run
+times are large enough that default-weight placement cannot balance them.
 
 ## Pulling Timing Data
 

@@ -28,10 +28,10 @@
   // Lane 3 — integration test. A `*.test.ts` file under `integration/` that
   // needs a running shell/toolshed/browser (PiecesController, ShellIntegration,
   // end-to-end flows). It is run by `deno task integration`. CI runs these in
-  // the "Pattern Integration Tests" job across its shard matrix; a heavy new
-  // file can be assigned in tasks/select-pattern-integration-files.ts, and
-  // otherwise falls back to round-robin. Reload-specific cases live in
-  // integration/reload/ and run via `integration:reload`.
+  // the "Pattern Integration Tests" job across its shard matrix. Measured
+  // files have weights in tasks/select-pattern-integration-files.ts.
+  // Unmeasured files receive the default weight. Reload-specific cases live
+  // in integration/reload/ and run via `integration:reload`.
   //
   // Every workspace member must define a `test` task. The root runner
   // (tasks/test.ts) calls `deno task test` in each member, and a member with no

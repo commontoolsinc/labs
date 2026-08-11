@@ -159,7 +159,7 @@ Deno.test("coverage requirements follow sharded test matrices", async () => {
       assertEquals(
         total,
         PATTERN_INTEGRATION_SHARD_COUNT,
-        "pattern integration matrix must use its measured assignment count",
+        "pattern integration matrix must use its measured weight profile",
       );
     }
     assertEquals(
