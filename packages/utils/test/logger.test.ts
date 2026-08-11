@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getGlobalLogFloor,
-  getGlobalTimingOutputConfig,
   getLogger,
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -12,7 +11,6 @@ import {
   resetAllLoggerCounts,
   resetAllTimingStats,
   setGlobalLogFloor,
-  setGlobalTimingOutputConfig,
 } from "../src/logger.ts";
 
 describe("logger", () => {
@@ -21,8 +19,6 @@ describe("logger", () => {
     log.level = "info";
     // Clear global floor so it doesn't interfere with tests
     setGlobalLogFloor(undefined);
-    setGlobalTimingOutputConfig(undefined);
-    performance.clearMeasures();
   });
 
   afterEach(() => {
@@ -33,8 +29,6 @@ describe("logger", () => {
     if (global.commonfabric?.logger) {
       global.commonfabric.logger = {};
     }
-    setGlobalTimingOutputConfig(undefined);
-    performance.clearMeasures();
   });
 
   // Helper to check styled timestamp format
@@ -90,11 +84,11 @@ describe("logger", () => {
   }
 
   describe("basic log function", () => {
-    it("should default to enabled state", () => {
+    it("is enabled by default", () => {
       expect(log.disabled).toBe(false);
     });
 
-    it("should log messages to console", () => {
+    it("logs a message to the console", () => {
       const { calls } = captureConsole("log", () => {
         log.info("test-key", "hello", "world");
       });
@@ -104,7 +98,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "hello", "world"]);
     });
 
-    it("should handle multiple arguments", () => {
+    it("logs every argument it is given", () => {
       const { calls } = captureConsole("log", () => {
         log.info("test-key", "a", 1, true, { key: "value" });
       });
@@ -116,7 +110,7 @@ describe("logger", () => {
       }]);
     });
 
-    it("should evaluate lazy functions", () => {
+    it("evaluates a lazy message function", () => {
       let evaluated = false;
       const lazyMessage = () => {
         evaluated = true;
@@ -133,7 +127,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "static", "lazy value"]);
     });
 
-    it("should handle mixed static and lazy messages", () => {
+    it("logs static and lazy messages together", () => {
       const { calls } = captureConsole("log", () => {
         log.info(
           "test-key",
@@ -157,7 +151,7 @@ describe("logger", () => {
       ]);
     });
 
-    it("should flatten arrays returned by lazy functions", () => {
+    it("flattens an array returned by a lazy message function", () => {
       const { calls } = captureConsole("log", () => {
         log.info(
           "test-key",
@@ -181,7 +175,7 @@ describe("logger", () => {
   });
 
   describe("severity levels", () => {
-    it("should log debug messages", () => {
+    it("logs at debug level", () => {
       log.level = "debug"; // Enable debug level
       const { calls } = captureConsole("debug", () => {
         log.debug("test-key", "debug message");
@@ -192,7 +186,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "debug message"]);
     });
 
-    it("should log info messages", () => {
+    it("logs at info level", () => {
       const { calls } = captureConsole("log", () => {
         log.info("test-key", "info message");
       });
@@ -202,7 +196,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "info message"]);
     });
 
-    it("should log warning messages", () => {
+    it("logs at warn level", () => {
       const { calls } = captureConsole("warn", () => {
         log.warn("test-key", "warning message");
       });
@@ -212,7 +206,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "warning message"]);
     });
 
-    it("should log error messages", () => {
+    it("logs at error level", () => {
       const { calls } = captureConsole("error", () => {
         log.error("test-key", "error message");
       });
@@ -222,7 +216,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "error message"]);
     });
 
-    it("should default to info level when using log.info()", () => {
+    it("logs at info level via `log.info()`", () => {
       const { calls } = captureConsole("log", () => {
         log.info("test-key", "default message");
       });
@@ -232,7 +226,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "default message"]);
     });
 
-    it("should support log.log() as alias for info", () => {
+    it("logs at info level via `log.log()`", () => {
       const { calls } = captureConsole("log", () => {
         log.log("test-key", "message via log()");
       });
@@ -244,7 +238,7 @@ describe("logger", () => {
   });
 
   describe("lazy evaluation", () => {
-    it("should evaluate lazy functions for all levels", () => {
+    it("evaluates a lazy message function at every level", () => {
       log.level = "debug"; // Enable debug level
       const lazyDebug = () => "lazy debug";
       const lazyInfo = () => "lazy info";
@@ -270,7 +264,7 @@ describe("logger", () => {
       expect(errorCalls[0]!.slice(2)).toEqual(["test-key", "lazy error"]);
     });
 
-    it("should not evaluate lazy functions when disabled", () => {
+    it("does not evaluate a lazy message function when disabled", () => {
       log.disabled = true;
       let evaluated = false;
       const lazyMessage = () => {
@@ -291,7 +285,7 @@ describe("logger", () => {
   });
 
   describe("log level filtering", () => {
-    it("should filter messages based on log level", () => {
+    it("drops a message below the current level", () => {
       log.level = "warn"; // Only show warn and error
 
       const { calls: debugCalls } = captureConsole("debug", () => {
@@ -313,7 +307,7 @@ describe("logger", () => {
       expect(errorCalls).toHaveLength(1);
     });
 
-    it("should show all messages when set to debug", () => {
+    it("logs at every level when the level is `debug`", () => {
       log.level = "debug"; // Enable all levels
       const { calls: debugCalls } = captureConsole("debug", () => {
         log.debug("test-key", "debug message");
@@ -334,7 +328,7 @@ describe("logger", () => {
       expect(errorCalls).toHaveLength(1);
     });
 
-    it("should only show error messages when set to error", () => {
+    it("logs only errors when the level is `error`", () => {
       log.level = "error";
       const { calls: debugCalls } = captureConsole("debug", () => {
         log.debug("test-key", "debug message");
@@ -357,7 +351,7 @@ describe("logger", () => {
   });
 
   describe("log level management", () => {
-    it("should respect log.level changes", () => {
+    it("takes effect when `.level` is reassigned", () => {
       // Test default level
       expect(log.level).toBe("info"); // Default
 
@@ -372,7 +366,7 @@ describe("logger", () => {
   });
 
   describe("tagged logger", () => {
-    it("should create tagged logger with module name", () => {
+    it("prefixes output with the module name", () => {
       const logger = getLogger("test-module");
       const { calls } = captureConsole("log", () => {
         logger.info("test-key", "test message");
@@ -389,7 +383,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "test message"]);
     });
 
-    it("should support log() method as alias for info()", () => {
+    it("logs at info level via `log()`", () => {
       const logger = getLogger("test-module");
       const { calls } = captureConsole("log", () => {
         logger.log("test-key", "test message via log()");
@@ -409,7 +403,7 @@ describe("logger", () => {
       ]);
     });
 
-    it("should support all log levels in tagged logger", () => {
+    it("logs at every level", () => {
       const logger = getLogger("test-module");
       logger.level = "debug"; // Enable all levels
 
@@ -461,7 +455,7 @@ describe("logger", () => {
       );
     });
 
-    it("should respect logger-specific level", () => {
+    it("drops a message below its own level", () => {
       const logger = getLogger("test-module", { level: "warn" });
 
       const { calls: debugCalls } = captureConsole("debug", () => {
@@ -483,7 +477,7 @@ describe("logger", () => {
       expect(errorCalls).toHaveLength(1);
     });
 
-    it("should support lazy evaluation in tagged logger", () => {
+    it("evaluates a lazy message function", () => {
       const logger = getLogger("test-module");
       let evaluated = false;
       const lazyMessage = () => {
@@ -507,7 +501,7 @@ describe("logger", () => {
       expect(calls[0]!.slice(2)).toEqual(["test-key", "lazy tagged message"]);
     });
 
-    it("should support disabled state in tagged logger", () => {
+    it("logs nothing and evaluates nothing when constructed disabled", () => {
       const logger = getLogger("test-module", { enabled: false });
       let evaluated = false;
       const lazyMessage = () => {
@@ -524,7 +518,7 @@ describe("logger", () => {
       expect(logger.disabled).toBe(true);
     });
 
-    it("should default to enabled state", () => {
+    it("is enabled by default", () => {
       const logger = getLogger("test-module");
       expect(logger.disabled).toBe(false);
 
@@ -535,7 +529,7 @@ describe("logger", () => {
       expect(calls).toHaveLength(1);
     });
 
-    it("should allow runtime enable/disable of tagged logger", () => {
+    it("starts and stops logging as `.disabled` is reassigned", () => {
       const logger = getLogger("test-module", { enabled: false });
 
       // Initially disabled
@@ -561,7 +555,7 @@ describe("logger", () => {
   });
 
   describe("global vs tagged logger", () => {
-    it("should have different formatting for global vs tagged", () => {
+    it("formats a tagged logger's output differently from the global one", () => {
       const taggedLogger = getLogger("test-module");
 
       const { calls: globalCalls } = captureConsole("log", () => {
@@ -587,7 +581,7 @@ describe("logger", () => {
       expect(taggedCalls[0]![1]).toBe(LOG_COLORS.taggedInfo);
     });
 
-    it("should have independent log levels", () => {
+    it("keeps its level independent of the global logger's", () => {
       const taggedLogger = getLogger("test-module");
 
       // Set different levels
@@ -618,7 +612,7 @@ describe("logger", () => {
   });
 
   describe("call counting", () => {
-    it("should initialize counts to zero", () => {
+    it("starts every count at `0`", () => {
       const logger = getLogger("count-test");
       expect(logger.counts.debug).toBe(0);
       expect(logger.counts.info).toBe(0);
@@ -627,7 +621,7 @@ describe("logger", () => {
       expect(logger.counts.total).toBe(0);
     });
 
-    it("should increment counts for each log level", () => {
+    it("increments the count for the level logged at", () => {
       const logger = getLogger("count-test");
       logger.level = "debug"; // Enable all levels
 
@@ -648,7 +642,7 @@ describe("logger", () => {
       expect(logger.counts.total).toBe(4);
     });
 
-    it("should increment counts even when logger is disabled", () => {
+    it("increments the count when the logger is disabled", () => {
       const logger = getLogger("count-test", { enabled: false });
 
       captureConsole("debug", () => logger.debug("test-key", "test"));
@@ -663,7 +657,7 @@ describe("logger", () => {
       expect(logger.counts.total).toBe(4);
     });
 
-    it("should increment counts even when log level filters messages", () => {
+    it("increments the count when the level filters the message out", () => {
       const logger = getLogger("count-test", { level: "error" });
 
       captureConsole("debug", () => logger.debug("test-key", "test"));
@@ -679,7 +673,7 @@ describe("logger", () => {
       expect(logger.counts.total).toBe(4);
     });
 
-    it("should not evaluate lazy functions when disabled but still count", () => {
+    it("increments the count without evaluating a lazy message function", () => {
       const logger = getLogger("count-test", { enabled: false });
       let evaluated = false;
       const lazyMessage = () => {
@@ -693,7 +687,7 @@ describe("logger", () => {
       expect(logger.counts.info).toBe(1); // But count was incremented
     });
 
-    it("should compute total as sum of all counts", () => {
+    it("reports `.total` as the sum of the per-level counts", () => {
       const logger = getLogger("count-test");
       logger.level = "debug";
 
@@ -719,7 +713,7 @@ describe("logger", () => {
       expect(logger.counts.total).toBe(8);
     });
 
-    it("should reset counts to zero with resetCounts()", () => {
+    it("returns every count to `0` on `resetCounts()`", () => {
       const logger = getLogger("count-test");
       logger.level = "debug";
 
@@ -741,7 +735,7 @@ describe("logger", () => {
       expect(logger.counts.total).toBe(0);
     });
 
-    it("should count log() calls as info", () => {
+    it("counts a `log()` call as info", () => {
       const logger = getLogger("count-test");
 
       captureConsole("log", () => logger.log("test-key", "test"));
@@ -753,14 +747,14 @@ describe("logger", () => {
   });
 
   describe("logger reuse", () => {
-    it("should return the same logger instance for the same module name", () => {
+    it("returns the same instance for the same module name", () => {
       const logger1 = getLogger("reuse-test");
       const logger2 = getLogger("reuse-test");
 
       expect(logger1).toBe(logger2);
     });
 
-    it("should preserve counts across getLogger calls", () => {
+    it("keeps its counts across a second `getLogger()` call", () => {
       const logger1 = getLogger("reuse-test");
 
       captureConsole("log", () => logger1.info("test-key", "test"));
@@ -772,7 +766,7 @@ describe("logger", () => {
       expect(logger2).toBe(logger1); // Same instance
     });
 
-    it("should ignore options when returning existing logger", () => {
+    it("ignores options given for a module name it already has", () => {
       const logger1 = getLogger("reuse-test", { enabled: true, level: "info" });
       const logger2 = getLogger("reuse-test", {
         enabled: false,
@@ -784,7 +778,7 @@ describe("logger", () => {
       expect(logger2.level).toBe("info"); // Original options preserved
     });
 
-    it("should be accessible via globalThis.commonfabric.logger", () => {
+    it("is reachable at `globalThis.commonfabric.logger`", () => {
       const logger = getLogger("global-test");
       const global = globalThis as unknown as {
         commonfabric: { logger: Record<string, typeof logger> };
@@ -794,8 +788,8 @@ describe("logger", () => {
     });
   });
 
-  describe("resetAllLoggerCounts", () => {
-    it("should reset counts for all loggers", () => {
+  describe("resetAllLoggerCounts()", () => {
+    it("returns every logger's counts to `0`", () => {
       const logger1 = getLogger("reset-all-test-1");
       const logger2 = getLogger("reset-all-test-2");
       const logger3 = getLogger("reset-all-test-3");
@@ -825,7 +819,7 @@ describe("logger", () => {
       expect(logger3.counts.total).toBe(0);
     });
 
-    it("should handle empty logger registry gracefully", () => {
+    it("does not throw when the registry is empty", () => {
       // Clean up registry
       const global = globalThis as unknown as {
         commonfabric?: { logger?: Record<string, unknown> };
@@ -838,7 +832,7 @@ describe("logger", () => {
       expect(() => resetAllLoggerCounts()).not.toThrow();
     });
 
-    it("should not affect subsequent count increments", () => {
+    it("leaves later increments working normally", () => {
       const logger = getLogger("reset-all-test");
 
       captureConsole("log", () => logger.info("test-key", "test"));
@@ -853,8 +847,8 @@ describe("logger", () => {
     });
   });
 
-  describe("getTotalLoggerCounts", () => {
-    it("should return total count across all loggers", () => {
+  describe("getTotalLoggerCounts()", () => {
+    it("returns the total across every logger", () => {
       const logger1 = getLogger("total-test-1");
       const logger2 = getLogger("total-test-2");
       const logger3 = getLogger("total-test-3");
@@ -890,7 +884,7 @@ describe("logger", () => {
       expect(getTotalLoggerCounts()).toBe(10);
     });
 
-    it("should return 0 when no loggers exist", () => {
+    it("returns `0` when no logger exists", () => {
       // Clean up registry
       const global = globalThis as unknown as {
         commonfabric?: { logger?: Record<string, unknown> };
@@ -902,14 +896,14 @@ describe("logger", () => {
       expect(getTotalLoggerCounts()).toBe(0);
     });
 
-    it("should return 0 when all counts are zero", () => {
+    it("returns `0` when every count is `0`", () => {
       getLogger("total-test-zero-1");
       getLogger("total-test-zero-2");
 
       expect(getTotalLoggerCounts()).toBe(0);
     });
 
-    it("should update as new log calls are made", () => {
+    it("rises as further calls are logged", () => {
       const logger = getLogger("total-test-update");
 
       expect(getTotalLoggerCounts()).toBe(0);
@@ -921,7 +915,7 @@ describe("logger", () => {
       expect(getTotalLoggerCounts()).toBe(2);
     });
 
-    it("should reset to 0 after resetAllLoggerCounts", () => {
+    it("returns to `0` after `resetAllLoggerCounts()`", () => {
       const logger1 = getLogger("total-test-reset-1");
       const logger2 = getLogger("total-test-reset-2");
 
@@ -938,8 +932,8 @@ describe("logger", () => {
     });
   });
 
-  describe("getLoggerCountsBreakdown", () => {
-    it("should return breakdown by logger name with total", () => {
+  describe("getLoggerCountsBreakdown()", () => {
+    it("returns a per-logger breakdown plus a total", () => {
       const logger1 = getLogger("breakdown-test-1");
       const logger2 = getLogger("breakdown-test-2");
       const logger3 = getLogger("breakdown-test-3");
@@ -962,7 +956,7 @@ describe("logger", () => {
       expect(breakdown.total).toBe(6);
     });
 
-    it("should return empty breakdown with 0 total when no loggers exist", () => {
+    it("returns an empty breakdown and a `0` total when no logger exists", () => {
       // Clean up registry
       const global = globalThis as unknown as {
         commonfabric?: { logger?: Record<string, unknown> };
@@ -976,7 +970,7 @@ describe("logger", () => {
       expect(Object.keys(breakdown).length).toBe(1); // Only 'total' key
     });
 
-    it("should update as new log calls are made", () => {
+    it("rises as further calls are logged", () => {
       const logger = getLogger("breakdown-update-test");
 
       let breakdown = getLoggerCountsBreakdown();
@@ -990,7 +984,7 @@ describe("logger", () => {
       expect(breakdown.total).toBe(1);
     });
 
-    it("should reset to 0 after resetAllLoggerCounts", () => {
+    it("returns to `0` after `resetAllLoggerCounts()`", () => {
       const logger1 = getLogger("breakdown-reset-1");
       const logger2 = getLogger("breakdown-reset-2");
 
@@ -1013,7 +1007,7 @@ describe("logger", () => {
       expect(breakdown.total).toBe(0);
     });
 
-    it("should match getTotalLoggerCounts", () => {
+    it("reports the same total as `getTotalLoggerCounts()`", () => {
       const logger1 = getLogger("breakdown-match-1");
       const logger2 = getLogger("breakdown-match-2");
 
@@ -1032,7 +1026,7 @@ describe("logger", () => {
   });
 
   describe("logCountEvery", () => {
-    it("should log summary at default threshold of 100", () => {
+    it("logs a summary every `100` calls by default", () => {
       const logger = getLogger("count-every-test");
       logger.level = "debug"; // Enable debug to see summary
 
@@ -1052,7 +1046,7 @@ describe("logger", () => {
         .toBe(true);
     });
 
-    it("should log summary at custom threshold", () => {
+    it("logs a summary at the configured interval", () => {
       const logger = getLogger("count-every-custom", {
         logCountEvery: 50,
         level: "debug",
@@ -1072,7 +1066,7 @@ describe("logger", () => {
       expect(summaryLogs).toHaveLength(1);
     });
 
-    it("should not log summary when logCountEvery is 0", () => {
+    it("logs no summary when `logCountEvery` is `0`", () => {
       const logger = getLogger("count-every-disabled", {
         logCountEvery: 0,
         level: "debug",
@@ -1092,7 +1086,7 @@ describe("logger", () => {
       expect(summaryLogs).toHaveLength(0);
     });
 
-    it("should log summary multiple times at thresholds", () => {
+    it("logs a summary at each successive threshold", () => {
       const logger = getLogger("count-every-multiple", {
         logCountEvery: 25,
         level: "debug",
@@ -1128,7 +1122,7 @@ describe("logger", () => {
       ).toBe(true);
     });
 
-    it("should not log summary when debug level is not enabled", () => {
+    it("logs no summary when the level excludes debug", () => {
       const logger = getLogger("count-every-no-debug", {
         logCountEvery: 50,
         level: "info", // Debug not enabled
@@ -1145,7 +1139,7 @@ describe("logger", () => {
       expect(calls).toHaveLength(0);
     });
 
-    it("should show breakdown of all log levels", () => {
+    it("names every log level in the summary", () => {
       const logger = getLogger("count-every-breakdown", {
         logCountEvery: 10,
         level: "debug",
@@ -1178,7 +1172,7 @@ describe("logger", () => {
       expect(summaryText).toContain("error: 3");
     });
 
-    it("should not increment counter for summary log itself", () => {
+    it("does not count the summary it logs", () => {
       const logger = getLogger("count-every-no-increment", {
         logCountEvery: 10,
         level: "debug",
@@ -1196,7 +1190,7 @@ describe("logger", () => {
       expect(logger.counts.debug).toBe(0); // Summary didn't increment debug
     });
 
-    it("should include module name in summary", () => {
+    it("names the module in the summary", () => {
       const logger = getLogger("my-module", {
         logCountEvery: 5,
         level: "debug",
@@ -1214,7 +1208,7 @@ describe("logger", () => {
       expect(summaryLogs).toHaveLength(1);
     });
 
-    it("should work even when logger is disabled", () => {
+    it("counts but logs no summary when the logger is disabled", () => {
       const logger = getLogger("count-every-disabled-logger", {
         logCountEvery: 10,
         level: "debug",
@@ -1236,7 +1230,7 @@ describe("logger", () => {
   });
 
   describe("countsByKey", () => {
-    it("should track counts by message key", () => {
+    it("counts separately per message key", () => {
       const logger = getLogger("key-test");
       logger.level = "debug";
 
@@ -1264,7 +1258,7 @@ describe("logger", () => {
       expect(byKey["data-fetch"]!.total).toBe(1);
     });
 
-    it("should track different keys independently", () => {
+    it("keeps one key's count clear of another's", () => {
       const logger = getLogger("multi-key-test");
 
       captureConsole("log", () => {
@@ -1280,7 +1274,7 @@ describe("logger", () => {
       expect(byKey["key-c"]!.total).toBe(1);
     });
 
-    it("should reset countsByKey when resetCounts is called", () => {
+    it("clears `.countsByKey` on `resetCounts()`", () => {
       const logger = getLogger("reset-key-test");
 
       captureConsole("log", () => {
@@ -1296,7 +1290,7 @@ describe("logger", () => {
       expect(Object.keys(logger.countsByKey).length).toBe(0);
     });
 
-    it("should increment key counts even when logger is disabled", () => {
+    it("counts a key when the logger is disabled", () => {
       const logger = getLogger("disabled-key-test", { enabled: false });
 
       captureConsole("log", () => {
@@ -1308,8 +1302,8 @@ describe("logger", () => {
     });
   });
 
-  describe("getLoggerCountsBreakdown with message keys", () => {
-    it("should return nested structure with message keys", () => {
+  describe("`getLoggerCountsBreakdown()` with message keys", () => {
+    it("nests message keys under each logger", () => {
       const logger1 = getLogger("breakdown-keys-1");
       const logger2 = getLogger("breakdown-keys-2");
 
@@ -1337,7 +1331,7 @@ describe("logger", () => {
       expect(breakdown.total).toBe(6);
     });
 
-    it("should show per-level counts in nested structure", () => {
+    it("gives per-level counts for each message key", () => {
       const logger = getLogger("breakdown-levels");
       logger.level = "debug";
 
@@ -1366,7 +1360,7 @@ describe("logger", () => {
       expect(testOp.total).toBe(6);
     });
 
-    it("should handle multiple keys across multiple loggers", () => {
+    it("reports several keys across several loggers", () => {
       const logger1 = getLogger("multi-1");
       const logger2 = getLogger("multi-2");
 
@@ -1389,7 +1383,7 @@ describe("logger", () => {
 
   describe("timing statistics", () => {
     describe("timeStart/timeEnd", () => {
-      it("should record timing with timeStart/timeEnd pair", () => {
+      it("records an elapsed time for a `timeStart()`/`timeEnd()` pair", () => {
         const logger = getLogger("timing-test-basic");
 
         logger.timeStart("operation");
@@ -1410,14 +1404,14 @@ describe("logger", () => {
         expect(stats?.max).toBeGreaterThanOrEqual(0);
       });
 
-      it("should return undefined when ending timer that was not started", () => {
+      it("returns `undefined` for a `timeEnd()` with no `timeStart()`", () => {
         const logger = getLogger("timing-test-no-start");
 
         const elapsed = logger.timeEnd("nonexistent");
         expect(elapsed).toBeUndefined();
       });
 
-      it("should support hierarchical keys", () => {
+      it("records a hierarchical key under each of its parents", () => {
         const logger = getLogger("timing-test-hierarchy");
 
         logger.timeStart("cell", "get", "user-data");
@@ -1442,7 +1436,7 @@ describe("logger", () => {
         expect(cellGetUserStats?.count).toBe(1);
       });
 
-      it("should allow accessing stats with joined path", () => {
+      it("returns the same stats for a joined path as for segments", () => {
         const logger = getLogger("timing-test-path");
 
         logger.timeStart("a", "b", "c");
@@ -1457,84 +1451,10 @@ describe("logger", () => {
         expect(stats1?.count).toBe(1);
         expect(stats2?.count).toBe(1);
       });
-
-      it("should emit performance measures for matching timings when enabled", () => {
-        const logger = getLogger("timing-measure");
-        setGlobalTimingOutputConfig({
-          include: ["timing-measure:operation"],
-          measure: true,
-        });
-
-        logger.time(10, 25, "operation");
-
-        const measures = performance.getEntriesByType("measure").filter((
-          entry,
-        ) => entry.name === "logger:timing-measure:operation");
-
-        expect(measures).toHaveLength(1);
-        expect(measures[0]!.duration).toBe(15);
-      });
-
-      it("should not emit performance measures when timing config does not match", () => {
-        const logger = getLogger("timing-measure-filter");
-        setGlobalTimingOutputConfig({
-          include: ["other-prefix"],
-          measure: true,
-        });
-
-        logger.time(10, 25, "operation");
-
-        const measures = performance.getEntriesByType("measure").filter((
-          entry,
-        ) => entry.name.includes("timing-measure-filter"));
-
-        expect(measures).toHaveLength(0);
-      });
-
-      it("should emit console timing output for matching timings when enabled", () => {
-        const logger = getLogger("timing-console");
-        setGlobalTimingOutputConfig({
-          include: ["timing-console"],
-          console: true,
-          measure: false,
-        });
-
-        const { calls } = captureConsole("log", () => {
-          logger.time(0, 12.5, "operation");
-        });
-
-        expect(calls).toHaveLength(1);
-        expect(calls[0]![0]).toMatch(
-          /^\%c\[TIMING\]\[timing-console::\d{2}:\d{2}:\d{2}\.\d{3}\]$/,
-        );
-        expect(calls[0]![1]).toBe(LOG_COLORS.debug);
-        expect(calls[0]![2]).toBe("operation");
-        expect(calls[0]![3]).toBe("12.500ms");
-      });
-
-      it("should respect minimum duration threshold for timing output", () => {
-        const logger = getLogger("timing-min-threshold");
-        setGlobalTimingOutputConfig({
-          include: ["timing-min-threshold"],
-          console: true,
-          measure: true,
-          minMs: 10,
-        });
-
-        const { calls } = captureConsole("log", () => {
-          logger.time(0, 5, "operation");
-        });
-
-        expect(calls).toHaveLength(0);
-        const measures = performance.getEntriesByType("measure").filter((
-          entry,
-        ) => entry.name.includes("timing-min-threshold"));
-        expect(measures).toHaveLength(0);
-      });
     });
 
-    describe("time() direct recording", () => {
-      it("should record timing with explicit start time", () => {
+    describe("`time()` direct recording", () => {
+      it("records an elapsed time from an explicit start", () => {
         const logger = getLogger("timing-test-direct");
 
         const startTime = performance.now();
@@ -1553,7 +1473,7 @@ describe("logger", () => {
         expect(stats?.count).toBe(1);
       });
 
-      it("should record timing with explicit start and end times", () => {
+      it("records an elapsed time from an explicit start and end", () => {
         const logger = getLogger("timing-test-explicit");
 
         const startTime = 100;
@@ -1568,7 +1488,7 @@ describe("logger", () => {
         expect(stats?.max).toBe(50);
       });
 
-      it("should record hierarchical stats with direct recording", () => {
+      it("records a hierarchical key given directly", () => {
         const logger = getLogger("timing-test-direct-hierarchy");
 
         logger.time(100, 120, "ipc", "CellGet");
@@ -1581,7 +1501,7 @@ describe("logger", () => {
     });
 
     describe("timing statistics calculation", () => {
-      it("should calculate min/max/average correctly", () => {
+      it("reports `.min`, `.max`, and `.average` over the samples", () => {
         const logger = getLogger("timing-test-stats");
 
         // Record with explicit times for predictable values
@@ -1600,7 +1520,7 @@ describe("logger", () => {
         expect(stats?.average).toBe(30);
       });
 
-      it("should calculate percentiles from samples", () => {
+      it("reports percentiles over the samples", () => {
         const logger = getLogger("timing-test-percentiles");
 
         // Record 100 samples: 1-100ms
@@ -1623,7 +1543,7 @@ describe("logger", () => {
         expect(stats?.p95).toBeLessThanOrEqual(100);
       });
 
-      it("should track lastTime and lastTimestamp", () => {
+      it("reports `.lastTime` and `.lastTimestamp` from the latest sample", () => {
         const logger = getLogger("timing-test-last");
 
         logger.time(0, 25, "op");
@@ -1640,8 +1560,8 @@ describe("logger", () => {
       });
     });
 
-    describe("timeStats property", () => {
-      it("should return all timing stats as flat map", () => {
+    describe("`timeStats` property", () => {
+      it("returns every recorded key in one flat map", () => {
         const logger = getLogger("timing-test-all");
 
         logger.time(0, 10, "a", "b");
@@ -1656,7 +1576,7 @@ describe("logger", () => {
         expect(Object.keys(allStats)).toContain("d/e/f");
       });
 
-      it("should return empty object when no timings recorded", () => {
+      it("returns an empty object when nothing is recorded", () => {
         const logger = getLogger("timing-test-empty");
         const allStats = logger.timeStats;
 
@@ -1664,8 +1584,8 @@ describe("logger", () => {
       });
     });
 
-    describe("resetTimeStats", () => {
-      it("should clear all timing data", () => {
+    describe("resetTimeStats()", () => {
+      it("clears every recorded timing", () => {
         const logger = getLogger("timing-test-reset");
 
         logger.time(0, 10, "op1");
@@ -1686,8 +1606,8 @@ describe("logger", () => {
       });
     });
 
-    describe("getTimingStatsBreakdown", () => {
-      it("should aggregate timing stats from all loggers", () => {
+    describe("getTimingStatsBreakdown()", () => {
+      it("aggregates timings across every logger", () => {
         const logger1 = getLogger("timing-breakdown-1");
         const logger2 = getLogger("timing-breakdown-2");
 
@@ -1702,7 +1622,7 @@ describe("logger", () => {
         expect(breakdown["timing-breakdown-2"]!["op2"]?.count).toBe(1);
       });
 
-      it("should not include loggers with no timing data", () => {
+      it("omits a logger with no timings", () => {
         const loggerWithTiming = getLogger("timing-breakdown-has-data");
         getLogger("timing-breakdown-no-data"); // Create logger without timing data
 
@@ -1715,8 +1635,8 @@ describe("logger", () => {
       });
     });
 
-    describe("resetAllTimingStats", () => {
-      it("should reset timing stats for all loggers", () => {
+    describe("resetAllTimingStats()", () => {
+      it("clears every logger's timings", () => {
         const logger1 = getLogger("timing-reset-all-1");
         const logger2 = getLogger("timing-reset-all-2");
 
@@ -1732,7 +1652,7 @@ describe("logger", () => {
         expect(Object.keys(logger2.timeStats)).toHaveLength(0);
       });
 
-      it("should handle empty logger registry gracefully", () => {
+      it("does not throw when the registry is empty", () => {
         // Clean up registry
         const global = globalThis as unknown as {
           commonfabric?: { logger?: Record<string, unknown> };
@@ -1746,7 +1666,7 @@ describe("logger", () => {
     });
 
     describe("timing baselines", () => {
-      it("should track exact timing totals since baseline", () => {
+      it("reports totals measured from the baseline", () => {
         const logger = getLogger("timing-baseline-total");
 
         logger.time(0, 10, "op");
@@ -1764,7 +1684,7 @@ describe("logger", () => {
         expect(stats?.cdfSinceBaseline).not.toBeNull();
       });
 
-      it("should include timing keys first seen after baseline reset", () => {
+      it("includes a key first seen after the baseline reset", () => {
         const logger = getLogger("timing-baseline-new-key");
 
         logger.resetTimingBaseline();
@@ -1780,7 +1700,7 @@ describe("logger", () => {
     });
 
     describe("reservoir sampling", () => {
-      it("should maintain bounded memory with many samples", () => {
+      it("holds a bounded number of samples however many arrive", () => {
         const logger = getLogger("timing-reservoir-test");
 
         // Record many samples to test reservoir behavior
@@ -1794,10 +1714,10 @@ describe("logger", () => {
         expect(stats?.min).toBe(1);
         expect(stats?.max).toBe(2000);
 
-        // Percentiles should still be approximately correct due to reservoir sampling
-        // With 2000 samples uniformly distributed 1-2000:
-        // p50 should be around 1000, p95 should be around 1900
-        // Allow wider margin due to random sampling
+        // Reservoir sampling keeps the percentiles approximately correct. With
+        // 2000 samples distributed uniformly over 1-2000, p50 lands around
+        // 1000 and p95 around 1900; the margins below are wide enough to
+        // absorb the sampling randomness.
         expect(stats?.p50).toBeGreaterThan(500);
         expect(stats?.p50).toBeLessThan(1500);
         expect(stats?.p95).toBeGreaterThan(1500);
@@ -1806,7 +1726,7 @@ describe("logger", () => {
     });
 
     describe("edge cases", () => {
-      it("should handle zero elapsed time", () => {
+      it("reports `0` for a zero-length measurement", () => {
         const logger = getLogger("timing-zero");
 
         logger.time(100, 100, "zero-time");
@@ -1817,7 +1737,7 @@ describe("logger", () => {
         expect(stats?.average).toBe(0);
       });
 
-      it("should handle single key (non-hierarchical)", () => {
+      it("creates no parent paths for a single-segment key", () => {
         const logger = getLogger("timing-single");
 
         logger.time(0, 10, "single");
@@ -1829,7 +1749,7 @@ describe("logger", () => {
         expect(Object.keys(logger.timeStats)).toEqual(["single"]);
       });
 
-      it("should accumulate stats for repeated measurements", () => {
+      it("accumulates repeated measurements under one key", () => {
         const logger = getLogger("timing-accumulate");
 
         logger.time(0, 10, "op");
@@ -1841,7 +1761,7 @@ describe("logger", () => {
         expect(stats?.totalTime).toBe(60);
       });
 
-      it("should handle stats request for nonexistent key", () => {
+      it("returns `undefined` for a key never recorded", () => {
         const logger = getLogger("timing-nonexistent");
 
         const stats = logger.getTimeStats("does-not-exist");
@@ -1875,11 +1795,11 @@ describe("logger", () => {
       setGlobalLogFloor(undefined);
     });
 
-    it("should default to undefined (no floor)", () => {
+    it("is `undefined` by default", () => {
       expect(getGlobalLogFloor()).toBeUndefined();
     });
 
-    it("should suppress all output when floor is 'silent'", () => {
+    it("suppresses all output when the floor is `silent`", () => {
       setGlobalLogFloor("silent");
       const logger = getLogger("floor-silent-test", {
         level: "debug",
@@ -1905,7 +1825,7 @@ describe("logger", () => {
       expect(errorCalls).toHaveLength(0);
     });
 
-    it("should allow error+ when floor is 'error'", () => {
+    it("passes error and above when the floor is `error`", () => {
       setGlobalLogFloor("error");
       const logger = getLogger("floor-error-test", {
         level: "debug",
@@ -1923,7 +1843,7 @@ describe("logger", () => {
       expect(errorCalls).toHaveLength(1);
     });
 
-    it("should allow warn+ when floor is 'warn'", () => {
+    it("passes warn and above when the floor is `warn`", () => {
       setGlobalLogFloor("warn");
       const logger = getLogger("floor-warn-test", {
         level: "debug",
@@ -1945,7 +1865,7 @@ describe("logger", () => {
       expect(errorCalls).toHaveLength(1);
     });
 
-    it("should use the more restrictive of floor and per-logger level", () => {
+    it("applies whichever of the floor and the logger's level is stricter", () => {
       // Floor is "info" but logger is "error" — logger is more restrictive
       setGlobalLogFloor("info");
       const logger = getLogger("floor-restrictive-test", {
@@ -1964,7 +1884,7 @@ describe("logger", () => {
       expect(errorCalls).toHaveLength(1);
     });
 
-    it("should still respect logger disabled flag", () => {
+    it("logs nothing from a disabled logger whatever the floor", () => {
       setGlobalLogFloor("debug");
       const logger = getLogger("floor-disabled-test", {
         level: "debug",
@@ -1978,7 +1898,7 @@ describe("logger", () => {
       expect(calls).toHaveLength(0);
     });
 
-    it("should be clearable by setting undefined", () => {
+    it("stops filtering once set to `undefined`", () => {
       setGlobalLogFloor("silent");
       expect(getGlobalLogFloor()).toBe("silent");
 
@@ -1996,7 +1916,7 @@ describe("logger", () => {
       expect(calls).toHaveLength(1);
     });
 
-    it("should still track counts even when floor suppresses output", () => {
+    it("counts a call the floor suppresses", () => {
       setGlobalLogFloor("silent");
       const logger = getLogger("floor-counts-test", {
         level: "debug",
@@ -2013,26 +1933,6 @@ describe("logger", () => {
       expect(logger.counts.info).toBe(1);
       expect(logger.counts.warn).toBe(1);
       expect(logger.counts.error).toBe(1);
-    });
-  });
-
-  describe("global timing output config", () => {
-    it("should expose timing output config getters and setters", () => {
-      expect(getGlobalTimingOutputConfig()).toBeUndefined();
-
-      setGlobalTimingOutputConfig({
-        include: ["scheduler/execute"],
-        measure: true,
-        console: true,
-        minMs: 5,
-      });
-
-      expect(getGlobalTimingOutputConfig()).toEqual({
-        include: ["scheduler/execute"],
-        measure: true,
-        console: true,
-        minMs: 5,
-      });
     });
   });
 });

@@ -8,9 +8,8 @@ import {
 // System space-root patterns, served as raw TSX by the toolshed patterns route
 // and addressed by `system:` ref (the runner's pattern-source-scheme.ts has
 // why the scheme, rather than the route path it expands to, is what a piece
-// stores). Shared by PiecesController (boot-path reconciliation) and
-// PieceManager (the default-root heal-on-load-failure retry) — a home of its
-// own so the manager does not import the controller that wraps it.
+// stores). Used by PiecesController for both boot-path reconciliation and the
+// default-root heal-on-load-failure retry.
 export const HOME_PATTERN_SOURCE = systemPatternSource("system/home.tsx");
 export const DEFAULT_APP_PATTERN_SOURCE = systemPatternSource(
   "system/default-app.tsx",

@@ -15,6 +15,42 @@ deno task test
 
 **Important:** Always use `deno task test` from the root, NOT `deno test`, as the task includes necessary flags.
 
+### Browser tests in agent sandboxes
+
+On macOS, an agent must request unsandboxed execution before its first attempt
+to run a command that can launch a browser. Headless Chrome still registers
+with AppKit and needs access to Launch Services and WindowServer. The macOS
+agent sandbox can deny that access and make Chrome abort during startup.
+
+The following repository commands and test paths launch a browser:
+
+- The root `deno task test` command, which reaches browser-backed workspace
+  package tests.
+- The unfiltered root `deno task integration` command. With no target, it
+  includes browser tests from `shell` and `patterns`. Unfiltered target runs
+  for `shell`, `patterns`, and `patterns-reload` also include browser tests.
+- A filtered integration run when the selected test launches a browser. A
+  package name associated with browser tests does not by itself establish that
+  a filtered test launches one.
+- The `deno task demo` command.
+- Tests that run `deno-web-test`, call `Browser.launch()`, or bind a
+  `ShellIntegration` lifecycle.
+
+An `@astral/astral` import alone is not proof that a test launches Chrome. It
+can be a type-only import or support a fake browser. When it is not clear
+whether a focused test starts a browser, inspect its suite setup and launch
+call path before running it.
+
+Use the agent environment's narrowly scoped escalation mechanism for the test
+command. Do not run the command in the sandbox first to see whether it fails.
+Deno's `-A` flag changes Deno's permission checks but does not escape the outer
+agent sandbox. Chrome's `--no-sandbox` flag disables a different protection;
+do not add it as a workaround.
+
+If a browser command was accidentally run inside the agent sandbox, disregard
+its browser-startup failure and rerun it outside the sandbox before
+interpreting the test result.
+
 ### Tests that start Deno
 
 For deliberate import-map and lockfile changes, follow the
@@ -37,6 +73,32 @@ This boundary keeps a verification test independent of mutable registry
 metadata. It also makes an accidental dependency graph change fail as an
 out-of-date lockfile instead of silently resolving a different graph.
 
+Both helpers start the Deno that is running the test, found through
+`Deno.execPath()`. Starting the program named `deno` instead would find whatever
+copy comes first on `PATH`, which is a different version than the pin in
+`mise.toml` on any machine whose shell Deno is not that pin. The versions share
+one cache directory and each reads transpiled sources only from its own part of
+it, so a test that collects a coverage profile under one version and reports it
+under the other gets a report with every file missing.
+
+Deno resolves an allowlist entry of `deno` through `PATH` as well, so
+`--allow-run=deno` refuses the very binary the test is running under. Name that
+binary instead of widening the grant. A task line can compute it, because `deno`
+inside one runs the Deno running the task whatever `PATH` says:
+
+```
+--allow-run=$(deno eval "console.log(Deno.execPath())")
+```
+
+A test launched from a script can read `Deno.execPath()` directly, as
+`packages/dashboard/test/runner.ts` does with `--allow-run=${Deno.execPath()},git`.
+
+That a task's `deno` is the running one rather than one found on `PATH` is what
+makes the computed form name the right binary, so
+`packages/test-support/src/isolated-deno.test.ts` holds it in place: it runs a
+task with a decoy `deno` as the only entry on the child's `PATH` and fails if the
+decoy is the one that runs.
+
 ### Test Structure
 
 - **Unit tests**: Use `@std/testing/bdd` (`describe`/`it`) with `@std/expect` for assertions
@@ -46,16 +108,27 @@ out-of-date lockfile instead of silently resolving a different graph.
 **Unit test example:**
 
 ```typescript
-// Shown at module scope.
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-describe("Feature", () => {
-  it("should do something", () => {
-    expect(result).toBe(expected);
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+
+describe("deep-freeze", () => {
+  describe("isDeepFrozen()", () => {
+    it("returns `false` for a plain unfrozen object", () => {
+      expect(isDeepFrozen({ a: 1 })).toBe(false);
+    });
   });
 });
 ```
+
+Note the shape: one top-level `describe()` named after the file under test, a
+nested `describe()` per function, and an `it()` reading as a verb phrase that
+completes the word "it".
+[Unit test coding style](unit-test-coding-style.md) covers that shape in full:
+where a test file goes, what it is called, how class and function tests nest,
+which assertions to reach for, and the matcher traps that produce a green test
+proving nothing.
 
 **Integration test example:**
 
@@ -152,6 +225,11 @@ run directory.
 
 ## Related documentation
 
+- [unit-test-coding-style.md](unit-test-coding-style.md) — how a unit test file
+  is shaped: where it lives and what it is called, the single top-level
+  `describe()` and the blocks nested under it, how an `it()` description is
+  worded, `expect()` over `assert*()`, and the matcher traps that yield a green
+  test which proves nothing. Read it before writing a new test file.
 - [waiting-in-tests.md](waiting-in-tests.md) — waiting in tests: prefer
   primitives that resolve on a real event over polling with a timeout. Covers
   the event-driven primitives, the `check-no-waitfor` CI guard that keeps new

@@ -303,8 +303,14 @@ export const gcpSpend: Tile = {
     const dailyBudget = readBudget(ctx.env("GCP_DAILY_BUDGET"));
     const monthlyBudget = dailyBudget * daysInMonth;
     const status = budgetStatus(summary.projected, monthlyBudget);
+    // The history holds finished days only, so its newest day is exactly the
+    // lag behind today and the line already ends on it.
     const chart = spendChart(
-      [{ spend: { byDay: history.paid }, color: GCP_COLOR }],
+      [{
+        spend: { byDay: history.paid },
+        color: GCP_COLOR,
+        lagDays: history.lagDays,
+      }],
       now,
       status,
       summary.estimateDays,

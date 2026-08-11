@@ -8,7 +8,10 @@ import {
   type CachedCiRunReference,
   CI_JOB_HISTORY_SAMPLING_VERSION,
   CiJobHistoryStore,
+  ganttRunSummary,
+  isDrawableGanttJob,
 } from "./ci-job-cache.ts";
+import { CiGanttDetailStore, ganttDetailDirectory } from "./ci-gantt-detail.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";
 import {
   clampInt,
@@ -46,7 +49,13 @@ const REFRESH_MS = 30 * 60_000;
 const GITHUB_SEARCH_LIMIT = 1_000;
 export const GANTT_MAX_RUNS = 150;
 const SELECTED_WORKFLOW_RUN_CACHE_MAX = GANTT_MAX_RUNS;
-const PROGRESS_RECORD_MAX = 256;
+export const PROGRESS_RECORD_MAX = 256;
+// Built snapshots are kept per repository and window width, and the window
+// width comes from the page's URL, so the set of keys is as wide as the range
+// slider. A snapshot holds a point for every job in every sampled run, and it
+// is rebuilt from the run index without touching GitHub, so only a handful are
+// worth keeping.
+export const SNAPSHOT_CACHE_MAX = 8;
 
 type GitHubRequest = <T = unknown>(
   path: string,
@@ -117,7 +126,7 @@ export interface CiGanttRunSelection {
 
 export interface CiGanttRefresh {
   progress: CiJobFetchProgress;
-  result: Promise<CiGanttInput>;
+  result: Promise<GanttSelection>;
 }
 
 export interface CiTimedJob {
@@ -226,7 +235,14 @@ interface SelectedWorkflowRuns {
 
 interface CiGanttRequest {
   progress: CiJobProgressRecord;
-  result: Promise<CiGanttInput>;
+  result: Promise<GanttSelection>;
+}
+
+// The runs one chart is made of. Their step detail stays on disk until each run
+// is handed to whatever is drawing or writing the chart.
+export interface GanttSelection {
+  entries: CachedCiRun[];
+  exactSelection: boolean;
 }
 
 type CiJobFetchOutcome =
@@ -278,6 +294,64 @@ function shardKey(name: string): string {
 
 function runTime(run: WorkflowRun): number {
   return Date.parse(run.run_started_at);
+}
+
+// Runs `work` over every item with at most `limit` of them outstanding, taking
+// the next item the moment any one finishes, so a slow response costs only its
+// own slot. For a GitHub read, waiting is nearly all of the time spent.
+//
+// Results keep the order of `items`. `work` is expected to report its own
+// failures in its result rather than rejecting; a rejection stops the run and
+// is raised once the outstanding work has finished. `halt` is consulted before
+// each item is taken, so a failure that makes the rest pointless — the cache
+// refusing writes — stops the remaining items from being started at all.
+async function inFlight<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+  halt?: (result: R) => boolean,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  let stopped = false;
+  const worker = async (): Promise<void> => {
+    while (!stopped) {
+      const index = next++;
+      if (index >= items.length) return;
+      const result = await work(items[index]);
+      results[index] = result;
+      if (halt?.(result)) stopped = true;
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  // Slots that halted before taking an item leave holes rather than undefined
+  // results the caller would have to guard.
+  return results.slice(0, Math.min(next, items.length)).filter((result) =>
+    result !== undefined
+  );
+}
+
+// GitHub answers a workflow-run query with far more than a run: the repository,
+// the head repository, the whole head commit, and both actors travel with every
+// entry, which is around 18 KB where the fields below are 330 bytes. A
+// discovery window is thousands of runs held for the length of the freshness
+// window, so each one is narrowed to these fields as it arrives.
+export function projectWorkflowRun(run: WorkflowRun): WorkflowRun {
+  return {
+    id: run.id,
+    status: run.status,
+    conclusion: run.conclusion,
+    event: run.event,
+    head_branch: run.head_branch,
+    head_sha: run.head_sha,
+    path: run.path,
+    run_attempt: run.run_attempt,
+    run_started_at: run.run_started_at,
+    html_url: run.html_url,
+    name: run.name,
+  };
 }
 
 function validateSelectedWorkflowRun(
@@ -483,7 +557,7 @@ async function fetchWorkflowRuns(
     };
 
     const first = await requestPage(1);
-    const firstBatch = first.workflow_runs ?? [];
+    const firstBatch = (first.workflow_runs ?? []).map(projectWorkflowRun);
     if ((first.total_count ?? firstBatch.length) >= GITHUB_SEARCH_LIMIT) {
       if (end - start <= 1_000) {
         throw new Error(
@@ -503,7 +577,7 @@ async function fetchWorkflowRuns(
         break;
       }
       const response = await requestPage(page);
-      const batch = response.workflow_runs ?? [];
+      const batch = (response.workflow_runs ?? []).map(projectWorkflowRun);
       runs.push(...batch);
       if (batch.length < 100) break;
     }
@@ -541,7 +615,7 @@ async function fetchRecentWorkflowRuns(
       `repos/${source.repo}/actions/workflows/${source.workflow}/runs?${params}`,
       token,
     );
-    const batch = response.workflow_runs ?? [];
+    const batch = (response.workflow_runs ?? []).map(projectWorkflowRun);
     runs.push(...batch);
     if (batch.length < 100) break;
   }
@@ -576,17 +650,6 @@ function timedJob(job: ApiJob): TimedApiJob | null {
     start,
     end,
   };
-}
-
-function hasJobTiming(job: ApiJob): boolean {
-  if (!job.started_at || !job.completed_at) return false;
-  const start = Date.parse(job.started_at);
-  const end = Date.parse(job.completed_at);
-  return Number.isFinite(start) && Number.isFinite(end) && end > start;
-}
-
-function isDrawableGanttJob(job: ApiJob | CachedCiGanttJob): boolean {
-  return job.conclusion !== "skipped" && hasJobTiming(job);
 }
 
 function ganttJob(job: ApiJob, attempt: number): CachedCiGanttJob {
@@ -915,12 +978,11 @@ function isMainCachedRun(run: CachedCiRun): boolean {
 }
 
 function hasDrawableGanttTiming(run: CachedCiRun): boolean {
-  return run.gantt.jobs.some(isDrawableGanttJob);
+  return run.gantt.drawable;
 }
 
 function hasAttemptMetadata(run: CachedCiRun): boolean {
-  return run.runAttempt === 1 ||
-    run.gantt.jobs.every((job) => job.attempt !== undefined);
+  return run.runAttempt === 1 || run.gantt.attemptTagged;
 }
 
 function hasAttemptAwareGanttTiming(run: CachedCiRun): boolean {
@@ -946,7 +1008,10 @@ function workflowRunFromCache(
   };
 }
 
-function ganttInputRun(run: CachedCiRun): CiGanttInputRun {
+function ganttInputRun(
+  run: CachedCiRun,
+  jobs: CachedCiGanttJob[],
+): CiGanttInputRun {
   return {
     run: {
       attempt: run.runAttempt,
@@ -958,12 +1023,13 @@ function ganttInputRun(run: CachedCiRun): CiGanttInputRun {
       startedAt: run.gantt.startedAt,
       workflowName: run.gantt.workflowName,
     },
-    jobs: run.gantt.jobs,
+    jobs,
   };
 }
 
 export class CiJobHistoryCollector {
   #store: CiJobHistoryStore;
+  #detail: CiGanttDetailStore;
   #github: GitHubRequest;
   #cacheSaves = new Map<number, Promise<void>>();
   #jobRequests = new Map<string, Promise<CachedCiRun>>();
@@ -998,9 +1064,11 @@ export class CiJobHistoryCollector {
   constructor(
     store = new CiJobHistoryStore(),
     request: GitHubRequest = performanceGithub,
+    detail = new CiGanttDetailStore(() => ganttDetailDirectory(store.file)),
   ) {
     this.#store = store;
     this.#github = request;
+    this.#detail = detail;
   }
 
   #newProgress(
@@ -1049,6 +1117,28 @@ export class CiJobHistoryCollector {
     this.#progressById.set(state.id, record);
     this.#trimProgressRecords(record);
     return record;
+  }
+
+  #rememberSnapshot(key: string, value: CiJobHistorySnapshot): void {
+    // Re-inserting moves the key to the end of the map's insertion order, so
+    // the first key is always the one written longest ago.
+    this.#latest.delete(key);
+    this.#latest.set(key, value);
+    for (const candidate of this.#latest.keys()) {
+      if (this.#latest.size <= SNAPSHOT_CACHE_MAX) break;
+      // Skipping a window that is still collecting is what makes eviction
+      // safe, not merely tidy. Its refresh reads #sampledRuns and
+      // #samplingVersions back at the end of collect() to record its manifest,
+      // and markRefreshed accepts an empty sampled-run list, so evicting one
+      // mid-collection would persist a manifest claiming no sampled runs and
+      // leave that window's chart permanently empty.
+      if (candidate === key || this.#refreshRequests.has(candidate)) continue;
+      this.#latest.delete(candidate);
+      this.#sampledRuns.delete(candidate);
+      this.#samplingVersions.delete(candidate);
+      this.#snapshotRevisions.delete(candidate);
+      this.#refreshedAt.delete(candidate);
+    }
   }
 
   #trimProgressRecords(preserve: CiJobProgressRecord): void {
@@ -1239,15 +1329,13 @@ export class CiJobHistoryCollector {
     );
     this.#samplingVersions.set(
       key,
-      refresh
-        ? refresh.samplingVersion ?? null
-        : null,
+      refresh ? refresh.samplingVersion ?? null : null,
     );
-    this.#latest.set(key, value);
     this.#snapshotRevisions.set(
       key,
       this.#store.revisionFor(source.repo, source.workflow),
     );
+    this.#rememberSnapshot(key, value);
     const freshRefresh = this.#store.freshRefresh(
       source.repo,
       source.workflow,
@@ -1267,9 +1355,18 @@ export class CiJobHistoryCollector {
     token: string,
     source: CiHistorySource,
     now: number,
-    exactAttempt = false,
-    expectedHeadSha = "",
+    options: {
+      exactAttempt?: boolean;
+      expectedHeadSha?: string;
+      // Set by the Gantt collectors, which need the attempt's step detail and
+      // not only its index entry. An entry whose detail has been pruned is
+      // fetched again.
+      hasGanttDetail?: boolean;
+    } = {},
   ): CiJobLoad {
+    const exactAttempt = options.exactAttempt ?? false;
+    const expectedHeadSha = options.expectedHeadSha ?? "";
+    const ganttDetailAvailable = options.hasGanttDetail ?? true;
     const pending = this.#pendingJobsForRun(run, source, exactAttempt);
     if (pending) return { kind: "joined", result: pending };
     let cached = exactAttempt
@@ -1294,7 +1391,7 @@ export class CiJobHistoryCollector {
         ? !hasAttemptAwareGanttTiming(cached)
         : !hasAttemptMetadata(cached));
     if (
-      cached &&
+      cached && ganttDetailAvailable &&
       (exactAttempt
         ? cached.runAttempt === run.run_attempt &&
           cached.headSha === expectedHeadSha &&
@@ -1323,18 +1420,35 @@ export class CiJobHistoryCollector {
             at: runTime(run),
             overallSeconds: timing.overallSeconds,
             jobs: timing.jobs,
-            gantt: {
+            gantt: ganttRunSummary({
               status: run.status,
               conclusion: run.conclusion,
               event: run.event,
               headBranch: run.head_branch ?? undefined,
               startedAt: run.run_started_at,
               workflowName: run.name ?? source.workflow,
-              jobs: timing.ganttJobs,
-            },
+            }, timing.ganttJobs),
           };
           if (repairCachedEntry) this.#store.replace(entry);
           else this.#store.set(entry);
+          // The index holds the durations on its own. An attempt whose step
+          // detail could not be written is one a chart collects again, the same
+          // as an attempt whose detail has been pruned, so the collection keeps
+          // going. A filesystem that cannot take the detail also cannot take
+          // the index, and that failure below does stop the collection.
+          try {
+            await this.#detail.write(
+              source,
+              run.id,
+              run.run_attempt,
+              timing.ganttJobs,
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : `${error}`;
+            console.error(
+              `CI Gantt detail for run ${run.id} attempt ${run.run_attempt} was not stored: ${message}`,
+            );
+          }
           const cached = exactAttempt
             ? this.#store.get(
               source.repo,
@@ -1384,6 +1498,24 @@ export class CiJobHistoryCollector {
       }
     }
     return pending;
+  }
+
+  // An attempt keeps its detail for exactly as long as the run index keeps the
+  // attempt. Compression makes an attempt's detail small enough that the whole
+  // retention window fits, so nothing GitHub would have to serve again is
+  // discarded early.
+  //
+  // Passing every attempt the index holds, with no cap of its own, is what
+  // makes pruning safe to run against a chart being assembled: a chart draws
+  // the runs the index names, so the set kept here always covers it. A cap
+  // here would break that, and no amount of coordinating the two would repair
+  // it — a chart would simply be reading files this had already decided to
+  // drop.
+  async #pruneGanttDetail(source: CiHistorySource): Promise<void> {
+    await this.#detail.prune(
+      source,
+      this.#store.attempts(source.repo, source.workflow),
+    );
   }
 
   async #saveCache(now: number): Promise<void> {
@@ -1466,43 +1598,44 @@ export class CiJobHistoryCollector {
       });
     }
     const failed = new Map<number, unknown>();
-    for (let i = 0; i < missing.length; i += JOB_FETCH_CONCURRENCY) {
-      const batch = missing.slice(i, i + JOB_FETCH_CONCURRENCY);
-      const outcomes = await Promise.all(
-        batch.map(async (run): Promise<CiJobFetchOutcome> => {
-          const load = this.#jobsForRun(run, token, source, now);
-          if (progress) this.#startJobLoadProgress(progress, load.kind);
-          try {
-            const entry = await load.result;
-            if (progress) {
-              this.#finishJobLoadProgress(progress, load.kind, true);
-            }
-            return { run, entry };
-          } catch (error) {
-            if (progress) {
-              this.#finishJobLoadProgress(progress, load.kind, false);
-            }
-            return {
-              run,
-              error,
-              persistence: error instanceof CiJobCacheWriteError,
-            };
+    const outcomes = await inFlight(
+      missing,
+      JOB_FETCH_CONCURRENCY,
+      async (run): Promise<CiJobFetchOutcome> => {
+        const load = this.#jobsForRun(run, token, source, now);
+        if (progress) this.#startJobLoadProgress(progress, load.kind);
+        try {
+          const entry = await load.result;
+          if (progress) {
+            this.#finishJobLoadProgress(progress, load.kind, true);
           }
-        }),
-      );
-      const persistenceFailure = outcomes.find((outcome) =>
-        "error" in outcome && outcome.persistence
-      );
-      if (persistenceFailure && "error" in persistenceFailure) {
-        throw persistenceFailure.error;
-      }
-      for (const outcome of outcomes) {
-        if ("entry" in outcome) entries.set(outcome.run.id, outcome.entry);
-        else failed.set(outcome.run.id, outcome.error);
-      }
+          return { run, entry };
+        } catch (error) {
+          if (progress) {
+            this.#finishJobLoadProgress(progress, load.kind, false);
+          }
+          return {
+            run,
+            error,
+            persistence: error instanceof CiJobCacheWriteError,
+          };
+        }
+      },
+      (outcome) => "error" in outcome && outcome.persistence,
+    );
+    const persistenceFailure = outcomes.find((outcome) =>
+      "error" in outcome && outcome.persistence
+    );
+    if (persistenceFailure && "error" in persistenceFailure) {
+      throw persistenceFailure.error;
+    }
+    for (const outcome of outcomes) {
+      if ("entry" in outcome) entries.set(outcome.run.id, outcome.entry);
+      else failed.set(outcome.run.id, outcome.error);
     }
     if (progress) this.#updateProgress(progress, { phase: "saving" });
     await this.#saveCache(now);
+    await this.#pruneGanttDetail(source);
     const samples = runs.flatMap((run) => {
       const entry = entries.get(run.id);
       return entry ? [sampleFromCache(entry)] : [];
@@ -1583,11 +1716,11 @@ export class CiJobHistoryCollector {
       : CI_JOB_HISTORY_SAMPLING_VERSION;
     this.#sampledRuns.set(key, sampledRuns);
     this.#samplingVersions.set(key, samplingVersion);
-    this.#latest.set(key, value);
     this.#snapshotRevisions.set(
       key,
       this.#store.revisionFor(source.repo, source.workflow),
     );
+    this.#rememberSnapshot(key, value);
     const rateLimitFailure = failures.find(({ error }) =>
       error instanceof GitHubRateLimitBudgetError
     );
@@ -1743,44 +1876,53 @@ export class CiJobHistoryCollector {
         this.#selectedWorkflowRequests,
         key,
         async (request): Promise<SelectedWorkflowRuns> => {
+          // One selection that does not match its commit invalidates the whole
+          // chart, so the first failure stops the rest from being started.
+          const outcomes = await inFlight(
+            missing,
+            JOB_FETCH_CONCURRENCY,
+            async (
+              selected,
+            ): Promise<
+              { selected: CiGanttRunSelection; run: WorkflowRun } | {
+                error: unknown;
+              }
+            > => {
+              try {
+                return {
+                  selected,
+                  run: validateSelectedWorkflowRun(
+                    await request<WorkflowRun>(
+                      `repos/${source.repo}/actions/runs/${selected.runId}/attempts/${selected.runAttempt}`,
+                      token,
+                    ),
+                    selected,
+                    source,
+                    options.headSha,
+                  ),
+                };
+              } catch (error) {
+                return { error };
+              }
+            },
+            (outcome) => "error" in outcome,
+          );
           const runs: WorkflowRun[] = [];
           let failure: SelectedWorkflowRuns["failure"];
-          for (
-            let index = 0;
-            index < missing.length;
-            index += JOB_FETCH_CONCURRENCY
-          ) {
-            const batch = missing.slice(index, index + JOB_FETCH_CONCURRENCY);
-            const outcomes = await Promise.allSettled(
-              batch.map(async (selected) =>
-                validateSelectedWorkflowRun(
-                  await request<WorkflowRun>(
-                    `repos/${source.repo}/actions/runs/${selected.runId}/attempts/${selected.runAttempt}`,
-                    token,
-                  ),
-                  selected,
-                  source,
-                  options.headSha,
-                )
-              ),
-            );
-            for (const [outcomeIndex, outcome] of outcomes.entries()) {
-              if (outcome.status === "rejected") {
-                failure ??= { error: outcome.reason };
-                continue;
-              }
-              const selected = batch[outcomeIndex];
-              runs.push(outcome.value);
-              this.#cacheSelectedWorkflowRun(
-                this.#selectedWorkflowRunKey(
-                  source,
-                  options.headSha,
-                  selected,
-                ),
-                outcome.value,
-              );
+          for (const outcome of outcomes) {
+            if ("error" in outcome) {
+              failure ??= { error: outcome.error };
+              continue;
             }
-            if (failure) break;
+            runs.push(outcome.run);
+            this.#cacheSelectedWorkflowRun(
+              this.#selectedWorkflowRunKey(
+                source,
+                options.headSha,
+                outcome.selected,
+              ),
+              outcome.run,
+            );
           }
           return { runs, failure };
         },
@@ -1848,10 +1990,72 @@ export class CiJobHistoryCollector {
     };
   }
 
-  #cachedGanttInput(
+  // Hands each run a chart draws to `visit`, reading one attempt's step detail
+  // at a time and letting go of it before reading the next, so the memory a
+  // chart costs does not grow with its size. The 150 attempts the range slider
+  // allows are around 17 MB of timings between them.
+  //
+  // A run the detail store cannot return is left out, except under an exact
+  // selection, where the caller asked for particular runs and a chart missing
+  // one of them would misrepresent the commit.
+  async #eachGanttRun(
+    source: CiHistorySource,
+    entries: CachedCiRun[],
+    exactSelection: boolean,
+    visit: (run: CiGanttInputRun) => void | Promise<void>,
+  ): Promise<number> {
+    let drawn = 0;
+    for (const entry of entries) {
+      const jobs = await this.#detail.read(
+        source,
+        entry.runId,
+        entry.runAttempt,
+      );
+      if (!jobs) {
+        if (exactSelection) {
+          throw new Error("Not every selected CI run has cached job timings.");
+        }
+        continue;
+      }
+      await visit(ganttInputRun(entry, jobs));
+      drawn++;
+    }
+    return drawn;
+  }
+
+  // The subset of `entries` whose step detail reads back, without keeping any
+  // of it. An attempt counts as drawable only when its detail parses, so one
+  // that cannot be read — a format this version does not recognize, a damaged
+  // file — is collected from GitHub again like one that was never stored.
+  async #drawableGanttRuns(
+    source: CiHistorySource,
+    entries: CachedCiRun[],
+  ): Promise<CachedCiRun[]> {
+    const drawable: CachedCiRun[] = [];
+    for (const entry of entries) {
+      if (await this.#ganttDetailReadable(source, entry)) drawable.push(entry);
+    }
+    return drawable;
+  }
+
+  async #ganttDetailReadable(
+    source: CiHistorySource,
+    entry: CachedCiRun | undefined,
+  ): Promise<boolean> {
+    if (!entry) return false;
+    return await this.#detail.read(
+      source,
+      entry.runId,
+      entry.runAttempt,
+    ) !== null;
+  }
+
+  // The index entries a chart would draw from the cache alone, newest first.
+  // Reading their detail is left to the caller, which often does not need it.
+  #cachedGanttRuns(
     source: CiHistorySource,
     options: CiGanttOptions,
-  ): CiGanttInput {
+  ): CachedCiRun[] {
     const selectedRuns = options.selectedRuns ?? [];
     const candidates = selectedRuns.length
       ? selectedRuns.flatMap(({ runId, runAttempt }) => {
@@ -1870,7 +2074,7 @@ export class CiJobHistoryCollector {
       : this.#store.list(source.repo, source.workflow).filter(
         hasAttemptMetadata,
       );
-    const runs = candidates
+    return candidates
       .filter((run) =>
         !options.mainOnly ||
         (options.allConclusions
@@ -1878,11 +2082,12 @@ export class CiJobHistoryCollector {
           : isSuccessfulMainCachedRun(run))
       )
       .sort((a, b) => b.at - a.at)
-      .slice(0, options.limit)
-      .map(ganttInputRun);
-    return { runs };
+      .slice(0, options.limit);
   }
 
+  // Collects a chart and returns every run of it at once. Convenient to assert
+  // against, and bounded only by the range slider, so the dashboard itself uses
+  // writeGanttInput instead.
   async gantt(
     token: string | undefined,
     source: CiHistorySource,
@@ -1890,12 +2095,71 @@ export class CiJobHistoryCollector {
     now = Date.now(),
     workflowRuns?: WorkflowRun[],
   ): Promise<CiGanttInput> {
-    return await this.#collectGantt(
-      token,
+    return await this.ganttRuns(
       source,
-      normalizedGanttOptions(options),
-      now,
-      workflowRuns,
+      await this.#collectGantt(
+        token,
+        source,
+        normalizedGanttOptions(options),
+        now,
+        workflowRuns,
+      ),
+    );
+  }
+
+  // Every run of an already collected chart, held together. Bounded only by the
+  // range slider, so the dashboard uses writeGanttInput instead.
+  async ganttRuns(
+    source: CiHistorySource,
+    selection: GanttSelection,
+  ): Promise<CiGanttInput> {
+    const runs: CiGanttInputRun[] = [];
+    await this.#emitGantt(source, selection, (run) => {
+      runs.push(run);
+    });
+    return { runs };
+  }
+
+  // Collects a chart and writes it straight to `destination` as the JSON the
+  // Gantt renderer reads, one run at a time. Nothing holds the whole chart, so
+  // the dashboard's memory does not grow with the size of the chart it serves.
+  async writeGanttInput(
+    source: CiHistorySource,
+    selection: GanttSelection,
+    destination: string,
+  ): Promise<number> {
+    using file = await Deno.open(destination, {
+      write: true,
+      create: true,
+      truncate: true,
+    });
+    const encoder = new TextEncoder();
+    const write = async (text: string): Promise<void> => {
+      const bytes = encoder.encode(text);
+      for (let at = 0; at < bytes.length;) {
+        at += await file.write(bytes.subarray(at));
+      }
+    };
+    await write(`{"runs":[`);
+    let written = 0;
+    await this.#emitGantt(source, selection, async (run) => {
+      await write(`${written++ ? "," : ""}${JSON.stringify(run)}`);
+    });
+    await write("]}");
+    return written;
+  }
+
+  // Hands over the runs of an already collected chart.
+  async #emitGantt(
+    source: CiHistorySource,
+    selection: GanttSelection,
+    visit: (run: CiGanttInputRun) => void | Promise<void>,
+  ): Promise<number> {
+    return await this.#eachGanttRun(
+      source,
+      selection.entries,
+      selection.exactSelection,
+      visit,
     );
   }
 
@@ -1906,28 +2170,66 @@ export class CiJobHistoryCollector {
     now: number,
     workflowRuns?: WorkflowRun[],
     progress?: CiJobProgressRecord,
-  ): Promise<CiGanttInput> {
+  ): Promise<GanttSelection> {
+    try {
+      return await this.#assembleGantt(
+        token,
+        source,
+        normalized,
+        now,
+        workflowRuns,
+        progress,
+      );
+    } finally {
+      // Reported rather than raised: the chart is already decided, and a
+      // filesystem that cannot take this also fails the run index save.
+      await this.#pruneGanttDetail(source).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : `${error}`;
+        console.error(`CI Gantt detail was not pruned: ${message}`);
+      });
+    }
+  }
+
+  async #assembleGantt(
+    token: string | undefined,
+    source: CiHistorySource,
+    normalized: Required<CiGanttOptions>,
+    now: number,
+    workflowRuns?: WorkflowRun[],
+    progress?: CiJobProgressRecord,
+  ): Promise<GanttSelection> {
     await this.#store.load();
     await this.#saveCache(now);
-    const cached = this.#cachedGanttInput(source, normalized);
+    // Which runs the cache alone would draw. Their detail is read to find out
+    // whether it is still there, and dropped again rather than carried.
+    const cachedRuns = this.#cachedGanttRuns(source, normalized);
+    let cachedDrawable: CachedCiRun[] | undefined;
+    const drawableFromCache = async (): Promise<CachedCiRun[]> =>
+      cachedDrawable ??= await this.#drawableGanttRuns(source, cachedRuns);
     const exactSelection = normalized.selectedRuns.length > 0;
-    const hasEverySelectedRun = exactSelection &&
-      normalized.selectedRuns.every(({ runId, runAttempt }) =>
-        cached.runs.some((entry) =>
-          entry.run.databaseId === runId &&
-          (entry.run.attempt ?? 1) === runAttempt
+    if (exactSelection) {
+      const drawable = await drawableFromCache();
+      const hasEverySelectedRun = normalized.selectedRuns.every((
+        { runId, runAttempt },
+      ) =>
+        drawable.some((entry) =>
+          entry.runId === runId && entry.runAttempt === runAttempt
         )
       );
-    if (hasEverySelectedRun) return cached;
+      if (hasEverySelectedRun) return { entries: drawable, exactSelection };
+    }
     if (!token) {
-      if (!exactSelection && cached.runs.length) {
-        if (progress) {
-          this.#updateProgress(progress, {
-            warning:
-              "Showing cached runs; set GH_TOKEN to check for newer attempts.",
-          });
+      if (!exactSelection && cachedRuns.length) {
+        const drawable = await drawableFromCache();
+        if (drawable.length) {
+          if (progress) {
+            this.#updateProgress(progress, {
+              warning:
+                "Showing cached runs; set GH_TOKEN to check for newer attempts.",
+            });
+          }
+          return { entries: drawable, exactSelection };
         }
-        return cached;
       }
       throw new Error("Set GH_TOKEN to collect CI Gantt data.");
     }
@@ -1944,7 +2246,10 @@ export class CiJobHistoryCollector {
           progress,
         );
     } catch (error) {
-      if (!exactSelection && cached.runs.length) {
+      const drawable = !exactSelection && cachedRuns.length
+        ? await drawableFromCache()
+        : [];
+      if (drawable.length) {
         if (progress) {
           const message = error instanceof Error
             ? error.message
@@ -1955,7 +2260,7 @@ export class CiJobHistoryCollector {
             }.`,
           });
         }
-        return cached;
+        return { entries: drawable, exactSelection };
       }
       throw error;
     }
@@ -1986,8 +2291,11 @@ export class CiJobHistoryCollector {
       .sort((a, b) => runTime(b) - runTime(a))
       .slice(0, normalized.limit)
       .filter((run) => run.status === "completed");
-    const missing = selected.filter((run) => {
-      const entry = exactSelection
+    // A chart draws the step detail rather than the index entry, so a run the
+    // detail store cannot return is collected again even though the index
+    // knows it.
+    const entryFor = (run: WorkflowRun): CachedCiRun | undefined =>
+      exactSelection
         ? this.#store.get(
           source.repo,
           source.workflow,
@@ -1995,14 +2303,19 @@ export class CiJobHistoryCollector {
           run.run_attempt,
         )
         : this.#store.latest(source.repo, source.workflow, run.id);
-      return !entry ||
+    const missing: WorkflowRun[] = [];
+    for (const run of selected) {
+      const entry = entryFor(run);
+      if (
+        !await this.#ganttDetailReadable(source, entry) || !entry ||
         (exactSelection
           ? entry.headSha !== normalized.headSha ||
             !hasAttemptAwareGanttTiming(entry)
           : entry.runAttempt < run.run_attempt ||
             !hasAttemptMetadata(entry)) ||
-        Boolean(this.#pendingJobsForRun(run, source, exactSelection));
-    });
+        Boolean(this.#pendingJobsForRun(run, source, exactSelection))
+      ) missing.push(run);
+    }
     if (progress) {
       this.#updateProgress(progress, {
         phase: "fetching",
@@ -2012,44 +2325,47 @@ export class CiJobHistoryCollector {
         cachedRuns: selected.length - missing.length,
       });
     }
-    const failures: { run: WorkflowRun; error: unknown }[] = [];
-    for (let i = 0; i < missing.length; i += JOB_FETCH_CONCURRENCY) {
-      const batch = missing.slice(i, i + JOB_FETCH_CONCURRENCY);
-      const outcomes = await Promise.all(
-        batch.map(async (run): Promise<
-          | { run: WorkflowRun; entry: CachedCiRun }
-          | { run: WorkflowRun; error: unknown }
-        > => {
-          const load = this.#jobsForRun(
-            run,
-            token,
-            source,
-            now,
-            exactSelection,
-            normalized.headSha,
-          );
-          if (progress) this.#startJobLoadProgress(progress, load.kind);
-          try {
-            const outcome = {
-              run,
-              entry: await load.result,
-            };
-            if (progress) {
-              this.#finishJobLoadProgress(progress, load.kind, true);
-            }
-            return outcome;
-          } catch (error) {
-            if (progress) {
-              this.#finishJobLoadProgress(progress, load.kind, false);
-            }
-            return { run, error };
-          }
-        }),
-      );
-      for (const outcome of outcomes) {
-        if ("error" in outcome) failures.push(outcome);
+    // Another collection can finish caching one of these while discovery runs,
+    // so the detail is read again next to the decision to spend a request. One
+    // attempt at a time, so a chart's worth of timings is never all in memory.
+    const detailAvailable = new Set<number>();
+    for (const run of missing) {
+      if (await this.#ganttDetailReadable(source, entryFor(run))) {
+        detailAvailable.add(run.id);
       }
     }
+    const outcomes = await inFlight(
+      missing,
+      JOB_FETCH_CONCURRENCY,
+      async (run): Promise<
+        | { run: WorkflowRun; entry: CachedCiRun }
+        | { run: WorkflowRun; error: unknown }
+      > => {
+        const load = this.#jobsForRun(run, token, source, now, {
+          exactAttempt: exactSelection,
+          expectedHeadSha: normalized.headSha,
+          hasGanttDetail: detailAvailable.has(run.id),
+        });
+        if (progress) this.#startJobLoadProgress(progress, load.kind);
+        try {
+          const outcome = { run, entry: await load.result };
+          if (progress) {
+            this.#finishJobLoadProgress(progress, load.kind, true);
+          }
+          return outcome;
+        } catch (error) {
+          if (progress) {
+            this.#finishJobLoadProgress(progress, load.kind, false);
+          }
+          return { run, error };
+        }
+      },
+      (outcome) =>
+        "error" in outcome && outcome.error instanceof CiJobCacheWriteError,
+    );
+    const failures = outcomes.flatMap((outcome) =>
+      "error" in outcome ? [outcome] : []
+    );
     const persistenceFailure = failures.find(({ error }) =>
       error instanceof CiJobCacheWriteError
     );
@@ -2069,7 +2385,7 @@ export class CiJobHistoryCollector {
           `reported run ${reportedFailure.run.id} attempt ${reportedFailure.run.run_attempt}: ${message}`,
       );
     }
-    const runs = selected.flatMap((run) => {
+    const drawn = selected.flatMap((run) => {
       const entry = exactSelection
         ? this.#store.get(
           source.repo,
@@ -2086,7 +2402,7 @@ export class CiJobHistoryCollector {
           : entry.runAttempt < run.run_attempt ||
             !hasAttemptMetadata(entry))
       ) return [];
-      return [ganttInputRun(entry)];
+      return [entry];
     });
     if (exactSelection) {
       if (selectionFailure) {
@@ -2104,15 +2420,14 @@ export class CiJobHistoryCollector {
           "Every selected CI run must be a completed successful main push.",
         );
       }
-      if (runs.length !== selected.length) {
+      if (drawn.length !== selected.length) {
         throw new Error("Not every selected CI run has cached job timings.");
       }
     }
-    const available = runs.length
-      ? { runs }
-      : cached.runs.length
-      ? cached
-      : null;
+    const fallback = drawn.length || !cachedRuns.length
+      ? []
+      : await drawableFromCache();
+    const available = drawn.length ? drawn : fallback.length ? fallback : null;
     if (!available) {
       if (reportedFailure) {
         throw reportedFailure.error instanceof Error
@@ -2135,7 +2450,7 @@ export class CiJobHistoryCollector {
         }; the chart uses available cached responses.`,
       });
     }
-    return available;
+    return { entries: available, exactSelection };
   }
 
   startGantt(
@@ -2170,7 +2485,7 @@ export class CiJobHistoryCollector {
     );
     const request: CiGanttRequest = {
       progress,
-      result: Promise.resolve({ runs: [] }),
+      result: Promise.resolve({ entries: [], exactSelection: false }),
     };
     request.result = Promise.resolve()
       .then(() =>
@@ -2416,29 +2731,52 @@ export class CiJobHistoryCollector {
 }
 
 const productionStore = new CiJobHistoryStore();
+const productionDetail = new CiGanttDetailStore(() =>
+  ganttDetailDirectory(productionStore.file)
+);
 const productionCollector = new CiJobHistoryCollector(
   productionStore,
   performanceGithub,
+  productionDetail,
 );
 const commitGanttCollector = new CiJobHistoryCollector(
   productionStore,
   github,
+  productionDetail,
 );
+
+// Collects a chart and writes the renderer's input file, without ever holding
+// more than one run's timings. Concurrent requests for the same chart share the
+// collection; each writes its own file from the shared list of runs.
+async function writeGanttInput(
+  collector: CiGanttProvider,
+  source: CiHistorySource,
+  options: CiGanttOptions,
+  destination: string,
+  token: string | undefined,
+): Promise<number> {
+  const selection = await collector.startGantt(token, source, options).result;
+  return await collector.writeGanttInput(source, selection, destination);
+}
 
 export function collectCiGanttInput(
   source: CiHistorySource,
   options: CiGanttOptions,
+  destination: string,
   token = Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN"),
-): Promise<CiGanttInput> {
-  return productionCollector.startGantt(token, source, options).result;
+  collector: CiGanttProvider = productionCollector,
+): Promise<number> {
+  return writeGanttInput(collector, source, options, destination, token);
 }
 
 export function collectCommitCiGanttInput(
   source: CiHistorySource,
   options: CiGanttOptions,
+  destination: string,
   token = Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN"),
-): Promise<CiGanttInput> {
-  return commitGanttCollector.startGantt(token, source, options).result;
+  collector: CiGanttProvider = commitGanttCollector,
+): Promise<number> {
+  return writeGanttInput(collector, source, options, destination, token);
 }
 
 function formatDuration(seconds: number): string {
@@ -3247,6 +3585,12 @@ export function ciCommitGanttProgressResponse(
 ): Response {
   return ganttProgressResponse(request, url, collector, token);
 }
+
+// What the Gantt image routes need of a collector.
+type CiGanttProvider = Pick<
+  CiJobHistoryCollector,
+  "startGantt" | "writeGanttInput"
+>;
 
 type CiJobHistoryProvider =
   & Pick<

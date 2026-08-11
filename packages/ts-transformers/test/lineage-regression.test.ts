@@ -266,7 +266,7 @@ async function transformFixtureToAst(): Promise<{
   const original = program.getSourceFile(fileName);
   assert(original, "fixture source file present in program");
 
-  const pipeline = new CommonFabricTransformerPipeline({ mode: "transform" });
+  const pipeline = new CommonFabricTransformerPipeline();
   const result = ts.transform(original, pipeline.toFactories(program));
   const transformed = result.transformed[0];
   assert(transformed, "pipeline returned a transformed source file");

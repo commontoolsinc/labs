@@ -107,6 +107,16 @@ which brands an existing content-hash string or `FabricHash`. A `FabricHash` has
 a tagged string form, `<tag>:<hash>` (e.g. `fid1:…`); construct one from that
 string via `FabricHash.fromString()`.
 
+`entityIdFrom()` is the entity-specific intake seam, so it also accepts the
+`of:`-schemed URI over a tagged hash (`of:fid1:…`) — the two spellings name the
+same entity, and both are in circulation wherever an id crosses a boundary a
+person can type into. A KINDED id (`computed:fid1:…`) is refused by name rather
+than stripped: the hash preimage carries no kind, so `computed:fid1:H` and
+`of:fid1:H` are different entities over the same hash bytes, and the bare hash
+is not a complete identity to fall back on (see
+[Computed Cell Identity](../computed-cell-identity.md)). The reduction itself
+lives in `hashStringForEntityAddress()`, which any other address intake shares.
+
 The underlying `hashOf()` function — see
 [Data Model](./1-data-model.md#hashing-and-content-addressing) for the hashing
 mechanism — is also used directly for:

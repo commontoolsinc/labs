@@ -97,6 +97,44 @@ return {
 
 Each step is either `{ action: Stream<void> }` or `{ assertion: boolean }`.
 
+## Walking the Rendered Tree
+
+Both actions and assertions often need to reach into what a pattern rendered.
+`packages/patterns/test/vnode-helpers.ts` is the one place those helpers live;
+import from it rather than writing a private copy in a test file. Each helper
+resolves cells as it walks, so a test does not have to unwrap reactive values
+by hand.
+
+Reading a single node:
+
+- `readValue(value)` — resolves a cell to the value it holds, and passes
+  anything else through unchanged.
+- `propsOf(node)` — the node's props, or `undefined` when the node has none.
+- `propValue(node, prop)` — one resolved prop off a node.
+- `childNodes(node)` — the node's rendered children.
+- `textContent(node)` — every text child in the subtree, concatenated. This
+  reads text children only. Text a component carries in a prop, such as the
+  `label` on a `cf-chip`, is not part of it — search for that prop instead.
+- `hasText(node, expected)` — whether the subtree's text contains `expected`.
+- `hasExactText(node, expected)` — whether the subtree's text, trimmed, equals
+  `expected`.
+
+Searching for a node:
+
+- `findNode(root, predicate)` — the first node in the subtree the predicate
+  accepts.
+- `findNodeByProp(root, prop, expected)` — the first node whose `prop` resolves
+  to `expected`. This is the way to assert on text a component carries in a
+  prop.
+- `findNodeById(root, id)` — the first node with that `id` prop.
+- `findNodeByText(root, expected)` — the first node whose text contains
+  `expected`.
+- `findElement(root, name)` — the first element with that tag name, such as
+  `"cf-image"`.
+- `findElementByText(root, name, expected)` and
+  `findElementByExactText(root, name, expected)` — the same search narrowed to
+  a tag name.
+
 ## Writing Actions
 
 Use `action()` to create void streams that trigger events on the pattern:

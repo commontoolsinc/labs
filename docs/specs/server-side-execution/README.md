@@ -276,7 +276,7 @@ discovered mid-rebuild. Five placement classes:
 | **Pure structural** | `map`, `filter`, `flatmap`, `if-else`/`when`/`unless`, `inspect-conf-label`, `wish` (the `list-*` modules, `op-pattern-ref` and `scope-policy` are helper modules, not registered built-ins — builtins.md §1) | server | yes — free to discard |
 | **Deferred** | `stream-data` | disabled in the v2 interim (unused today; the low-latency UI it promises likely wants a different mechanism — owner, 2026-08-02) | — |
 | **Effectful / network** | `fetch` (`fetchData`), `fetch-program`, `llm` (`generateText`/`generateObject`), `llm-dialog`, `sqlite*` | **server only** | **never** — speculation reads through to the last committed result |
-| **Compile / instantiate** | `compile-and-run` (charm creation, incl. from handlers) | server (sandboxed worker; toolshed already compiles) | no |
+| **Compile / instantiate** | `compile-and-run` (piece creation, incl. from handlers) | server (sandboxed worker; toolshed already compiles) | no |
 | **Client-enacted effect** | `navigate-to` | server *computes*, client *enacts* (§3.7) | echo allowed (navigate optimistically, reconcile) |
 
 Why effectful nodes are server-only rather than merely server-preferred:
@@ -286,9 +286,9 @@ and bind results to the wrong network vantage point. The request-hash
 memoization these built-ins already carry is what makes reading-through
 sound: same inputs → the committed result *is* the value.
 
-`resume-recover` / `resume-republish`: re-evaluate under v2 recovery —
-currently load-bearing on main in `filter.ts`/`flatmap.ts` (#4367,
-#4438); builtins.md §5 carries the call.
+`resume-republish`: re-evaluate under v2 recovery — currently
+load-bearing on main in `filter.ts`/`flatmap.ts` (#4367, #4438);
+builtins.md §5 carries the call.
 
 ### 3.6 Events are the client's computational commit (D-v2-1, RULED 2026-08-02)
 
@@ -424,7 +424,7 @@ intent, the following have no decision left to make:
   at derived-run frequency; `persistentSchedulerState`'s persisted form
   reduces to the v2 basis index — see below)
 - unserved markers, demand-shrink compensation, the legacy-background
-  exclusion protocol, `resume-recover`-style compensations
+  exclusion protocol, `resume-republish`-style compensations
 - the arc's write-firewall-as-admission (write bounding moves to handle
   grant time; client computational commits narrow to event appends)
 

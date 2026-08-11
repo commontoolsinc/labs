@@ -20,7 +20,6 @@ router.use(
 router
   .openapi(routes.getModels, handlers.getModels)
   .openapi(routes.generateText, handlers.generateText)
-  .openapi(routes.feedback, handlers.submitFeedback)
   .openapi(routes.generateObject, handlers.generateObject);
 
 export default router;

@@ -1,5 +1,5 @@
 import type { CellScope, JSONSchema, Pattern } from "@commonfabric/api";
-import type { PieceManager } from "@commonfabric/piece";
+import type { PiecesController } from "@commonfabric/piece/ops";
 import {
   type Cell,
   encodeJsonPointer,
@@ -34,7 +34,7 @@ export interface CallableResolution {
   callableCell: Cell<any>;
   callableKind: CallableKind;
   cellKey: string;
-  manager: PieceManager;
+  pieces: PiecesController;
   space: MemorySpace;
 }
 
@@ -570,7 +570,7 @@ export async function executeResolvedCallable(
       input,
       resolved.callableCell.schema,
     );
-    const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
+    const runtimeErrors = runtimeErrorLog(resolved.pieces.runtime);
     const errorCountBefore = runtimeErrors.length;
     const invocationId = deps.invocationId;
     if (deps.skipReadback && invocationId === undefined) {
@@ -596,7 +596,7 @@ export async function executeResolvedCallable(
     );
     // Acknowledgment is transaction-local (verb contract, Settlement): the
     // commit callback above fires on THIS handling's final commit. Awaiting
-    // runtime.idle()/manager.synced() here instead would hold an
+    // runtime.idle()/pieces.synced() here instead would hold an
     // already-committed write hostage to every derived recomputation it
     // triggered elsewhere in the graph.
     deps.onPhase?.("committed");
@@ -640,7 +640,7 @@ export async function executeResolvedCallable(
     let links: Record<string, InvocationResultLink> | undefined;
     const link = tx.handlingReceiptLink;
     if (link) {
-      const receipt = resolved.manager.runtime.getCellFromLink<any>(link);
+      const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
       const value = await receipt.pull();
       // A value-less verb's receipt is an empty record — existence-only.
       if (
@@ -684,7 +684,7 @@ export async function executeResolvedCallable(
   const extraParams = asExtraParams(
     resolved.callableCell.key("extraParams").get(),
   );
-  const runtime = resolved.manager.runtime;
+  const runtime = resolved.pieces.runtime;
   const runtimeErrors = runtimeErrorLog(runtime);
   const errorCountBefore = runtimeErrors.length;
   const tx = runtime.edit();

@@ -7,7 +7,7 @@
 // exercises only the raw trusted-builder `handler`) with the api's declared-
 // result authoring surface. This is the readback half of WS-C's exit
 // criterion, pinned at the runner in addition to the end-to-end fixture
-// (pattern-verb-contract-implementation.md, D4).
+// (docs/history/plans/pattern-verb-contract-implementation.md, D4).
 //
 // The incidental-cell-return case pins the receipt write's conversion: `set()`
 // returns its cell for chaining, so an expression-body
@@ -93,6 +93,11 @@ async function waitForSchedulerCondition(
   const deadline = performance.now() + 5_000;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
+    // Yield a zero-delay timer turn: an idle() that resolves through
+    // microtasks alone would otherwise starve the timer queue, and the
+    // emulated server's fan-out flush — which resolves awaited commits at
+    // marker coverage (CT-1950) — rides a zero-delay timer.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
     throw new Error(message);

@@ -868,8 +868,8 @@ All errors are returned in `response`.
 // Shown at module scope.
 interface ConflictError extends Error {
   name: "ConflictError";
-  commit: ClientCommit;
-  conflicts: ConflictDetail[];
+  /** Server head seq at rejection time (§3.6.4). */
+  retryAfterSeq: number;
 }
 
 interface TransactionError extends Error {
@@ -976,14 +976,20 @@ Clients MUST:
 The server processes writes serially within a branch, or with equivalent
 serializable isolation.
 
-For live sync, transact verdicts return INLINE and the fan-out stays
-batched: N commits can apply against one watch-union recompute, which is
-where the subscription pipeline's throughput comes from. The ordering
-contract is enforced through the catch-up marker and CLIENT-side verdict
-parking instead of server-side response queuing (CT-1927):
+For live sync, transact verdicts return INLINE before the independently batched
+fan-out: N commits can apply against one watch-union recompute, which is where
+the subscription pipeline's throughput comes from. A per-space publication lock
+orders transactions and fan-out: the server sends the verdict while holding the
+lock, completes the transaction's post-commit scheduler bookkeeping, and then
+releases the lock for fan-out. Locks for other spaces remain independent. The
+lock covers each complete turn, so a transaction arriving during fan-out for
+its space waits for that fan-out to finish. The remaining ordering contract is
+enforced through the catch-up marker and CLIENT-side verdict parking (CT-1927):
 
 - the server MAY coalesce multiple successful commits into one `SessionSync`
   frame
+- on a live connection, the server MUST send a commit's transact response
+  before any `SessionSync` frame whose `caughtUpLocalSeq` covers that commit
 - for every accept and every `ConflictError` rejection, the server MUST
   stage a catch-up obligation for the committing session, and the next
   frame the batched fan-out sends that session MUST carry
@@ -993,20 +999,46 @@ parking instead of server-side response queuing (CT-1927):
   obligation; the client applies them immediately
 - the marker means "every verdict of yours through this localSeq is
   decided, and this frame reflects those outcomes for the docs it covers."
-  The session's own ACCEPTED writes are echo-suppressed from frames
-  (dirty-origin tracking): the parked verdict carries their truth (with the
-  post-apply `document` on patch revisions where provided, §4.3.1).
-  REJECTED commits' docs are staged origin-less, so repair frames DO cover
-  them.
+  The frame includes a doc unless the session provably holds it (CT-1965,
+  decided per doc by the LAST op the session's accepted commit applied):
+  own `set`- and `delete`-produced heads are elided — the writer supplied
+  the bytes (or the absence), and the verdict plus marker promote them —
+  while own `patch`-produced heads are delivered as full post-apply
+  documents, since merged state is truth the writer cannot extrapolate. A
+  head moved past the session's own write, and all foreign novelty, is
+  delivered in full. REJECTED commits' docs are staged origin-less, so
+  repair frames DO cover them, and a frame lost in flight re-stages its
+  docs origin-less, so the retry delivers full documents.
 - the CLIENT MUST NOT apply a verdict's state effects ahead of the marker
   that covers it: an accept's promotion (pending overlay to confirmed
   mirror, removing the pending local copy) is PARKED until
-  `caughtUpLocalSeq` reaches its localSeq, so promotion extrapolates over a
-  base reflecting the foreign novelty the accept was applied on top of; a
+  `caughtUpLocalSeq` reaches its localSeq. For an elided `set` head the
+  promotion installs the client's own value; for a `patch` head the
+  covering frame has already delivered the post-apply document, so
+  promotion retires the overlay against delivered truth. Extrapolating the
+  post-apply state from the client's own ops remains the fallback where no
+  frame channel exists — unwatched docs, servers that still suppress; a
   conflict rejection's drop/revert is held by the read-repair gate
   (`finalizeRejection`, with a timeout backstop for lost connections).
   Visible state is unaffected by parking — the pending overlay already
   shows the write.
+- parking splits what an accepted commit's client observers wait for. The
+  commit PROMISE the submitting caller awaits resolves at marker coverage:
+  a resolved commit means the caller's subscribed view reflects the
+  committed write and the foreign novelty it was applied on top of.
+  Post-commit effects gated on durability alone — verdict callbacks and
+  the outbox flush — run at the VERDICT instead: delaying them to
+  coverage buys nothing (they do not read the subscribed view) and costs
+  a fan-out window on every effect-bearing commit. Commit callbacks keep
+  the SETTLEMENT timeline — after coverage on accept, after the
+  read-repair gate on rejection — because their consumers act on the
+  post-commit view; a `resolveAt: "verdict"` caller's returned promise
+  settles early, but its commit callbacks still wait. The same split holds on rejection: the fate is sealed
+  at rejection receipt (verdict callbacks fire), while the promise and
+  commit callbacks wait out the read-repair gate a retry needs. A caller may opt a commit back to
+  verdict timing (`commit({ resolveAt: "verdict" })`) when it needs
+  "durably accepted" without forcing the fan-out through —
+  controlled-staleness test fixtures foremost.
 
 The server advertises this contract with the build-inherent
 `verdictCatchUpMarkers` protocol flag. A client that sees it absent (an

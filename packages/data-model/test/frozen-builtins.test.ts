@@ -35,17 +35,17 @@ describe("frozen-builtins", () => {
 
     it("throws on `set()`", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.set("b", 2)).toThrow("Cannot mutate a FrozenMap");
+      expect(() => fm.set("b", 2)).toThrow("Cannot mutate a `FrozenMap`");
     });
 
     it("throws on `delete()`", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.delete("a")).toThrow("Cannot mutate a FrozenMap");
+      expect(() => fm.delete("a")).toThrow("Cannot mutate a `FrozenMap`");
     });
 
     it("throws on `clear()`", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]);
-      expect(() => fm.clear()).toThrow("Cannot mutate a FrozenMap");
+      expect(() => fm.clear()).toThrow("Cannot mutate a `FrozenMap`");
     });
 
     it("rejects intrinsic `Map` mutators", () => {
@@ -60,13 +60,19 @@ describe("frozen-builtins", () => {
         number
       >;
 
-      expect(() => foreign.get("a")).toThrow("Incompatible FrozenMap receiver");
-      expect(() => foreign.has("a")).toThrow("Incompatible FrozenMap receiver");
-      expect(() => foreign.size).toThrow("Incompatible FrozenMap receiver");
-      expect(() => foreign.keys()).toThrow("Incompatible FrozenMap receiver");
-      expect(() => foreign.values()).toThrow("Incompatible FrozenMap receiver");
+      expect(() => foreign.get("a")).toThrow(
+        "Incompatible `FrozenMap` receiver",
+      );
+      expect(() => foreign.has("a")).toThrow(
+        "Incompatible `FrozenMap` receiver",
+      );
+      expect(() => foreign.size).toThrow("Incompatible `FrozenMap` receiver");
+      expect(() => foreign.keys()).toThrow("Incompatible `FrozenMap` receiver");
+      expect(() => foreign.values()).toThrow(
+        "Incompatible `FrozenMap` receiver",
+      );
       expect(() => foreign.entries()).toThrow(
-        "Incompatible FrozenMap receiver",
+        "Incompatible `FrozenMap` receiver",
       );
     });
 
@@ -83,7 +89,9 @@ describe("frozen-builtins", () => {
           number
         >
         & MutableMapExtensions<string, number>;
-      expect(() => fm.getOrInsert("b", 2)).toThrow("Cannot mutate a FrozenMap");
+      expect(() => fm.getOrInsert("b", 2)).toThrow(
+        "Cannot mutate a `FrozenMap`",
+      );
       expect(fm.has("b")).toBe(false);
     });
 
@@ -100,7 +108,7 @@ describe("frozen-builtins", () => {
           invoked = true;
           return 2;
         })
-      ).toThrow("Cannot mutate a FrozenMap");
+      ).toThrow("Cannot mutate a `FrozenMap`");
       expect(invoked).toBe(false);
       expect(fm.has("b")).toBe(false);
     });
@@ -129,7 +137,7 @@ describe("frozen-builtins", () => {
       const fm = builder.finish();
 
       expect(() => builder.set("b", 2)).toThrow(
-        "Cannot mutate a finalized FrozenMap builder",
+        "Cannot mutate a finalized `FrozenMap` builder",
       );
       expect([...fm.entries()]).toEqual([["a", 1]]);
     });
@@ -196,17 +204,17 @@ describe("frozen-builtins", () => {
 
     it("throws on `add()`", () => {
       const fs = new FrozenSet<number>([1]);
-      expect(() => fs.add(2)).toThrow("Cannot mutate a FrozenSet");
+      expect(() => fs.add(2)).toThrow("Cannot mutate a `FrozenSet`");
     });
 
     it("throws on `delete()`", () => {
       const fs = new FrozenSet<number>([1]);
-      expect(() => fs.delete(1)).toThrow("Cannot mutate a FrozenSet");
+      expect(() => fs.delete(1)).toThrow("Cannot mutate a `FrozenSet`");
     });
 
     it("throws on `clear()`", () => {
       const fs = new FrozenSet<number>([1]);
-      expect(() => fs.clear()).toThrow("Cannot mutate a FrozenSet");
+      expect(() => fs.clear()).toThrow("Cannot mutate a `FrozenSet`");
     });
 
     it("rejects intrinsic `Set` mutators", () => {
@@ -218,12 +226,14 @@ describe("frozen-builtins", () => {
     it("rejects a receiver that has no backing store", () => {
       const foreign = Object.create(FrozenSet.prototype) as FrozenSet<number>;
 
-      expect(() => foreign.has(1)).toThrow("Incompatible FrozenSet receiver");
-      expect(() => foreign.size).toThrow("Incompatible FrozenSet receiver");
-      expect(() => foreign.keys()).toThrow("Incompatible FrozenSet receiver");
-      expect(() => foreign.values()).toThrow("Incompatible FrozenSet receiver");
+      expect(() => foreign.has(1)).toThrow("Incompatible `FrozenSet` receiver");
+      expect(() => foreign.size).toThrow("Incompatible `FrozenSet` receiver");
+      expect(() => foreign.keys()).toThrow("Incompatible `FrozenSet` receiver");
+      expect(() => foreign.values()).toThrow(
+        "Incompatible `FrozenSet` receiver",
+      );
       expect(() => foreign.entries()).toThrow(
-        "Incompatible FrozenSet receiver",
+        "Incompatible `FrozenSet` receiver",
       );
     });
 
@@ -267,7 +277,7 @@ describe("frozen-builtins", () => {
       const fs = builder.finish();
 
       expect(() => builder.add(2)).toThrow(
-        "Cannot mutate a finalized FrozenSet builder",
+        "Cannot mutate a finalized `FrozenSet` builder",
       );
       expect([...fs.values()]).toEqual([1]);
     });

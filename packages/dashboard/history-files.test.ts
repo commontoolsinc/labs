@@ -26,8 +26,8 @@ Deno.test("dashboard cache files use fixed names in one configured directory", (
     join(directory, "fabric-wall-discord-history.json"),
   );
   assertEquals(
-    dashboardCacheFile("fabric-wall-ci-job-history.json", env),
-    join(directory, "fabric-wall-ci-job-history.json"),
+    dashboardCacheFile("fabric-wall-ci-run-index.json", env),
+    join(directory, "fabric-wall-ci-run-index.json"),
   );
   assertEquals(
     dashboardCacheFile("fabric-wall-benchmark-history.json", env),
@@ -54,8 +54,8 @@ Deno.test("dashboard cache files default to the temp directory", () => {
   const env = environment({ TMPDIR: directory });
   assertEquals(dashboardCacheDirectory(env), directory);
   assertEquals(
-    dashboardCacheFile("fabric-wall-ci-job-history.json", env),
-    join(directory, "fabric-wall-ci-job-history.json"),
+    dashboardCacheFile("fabric-wall-ci-run-index.json", env),
+    join(directory, "fabric-wall-ci-run-index.json"),
   );
 });
 

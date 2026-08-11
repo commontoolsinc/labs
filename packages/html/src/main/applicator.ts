@@ -55,8 +55,13 @@ export interface DomApplicatorOptions {
   /** Callback when a DOM event needs to be sent back to the worker */
   onEvent: (message: DomEventMessage) => void;
 
-  /** RuntimeClient for creating CellHandles from CellRefs */
-  runtimeClient: RuntimeClient;
+  /**
+   * `RuntimeClient` for turning a `CellRef` into a live handle. A host with no
+   * client-side runtime proxy — the CLI, which drives the reconciler in its own
+   * process and serializes the result — omits it, and a bidirectional binding
+   * is then applied as the plain cell reference it names.
+   */
+  runtimeClient?: RuntimeClient;
 
   /** Optional callback for errors */
   onError?: (error: Error) => void;
@@ -80,7 +85,7 @@ export class DomApplicator {
   private readonly nodeChildren = new Map<number, Set<number>>();
   private readonly document: Document;
   private readonly onEvent: (message: DomEventMessage) => void;
-  private readonly runtimeClient: RuntimeClient;
+  private readonly runtimeClient?: RuntimeClient;
   private readonly onError?: (error: Error) => void;
   private readonly setPropHandler: SetPropHandler;
   private pendingChildInserts: PendingChildInsert[] = [];
@@ -170,18 +175,8 @@ export class DomApplicator {
         }
         break;
 
-      case "move-child":
-        if (!this.moveChild(op.parentId, op.childId, op.beforeId)) {
-          this.deferChildInsert(op.parentId, op.childId, op.beforeId);
-        }
-        break;
-
       case "remove-node":
         this.removeNode(op.nodeId);
-        break;
-
-      case "set-attrs":
-        this.setAttrs(op.nodeId, op.attrs);
         break;
     }
   }
@@ -209,17 +204,6 @@ export class DomApplicator {
    */
   setContainer(container: HTMLElement): void {
     this.nodes.set(CONTAINER_NODE_ID, container);
-  }
-
-  /**
-   * Mount the rendered tree into a parent element.
-   * @deprecated Use setContainer instead - content is now inserted directly.
-   */
-  mountInto(parent: HTMLElement, rootId: number): void {
-    const root = this.nodes.get(rootId);
-    if (root) {
-      parent.appendChild(root);
-    }
   }
 
   /**
@@ -408,6 +392,13 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
 
+    if (!this.runtimeClient) {
+      // No client-side runtime to hand the element a live handle; the
+      // reference is what this host can say about the binding.
+      this.setPropHandler(node, propName, cellRef);
+      return;
+    }
+
     const existing = (node as any)[propName];
     if (
       existing instanceof CellHandle &&
@@ -486,15 +477,6 @@ export class DomApplicator {
       parent.appendChild(child);
     }
     return true;
-  }
-
-  private moveChild(
-    parentId: number,
-    childId: number,
-    beforeId: number | null,
-  ): boolean {
-    // Move is the same as insert - insertBefore handles it
-    return this.insertChild(parentId, childId, beforeId);
   }
 
   private deferChildInsert(
@@ -639,19 +621,4 @@ export class DomApplicator {
       this.collectDescendantNodeIds(childId, into);
     }
   }
-
-  private setAttrs(nodeId: number, attrs: Record<string, unknown>): void {
-    for (const [key, value] of Object.entries(attrs)) {
-      this.setProp(nodeId, key, value);
-    }
-  }
-}
-
-/**
- * Create a new DOM applicator.
- */
-export function createDomApplicator(
-  options: DomApplicatorOptions,
-): DomApplicator {
-  return new DomApplicator(options);
 }

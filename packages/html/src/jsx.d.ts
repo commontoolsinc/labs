@@ -2924,7 +2924,6 @@ interface CFIFrameElement extends CFHTMLElement {}
 interface CFHStackElement extends CFHTMLElement {}
 interface CFFabElement extends CFHTMLElement {}
 interface CFModalElement extends CFHTMLElement {}
-interface CFModalProviderElement extends CFHTMLElement {}
 interface CFChevronButtonElement extends CFHTMLElement {}
 interface CFCardElement extends CFHTMLElement {}
 interface CFListItemElement extends CFHTMLElement {}
@@ -3694,8 +3693,6 @@ interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-modal-opened"?: EventHandler<void>;
   "oncf-modal-closed"?: EventHandler<void>;
 }
-
-interface CFModalProviderAttributes<T> extends CFHTMLAttributes<T> {}
 
 interface CFChevronButtonAttributes<T> extends CFHTMLAttributes<T> {
   "expanded"?: boolean;
@@ -5060,10 +5057,6 @@ declare global {
       "cf-modal": CFDOM.DetailedHTMLProps<
         CFModalAttributes<CFModalElement>,
         CFModalElement
-      >;
-      "cf-modal-provider": CFDOM.DetailedHTMLProps<
-        CFModalProviderAttributes<CFModalProviderElement>,
-        CFModalProviderElement
       >;
       "cf-file-download": CFDOM.DetailedHTMLProps<
         CFFileDownloadAttributes<CFFileDownloadElement>,

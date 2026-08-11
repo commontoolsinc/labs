@@ -88,7 +88,8 @@ export interface CoverageCommentPayload {
 export const COVERAGE_LOCAL_CHECK_COMMAND = [
   "rm -rf coverage/raw/local",
   'DENO_COVERAGE_DIR="$(pwd)/coverage/raw/local" deno task test',
-  "deno run --allow-read --allow-write --allow-run tasks/coverage-metrics.ts \\",
+  "deno run --allow-read --allow-write --allow-run --allow-env \\",
+  "  tasks/coverage-metrics.ts \\",
   '  --profile-dir="$(pwd)/coverage/raw/local" --root="$(pwd)"',
 ].join("\n");
 

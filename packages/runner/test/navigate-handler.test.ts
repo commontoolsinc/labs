@@ -17,13 +17,17 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 
 function delayNextServerTransact(
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) {
   const server = (storageManager as unknown as {
     server(): {
-      transact(message: TransactMessage): Promise<TransactResponse>;
+      transact(
+        message: TransactMessage,
+        publishVerdict?: PublishTransactVerdict,
+      ): Promise<TransactResponse>;
     };
   }).server();
   const original = server.transact.bind(server);
@@ -31,12 +35,12 @@ function delayNextServerTransact(
   const release = Promise.withResolvers<void>();
   let shouldDelay = true;
 
-  server.transact = async (message) => {
-    if (!shouldDelay) return await original(message);
+  server.transact = async (message, publishVerdict) => {
+    if (!shouldDelay) return await original(message, publishVerdict);
     shouldDelay = false;
     started.resolve();
     await release.promise;
-    return await original(message);
+    return await original(message, publishVerdict);
   };
 
   return {

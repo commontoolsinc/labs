@@ -83,6 +83,39 @@ export function stripEntityUriScheme(id: string): string {
   return prefix === undefined ? id : id.slice(prefix.length);
 }
 
+/**
+ * The bare tagged hash (`fid1:<hash>`) naming the entity that `address`
+ * addresses, accepting either spelling of an unkinded entity: the bare hash
+ * itself, or the `of:`-schemed URI over it. This is the intake seam for an
+ * address that came from outside the runtime — a command-line flag, a routing
+ * request, a pasted id — where both spellings are in circulation and both
+ * name the same entity.
+ *
+ * A KINDED scheme is refused rather than stripped. `computed:fid1:<hash>` and
+ * `of:fid1:<hash>` share hash bytes and name different entities (the preimage
+ * is kind-free; see the module comment above and
+ * `docs/specs/computed-cell-identity.md`), so dropping the scheme would
+ * silently address the sibling instead of reporting that the caller named
+ * something this seam cannot resolve. Every scheme but `of:` is refused, so a
+ * kind added to {@link ENTITY_URI_SCHEMES} is refused here without a further
+ * edit.
+ *
+ * A string carrying no entity scheme is returned unchanged, including one with
+ * no colon at all: recognizing a scheme is this function's job, and judging
+ * what remains belongs to the parser the caller hands it to.
+ *
+ * @throws Error if `address` carries a kinded entity URI scheme.
+ */
+export function hashStringForEntityAddress(address: string): string {
+  const prefix = entityUriSchemePrefix(address);
+  if (prefix === undefined) return address;
+  if (prefix === "of:") return address.slice(prefix.length);
+  throw new Error(
+    `Kinded entity id \`${address}\` cannot be addressed by its hash: ` +
+      `the \`of:\` id over the same hash names a different entity.`,
+  );
+}
+
 const KNOWN_ENTITY_KINDS: ReadonlySet<string> = new Set(["computed"]);
 
 export function isEntityKind(value: unknown): value is EntityKind {

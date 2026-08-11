@@ -90,7 +90,6 @@ const addModel = ({
   name,
   aliases,
   capabilities,
-  providerOptions: _,
   nativeModelToolFactories,
 }: {
   provider:
@@ -101,7 +100,6 @@ const addModel = ({
   name: string;
   aliases: string[];
   capabilities: Capabilities;
-  providerOptions?: Record<string, unknown>;
   nativeModelToolFactories?: Partial<Record<LLMNativeModelToolId, () => any>>;
 }) => {
   let modelName = name.includes(":")
@@ -111,10 +109,6 @@ const addModel = ({
   // AWS includes colons in their model names, so we need to special case it.
   if (name.includes("us.amazon")) {
     modelName = name;
-  }
-
-  if (name.includes("-thinking") && !name.startsWith("gateway:")) {
-    modelName = modelName.split("-thinking")[0];
   }
 
   const model = provider(modelName);
@@ -161,30 +155,6 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
 
   addModel({
     provider: anthropicProvider,
-    name: "anthropic:claude-opus-4-1-thinking",
-    aliases: [
-      "anthropic:claude-opus-4-1-thinking-latest",
-      "claude-opus-4-1-thinking",
-    ],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 32000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 32000 },
-      },
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
     name: "anthropic:claude-sonnet-4-0",
     aliases: ["anthropic:claude-sonnet-4-0-latest", "claude-sonnet-4-0"],
     capabilities: {
@@ -196,30 +166,6 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
       stopSequences: true,
       streaming: true,
       reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-sonnet-4-0-thinking",
-    aliases: [
-      "anthropic:claude-sonnet-4-0-thinking-latest",
-      "claude-sonnet-4-0-thinking",
-    ],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 64000 },
-      },
     },
   });
 
@@ -241,27 +187,6 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
 
   addModel({
     provider: anthropicProvider,
-    name: "anthropic:claude-sonnet-4-5-thinking",
-    aliases: ["sonnet-4-5-thinking", "sonnet-4.5-thinking"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 64000 },
-      },
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
     name: "anthropic:claude-sonnet-4-6",
     aliases: ["sonnet-4-6", "sonnet-4.6"],
     capabilities: {
@@ -273,27 +198,6 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
       stopSequences: true,
       streaming: true,
       reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: anthropicProvider,
-    name: "anthropic:claude-sonnet-4-6-thinking",
-    aliases: ["sonnet-4-6-thinking", "sonnet-4.6-thinking"],
-    capabilities: {
-      contextWindow: 200_000,
-      maxOutputTokens: 64000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      anthropic: {
-        thinking: { type: "enabled", budgetTokens: 64000 },
-      },
     },
   });
 
@@ -376,25 +280,6 @@ if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
 
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-5-thinking",
-    aliases: ["openai:gpt-5-thinking-latest", "gpt-5-thinking"],
-    capabilities: {
-      contextWindow: 400_000,
-      maxOutputTokens: 128_000,
-      images: true,
-      prefill: false,
-      systemPrompt: true,
-      stopSequences: false,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      reasoningEffort: "high",
-    },
-  });
-
-  addModel({
-    provider: openAIProvider,
     name: "openai:gpt-5-mini",
     aliases: ["openai:gpt-5-mini-latest", "gpt-5-mini"],
     capabilities: {
@@ -406,25 +291,6 @@ if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
       stopSequences: true,
       streaming: true,
       reasoning: false,
-    },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:gpt-5-mini-thinking",
-    aliases: ["openai:gpt-5-mini-thinking-latest", "gpt-5-mini-thinking"],
-    capabilities: {
-      contextWindow: 400_000,
-      maxOutputTokens: 128_000,
-      images: true,
-      prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
-      streaming: true,
-      reasoning: true,
-    },
-    providerOptions: {
-      reasoningEffort: "high",
     },
   });
 }

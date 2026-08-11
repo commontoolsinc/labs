@@ -16,10 +16,35 @@ runtime and gives a user a way to move around their spaces. Entry point is
   exports. A change there is a change to two packages.
 - A component never writes application state. It calls `this.command(...)` from
   `BaseView`, which dispatches a composed, bubbling `shell-command` event that
-  `RootView` catches and applies. `Command` is a closed union in
-  `shared/app/commands.ts`, and `isCommand` rejects anything outside it at the
-  boundary, so a new kind of state change means extending that union rather than
-  reaching past it.
+  `XRootView` catches and routes to one of its own methods. `Command` is a
+  closed union in `src/views/BaseView.ts`, so a new kind of state change means a
+  new arm on that union and a new method on `XRootView`, not reaching past
+  either. That event carries an unchecked `detail` across the DOM, so
+  `setConfig` re-checks the config key it is handed.
+- `XRootView` owns every write to `AppState`, through `setView`, `setIdentity`
+  and `setConfig`. `shared/app/state.ts` names the part of that surface a caller
+  outside the element sees as `ShellApp`: the shell's `Navigation` takes one,
+  and `src/index.ts` publishes the root element on `globalThis.app` under that
+  type, which is how integration tests drive the page.
+- Navigation is the other way in, and it does not come from a shell view. Anyone
+  holding `@commonfabric/shell/shared` calls `navigate(...)`, which dispatches a
+  `cf-navigate` event on `globalThis`; the `Navigation` class in
+  `shared/navigate.ts` listens, writes browser history, and calls `setView` on
+  the `ShellApp` it holds. `cf-cell-link`, `cf-space-link`, `cf-render`, and
+  `cf-profile-badge` navigate this way, so a piece being rendered can move the
+  whole shell. The events an embedding host may bind to instead are listed in
+  [`host-embedding.md`](../../docs/features/host-embedding.md).
+- `XRootView` is where a `cf-` component gets its runtime. It holds the only
+  `@provide` of `runtimeContext` and `spaceContext`, the two Lit contexts
+  defined in the `ui` package, and five components there `@consume` them:
+  `cf-cell-link`, `cf-code-editor`, `cf-file-input`, `cf-profile-badge`, and
+  `cf-prompt-input`. One of those mounted outside this tree sees `undefined` for
+  both and renders as though nothing is connected.
+- `src/lib/runtime.ts` and `src/lib/credentials.ts` are one-line re-exports of
+  `@commonfabric/lib-shell`, which is where `RuntimeInternals` and the key
+  handling actually live. The pattern integration tests import that package
+  directly, so editing it changes something outside this package too. Look there
+  first when a runtime question is not answered by the files under `src/`.
 - Embed mode is a property of the route, not of a component. The `.embed` path
   prefix (`shared/app/view.ts`) strips shell-owned chrome, and every navigation
   has to preserve it — including one issued by a rendered pattern. A navigation
@@ -36,8 +61,10 @@ runtime and gives a user a way to move around their spaces. Entry point is
 | Question                       | Read                                                                                                         |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | The state shape                | `shared/app/state.ts`                                                                                        |
-| What commands exist            | `shared/app/commands.ts`                                                                                     |
-| How a command is applied       | `processCommand` in `src/views/RootView.ts`                                                                  |
-| How the runtime is mounted     | `src/lib/runtime.ts`                                                                                         |
+| What commands exist            | `Command` in `src/views/BaseView.ts`                                                                         |
+| How a command is applied       | `onCommand` and the state setters in `src/views/RootView.ts`                                                 |
+| How a navigation becomes one   | `Navigation` in `shared/navigate.ts`                                                                         |
+| What a URL means, embed mode   | `shared/app/view.ts`                                                                                         |
+| How the runtime is mounted     | `RuntimeInternals` in `packages/lib-shell/src/runtime.ts`                                                    |
 | Coding style and test commands | [`DEVELOPMENT.md`](../../docs/development/DEVELOPMENT.md), [`TESTING.md`](../../docs/development/TESTING.md) |
 | Writing a `cf-` component      | the `lit-component` skill                                                                                    |

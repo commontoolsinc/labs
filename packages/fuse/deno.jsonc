@@ -5,6 +5,6 @@
   "tasks": {
     "test": "deno test --allow-ffi --allow-read --allow-write --allow-env --allow-net --allow-run",
     "bench": "deno run -A ../../scripts/fuse-bench.ts",
-    "bench:entity-projection": "deno bench --allow-env --v8-flags=--expose-gc entity-projection.bench.ts"
+    "bench:entity-projection": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --v8-flags=--expose-gc entity-projection.bench.ts"
   }
 }

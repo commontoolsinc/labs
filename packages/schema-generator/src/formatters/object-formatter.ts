@@ -1,7 +1,8 @@
 import ts from "typescript";
-import type {
-  MutableJSONSchema,
-  MutableJSONSchemaObj,
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  type MutableJSONSchema,
+  type MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
@@ -25,6 +26,7 @@ import {
   attachDocTags,
   extractDocFromSymbolAndDecls,
   getDeclDocs,
+  symbolHasDeprecatedTag,
 } from "../doc-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
@@ -157,6 +159,13 @@ function shouldSkipInternalProperty(
   context: GenerationContext,
 ): boolean {
   if (propName.startsWith("__@")) {
+    return true;
+  }
+
+  // The FabricSpecialObject nominal brand exists only in the type system —
+  // no runtime value carries the key, so it must never appear in a schema's
+  // `properties` or `required`.
+  if (propName === FABRIC_SPECIAL_OBJECT_BRAND) {
     return true;
   }
 
@@ -302,6 +311,7 @@ export class ObjectFormatter implements TypeFormatter {
           ) {
             required.push(propName);
           }
+          attachDeprecatedStreamMark(wrapperSchema, prop, checker);
           properties[propName] = wrapperSchema;
         }
         continue;
@@ -320,6 +330,13 @@ export class ObjectFormatter implements TypeFormatter {
         context,
         propTypeNode,
       );
+      if (isRecord(generated)) {
+        attachDeprecatedStreamMark(
+          generated as Record<string, unknown>,
+          prop,
+          checker,
+        );
+      }
       // Attach property description from JSDoc (if any)
       const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
       if (text && isRecord(generated)) {
@@ -411,5 +428,26 @@ export class ObjectFormatter implements TypeFormatter {
   ): MutableJSONSchema | undefined {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
+  }
+}
+
+/**
+ * Verb listing mark (WS-F): a stream-valued property whose declaration carries
+ * `@deprecated` JSDoc lowers to standard JSON Schema `deprecated: true`.
+ * Annotation-class (classified in the piece compat checker), so it adds and
+ * removes freely; `cf piece verbs` hides marked verbs by default while
+ * `cf piece call` never consults it. Applied only where the property schema is
+ * stream-marked — deprecation of non-verb data is out of this mark's scope.
+ */
+function attachDeprecatedStreamMark(
+  schema: Record<string, unknown>,
+  prop: ts.Symbol,
+  checker: ts.TypeChecker,
+): void {
+  const asCell = schema.asCell;
+  const isStream = Array.isArray(asCell) && asCell.includes("stream");
+  if (!isStream) return;
+  if (symbolHasDeprecatedTag(prop, checker)) {
+    schema.deprecated = true;
   }
 }

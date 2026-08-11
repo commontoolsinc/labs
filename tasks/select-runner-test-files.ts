@@ -1,21 +1,25 @@
 #!/usr/bin/env -S deno run --allow-read
 
 import { parseShard } from "./shard-utils.ts";
+import { RUNNER_TEST_WEIGHTS } from "./test-timing-weights.ts";
+import { assignWeightedShards } from "./weighted-shards.ts";
 export { parseShard };
 
-// Runner test files are split across shards by round-robin over the sorted file
-// list. There is no per-file weighting: a byte-size table used to live here, but
-// file size does not track run time, so it balanced no better than plain
-// round-robin. A time-weighted split would do better and can be added if the
-// imbalance starts to matter on the critical path.
+// Observed timings place expensive files first. Files absent from the profile
+// receive a unit weight, so newly added tests remain covered and spread evenly.
 export function selectRunnerTestFiles(
   files: { name: string }[],
   shard: { index: number; total: number },
+  weights: Readonly<Record<string, number>> = RUNNER_TEST_WEIGHTS,
 ): string[] {
-  return files
-    .map((file) => file.name)
-    .sort()
-    .filter((_, i) => i % shard.total === shard.index - 1);
+  const names = files.map((file) => file.name);
+  const assignments = assignWeightedShards(
+    names.map((name) => ({ name, weight: weights[name] ?? 1 })),
+    shard.total,
+  );
+  return names
+    .filter((name) => assignments.get(name) === shard.index)
+    .sort();
 }
 
 export async function listRunnerTests(): Promise<{ name: string }[]> {

@@ -22,6 +22,9 @@ export interface DiffFileRange {
   readonly path: string;
   readonly isTest: boolean;
   readonly isMarkdown: boolean;
+  /** Added and removed line counts within the file's range. */
+  readonly adds: number;
+  readonly dels: number;
   /** The one-line summary shown when the file is collapsed. */
   readonly summary: Line;
 }
@@ -48,6 +51,8 @@ export function diffFiles(text: string): DiffFileRange[] {
       path,
       isTest: isTestPath(path),
       isMarkdown: isMarkdownPath(path),
+      adds,
+      dels,
       summary: summaryLine({
         oldPath: file.oldPath,
         newPath: file.newPath,
