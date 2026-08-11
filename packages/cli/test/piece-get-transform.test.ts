@@ -2201,6 +2201,36 @@ describe("cf piece get transforms", () => {
       ).toEqual({ topic: { $link: addressOf(notes[0]) } });
     });
 
+    /**
+     * The board reopened under a schema that marks its fields required. A
+     * generated pattern schema does this and `boardSchema` above does not,
+     * which is the whole reason a rejected position surviving into `required`
+     * stayed invisible to these tests while breaking a live read.
+     */
+    const requiredBoardSchema = {
+      ...boardSchema,
+      required: ["topic", "label"],
+    } as const satisfies JSONSchema;
+
+    it("reads a required sibling beside a marked position", async () => {
+      const { notes } = await seedBoard("link-marker-required", true);
+      const board = runtime.getCell(
+        space,
+        "link-marker-required-board",
+        requiredBoardSchema,
+      );
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"topic":{"$link":true},"label":true}}',
+          ),
+        }),
+      ).toEqual({
+        topic: { $link: addressOf(notes[0]) },
+        label: "Field notes",
+      });
+    });
+
     it("returns the address and the contents asked for beside it", async () => {
       const { board, notes } = await seedBoard("link-marker-beside", true);
       expect(
