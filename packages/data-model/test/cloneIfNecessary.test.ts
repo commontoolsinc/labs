@@ -20,7 +20,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
 
-describe("cloneIfNecessary", () => {
+describe("cloneIfNecessary()", () => {
   describe(`error cases`, () => {
     it("throws for `frozen=true`, `force=true`", () => {
       const value = { a: 1 };
@@ -44,7 +44,7 @@ describe("cloneIfNecessary", () => {
       expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
 
-    it("passes through bigint unchanged", () => {
+    it("passes through a `bigint` unchanged", () => {
       expect(cloneIfNecessary(42n)).toBe(42n);
     });
 
@@ -465,7 +465,7 @@ describe("cloneIfNecessary", () => {
       );
     });
 
-    it("handles shared (diamond) references without throwing", () => {
+    it("clones a diamond-shared reference into two equal subtrees", () => {
       const shared = { x: 1 };
       const value = { a: shared, b: shared };
       // Shared (non-circular) references should not throw.

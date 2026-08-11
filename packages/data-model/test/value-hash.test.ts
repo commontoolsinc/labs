@@ -986,7 +986,7 @@ describe("value-hash", () => {
         expect(hex(hashBytesOf(cid1))).not.toBe(hex(hashBytesOf(cid2)));
       });
 
-      it("works for a `FabricHash` inside a plain object (does not throw)", () => {
+      it("hashes a `FabricHash` inside a plain object without throwing", () => {
         // This captures the essence of using `FabricHash` instances as things
         // like content IDs inside `Fact` objects.
         const fact = {
@@ -1174,7 +1174,7 @@ describe("value-hash", () => {
         // `toJSON` gets no special reading here either: it is a function-valued
         // member, and functions have no hash.
         const obj = { toJSON: () => "hello" };
-        expect(() => hashOf(obj)).toThrow("unsupported type: function");
+        expect(() => hashOf(obj)).toThrow("unsupported type `function`");
       });
     });
   });

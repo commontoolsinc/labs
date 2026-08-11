@@ -21,11 +21,11 @@ describe("impl", () => {
       expect(seemsLikeJsonEncodedFabricValue(encoded)).toBe(true);
     });
 
-    it("rejects empty string", () => {
+    it("returns `false` for an empty string", () => {
       expect(seemsLikeJsonEncodedFabricValue("")).toBe(false);
     });
 
-    it("rejects plain JSON without the prefix", () => {
+    it("returns `false` for plain JSON without the prefix", () => {
       // These are plain JSON without the prefix, so the dispatch must reject
       // them.
       expect(seemsLikeJsonEncodedFabricValue("true")).toBe(false);
@@ -38,7 +38,7 @@ describe("impl", () => {
       expect(seemsLikeJsonEncodedFabricValue("-1")).toBe(false);
     });
 
-    it("rejects partial or misplaced prefixes", () => {
+    it("returns `false` for a partial or misplaced prefix", () => {
       expect(seemsLikeJsonEncodedFabricValue("fvj")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("fvj1")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("FVJ1:")).toBe(false);
@@ -47,7 +47,7 @@ describe("impl", () => {
       expect(seemsLikeJsonEncodedFabricValue("xfvj1:")).toBe(false);
     });
 
-    it("rejects bare identifiers and other non-JSON-looking strings", () => {
+    it("returns `false` for a bare identifier or other non-JSON-looking string", () => {
       expect(seemsLikeJsonEncodedFabricValue("hello")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("undefined")).toBe(false);
     });

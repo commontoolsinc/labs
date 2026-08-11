@@ -66,14 +66,14 @@ import {
   type FoldPlan,
   identityFold,
 } from "./fold.ts";
-import { parseDiff } from "./diff.ts";
+import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
 import {
   commitSubjects,
   findCommitHeaders,
   findCommitMessages,
 } from "./commitmsg.ts";
 import type { Highlighter, Semantics } from "./languages/language.ts";
-import { EditBuffer } from "./editbuffer.ts";
+import { EditBuffer, type LineEndingProvenance } from "./editbuffer.ts";
 import type {
   EditableSource,
   ExpandResult,
@@ -363,8 +363,14 @@ export class Session {
     this.files = files;
     // The edit buffer mirrors the document text; for an editable file the two
     // stay in lock-step (the document is a re-parse of the buffer).
-    if (source) this.buffer = new EditBuffer(doc.text);
-    if (options.viewMode === "rendered" && source?.render) {
+    if (source) {
+      this.buffer = new EditBuffer(
+        doc.text,
+        source.lineEndingProvenance?.(doc.text),
+      );
+    }
+    const initialViewMode = options.viewMode ?? source?.defaultViewMode;
+    if (initialViewMode === "rendered" && source?.render) {
       this.viewMode = "rendered";
       this.setSourceDocument(doc);
     }
@@ -415,6 +421,10 @@ export class Session {
   }
 
   private toggleViewMode(): void {
+    if (this.source?.renderLineTopology === "independent") {
+      this.message = "This rendered view has no line-aligned source view.";
+      return;
+    }
     const changed = this.setViewMode(
       this.viewMode === "source" ? "rendered" : "source",
     );
@@ -939,7 +949,8 @@ export class Session {
         ? this.displayAdjacentDiffMetadataRows(offeredExpand)
         : [],
       canEdit: !this.cursorOn && !!this.source?.editable,
-      canRender: !!this.source?.render,
+      canRender: !!this.source?.render &&
+        this.source.renderLineTopology !== "independent",
       viewMode: this.viewMode,
       hasNonPrintables: this.hasNonPrintables(),
       notice: null,
@@ -2194,6 +2205,7 @@ export class Session {
     this.highlighter = this.source?.createHighlighter?.(
       this.buffer!.text(),
       this.currentDoc.lines,
+      this.buffer!.lineEndingProvenance(),
     );
   }
 
@@ -2218,7 +2230,7 @@ export class Session {
           b.moveBufferEnd();
           return this.afterMove();
         case "d":
-          if (this.guardForwardEdit()) {
+          if (this.guardForwardWordEdit()) {
             b.killWordForward();
             this.afterEdit();
           }
@@ -2265,7 +2277,7 @@ export class Session {
         b.moveLeft();
         return this.afterMove();
       case "right":
-        b.moveRight();
+        this.moveRightAcrossTransport();
         return this.afterMove();
       case "up":
         b.moveUp();
@@ -2285,7 +2297,7 @@ export class Session {
         b.moveLeft();
         return this.afterMove();
       case "ctrl-f":
-        b.moveRight();
+        this.moveRightAcrossTransport();
         return this.afterMove();
       case "ctrl-p":
         b.moveUp();
@@ -2322,7 +2334,7 @@ export class Session {
       case "delete":
       case "ctrl-d":
         if (this.guardForwardEdit()) {
-          b.deleteForward();
+          b.deleteForward(this.logicalLineEnd());
           this.afterEdit();
         }
         return;
@@ -2344,7 +2356,10 @@ export class Session {
           if (this.allowEdit(false, false)) {
             const hunkHeader = this.hunkHeaderAt(b.row);
             const start = this.editStart() ?? 1;
-            const onContext = b.lines[b.row]?.[0] === " ";
+            const line = b.lines[b.row] ?? "";
+            const onContext = line[0] === " ";
+            const logicalEnd = this.logicalLineEnd();
+            const transport = logicalEnd < b.currentLineLength() ? "\r" : "";
             // Enter splits the line at the cursor. On a context line the result
             // is shown minimally: an empty half just adds a blank line and the
             // line stays unchanged context (start → blank above, end → blank
@@ -2356,19 +2371,53 @@ export class Session {
               // Empty head: the blank added line goes above and the cursor
               // follows the content onto the line below, keeping its place at
               // the line start (past the marker).
-              b.spliceLines(b.row, 0, [prefix], 1, start);
+              const chars = [...line];
+              const protectedPrefix = chars.slice(1, start).join("");
+              if (protectedPrefix.length > 0) {
+                const content = chars.slice(start, logicalEnd).join("");
+                b.spliceLines(
+                  b.row,
+                  1,
+                  [
+                    `-${protectedPrefix}${content}${transport}`,
+                    `${prefix}${protectedPrefix}${transport}`,
+                    `${prefix}${content}${transport}`,
+                  ],
+                  2,
+                  1,
+                );
+              } else {
+                b.spliceLines(
+                  b.row,
+                  0,
+                  [`${prefix}${transport}`],
+                  1,
+                  start,
+                );
+              }
               this.splitRow = null;
-            } else if (onContext && b.col < b.currentLineLength()) {
+            } else if (onContext && b.col < logicalEnd) {
               this.prepareContextEdit();
-              b.insert(`\n${prefix}`);
+              this.splitDiffLine(prefix);
+            } else if (onContext) {
+              b.spliceLines(
+                b.row + 1,
+                0,
+                [`${prefix}${transport}`],
+                0,
+                [...prefix].length,
+              );
             } else {
-              b.insert(`\n${prefix}`);
+              this.splitDiffLine(prefix);
             }
             this.adjustHunkCounts(0, 1, hunkHeader);
             this.afterEdit();
           }
         } else {
-          b.insertNewline();
+          b.insertNewline(
+            this.logicalLineEnd(),
+            this.plainNewlineSuffix(),
+          );
           this.afterEdit();
         }
         return;
@@ -2381,7 +2430,7 @@ export class Session {
         return;
       case "ctrl-k":
         if (this.guardForwardEdit()) {
-          b.killLine();
+          b.killLine(this.logicalLineEnd());
           this.afterEdit();
         }
         return;
@@ -2448,6 +2497,24 @@ export class Session {
     this.splitRow = b.row; // the added line, so undoing the edit can collapse it
   }
 
+  /** Split an added diff line while retaining its newline transport. */
+  private splitDiffLine(prefix: string): void {
+    const b = this.buffer!;
+    const chars = [...b.lines[b.row]];
+    const logicalEnd = this.logicalLineEnd();
+    const transport = logicalEnd < chars.length ? "\r" : "";
+    const split = Math.min(b.col, logicalEnd);
+    const before = chars.slice(0, split).join("");
+    const after = chars.slice(split, logicalEnd).join("");
+    b.spliceLines(
+      b.row,
+      1,
+      [`${before}${transport}`, `${prefix}${after}${transport}`],
+      1,
+      [...prefix].length,
+    );
+  }
+
   /** Whether the cursor is on a removed line in a hunk whose new side can be
    * saved back to disk. */
   private canResurrectRemovedLine(): boolean {
@@ -2457,24 +2524,62 @@ export class Session {
       pol.regionKind(b.lines, b.row) === "removed";
   }
 
-  /** Carry a removed line back onto the diff's new side as unchanged context.
-   * Its old-side count is unchanged and its new-side count grows by one. */
+  /** Carry a removed line back onto the diff's new side. Lines whose old and
+   * new encoding markers differ remain a removed/added pair. */
   private resurrectRemovedLine(): boolean {
     if (!this.canResurrectRemovedLine()) return false;
     const b = this.buffer!;
-    const hunkHeader = this.hunkHeaderAt(b.row);
+    const targetRow = b.row;
+    const parsed = this.parsedHunkAt(b.row);
+    const hunkHeader = parsed?.hunk.headerLine ?? null;
+    const line = b.lines[b.row];
+    const oldHasUtf8Bom = parsed?.model.lines[b.row]?.oldLine === 0 &&
+      line[1] === "\uFEFF";
+    const newHasUtf8Bom = this.source?.policy?.hasUtf8Bom?.(
+      b.lines,
+      b.row,
+    ) === true;
+    const carriesNewUtf8Bom = newHasUtf8Bom && parsed !== null &&
+      this.newSideInsertionLine(parsed.model, parsed.hunk, b.row) === 0;
+    const newSideBom = carriesNewUtf8Bom && parsed
+      ? this.newSideBomCarrier(parsed.model, parsed.hunk)
+      : null;
     if (!this.adjustHunkCounts(0, 1, hunkHeader)) {
       this.message = "This hunk could not be updated.";
       return true;
     }
-    const line = b.lines[b.row];
+    const decodedContent = [...line].slice(oldHasUtf8Bom ? 2 : 1).join("");
+    const newContent = `${carriesNewUtf8Bom ? "\uFEFF" : ""}${decodedContent}`;
+    const context = oldHasUtf8Bom === carriesNewUtf8Bom;
     b.spliceLines(
-      b.row,
+      targetRow,
       1,
-      [` ${line.slice(1)}`],
-      0,
-      Math.max(1, b.col),
+      context ? [` ${newContent}`] : [line, `+${newContent}`],
+      context ? 0 : 1,
+      1 + (carriesNewUtf8Bom ? 1 : 0),
     );
+    if (newSideBom !== null) {
+      const carrierRow = newSideBom +
+        (context || newSideBom < targetRow ? 0 : 1);
+      const carrier = b.lines[carrierRow];
+      if (carrier?.[0] === "+") {
+        b.lines[carrierRow] = `+${[...carrier].slice(2).join("")}`;
+      } else if (carrier?.[0] === " ") {
+        const cursor = { row: b.row, col: b.col };
+        const content = [...carrier].slice(2).join("");
+        b.spliceLines(
+          carrierRow,
+          1,
+          [`-\uFEFF${content}`, `+${content}`],
+          0,
+          1,
+        );
+        b.place(
+          cursor.row + (carrierRow < cursor.row ? 1 : 0),
+          cursor.col,
+        );
+      }
+    }
     this.afterEdit();
     this.message = "Resurrected the removed line.";
     return true;
@@ -2503,16 +2608,55 @@ export class Session {
   /** The parsed hunk containing a body row. Structural lookup keeps body text
    * such as `--- prior` and `+++ next` from being mistaken for file headers. */
   private hunkHeaderAt(row: number): number | null {
+    return this.parsedHunkAt(row)?.hunk.headerLine ?? null;
+  }
+
+  /** The parsed hunk containing a body row. */
+  private parsedHunkAt(
+    row: number,
+  ): { model: DiffModel; hunk: DiffHunk } | null {
     if (!this.buffer) return null;
+    const policyLookup = this.source?.policy?.hunkAt;
+    if (policyLookup) return policyLookup(this.buffer.lines, row);
     const model = parseDiff(this.buffer.text());
-    for (const file of model?.files ?? []) {
+    if (!model) return null;
+    for (const file of model.files) {
       for (const hunk of file.hunks) {
         if (row > hunk.headerLine && row <= hunk.endLine) {
-          return hunk.headerLine;
+          return { model, hunk };
         }
       }
     }
     return null;
+  }
+
+  /** The first new-side line carrying the file's decoded UTF-8 BOM. */
+  private newSideBomCarrier(model: DiffModel, hunk: DiffHunk): number | null {
+    for (let row = hunk.headerLine + 1; row <= hunk.endLine; row++) {
+      const kind = model.lines[row]?.kind;
+      if (
+        (kind === "ctx" || kind === "add") &&
+        model.lines[row]?.newLine === 0 &&
+        this.buffer?.lines[row]?.[1] === "\uFEFF"
+      ) {
+        return row;
+      }
+    }
+    return null;
+  }
+
+  /** The new-file line where a removed row would be inserted. */
+  private newSideInsertionLine(
+    model: DiffModel,
+    hunk: DiffHunk,
+    row: number,
+  ): number {
+    let line = hunk.newCount === 0 ? hunk.newStart : hunk.newStart - 1;
+    for (let candidate = hunk.headerLine + 1; candidate < row; candidate++) {
+      const kind = model.lines[candidate]?.kind;
+      if (kind === "ctx" || kind === "add") line++;
+    }
+    return line;
   }
 
   /** Grow or shrink a parsed hunk header after its body changes. A zero-count
@@ -2563,6 +2707,54 @@ export class Session {
     return pol.editStart(this.buffer!.lines, this.buffer!.row);
   }
 
+  /** The current line's last editable column, before source-owned transport. */
+  private logicalLineEnd(row = this.buffer!.row): number {
+    const b = this.buffer!;
+    const line = b.lines[row] ?? "";
+    const physicalEnd = [...line].length;
+    const ordinaryEnd = line.endsWith("\r") && row < b.lines.length - 1
+      ? physicalEnd - 1
+      : physicalEnd;
+    const end = this.source?.logicalEnd?.(b.lines, row) ?? ordinaryEnd;
+    return clamp(end, 0, physicalEnd);
+  }
+
+  /** The character before LF in the nearest newline of an ordinary file. */
+  private plainNewlineSuffix(): string {
+    const b = this.buffer!;
+    if (b.row < b.lines.length - 1) {
+      const line = b.lines[b.row] ?? "";
+      return line.endsWith("\r") ? "\r" : "";
+    }
+    if (b.row > 0) {
+      const previous = b.lines[b.row - 1] ?? "";
+      return previous.endsWith("\r") ? "\r" : "";
+    }
+    return "";
+  }
+
+  /** Keep a right-arrow motion able to cross a protected CRLF boundary. */
+  private moveRightAcrossTransport(): void {
+    const b = this.buffer!;
+    const logicalEnd = this.logicalLineEnd();
+    if (
+      b.col >= logicalEnd && logicalEnd < b.currentLineLength() &&
+      b.row < b.lines.length - 1
+    ) {
+      b.place(b.row + 1, 0);
+      return;
+    }
+    b.moveRight();
+  }
+
+  /** Keep source-owned transport outside the text cursor. */
+  private clampToLogicalLine(): void {
+    const b = this.buffer;
+    if (!b) return;
+    const end = this.logicalLineEnd();
+    if (b.col > end) b.place(b.row, end);
+  }
+
   /** Whether the cursor sits in an editable commit-message line — plain indented
    * text, edited without the diff's removed/added pairing. */
   private inMessageRow(): boolean {
@@ -2589,12 +2781,13 @@ export class Session {
       this.message = this.notEditableMessage();
       return false;
     }
+    this.clampToLogicalLine();
     if (b.col < start) b.place(b.row, start);
     if (split) this.prepareContextEdit();
     return true;
   }
 
-  /** Gate a delete-forward edit (delete, M-d, C-k): refuse the diff marker and
+  /** Gate a delete-forward edit (delete, C-k): refuse the diff marker and
    * a delete at end of line, which would join the next line — removing a line
    * is Backspace at its start instead. */
   private guardForwardEdit(): boolean {
@@ -2605,8 +2798,27 @@ export class Session {
       this.message = this.notEditableMessage();
       return false;
     }
+    this.clampToLogicalLine();
     if (b.col < start) b.place(b.row, start);
-    if (b.col >= b.currentLineLength()) {
+    if (b.col >= this.logicalLineEnd()) {
+      this.message = JOIN_MSG;
+      return false;
+    }
+    this.prepareContextEdit();
+    return true;
+  }
+
+  /** Gate a forward word kill that would consume a diff line boundary. */
+  private guardForwardWordEdit(): boolean {
+    if (!this.source?.policy) return true;
+    const b = this.buffer!;
+    const start = this.editStart();
+    if (start === null) {
+      this.message = this.notEditableMessage();
+      return false;
+    }
+    if (b.col < start) b.place(b.row, start);
+    if (b.wordEndForward().row !== b.row) {
       this.message = JOIN_MSG;
       return false;
     }
@@ -2620,7 +2832,9 @@ export class Session {
   private handleBackspace(): void {
     const b = this.buffer!;
     if (!this.source?.policy) {
-      b.deleteBackward();
+      b.deleteBackward(
+        b.row > 0 ? this.logicalLineEnd(b.row - 1) : undefined,
+      );
       return this.afterEdit();
     }
     const start = this.editStart();
@@ -2628,33 +2842,75 @@ export class Session {
       this.message = this.notEditableMessage();
       return;
     }
+    this.clampToLogicalLine();
     if (b.col > start) {
       this.prepareContextEdit();
       b.deleteBackward();
       return this.afterEdit();
     }
-    if (b.currentLineLength() <= start && b.row > 0) {
+    if (this.logicalLineEnd() <= start && b.row > 0) {
       this.removeDiffLine(start);
       return this.afterEdit();
     }
     this.message = MARKER_MSG;
   }
 
-  /** Remove the cursor's (empty-content) line, joining into the previous line
-   * and stripping the marker the join carries over, then shrink the hunk header
-   * by the side(s) the removed line counted on. */
+  /** Remove an empty added line. An empty context line becomes a removal so its
+   * original old-side coordinate and content provenance remain represented. */
   private removeDiffLine(markerLen: number): void {
     const b = this.buffer!;
     const marker = b.lines[b.row][0] ?? "";
-    const hunkHeader = this.hunkHeaderAt(b.row);
+    const context = marker === " " &&
+      this.source?.policy?.regionKind(b.lines, b.row) === "hunk";
+    const parsed = this.parsedHunkAt(b.row);
+    const hunkHeader = parsed?.hunk.headerLine ?? null;
+    const transportWidth = b.currentLineLength() - this.logicalLineEnd();
+    this.transferProtectedPrefix(markerLen, parsed);
+    if (context) {
+      b.lines[b.row] = `-${b.lines[b.row].slice(1)}`;
+      b.place(b.row, 1);
+      this.adjustHunkCounts(0, -1, hunkHeader);
+      return;
+    }
+    const previousEnding = b.lineEndingProvenance()[b.row - 1];
     b.place(b.row, 0);
     b.deleteBackward(); // join into the previous line
-    for (let i = 0; i < markerLen; i++) b.deleteForward(); // drop the marker
+    for (let i = 0; i < markerLen + transportWidth; i++) b.deleteForward();
+    const lineEndings = [...b.lineEndingProvenance()];
+    lineEndings[b.row] = previousEnding;
+    b.setLineEndingProvenance(lineEndings);
     this.adjustHunkCounts(
       marker === " " || marker === "-" ? -1 : 0,
       marker === " " || marker === "+" ? -1 : 0,
       hunkHeader,
     );
+  }
+
+  /** Move an encoding prefix from a removed first new-side line to its
+   * successor. A context successor becomes a removed/added pair. */
+  private transferProtectedPrefix(
+    markerLen: number,
+    parsed: { model: DiffModel; hunk: DiffHunk } | null,
+  ): void {
+    if (!this.buffer || markerLen <= 1 || parsed === null) return;
+    const b = this.buffer;
+    const prefix = [...b.lines[b.row]].slice(1, markerLen).join("");
+    if (prefix.length === 0) return;
+    const { model, hunk } = parsed;
+    for (let row = b.row + 1; row <= hunk.endLine; row++) {
+      const kind = model.lines[row]?.kind;
+      if (kind !== "ctx" && kind !== "add") continue;
+      const markerWidth = kind === "add" || b.lines[row][0] === " " ? 1 : 0;
+      const body = b.lines[row].slice(markerWidth);
+      if (kind === "add") {
+        b.lines[row] = `+${prefix}${body}`;
+      } else {
+        const cursor = { row: b.row, col: b.col };
+        b.spliceLines(row, 1, [`-${body}`, `+${prefix}${body}`], 0, 1);
+        b.place(cursor.row, cursor.col);
+      }
+      return;
+    }
   }
 
   /** Gate a backward word kill (M-Backspace): refuse reaching the marker. */
@@ -2666,7 +2922,13 @@ export class Session {
       this.message = this.notEditableMessage();
       return false;
     }
+    this.clampToLogicalLine();
     if (b.col <= start) {
+      this.message = MARKER_MSG;
+      return false;
+    }
+    const destination = b.wordStartBackward();
+    if (destination.row !== b.row || destination.col < start) {
       this.message = MARKER_MSG;
       return false;
     }
@@ -2697,6 +2959,10 @@ export class Session {
       this.message = MARKER_MSG;
       return false;
     }
+    if (Math.max(b.col, mark.col) > this.logicalLineEnd()) {
+      this.message = JOIN_MSG;
+      return false;
+    }
     this.prepareContextEdit();
     return true;
   }
@@ -2712,12 +2978,14 @@ export class Session {
   }
 
   private afterMove(): void {
+    this.clampToLogicalLine();
     this.ensureCursorVisible();
   }
 
   private afterEdit(): void {
     this.selectedIndex = null;
     this.collapseUnchangedPair();
+    this.clampToLogicalLine();
     if (this.source && this.buffer) {
       const text = this.buffer.text();
       const lines = this.liveHighlight(text);
@@ -2730,7 +2998,9 @@ export class Session {
         this.currentDoc = this.sourceDoc;
         this.needsReparse = true;
       } else {
-        this.setSourceDocument(this.source.parse(text));
+        this.setSourceDocument(
+          this.source.parse(text, this.buffer.lineEndingProvenance()),
+        );
         this.needsReparse = false;
       }
     }
@@ -2752,7 +3022,12 @@ export class Session {
    * incremental highlighter, created lazily and seeded with the current text so
    * the first keystroke is a full highlight and each later one is incremental. */
   private liveHighlight(text: string): readonly Line[] | null {
-    if (this.highlighter) return this.highlighter.update(text);
+    if (this.highlighter) {
+      return this.highlighter.update(
+        text,
+        this.buffer?.lineEndingProvenance(),
+      );
+    }
     return this.source?.highlight?.(text) ?? null;
   }
 
@@ -2762,7 +3037,12 @@ export class Session {
    * the next edit re-seeds it from this authoritative parse. */
   reparse(): void {
     if (!this.source || !this.buffer || !this.needsReparse) return;
-    this.setSourceDocument(this.source.parse(this.buffer.text()));
+    this.setSourceDocument(
+      this.source.parse(
+        this.buffer.text(),
+        this.buffer.lineEndingProvenance(),
+      ),
+    );
     this.needsReparse = false;
     // Re-baseline the live highlighter from this authoritative parse while still
     // editing; drop it when leaving edit mode.
@@ -3026,13 +3306,27 @@ export class Session {
       ? { amendCommit: false }
       : undefined;
     try {
-      this.message = this.source.save(current, baseline, options);
+      this.message = this.source.save(
+        current,
+        this.buffer.lineEndingProvenance(),
+        baseline,
+        options,
+      );
       const savedBaseline = this.source.baselineAfterSave?.(
         baseline,
         current,
         options,
       ) ?? current;
       this.buffer.setBaseline(savedBaseline);
+      const refreshedLineEndings = this.source.lineEndingProvenance?.(current);
+      if (refreshedLineEndings) {
+        const retainedLineEndings = this.buffer.lineEndingProvenance();
+        this.buffer.setLineEndingProvenance(
+          this.buffer.lines.map((_, index) =>
+            refreshedLineEndings[index] ?? retainedLineEndings[index]
+          ),
+        );
+      }
       if (target === "workspace" && this.buffer.dirty()) {
         this.message += "; commit message remains unsaved";
       }
@@ -3271,15 +3565,23 @@ export class Session {
       this.buffer.text(),
       this.buffer.row,
       scope,
+      this.buffer.lineEndingProvenance(),
     );
     if (!result) {
       this.message = "Nothing to revert there.";
       return;
     }
-    this.buffer.setText(result.text, result.cursorLine, 0);
+    this.buffer.setText(
+      result.text,
+      result.cursorLine,
+      0,
+      result.lineEndings ?? this.source.lineEndingProvenance?.(result.text),
+    );
     this.splitRow = null;
     this.snapCursorToEditable();
-    this.setSourceDocument(this.source.parse(result.text));
+    this.setSourceDocument(
+      this.source.parse(result.text, this.buffer.lineEndingProvenance()),
+    );
     this.needsReparse = false;
     if (this.cursorOn) this.seedHighlighter();
     this.clampScroll();
@@ -3360,6 +3662,23 @@ export class Session {
     const moved = (n: number) =>
       n + (n >= r.insertedAt ? r.inserted : 0) -
       (r.removedAt !== null && n > r.removedAt ? 1 : 0);
+    const lineEndings = r.text.split("\n").map(() => undefined) as Array<
+      LineEndingProvenance | undefined
+    >;
+    const insertedAt = r.insertedAt -
+      (r.removedAt !== null && r.up ? 1 : 0);
+    for (const [offset, ending] of r.insertedLineEndings.entries()) {
+      lineEndings[insertedAt + offset] = ending;
+    }
+    for (
+      let row = 0;
+      row < this.buffer.lineEndingProvenance().length;
+      row++
+    ) {
+      if (row === r.removedAt) continue;
+      const ending = this.buffer.lineEndingProvenance()[row];
+      if (ending !== undefined) lineEndings[moved(row)] = ending;
+    }
     // The line held still on screen: the one just outside the edge the revealed
     // lines go in at, so they open a gap on the hunk's side of it. Expanding
     // upwards holds the hunk's header and pushes the body down; expanding
@@ -3372,9 +3691,16 @@ export class Session {
     const pinRow = this.toDisplay(pinDoc) - this.top;
     const col = this.cursorOn ? this.buffer.col : 0;
     this.buffer.setBaseline(r.baseline);
-    this.buffer.setText(r.text, r.cursorLine, col);
+    this.buffer.setText(
+      r.text,
+      r.cursorLine,
+      col,
+      lineEndings,
+    );
     this.splitRow = null;
-    this.setSourceDocument(this.source.parse(r.text));
+    this.setSourceDocument(
+      this.source.parse(r.text, this.buffer.lineEndingProvenance()),
+    );
     this.needsReparse = false;
     this.wrapDecorations = new Map();
     this.wrapDecorationKey = "";
@@ -4017,11 +4343,22 @@ export class Session {
       return;
     }
     this.source = opened.source;
-    this.buffer = new EditBuffer(opened.text);
+    if (opened.source.defaultViewMode === "rendered") {
+      this.viewMode = "rendered";
+    }
+    this.buffer = new EditBuffer(
+      opened.text,
+      opened.source.lineEndingProvenance?.(opened.text),
+    );
     this.splitRow = null;
     this.highlighter = undefined; // the old highlighter was for the previous file
     this.clearFolds(); // the previous file's fold indices do not carry over
-    this.setSourceDocument(opened.source.parse(opened.text));
+    this.setSourceDocument(
+      opened.source.parse(
+        opened.text,
+        this.buffer.lineEndingProvenance(),
+      ),
+    );
     this.semantics = undefined; // the old service was for the previous file
     this.mode = "normal";
     this.cursorOn = false;

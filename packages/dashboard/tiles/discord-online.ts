@@ -10,8 +10,9 @@
 // the Discord developer portal (privileged intents); without them the gateway
 // closes with 4014.
 import type { Status, Tile, TileView } from "../types.ts";
-import { escapeHtml, multiSparkline, thin } from "../lib.ts";
+import { escapeHtml, multiSparkline, SPARK_FADE, thin } from "../lib.ts";
 import { dashboardCacheFile } from "../history-files.ts";
+import { themedChartSeries } from "../theme.ts";
 
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
 const SNAPSHOT_TIMEOUT_MS = 12_000;
@@ -24,11 +25,6 @@ const INTENTS = 259;
 const TEAM_ROLE_NAME = "Team";
 const TEAM_ROLE_NAMES = new Set([TEAM_ROLE_NAME, "Team Member"]);
 const VISITOR_COLOR = "#7c828c";
-// The chart lines fade from this (a shade darker than the good-status tile
-// background) on the far left up to their own color, matching the ci-duration
-// sparkline.
-const LINE_FADE = "#0e1915";
-
 // A rolling series of timestamped samples, charted as two lines. Samples are
 // retained for up to HISTORY_MAX_AGE_DAYS (~2 months) and persisted to disk in
 // the dashboard cache directory, reloaded on start so a relaunch keeps the
@@ -265,19 +261,21 @@ export const discordOnline: Tile = {
     // history feeds the span.
     const spanMs = history.length >= 2 ? history[history.length - 1].t - history[0].t : 0;
     const plot = thin(history, PLOT_POINTS);
+    const teamSeries = themedChartSeries(snap.teamColor);
+    const visitorSeries = themedChartSeries(VISITOR_COLOR);
     const chart = multiSparkline(
       [
-        { vals: plot.map((h) => h.team), color: snap.teamColor, label: String(snap.team) },
-        { vals: plot.map((h) => h.visitors), color: VISITOR_COLOR, label: String(snap.visitors) },
+        { vals: plot.map((h) => h.team), ...teamSeries, label: String(snap.team) },
+        { vals: plot.map((h) => h.visitors), ...visitorSeries, label: String(snap.visitors) },
       ],
-      { fadeFrom: LINE_FADE },
+      { fadeFrom: SPARK_FADE.good },
     );
     const swatch = (c: string) => `<span class="swatch" style="background:${escapeHtml(c)}"></span>`;
     // With the chart drawn, the counts sit at each line's end; until there are
     // two samples show them inline so the tile is never numberless.
     const subline = chart
-      ? `<p class="sub">${swatch(snap.teamColor)} team + ${swatch(VISITOR_COLOR)} visitors</p>`
-      : `<p class="sub">${swatch(snap.teamColor)} team ${snap.team} + ${swatch(VISITOR_COLOR)} visitors ${snap.visitors}</p>`;
+      ? `<p class="sub">${swatch(teamSeries.color)} team + ${swatch(visitorSeries.color)} visitors</p>`
+      : `<p class="sub">${swatch(teamSeries.color)} team ${snap.team} + ${swatch(visitorSeries.color)} visitors ${snap.visitors}</p>`;
 
     return {
       label,

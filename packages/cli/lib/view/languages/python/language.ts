@@ -4,6 +4,7 @@
  * navigation or a semantic layer.
  */
 import type { Language } from "../language.ts";
+import { utf8Decoder } from "../decoder.ts";
 import {
   createPythonHighlighter,
   pythonDocument,
@@ -12,6 +13,8 @@ import {
 
 export const pythonLanguage: Language = {
   id: "python",
+
+  input: { kind: "text", decoder: utf8Decoder },
 
   metadata: {
     extensions: [".py", ".pyi", ".pyw"],

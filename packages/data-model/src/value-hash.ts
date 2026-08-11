@@ -7,6 +7,7 @@
  * the full algorithm.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   createHasher,
   type IncrementalHasher,
@@ -241,7 +242,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 
     default:
       throw new Error(
-        `hashOf: unsupported type: ${typeof value}`,
+        `\`hashOf()\`: unsupported type \`${typeof value}\``,
       );
   }
 }
@@ -340,8 +341,8 @@ function feedObjectValue(
       // Nothing else is handled. As of this writing, specifically missing are
       // `Map`, `Set`, and `Error`.
       throw new Error(
-        `hashOf: unsupported object type: ${
-          value?.constructor?.name ?? typeof value
+        `\`hashOf()\`: unsupported object type ${
+          backtickQuote(value?.constructor?.name ?? typeof value)
         }`,
       );
     }
@@ -535,7 +536,7 @@ function hashOfInternal(
     }
 
     default: {
-      throw new Error(`Cannot hash value of type ${typeof value}`);
+      throw new Error(`Cannot hash value of type \`${typeof value}\``);
     }
   }
 }

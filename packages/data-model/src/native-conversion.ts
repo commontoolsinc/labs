@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isInstance,
   isRecord,
@@ -363,9 +364,9 @@ export function shallowFabricFromNativeValue(
       // Unrecognized object types (`Map`, `Set`, class instances, etc.) --
       // not valid `FabricValue`. Death before confusion!
       throw new Error(
-        `Not representable as a \`FabricValue\`: \`${
-          (value as object).constructor?.name ?? typeof value
-        }\` (not a recognized fabric type)`,
+        `Not representable as a \`FabricValue\`: ${
+          backtickQuote((value as object).constructor?.name ?? typeof value)
+        } (not a recognized fabric type)`,
       );
   }
 }

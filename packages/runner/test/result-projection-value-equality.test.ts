@@ -78,8 +78,9 @@ describe("result projection", () => {
     });
     // A result value that only becomes a `FabricValue` once converted: raw, it
     // is unhashable, so comparing the projection before converting it throws
-    // (`hashOf: unsupported object type`) instead of deciding anything. The two
-    // setups differ, so the second one reaches the comparison.
+    // (`` `hashOf()`: unsupported object type ``) instead of deciding
+    // anything. The two setups differ, so the second one reaches the
+    // comparison.
     const patternTagged = (tag: number) =>
       ({
         argumentSchema: { type: "object", properties: {} } as const,

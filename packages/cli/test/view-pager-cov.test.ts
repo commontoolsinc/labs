@@ -646,15 +646,16 @@ Deno.test("pager: paints a pressed button before its synchronous action starts",
       }),
       save: (
         text: string,
+        lineEndings: Parameters<typeof base.save>[1],
         baseline?: string,
-        options?: Parameters<typeof base.save>[2],
+        options?: Parameters<typeof base.save>[3],
       ) => {
         const promptFrames = writes.filter((write) =>
           write.includes("Amend commit 012345678")
         );
         promptFramesWhenSaveStarted = promptFrames.length;
         pressedFrameWasDistinct = promptFrames[0] !== promptFrames[1];
-        return base.save(text, baseline, options);
+        return base.save(text, lineEndings, baseline, options);
       },
     };
 
