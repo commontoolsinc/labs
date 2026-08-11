@@ -43,6 +43,17 @@ export function navigateTo(
     // The main reason we might be called again after navigating is that the
     // transaction to update the result cell failed, so we'll just set it again.
     if (navigated) {
+      // SERVED runs excepted: the intent tx owns the acting-instance
+      // result write; re-setting it here would ride the derivation-
+      // stamped wave tx and resolve against the wave-level SERVICE
+      // identity — a service-session instance write (the
+      // silent-empty-instance shape protocol.md §2 names).
+      if (
+        runtime.experimental.serverExecution === true &&
+        waveRunContextOf(tx) !== undefined
+      ) {
+        return;
+      }
       resultCell?.withTx(tx).set(true);
       return;
     }
@@ -90,32 +101,31 @@ export function navigateTo(
     // navigation; requiring a current value can block valid piece targets.
     if (!target) return;
 
-    // Resolve to root piece - follows links until path is empty
-    const resolvedTarget = target.resolveAsCell();
-
     // ---- Server-execution v2 Phase 4 (protocol.md §5, builtins.md §4):
     // under the flag, navigateTo is the SPLIT contract. The SERVED half
     // (a wave-stamped run) computes the target and writes the intent into
     // the firing session's effects INSTANCE; the CLIENT half of a flag-ON
     // runtime enacts OPTIMISTICALLY under the speculation overlay,
     // carrying the same deterministic nonce the authoritative intent
-    // arrives with. The OFF arm falls through to today's path unchanged.
+    // arrives with. The OFF arm falls through to today's path unchanged —
+    // target RESOLUTION stays inside each arm so the OFF path keeps
+    // today's exact order (navigateCallback check before resolve).
     if (runtime.experimental.serverExecution === true) {
       const waveContext = waveRunContextOf(tx);
       const speculationContext = speculationRunContextOf(tx);
       if (waveContext !== undefined) {
-        servedNavigate(tx, resolvedTarget);
+        servedNavigate(tx, target);
         return;
       }
       if (speculationContext !== undefined) {
-        optimisticNavigate(tx, resolvedTarget);
+        optimisticNavigate(tx, target);
         return;
       }
       // Neither stamp: an unstamped flag-ON run (not a scheduler run —
       // defensive). Fall through to today's path.
     }
 
-    legacyNavigate(tx, resolvedTarget);
+    legacyNavigate(tx, target);
   };
 
   /** The SERVED half (builtins.md §4): compute the target, write the §5
@@ -126,7 +136,7 @@ export function navigateTo(
    * transaction. No local enactment: the session's client enacts. */
   function servedNavigate(
     _tx: IExtendedStorageTransaction,
-    resolvedTarget: Cell<any>,
+    target: Cell<any>,
   ): void {
     const context = navigateEventContextOf(action);
     if (context === undefined) {
@@ -179,6 +189,8 @@ export function navigateTo(
 
     const nonce = effectIntentNonce(context.eventId, resultDocId ?? "");
     const space: MemorySpace = parentCell.space;
+    // Resolve to root piece - follows links until path is empty
+    const resolvedTarget = target.resolveAsCell();
     const targetLink = resolvedTarget.getAsNormalizedFullLink();
 
     const previousNavigated = navigated;
@@ -244,22 +256,53 @@ export function navigateTo(
         (entry as { nonce?: string }).nonce === nonce
       );
     if (!locallyPresent) {
+      if (intentTx.recordMergeableOp === undefined) {
+        // FAIL CLOSED: without the mergeable-append record the commit
+        // would carry the WHOLE local array — the serving replica's
+        // scope-NAME-keyed view can hold other sessions' entries (the
+        // OW17 residual), and a whole-array write would bleed them
+        // into the acting session's instance.
+        throw new Error(
+          "navigate intent write requires mergeable-append support " +
+            "(the tail-relative append is what keeps the collapsed " +
+            "local view out of the acting session's instance)",
+        );
+      }
       intentTx.writeValueOrThrow(entriesLink, [
         ...(Array.isArray(currentEntries) ? currentEntries : []),
         intentEntry,
       ] as never);
-      intentTx.recordMergeableOp?.(entriesLink, { op: "append", count: 1 });
+      intentTx.recordMergeableOp(entriesLink, { op: "append", count: 1 });
     }
     // The result cell records the navigation in the ACTING session's
     // instance (the same annotation-keyed addressing) — the client's own
     // speculative write converges on the same instance.
     resultCell.withTx(intentTx).set(true);
-    intentTx.commit().catch((error) => {
-      logger.warn("intent-commit-failed", () => [
-        `navigate intent ${nonce} failed to seal; a requeue or the next ` +
-        "input change retries",
+    // The seal outcome resolves as { error } (commit promises always
+    // resolve — extended-storage-transaction.ts); handle BOTH shapes,
+    // loudly. Recovery on failure: `navigated` rolls back via the
+    // commit callback above; a wave-conflict requeue re-runs the WHOLE
+    // event (the per-event fold in wave.ts's resolveConflicts), which
+    // recomputes the intent under the same deterministic nonce. An
+    // ISOLATED seal failure (no requeue, inputs unchanged) leaves the
+    // intent unissued until the next input change — the same
+    // input-driven re-land posture as the watermark doc's dropped
+    // write (space-server.ts); flagged in the Phase-4 PR.
+    intentTx.commit().then(({ error }) => {
+      if (error !== undefined) {
+        logger.error(
+          "intent-commit-failed",
+          `navigate intent ${nonce} failed to seal; navigated rolled ` +
+            "back — a requeue or the next input change retries",
+          error,
+        );
+      }
+    }).catch((error) => {
+      logger.error(
+        "intent-commit-failed",
+        `navigate intent ${nonce} seal rejected; navigated rolled back`,
         error,
-      ]);
+      );
     });
     runtime.scheduler.queueExecution();
   }
@@ -272,7 +315,7 @@ export function navigateTo(
    * re-enacting (protocol.md §5; T2.Q7). */
   function optimisticNavigate(
     tx: IExtendedStorageTransaction,
-    resolvedTarget: Cell<any>,
+    target: Cell<any>,
   ): void {
     const context = navigateEventContextOf(action);
     if (context === undefined) {
@@ -301,6 +344,8 @@ export function navigateTo(
     }
     const nonce = effectIntentNonce(context.eventId, resultDocId ?? "");
     const navigateCallback = runtime.navigateCallback;
+    // Resolve to root piece - follows links until path is empty
+    const resolvedTarget = target.resolveAsCell();
 
     const previousNavigated = navigated;
     const thisAttempt = ++navigationAttempt;
@@ -345,11 +390,14 @@ export function navigateTo(
   /** Today's client-computed path — the OFF arm, byte-identical. */
   function legacyNavigate(
     tx: IExtendedStorageTransaction,
-    resolvedTarget: Cell<any>,
+    target: Cell<any>,
   ): void {
     if (!runtime.navigateCallback) {
       throw new Error("navigateCallback is not set");
     }
+
+    // Resolve to root piece - follows links until path is empty
+    const resolvedTarget = target.resolveAsCell();
     const navigateCallback = runtime.navigateCallback;
 
     const previousNavigated = navigated;

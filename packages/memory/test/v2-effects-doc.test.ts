@@ -368,6 +368,13 @@ Deno.test("effects doc: the retirement scan (protocol §5's next-wave retirement
             }],
           } as ClientCommit,
         });
+        // The garbage actually STORED (else the defensive arms never
+        // execute and this step is vacuous).
+        const stored = readState(engine, {
+          id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+          scopeKey: resolvePrincipalSessionKey(BOB, BOB_SESSION),
+        })?.document?.value as Record<string, unknown> | undefined;
+        assertEquals(stored?.entries, "garbage");
         assertEquals(selectRetirableEffectsInstances(engine).length, 0);
       },
     );

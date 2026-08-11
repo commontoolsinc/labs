@@ -44,7 +44,10 @@ import {
 import { selectSchedulerBasisRows } from "@commonfabric/memory/v2/scheduler-basis";
 import {
   decodeMemoryBoundary,
+  resolvePrincipalSessionKey,
   resolveScopeKey,
+  SERVER_EXECUTION_EFFECTS_DOC_ID,
+  type SessionEffectsDocValue,
   streamEntriesDocId,
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -554,6 +557,138 @@ describe("stage D seal-into-wave", () => {
       entityScopeKey: "space",
       seq: seedSeq,
     });
+  });
+
+  it("folds ALL of an event's contributions into its requeue — the served intent tx rolls back with its handler (Phase 4; events.md §4)", async () => {
+    // Phase 4 makes an event contribute SEVERAL transactions to one
+    // wave: the handler run plus the served navigateTo's intent tx
+    // (builtins.md §4's split contract). Requeue must be atomic PER
+    // EVENT: a requeued handler beside a SURVIVING intent would mark
+    // the event consequenced (survivedEventIds) while its consequences
+    // were withdrawn — lost forever behind the idempotency skip.
+    // (Red-first: without the per-event fold in resolveConflicts, the
+    // intent survives — dispositions [requeued, committed] — and the
+    // second wave's re-run double-issues nothing only by luck.)
+    const lease = liveLease();
+    const y = runtime.getCell<{ value: number }>(
+      space,
+      "wave-nav-y",
+      undefined,
+    );
+    const actorKey = resolvePrincipalSessionKey("did:key:alice", "sess-1");
+
+    const runEvent = async () => {
+      // The handler run: reads + bumps y.
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId: "handle-go",
+        kind: "event-handler",
+        eventId: "e-nav",
+        acting: { user: "did:key:alice", session: "sess-1" },
+      });
+      const base = y.withTx(tx).get()?.value ?? 0;
+      y.withTx(tx).set({ value: base + 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+      // The served intent tx: SAME event, separate contribution,
+      // addressed to the acting session's instance.
+      const intentTx = runtime.edit();
+      stampWaveRunContext(intentTx, {
+        actionId: "server-execution/navigate-intent:nav-e",
+        kind: "event-handler",
+        eventId: "e-nav",
+        acting: { user: "did:key:alice", session: "sess-1" },
+        scopeKeyIdentity: {
+          principal: "did:key:alice",
+          sessionId: "sess-1" as never,
+        },
+      });
+      // RAW tx write (the builtin's own shape): a Cell.set would
+      // cellify the entry into a linked child doc.
+      intentTx.writeValueOrThrow(
+        {
+          space,
+          id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+          scope: "session",
+          path: [],
+        } as never,
+        {
+          entries: [{
+            nonce: "nav:fold-test",
+            kind: "navigate",
+            args: { target: { id: "of:nav-target", path: [] } },
+            issuedIn: null,
+          }],
+        } as never,
+      );
+      expect((await intentTx.commit()).error).toBeUndefined();
+    };
+
+    const wave1 = newWave({ lease });
+    runtime.installSealDestination(wave1);
+    await runEvent();
+
+    // A rival authored write races ONLY the handler's consequence doc:
+    // a whole-doc set never commutes, so the handler requeues — and the
+    // intent (which nothing raced) must FOLD with it.
+    const yLink = y.getAsNormalizedFullLink();
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 51,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: yLink.id,
+          value: { value: { value: 1000 } },
+        }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const outcome1 = await wave1.commitWave(newSink());
+    await wave1.settled();
+
+    // BOTH contributions requeued; the event reported ONCE; nothing
+    // marked consequenced; no intent landed.
+    expect(outcome1.requeuedEventIds).toEqual(["e-nav"]);
+    expect(outcome1.committedEventIds).toEqual([]);
+    expect(outcome1.dispositions).toEqual([
+      { kind: "requeued" },
+      { kind: "requeued" },
+    ]);
+    const storedAfter1 = Engine.readState(engine, {
+      id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+      scopeKey: actorKey,
+    })?.document?.value as SessionEffectsDocValue | undefined;
+    expect(storedAfter1?.entries ?? []).toEqual([]);
+
+    // The later wave retries the WHOLE event: consequence + intent land
+    // exactly once, converging against the rival's value.
+    const wave2 = newWave({ lease });
+    runtime.installSealDestination(wave2);
+    await runEvent();
+    runtime.clearSealDestination();
+    const outcome2 = await wave2.commitWave(newSink());
+    await wave2.settled();
+
+    expect(outcome2.aborted).toBeUndefined();
+    expect(outcome2.committedEventIds).toEqual(["e-nav"]);
+    expect(outcome2.requeuedEventIds).toEqual([]);
+    // The re-run's consequence landed exactly once (the fixture's
+    // replica never saw the rival's engine-direct write, so the re-run
+    // read base 0 — the point is single delivery, not arithmetic).
+    const yDoc = Engine.read(engine, { id: yLink.id })?.value as
+      | { value?: number }
+      | undefined;
+    expect(yDoc?.value).toBe(1);
+    const storedAfter2 = Engine.readState(engine, {
+      id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+      scopeKey: actorKey,
+    })?.document?.value as SessionEffectsDocValue | undefined;
+    expect(storedAfter2?.entries?.length).toBe(1);
+    expect(storedAfter2?.entries?.[0].nonce).toBe("nav:fold-test");
+    expect(typeof storedAfter2?.entries?.[0].issuedIn).toBe("number");
   });
 
   it("rebases a commuting consequence instead of requeueing (field-level merge)", async () => {

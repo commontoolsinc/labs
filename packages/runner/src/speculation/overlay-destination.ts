@@ -373,16 +373,21 @@ export class SpeculationOverlayDestination
       void (async () => {
         for (const effect of enactable) {
           try {
-            await effect.flush(tx);
-            // Phase 4 (protocol.md §5, T2.Q7): the optimistic enactment
-            // carries the run's deterministic nonce — record it so the
-            // AUTHORITATIVE intent, arriving on the effects channel with
-            // the same nonce, is acked without a second navigation. The
-            // record lives in the reload-wiped channel (LT8's accepted
-            // window).
+            // Phase 4 (protocol.md §5, T2.Q7): record the run's
+            // deterministic nonce BEFORE the flush — the flush awaits
+            // an arbitrary (possibly slow, async) navigateCallback, and
+            // the authoritative intent can arrive on the effects
+            // channel MID-flush; recording first makes the channel
+            // converge instead of double-navigating within one life
+            // (LT8 accepts re-enactment only across a RELOAD). A flush
+            // that then no-ops on a superseded attempt is deliberate
+            // non-enactment, and a thrown callback is today's
+            // navigation-consumed posture — acking either is correct.
+            // The record lives in the reload-wiped channel.
             if (effect.nonce !== undefined) {
               this.#runtime.effectsChannel?.recordEnacted(effect.nonce);
             }
+            await effect.flush(tx);
           } catch (error) {
             logger.error(
               "speculative-enact-failed",

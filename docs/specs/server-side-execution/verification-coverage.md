@@ -1260,17 +1260,46 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   piece demand for a value doc that can never carry `patternIdentity`
   meta is the OW19 churn class;
   (vii) the serving replica's scope-NAME-keyed local view (the OW17
-  residual) is bypassed, never consulted: the intent write is a
-  tail-relative MERGEABLE append (only the appended tail crosses;
-  the store applies it per instance via the annotation key) with the
-  ENGINE as idempotency authority, and the retirement write's pruned
-  value is computed from `selectRetirableEffectsInstances`' engine
-  reads — the local collapsed view has no remaining consumer on the
-  effects doc.
+  residual) is TOLERATED, never trusted for instance state: the
+  served half still READS it (the append-mechanics tail and the
+  cheap local presence check), but nothing store-visible derives
+  from it — the intent write is a tail-relative MERGEABLE append
+  (only the appended tail crosses; the store applies it per
+  instance via the annotation key; the builtin FAILS CLOSED if the
+  transaction cannot record the mergeable append) with the ENGINE's
+  stored-nonce dedupe as the idempotency authority, and the
+  retirement write's pruned value is computed from
+  `selectRetirableEffectsInstances`' engine reads.
 - serving-loop §7's `effectAcks` counter is LIVE (the feed drain
   counts authored commits touching the effects doc), so testing §4's
   amplification metric is computable from counters alone — the
-  Phase-2 gate's formula gains its subtrahend.
+  Phase-2 gate's formula gains its subtrahend. (Counting note: the
+  recognizer is any AUTHORED commit touching the effects doc — a
+  client authoring garbage into its own instance inflates it; the
+  notice carries no paths to discriminate by, and the inflation is
+  the same self-poisoning class as the instance itself.)
+- The Phase-4 INDEPENDENT review's fix batch (2026-08-11; every
+  finding addressed in the same PR): (1) requeue is now ATOMIC PER
+  EVENT at the wave — an event can contribute SEVERAL transactions
+  (the handler run + the served intent tx), and the conflict
+  closure folds every same-eventId sibling into a requeue, with
+  `requeuedEventIds`/`committedEventIds`/`consequenceOf` deduped to
+  one entry per event (red-first pinned in `executor-wave.test.ts`'s
+  per-event fold test: without the fold, a requeued handler beside a
+  surviving intent marks the event consequenced while its
+  consequences were withdrawn — lost behind the idempotency skip);
+  (2) the overlay records the optimistic nonce BEFORE the flush (a
+  slow async navigateCallback left a window where the authoritative
+  intent double-navigated within one life); (3) the intent seal's
+  resolved-`{error}` outcome is logged loudly (commit promises
+  resolve, never reject, on ordinary failure) — an ISOLATED intent
+  seal failure (no requeue, inputs unchanged) leaves the intent
+  unissued until the next input change, the watermark-doc drop's
+  input-driven re-land posture, recorded as accepted; (4) the
+  served-side `navigated` re-run arm returns early instead of
+  re-writing the result cell under the wave-level service identity;
+  (5) the no-context refusal arm gained direct coverage (the
+  static-wiring test in `executor-effect-channel.test.ts`).
 
 ## 4. Standing rule
 

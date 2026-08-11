@@ -609,10 +609,11 @@ Success criteria:
 
 - [ ] `topics-navigation` and the navigateTo paths green in the ON arm.
       (The runner-level navigateTo paths are green —
-      `executor-effect-channel.test.ts`, both arms of the unit suite;
-      the `sx2-effect-channel` browser-facing gate is authored and the
-      ON-arm CI jobs carry it with `topics-navigation` — tick on the
-      first green ON-arm CI run.)
+      `executor-effect-channel.test.ts`, an ON-posture suite that runs
+      under both CI arms; the `sx2-effect-channel` gate is authored
+      and green live in BOTH arms locally, and the ON-arm CI jobs
+      carry it with `topics-navigation` — tick on the first green
+      ON-arm CI run.)
 - [x] An intent is enacted exactly once per nonce, including across a
       client reload between intent and ack (2026-08-11:
       `executor-effect-channel.test.ts` pins the optimistic/

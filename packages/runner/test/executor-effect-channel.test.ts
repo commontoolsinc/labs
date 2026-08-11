@@ -444,9 +444,21 @@ describe("Phase 4 client-effect channel", () => {
 
     const sessionId = clientManager.id;
     // The full lifecycle, in order: the intent LANDS in alice's
-    // instance…
+    // instance… (transient-tolerant: intent → ack → retire can outrun
+    // the poll, so a drained-but-PRESENT instance with the ack counted
+    // is also completion — the sx2 gate's rule).
+    let sampledNonce: string | undefined;
     await waitUntil(
-      () => intentsOf(engine, aliceSigner.did(), sessionId).length === 1,
+      () => {
+        const intents = intentsOf(engine, aliceSigner.did(), sessionId);
+        if (intents.length === 1) {
+          sampledNonce = intents[0].nonce;
+          return true;
+        }
+        const value = effectsInstanceOf(engine, aliceSigner.did(), sessionId);
+        return Object.keys(value).length > 0 &&
+          (host!.stats().effectAcks ?? 0) >= 1;
+      },
       "the intent to land",
     );
     // …then the client acks and the next wave RETIRES the acked entry
@@ -460,6 +472,14 @@ describe("Phase 4 client-effect channel", () => {
       },
       "the ack to land and the entry to retire",
     );
+    // The enacted-nonce record converged on the SAME deterministic
+    // nonce the authoritative intent carried (when the poll sampled
+    // it).
+    if (sampledNonce !== undefined) {
+      expect(clientRuntime.effectsChannel?.hasEnacted(sampledNonce)).toBe(
+        true,
+      );
+    }
 
     // Exactly ONE navigation: the optimistic enactment carried the same
     // nonce the authoritative intent arrived with — the channel
@@ -610,6 +630,97 @@ describe("Phase 4 client-effect channel", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(firstLife.length).toBe(1);
     expect(secondLife.length).toBe(1);
+  });
+
+  it("the NO-CONTEXT refusal (builtins.md §4): a navigateTo outside any client-fired event's consequences writes no intent and does not wedge the wave", async () => {
+    // A STATICALLY wired navigateTo (not handler-returned): its target
+    // arrives via an ordinary authored write, so the served run carries
+    // no firing-event context — the split contract's refusal arm
+    // (implemented as a loud refusal-without-throw: a re-instantiated
+    // past instance is indistinguishable at the action — the Phase-4
+    // PR's flagged surface iii).
+    ({ manager: clientManager, runtime: clientRuntime } = openClient(
+      aliceSigner,
+    ));
+    const engine = await server.engineForSpace(space);
+    const STATIC_NAVIGATE_PATTERN = [
+      "import { navigateTo, pattern } from 'commonfabric';",
+      "export default pattern<",
+      "  { target: unknown },",
+      "  { nav: boolean }",
+      ">(({ target }) => ({ nav: navigateTo(target) }));",
+    ].join("\n");
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: STATIC_NAVIGATE_PATTERN }],
+    }, { space });
+    const argument = clientRuntime.getCell<{ target: unknown }>(
+      space,
+      "noctx-arg",
+      undefined,
+    );
+    const destination = clientRuntime.getCell<{ label: string }>(
+      space,
+      "noctx-destination",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "noctx-result",
+      compiled.resultSchema,
+    );
+    await argument.sync();
+    await destination.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      destination.withTx(seed).set({ label: "somewhere" });
+      argument.withTx(seed).set({ target: destination as never });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    // Kick the serving side (activation + demand): an authored write.
+    {
+      const kick = clientRuntime.getCell<{ n: number }>(
+        space,
+        "noctx-kick",
+        undefined,
+      );
+      await kick.sync();
+      const tx = clientRuntime.edit();
+      kick.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    // Let the serving side settle a few cycles, then assert: NO intent
+    // exists in ANY effects instance (the refusal wrote nothing), and
+    // the loop is healthy (the watermark advanced past the kick).
+    await waitUntil(
+      () => (host!.spaceServer(space)?.watermark ?? 0) > 0,
+      "the serving loop to settle the kick",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const instances = engine.database.prepare(
+      `SELECT scope_key FROM head WHERE id = :id AND op != 'delete'`,
+    ).all({ id: SERVER_EXECUTION_EFFECTS_DOC_ID }) as Array<
+      { scope_key: string }
+    >;
+    for (const row of instances) {
+      const value = Engine.readState(engine, {
+        id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+        scopeKey: row.scope_key,
+      })?.document?.value as SessionEffectsDocValue | undefined;
+      expect(value?.entries ?? []).toEqual([]);
+    }
+    cancelDemand();
   });
 
   it("the SESSIONLESS refusal (builtins.md §4): a chain with no acting session reaches navigateTo — no intent is written anywhere", async () => {

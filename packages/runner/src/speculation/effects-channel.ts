@@ -14,14 +14,15 @@
 // resubscribe and MAY re-enact it, which is ACCEPTED for reversible
 // effects (LT8, RULED 2026-08-03). The record has two writers:
 //
-// - the OPTIMISTIC path — the speculation overlay enacts a speculative
-//   run's navigateTo (speculation.md §2) and records the run's
-//   deterministic nonce here after the flush, so the authoritative
+// - the OPTIMISTIC path — the speculation overlay records the run's
+//   deterministic nonce here BEFORE flushing its navigateTo enactment
+//   (speculation.md §2; the flush awaits an arbitrary callback, and the
+//   authoritative intent can arrive mid-flush), so the authoritative
 //   intent CONVERGES on the already-enacted nonce and is acked without
 //   a second navigation (T2.Q7);
 // - the AUTHORITATIVE path — an intent arriving unenacted (a reload, a
-//   client that never speculated the run) is enacted here, then
-//   recorded, then acked.
+//   client that never speculated the run) is recorded, enacted, and
+//   acked here (record-before-invoke guards re-entrant deliveries).
 //
 // The ack is once-per-nonce and the server-side retirement is
 // idempotent, so the accepted LT8 re-enactment never doubles anything
@@ -102,7 +103,16 @@ export class EffectsChannel {
       // instance, so a reload enacts what it left unacked.
       const pulled = cell.sync();
       this.#runtime.trackAsyncWork(
-        Promise.resolve(pulled).catch(() => undefined) as Promise<unknown>,
+        Promise.resolve(pulled).catch((error) => {
+          // The re-read failing means this life may never see its
+          // UNACKED intents until the next commit touches the doc —
+          // loud, like the sink-failure arm below.
+          logger.warn("effects-resubscribe-read-failed", () => [
+            `effects-doc re-read for ${space} failed; unacked intents ` +
+            "enact only on the next push",
+            error,
+          ]);
+        }) as Promise<unknown>,
       );
     } catch (error) {
       logger.warn("effects-subscribe-failed", () => [

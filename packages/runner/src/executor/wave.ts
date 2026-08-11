@@ -1058,12 +1058,29 @@ export class WaveAccumulator
             this.#contributions.some((c) =>
               requeued.has(c.index) && c.context.eventId === parent
             );
+          // Requeue is atomic PER EVENT (events.md §4: the mark, the
+          // watermark, and the consequences move together — Phase 4
+          // review finding 1): an event can contribute SEVERAL
+          // transactions to one wave — the handler run plus the served
+          // navigateTo's intent tx (builtins.md §4) — and when ANY of
+          // them requeues, every sibling with the same eventId folds
+          // into the rollback. Without the fold, a requeued handler
+          // beside a surviving intent marks the event consequenced
+          // (survivedEventIds) while its consequences were withdrawn —
+          // lost forever behind the idempotency skip; a requeued
+          // intent beside a surviving handler loses the intent with
+          // nothing left to retry it.
+          const sameEvent = contribution.context.eventId;
+          const eventRequeued = sameEvent !== undefined &&
+            this.#contributions.some((c) =>
+              requeued.has(c.index) && c.context.eventId === sameEvent
+            );
           const readWithdrawn = this.#readsWithdrawnContribution(
             contribution,
             byLocalSeq,
             readSawWithdrawnWrite,
           ) || readOnlyReadSawWithdrawal(contribution);
-          if (!parentRequeued && !readWithdrawn) continue;
+          if (!parentRequeued && !eventRequeued && !readWithdrawn) continue;
           if (contribution.context.kind === "event-handler") {
             requeued.add(idx);
           } else {
@@ -1468,7 +1485,14 @@ export class WaveAccumulator
       // both silently for the foreign-only and zero-seal shapes. A
       // withdrawn contribution's appends still never ride (the
       // survivors filter above): its event replays and re-emits.
-      if (context.kind === "event-handler" && context.eventId !== undefined) {
+      if (
+        context.kind === "event-handler" && context.eventId !== undefined &&
+        // One entry per EVENT (protocol.md §7: `consequenceOf` scales
+        // with the wave's INPUT — the events drained — never with how
+        // many transactions an event contributed; Phase 4's intent tx
+        // is the second contribution an event can make).
+        !consequenceOf.includes(context.eventId)
+      ) {
         consequenceOf.push(context.eventId);
       }
       outboxAppends.push(...contribution.outboundAppends);
@@ -1810,7 +1834,14 @@ export class WaveAccumulator
         continue;
       }
       outcome.dispositions[idx] = { kind: "committed" };
-      if (context.kind === "event-handler" && context.eventId !== undefined) {
+      if (
+        context.kind === "event-handler" && context.eventId !== undefined &&
+        // One entry per EVENT: Phase 4's served navigateTo makes an
+        // event contribute several transactions to one wave (the
+        // handler run + the intent tx), and consumers count events,
+        // not contributions.
+        !outcome.committedEventIds.includes(context.eventId)
+      ) {
         outcome.committedEventIds.push(context.eventId);
       }
       for (const space of contribution.spaces) {
@@ -1862,7 +1893,14 @@ export class WaveAccumulator
           c.context.eventId === context.parentEventId &&
           isRequeued(c.index)
         );
-      if (!parentAlsoRequeued) {
+      if (
+        !parentAlsoRequeued &&
+        // One entry per EVENT: an event can requeue through several
+        // contributions (the handler run + the served navigateTo's
+        // intent tx — the per-event fold in resolveConflicts), and the
+        // loop's re-arm keys on the event, not the contribution.
+        !outcome.requeuedEventIds.includes(context.eventId)
+      ) {
         outcome.requeuedEventIds.push(context.eventId);
       }
     }

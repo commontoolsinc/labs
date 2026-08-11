@@ -1604,6 +1604,12 @@ export class Runtime {
     this.#speculationOverlay = undefined;
     this.#effectsChannel?.close();
     this.#effectsChannel = undefined;
+    // Release the manager-side hook (a later runtime over the SAME
+    // manager installs its own; without the clear a stale closure
+    // lingers on a shared manager).
+    if (this.storageManager.spaceOpenObserver !== undefined) {
+      this.storageManager.spaceOpenObserver = undefined;
+    }
 
     // Background source checks are deliberately outside the scheduler. Abort
     // and settle them before the storage sessions they may write through close.
