@@ -6,16 +6,22 @@ import {
 } from "./interface.ts";
 
 /**
- * Gets the `[CODEC]` bound to the given value's class, or `undefined` if the
- * class binds none.
+ * Gets the `[CODEC]` for the given value's class. Throws a "shouldn't happen"
+ * error if the value's class has no `[CODEC]`.
  *
- * A `FabricPrimitive` binds no `[CODEC]`, and so answers `undefined` here: its
- * codec terminates an encoding and is therefore bound per wire format, under
- * that format's own symbol. Only a `FabricInstance`, whose codec merely
- * decomposes and so serves every format alike, is reachable this way.
+ * A `FabricPrimitive` binds its codec per wire format, under that format's own
+ * symbol, so it has no `[CODEC]` and throws here. Reach for `jsonCodecOf()`
+ * when the JSON codec is what is wanted, whichever symbol carries it.
  */
-export function codecOf(
-  value: FabricSpecialObject,
-): FabricCodec | undefined {
-  return (value.constructor as unknown as Partial<FabricClassWithCodec>)[CODEC];
+export function codecOf(value: FabricSpecialObject): FabricCodec {
+  const codec =
+    (value.constructor as unknown as Partial<FabricClassWithCodec>)[CODEC];
+
+  if (codec === undefined) {
+    throw new Error(
+      `Shouldn't happen: no \`[CODEC]\` for \`${value.constructor.name}\`.`,
+    );
+  }
+
+  return codec;
 }

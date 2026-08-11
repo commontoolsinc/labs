@@ -916,13 +916,9 @@ async function searchTextMatches(
       try {
         // The JSON codec, because these representations exist to be searched
         // as text: a `FabricPrimitive` yields its encoded form only under
-        // `[JSON_CODEC]`. Absent under both symbols, the value cannot be
-        // represented at all, which is worth reporting rather than skipping.
-        const codec = jsonCodecOf(current);
-        if (codec === undefined) {
-          throw new Error(`No codec for \`${current.constructor.name}\`.`);
-        }
-        representations.push({ value: codec.encode(current) });
+        // `[JSON_CODEC]`. Throws for a value that binds neither symbol, which
+        // the surrounding `catch` reports as unreadable.
+        representations.push({ value: jsonCodecOf(current).encode(current) });
       } catch (error) {
         reportReadError?.(error);
       }

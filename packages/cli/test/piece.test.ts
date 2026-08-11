@@ -1880,7 +1880,11 @@ describe("cli piece parsing", () => {
     expect(errors).toContain(iteratorError);
     expect(errors).toContain(cellProxyError);
     expect(errors).toContain(stringError);
-    expect(errors.map(String).some((error) => error.includes("No codec for")))
+    expect(
+      errors.map(String).some((error) =>
+        error.includes("no `[JSON_CODEC]` or `[CODEC]`")
+      ),
+    )
       .toBe(true);
   });
 

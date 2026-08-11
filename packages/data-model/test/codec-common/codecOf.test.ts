@@ -12,15 +12,15 @@ describe("codecOf()", () => {
     expect(codecOf(err)).toBe(FabricError[CODEC]);
   });
 
-  it("returns `undefined` for a `FabricPrimitive`", () => {
+  it("throws for a `FabricPrimitive`", () => {
     // A primitive's codec terminates an encoding, so it is bound per wire
     // format under that format's own symbol rather than to `[CODEC]`.
     const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
-    expect(codecOf(fb)).toBe(undefined);
+    expect(() => codecOf(fb)).toThrow("no `[CODEC]`");
   });
 
-  it("returns `undefined` for a `FabricSpecialObject` binding no `[CODEC]`", () => {
+  it("throws for a `FabricSpecialObject` binding no `[CODEC]`", () => {
     class NoCodec extends FabricSpecialObject {}
-    expect(codecOf(new NoCodec())).toBe(undefined);
+    expect(() => codecOf(new NoCodec())).toThrow("no `[CODEC]`");
   });
 });

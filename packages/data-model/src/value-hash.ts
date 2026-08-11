@@ -312,11 +312,6 @@ function feedObjectValue(
       const fabInst = value as BaseFabricInstance;
       hasher.update(TAG_INSTANCE_BYTES);
       const codec = codecOf(fabInst);
-      if (codec === undefined) {
-        throw new Error(
-          `Shouldn't happen: no \`[CODEC]\` for \`${fabInst.constructor.name}\`.`,
-        );
-      }
       hasher.update(getStringRep(codec.tagForValue(fabInst)));
       const state = codec.encode(fabInst);
       feedValue(hasher, state);
