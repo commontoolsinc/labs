@@ -107,6 +107,25 @@ const claimHost = handler<ClaimHostEvent, {
 });
 
 /**
+ * ParticipantIdentityCard renders a participant join and admin-claim surface.
+ *
+ * Use it when a parent pattern owns the roster, current viewer, and admin cells
+ * and needs composed UI for joining, resolving the current participant, and
+ * taking over admin duties. The resolved identity outputs (`me`, `isJoined`,
+ * and `isAdmin`) are intended for downstream sub-patterns such as per-option
+ * cards.
+ *
+ * Joining is profile-first. The parent resolves the viewer's `#profile` at
+ * top level (per docs/specs/shared-profile-rosters.md) and passes the cell,
+ * display name, and the wish's create/pick surface in. When a profile
+ * resolves, the card offers a one-click "Join as <name>" and retains the live
+ * cell in the shared profile directory. When it doesn't, the card renders the
+ * passed create/pick surface — the typed-name guest path never appears
+ * automatically; "Continue as guest" is an explicit choice, and guest entries
+ * store only the entered string.
+ */
+
+/**
  * Inputs for the participant identity/admin controls.
  *
  * The parent owns the durable user directory and viewer identity cells. This
@@ -185,24 +204,6 @@ export interface ParticipantIdentityCardOutput {
   claimHost: Stream<ClaimHostEvent>;
 }
 
-/**
- * ParticipantIdentityCard renders a participant join and admin-claim surface.
- *
- * Use it when a parent pattern owns the roster, current viewer, and admin cells
- * and needs composed UI for joining, resolving the current participant, and
- * taking over admin duties. The resolved identity outputs (`me`, `isJoined`,
- * and `isAdmin`) are intended for downstream sub-patterns such as per-option
- * cards.
- *
- * Joining is profile-first. The parent resolves the viewer's `#profile` at
- * top level (per docs/specs/shared-profile-rosters.md) and passes the cell,
- * display name, and the wish's create/pick surface in. When a profile
- * resolves, the card offers a one-click "Join as <name>" and retains the live
- * cell in the shared profile directory. When it doesn't, the card renders the
- * passed create/pick surface — the typed-name guest path never appears
- * automatically; "Continue as guest" is an explicit choice, and guest entries
- * store only the entered string.
- */
 export default pattern<
   ParticipantIdentityCardInput,
   ParticipantIdentityCardOutput

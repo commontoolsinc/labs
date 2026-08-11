@@ -59,6 +59,14 @@ export const generatedImageUrlFor = (title: string): string =>
   "&height=" + GENERATED_IMAGE_SIZE;
 
 /**
+ * GeneratedArt renders a fallback-backed food illustration thumbnail.
+ *
+ * Use it when a parent pattern needs fixed-size generated-or-stored image UI
+ * from a text prompt. This sub-pattern owns no shared state; callers pass any
+ * persisted source URL and decide whether this instance may generate.
+ */
+
+/**
  * Fetch lifecycle exposed by GeneratedArt for parents that need to observe or
  * persist generated image state.
  */
@@ -136,13 +144,6 @@ export interface GeneratedArtOutput {
   fetchState?: GeneratedArtFetchState;
 }
 
-/**
- * GeneratedArt renders a fallback-backed food illustration thumbnail.
- *
- * Use it when a parent pattern needs fixed-size generated-or-stored image UI
- * from a text prompt. This sub-pattern owns no shared state; callers pass any
- * persisted source URL and decide whether this instance may generate.
- */
 export default pattern<GeneratedArtInput, GeneratedArtOutput>(
   ({ prompt, sourceUrl, shouldGenerate }) => {
     const requestUrl = computed(() => {
