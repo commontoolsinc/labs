@@ -1,5 +1,5 @@
 import { Identity, KeyStore } from "@commonfabric/identity";
-import { ROOT_KEY } from "../../shared/mod.ts";
+import { ROOT_KEY } from "./root-key.ts";
 import type { DeviceLinkFragment } from "./device-link.ts";
 import "../views/DeviceLinkView.ts";
 
@@ -7,10 +7,10 @@ import "../views/DeviceLinkView.ts";
 //
 // ORDERING CONSTRAINT (do not deviate): this must overwrite ROOT_KEY in the
 // KeyStore BEFORE the app's normal key initialization runs, then let the normal
-// boot pick the new identity up. It must NOT route through App.setIdentity or a
-// set-identity command — those THROW "Cannot change identity while logged in"
-// when a different identity is active, and replacing a stale identity is the
-// entire point of this handler.
+// boot pick the new identity up. It must NOT route through
+// XRootView.setIdentity or a set-identity command — those THROW "Cannot change
+// identity while logged in" when a different identity is active, and replacing
+// a stale identity is the entire point of this handler.
 //
 // It also runs at BOOTSTRAP rather than from LoginView, because LoginView never
 // mounts when a stale identity auto-logs in — which is exactly the re-pair case.

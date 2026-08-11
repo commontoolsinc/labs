@@ -37,6 +37,7 @@ import {
   logBrowserLoadSummary,
   logStepTimings,
   StepTimer,
+  waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForSettledText,
 } from "./cfc-browser-helpers.ts";
@@ -119,12 +120,12 @@ describe("lunch poll: two users vote on a shared option", () => {
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(sourcePath, rootPath),
     );
     const piece = await cc.create(program, { start: true });
     pieceId = piece.id;
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     // Keep the piece running without materializing the whole UI tree in this
     // controller process; the two browsers render their own UI.
     resultSinkCancel = resultCell.sink(() => {});
@@ -140,6 +141,7 @@ describe("lunch poll: two users vote on a shared option", () => {
     const view = { spaceName: SPACE_NAME, pieceId };
     const hostPage = hostShell.page();
     const guestPage = guestShell.page();
+    const spaceDid = cc.getSpace();
 
     try {
       await timer.run(
@@ -156,6 +158,20 @@ describe("lunch poll: two users vote on a shared option", () => {
               view,
               identity: guestIdentity,
             }),
+          ]),
+      );
+      // ShellIntegration.goto() waits for URL/login state, while RootView
+      // resolves the named space and AppView loads its active pattern
+      // independently. A runtime can report idle during that handoff, with the
+      // previous or provisional root still rendered. Wait for the PageHandle
+      // on each browser to belong to this poll's space before interacting with
+      // either surface.
+      await timer.run(
+        "both active space roots ready",
+        () =>
+          Promise.all([
+            waitForActiveSpaceRoot(hostPage, spaceDid),
+            waitForActiveSpaceRoot(guestPage, spaceDid),
           ]),
       );
       await timer.run(

@@ -33,20 +33,28 @@ about one aspect of the runtime, are indexed in
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
 
+### Comments
+
+- Comments explain **why**, not what, and describe the system as it stands.
+- Every export, every class and public member, and every non-trivial internal
+  function carries a JSDoc doc comment.
+- [`code-comment-style.md`](code-comment-style.md) is the guide to both kinds,
+  and to the Markdown markup that comments, error messages, and log messages
+  all use.
+
 ## Code Design & Principles
 
 ### Error Handling
 
-- Write descriptive error messages.
+- Write descriptive error messages, marked up as
+  [`code-comment-style.md`](code-comment-style.md#error-and-log-messages)
+  describes.
 - Propagate errors using async/await.
 - Document possible errors in JSDoc.
 
 ### TypeScript
 
 - Export types explicitly using `export type { ... }`.
-- Provide descriptive JSDoc comments on public interfaces. What belongs in a
-  comment, and what belongs in a document instead, is in
-  [the documentation guide](../README.md#comments-in-code).
 - Prefer strong typing with interfaces or types instead of `any`.
 - Update package-level README.md files.
 

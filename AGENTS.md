@@ -92,18 +92,25 @@ When authoring or reviewing a skill itself, read
 
 For reading or changing Topics on Estuary, use `skills/topics/SKILL.md`.
 
-**Important:** Ignore the `packages/patterns/deprecated` folder - it is defunct.
-
 ### Runtime Development
 
 If you are developing runtime code, start with:
 
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
+- `docs/development/code-comment-style.md` - How a comment is written, both the
+  `//` kind and the JSDoc kind. The rule that catches people out is that a
+  comment describes the system as it stands: not its own past, not the road not
+  taken, not the plan that got it here
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
   and integration test structure; hub that links the other testing docs
+- `docs/development/unit-test-coding-style.md` - How a unit test file is shaped:
+  its location and name, the single top-level `describe()`, how an `it()`
+  description is worded, `expect()` over `assert*()`, and the matcher traps that
+  yield a test which cannot fail. Read it before writing a new test file; not
+  every file in the tree follows it, so a neighbor is not evidence of it
 - `docs/development/waiting-in-tests.md` - Waiting on a real event instead of
   polling: the primitives to reach for, and the specific cases where a bounded
   poll is the honest tool
@@ -123,11 +130,25 @@ one document per feature or per aspect of the runtime — collection writes,
 identity, ingest, host embedding, and the rest. Read the relevant one before you
 change a subsystem you have not worked on before.
 
+#### Browser tests in agent sandboxes
+
+On macOS, an agent must request unsandboxed execution before its first attempt
+to run a command that can launch a browser. This includes the root
+`deno task test`; the unfiltered root `deno task integration` command;
+unfiltered integration runs for `shell`, `patterns`, or `patterns-reload`;
+`deno task demo`; `deno-web-test`; and focused or filtered tests whose setup
+launches Chrome through Astral or `ShellIntegration`. Never try the command in
+the agent sandbox first. Deno's `-A` flag does not escape the outer sandbox, and
+a browser startup failure caused by that sandbox is not test evidence. The
+complete rule is in
+[`docs/development/TESTING.md`](docs/development/TESTING.md#browser-tests-in-agent-sandboxes).
+
 Three obligations that are easy to miss:
 
 - `docs/README.md` governs everything this repository writes down. It says how
-  to write a comment in code, how to write documentation, and where a new
-  document belongs. Read it before you write either.
+  to write documentation, where a new document belongs, which examples belong in
+  one, and which spelling of English both documents and comments use. Read it
+  before you write either.
 - `docs/development/EXPERIMENTAL_OPTIONS.md` is the central registry of every
   experimental flag. Read it before adding, changing, or removing a flag, and
   update it in the same change.

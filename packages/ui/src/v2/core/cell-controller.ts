@@ -38,24 +38,10 @@ export interface CellControllerOptions<T> {
   onChange?: (newValue: T, oldValue: T) => void;
 
   /**
-   * Custom transaction strategy
-   * - "auto" (default): Create transaction, set value, commit immediately
-   * - "manual": Only call setValue, let caller handle transactions
-   * - "batch": Collect changes and commit in batches (advanced usage)
-   */
-  transactionStrategy?: "auto" | "manual" | "batch";
-
-  /**
    * Whether to trigger host.requestUpdate() on Cell changes
    * Defaults to true
    */
   triggerUpdate?: boolean;
-
-  /**
-   * Custom focus/blur handlers for timing integration
-   */
-  onFocus?: () => void;
-  onBlur?: () => void;
 }
 
 /**
@@ -92,9 +78,7 @@ export interface CellControllerOptions<T> {
  * ```typescript
  * class MyInput extends BaseElement {
  *   private cellController = new CellController<string>(this, {
- *     timing: { strategy: "blur" },
- *     onFocus: () => this.classList.add("focused"),
- *     onBlur: () => this.classList.remove("focused")
+ *     timing: { strategy: "blur" }
  *   });
  *
  *   private handleFocus() {
@@ -158,10 +142,7 @@ export class CellController<T> implements ReactiveController {
       getValue: options.getValue || this.defaultGetValue.bind(this),
       setValue: options.setValue || this.defaultSetValue.bind(this),
       onChange: options.onChange || (() => {}),
-      transactionStrategy: options.transactionStrategy || "auto",
       triggerUpdate: options.triggerUpdate ?? true,
-      onFocus: options.onFocus || (() => {}),
-      onBlur: options.onBlur || (() => {}),
     };
 
     // Create timing controller if timing options are provided
@@ -262,12 +243,7 @@ export class CellController<T> implements ReactiveController {
     const performUpdate = () => {
       this._applyingLocalWrite = true;
       try {
-        if (this.options.transactionStrategy === "auto") {
-          this.options.setValue(this._currentValue!, newValue, oldValue);
-        } else {
-          // For manual/batch strategies, just call setValue without transaction handling
-          this.options.setValue(this._currentValue!, newValue, oldValue);
-        }
+        this.options.setValue(this._currentValue!, newValue, oldValue);
       } finally {
         this._applyingLocalWrite = false;
       }
@@ -307,7 +283,6 @@ export class CellController<T> implements ReactiveController {
    */
   onFocus(): void {
     this._inputTiming?.onFocus();
-    this.options.onFocus();
   }
 
   /**
@@ -315,7 +290,6 @@ export class CellController<T> implements ReactiveController {
    */
   onBlur(): void {
     this._inputTiming?.onBlur();
-    this.options.onBlur();
   }
 
   /**
@@ -361,10 +335,6 @@ export class CellController<T> implements ReactiveController {
   hostDisconnected(): void {
     this._cleanupCellSubscription();
     this._inputTiming?.cancel();
-  }
-
-  hostUpdated(): void {
-    // Override in subclasses if needed
   }
 
   // Private methods

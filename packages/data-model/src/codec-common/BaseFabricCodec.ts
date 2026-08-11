@@ -9,9 +9,7 @@ export abstract class BaseFabricCodec implements FabricCodec {
   #recognizedTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
-  /**
-   * Constructs an instance.
-   */
+  /** Constructs an instance. */
   constructor(
     /**
      * The wire type tag this codec recognizes, or `undefined` for a codec with

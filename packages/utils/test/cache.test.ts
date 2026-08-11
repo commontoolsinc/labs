@@ -12,12 +12,12 @@ describe("LRUCache", () => {
       expect(cache.get("b")).toBe(2);
     });
 
-    it("returns undefined for missing keys", () => {
+    it("returns `undefined` for missing keys", () => {
       const cache = new LRUCache<string, number>();
       expect(cache.get("missing")).toBe(undefined);
     });
 
-    it("tracks size correctly", () => {
+    it("reports `.size` as the number of entries", () => {
       const cache = new LRUCache<string, number>();
       expect(cache.size).toBe(0);
       cache.put("a", 1);
@@ -26,7 +26,7 @@ describe("LRUCache", () => {
       expect(cache.size).toBe(2);
     });
 
-    it("has() returns correct membership", () => {
+    it("returns `true` from `has()` only for a stored key", () => {
       const cache = new LRUCache<string, number>();
       cache.put("a", 1);
       expect(cache.has("a")).toBe(true);
@@ -49,7 +49,7 @@ describe("LRUCache", () => {
       expect(cache.size).toBe(0);
     });
 
-    it("delete returns false for missing keys", () => {
+    it("returns `false` from `delete()` for a missing key", () => {
       const cache = new LRUCache<string, number>();
       expect(cache.delete("missing")).toBe(false);
     });
@@ -79,7 +79,7 @@ describe("LRUCache", () => {
       expect(cache.size).toBe(3);
     });
 
-    it("get() promotes item to most recently used", () => {
+    it("promotes an entry to most recently used on `get()`", () => {
       const cache = new LRUCache<string, number>({ capacity: 3 });
       cache.put("a", 1);
       cache.put("b", 2);
@@ -92,7 +92,7 @@ describe("LRUCache", () => {
       expect(cache.has("d")).toBe(true);
     });
 
-    it("put() on existing key promotes to most recently used", () => {
+    it("promotes an entry to most recently used on a `put()` over it", () => {
       const cache = new LRUCache<string, number>({ capacity: 3 });
       cache.put("a", 1);
       cache.put("b", 2);
@@ -104,7 +104,7 @@ describe("LRUCache", () => {
       expect(cache.has("b")).toBe(false);
     });
 
-    it("handles capacity of 1", () => {
+    it("evicts on every put at a capacity of `1`", () => {
       const cache = new LRUCache<string, number>({ capacity: 1 });
       cache.put("a", 1);
       cache.put("b", 2);
@@ -115,7 +115,7 @@ describe("LRUCache", () => {
   });
 
   describe("edge cases", () => {
-    it("works with various key types", () => {
+    it("stores and retrieves under a numeric key", () => {
       const cache = new LRUCache<number, string>();
       cache.put(1, "one");
       cache.put(2, "two");
@@ -123,7 +123,7 @@ describe("LRUCache", () => {
       expect(cache.get(2)).toBe("two");
     });
 
-    it("handles delete of head node", () => {
+    it("keeps evicting in order after the head entry is deleted", () => {
       const cache = new LRUCache<string, number>({ capacity: 3 });
       cache.put("a", 1);
       cache.put("b", 2);
@@ -135,7 +135,7 @@ describe("LRUCache", () => {
       expect(cache.has("b")).toBe(false);
     });
 
-    it("handles delete of tail node", () => {
+    it("keeps evicting in order after the tail entry is deleted", () => {
       const cache = new LRUCache<string, number>({ capacity: 3 });
       cache.put("a", 1);
       cache.put("b", 2);
@@ -147,7 +147,7 @@ describe("LRUCache", () => {
       expect(cache.has("a")).toBe(false);
     });
 
-    it("handles delete of middle node", () => {
+    it("keeps both neighbors reachable after a middle entry is deleted", () => {
       const cache = new LRUCache<string, number>({ capacity: 3 });
       cache.put("a", 1);
       cache.put("b", 2);
@@ -158,7 +158,7 @@ describe("LRUCache", () => {
       expect(cache.get("c")).toBe(3);
     });
 
-    it("get on tail node does not break list", () => {
+    it("keeps the eviction order intact after a `get()` on the tail entry", () => {
       const cache = new LRUCache<string, number>({ capacity: 3 });
       cache.put("a", 1);
       cache.put("b", 2);
@@ -294,7 +294,7 @@ describe("BoundedKeyMap", () => {
     expect(map.has("b")).toBe(false);
   });
 
-  it("reads like a ReadonlyMap, oldest entry first", () => {
+  it("reads like a `ReadonlyMap`, oldest entry first", () => {
     const map = new BoundedKeyMap<string, number>(10);
     map.set("a", 1);
     map.set("b", 2);

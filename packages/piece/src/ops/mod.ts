@@ -1,5 +1,4 @@
 export { PiecesController } from "./pieces-controller.ts";
-export { ACLManager } from "./acl-manager.ts";
 export {
   type PatternCompatibilityReport,
   PieceController,

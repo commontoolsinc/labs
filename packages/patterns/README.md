@@ -20,8 +20,6 @@ This README is intentionally just a signpost. The maintained references are:
   guide for authoring patterns; broader pattern documentation is indexed from
   [docs/common/README.md](../../docs/common/README.md).
 
-The `deprecated/` subdirectory is defunct — ignore it entirely.
-
 A previous version of this file was a hand-maintained duplicate of the catalog;
 it drifted badly. Add new catalog entries to `index.md` only (and give them a
 status tier).

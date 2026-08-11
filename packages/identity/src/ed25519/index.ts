@@ -58,15 +58,14 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     return this.#impl.sign(payload);
   }
 
-  // Only "noble" implementations can be converted to PKCS8
-  // since we need the raw material.
+  // Only "noble" implementations can be converted to PKCS8, since we need the
+  // raw material. Asks the implementation directly rather than inspecting what
+  // `serialize()` returns: that would build a pair object and a second array
+  // only to discard both, and the question here is which implementation this
+  // is, which the type already answers.
   toPkcs8() {
-    const serialized = this.serialize();
-    if (
-      "privateKey" in serialized &&
-      serialized.privateKey instanceof Uint8Array
-    ) {
-      return toPEM(ed25519RawToPkcs8(serialized.privateKey));
+    if (this.#impl instanceof NobleEd25519Signer) {
+      return toPEM(ed25519RawToPkcs8(this.#impl.privateKey().slice()));
     }
     throw new Error(
       'Cannot convert identity to PKCS8 format: requires "noble" implementation.',
@@ -75,15 +74,10 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
 
   // The raw 32-byte ed25519 seed. Like toPkcs8, only "noble" implementations
   // expose the private material; WebCrypto (native) hides it, so this throws.
-  // Returns a COPY — serialize() hands back the live internal buffer, and a
-  // caller mutating it would corrupt this signer.
+  // The array is freshly allocated, so the caller owns it outright.
   toRaw(): Uint8Array {
-    const serialized = this.serialize();
-    if (
-      "privateKey" in serialized &&
-      serialized.privateKey instanceof Uint8Array
-    ) {
-      return new Uint8Array(serialized.privateKey);
+    if (this.#impl instanceof NobleEd25519Signer) {
+      return this.#impl.privateKey().slice();
     }
     throw new Error(
       'Cannot export raw key material: requires "noble" implementation.',

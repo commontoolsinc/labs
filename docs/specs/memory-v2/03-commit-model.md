@@ -351,28 +351,28 @@ by the read's shape:
 
 ### 3.6.4 Conflict Response
 
-When validation fails, the server returns a `ConflictError` with enough detail
-for the client to refresh confirmed state and retry.
+When validation fails, the server rejects the commit with a `ConflictError` and
+stages the repair for delivery through the sync stream.
 
 ```typescript
 // Shown at module scope.
 interface ConflictError extends Error {
   name: "ConflictError";
-  commit: ClientCommit;
-  conflicts: ConflictDetail[];
-}
-
-interface ConflictDetail {
-  id: EntityId;
-  branch: BranchId;
-  path: ReadPath;
-  expected: { seq: number };
-  actual: {
-    seq: number;
-    value?: JSONValue;
-  };
+  /**
+   * Server head seq at rejection time. Carried for diagnostics; a sync window
+   * reaching this seq reflects the winning write.
+   */
+  retryAfterSeq: number;
 }
 ```
+
+The rejection carries no document values. Instead the server marks the commit's
+write targets and both read sets (`reads.confirmed` and `reads.pending`) dirty
+for the session — origin-less, so the session's own echo suppression does not
+hide them — and the next sync frame delivers the current documents for all of
+them as ordinary upserts. Repair therefore arrives as a consistent cut over the
+session's watched view — covering stale read dependencies as well as write
+targets, with every document the frame links to delivered in the same cut.
 
 ## 3.7 Server-Side Commit Processing
 
@@ -556,16 +556,23 @@ branches for source, target, and base observations.
 
 ## 3.12 Client Retry Strategy
 
-When a commit is rejected:
+When a commit is rejected with a `ConflictError`:
 
-1. inspect the `ConflictError`
-2. update confirmed state from the returned `actual` values or by fetching
-   current state
-3. discard the rejected pending commit and any dependent stacked commits
-4. rebuild the transaction against the refreshed confirmed state
-5. resubmit
+1. discard the rejected pending commit and any dependent stacked commits
+2. wait for the repair sync: the catch-up marker covering the rejected commit
+   (`caughtUpLocalSeq` reaching its `localSeq`), whose frame delivers current
+   documents for the commit's write targets and read sets (§3.6.4)
+3. rebuild the transaction against the repaired confirmed state
+4. resubmit
 
-The client library SHOULD support automatic retry with a bounded retry count.
+Conflict retries are event-gated, not counted: every conflict raised against a
+repaired read set proves a newer overlapping write, so each round makes
+progress, and waiting on the repair frame bounds the loop without a retry
+budget. Rejections other than `ConflictError` are terminal for the failing run
+— re-running against an unchanged replica recomputes the identical refused
+write. Recovery is owned by reactivity: any server-side change that could make
+the operation valid overlaps state the client subscribes to, and its arrival
+re-triggers the computation.
 
 ## 3.13 Mapping from Current Implementation
 

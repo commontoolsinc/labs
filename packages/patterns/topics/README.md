@@ -87,7 +87,7 @@ cf piece call --piece <board> addTopic \
   '{"title":"...","body":"the initial living document","agentName":"Sol"}'
 # -> { "result": { "topic": … } }: the topic this call created
 cf piece get --piece <board> topics --input \
-  --schema title,createdAt,lastActivityAt,commentCount
+  --select title,createdAt,lastActivityAt,commentCount
 cf piece call --piece <topic> addComment \
   '{"body":"point-in-time progress update","agentName":"Sol"}'
 cf piece call --piece <topic> setBody \
@@ -108,24 +108,24 @@ cf piece get --piece <board> index --step
 
 The board input links to complete Topic objects, including bodies, threads,
 handlers, and cross-reference data. Targeted headless discovery beyond the index
-should therefore combine an exact/range `--filter` with a concise `--schema`
+should therefore combine an exact/range `--filter` with a concise `--select`
 instead of materializing the whole corpus:
 
 ```bash
 cf piece get --piece <board> topics --input \
   --filter '.title == "<exact title>"' \
-  --schema title,lastActivityAt,commentCount
+  --select title,lastActivityAt,commentCount
 cf piece get --piece <board> topics --input \
   --filter '.lastActivityAt >= <epoch-milliseconds>' \
-  --schema title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
+  --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 cf piece get --piece <board> crossrefs --step \
   --filter '.topic.title == "<exact title>"' \
-  --schema fid,topic.title,topic.lastActivityAt,topic.commentCount
+  --select fid,topic.title,topic.lastActivityAt,topic.commentCount
 cf piece get --piece <topic> comments --input \
   --filter '.author.name == "Sol" or .authorName == "Sol"' \
-  --schema sentAt,author.kind,author.name,authorName,body
+  --select sentAt,author.kind,author.name,authorName,body
 cf piece get --piece <topic> links --input \
-  --filter '.kind == "pr"' --schema kind,url,label,addedAt
+  --filter '.kind == "pr"' --select kind,url,label,addedAt
 ```
 
 Filtering happens before projection and preserves list order. The jq-inspired
@@ -152,11 +152,12 @@ appends are mergeable ops, so a length observed inside one handling is not a
 fact about the resulting list — read `commentCount` when you want the count.
 
 A returned value reaches the caller through the handling's receipt. A result
-carrying a piece (`addTopic`) arrives on any runtime; the plain records
-(`addComment`, `addLink`, `setBody`) additionally need `plainResultReceipts`,
-which is `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` until that flag's default
-flips (`docs/development/EXPERIMENTAL_OPTIONS.md`). Without it those three verbs
-still perform their write and simply report no result.
+carrying a piece (`addTopic`) travels the result-pattern projection path; the
+plain records (`addComment`, `addLink`, `setBody`) project into the receipt
+under `plainResultReceipts`, which is on by default
+(`docs/development/EXPERIMENTAL_OPTIONS.md`). Setting
+`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` restores the discard, and those three
+verbs then still perform their write and simply report no result.
 
 `addTopic` takes the body at create (optional): a topic born with a body appears
 with it atomically — no reader observes a title-only halfway state, and no

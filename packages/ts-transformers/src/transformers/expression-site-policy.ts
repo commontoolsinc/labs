@@ -4,11 +4,13 @@ import {
   classifyArrayMethodCallSite,
   detectCallKind,
   getTypeAtLocationWithFallback,
+  hasAuthoredSourceSite,
   isCollectionType,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
   isReactiveOriginTaggedTemplate,
+  isSyntheticNode,
   type ReactiveContextInfo,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -599,18 +601,6 @@ export function getExpressionContainerKind(
   return undefined;
 }
 
-function hasAuthoredSourceSite(node: ts.Node): boolean {
-  const original = ts.getOriginalNode(node);
-
-  if (node.getSourceFile() && node.pos >= 0) {
-    return true;
-  }
-
-  return original !== node &&
-    !!original.getSourceFile() &&
-    original.pos >= 0;
-}
-
 function isWithinEventHandlerJsxAttribute(
   node: ts.Node,
   checker: ts.TypeChecker,
@@ -672,7 +662,7 @@ function getHelperBoundaryKind(
     if (
       parent &&
       ts.isCallExpression(parent) &&
-      parent.pos >= 0 &&
+      !isSyntheticNode(parent) &&
       ts.isExpression(current) &&
       parent.arguments.includes(current)
     ) {
@@ -938,7 +928,6 @@ function arrayMethodCallbackValueResolvesToCollection(
       expression,
       context.checker,
       context.state.typeRegistry,
-      context.options.logger,
     ),
     context.checker,
   );

@@ -86,7 +86,6 @@ function hasSharedReactiveCollectionProvenance(
     {
       ...options,
       typeRegistry: context.state.typeRegistry,
-      logger: context.options.logger,
       syntheticReactiveCollectionRegistry: context.state
         .syntheticReactiveCollectionRegistry,
     },
@@ -128,7 +127,6 @@ export function shouldTransformArrayMethod(
     mapTarget,
     context.checker,
     context.state.typeRegistry,
-    context.options.logger,
   );
   const receiverKind = classifyReactiveReceiverKind(
     mapTarget,

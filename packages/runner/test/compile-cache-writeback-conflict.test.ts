@@ -1,47 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   setCompileCacheRuntimeVersionForTesting,
   sourceDocKey,
   WRITE_TARGET_EDGE_SYNC_SCHEMA,
 } from "../src/compilation-cache/cell-cache.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
-
-// Shared-server helper (same shape as cell-cache.test.ts): several managers —
-// each a SEPARATE client replica — over ONE in-process memory server, so a
-// fresh runtime is genuinely cold the way a fresh browser worker is.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager._sharedServer = server;
-    return manager;
-  }
-  private _sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this._sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("writeback conflict test");
 const space = signer.did();
@@ -79,14 +46,14 @@ describe("compile-cache write-back after a runtime-version bump", () => {
     const restoreVersion = setCompileCacheRuntimeVersionForTesting(
       "test-version-A",
     );
-    const smA = SharedServerStorageManager.connectTo(server, { as: signer });
+    const smA = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtimeA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: smA,
     });
-    let smB: SharedServerStorageManager | undefined;
+    let smB: EmulatedStorageManager | undefined;
     let runtimeB: Runtime | undefined;
-    let smC: SharedServerStorageManager | undefined;
+    let smC: EmulatedStorageManager | undefined;
     let runtimeC: Runtime | undefined;
     try {
       const txA = runtimeA.edit();
@@ -106,7 +73,7 @@ describe("compile-cache write-back after a runtime-version bump", () => {
       // back source docs (which already exist server-side, with their derived
       // cells this replica has never read) plus compiled docs under vB.
       setCompileCacheRuntimeVersionForTesting("test-version-B");
-      smB = SharedServerStorageManager.connectTo(server, { as: signer });
+      smB = EmulatedStorageManager.connectTo(server, { as: signer });
       runtimeB = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: smB,
@@ -131,7 +98,7 @@ describe("compile-cache write-back after a runtime-version bump", () => {
       // B's write-back died on a deterministic ConflictError (stale seq-0
       // read of a pre-existing derived doc), so C recompiled again — and so
       // did every cold boot after it, forever.
-      smC = SharedServerStorageManager.connectTo(server, { as: signer });
+      smC = EmulatedStorageManager.connectTo(server, { as: signer });
       runtimeC = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: smC,
@@ -199,14 +166,14 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
     const restoreVersion = setCompileCacheRuntimeVersionForTesting(
       "ct1848-version-A",
     );
-    const smA = SharedServerStorageManager.connectTo(server, { as: signer });
+    const smA = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtimeA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: smA,
     });
-    let smB: SharedServerStorageManager | undefined;
+    let smB: EmulatedStorageManager | undefined;
     let runtimeB: Runtime | undefined;
-    let smC: SharedServerStorageManager | undefined;
+    let smC: EmulatedStorageManager | undefined;
     let runtimeC: Runtime | undefined;
     try {
       const txA = runtimeA.edit();
@@ -221,7 +188,7 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
 
       // Arm 1 — COLD replica, sync the entry under the one-hop edge schema
       // (what the write-target pre-sync now uses): the element docs arrive.
-      smB = SharedServerStorageManager.connectTo(server, { as: signer });
+      smB = EmulatedStorageManager.connectTo(server, { as: signer });
       runtimeB = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: smB,
@@ -254,7 +221,7 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
       // Arm 2 — another COLD replica, schema-less sync (the pre-fix
       // behavior): the root arrives, the element docs do NOT. This is the
       // differential that makes the edge selector load-bearing.
-      smC = SharedServerStorageManager.connectTo(server, { as: signer });
+      smC = EmulatedStorageManager.connectTo(server, { as: signer });
       runtimeC = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: smC,
@@ -286,7 +253,7 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
 describe("editWithRetry conflict catch-up", () => {
   it("awaits readyToRetry between attempts and then succeeds", async () => {
     const server = newSharedServer();
-    const sm = SharedServerStorageManager.connectTo(server, { as: signer });
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
@@ -345,7 +312,7 @@ describe("editWithRetry conflict catch-up", () => {
 describe("editWithRetry sequential conflict discovery", () => {
   it("pulls each named doc and converges one doc per round", async () => {
     const server = newSharedServer();
-    const sm = SharedServerStorageManager.connectTo(server, { as: signer });
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
@@ -420,7 +387,7 @@ describe("editWithRetry sequential conflict discovery", () => {
 
   it("exhausts the default budget when discovery outlasts it", async () => {
     const server = newSharedServer();
-    const sm = SharedServerStorageManager.connectTo(server, { as: signer });
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,

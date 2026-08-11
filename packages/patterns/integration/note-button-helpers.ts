@@ -73,7 +73,13 @@ async function settleAndClickNoteButton(
       { cause },
     );
   }
-  await clickMarked(page, token);
+  await clickMarked(page, {
+    token,
+    remark: {
+      predicate: markNoteButton,
+      args: [selector, match, needle, token, CLICK_TARGET_ATTR],
+    },
+  });
 }
 
 // The click helpers resolve `true` once the single click has landed (they throw

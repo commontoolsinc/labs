@@ -1,5 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { PieceManager } from "@commonfabric/piece";
+import { PiecesController } from "@commonfabric/piece/ops";
 import {
   compileAndSavePattern,
   experimentalOptionsFromEnv,
@@ -28,7 +28,7 @@ export interface CastAdminDependencies {
   ) => Runtime;
   readTextFile: typeof Deno.readTextFile;
   createSession: typeof createSession;
-  createPieceManager: (
+  createPiecesController: (
     session: Session,
     runtime: Runtime,
   ) => {
@@ -119,15 +119,15 @@ export async function castPattern(
     // Cast the pattern on the cell or with undefined if no cell
     dependencies.log("Casting pattern...");
 
-    // Create session and piece manager (matching main.ts pattern)
+    // Create session and pieces controller (matching main.ts pattern)
     const session = await dependencies.createSession({
       identity,
       spaceDid: spaceId as DID,
     });
 
-    // Create piece manager for the specified space
-    const pieceManager = dependencies.createPieceManager(session, runtime);
-    await pieceManager.ready;
+    // Create the pieces controller for the specified space
+    const pieces = dependencies.createPiecesController(session, runtime);
+    await pieces.ready;
     const pattern = await dependencies.compileAndSavePattern(
       runtime,
       patternSrc,
@@ -135,7 +135,7 @@ export async function castPattern(
     );
     dependencies.log("Pattern compiled successfully");
 
-    const piece = await pieceManager.runPersistent(pattern, {
+    const piece = await pieces.runPersistent(pattern, {
       pieces: targetCell,
     });
 
@@ -162,9 +162,9 @@ export function defaultCastAdminDependencies(): CastAdminDependencies {
     createRuntime,
     readTextFile: Deno.readTextFile,
     createSession,
-    createPieceManager: (session, runtime) =>
-      new PieceManager(session, runtime) as unknown as ReturnType<
-        CastAdminDependencies["createPieceManager"]
+    createPiecesController: (session, runtime) =>
+      new PiecesController(session, runtime) as unknown as ReturnType<
+        CastAdminDependencies["createPiecesController"]
       >,
     compileAndSavePattern: compileAndSavePattern as CastAdminDependencies[
       "compileAndSavePattern"

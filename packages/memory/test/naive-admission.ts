@@ -1,7 +1,7 @@
 // Naive reference model for commit admission and value application.
 //
 // This is the "obviously correct, unoptimized" half of the differential
-// consistency harness (v2-differential-consistency-test.ts): no SQL, no
+// consistency harness (v2-differential-consistency.test.ts): no SQL, no
 // tier shortcuts, no memoization — a direct transcription of the admission
 // rules in docs/specs/memory-v2/03-commit-model.md §3.6 over an in-memory
 // history of accepted commits.

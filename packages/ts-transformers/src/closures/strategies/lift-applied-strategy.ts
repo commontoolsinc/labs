@@ -8,6 +8,7 @@ import {
   detectCallKind,
   getLiftAppliedInputAndCallback,
   getTypeFromTypeNodeWithFallback,
+  isSyntheticNode,
   preserveLineage,
   qualifyCommonFabricTypeRefs,
   setParentPointers,
@@ -522,7 +523,7 @@ export function transformLiftAppliedCall(
     | ts.ArrowFunction
     | ts.FunctionExpression;
   const hasExplicitReturnType = originalCallback.type &&
-    originalCallback.type.pos >= 0;
+    !isSyntheticNode(originalCallback.type);
 
   const newCallback = builder.buildCallback(
     callback,

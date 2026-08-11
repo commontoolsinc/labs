@@ -120,7 +120,8 @@ describe("FabricEpochNsec", () => {
         });
 
         it("round-trips positive nanosecond timestamp", () => {
-          // 2024-01-01T00:00:00Z = 1704067200 seconds = 1704067200000000000 nsec
+          // 2024-01-01T00:00:00Z is 1704067200 seconds, so
+          // 1704067200000000000 nsec.
           const nsec = 1704067200000000000n;
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(

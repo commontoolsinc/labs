@@ -5,7 +5,7 @@ import {
   type Capability,
   isACLUser,
 } from "@commonfabric/memory/acl";
-import { loadManager, type SpaceConfig } from "./piece.ts";
+import { loadPieces, type SpaceConfig } from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
 // Open the space and hand an ACLManager to `run`. The ACL document is
@@ -15,9 +15,9 @@ async function withAcl<T>(
   config: SpaceConfig,
   run: (acl: ACLManager) => Promise<T>,
 ): Promise<T> {
-  const manager = await loadManager({ ...config, deferSpaceCellSync: true });
-  await using runtime = manager.runtime;
-  const space = manager.getSpace();
+  const pieces = await loadPieces({ ...config, deferSpaceCellSync: true });
+  await using runtime = pieces.runtime;
+  const space = pieces.getSpace();
   const result = await run(new ACLManager(runtime, space));
   // Checked AFTER the ACL access, which is what pulls the space and records any
   // denial. A denied write already rejects above; this also fails a read that

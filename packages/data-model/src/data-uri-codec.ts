@@ -10,7 +10,7 @@ import {
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 import { EmptyReconstructionContext } from "./codec-common/index.ts";
-import { jsonFromValue, valueFromJson } from "./codec-json/index.ts";
+import { jsonFromValue, valueFromJson } from "./codecs.ts";
 import type { FabricValue } from "./fabric-value.ts";
 
 /**

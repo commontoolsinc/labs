@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Cell, type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -10,7 +10,7 @@ import { trustExecutable } from "./support/trusted-builder.ts";
 import { JSONValue } from "@commonfabric/runner/shared";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isPrimitiveCellLink } from "../src/link-types.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -19,19 +19,6 @@ const space = signer.did();
 // boundary) but keep SEPARATE client caches. This models a reload: the second
 // runtime starts cold and must fetch persisted docs from the server, rather
 // than reading the first runtime's warm cache.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  constructor(as: Identity, server: MemoryV2Server.Server) {
-    super({ as, memoryHost: new URL("memory://") }, () => server);
-  }
-  // The shared server is owned by the test, not by either manager. Closing one
-  // manager must not close the server out from under the other; close only this
-  // manager's client by invoking the grandparent (plain StorageManager) close.
-  override close(): Promise<void> {
-    const baseClose = Object.getPrototypeOf(EmulatedStorageManager.prototype)
-      .close as (this: EmulatedStorageManager) => Promise<void>;
-    return baseClose.call(this);
-  }
-}
 
 // Regression coverage for CT-1666.
 //
@@ -57,8 +44,8 @@ class SharedServerStorageManager extends EmulatedStorageManager {
 // cache, exercising the load path the gate is responsible for.
 describe("rehydrate internal default (CT-1666)", () => {
   let server: MemoryV2Server.Server;
-  let sm1: SharedServerStorageManager;
-  let sm2: SharedServerStorageManager;
+  let sm1: EmulatedStorageManager;
+  let sm2: EmulatedStorageManager;
 
   const pattern: Pattern = {
     argumentSchema: {},
@@ -111,16 +98,9 @@ describe("rehydrate internal default (CT-1666)", () => {
   };
 
   beforeEach(() => {
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
-    sm1 = new SharedServerStorageManager(signer, server);
-    sm2 = new SharedServerStorageManager(signer, server);
+    server = newSharedServer();
+    sm1 = EmulatedStorageManager.connectTo(server, { as: signer });
+    sm2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await sm1?.close();

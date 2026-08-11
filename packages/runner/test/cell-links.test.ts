@@ -7,6 +7,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isSigilLink } from "../src/link-utils.ts";
 import { type SigilLink } from "../src/sigil-types.ts";
 import { JSONSchema } from "../src/builder/types.ts";
@@ -83,23 +84,23 @@ describe("getAsLink method", () => {
     expect(linkRefPayload(link).path).toEqual(["nested", "value"]);
   });
 
-  it("should stringify as the link it names, nested or not", () => {
-    // `generateKey()` in `packages/html/src/worker/keying.ts` keys render nodes
-    // by stringifying them, so a cell inside one has to come out as its link
-    // for the key to be stable across renders. Without the member the
-    // stringify walks a cell's own members into the runtime and dies on the
-    // cycle -- which that function catches, silently keying by a fallback.
+  it("should render as the link it names in a debug string", () => {
+    // `toCompactDebugString` honors the JSON protocol, and pattern-test
+    // assertion diagnostics render their operands with it. Without the member,
+    // rendering a value holding a cell walks the cell's own members into the
+    // runtime, so the rendering carries per-process detail -- the runtime's id
+    // among it -- and reports differently each run.
     const cell = runtime.getCell<{ value: number }>(
       space,
-      "cell-json-print-test",
+      "cell-debug-render-test",
       undefined,
       tx,
     );
     cell.set({ value: 42 });
 
-    const link = cell.toSigilLinkOrNull();
-    expect(JSON.parse(JSON.stringify(cell))).toEqual(link);
-    expect(JSON.parse(JSON.stringify({ held: cell }))).toEqual({ held: link });
+    const link = toCompactDebugString(cell.toSigilLinkOrNull());
+    expect(toCompactDebugString(cell)).toBe(link);
+    expect(toCompactDebugString({ held: cell })).toBe(`{"held":${link}}`);
   });
 
   it("should return sigil format for both getAsLink and toSigilLinkOrNull", () => {

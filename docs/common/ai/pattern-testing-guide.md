@@ -293,17 +293,22 @@ Key points:
 - Each participant gets its own identity. Use
   `{ pattern: aliceTab2, user: "alice" }` for a second session of an
   existing user (PerUser state shared, PerSession state isolated).
-- Assertions retry (with settling) until the step timeout, since asserted
-  state may still be propagating from another runtime — don't assert
-  "other user does NOT see X yet" right after the other user acted; assert
-  stable invariants instead.
+- A marker is a durable write in the shared space, so crossing
+  `{ await: "name" }` means everything the announcing participant committed
+  before `{ label: "name" }` has reached this runtime. An assertion is read
+  once, there: a false value is a failure rather than a cue to wait longer.
+  Put every assertion about another participant's state after the marker
+  that carries it. A marker says what HAS arrived and nothing about what has
+  not, so "other user does NOT see X yet" is still not something to assert —
+  assert stable invariants instead.
 - Pattern outputs a participant asserts on must be computed snapshots that
   always yield a REAL, STABLE value. In a runtime that didn't write the
   underlying scoped cell, the cell reads as `undefined` — and a computed that
   returns `undefined` (or a fresh `[]` per recompute) is indistinguishable
   from "not yet computed" for cross-runtime readers, so the assertion never
-  settles. Normalize inside the computed (`trimmedName(name.get())`,
-  `cell.get() ?? EMPTY_LIST` with a module-level constant).
+  sees the value the writing runtime holds. Normalize inside the computed
+  (`trimmedName(name.get())`, `cell.get() ?? EMPTY_LIST` with a module-level
+  constant).
 - Read another runtime's arrays with INLINE literal indexing in the assertion
   computed (`users?.[0]?.name === "Alice"`). `.map()`, loop-variable
   indexing, and module-level helper calls over the array resolve in the

@@ -92,6 +92,8 @@ interface ColumnOutput {
 }
 ```
 
+The runtime reads a set of reserved keys off the returned object, and `pattern()` types each one at its return position. `[NAME]` (a string) names the piece; `[UI]` and its `[TILE_UI]`/`[CHIP_UI]` variants are a `VNode` or a `JSXElement` (which admits a renderable sub-piece); `[FS]` is an `FsProjection`. Each also accepts a reactive value in place of a plain one. A value of the wrong shape under one — a non-string `[NAME]`, a `[UI]` that is not renderable — is a compile error at the pattern, whether or not the Output type lists that key.
+
 ## See Also
 
 - [Pattern Composition](../patterns/composition.md) - How sub-pattern rendering works
