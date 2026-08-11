@@ -26,13 +26,12 @@ are illustrative.
 
 ## What you are driving
 
-Two patterns. A **board** holds root items; an **item** holds its own subtree
-and its own verbs, so the thing a create hands back is itself callable.
+Two patterns. A **board** holds root items; an **item** holds its own subtree,
+its own graph edges, and its own verbs — so the thing a create hands back is
+itself callable, with no separate lookup.
 
 ```tsx
 // Shown for illustration only.
-
-// ── The board ──────────────────────────────────────────────────────────────
 
 /** What a caller supplies at creation. Everything else the board derives. */
 interface BoardInput {
@@ -40,14 +39,12 @@ interface BoardInput {
 }
 
 /** The board holds ROOT items only. Everything deeper is reached through an
- *  item's `children`, which is why an unshaped read of `items` expands the
- *  whole tree — the cost shaped reads exist to bound. */
+ *  item's `children`. */
 interface BoardOutput {
   items: ItemOutput[];
+  /** File a new root item. Returns the item it created. */
   addItem: Stream<{ title: string }, { item: ItemOutput }>;
 }
-
-// ── An item ────────────────────────────────────────────────────────────────
 
 /** What a caller supplies. `status`, `notes`, `children` and `blockedOn` are
  *  the pattern's own state, not inputs — a caller changes them through verbs. */
@@ -56,7 +53,7 @@ interface ItemInput {
   parent?: ItemOutput | null;
 }
 
-/** One work item, as the board projects it. */
+/** One work item: what it holds, and what it can do. */
 interface ItemOutput {
   title: string;
   /** "open" until a verb changes it — "done" or "archived". */
@@ -71,75 +68,54 @@ interface ItemOutput {
   /** The graph. A blocker is any item anywhere on the board, not a
    *  descendant — which is what makes one item reachable by two paths. */
   blockedOn: ItemOutput[];
-}
 
-/** An item is itself callable. This is what a create hands back, so the
- *  address the board returns is one you can immediately call verbs on. */
-interface ItemVerbs extends ItemOutput {
+  /** File a new item beneath this one. Returns the item it created. */
   addChild: Stream<{ title: string }, { item: ItemOutput }>;
+  /** Append a progress note. Returns it with the time the pattern stamped. */
   recordNote: Stream<{ body: string }, { note: Note; noteCount: number }>;
+  /** Mark this done. Returns how many descendants are still open. */
   finish: Stream<{ body?: string }, { at: number; openBelow: number }>;
+  /** Record that this item waits on another. Returns both endpoints. */
   blockOn: Stream<{ on: ItemOutput }, { blocked: ItemOutput; on: ItemOutput }>;
+  /** Mark archived. Returns nothing — the value-less shape. */
   archive: Stream<void>;
 }
 ```
 
-Every field above is a **reference**, not a copy: `children` holds links to
-item pieces, and so does `blockedOn`. That is the whole reason addresses
-matter here — the same item can sit under one item's `children` and in
-another's `blockedOn`, and only an address tells a reader those are one item
-rather than two.
+**One interface, holding both.** An item's fields and its verbs sit together
+because that is what an item *is*: a child in `children` is a full item, and
+declaring it any narrower would be a claim the runtime contradicts — ask that
+child what it can do and it lists all five.
 
-### How a holder of an `ItemOutput` knows it can call these
+**Every field is a reference, not a copy.** `children` holds links to item
+pieces, and so does `blockedOn`. That is the whole reason addresses matter
+here: the same item can sit under one item's `children` and in another's
+`blockedOn`, and only an address tells a reader those are one item rather than
+two.
 
-It does not — not from the type. `children` is declared `ItemOutput[]`, which
-carries no verbs, so a consumer holding an element cannot statically call
-`addChild` on it. That narrowing is deliberate: a receiving contract is kept to
-what it actually reads, because importing a producer's full shape couples far
-more than the relationship needs
-([composition](patterns/composition.md#keep-external-data-contracts-narrow)).
-
-**Over the CLI the question dissolves, because a caller holds an address and
-asks the piece.** Discovery is against the deployed pattern, not inferred from
-whatever type the parent used to declare the field:
+**Which makes an unshaped read expensive, on purpose.** Reading `children` with
+no selection carries every field *and* a link envelope per verb per element —
+measured at 3183 bytes for a single child on this pattern. Naming what you want
+brings it to 51:
 
 ```bash
-cf piece verbs --piece <a child's address>
+cf piece get --piece <item> children --select 'title,status'
 ```
 
-```text
-PATTERN cf:module/U7iaSZ…#Item
-NAME        KIND     ON
-addChild    handler  result
-archive     handler  result
-blockOn     handler  result
-finish      handler  result
-recordNote  handler  result
-```
+That is not a workaround; it is the read model working. A schema is a query,
+and a caller who names nothing has asked for everything. The same flags shape a
+verb's result, because
+[a result is a read on a different cell](../plans/fabric-read-model.md) — 1743
+bytes unshaped, 140 with `--select 'item.title'`.
 
-Every verb is there, and the listing names the pattern the piece is running so
-a caller can tell which version it is talking to. This is the whole reason the
-session below never needs to know a pattern's types in advance: it asks.
+**The prose above does not reach a caller.** Each verb carries a doc comment
+saying what it is for, which is where that documentation belongs — and none of
+it survives emission. A JSDoc comment on a *data* property reaches the compiled
+pattern; on a `Stream` property it is dropped. Measured on this pattern:
+`items` keeps "Root items only…", `addItem` keeps nothing. So `cf piece verbs`
+can list a verb and never say what it does. See step 2 for the two related
+losses on the input side.
 
-One wrinkle a reader will hit running that command — the real listing also
-reports `$NAME`, `children`, `notes`, `parent` and `blockedOn` as handlers.
-They are data, not callables; the listing over-reports
-([#5576](https://github.com/commontoolsinc/labs/issues/5576)).
-
-The verbs, and what each one is for:
-
-| On | Verb | Changes | Hands back |
-| --- | --- | --- | --- |
-| board | `addItem` | files a new root item | the item it created |
-| item | `addChild` | files an item beneath this one | the item it created |
-| item | `recordNote` | appends a note | the note, with the time it stamped |
-| item | `finish` | marks done, optionally notes why | the time, and how many descendants are still open |
-| item | `blockOn` | records that this waits on another item | both endpoints of the edge |
-| item | `archive` | marks archived | nothing — the value-less shape |
-
-`finish` is worth singling out: **`openBelow` is the count of open items
-anywhere beneath this one**, which a caller cannot compute without walking the
-whole subtree. That is the shape of thing a verb result is for.
 
 ## 1. Arrive with a slug **[today]**
 
@@ -324,8 +300,13 @@ Declared results make an **output** self-describing; this is about what an
 | `Output:` claims a handler returns nothing | Nothing — it is wrong, not missing |
 | A flag's prose absent from its help page | An emission fix — the renderer already reads a `description`; the schema the CLI is served has none |
 | A verb's purpose absent from its help page | An emission fix, then a renderer one — an event interface's doc comment reaches neither |
+| A verb's own doc comment absent everywhere | An emission fix — JSDoc survives on a data property and is dropped on a `Stream` one |
 | Result fields listed in help | A declared result |
 | `--select` completion, and refusal before the call | A declared result |
 | An address accepted as an argument | The round-trip property above |
 
-Three of the five need no decision.
+Three of the six need no decision at all, and three of them are the same
+mechanism seen from different sides: an author writes prose about a verb — on
+its event interface, on an event field, on the verb itself — and none of it
+reaches a caller. That is one emission gap with three symptoms, not three
+bugs.
