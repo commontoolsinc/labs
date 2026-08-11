@@ -122,12 +122,12 @@ verb's result, because
 bytes unshaped, 140 with `--select 'item.title'`.
 
 **The prose above does not reach a caller.** Each verb carries a doc comment
-saying what it is for, which is where that documentation belongs — and none of
-it survives emission. A JSDoc comment on a *data* property reaches the compiled
-pattern; on a `Stream` property it is dropped. Measured on this pattern:
-`items` keeps "Root items only…", `addItem` keeps nothing. So `cf piece verbs`
-can list a verb and never say what it does. See step 2 for the two related
-losses on the input side.
+saying what it is for, which is where that documentation belongs — and a
+comment on a `Stream` property is dropped in emission, so `cf piece verbs` can
+list a verb and never say what it does. Measured on this pattern: the data
+property `items` keeps "Root items only…", the verb `addItem` keeps nothing.
+It is one of three sites where an author's prose goes nowhere; step 2 has the
+full picture.
 
 
 ## 1. Arrive with a slug **[today]**
@@ -176,26 +176,36 @@ Output:
   No output on success.
 ```
 
-The flags, their types and their required-ness are derived. Nothing is authored
-per pattern: `parseInputFlags` builds a descriptor per input-schema property.
+**Structure is published; prose is not.** That line is the whole of what `cf`
+can currently say about a verb, and the split is worth holding onto:
 
-**The prose is not there, and that is measured.** `specificFlagLines` *would*
-render a `description` beside each flag — it reads one through
-`schemaDescription` — but no description ever reaches it. Write both kinds of
-JSDoc on an event and neither arrives:
+| | Where it comes from | Survives? |
+| --- | --- | --- |
+| flag name, placeholder, required-ness | the event's **type** — `{ title: string }` | **yes** |
+| what `title` means, what the verb is for | the author's **doc comments** | **no** |
 
-```tsx
-// Shown as interface or class members.
-/** One line naming the work. */
-title: string;
-```
+The structural half needs nothing authored per pattern: `parseInputFlags`
+builds a descriptor per input-schema property, so `--title <string> Required.`
+falls out of the type. That is why the page exists at all.
 
-- A **property** comment reaches the compiled pattern, where
-  `$defs.<Event>.properties.title.description` carries it, and is **stripped**
-  from the schema `cf piece call … --help` reads. Same schema, no description.
-- An **interface-level** comment — the one that would say what the verb is
-  *for* — does not reach the compiled pattern at all. Its `$defs.<Event>`
-  entry has no `description`.
+The prose half is dropped in emission, at three separate sites:
+
+| An author writes… | Reaches the compiled pattern? | Reaches `cf`? |
+| --- | --- | --- |
+| a comment on an **event field** (what `title` means) | yes — `$defs.<Event>.properties.title.description` | **no, stripped** |
+| a comment on the **event interface** (what the verb is for) | **no** | no |
+| a comment on the **verb itself**, as in the model above | **no** | no |
+
+One emitter is dropping all three
+([#5637](https://github.com/commontoolsinc/labs/issues/5637)), and for two of
+them that is the whole fix: `specificFlagLines` reads a `description` through
+`schemaDescription` and would print one the moment it were given one, and a
+listing row would carry one as soon as the emitter supplied it.
+
+The verb's *purpose* is the exception, and needs a second change. Even with a
+description on the event schema's root, `renderPieceCallHelp` has nowhere to
+put it — the page runs Usage, JSON input, Flags, Output, with no summary line,
+and `schemaDescription` is consulted only from the per-property loop.
 
 So the help page shows `--title <string>  Required.` and stops.
 
