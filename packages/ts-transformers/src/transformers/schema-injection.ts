@@ -2635,13 +2635,6 @@ function shouldReportPermissiveInferredPatternResult(
   return isAnyOrUnknownType(resultType);
 }
 
-/**
- * Handler for pattern schema injection.
- * Argument order is function-first: [function, inputSchema, resultSchema]
- *
- * @returns The transformed node, or undefined if no transformation was performed
- */
-
 function reportAnyResultSchema(
   context: TransformationContext,
   node: ts.CallExpression,
@@ -2738,6 +2731,12 @@ function isMapWithPatternCallbackPatternCall(node: ts.CallExpression): boolean {
     arrayMethodInfo.family === "map";
 }
 
+/**
+ * Handler for pattern schema injection.
+ * Argument order is function-first: [function, inputSchema, resultSchema]
+ *
+ * @returns The transformed node, or undefined if no transformation was performed
+ */
 function handlePatternSchemaInjection(
   node: ts.CallExpression,
   context: TransformationContext,

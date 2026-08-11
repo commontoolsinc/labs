@@ -631,10 +631,6 @@ export function resolveMetricBaselines(
   return resolved;
 }
 
-/**
- * Reports which commit each baseline was measured at, and how far back from the
- * base-branch commit that sits.
- */
 /** Names the groups no baseline could speak to, and why they are not gated. */
 export function reportUngatedGroups(
   groups: Set<string>,
@@ -650,6 +646,10 @@ export function reportUngatedGroups(
   );
 }
 
+/**
+ * Reports which commit each baseline was measured at, and how far back from the
+ * base-branch commit that sits.
+ */
 export function reportBaselineDistance(
   baselineShas: Set<string>,
   baseSha: string,
