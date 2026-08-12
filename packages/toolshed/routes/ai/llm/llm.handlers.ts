@@ -98,6 +98,11 @@ async function validateModelAndJsonMode(
  * Returns filtered list of available LLM models based on search criteria
  */
 export const getModels: AppRouteHandler<GetModelsRoute> = async (c) => {
+  // The list is what this route answers for, so it waits for the whole of it.
+  // A route naming one model asks `resolveModel`, which waits only when the
+  // name is not registered yet; there is no such shortcut for all of them, and
+  // a list quietly missing every gateway model is a wrong answer rather than
+  // an early one.
   await whenModelsReady();
   const { search, capability, task } = c.req.query();
   const capabilities = capability?.split(",");
