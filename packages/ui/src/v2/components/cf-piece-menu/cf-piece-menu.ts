@@ -889,6 +889,7 @@ export class CFPieceMenu extends BaseElement {
 
   private sourceActionToken = 0;
   private sourceRead: Promise<void> | undefined;
+  private sourceReadPending = false;
   private accessRead: Promise<void> | undefined;
   private revisionReadToken = 0;
 
@@ -951,12 +952,18 @@ export class CFPieceMenu extends BaseElement {
 
   override disconnectedCallback() {
     globalThis.removeEventListener("keydown", this.#onKeyDown);
-    this.#setHighlightedPiece(undefined, undefined);
-    this.#resetPieceState();
-    this.#resetAccessState();
-    this.sourceRead = undefined;
-    this.sourceActionToken++;
-    this.readToken++;
+    const sourceReadPending = this.sourceReadPending &&
+      (this.panel === "source" || this.panel === "origin");
+    if (!this.clonePending && !this.sourceActionPending && !sourceReadPending) {
+      this.close();
+    } else {
+      this.#setHighlightedPiece(undefined, undefined);
+      this.#resetPieceState();
+      this.#resetAccessState();
+      this.sourceRead = undefined;
+      this.sourceReadPending = false;
+      this.readToken++;
+    }
     super.disconnectedCallback();
   }
 
@@ -991,6 +998,7 @@ export class CFPieceMenu extends BaseElement {
     this.#resetPieceState();
     this.payloadText = "";
     this.sourceRead = undefined;
+    this.sourceReadPending = false;
     this.sourceActionPending = false;
     this.clonePending = false;
     this.cloneMode = undefined;
@@ -1019,6 +1027,7 @@ export class CFPieceMenu extends BaseElement {
     this.#resetRevisionSource();
     this.#resetPieceState();
     this.sourceRead = undefined;
+    this.sourceReadPending = false;
     this.sourceActionPending = false;
     this.clonePending = false;
     this.cloneMode = undefined;
@@ -1498,7 +1507,15 @@ export class CFPieceMenu extends BaseElement {
   }
 
   #readSource(cell: CellHandle): Promise<void> {
-    this.sourceRead ??= this.#performSourceRead(cell);
+    if (this.sourceRead === undefined) {
+      this.sourceReadPending = true;
+      const read = this.#performSourceRead(cell);
+      this.sourceRead = read;
+      const settled = () => {
+        if (this.sourceRead === read) this.sourceReadPending = false;
+      };
+      void read.then(settled, settled);
+    }
     return this.sourceRead;
   }
 

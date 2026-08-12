@@ -530,6 +530,53 @@ describe("the menu a right-click opens", () => {
     ).toBeUndefined();
   });
 
+  it("drops an access read while preserving a clone across disconnect", async () => {
+    let resolveAccess!: (access: SpaceAclView) => void;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const cell = pieceCell(undefined, {
+      getAccess: () =>
+        new Promise((resolve) => {
+          resolveAccess = resolve;
+        }),
+    });
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = async () => {
+      entered.resolve();
+      await release.promise;
+      throw new Error("expected test failure");
+    };
+    const menu = openMenu(cell);
+    const read = menu.showPanel("access");
+    (menu as unknown as { panel: string | undefined }).panel = undefined;
+    const cloning = menu.cloneIntoNewSpace({
+      spaceName: "clone-with-pending-access",
+    });
+    await entered.promise;
+    menu.disconnectedCallback();
+    resolveAccess(OWNER_ACCESS);
+    await read;
+
+    expect(
+      (menu as unknown as { spaceAccess: SpaceAclView | undefined })
+        .spaceAccess,
+    ).toBeUndefined();
+
+    (menu as unknown as { spaceAccess: SpaceAclView | undefined })
+      .spaceAccess = OWNER_ACCESS;
+    menu.disconnectedCallback();
+    expect(
+      (menu as unknown as { spaceAccess: SpaceAclView | undefined })
+        .spaceAccess,
+    ).toBeUndefined();
+    release.resolve();
+    await cloning;
+  });
+
   it("draws a clipped fixed highlight over a nested pattern root", () => {
     const menu = newMenu();
     const owner = geometryProbe({
@@ -1180,6 +1227,18 @@ describe("the source panel", () => {
     expect(shows(menu)).toContain("no read");
     await menu.showPanel("origin");
     expect(shows(menu)).toContain("no read");
+  });
+
+  it("closes after a completed source read failure disconnects", async () => {
+    const menu = openMenu(
+      pieceCell(() => Promise.reject(new Error("no read"))),
+    );
+    await menu.showPanel("source");
+    expect(shows(menu)).toContain("no read");
+
+    menu.disconnectedCallback();
+
+    expect(shows(menu)).toBe("");
   });
 
   it("stays quiet when the runtime was disposed mid-read", async () => {
