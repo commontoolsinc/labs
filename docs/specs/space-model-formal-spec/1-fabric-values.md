@@ -67,15 +67,18 @@ wrapper classes (Section 1.4).
 > `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
 > carries them (Section 8.6). The serialization vocabulary (the `CODEC`
 > symbol, `FabricCodec`, `ReconstructionContext`, `SerializationContext`)
-> lives in `codec-common/` (Section 2), and the conversion functions in
-> `native-conversion.ts` (Section 8).
+> lives in `codec-interface/` (Section 2), the machinery that acts on it in
+> `codec-common/`, and the conversion functions in `native-conversion.ts`
+> (Section 8).
 >
 > **Where a thing is declared is not where it is imported from**, and the
 > modules named here divide on that point. `interface.ts` and
 > `native-conversion.ts` are internal: they are not exported subpaths, and
 > their contents are reached through `@commonfabric/data-model/fabric-value`,
-> which re-exports them. `codec-common/` and `fabric-instances/` are exported
-> subpaths in their own right and are imported directly under those names;
+> which re-exports them. `codec-interface/` is internal in the same way: it
+> is reached through `@commonfabric/data-model/codec-common`, which
+> re-exports it. `codec-common/` and `fabric-instances/` are exported subpaths
+> in their own right and are imported directly under those names;
 > `fabric-value` does *not* re-export the codec vocabulary, so
 > `ReconstructionContext` and its siblings come from
 > `@commonfabric/data-model/codec-common`. Cite a module to say where
@@ -1407,6 +1410,7 @@ The protocol has two complementary halves:
 
 This split deliberately separates wire-format concerns from live in-process
 representation: the codec vocabulary lives in its own module area
+(`codec-interface/`), separate again from the machinery that reads it
 (`codec-common/`), and the dependency-free `interface.ts` carries no
 serialization machinery at all. Two motivations drove this shape: the seam
 between `FabricValue`'s encoding/decoding and the JSON-layer serialization
@@ -1427,7 +1431,7 @@ to `Symbol()` is a description, for debugging; it is not a key anything can look
 the symbol up by.
 
 ```typescript
-// file: packages/data-model/codec-common/interface.ts
+// file: packages/data-model/codec-interface/interface.ts
 
 /**
  * Well-known symbol for binding the getter `FabricClassWithCodec[CODEC]`.
@@ -1438,7 +1442,7 @@ export const CODEC: unique symbol = Symbol('data-model.codec');
 ```
 
 ```typescript
-// file: packages/data-model/fabric-instances/BaseFabricInstance.ts
+// file: packages/data-model/codec-common/BaseFabricInstance.ts
 
 /**
  * Well-known symbol for deeply freezing a fabric instance in place. The
@@ -1583,7 +1587,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/fabric-instances/BaseFabricInstance.ts
+// file: packages/data-model/codec-common/BaseFabricInstance.ts
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`
@@ -1655,7 +1659,7 @@ about serialization lives on the instances themselves.
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/codec-common/interface.ts
+// file: packages/data-model/codec-interface/interface.ts
 
 /**
  * Interface for codecs (encoder-decoder objects). These are objects which
@@ -1735,7 +1739,7 @@ export interface FabricClassWithCodec {
 
 Two helpers round out the vocabulary:
 
-- **`BaseFabricCodec`** (`codec-common/BaseFabricCodec.ts`) supplies the
+- **`BaseFabricCodec`** (`codec-interface/BaseFabricCodec.ts`) supplies the
   common scaffolding: a constructor taking `(recognizedTypeTag,
   uniqueHandledClass)`, an `instanceof`-based `canEncode()`, and a
   `tagForValue()` that returns `recognizedTypeTag` (a codec with no
@@ -1769,7 +1773,7 @@ Key contracts:
   the distinction is deliberate: a registry can route a legacy or
   alternate tag to an equivalent codec (a decode-only hookup), which is
   the affordance for legacy-data migration/import. The canonical tag
-  constants (`CODEC_TYPE_TAGS`, `codec-common/codec-type-tags.ts`)
+  constants (`CODEC_TYPE_TAGS`, `codec-interface/codec-type-tags.ts`)
   reserve a section for exactly such decode-only "non-primary versions"
   of classes (e.g., a future `Map@2` decoding into the same class as
   `Map@1`).
@@ -1782,7 +1786,7 @@ Key contracts:
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/codec-common/interface.ts
+// file: packages/data-model/codec-interface/interface.ts
 
 /**
  * The minimal interface that codec `decode()` implementations may depend
@@ -1810,7 +1814,7 @@ export interface ReconstructionContext {
    *
    * Required (not optional): every context declares it. A shared
    * `BaseReconstructionContext`
-   * (`packages/data-model/codec-common/BaseReconstructionContext.ts`)
+   * (`packages/data-model/codec-interface/BaseReconstructionContext.ts`)
    * centralizes the getter with a `true` default, mirroring
    * `cloneIfNecessary()`'s default; contexts opt out by overriding. An
    * `EmptyReconstructionContext` (same directory) covers context-less
@@ -2029,7 +2033,7 @@ handle both subtypes uniformly (e.g., serialization dispatch).
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/fabric-instances/ExplicitTagValue.ts
+// file: packages/data-model/codec-common/ExplicitTagValue.ts
 
 /**
  * Base class for fabric types that carry an explicit wire-format tag.
@@ -2090,15 +2094,15 @@ stands in for.
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/fabric-instances/UnknownValue.ts
+// file: packages/data-model/codec-common/UnknownValue.ts
 
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from '../interface';
 import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
-} from '../codec-common/interface';
-import { BaseFabricCodec } from '../codec-common/BaseFabricCodec';
+} from '../codec-interface/interface';
+import { BaseFabricCodec } from '../codec-interface/BaseFabricCodec';
 import { ExplicitTagValue } from './ExplicitTagValue';
 import { deepFreeze } from '../deep-freeze';
 
@@ -2176,15 +2180,15 @@ information.
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/fabric-instances/ProblematicValue.ts
+// file: packages/data-model/codec-common/ProblematicValue.ts
 
 import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from '../interface';
 import {
   CODEC,
   type FabricCodec,
   type ReconstructionContext,
-} from '../codec-common/interface';
-import { BaseFabricCodec } from '../codec-common/BaseFabricCodec';
+} from '../codec-interface/interface';
+import { BaseFabricCodec } from '../codec-interface/BaseFabricCodec';
 import { ExplicitTagValue } from './ExplicitTagValue';
 import { deepFreeze } from '../deep-freeze';
 
@@ -2322,7 +2326,7 @@ implementation.
 
 ```typescript
 // Shown at module scope.
-// file: packages/data-model/codec-common/interface.ts
+// file: packages/data-model/codec-interface/interface.ts
 
 /**
  * Public boundary interface for serialization contexts. Encodes fabric
@@ -2491,9 +2495,9 @@ needing classes of its own extends what this returns.
 | `registerSelfRep` | `null`, `boolean`, `number`, `string` | _(none)_ | Self-representing: emitted as-is. `number` is registered both ways; the codec is tried first. |
 
 The canonical tag strings live in `CODEC_TYPE_TAGS`
-(`codec-common/codec-type-tags.ts`); the structural meta tags (`quote`,
+(`codec-interface/codec-type-tags.ts`); the structural meta tags (`quote`,
 `hole`, `object`) live in `CODEC_META_TAGS`
-(`codec-common/codec-meta-tags.ts`).
+(`codec-interface/codec-meta-tags.ts`).
 
 An un-codec'd `FabricSpecialObject` reaching the encoder is a **hard
 error** — every wire form is explicitly represented; there is no implicit

@@ -8,16 +8,16 @@ import {
 } from "@commonfabric/utils/bigint";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import {
   type ReconstructionContext,
   type TerminalCodec,
-} from "@/codec-common/interface.ts";
+} from "@/codec-interface/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
 /**
  * Temporal type representing days from the POSIX Epoch (1970-01-01).

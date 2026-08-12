@@ -10,7 +10,7 @@
  * instead of being assumed.
  */
 
-import type { CodecForFormat } from "@/codec-common/interface.ts";
+import type { CodecForFormat } from "@/codec-interface/interface.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { FabricPrimitive, JSON_CODEC } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";

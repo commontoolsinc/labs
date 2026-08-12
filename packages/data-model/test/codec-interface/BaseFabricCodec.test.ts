@@ -14,8 +14,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/codec-common/interface.ts";
+import { BaseFabricCodec } from "@/codec-interface/BaseFabricCodec.ts";
+import type { ReconstructionContext } from "@/codec-interface/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 /**

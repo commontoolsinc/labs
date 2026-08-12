@@ -24,7 +24,7 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "@/fabric-instances/BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
 /**

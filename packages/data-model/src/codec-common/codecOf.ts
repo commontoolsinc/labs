@@ -4,7 +4,7 @@ import {
   type CodecForFormat,
   type FabricClassWithNonterminalCodec,
   type NonterminalCodec,
-} from "./interface.ts";
+} from "@/codec-interface/interface.ts";
 
 /**
  * Gets the `[CODEC]` for the given value's class, which is a

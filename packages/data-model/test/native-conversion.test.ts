@@ -29,8 +29,8 @@ import {
   type FabricOrConvertibleNativeValue,
   type FabricValue,
 } from "@/interface.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
@@ -49,15 +49,15 @@ import {
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import {
   BaseFabricInstance,
   DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "@/fabric-instances/BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
 

@@ -29,24 +29,24 @@ import { JsonCodec } from "@/codec-json/JsonCodec.ts";
 import { createDefaultJsonRegistry, newDefaultJsonCodec } from "@/codecs.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
 import { JSON_FORMAT, type JsonCodecValue } from "@/codec-json/interface.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import {
   BaseFabricInstance,
   DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "@/fabric-instances/BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
-import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
+import { BaseReconstructionContext } from "@/codec-interface/BaseReconstructionContext.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
-import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
-import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
 /**

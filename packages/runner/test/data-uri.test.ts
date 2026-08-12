@@ -25,7 +25,7 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
+import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";

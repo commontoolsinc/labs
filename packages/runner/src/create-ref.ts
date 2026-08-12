@@ -4,10 +4,8 @@ import {
   hasEntityUriScheme,
   hashStringForEntityAddress,
 } from "./entity-kind.ts";
-import {
-  BaseFabricPrimitive,
-  FabricHash,
-} from "@commonfabric/data-model/fabric-primitives";
+import { BaseFabricPrimitive } from "@commonfabric/data-model/codec-common";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
   entityRefFrom,

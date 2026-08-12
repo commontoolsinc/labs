@@ -21,9 +21,9 @@ import { expect } from "@std/expect";
 
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
   isFabricCompatible,

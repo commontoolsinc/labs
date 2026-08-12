@@ -13,9 +13,13 @@
  */
 
 import type { FabricValue } from "@/interface.ts";
-import { CODEC, type CodecForFormat, type WireFormat } from "./interface.ts";
-import { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
-import { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
+import {
+  CODEC,
+  type CodecForFormat,
+  type WireFormat,
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
 /**

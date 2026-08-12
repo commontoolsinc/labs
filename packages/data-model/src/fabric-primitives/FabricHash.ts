@@ -11,15 +11,15 @@ import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
+import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import {
   type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
+} from "@/codec-interface/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.

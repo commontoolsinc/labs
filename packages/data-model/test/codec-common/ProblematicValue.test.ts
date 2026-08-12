@@ -16,12 +16,12 @@ import { expect } from "@std/expect";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/fabric-instances/BaseFabricInstance.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { ExplicitTagValue } from "@/codec-common/ExplicitTagValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
-import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
+import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("ProblematicValue", () => {
   // Subclass-checking-superclass identity: lives directly under the class

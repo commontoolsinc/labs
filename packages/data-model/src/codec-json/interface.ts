@@ -9,7 +9,7 @@
  * itself rather than restated here.
  */
 
-import type { WireFormat } from "@/codec-common/interface.ts";
+import type { WireFormat } from "@/codec-interface/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
 
 /**

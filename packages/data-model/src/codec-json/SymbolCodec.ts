@@ -1,11 +1,11 @@
 import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "./interface.ts";
-import type { ReconstructionContext } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
  * Codec for registry-interned symbols. Encodes the registry key as a JSON

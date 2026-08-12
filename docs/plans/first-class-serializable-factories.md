@@ -188,7 +188,7 @@ Expected implementation files:
 ### WP1.2 — Add `Factory@1` codec dispatch
 
 - [ ] Add the `Factory@1` constant to
-  `packages/data-model/src/codec-common/codec-type-tags.ts`.
+  `packages/data-model/src/codec-interface/codec-type-tags.ts`.
 - [ ] Implement a `FactoryCodec` with wire tag `Factory@1`.
 - [ ] Validate discriminant, exact allowed fields, content-addressed ref shape,
   schemas, modifiers, and pattern-only params fields during decode.

@@ -4,15 +4,15 @@ import {
 } from "@commonfabric/utils/base64url";
 import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   ReconstructionContext,
   TerminalCodec,
-} from "@/codec-common/interface.ts";
+} from "@/codec-interface/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
 
 /**

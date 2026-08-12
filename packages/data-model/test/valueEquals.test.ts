@@ -27,7 +27,7 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 
 describe("valueEqual()", () => {
   it("returns `true` for equal primitives", () => {
