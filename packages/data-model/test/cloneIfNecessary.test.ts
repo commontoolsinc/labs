@@ -1,3 +1,23 @@
+/**
+ * Cloning to a requested frozenness, and which option combinations mean
+ * anything together.
+ *
+ * Two of them are errors rather than choices, having no coherent answer to
+ * give: forcing a copy of a value that will be immutable anyway, and
+ * shallow-thawing a tree whose frozenness is mixed. Refusing those is what
+ * keeps each remaining combination meaning exactly one thing.
+ *
+ * The rest is what may be shared and what must be rebuilt. A value already in
+ * the requested state comes back as it is unless a copy was forced,
+ * inherently immutable values are never copied at all, and a null prototype is
+ * canonicalized rather than carried through, not being a shape the value type
+ * admits.
+ *
+ * Cycles are detected on the deep paths, and the subclass matrix asks the same
+ * questions of every concrete class rather than trusting one to stand in for
+ * the others.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
