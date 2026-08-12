@@ -15,20 +15,23 @@
 import { action, assert, NAME, pattern, TESTS, Writable } from "commonfabric";
 import NoteMd from "./note-md.tsx";
 import Note from "./note.tsx";
-import { type MentionRefMap } from "./schemas.tsx";
+import { type MentionRefMap, type NotePiece } from "./schemas.tsx";
 
 /**
- * The address the renderer should produce for a reference, read back the way
- * the renderer reads it. A destination's address is a content hash, so it
- * cannot be spelled out in an expectation. Module scope is required: an
- * assertion callback may not capture a callable from an enclosing function.
+ * The address of the piece a cell holds.
+ *
+ * A destination's address is a content hash, so an expectation cannot spell it
+ * out. It is read here from a cell that holds the destination DIRECTLY, never
+ * from the reference map: walking the map the way the renderer walks it would
+ * make expected and actual agree by construction, and the test would still
+ * pass if the renderer resolved the wrong key. Two independent paths to the
+ * same piece is what pins which destination the rendered link names.
+ *
+ * Module scope is required: an assertion callback may not capture a callable
+ * from an enclosing function.
  */
-const referenceAddress = (
-  references: Writable<MentionRefMap>,
-  key: string,
-): string => {
-  const uri = ((references as any).key(key).key("destination"))
-    ?.resolveAsCell?.()?.sourceURI;
+const heldPieceAddress = (held: unknown): string => {
+  const uri = (held as any)?.resolveAsCell?.()?.sourceURI;
   return uri ? `/${uri}` : "";
 };
 
@@ -163,9 +166,11 @@ export default pattern(() => {
 
   // === Instance with mentions in reference form ===
   // `[Label][key]` resolves through the note's reference map. The destination
-  // is a live piece, so its address is content-derived and cannot be spelled
-  // out here; the assertions read it back the way the renderer does.
+  // is a live piece, so its address is content-derived; the assertions ask the
+  // piece for its own address rather than re-walking the map.
   const alice = Note({ title: "Alice", content: "", isHidden: false });
+  // The same destination, reachable without going through the map.
+  const aliceHeld = new Writable<NotePiece | null>(null);
 
   // Seeded by an action rather than inline: a Writable initializer takes
   // static data, and a destination is a live piece.
@@ -259,14 +264,17 @@ export default pattern(() => {
 
   const action_seed_reference = action(() => {
     references.key("a3f9zz").set({ destination: alice, modifiedTitle: false });
+    aliceHeld.set(alice as NotePiece);
   });
 
   // Add an entry for a key already sitting in a document, which is the order
   // a mention pasted before its map arrives comes in.
   const bob = Note({ title: "Bob", content: "", isHidden: false });
+  const bobHeld = new Writable<NotePiece | null>(null);
 
   const action_add_reference = action(() => {
     references.key("zzzz99").set({ destination: bob, modifiedTitle: false });
+    bobHeld.set(bob as NotePiece);
   });
 
   // Update wiki content to have multiple links
@@ -351,13 +359,13 @@ export default pattern(() => {
   const assert_reference_converted = assert(
     () =>
       mdRefs.processedContent ===
-        `See [Alice](${referenceAddress(references, "a3f9zz")}) for details`,
+        `See [Alice](${heldPieceAddress(aliceHeld)}) for details`,
   );
 
   // The address carries the destination's own scheme rather than a prepended
   // one, which for a piece is `of:`.
   const assert_reference_address_schemed = assert(
-    () => referenceAddress(references, "a3f9zz").startsWith("/of:"),
+    () => heldPieceAddress(aliceHeld).startsWith("/of:"),
   );
 
   // A key with no entry, and a hand-written reference link, both stay as
@@ -377,18 +385,14 @@ export default pattern(() => {
   const assert_mixed_forms_converted = assert(
     () =>
       mdMixedForms.processedContent ===
-        `Old [Bob](/of:def456) and new [Alice](${
-          referenceAddress(references, "a3f9zz")
-        })`,
+        `Old [Bob](/of:def456) and new [Alice](${heldPieceAddress(aliceHeld)})`,
   );
 
   // An entry added after the fact resolves the token that was waiting for it.
   const assert_late_reference_converted = assert(
     () =>
       mdUnknownRefs.processedContent ===
-        `See [Bob](${
-          referenceAddress(references, "zzzz99")
-        }) and [the docs][readme] here`,
+        `See [Bob](${heldPieceAddress(bobHeld)}) and [the docs][readme] here`,
   );
 
   // After updating wiki content, new links should be converted
