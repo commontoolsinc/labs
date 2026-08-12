@@ -652,7 +652,9 @@ child on the configured Gemini search model, requests the gateway's
 browser, or fetch tools. The intended use is the same CFC boundary as browser
 and web_fetch subagents: the parent delegates a focused search task, raw search
 observations stay in child artifacts, and the parent receives only the sanitized
-subagent return channel.
+subagent return channel. Because this profile overrides the parent model, parent
+`--reasoning-effort` and `--prompt-cache-mode` settings remain on
+model-inheriting loops and do not apply to the search child.
 
 Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
 object or boolean. In that mode the child is required to return a single JSON
