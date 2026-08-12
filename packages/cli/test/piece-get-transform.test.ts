@@ -1950,6 +1950,43 @@ describe("cf piece get transforms", () => {
     );
   });
 
+  it("answers an unset declared array with no addresses rather than a refusal", async () => {
+    // An unset declared array is the empty array under the runner's map
+    // semantics, and the unmarked spelling already answers `[]`. A marked one
+    // must agree: refusing here would tell a caller its piece is malformed
+    // when it merely has nothing in it yet — the state every collection
+    // starts in.
+    const tx = runtime.edit();
+    const unsetSource = runtime.getCell(
+      space,
+      "declared-array-unset-source",
+      { type: "array", items: { type: "object" } },
+      tx,
+    );
+    expect((await tx.commit()).ok).toBeDefined();
+
+    // All three spellings agree, which is the property: an unmarked
+    // projection, a concise marker, and the JSON-schema marker each answer
+    // with no elements rather than one refusing and another going absent.
+    expect(
+      await deriveSelectedValue(runtime, space, unsetSource, {
+        projection: parseSelectProjection("id"),
+      }),
+    ).toEqual([]);
+    expect(
+      await deriveSelectedValue(runtime, space, unsetSource, {
+        projection: parseSelectProjection("id@"),
+      }),
+    ).toEqual([]);
+    expect(
+      await deriveSelectedValue(runtime, space, unsetSource, {
+        projection: await parseSelectionProjection(
+          '{"type":"array","items":{"properties":{"id":{"$link":true}}}}',
+        ),
+      }),
+    ).toEqual([]);
+  });
+
   it("reports runtime predicate failures as transform errors", async () => {
     const tx = runtime.edit();
     const source = runtime.getCell(

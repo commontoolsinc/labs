@@ -2036,10 +2036,21 @@ export async function deriveSelectedValue(
     // which is not an array, and the answer to a marked one is the same
     // refusal: a walk over a non-array simply finds no elements to address,
     // which renders as an absent value rather than as the mismatch it is.
-    if (
-      projection.projectsArrayItems &&
-      !Array.isArray(await storedContainer(position))
-    ) {
+    //
+    // `undefined` is not a mismatch. An unset declared array is the empty
+    // array under the runner's map semantics, so the unmarked spelling
+    // answers `[]` — and a marked one has to answer `[]` too, or the two
+    // disagree about a piece that simply has nothing in it yet. A stored
+    // `null` or object still is a mismatch and still refuses.
+    const storedValue = await storedContainer(position);
+    if (projection.projectsArrayItems && !Array.isArray(storedValue)) {
+      // An unset declared array is the empty array under the runner's map
+      // semantics, which is why the unmarked spelling answers `[]`. A marked
+      // one answers `[]` as well rather than refusing or going absent: the
+      // piece is not malformed, it simply holds nothing yet, and that is the
+      // state every collection starts in. A stored `null` or object IS a
+      // mismatch and still refuses.
+      if (storedValue === undefined) return [];
       throw arrayItemProjectionError(selection.projection!.flag);
     }
     return await composeLinkAddresses(
