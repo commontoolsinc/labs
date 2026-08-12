@@ -66,20 +66,26 @@ handing content to `cf-markdown`.
 
 ## The contract
 
-A reference key is six characters of `[0-9a-z]`. Parsing is three-state, which
-mirrors the complete/incomplete split the wiki-link form already has:
+A reference key is six characters of `[0-9a-z]`. A token is a mention when the
+map holds its key, and ordinary text otherwise:
 
-| Token shape matches | Key in map | What the user sees                             |
-| ------------------- | ---------- | ---------------------------------------------- |
-| yes                 | yes        | a pill; cursor inside reveals `[Label]`        |
-| yes                 | no         | a pending pill — a dangling reference          |
-| no                  | —          | untouched: a hand-written reference link       |
+| Token shape matches | Key in map | What the user sees                      |
+| ------------------- | ---------- | --------------------------------------- |
+| yes                 | yes        | a pill; cursor inside reveals `[Label]` |
+| yes                 | no         | ordinary text — editable, unprotected   |
+| no                  | —          | ordinary text                           |
 
-**Shape alone drives protection; map membership drives only resolution.** The
-map arrives asynchronously, and a reference must not sit unprotected while it
-loads. The cost is that a hand-written `[text][abcdef]` is protected too, which
-is why the key alphabet is narrow enough to make the collision rare and the
-pending pill makes it visible when it happens.
+**Membership rather than shape is what decides**, and the alternative is worth
+naming because it is the tempting one. Six lowercase characters is a shape
+ordinary prose reaches: deciding by shape would capture a hand-written
+`[the docs][readme]`, put its `][readme]` beyond the keyboard, and leave the
+user no way to fix it.
+
+The cost is a window. A document whose text has loaded but whose map has not
+shows its mentions as plain text until the map arrives — an effect announcing
+the map's keys is what closes it, and the parse reruns on that as well as on a
+document change. A token pasted from another document stays plain text, which
+is what it is here.
 
 **Writes are ordered map-first.** The document and the map are separate cells
 with separate timings — content is debounced, the map is not. Writing the map
@@ -131,8 +137,9 @@ reference form.
       `parseMentionRefs`, a `mentionRefField` that recomputes on `docChanged`
       **or** a `setKnownRefKeys` effect, `atomicMentionRefRanges` and
       `mentionRefEditFilter` over the `][key]` suffix, and a decoration plugin
-      implementing the three-state table. It keeps the single-line guard: a
-      token spanning a line break is skipped rather than decorated.
+      that renders a pill and reveals `[Label]` under the cursor. The label
+      pattern excludes newlines, so a mention is a single-line range by
+      construction rather than by a guard.
 - [ ] `cf-code-editor.ts`: the `references` property (`$references`), wrapped
       with `asSchema(MentionRefMapSchema)` and subscribed on change like
       `mentionable`; completion and novel-mention creation minting reference
@@ -179,14 +186,14 @@ lived in one pattern for a while.
 ## Risks
 
 **Self-containment.** Named above and unrecovered for cross-document paste. A
-reference pasted into another note renders as a pending pill: visible, inert,
-and repairable by re-picking the mention. The alternative — resolving the key
-against a global registry — would restore the property and give up the
-locality that makes short keys workable.
+reference pasted into another note reads as ordinary text — the label survives,
+the destination does not, and re-picking the mention is the repair. The
+alternative — resolving the key against a global registry — would restore the
+property and give up the locality that makes short keys workable.
 
 **Two cells, two clocks.** Map-first ordering handles the interrupted case.
 The remaining exposure is a map write that fails while the text write succeeds,
-which produces the same pending pill.
+which leaves the same label without a destination.
 
 **Garbage collection against a concurrent editor.** Two clients editing one
 note will each see keys the other just added and not yet received. A sweep that
