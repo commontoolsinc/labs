@@ -33,12 +33,11 @@ References:  { a3f9: { destination: Cell<unknown>, modifiedTitle: false } }
   and it sits at the edge of the token rather than inside it.
 
 **What it costs: self-containment.** `[[Name (id)]]` survives being copied
-anywhere. `[Label][a3f9]` means nothing without the map, so text pasted into
-another document arrives as a dangling reference, and every consumer of raw
-note content — the filesystem projection, an export, a prompt — sees a label
-with no destination. Stage 3 recovers the export case by emitting the map as
-the markdown reference-definition block it already resembles. Cross-document
-paste is not recovered.
+anywhere. `[Label][a3f9zz]` means nothing without the map, so text pasted into
+another document reads as ordinary text there, and every consumer of raw note
+content — the filesystem projection, an export, a prompt — sees a label with no
+destination. Neither case is recovered by this arc; the reasoning is under
+Stage 3, and it is the honest cost of moving identity out of the prose.
 
 **The whole feature is opt-in.** With no `$references` cell the editor parses an
 empty key set, produces no reference decorations, and mints wiki-links exactly
@@ -66,8 +65,9 @@ handing content to `cf-markdown`.
 
 ## The contract
 
-A reference key is six characters of `[0-9a-z]`. A token is a mention when the
-map holds its key, and ordinary text otherwise:
+A reference key is six characters of `[0-9a-z]`, and the parser accepts six to
+ten so that a collision has somewhere to go — see the mint under Stage 1. A
+token is a mention when the map holds its key, and ordinary text otherwise:
 
 | Token shape matches | Key in map | What the user sees                      |
 | ------------------- | ---------- | --------------------------------------- |
@@ -87,11 +87,18 @@ the map's keys is what closes it, and the parse reruns on that as well as on a
 document change. A token pasted from another document stays plain text, which
 is what it is here.
 
-**Writes are ordered map-first.** The document and the map are separate cells
-with separate timings — content is debounced, the map is not. Writing the map
-entry before dispatching the text means an interrupted mention leaves an
-unreferenced map entry, which is inert, rather than a reference with no
-destination, which is a broken link.
+**Writes are ordered map-first, and removal is ordered the other way.** The
+document and the map are separate cells with separate timings — content is
+debounced, the map is not. Writing the map entry before dispatching the text
+means an interrupted mention leaves an unreferenced map entry, which is inert,
+rather than a reference with no destination, which is a broken link.
+
+Deleting an entry inverts that, for the same reason. A user who deletes a
+mention leaves the document write pending under the debounce or blur strategy;
+dropping the entry immediately, and then losing that pending write to a
+disconnect, leaves the durable document holding a token whose destination is
+gone. Collection therefore flushes the document write first and only then
+removes the entry.
 
 **Title sync gains a direction and loses one:**
 
@@ -130,8 +137,10 @@ reference form.
   ```
 
   `mintRefKey` samples against the union of the map's keys and the keys already
-  in the document, and widens deterministically on collision rather than
-  resampling in a loop.
+  in the document, and widens by a character on collision rather than resampling
+  one length in a loop. Widening is why the accepted shape is a range rather
+  than a fixed six: a key the mint can produce and the parser would not accept
+  is a mention that reads as ordinary text.
 
 - [ ] `features/mention-refs.ts`: the structural twin of `backlinks.ts` —
       `parseMentionRefs`, a `mentionRefField` that recomputes on `docChanged`
@@ -172,10 +181,20 @@ reference form.
 
 - [ ] `note.tsx` owns a `references` cell, passes it to the editor, and threads
       it into `note-md`.
-- [ ] `[FS]` emits resolved definitions (`[a3f9]: /of:<id>`) beneath the
-      content. The map is a markdown reference-definition block; writing it as
-      one makes the projected file self-contained standard markdown while the
-      editing buffer stays clean.
+**`[FS]` is left alone, and that is a decision rather than an omission.** The
+appealing idea is to emit the map as the markdown reference-definition block it
+already resembles, so a projected note is self-contained standard markdown.
+That cannot be done through `[FS].content` as it stands: `writeFsFile`
+(`packages/fuse/cell-bridge.ts`) parses an edited file and writes the **entire**
+body back to `$FS.content`, which for a note is its own content cell. Emitted
+definitions would come straight back in as note text on the first edit through
+the filesystem, and be appended again on the next projection.
+
+Making it work needs one of two things this arc should not reach for: a
+projection surface that is read-only, or an `[FS]` write-back contract that
+knows how to strip a generated section before storing the rest. Until then a
+projected note shows its reference tokens with no destinations — the same
+shape a reader gets from a raw wiki-link, minus the id.
 
 Other `$mentionable` consumers — `chat-note.tsx`, `daily-journal.tsx`,
 `topic.tsx`, `agent.tsx`, `record-backup.tsx`, `compiler.tsx`, and the catalog
