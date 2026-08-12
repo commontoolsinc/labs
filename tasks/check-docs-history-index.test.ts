@@ -117,6 +117,30 @@ describe("checkShape", () => {
     expect(entries[0].targets).toEqual(["specs/a.md"]);
   });
 
+  it("ignores a link to somewhere off the filesystem", () => {
+    const { problems, entries } = checkShape(index(
+      "## Audits and reports",
+      "",
+      "- [a.md](specs/a.md) — an audit, measured against " +
+        "[the site](https://example.com/thing).",
+    ));
+    expect(problems).toEqual([]);
+    expect(entries[0].targets).toEqual(["specs/a.md"]);
+  });
+
+  it("reports an index with no sections rather than reading it as entries", () => {
+    const { problems, entries } = checkShape([
+      TITLE,
+      "",
+      PROSE,
+      "",
+      "- [a.md](specs/a.md) — an audit filed under no section.",
+    ].join("\n"));
+    expect(problems.length).toBe(1);
+    expect(problems[0].message).toContain("no `## ` section heading");
+    expect(entries).toEqual([]);
+  });
+
   it("requires the title", () => {
     const { problems } = checkShape([
       "# Historical documents",
