@@ -38,6 +38,14 @@ const polylines = (chart: string): number[][][] =>
     match[1].split(" ").map((pair) => pair.split(",").map(Number))
   );
 
+// Every explicit point marker in the chart, as [x, y] in drawing order. A
+// point no polyline can reach is drawn as one of these instead.
+const markers = (chart: string): number[][] =>
+  [...chart.matchAll(/<circle cx="([^"]+)" cy="([^"]+)"/g)].map((match) => [
+    Number(match[1]),
+    Number(match[2]),
+  ]);
+
 const NOW = new Date("2026-01-20T09:00:00Z");
 
 describe("spend", () => {
@@ -167,5 +175,50 @@ describe("spend", () => {
     expect(githubTint.length).toBe(3);
     expect(githubTint[0][0]).toBe(210);
     expect(githubTint[2][0]).toBe(blacksmithTint[19][0]);
+  });
+
+  it("stops at the last day it reports on rather than at the settled horizon", () => {
+    // December was read and January was not, so on 5 January a 2-day lag
+    // settles no January day. The line ends on 31 December.
+    const github = source(run("2025-12-01", 20, 5), 2, "#58a6ff", ["2025-12"]);
+    const { chart, duration } = spendChart([github], GAP_NOW, "good");
+    expect(duration).toBe(31 * DAY);
+    const lines = polylines(chart);
+    // One base line over December, then the bright trailing slice.
+    expect(lines.length).toBe(2);
+    expect(lines[0].length).toBe(31);
+    // It reaches the right edge: the grid stops where the line does, instead
+    // of running on to 3 January and leaving the line short of the edge.
+    expect(lines[0][30][0]).toBe(220);
+    // The quiet 21st-31st settled into real zeros below the $5 days.
+    const quiet = lines[0].slice(20).map(([, y]) => y);
+    expect(new Set(quiet).size).toBe(1);
+    expect(quiet[0]).toBeGreaterThan(lines[0][19][1]);
+  });
+
+  it("marks a day both its neighbours are missing", () => {
+    // On 3 January a 2-day lag reaches 1 January, so the January side of the
+    // hole is a single day with nothing to join it to.
+    const github = source(
+      [...NOVEMBER, ...run("2026-01-01", 1, 2)],
+      2,
+      "#58a6ff",
+      ["2025-11", "2026-01"],
+    );
+    const { chart } = spendChart(
+      [github],
+      new Date("2026-01-03T09:00:00Z"),
+      "good",
+    );
+    const lines = polylines(chart);
+    // November is the only run of days long enough to draw a line through.
+    expect(lines.length).toBe(1);
+    expect(lines[0].length).toBe(11);
+    // 1 January is drawn as a point of its own at the chart's right edge.
+    const points = markers(chart);
+    expect(points.length).toBe(1);
+    expect(points[0][0]).toBe(220);
+    // It sits above the $1 November days, at its own $2.
+    expect(points[0][1]).toBeLessThan(lines[0][10][1]);
   });
 });

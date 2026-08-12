@@ -251,7 +251,6 @@ export function spendChart(
     const columns = grid.slice(0, covered)
       .map((day, index) => ({ day, index }))
       .filter(({ day }) => reports(source, day));
-    if (columns.length === 0) return [];
     return [{
       vals: columns.map(({ day }) => source.spend!.byDay.get(day) ?? 0),
       // A line that skips days, or that the grid outlives, keeps its points on
