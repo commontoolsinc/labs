@@ -1,7 +1,8 @@
 /**
  * This directory holds the codec system's active machinery: the registry that
- * indexes codecs, the lookup that finds a class's codec, the abstract bases
- * every participating class extends, and the `ExplicitTagValue` family. It is
+ * indexes codecs, the lookup that finds a class's codec, the base class a
+ * whole-value codec engine extends, the abstract bases every participating
+ * class extends, and the `ExplicitTagValue` family. It is
  * also the package's public face for the codec system as a whole, re-exporting
  * the declarations in `codec-interface/` so that an outside caller has one
  * entry point rather than two.
@@ -17,9 +18,9 @@
  * `codec-json/` holds the four that JSON needs.
  *
  * The classes here are the codec system's own. That covers the two abstract
- * bases every participating class extends, and the `ExplicitTagValue` family,
- * whose members exist only because a decode went wrong or found a tag that no
- * codec claimed. A class a caller models data with belongs in
+ * bases every participating class extends, the base that each format's engine
+ * extends, and the `ExplicitTagValue` family, whose members exist only because
+ * a decode went wrong or found a tag that no codec claimed. A class a caller models data with belongs in
  * `fabric-instances/` or `fabric-primitives/` instead.
  */
 

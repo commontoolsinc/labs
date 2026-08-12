@@ -2563,9 +2563,10 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 7. **Arrays** — recursively deserialized; `hole` entries reconstructed as
    true holes (absent indices).
 8. **Plain objects** — recursively deserialized; output frozen. Any
-   `/`-prefixed key in a plain (non-single-key-tagged) object is reserved:
-   the walker produces a `ProblematicValue` rather than silently
-   round-tripping it (Section 9 of `3-json-encoding.md`).
+   `/`-prefixed key in a plain (non-single-key-tagged) object is reserved, as
+   is any name this runtime reserves: rather than silently round-trip it, the
+   walker rejects it, settled against `lenient` as in step 3 (Section 9 of
+   `3-json-encoding.md`).
 
 > **Previous design: type handlers + class registry.** The earlier design
 > dispatched per-type logic to `TypeHandler` objects (which did their own

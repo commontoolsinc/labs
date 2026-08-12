@@ -409,8 +409,8 @@ escape, or encoding error — never a literal user-data key.
 Specifically:
 
 - **Objects with a bare `"/"` key** (i.e., the tag name is empty after
-  stripping the leading `/`) are always encoding errors — produce
-  `ProblematicValue`. No valid tag has an empty name.
+  stripping the leading `/`) are always encoding errors, and are rejected. No
+  valid tag has an empty name.
 - **Single-key objects** whose sole key starts with `/` are either a tagged
   value of a known type (e.g. `{ "/Error@1": ... }`), a built-in escape
   (`/object`, `/quote`), or an unrecognized tag. A syntactically well-formed
