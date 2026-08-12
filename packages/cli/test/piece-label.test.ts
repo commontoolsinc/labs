@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
 import { type Cell, Runtime } from "@commonfabric/runner";
+import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   getCellCfcLabel,
@@ -123,6 +129,150 @@ describe("cf piece CFC labels", () => {
     expect(
       await getCellCfcLabel(pieceConfig, ["body"], {}, deps as never),
     ).toEqual(updated);
+  });
+
+  it("requires a transaction and an existing value for a CFC schema update", async () => {
+    expect(() =>
+      root.key("body").asSchema({
+        ifc: { confidentiality: ["team"] },
+      }).applyCfcSchemaToExistingValue()
+    ).toThrow("Transaction required");
+
+    const absent = runtime.getCell<string>(
+      signer.did(),
+      "cf-piece-label-absent-schema-target",
+      { type: "string" },
+    );
+    await absent.pull();
+    const tx = runtime.edit();
+    expect(() =>
+      absent.withTx(tx).asSchema({
+        ifc: { confidentiality: ["team"] },
+      }).applyCfcSchemaToExistingValue()
+    ).toThrow("absent value");
+    tx.abort();
+  });
+
+  it("labels a link slot without moving the label to its target", async () => {
+    const linked = runtime.getCell<string>(
+      signer.did(),
+      "cf-piece-label-linked-target",
+      { type: "string" },
+    );
+    const seed = runtime.edit();
+    linked.withTx(seed).set("linked value");
+    const storedLink = linked.getAsLink();
+    root.withTx(seed).key("body").setRawUntyped(storedLink);
+    runtime.prepareTxForCommit(seed);
+    expect((await seed.commit()).error).toBeUndefined();
+
+    const updated = await setCellCfcLabel(
+      pieceConfig,
+      ["body"],
+      { confidentiality: ["team"] },
+      {},
+      deps as never,
+    );
+
+    await root.pull();
+    await linked.pull();
+    expect(root.key("body").getRaw()).toEqual(storedLink);
+    expect(linked.getRaw()).toBe("linked value");
+    expect(cfcLabelViewForCell(linked)).toBeUndefined();
+    expect(updated?.entries[0].label.confidentiality).toEqual(["team"]);
+  });
+
+  it("applies a label through a schema-bearing write redirect", async () => {
+    const linked = runtime.getCell<string>(
+      signer.did(),
+      "cf-piece-label-write-redirect-target",
+      { type: "string" },
+    );
+    const seed = runtime.edit();
+    linked.withTx(seed).set("redirected value");
+    const storedRedirect = linked.getAsWriteRedirectLink({
+      includeSchema: true,
+    });
+    root.withTx(seed).key("body").setRawUntyped(storedRedirect);
+    runtime.prepareTxForCommit(seed);
+    expect((await seed.commit()).error).toBeUndefined();
+
+    const updated = await setCellCfcLabel(
+      pieceConfig,
+      ["body"],
+      { confidentiality: ["team"] },
+      {},
+      deps as never,
+    );
+
+    await root.pull();
+    await linked.pull();
+    expect(root.key("body").getRaw()).toEqual(storedRedirect);
+    expect(linked.getRaw()).toBe("redirected value");
+    expect(cfcLabelViewForCell(linked)?.entries[0].label.confidentiality)
+      .toEqual(["team"]);
+    expect(updated?.entries[0].label.confidentiality).toEqual(["team"]);
+  });
+
+  it("preserves raw Fabric values while adding a label", async () => {
+    const original = {
+      bytes: new FabricBytes(new Uint8Array([1, 2, 3])),
+      timestamp: new FabricEpochNsec(1_725_000_000_000_000_000n),
+    };
+    const fabricRoot = runtime.getCell<{ body: typeof original }>(
+      signer.did(),
+      "cf-piece-label-fabric-root",
+      {
+        type: "object",
+        properties: {
+          body: {
+            type: "object",
+            properties: {
+              bytes: { type: "FabricBytes" },
+              timestamp: { type: "FabricEpochNsec" },
+            },
+            required: ["bytes", "timestamp"],
+          },
+        },
+        required: ["body"],
+      },
+    );
+    const seed = runtime.edit();
+    fabricRoot.withTx(seed).set({ body: original });
+    runtime.prepareTxForCommit(seed);
+    expect((await seed.commit()).error).toBeUndefined();
+    await fabricRoot.pull();
+    const before = fabricRoot.key("body").getRawUntyped();
+    const piece = {
+      input: { getCell: () => Promise.resolve(fabricRoot) },
+      result: { getCell: () => Promise.resolve(fabricRoot) },
+    };
+    const fabricDeps = {
+      ...deps,
+      loadPieces: () =>
+        Promise.resolve({
+          runtime,
+          get: () => Promise.resolve(piece),
+          synced: () => Promise.resolve(),
+        }),
+    };
+
+    const updated = await setCellCfcLabel(
+      pieceConfig,
+      ["body"],
+      { confidentiality: ["team"] },
+      {},
+      fabricDeps as never,
+    );
+
+    await fabricRoot.pull();
+    const after = fabricRoot.key("body").getRawUntyped() as typeof original;
+    expect(valueEqual(after, before)).toBe(true);
+    expect(after.bytes).toBeInstanceOf(FabricBytes);
+    expect(Array.from(after.bytes.slice())).toEqual([1, 2, 3]);
+    expect(after.timestamp).toBeInstanceOf(FabricEpochNsec);
+    expect(after.timestamp.value).toBe(1_725_000_000_000_000_000n);
+    expect(updated?.entries[0].label.confidentiality).toEqual(["team"]);
   });
 
   it("allows integrity to become less trusted", async () => {

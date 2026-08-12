@@ -88,7 +88,9 @@ import {
   txToReactivityLog,
 } from "./scheduler.ts";
 import {
+  allowMutableTransactionRead,
   internalVerifierRead,
+  markReadAsAttemptedWrite,
   mergeableOpRead,
 } from "./storage/reactivity-log.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
@@ -479,6 +481,11 @@ declare module "@commonfabric/api" {
       onlyIfDifferent?: boolean,
       schemaRole?: "output",
     ): void;
+    /**
+     * Applies this cell's CFC schema to its existing stored value without
+     * rewriting that value.
+     */
+    applyCfcSchemaToExistingValue(): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -2550,6 +2557,33 @@ export class CellImpl<T extends FabricValue>
     // ever recorded, so this is inert; it is here so the rule stays true if that
     // changes.
     this.tx.poisonMergeableOp?.(this.link);
+  }
+
+  applyCfcSchemaToExistingValue(): void {
+    if (!this.tx) {
+      throw new Error(
+        "Transaction required for applyCfcSchemaToExistingValue",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const writeLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "writeRedirect",
+    );
+    const value = this.tx.readValueOrThrow(writeLink, {
+      meta: { ...markReadAsAttemptedWrite, ...allowMutableTransactionRead },
+    });
+    if (value === undefined) {
+      throw new Error("Cannot apply a CFC schema to an absent value");
+    }
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      writeLink,
+      this.schema,
+    );
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {

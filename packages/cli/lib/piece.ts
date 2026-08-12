@@ -2699,7 +2699,7 @@ export async function setCellCfcLabel(
       ...label,
       ...(observes !== undefined ? { observes } : {}),
     },
-  }).set(value);
+  }).applyCfcSchemaToExistingValue();
   pieces.runtime.prepareTxForCommit(tx);
   const committed = await tx.commit();
   if (committed.error !== undefined) {

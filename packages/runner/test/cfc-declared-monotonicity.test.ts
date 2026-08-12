@@ -1085,6 +1085,16 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           { out: "v1" },
         );
         expect(first.error).toBeUndefined();
+        expect(
+          declaredEntryAt(
+            persistedEntriesFor(storageManager, first.docId),
+            ["out"],
+          ),
+        ).toEqual({
+          path: ["out"],
+          label: { integrity: [ATOM_X] },
+          origin: "declared",
+        });
         const second = await commitWrite(
           runtime,
           "dm-tight-empty-integ",
@@ -1092,6 +1102,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           { out: "v2" },
         );
         expect(second.error).toBeUndefined();
+        expect(second.docId).toBe(first.docId);
         expect(
           declaredEntryAt(
             persistedEntriesFor(storageManager, second.docId),
