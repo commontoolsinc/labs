@@ -1,15 +1,3 @@
-/**
- * This file inserts an optional layer between a caller and the underlying
- * hasher, buffering small `update()` calls so they reach that hasher as one
- * larger call.
- *
- * It is deliberately not what every hasher extends. The trade runs in both
- * directions: an implementation whose own `update()` is already cheap loses
- * more to the extra copying than it gains from making fewer calls. Which base
- * class an implementation derives from is therefore a measurement about that
- * implementation, not a matter of style.
- */
-
 import { BaseIncrementalHasher } from "@/BaseIncrementalHasher.ts";
 
 /** Size of the small-data buffer. */

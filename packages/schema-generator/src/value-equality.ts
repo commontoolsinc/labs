@@ -1,15 +1,3 @@
-/**
- * This file supplies value comparison for the schema formatters, decided by
- * the value model's own notion of identity rather than by anything JavaScript
- * offers directly.
- *
- * That indirection is the whole of it. The obvious ways to compare or
- * deduplicate in JavaScript each conflate values the value model holds
- * distinct, and a formatter that conflates them emits a schema describing a
- * different type than the source declared. Which conflations, and why the
- * content hash avoids them, is documented on the function itself.
- */
-
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 

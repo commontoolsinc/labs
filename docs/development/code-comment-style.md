@@ -404,7 +404,7 @@ a `//` block; see [Section markers](#section-markers) above.
 
 ### What gets one
 
-- Every file with logic or type declarations in it, as a header; see
+- Every file that has something to say about itself, as a header; see
   [File headers](#file-headers) below.
 - Every exported symbol: variable, function, class, type.
 - Every class and every public member of one, including the constructor,
@@ -502,8 +502,28 @@ nothing else. The blank line is load-bearing for that same reason: it is what
 keeps the header from being read as the doc comment of the first declaration
 under it.
 
-Every file with logic or type declarations in it gets one. A re-export barrel
-and a test fixture whose content is the point are the exceptions.
+Every file with logic or type declarations in it gets one, except for the
+three kinds below.
+
+**A file that defines a single thing.** Where the whole content of a file is
+one declaration — one class, one function, one type — along with the imports
+and the private helpers serving it, that declaration's own doc comment is the
+file's documentation, and a header above it can only duplicate it or drift
+from it.
+
+Everything worth saying then goes in the one doc comment, including what would
+otherwise have felt file-scoped: why the thing exists as its own module, how it
+differs from a sibling, what a caller has to know that the signature does not
+carry. Keeping it there is what puts it in front of a reader who arrives at the
+declaration, and in front of one reading rendered documentation, which never
+shows a file header at all.
+
+The exception ends where the file does. A second exported declaration, or
+module-level machinery that is not simply in service of the one, and the file
+has something to say about itself again.
+
+**A re-export barrel**, and **a test fixture whose content is the point**, are
+the other two.
 
 Two placements look close enough to pass and are not. A `//` block is not an
 alternative form of a header: it reads as a note about the line beneath it,
