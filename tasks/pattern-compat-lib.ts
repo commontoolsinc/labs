@@ -393,3 +393,33 @@ export async function writeBaseline(
 export function shouldRecord(findings: readonly Finding[]): boolean {
   return findings.length === 1 && findings[0].kind === "missing-baseline";
 }
+
+/** One `(pattern, baseline)` pair an accepted break forgives. */
+export const acceptedBreakKey = (pattern: string, baseline: string): string =>
+  `${pattern} ${baseline}`;
+
+/**
+ * Split findings into the ones that stand and the accepted breaks among them.
+ *
+ * Only an `incompatible` finding can be accepted. Everything else — a contract
+ * that is not recorded, a schema that is invalid on its own terms, baselines
+ * that outlived their source — describes work still to do, and an accepted
+ * break says nothing about any of them.
+ *
+ * The accepted ones come back rather than being dropped, because an exemption
+ * nobody sees is an exemption nobody reviews: the run prints what it forgave,
+ * and uses the same list to fail on a pair that no longer needs forgiving.
+ */
+export function partitionAcceptedBreaks(
+  findings: readonly Finding[],
+  accepted: ReadonlySet<string>,
+): { standing: Finding[]; forgiven: Finding[] } {
+  const standing: Finding[] = [];
+  const forgiven: Finding[] = [];
+  for (const finding of findings) {
+    const isAccepted = finding.kind === "incompatible" &&
+      accepted.has(acceptedBreakKey(finding.pattern, finding.baseline));
+    (isAccepted ? forgiven : standing).push(finding);
+  }
+  return { standing, forgiven };
+}

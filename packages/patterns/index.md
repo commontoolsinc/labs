@@ -189,15 +189,17 @@ addPiece.send({ piece: ann });
 **Topics — a multi-user tracker over #topic pieces** (durable units of shared
 attention; CT-1878): title, living body document, flat chronological comment
 thread, typed links out. Deliberately minimal — no statuses, labels, or
-assignees. The board derives the corpus's prose reference graph (topic fids
-pasted in bodies/comments/link URLs → navigable crossref chips, never
-persisted). Demonstrates: reading-list-style piece-in-list composition,
-`PerUser` display-name on a shared piece, mergeable comment appends,
-session-scoped drafts, read-side derived backlinks over sibling pieces
-(`resolveAsCell().entityId` for piece identity), `multiUserTest` coverage.
+assignees. The board publishes a bounded discovery index — one row per topic
+carrying its canonical fid, a title-only reference, and summary scalars — and
+renders its cards from the same rows. Demonstrates: reading-list-style
+piece-in-list composition, `PerUser` display-name on a shared piece, mergeable
+comment appends, session-scoped drafts, bounding a whole-list derivation with a
+narrow declared `lift` parameter, per-row cell identity so an activity-sorted
+list keeps its element runs across a prepend (`resolveAsCell().entityId` for
+piece identity), `multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
-PerUser, mergeable, backlinks, crossrefs, references, graph
+PerUser, mergeable, index, discovery, bounded read, row identity
 
 ### Input Schema
 
@@ -206,10 +208,9 @@ interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
   myName?: PerUser<Writable<string | Default<"">>>;
 }
-// TopicInput additionally takes mentionable?: Writable<TopicReference[]> —
-// the board's own list, wired at creation, for detail-page Connections.
-// TopicReference is TopicPiece minus its own crossrefs, so a Topic's schema
-// describes its siblings without recursing over the whole board.
+// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
+// board's own list, wired at creation, as the @-mention universe for the
+// topic's body editor.
 ```
 
 ### Output Schema
@@ -219,7 +220,9 @@ interface TopicsOutput {
   topics: TopicPiece[];
   mentionable: TopicPiece[];
   topicCount: number;
-  crossrefs: TopicCrossref[]; // { fid, topic, refsOut, referencedBy }
+  // { fid, topic: { title }, title, createdAt, createdBy, commentCount,
+  //   lastActivityAt }
+  index: TopicIndexRow[];
   myName: string;
   addTopic: Stream<{ title: string }>;
   setMyName: Stream<{ name: string }>;
