@@ -28,6 +28,49 @@ function encodeJsonEntryName(
 }
 
 /**
+ * The staging entries a rebuild builds under, and the name each one's contents
+ * take once the rebuild reconciles them onto the live tree. A prop's staging
+ * root becomes the prop; the `[FS]` staging container maps to nothing, since
+ * its children move onto the piece directory itself.
+ *
+ * A user key that looks like one of these is encoded by `encodeJsonEntryName`,
+ * so a path component spelled this way is always the internal entry.
+ */
+const STAGING_ENTRY_MOUNTED_NAMES: ReadonlyArray<[string, string | null]> = [
+  [".input.pending", "input"],
+  [".result.pending", "result"],
+  [".fs.pending", null],
+];
+
+/** Where a path component lands once a rebuild reconciles, or null if it goes. */
+function mountedPathComponent(component: string): string | null {
+  for (const [staging, mounted] of STAGING_ENTRY_MOUNTED_NAMES) {
+    if (component === staging) return mounted;
+    if (component === `${staging}.json`) {
+      return mounted === null ? null : `${mounted}.json`;
+    }
+  }
+  return component;
+}
+
+/**
+ * The path an entry mounts at, for a build that may still be running under a
+ * staging root. Reports where a reader will find the entry rather than where
+ * the rebuild happens to be assembling it.
+ */
+function mountedEntryPath(
+  tree: FsTree,
+  parentIno: bigint,
+  fsName: string,
+): string {
+  return tree.childPath(parentIno, fsName)
+    .split("/")
+    .map(mountedPathComponent)
+    .filter((component) => component !== null)
+    .join("/");
+}
+
+/**
  * How many levels of nested objects and arrays a `.json` file spells out. A
  * value below the last of them is written as `MAX_DEPTH_MARKER`.
  *
@@ -68,8 +111,11 @@ export function safeStringify(value: unknown, indent = 2): string {
         ) {
           ancestors.pop();
         }
-        if (ancestors.length >= MAX_JSON_DEPTH) return MAX_DEPTH_MARKER;
+        // Circularity is a property of the value and the depth bound is a
+        // property of this rendering, so a value that is both reads as
+        // circular: there is nothing below it that a deeper bound would show.
         if (ancestors.includes(val)) return "[Circular]";
+        if (ancestors.length >= MAX_JSON_DEPTH) return MAX_DEPTH_MARKER;
         ancestors.push(val);
       }
       return val;
@@ -95,7 +141,9 @@ export function stringifyEntryValue(
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
-      `Cannot serialize ${tree.childPath(parentIno, fsName)}: ${detail}`,
+      `Cannot serialize ${
+        mountedEntryPath(tree, parentIno, fsName)
+      }: ${detail}`,
       { cause },
     );
   }

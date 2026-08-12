@@ -1,5 +1,5 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
@@ -421,6 +421,24 @@ function chainDepth(value: unknown): { depth: number; tail: unknown } {
   }
   return { depth, tail: cursor };
 }
+
+Deno.test("safeStringify - a circular edge at the depth bound reads as circular", () => {
+  // Objects at nesting levels 0 to the bound, the deepest pointing at the
+  // root, so the back edge falls exactly where the depth bound would bite.
+  const nodes: Record<string, unknown>[] = [];
+  for (let level = 0; level < MAX_JSON_DEPTH; level++) nodes.push({});
+  for (let level = 0; level < MAX_JSON_DEPTH - 1; level++) {
+    nodes[level].next = nodes[level + 1];
+  }
+  nodes[MAX_JSON_DEPTH - 1].next = nodes[0];
+
+  // Circular, not out of depth: nothing lies below the back edge that a
+  // deeper bound would have shown.
+  assertEquals(chainDepth(JSON.parse(safeStringify(nodes[0]))), {
+    depth: MAX_JSON_DEPTH,
+    tail: "[Circular]",
+  });
+});
 
 Deno.test("safeStringify - spells out nesting up to the depth bound", () => {
   const shallow = JSON.parse(safeStringify(nestedChain(MAX_JSON_DEPTH - 2)));
@@ -1677,5 +1695,46 @@ Deno.test("makeLinkResolver leaves malformed link paths inert", () => {
       },
     }, 0),
     null,
+  );
+});
+
+Deno.test("a failure during a rebuild names where the entry mounts", async () => {
+  // A rebuild of a prop that already exists assembles under a staging root and
+  // reconciles onto the live tree afterwards. The staging name is internal and
+  // never appears in the mount, so the failure names the live path instead.
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.addDir(tree.rootIno, "pieces"), "todo-app");
+  const unserializable = { items: [{ count: 1n }] };
+
+  const rebuild = await assertRejects(
+    () => buildPendingJsonTreeAsync(tree, piece, "result", unserializable),
+    Error,
+    "/pieces/todo-app/result.json",
+  );
+  assertEquals(rebuild.message.includes(".result.pending"), false);
+
+  const firstHydration = await assertRejects(
+    () => buildJsonTreeAsync(tree, piece, "result", unserializable),
+    Error,
+  );
+  // Both routes reach the same mounted file, so both name the same path.
+  assertEquals(firstHydration.message, rebuild.message);
+});
+
+Deno.test("a failure under the [FS] staging container names the piece entry", () => {
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.addDir(tree.rootIno, "pieces"), "todo-app");
+  const stage = tree.addDir(piece, ".fs.pending");
+  const fsValue = {
+    type: "application/json",
+    content: { count: 1n },
+  } as unknown as FsValue;
+
+  // The staging container's children land on the piece directory itself, so
+  // the container drops out of the path rather than being renamed.
+  assertThrows(
+    () => buildFsProjection(tree, stage, fsValue, "of:entity-1"),
+    Error,
+    "/pieces/todo-app/index.json",
   );
 });
