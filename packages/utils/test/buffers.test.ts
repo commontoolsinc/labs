@@ -1,3 +1,13 @@
+/**
+ * The two questions a byte holder has to answer before it can promise
+ * anything about the bytes it was handed: whether the buffer underneath has
+ * been detached, and how to obtain an array it is allowed to rely on.
+ *
+ * `toOwnedUint8Array()` is where the promise is actually made, so its cases
+ * are about what a caller may still do to the source afterwards. A holder
+ * that skips it is holding a view someone else can mutate or transfer away.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
