@@ -71,11 +71,11 @@ The principal is kept in `$CF_HARNESS_HOME/principal`, or under `HOME` when that
 is unset, so a deployment whose filesystem does not survive a restart draws a
 new one each time. Setting `CF_HARNESS_PRINCIPAL` pins it to the deployment.
 
-What a value may contain is not a matter of taste:
-[`docs/features/gateway-request-provenance.md`](../../docs/features/gateway-request-provenance.md)
-states the invariants, and the gateway removes these headers from the request by
-name, so a field added here without the matching change to the gateway manifests
-reaches the model vendor.
+What a value may contain is fixed by the invariants in
+[`docs/features/gateway-request-provenance.md`](../../docs/features/gateway-request-provenance.md):
+no request content, and nothing that identifies a person. The gateway removes
+these headers from the request by name, so a field added here without the
+matching change to the gateway manifests reaches the model vendor instead.
 
 ## Getting Started
 

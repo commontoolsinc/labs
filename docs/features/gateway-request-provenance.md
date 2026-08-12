@@ -52,7 +52,8 @@ follow.
 message, a tool argument, or a command line appears in one. Three mechanisms
 hold this: the `command` field is mapped through a closed set, so an
 unrecognized harness argument reports `prompt` and a toolshed request reports
-the name of the route it arrived on; every value passes through a sanitizer, at
+the name of the operation it is performing; every value passes through a
+sanitizer, at
 the one point where values leave, that bounds it to a short run of characters
 that cannot break a header or carry structure into one; and a Loom run manifest
 contributes only its dispatch class.

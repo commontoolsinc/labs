@@ -24,8 +24,10 @@ import env from "@/env.ts";
 
 /**
  * What toolshed was doing when it called the gateway, reported as the
- * provenance `command`. The set is closed and each value names a route, so
- * nothing a request carries can reach the header.
+ * provenance `command`. Three of these name a route toolshed serves and the
+ * fourth names the model list it asks for as it starts up. Every one of them
+ * is written here, so nothing a request carries — a prompt, a message, a tool
+ * argument, a piece of metadata — can reach the header.
  */
 export type GatewayOperation =
   | "generate-text"
