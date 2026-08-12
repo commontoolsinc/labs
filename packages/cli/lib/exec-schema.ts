@@ -1011,9 +1011,11 @@ export function renderExecHelp(
   ];
 
   if (spec.callableKind === "handler") {
-    lines.push("");
-    lines.push("Output:");
-    lines.push("  No output on success.");
+    // No `Output:` section. A verb declared `Stream<E, R>` returns a result and
+    // the caller reads it off the invocation, so claiming there is none is
+    // false for exactly the verbs a caller most wants described. Saying nothing
+    // is the honest position until a handler's declared result reaches this
+    // path; the listing already carries it (`cf piece verbs --json`).
     lines.push("");
     lines.push("Alternatively, write JSON to this file to invoke the handler.");
     if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {
@@ -1110,9 +1112,11 @@ export function renderPieceCallHelp(
   }
 
   if (spec.callableKind === "handler") {
-    lines.push("");
-    lines.push("Output:");
-    lines.push("  No output on success.");
+    // No `Output:` section. A verb declared `Stream<E, R>` returns a result and
+    // the caller reads it off the invocation, so claiming there is none is
+    // false for exactly the verbs a caller most wants described. Saying nothing
+    // is the honest position until a handler's declared result reaches this
+    // path; the listing already carries it (`cf piece verbs --json`).
     lines.push("");
     lines.push("Alternatively, write JSON to this file to invoke the handler.");
     if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {

@@ -835,7 +835,10 @@ describe("renderExecHelp", () => {
     expect(help).toContain("./legacyWrite.handler [invoke] --message <string>");
     expect(help).toContain("./legacyWrite.handler [invoke] --help");
     expect(help).not.toContain("cf exec ./legacyWrite.handler");
-    expect(help).toContain("No output on success.");
+    // A handler's help carries no `Output:` section at all: it cannot see a
+    // declared result from here, and a verb that declares one does return it,
+    // so any fixed claim about output would be false for half the verbs.
+    expect(help).not.toContain("Output:");
     expect(help).toContain(
       "Alternatively, write JSON to this file to invoke the handler.",
     );

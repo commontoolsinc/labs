@@ -192,13 +192,12 @@ JSON input:
 
 Flags after `--`:
   --title <string>    Required.
-
-Output:
-  No output on success.
 ```
 
-**Structure is published; prose is not.** That line is the whole of what `cf`
-can currently say about a verb, and the split is worth holding onto:
+**Structure is published; prose is not.** The flags are the whole of what `cf`
+can currently say about a verb — there is no `Output:` section, because this
+page cannot see a declared result and a fixed claim about output would be false
+for every verb that declares one. The split is worth holding onto:
 
 | | Where it comes from | Survives? |
 | --- | --- | --- |
@@ -230,7 +229,7 @@ The renderer is ready for two of the three: `specificFlagLines` reads a
 were given one, and a listing row would carry one as soon as it were supplied.
 The verb's *purpose* needs a second change on top, because
 `renderPieceCallHelp` has nowhere to put it — the page runs Usage, JSON input,
-Flags, Output, with no summary line.
+Flags, with no summary line.
 
 So the help page shows `--title <string>  Required.` and stops.
 
