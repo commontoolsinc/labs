@@ -23,7 +23,14 @@ import {
   UI,
   VNode,
 } from "@commonfabric/runner";
-import { validateSchemaValue } from "@commonfabric/runner/cfc";
+import {
+  type CfcLabelView,
+  cfcLabelViewForCellWithStatus,
+  getCarriedCfcLabelView,
+  type IFCLabel,
+  redactCaveatSourcesForDisplay,
+  validateSchemaValue,
+} from "@commonfabric/runner/cfc";
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
@@ -49,7 +56,6 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { getCarriedCfcLabelView } from "@commonfabric/runner/cfc";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
@@ -121,6 +127,95 @@ export interface GetCellValueOptions {
   input?: boolean;
   step?: boolean;
   selection?: CellSelection;
+}
+
+/** A declared CFC label update accepted by `cf piece set-label`. */
+export type CellCfcLabelUpdate = IFCLabel & {
+  observes?: LabelObservationClass;
+};
+
+type LabelObservationClass = NonNullable<
+  CfcLabelView["entries"][number]["observes"]
+>;
+
+const CFC_LABEL_OBSERVATION_CLASSES = new Set<LabelObservationClass>([
+  "value",
+  "shape",
+  "enumerate",
+  "followRef",
+]);
+
+/**
+ * Validate the JSON object accepted by `cf piece set-label`.
+ *
+ * The command exposes the two stored label families and their observation
+ * class. Policy claims such as `requiredIntegrity` remain pattern-schema
+ * authoring concerns rather than label metadata.
+ */
+export function parseCellCfcLabelUpdate(
+  input: unknown,
+): CellCfcLabelUpdate {
+  if (!isPlainObject(input)) {
+    throw new Error("CFC label input must be a JSON object.");
+  }
+
+  const supported = new Set(["confidentiality", "integrity", "observes"]);
+  const unsupported = Object.keys(input).filter((key) => !supported.has(key));
+  if (unsupported.length > 0) {
+    throw new Error(
+      `Unknown CFC label field${unsupported.length === 1 ? "" : "s"}: ` +
+        unsupported.join(", ") +
+        ". Expected confidentiality, integrity, or observes.",
+    );
+  }
+
+  const confidentiality = input.confidentiality;
+  const integrity = input.integrity;
+  if (confidentiality === undefined && integrity === undefined) {
+    throw new Error(
+      "CFC label input must include confidentiality or integrity.",
+    );
+  }
+  if (confidentiality !== undefined && !Array.isArray(confidentiality)) {
+    throw new Error("CFC label confidentiality must be a JSON array.");
+  }
+  if (integrity !== undefined && !Array.isArray(integrity)) {
+    throw new Error("CFC label integrity must be a JSON array.");
+  }
+
+  const observes = input.observes;
+  if (
+    observes !== undefined &&
+    !CFC_LABEL_OBSERVATION_CLASSES.has(
+      observes as LabelObservationClass,
+    )
+  ) {
+    throw new Error(
+      "CFC label observes must be value, shape, enumerate, or followRef.",
+    );
+  }
+
+  return {
+    ...(confidentiality !== undefined
+      ? { confidentiality: [...confidentiality] }
+      : {}),
+    ...(integrity !== undefined ? { integrity: [...integrity] } : {}),
+    ...(observes !== undefined
+      ? { observes: observes as LabelObservationClass }
+      : {}),
+  } as CellCfcLabelUpdate;
+}
+
+function cfcLabelViewForCommand(
+  cell: unknown,
+  path: readonly (string | number)[],
+): CfcLabelView | null {
+  const { view, readFailed } = cfcLabelViewForCellWithStatus(cell);
+  if (readFailed) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    throw new Error(`Could not read CFC labels at "${location}".`);
+  }
+  return view === undefined ? null : redactCaveatSourcesForDisplay(view);
 }
 
 /** A `cf piece get` path that lands ON a verb. Reading a verb returns the
@@ -2476,6 +2571,147 @@ async function verbReadRefusalOrNull(
   return verb
     ? new PieceVerbReadError(verb.verb, pieceId, verb.callable)
     : null;
+}
+
+/**
+ * Return the effective CFC label view at one piece data path.
+ *
+ * Paths in the returned view are relative to the selected cell. The view
+ * includes stored declared, derived, and link-carried labels and uses the same
+ * display redaction as the runtime-client boundary.
+ */
+export async function getCellCfcLabel(
+  config: PieceConfig,
+  path: (string | number)[],
+  options: { input?: boolean } = {},
+  deps: PieceOperationDependencies = {},
+): Promise<CfcLabelView | null> {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  const rootCell =
+    await (options.input ? piece.input.getCell() : piece.result.getCell());
+  const targetCell = rootCell.key(...path);
+  await targetCell.pull();
+  return cfcLabelViewForCommand(targetCell, path);
+}
+
+/**
+ * Update the declared CFC label at one piece data path.
+ *
+ * This updates the label through the same checked write path used by ordinary
+ * runtime operations. The stored schema merge and CFC preparation rules
+ * therefore reject changes that weaken confidentiality or strengthen
+ * integrity. Raw label-map metadata is never written by the CLI.
+ */
+export async function setCellCfcLabel(
+  config: PieceConfig,
+  path: (string | number)[],
+  input: unknown,
+  options: { input?: boolean } = {},
+  deps: PieceOperationDependencies = {},
+): Promise<CfcLabelView | null> {
+  const update = parseCellCfcLabelUpdate(input);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  const rootCell =
+    await (options.input ? piece.input.getCell() : piece.result.getCell());
+  const targetCell = rootCell.key(...path);
+  await targetCell.pull();
+  const currentView = cfcLabelViewForCommand(targetCell, path);
+  const value = targetCell.getRaw();
+  if (value === undefined) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    throw new Error(`Cannot set a CFC label on absent path "${location}".`);
+  }
+
+  const { observes: requestedObserves, ...label } = update;
+  const schemaIfc = isRecord(targetCell.schema) &&
+      isRecord(targetCell.schema.ifc)
+    ? targetCell.schema.ifc
+    : undefined;
+  const existingObservationClasses = new Set<
+    LabelObservationClass | undefined
+  >(
+    currentView?.entries
+      .filter((entry) => entry.path.length === 0)
+      .map((entry) => entry.observes) ?? [],
+  );
+  if (schemaIfc !== undefined) {
+    existingObservationClasses.add(
+      CFC_LABEL_OBSERVATION_CLASSES.has(
+          schemaIfc.observes as LabelObservationClass,
+        )
+        ? schemaIfc.observes as LabelObservationClass
+        : undefined,
+    );
+  }
+  if (
+    requestedObserves === undefined && existingObservationClasses.size > 1
+  ) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    throw new Error(
+      `Cannot preserve observes at "${location}": ` +
+        "the effective label uses multiple observation classes.",
+    );
+  }
+  const observes = requestedObserves ??
+    (existingObservationClasses.size === 1
+      ? existingObservationClasses.values().next().value
+      : undefined);
+  if (
+    observes !== undefined &&
+    (
+      (schemaIfc !== undefined && schemaIfc.observes !== observes) ||
+      currentView?.entries.some((entry) =>
+        entry.path.length === 0 && entry.observes !== observes
+      )
+    )
+  ) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    throw new Error(
+      `Cannot set observes to "${observes}" at "${location}": ` +
+        "the effective label already uses a different observation class.",
+    );
+  }
+  const tx = pieces.runtime.edit();
+  targetCell.withTx(tx).asSchema({
+    ifc: {
+      ...label,
+      ...(observes !== undefined ? { observes } : {}),
+    },
+  }).set(value);
+  pieces.runtime.prepareTxForCommit(tx);
+  const committed = await tx.commit();
+  if (committed.error !== undefined) {
+    throw new Error(
+      `Could not set the CFC label at ${
+        path.length === 0 ? "<root>" : path.join("/")
+      }: ${committed.error.message}`,
+    );
+  }
+  await pieces.synced();
+
+  return cfcLabelViewForCommand(targetCell, path);
 }
 
 export async function getCellValue(

@@ -115,6 +115,39 @@ as `cf piece ls`. Human-readable output uses the same columns as `piece ls`.
 matches. If part of a piece cannot be read, the command reports a warning on
 standard error and continues searching that piece and the rest of the space.
 
+## Piece CFC labels
+
+`cf piece get-label` returns the effective CFC label view for a result path.
+Pass `--input` to select the input cell. The paths in the returned view are
+relative to the selected path, and the view includes declared, derived, and
+link-carried labels. An unlabeled value returns JSON `null`.
+
+```bash
+cf piece get-label --piece ID messages/0/body
+cf piece get-label --piece ID credentials --input
+```
+
+`cf piece set-label` reads a declared label update from standard input and
+returns the updated effective view. The input is an object with a
+`confidentiality` array, an `integrity` array, or both. An optional `observes`
+field selects `value`, `shape`, `enumerate`, or `followRef` consumption.
+
+```bash
+echo '{"confidentiality":["team"]}' \
+  | cf piece set-label --piece ID notes
+echo '{"integrity":[],"observes":"value"}' \
+  | cf piece set-label --piece ID draft --input
+```
+
+The command updates the label through the same checked write path used by
+ordinary runtime operations. It does not edit raw CFC metadata. The
+stored-schema rules reject a confidentiality update that would make data less
+restricted and an integrity update that would silently make data more trusted.
+An absent path is also rejected rather than creating policy metadata without a
+value. An `observes` update is rejected when it would combine with an existing
+observation class instead of preserving the requested class. Omitting `observes`
+from a later update preserves an existing unambiguous class.
+
 ## Output Conventions
 
 - stdout carries command output only; hints and diagnostics go to stderr.

@@ -8,6 +8,7 @@ import {
   executePieceCallable,
   formatViewTree,
   generateSpaceMap,
+  getCellCfcLabel,
   getCellValue,
   getPieceView,
   inspectPiece,
@@ -27,6 +28,7 @@ import {
   resetHomePattern,
   savePiecePattern,
   searchPieces,
+  setCellCfcLabel,
   setCellValue,
   setHomePattern,
   setPiecePattern,
@@ -1614,6 +1616,92 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
       if (report) exitWithDataError(report);
       throw error;
     }
+  })
+  /* piece get-label */
+  .command(
+    "get-label",
+    `Get the effective CFC label view for a piece data path.
+
+The returned paths are relative to the selected path. The view includes
+declared, derived, and link-carried labels. Omit path to inspect the root.`,
+  )
+  .usage(`${pieceUsage} [path]`)
+  .example(
+    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
+    "Get the effective label on a nested result value.",
+  )
+  .example(
+    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} secret --input`),
+    "Get the effective label on an input value.",
+  )
+  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("--input", "Read from the piece's input cell instead of result cell")
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
+  .arguments("[path:string]")
+  .action(async (options, pathString) => {
+    setQuietMode(!!options.quiet);
+    const pieceConfig = {
+      ...parsePieceOptions(options),
+      jsonOutput: true,
+    };
+    const pathSegments = pathString ? parseCellPath(pathString) : [];
+    const label = await getCellCfcLabel(pieceConfig, pathSegments, {
+      input: options.input,
+    });
+    render(label, { json: true });
+  })
+  /* piece set-label */
+  .command(
+    "set-label",
+    cliText(`Set the declared CFC label at a piece data path from JSON on stdin.
+
+INPUT: An object with confidentiality and/or integrity arrays, plus an optional
+observes value: value, shape, enumerate, or followRef.
+
+The update uses the stored schema and CFC transaction rules. Confidentiality
+can only become stricter, and integrity cannot be silently strengthened. Raw
+CFC metadata is never edited. Conflicting observation classes are rejected.
+Omitting observes preserves an existing class. The updated effective label view
+is returned.`),
+  )
+  .usage(`${pieceUsage} [path]`)
+  .example(
+    cliText(
+      `echo '{"confidentiality":["team"]}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} notes`,
+    ),
+    "Add a confidentiality requirement to a result value.",
+  )
+  .example(
+    cliText(
+      `echo '{"integrity":[],"observes":"value"}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} draft --input`,
+    ),
+    "Remove declared integrity claims from an input value.",
+  )
+  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("--input", "Write to the piece's input cell instead of result cell")
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
+  .arguments("[path:string]")
+  .action(async (options, pathString) => {
+    setQuietMode(!!options.quiet);
+    const pieceConfig = {
+      ...parsePieceOptions(options),
+      jsonOutput: true,
+    };
+    const pathSegments = pathString ? parseCellPath(pathString) : [];
+    const update = await drainStdin();
+    const label = await setCellCfcLabel(
+      pieceConfig,
+      pathSegments,
+      update,
+      { input: options.input },
+    );
+    render(label, { json: true });
   })
   /* piece set */
   .command(
