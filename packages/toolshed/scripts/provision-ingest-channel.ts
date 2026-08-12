@@ -65,6 +65,50 @@ export type ProvisionOutcome =
   | { ok: false; code: 1 | 2; message: string };
 
 /**
+ * Argument validation, separated so `main` can reject bad input BEFORE building
+ * a runtime. Constructing one reads `MEMORY_URL`, so validating afterwards
+ * turned a plain usage error into an uncaught construction failure on a
+ * deployment whose config is wrong — the two things an operator most needs to
+ * tell apart.
+ */
+export function validateProvisionRequest(
+  request: ProvisionRequest,
+): { code: 2; message: string } | null {
+  const { space, installId } = request;
+  if (!space || !installId) return { code: 2, message: USAGE };
+  // A typo'd space durably writes marked data into a garbage space (loom's
+  // reader silently orphaned); installId is the mark's audience AND a
+  // `\n`-separated input to channelId, so whitespace/newlines corrupt the
+  // cross-repo join key.
+  if (!space.startsWith("did:")) {
+    return {
+      code: 2,
+      message: `Invalid --space '${space}': must be a DID (did:...).`,
+    };
+  }
+  if (!isValidSegment(installId)) {
+    return {
+      code: 2,
+      message:
+        `Invalid --install-id '${installId}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
+    };
+  }
+  // causePrefix is the other half of the `${causePrefix}/${partition}` cause
+  // that loom must recompute to read the cells — hold it to the same
+  // clean-segment rule as the partition so an operator typo can't silently
+  // orphan the read path.
+  const causePrefix = request.causePrefix ?? "location";
+  if (!isValidSegment(causePrefix)) {
+    return {
+      code: 2,
+      message:
+        `Invalid --cause-prefix '${causePrefix}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
+    };
+  }
+  return null;
+}
+
+/**
  * The provisioning write itself. BORROWS the runtime rather than owning it —
  * `main` below constructs and disposes one, but the lifecycle behaviour here
  * (carrying expiry and revocation history forward, refusing to overwrite a
@@ -76,42 +120,11 @@ export async function provisionChannel(
   serviceSpace: string,
   request: ProvisionRequest,
 ): Promise<ProvisionOutcome> {
+  const invalid = validateProvisionRequest(request);
+  if (invalid) return { ok: false, ...invalid };
   const { space, installId } = request;
-  // A typo'd space durably writes marked data into a garbage space (loom's
-  // reader silently orphaned); installId is the mark's audience AND a
-  // `\n`-separated input to channelId, so whitespace/newlines corrupt the
-  // cross-repo join key.
-  if (!space || !installId) return { ok: false, code: 2, message: USAGE };
-  if (!space.startsWith("did:")) {
-    return {
-      ok: false,
-      code: 2,
-      message: `Invalid --space '${space}': must be a DID (did:...).`,
-    };
-  }
-  if (!isValidSegment(installId)) {
-    return {
-      ok: false,
-      code: 2,
-      message:
-        `Invalid --install-id '${installId}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
-    };
-  }
   const causePrefix = request.causePrefix ?? "location";
   const name = request.name ?? `ingest-${installId}`;
-
-  // causePrefix is the other half of the `${causePrefix}/${partition}` cause
-  // that loom must recompute to read the cells — hold it to the same
-  // clean-segment rule as the partition so an operator typo can't silently
-  // orphan the read path.
-  if (!isValidSegment(causePrefix)) {
-    return {
-      ok: false,
-      code: 2,
-      message:
-        `Invalid --cause-prefix '${causePrefix}': must match [A-Za-z0-9._-]{1,64} and not be '.' or '..'`,
-    };
-  }
 
   // Deterministic id: re-running for the same space+install rotates the token
   // in place (overwrites the one registration) rather than leaving a stale one
@@ -222,15 +235,24 @@ export async function main(
     boolean: ["force"],
   });
 
+  const request = {
+    space: flags.space ?? "",
+    installId: flags["install-id"] ?? "",
+    causePrefix: flags["cause-prefix"],
+    name: flags.name,
+    force: flags.force,
+  };
+  // Before `makeRuntime()`: a usage error must stay a usage error even when
+  // MEMORY_URL is unset or malformed.
+  const invalid = validateProvisionRequest(request);
+  if (invalid) {
+    logError(invalid.message);
+    return invalid.code;
+  }
+
   const runtime = makeRuntime();
   try {
-    const outcome = await provisionChannel(runtime, serviceSpace, {
-      space: flags.space ?? "",
-      installId: flags["install-id"] ?? "",
-      causePrefix: flags["cause-prefix"],
-      name: flags.name,
-      force: flags.force,
-    });
+    const outcome = await provisionChannel(runtime, serviceSpace, request);
     if (!outcome.ok) {
       logError(outcome.message);
       return outcome.code;

@@ -508,8 +508,10 @@ describe("ingest channel operator scripts", () => {
     });
 
     // A trusted action should conflict visibly rather than silently undo a
-    // security action someone else just took.
-    it("fails visibly instead of overwriting a concurrent revoke", async () => {
+    // security action someone else just took. Two provisions racing the same
+    // channel both read one revision and both write against it, so exactly one
+    // must lose — which is the code-1 branch.
+    it("fails visibly instead of overwriting a concurrent write", async () => {
       const id = channelId(SPACE, "phone-race");
       await saveRegistration(
         runtime,
@@ -517,8 +519,35 @@ describe("ingest channel operator scripts", () => {
         reg({ id, space: SPACE, installId: "phone-race", revision: 2 }),
       );
 
-      // Stand in for the read the script has already done, then let a revoke
-      // land before its write.
+      const outcomes = await Promise.all([
+        provision({ installId: "phone-race" }),
+        provision({ installId: "phone-race" }),
+      ]);
+      const won = outcomes.filter((o) => o.ok);
+      const lost = outcomes.filter((o) => !o.ok);
+      expect(won.length).toBe(1);
+      expect(lost.length).toBe(1);
+      const loser = lost[0];
+      expect(loser.ok === false && loser.code).toBe(1);
+      expect(loser.ok === false && loser.message).toContain(
+        "Nothing was written",
+      );
+
+      // One write landed, not two.
+      expect((await getRegistration(runtime, serviceSpace, id))?.revision)
+        .toBe(3);
+    });
+
+    // Distinct from the race above: re-provisioning a channel someone has
+    // already revoked is allowed — it is an operator re-authorizing it — but
+    // the record of that revocation has to survive.
+    it("preserves a revocation it re-authorizes over", async () => {
+      const id = channelId(SPACE, "phone-revoked");
+      await saveRegistration(
+        runtime,
+        serviceSpace,
+        reg({ id, space: SPACE, installId: "phone-revoked", revision: 2 }),
+      );
       const stale = await getRegistration(runtime, serviceSpace, id);
       await saveRegistration(
         runtime,
@@ -532,14 +561,33 @@ describe("ingest channel operator scripts", () => {
         2,
       );
 
-      // The script's own write is gated on the revision it observed, so a
-      // second provision against the CURRENT state succeeds and re-authorizes —
-      // but it preserves Alice's revocation in the history rather than erasing
-      // it.
-      expect((await provision({ installId: "phone-race" })).ok).toBe(true);
+      expect((await provision({ installId: "phone-revoked" })).ok).toBe(true);
       const after = await getRegistration(runtime, serviceSpace, id);
+      expect(after?.enabled).toBe(true);
       expect(after?.revision).toBe(4);
       expect(after?.revocations?.[0].by).toBe("did:key:zAlice");
+    });
+
+    // Building a runtime reads MEMORY_URL, so validating after it turned a
+    // plain usage error into an uncaught construction failure — the two things
+    // an operator most needs to tell apart.
+    it("rejects bad input without ever constructing a runtime", async () => {
+      const errors: string[] = [];
+      const explode = () => {
+        throw new Error("runtime must not be constructed for invalid input");
+      };
+      for (const args of [[], ["--space", "nope", "--install-id", "a"]]) {
+        expect(
+          await provisionMain(
+            args,
+            explode,
+            "did:key:zX",
+            () => {},
+            (l) => errors.push(l),
+          ),
+        ).toBe(2);
+      }
+      expect(errors.length).toBe(2);
     });
 
     it("main returns 2 and prints usage with no arguments", async () => {

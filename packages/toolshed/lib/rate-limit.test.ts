@@ -41,13 +41,19 @@ describe("token bucket", () => {
   });
 
   // Refill is elapsed-time arithmetic, so a clock that steps BACKWARDS — an NTP
-  // correction, an operator setting the date — refilled a spent bucket by a
-  // negative amount and drove it below empty, leaving it denied for longer than
-  // the configured interval. The bucket this most matters for is revoke's,
-  // where an extended false denial leaves live the credential the caller is
-  // trying to kill.
-  it("does not go below empty when the clock jumps backwards", () => {
-    let clock = 1_000_000;
+  // correction, an operator setting the date — used to refill a spent bucket by
+  // a negative amount and drive it below empty, leaving it denied for longer
+  // than the configured interval. Clamping the elapsed value alone then left
+  // the opposite hole: the stored timestamp had been rewound, so the catch-up
+  // back to real time counted as elapsed and refunded the bucket.
+  //
+  // A backward excursion must cost the caller nothing and earn them nothing.
+  // The bucket this most matters for is revoke's, where a false denial leaves
+  // live the credential the caller is trying to kill, and a false refund is the
+  // abuse bound not existing.
+  it("neither penalises nor refunds a backward clock excursion", () => {
+    const start = 1_000_000;
+    let clock = start;
     const limiter = createRateLimiter({
       capacity: 2,
       refillPerSecond: 1,
@@ -60,9 +66,15 @@ describe("token bucket", () => {
     clock -= 3_600_000;
     expect(limiter.take("a")).toBe(false);
 
-    // One normal second must still buy exactly one token, as it would have if
-    // the jump had never happened.
-    clock += 1_000;
+    // ...and back to where it started. No real time has passed, so nothing is
+    // owed: clamping elapsed but rewinding `updatedAt` would hand back a full
+    // bucket at this point.
+    clock = start;
+    expect(limiter.take("a")).toBe(false);
+
+    // One real second past the high-water mark buys exactly one token, as it
+    // would have if the excursion had never happened.
+    clock = start + 1_000;
     expect(limiter.take("a")).toBe(true);
     expect(limiter.take("a")).toBe(false);
   });

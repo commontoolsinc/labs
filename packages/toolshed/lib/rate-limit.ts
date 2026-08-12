@@ -63,11 +63,18 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         // bucket this protects is revoke's, where an extended false denial
         // leaves a credential the caller is trying to kill alive.
         const elapsedSeconds = Math.max(0, at - existing.updatedAt) / 1000;
+        // Clamping the ELAPSED value alone is not enough. Storing the earlier
+        // `at` would rewind the reference point, so when the clock catches back
+        // up the whole excursion is counted as elapsed and refunds a bucket
+        // that should still be spent — a backward jump followed by catch-up
+        // becomes a bypass rather than a stall. Advancing the stored timestamp
+        // monotonically is what makes the clamp hold in both directions.
+        const nextUpdatedAt = Math.max(at, existing.updatedAt);
         bucket.tokens = Math.min(
           capacity,
           existing.tokens + elapsedSeconds * refillPerSecond,
         );
-        bucket.updatedAt = at;
+        bucket.updatedAt = nextUpdatedAt;
         buckets.delete(key);
       }
 
