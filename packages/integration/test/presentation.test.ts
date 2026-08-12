@@ -48,6 +48,49 @@ Deno.test("Page runs the navigation hook after goto and reload", async () => {
   assertEquals(hookCalls, 2);
 });
 
+Deno.test("Page navigation does not depend on Astral's retry wrapper", async () => {
+  const navigationCalls: unknown[] = [];
+  const celestial = new EventTarget() as EventTarget & {
+    Page: {
+      navigate(options: unknown): Promise<{ loaderId: string }>;
+    };
+  };
+  celestial.Page = {
+    navigate(options) {
+      navigationCalls.push(options);
+      queueMicrotask(() => {
+        celestial.dispatchEvent(new Event("Page.domContentEventFired"));
+      });
+      return Promise.resolve({ loaderId: "loader" });
+    },
+  };
+  const astralPage = {
+    timeout: 0,
+    goto: () => {
+      throw new Error("RetryError: Retrying exceeded the maxAttempts (5).");
+    },
+    unsafelyGetCelestialBindings: () => celestial,
+  };
+  const page = new Page(
+    astralPage as unknown as ConstructorParameters<typeof Page>[0],
+    { timeout: 10 },
+  );
+  let hookCalls = 0;
+  page.setAfterNavigationHook(() => {
+    hookCalls++;
+  });
+
+  await page.goto("https://example.test/next", {
+    referrer: "https://example.test/previous",
+  });
+
+  assertEquals(navigationCalls, [{
+    url: "https://example.test/next",
+    referrer: "https://example.test/previous",
+  }]);
+  assertEquals(hookCalls, 1);
+});
+
 Deno.test("parsePresentationConfig supplies deterministic defaults", () => {
   const config = parsePresentationConfig({
     CF_DEMO_OUTPUT_DIR: "/tmp/demo",
