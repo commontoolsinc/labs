@@ -345,29 +345,54 @@ export class JsonCodec implements SerializationContext<string> {
         //
         // Otherwise the tag is simply one this registry does not carry, and
         // the unknown form is preserved so that it round-trips. Neither of
-        // these is covered by the deep-frozen contract described on
-        // `#decodeChecked()`.
+        // these is covered by the deep-frozen contract that the codec arm
+        // below states.
         return (tag === "")
           ? new ProblematicValue(tag, state, `object has bare "/" key`)
           : new UnknownValue(tag, state);
       }
 
-      if (matched instanceof BaseTerminalCodec) {
-        return this.#decodeChecked(
-          tag,
-          rawState,
-          () =>
-            (matched as TerminalCodec<JsonCodecValue>)
-              .decode(tag, rawState, context),
+      // A terminal codec takes the state exactly as it arrived; a nonterminal
+      // one takes it expanded. The two casts restate what `instanceof` just
+      // established, which TypeScript drops on a generic class.
+      const terminal = matched instanceof BaseTerminalCodec;
+      const state = terminal ? rawState : this.#decodeValue(rawState, context);
+
+      try {
+        // A codec's `decode()` promises deep-frozen results rather than
+        // relying on every caller to freeze, so both returns here pass through
+        // `deepFreeze()`. That covers the codec's own product -- a
+        // `FabricPrimitive` is already frozen, making it an O(1) cache hit --
+        // and the lenient fallback alike. The two arms above are separate and
+        // deliberately not covered.
+        return deepFreeze(
+          terminal
+            ? (matched as TerminalCodec<JsonCodecValue>).decode(
+              tag,
+              rawState,
+              context,
+            )
+            : (matched as NonterminalCodec).decode(
+              tag,
+              state as FabricValue,
+              context,
+            ),
+        );
+      } catch (e: unknown) {
+        if (!this.lenient) {
+          throw e;
+        }
+
+        // Report over the state the codec was actually handed, so that it says
+        // what the codec choked on.
+        return deepFreeze(
+          new ProblematicValue(
+            tag,
+            state,
+            e instanceof Error ? e.message : String(e),
+          ),
         );
       }
-
-      const state = this.#decodeValue(rawState, context);
-      return this.#decodeChecked(
-        tag,
-        state,
-        () => (matched as NonterminalCodec).decode(tag, state, context),
-      );
     }
 
     // Primitives pass through.
@@ -443,42 +468,6 @@ export class JsonCodec implements SerializationContext<string> {
       result[key] = this.#decodeValue(val, context);
     }
     return Object.freeze(result);
-  }
-
-  /**
-   * Runs a codec's `decode()` under this class's two standing guarantees.
-   *
-   * Deep-frozen contract: a codec's `decode()` promises deep-frozen results
-   * rather than relying on every caller to freeze, so every return from here
-   * passes through `deepFreeze()`. That covers the codec's own product (a
-   * `FabricPrimitive` is already frozen, making this an O(1) cache hit) and
-   * the lenient-mode fallback alike.
-   *
-   * Lenience: when `lenient` is set, a throw becomes a `ProblematicValue` over
-   * `state`. Nothing here ties `state` to what `decode` goes on to hand the
-   * codec, the two being separate arguments; each call site passes the same
-   * value for both, so that the report says what the codec choked on.
-   */
-  #decodeChecked(
-    tag: string,
-    state: FabricValue,
-    decode: () => FabricValue,
-  ): FabricValue {
-    if (!this.lenient) {
-      return deepFreeze(decode());
-    }
-
-    try {
-      return deepFreeze(decode());
-    } catch (e: unknown) {
-      return deepFreeze(
-        new ProblematicValue(
-          tag,
-          state,
-          e instanceof Error ? e.message : String(e),
-        ),
-      );
-    }
   }
 
   //
