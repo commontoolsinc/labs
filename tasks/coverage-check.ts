@@ -1451,30 +1451,35 @@ export interface UnattributedRegressionOptions {
 export async function buildUnattributedRegressionBody(
   options: UnattributedRegressionOptions,
 ): Promise<string | null> {
-  const baselineRunIds = new Set(
-    options.coverageFailures
-      .map((failure) => failure.baselineRunId)
-      .filter((runId): runId is number => runId !== undefined),
-  );
-  if (baselineRunIds.size === 0) return null;
+  // Each metric resolves its own ratchet baseline, so two regressed groups can
+  // be held against two different `main` runs. A group is compared against the
+  // run its own baseline came from and no other: another run measured a
+  // different commit, where the same line may legitimately have been covered.
+  const groupsByBaselineRun = new Map<number, Set<string>>();
+  for (const failure of options.coverageFailures) {
+    const runId = failure.baselineRunId;
+    if (runId === undefined) continue;
+    const group = coverageMetricGroupName(failure.metric);
+    if (group === null) continue;
+    const groups = groupsByBaselineRun.get(runId) ?? new Set<string>();
+    groups.add(group);
+    groupsByBaselineRun.set(runId, groups);
+  }
+  if (groupsByBaselineRun.size === 0) return null;
 
   const changedFiles = new Set(
     options.prFiles.map((prFile) => prFile.filename.replaceAll("\\", "/")),
   );
-  const failingGroups = new Set(options.groups.map((group) => group.group));
 
-  // One regressed group is the common case, and every group then shares a
-  // baseline run. Several groups can resolve to different runs, so each run's
-  // report is compared and the results joined.
   const files: CoverageUnattributedFile[] = [];
-  for (const runId of baselineRunIds) {
+  for (const [runId, groups] of groupsByBaselineRun) {
     const baselineLcov = await options.readBaselineLcov(runId);
     if (baselineLcov === null) continue;
     const regressed = await collectRegressedLines({
       rootDir: options.rootDir,
       lcov: options.lcov,
       baselineLcov,
-      groups: failingGroups,
+      groups,
       changedFiles,
     });
     for (const file of regressed) {

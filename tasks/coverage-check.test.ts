@@ -1,6 +1,7 @@
 import {
   assert,
   assertEquals,
+  assertFalse,
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
@@ -2324,4 +2325,63 @@ Deno.test("combinedLcovFromArtifacts refuses to report on no artifacts at all", 
     Error,
     "contained no profile or LCOV files",
   );
+});
+
+Deno.test("buildUnattributedRegressionBody holds each group against its own baseline run", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-unattributed-" });
+  try {
+    const alphaPath = path.join(rootDir, "packages/alpha/src/mod.ts");
+    const betaPath = path.join(rootDir, "packages/beta/src/mod.ts");
+    await Deno.mkdir(path.dirname(alphaPath), { recursive: true });
+    await Deno.mkdir(path.dirname(betaPath), { recursive: true });
+    await Deno.writeTextFile(alphaPath, "export const alpha = 1;\n");
+    await Deno.writeTextFile(betaPath, "export const beta = 1;\n");
+
+    const report = (alphaHits: number, betaHits: number) =>
+      [
+        `SF:${alphaPath}`,
+        `DA:1,${alphaHits}`,
+        "end_of_record",
+        `SF:${betaPath}`,
+        `DA:1,${betaHits}`,
+        "end_of_record",
+      ].join("\n");
+
+    // Two groups regress, and their baselines resolve to different main runs.
+    // Run 901 covered both lines; run 902 covered neither. Only alpha is held
+    // against 901, so only alpha regressed — beta's own baseline never covered
+    // its line, which makes it existing debt.
+    const read = new Map([[901, report(1, 1)], [902, report(0, 0)]]);
+    const body = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [
+        { group: "packages/alpha", target: 1, current: 2 },
+        { group: "packages/beta", target: 1, current: 2 },
+      ],
+      coverageFailures: [
+        {
+          metric: "coverage-debt: packages/alpha uncovered lines",
+          status: "OVER",
+          current: 2,
+          baseline: 1,
+          baselineRunId: 901,
+        },
+        {
+          metric: "coverage-debt: packages/beta uncovered lines",
+          status: "OVER",
+          current: 2,
+          baseline: 1,
+          baselineRunId: 902,
+        },
+      ],
+      prFiles: [],
+      lcov: report(0, 0),
+      readBaselineLcov: (runId) => Promise.resolve(read.get(runId) ?? null),
+    });
+
+    assertStringIncludes(body ?? "", "`packages/alpha/src/mod.ts`: 1");
+    assertFalse((body ?? "").includes("packages/beta/src/mod.ts"));
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
 });
