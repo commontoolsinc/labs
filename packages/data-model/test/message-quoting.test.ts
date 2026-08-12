@@ -1,3 +1,14 @@
+/**
+ * Error messages that quote the value they refused, checked at the sites where
+ * the quoted text arrives from outside.
+ *
+ * A refusal is only useful if it names what it refused, and what it refused is
+ * arbitrary text -- a class name, a hash string, a fragment of wire data --
+ * which may itself contain backticks. So each case makes the same demand:
+ * whatever went in comes back out intact, rather than being truncated or
+ * having its quoting broken by its own content.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

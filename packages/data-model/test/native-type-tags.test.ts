@@ -1,3 +1,20 @@
+/**
+ * Classifying a native value by what it actually is, across the cases where
+ * the obvious check fails.
+ *
+ * A prototype can be severed, an `Error` can arrive from another realm or from
+ * a subclass nobody here knows, an array can be an `Array` subclass, and an
+ * object can have no prototype at all. Each still has a right answer, so these
+ * cases are mostly the awkward shapes rather than the ordinary ones --
+ * including a run with `Error.isError` removed, to reach the fallback beneath
+ * it.
+ *
+ * A separate group pins something the classifier deliberately does not do:
+ * `toJSON()` has no bearing on what a value is. An object carrying one is
+ * still an object and a class instance carrying one is still unrecognized,
+ * whether the member is own or inherited.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

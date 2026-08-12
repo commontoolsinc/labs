@@ -1,3 +1,26 @@
+/**
+ * Converting between native JS values and fabric values, in both directions
+ * and at both depths, plus the predicate saying in advance whether a value
+ * will make it across.
+ *
+ * Refusal is central here rather than incidental: conversion is a vetting
+ * boundary, and a value that cannot be represented has to be rejected rather
+ * than approximated into something that merely looks representable. A
+ * function, a class instance, an array carrying non-index properties, an
+ * `Array` subclass, a cycle -- each is refused, and refused at whatever depth
+ * it turns up.
+ *
+ * One group appears three times over, once per entry point, to pin something
+ * the conversion deliberately does not do: `toJSON()` is never consulted. A
+ * value does not get to nominate its own fabric form, because a method is code
+ * and the decision has to rest on what the value is.
+ *
+ * The remainder is the structure that has to survive the trip: an object
+ * reached twice stays shared, sparse holes and `undefined` elements are
+ * preserved rather than filled in, and an `Error` carries its cause and its
+ * own properties across.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

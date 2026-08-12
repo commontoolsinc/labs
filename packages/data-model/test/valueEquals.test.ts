@@ -1,3 +1,23 @@
+/**
+ * Content equality across the value kinds, and the subtype question that comes
+ * before it.
+ *
+ * Two values are comparable only once they are the same kind of thing, so a
+ * plain object and an array are unequal without their contents being consulted
+ * at all, as are two fabric values of different concrete classes. The cases
+ * walk that branch deliberately rather than sampling it.
+ *
+ * Frozen state must not change an answer, which is what the matrix over it is
+ * for: equality is about what a value holds, not about whether it can still be
+ * written to.
+ *
+ * Signed zeros and `NaN` get their own group, being where a comparison written
+ * with `===` answers differently: `-0` and `+0` are distinct here though `===`
+ * merges them, and `NaN` equals itself though `===` denies it. The infinities
+ * sit in that group as the counterweight -- `===` already answers correctly
+ * for those, and so must this, so they pin the absence of an over-correction.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

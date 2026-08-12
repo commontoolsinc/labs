@@ -1,3 +1,20 @@
+/**
+ * The `data:` URI form of a value: minting one, and reading one back.
+ *
+ * A minted URI stands in for the value, which pulls two demands against each
+ * other. It has to be canonical -- key insertion order cannot show through,
+ * and neither can a sort order that differs between UTF-16 and code points --
+ * while still telling apart values that ordinary equality would merge. That is
+ * where the numeric cases earn their place: `-0` and `+0` mint different URIs,
+ * the two infinities differ, and every `NaN` mints the same one whatever
+ * payload bits it happened to carry.
+ *
+ * Reading one back is deliberately strict. The media type must be this
+ * codec's, header parameters are refused, a percent-encoded payload is
+ * refused, and the payload stops at a raw query or fragment delimiter rather
+ * than swallowing it. What comes back is deep-frozen.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

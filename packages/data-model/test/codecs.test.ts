@@ -1,3 +1,18 @@
+/**
+ * The package's ready-made encode and decode entry points, exercised on the
+ * class set they come configured with.
+ *
+ * Much of this is that a value survives the trip, but the cases earning their
+ * space are the ones where the format's own syntax collides with ordinary
+ * data. An object keyed `/` has to escape and come back identical, and the
+ * markers other layers write into values -- a stream, an error, an alias --
+ * have to pass through untouched rather than being interpreted here.
+ *
+ * The plain-object entry point additionally refuses anything that decoded to
+ * something else, so a caller that asked for a record is not handed an array
+ * or an instance instead.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
