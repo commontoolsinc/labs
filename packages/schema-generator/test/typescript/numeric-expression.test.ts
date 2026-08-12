@@ -1,3 +1,16 @@
+/**
+ * These cases drive `numberFromExpression` against a real compiled program
+ * rather than a hand-built node, because two of the distinctions it has to
+ * make are ones only the checker and the file's own scope can supply:
+ * whether an identifier naming a non-finite global is the global or a local
+ * rebinding of it, and what a parenthesized or type-only wrapper is wrapping.
+ *
+ * The declining cases carry as much weight as the recognizing ones. Folding a
+ * non-numeric expression, or a prefix operator that is not a sign, would put
+ * a fabricated value into a generated schema, which is a worse outcome than
+ * declining to read one at all.
+ */
+
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import ts from "typescript";
 

@@ -1,3 +1,15 @@
+/**
+ * This file reads a number out of the TypeScript AST, for the sites where the
+ * checker hands over no literal type and the syntax is not a bare numeric
+ * literal either.
+ *
+ * Two shapes account for all of it. A negative number is a prefix-unary
+ * expression rather than a literal, and the non-finite values have no literal
+ * form at all, reachable only as identifiers naming globals. The second shape
+ * drags shadowing in with it, because those globals are ordinary `var`
+ * declarations that a program is free to rebind.
+ */
+
 import ts from "typescript";
 
 /**

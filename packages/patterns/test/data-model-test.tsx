@@ -1,3 +1,16 @@
+/**
+ * This is a hand-driven probe for the data model, not an automated test,
+ * despite the directory it sits in and the name it carries. It takes a
+ * JavaScript expression typed into the UI, stores the result in a cell, and
+ * renders back a description of what came out, so that the round trip through
+ * storage can be inspected for values whose handling is hard to predict:
+ * `undefined`, `NaN`, a signed zero, a nested container.
+ *
+ * Nothing here asserts anything, so nothing here can fail. What it produces is
+ * a display for a person to read, and the `VERSION` string exists so that a
+ * reader can tell from the console which build of it they are looking at.
+ */
+
 import {
   computed,
   Default,

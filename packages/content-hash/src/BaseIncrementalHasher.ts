@@ -1,3 +1,14 @@
+/**
+ * This file holds the base of the incremental-hasher hierarchy, which is to
+ * say the parts that do not vary with the underlying hash: refusing use of an
+ * instance after `digest()`, and encoding a raw digest into a string when
+ * that is what the caller asked for.
+ *
+ * A subclass supplies only `_rawUpdate()` and `_rawDigest()`. The byte
+ * ownership rules on those two are the subtle part, and they are stated on
+ * the methods themselves rather than restated here.
+ */
+
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { IncrementalHasher } from "@/interface.ts";
