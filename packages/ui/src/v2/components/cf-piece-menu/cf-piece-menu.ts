@@ -80,13 +80,36 @@ const SPACE_ACCESS_ENTRY: MenuEntry = {
 const DETACH_ENTRY = {
   label: "Stop following source",
   testId: "piece-menu-detach-source",
+  action: "detach",
 } as const;
 
-/** The entries a piece menu shows, including detach for a followed piece. */
+const CLONE_FRESH_ENTRY = {
+  label: "Clone fresh piece into new space",
+  testId: "piece-menu-clone-fresh",
+  action: "clone-fresh",
+} as const;
+
+const CLONE_WITH_DATA_ENTRY = {
+  label: "Clone piece and copy data into new space",
+  testId: "piece-menu-clone-copy-data",
+  action: "clone-copy-data",
+} as const;
+
+type CloneMode = "fresh" | "copy-data";
+
+type PieceMenuEntry =
+  | MenuEntry
+  | typeof CLONE_FRESH_ENTRY
+  | typeof CLONE_WITH_DATA_ENTRY
+  | typeof DETACH_ENTRY;
+
+/** The entries a piece menu shows, including its lifecycle actions. */
 export function pieceMenuEntries(
   hasOrigin = false,
-): readonly (MenuEntry | typeof DETACH_ENTRY)[] {
-  return hasOrigin ? [...ENTRIES, DETACH_ENTRY] : ENTRIES;
+): readonly PieceMenuEntry[] {
+  return hasOrigin
+    ? [...ENTRIES, CLONE_FRESH_ENTRY, CLONE_WITH_DATA_ENTRY, DETACH_ENTRY]
+    : [...ENTRIES, CLONE_FRESH_ENTRY, CLONE_WITH_DATA_ENTRY];
 }
 
 /**
@@ -414,6 +437,24 @@ export class CFPieceMenu extends BaseElement {
       clip: rect(0, 0, 0, 0);
       white-space: nowrap;
       border: 0;
+    }
+
+    .clone-status {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      min-height: 2rem;
+    }
+
+    .clone-status progress {
+      width: 8rem;
+    }
+
+    .clone-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 1rem;
     }
 
     .file-tabs {
@@ -805,6 +846,15 @@ export class CFPieceMenu extends BaseElement {
   private accessor sourceActionPending = false;
 
   @state()
+  private accessor clonePending = false;
+
+  @state()
+  private accessor cloneMode: CloneMode | undefined = undefined;
+
+  @state()
+  private accessor cloneError: string | undefined = undefined;
+
+  @state()
   private accessor sourceActionError: string | undefined = undefined;
 
   @state()
@@ -836,7 +886,10 @@ export class CFPieceMenu extends BaseElement {
 
   /** Identifies the read a late response belongs to, so a stale one is dropped. */
   private readToken = 0;
+
+  private sourceActionToken = 0;
   private sourceRead: Promise<void> | undefined;
+  private sourceReadPending = false;
   private accessRead: Promise<void> | undefined;
   private revisionReadToken = 0;
 
@@ -889,11 +942,28 @@ export class CFPieceMenu extends BaseElement {
   override connectedCallback() {
     super.connectedCallback();
     globalThis.addEventListener("keydown", this.#onKeyDown);
+    if (
+      this.cell && this.source === undefined && !this.clonePending &&
+      !this.sourceActionPending
+    ) {
+      void this.#readSource(this.cell);
+    }
   }
 
   override disconnectedCallback() {
     globalThis.removeEventListener("keydown", this.#onKeyDown);
-    this.close();
+    const sourceReadPending = this.sourceReadPending &&
+      (this.panel === "source" || this.panel === "origin");
+    if (!this.clonePending && !this.sourceActionPending && !sourceReadPending) {
+      this.close();
+    } else {
+      this.#setHighlightedPiece(undefined, undefined);
+      this.#resetPieceState();
+      this.#resetAccessState();
+      this.sourceRead = undefined;
+      this.sourceReadPending = false;
+      this.readToken++;
+    }
     super.disconnectedCallback();
   }
 
@@ -907,6 +977,7 @@ export class CFPieceMenu extends BaseElement {
       highlightTarget?: Element;
     },
   ): void {
+    if (this.clonePending) return;
     const target = highlightTarget ?? highlightedPiece;
     if (
       highlightedPiece && target && target !== highlightedPiece &&
@@ -927,18 +998,27 @@ export class CFPieceMenu extends BaseElement {
     this.#resetPieceState();
     this.payloadText = "";
     this.sourceRead = undefined;
+    this.sourceReadPending = false;
     this.sourceActionPending = false;
+    this.clonePending = false;
+    this.cloneMode = undefined;
+    this.cloneError = undefined;
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
     this.#resetAccessState();
+    this.sourceActionToken++;
     this.readToken++;
     this.hidden = false;
     void this.#readSource(cell);
   }
 
-  /** Hide the menu and forget the piece it was describing. */
+  /**
+   * Hides the menu and forgets its piece. A clone progress dialog remains
+   * mounted until the request settles so it can report failure or navigate.
+   */
   close(): void {
+    if (this.clonePending) return;
     this.#setHighlightedPiece(undefined, undefined);
     this.hidden = true;
     this.panel = undefined;
@@ -947,11 +1027,16 @@ export class CFPieceMenu extends BaseElement {
     this.#resetRevisionSource();
     this.#resetPieceState();
     this.sourceRead = undefined;
+    this.sourceReadPending = false;
     this.sourceActionPending = false;
+    this.clonePending = false;
+    this.cloneMode = undefined;
+    this.cloneError = undefined;
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
     this.#resetAccessState();
+    this.sourceActionToken++;
     this.readToken++;
   }
 
@@ -1422,7 +1507,15 @@ export class CFPieceMenu extends BaseElement {
   }
 
   #readSource(cell: CellHandle): Promise<void> {
-    this.sourceRead ??= this.#performSourceRead(cell);
+    if (this.sourceRead === undefined) {
+      this.sourceReadPending = true;
+      const read = this.#performSourceRead(cell);
+      this.sourceRead = read;
+      const settled = () => {
+        if (this.sourceRead === read) this.sourceReadPending = false;
+      };
+      void read.then(settled, settled);
+    }
     return this.sourceRead;
   }
 
@@ -1666,7 +1759,7 @@ export class CFPieceMenu extends BaseElement {
   ): Promise<void> {
     const cell = this.cell;
     if (!cell || this.sourceActionPending) return;
-    const token = this.readToken;
+    const actionToken = ++this.sourceActionToken;
     this.sourceActionPending = true;
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
@@ -1678,7 +1771,7 @@ export class CFPieceMenu extends BaseElement {
         action,
         confirmationToken === undefined ? {} : { confirmationToken },
       );
-      if (token !== this.readToken) return;
+      if (actionToken !== this.sourceActionToken) return;
       this.source = response.source;
       if (response.compatibilityWarning !== undefined) {
         if (response.confirmationToken === undefined) {
@@ -1697,20 +1790,69 @@ export class CFPieceMenu extends BaseElement {
         this.panel = "origin";
       }
     } catch (error) {
-      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      if (
+        actionToken !== this.sourceActionToken || cell.runtime().signal.aborted
+      ) return;
       this.sourceActionError = error instanceof Error
         ? error.message
         : String(error);
       this.panel = "origin";
     } finally {
-      if (token === this.readToken) this.sourceActionPending = false;
+      if (actionToken === this.sourceActionToken) {
+        this.sourceActionPending = false;
+      }
+    }
+  }
+
+  /** Open the clone dialog and begin the selected clone operation. */
+  private async startClone(mode: CloneMode): Promise<void> {
+    if (this.clonePending) return;
+    this.cloneMode = mode;
+    this.cloneError = undefined;
+    await this.cloneIntoNewSpace({ copyData: mode === "copy-data" });
+  }
+
+  /** Clone the selected piece into a unique named space and open the copy. */
+  async cloneIntoNewSpace(
+    {
+      copyData = false,
+      spaceName = `piece-copy-${crypto.randomUUID()}`,
+    }: { copyData?: boolean; spaceName?: string } = {},
+  ): Promise<void> {
+    const cell = this.cell;
+    if (!cell || this.clonePending) return;
+    this.cloneMode = copyData ? "copy-data" : "fresh";
+    this.clonePending = true;
+    this.cloneError = undefined;
+    try {
+      const runtime = cell.runtime();
+      const destinationSpace = await runtime.resolveSpaceName(spaceName);
+      const clone = await runtime.clonePiece(
+        cell.id(),
+        cell.space(),
+        destinationSpace,
+        { copyData },
+      );
+      this.clonePending = false;
+      this.close();
+      navigate({ spaceName, pieceId: clone.id() });
+    } catch (error) {
+      this.cloneError = cell.runtime().signal.aborted
+        ? "The clone was canceled because the runtime stopped."
+        : error instanceof Error
+        ? error.message
+        : String(error);
+    } finally {
+      this.clonePending = false;
     }
   }
 
   protected override render() {
     if (this.hidden || !this.cell) return nothing;
     return html`
-      ${this.#renderNestedHighlight()} ${this.panel
+      ${this.#renderNestedHighlight()} ${this.cloneMode !== undefined
+        ? this.#renderCloneDialog()
+        : this.panel
         ? this.#renderPanel(this.panel)
         : this.#renderMenu()}
     `;
@@ -1761,10 +1903,14 @@ export class CFPieceMenu extends BaseElement {
               class="menu-item"
               role="menuitem"
               test-id="${entry.testId}"
-              ?disabled="${this.sourceActionPending}"
+              ?disabled="${this.sourceActionPending || this.clonePending}"
               @click="${() =>
                 "panel" in entry
                   ? this.showPanel(entry.panel)
+                  : entry.action === "clone-fresh"
+                  ? this.startClone("fresh")
+                  : entry.action === "clone-copy-data"
+                  ? this.startClone("copy-data")
                   : this.changeSource({ kind: "detach" })}"
             >
               ${entry.label}
@@ -1780,6 +1926,63 @@ export class CFPieceMenu extends BaseElement {
         >
           ${SPACE_ACCESS_ENTRY.label}
         </button>
+      </div>
+    `;
+  }
+
+  #renderCloneDialog(): TemplateResult {
+    const copyData = this.cloneMode === "copy-data";
+    return html`
+      <div class="backdrop dimmed" @click="${() => this.close()}"></div>
+      <div
+        class="panel"
+        role="dialog"
+        aria-label="Clone piece"
+        aria-live="polite"
+        test-id="piece-clone-dialog"
+      >
+        <div class="panel-head">
+          <h2>${copyData
+            ? "Clone piece and copy data"
+            : "Clone fresh piece"}</h2>
+          <span class="subject">${this.source?.name ?? this.cell?.id() ??
+            ""}</span>
+          <button
+            class="panel-close"
+            ?disabled="${this.clonePending}"
+            @click="${() => this.close()}"
+          >
+            Close
+          </button>
+        </div>
+        <div class="panel-body">
+          ${this.clonePending
+            ? html`
+              <div class="clone-status">
+                <progress aria-label="Cloning piece"></progress>
+                <span>Cloning piece into a new space…</span>
+              </div>
+            `
+            : this.cloneError
+            ? html`
+              <p class="error">
+                Could not clone this piece: ${this.cloneError}
+              </p>
+              <div class="clone-actions">
+                <button class="source-action" @click="${() => this.close()}">
+                  Close
+                </button>
+                <button
+                  class="source-action"
+                  test-id="piece-clone-retry"
+                  @click="${() => this.startClone(this.cloneMode!)}"
+                >
+                  Try again
+                </button>
+              </div>
+            `
+            : nothing}
+        </div>
       </div>
     `;
   }

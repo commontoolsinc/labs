@@ -245,6 +245,84 @@ describe("RuntimeClient space ACL methods", () => {
   });
 });
 
+describe("RuntimeClient.clonePiece", () => {
+  it("asks the worker to clone between the named spaces", async () => {
+    const sourceSpace = "did:key:z6Mk-runtime-client-source";
+    const destinationSpace = "did:key:z6Mk-runtime-client-destination";
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({
+          page: {
+            cell: {
+              id: "of:fid1:clone",
+              space: destinationSpace,
+              path: [],
+            },
+          },
+        });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    const clone = await client.clonePiece(
+      "of:fid1:piece",
+      sourceSpace as never,
+      destinationSpace as never,
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceClone,
+      pieceId: "of:fid1:piece",
+      sourceSpace,
+      destinationSpace,
+    }]);
+    expect(clone.id()).toBe("fid1:clone");
+  });
+
+  it("asks the worker to copy the piece's input data", async () => {
+    const sourceSpace = "did:key:z6Mk-runtime-client-source";
+    const destinationSpace = "did:key:z6Mk-runtime-client-destination";
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({
+          page: {
+            cell: {
+              id: "of:fid1:clone",
+              space: destinationSpace,
+              path: [],
+            },
+          },
+        });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    await client.clonePiece(
+      "of:fid1:piece",
+      sourceSpace as never,
+      destinationSpace as never,
+      { copyData: true },
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceClone,
+      pieceId: "of:fid1:piece",
+      sourceSpace,
+      destinationSpace,
+      copyData: true,
+    }]);
+  });
+});
+
 describe("RuntimeClient.resolveSpaceName", () => {
   it("resolves the name inside the worker runtime", async () => {
     const space = "did:key:z6Mk-runtime-client-named-space";

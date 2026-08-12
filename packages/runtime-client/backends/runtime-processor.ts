@@ -115,6 +115,7 @@ import {
   type PageSyncedRequest,
   type PatternCoverageResponse,
   type PatternSourcesResponse,
+  type PieceCloneRequest,
   type PieceGetSourceRequest,
   type PieceGetSourceRevisionRequest,
   type PieceSourceResponse,
@@ -1382,6 +1383,21 @@ export class RuntimeProcessor {
     };
   }
 
+  /** Clone a source piece into another space. */
+  async handlePieceClone(request: PieceCloneRequest): Promise<PageResponse> {
+    const sourcePieces = this.getSpaceCtx(request.sourceSpace);
+    const sourceCell = this.runtime.getCellFromEntityId(
+      sourcePieces.getSpace(),
+      entityIdFrom(request.pieceId),
+    );
+    const source = new PieceController(sourcePieces, sourceCell);
+    const clone = await source.cloneTo(
+      this.getSpaceCtx(request.destinationSpace),
+      { copyData: request.copyData === true },
+    );
+    return { page: createPageRef(clone.getCell()) };
+  }
+
   async handlePieceUpdateSource(
     request: PieceUpdateSourceRequest,
   ): Promise<PieceUpdateSourceResponse> {
@@ -1823,6 +1839,8 @@ export class RuntimeProcessor {
         return await this.handlePieceGetSource(request);
       case RequestType.PieceGetSourceRevision:
         return await this.handlePieceGetSourceRevision(request);
+      case RequestType.PieceClone:
+        return await this.handlePieceClone(request);
       case RequestType.PieceUpdateSource:
         return await this.handlePieceUpdateSource(request);
       case RequestType.SpaceGetAcl:

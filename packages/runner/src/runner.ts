@@ -4322,6 +4322,7 @@ export class Runner {
   }
 
   private stopResult<T>(resultCell: Cell<T>): void {
+    this.runtime.patternUpdater.unwatch(resultCell);
     const key = this.getDocKey(resultCell);
     this.independentlyStartedResults.delete(key);
     // TODO(hixie): This reaches every pending commit-gated start for the result,
