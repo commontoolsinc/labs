@@ -135,11 +135,16 @@ describe("listPieceCallables", () => {
       },
     );
 
-    // "hiddenPing" defeats ordinary detection (plain object value/schema) but
-    // succeeds through the forced stream cast — resolvePieceCallable's third
-    // path — so the listing must include it. "\u00e9dit" pins byte ordering:
-    // utf8Compare puts it AFTER "setup"/"search" (0xC3 > s), where locale
-    // collation would interleave it linguistically.
+    // "hiddenPing" carries no stream signal at all — a plain object value and
+    // a plain object schema — so it is data as far as anything stored can tell,
+    // and the listing must NOT include it. The forced-stream cast used to find
+    // it, by asserting a stream schema and then asking whether the schema said
+    // stream. `asSchema` below is kept for exactly that reason: the double
+    // still answers "stream" to any cast, so its presence proves the listing no
+    // longer asks. "\u00e9dit" does carry the `{$stream: true}` sentinel, which
+    // is a definite stored signal, so it stays listed — and it pins byte
+    // ordering: utf8Compare puts it AFTER "setup"/"search" (0xC3 > s), where
+    // locale collation would interleave it linguistically.
     const pieceRootValue = { hiddenPing: {}, "\u00e9dit": { $stream: true } };
     const piece = {
       result: { getCell: () => Promise.resolve(resultRoot) },
@@ -174,18 +179,20 @@ describe("listPieceCallables", () => {
     const verbs = listing.verbs;
     expect(verbs.map((v) => v.name)).toEqual([
       "addTopic",
-      "hiddenPing",
       "search",
       "setup",
       "\u00e9dit",
     ]);
+    // Named explicitly, because the whole defect was a name like this being
+    // offered to a caller as callable when calling it is a silent no-op.
+    expect(verbs.some((v) => v.name === "hiddenPing")).toBe(false);
 
-    const [addTopic, hiddenPing, search, setup, accented] = verbs;
-    // Fallback-resolved handlers are listed as handlers on the result cell,
-    // exactly as tryResolvePieceHandler dispatches them.
-    expect(hiddenPing.kind).toBe("handler");
-    expect(hiddenPing.on).toBe("result");
+    const [addTopic, search, setup, accented] = verbs;
+    // A sentinel-bearing name found only on the piece root is listed as a
+    // handler on the result cell, exactly as tryResolvePieceHandler dispatches
+    // it.
     expect(accented.kind).toBe("handler");
+    expect(accented.on).toBe("result");
     expect(addTopic).toEqual({
       name: "addTopic",
       kind: "handler",
