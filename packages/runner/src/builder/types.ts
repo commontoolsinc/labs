@@ -89,6 +89,9 @@ export const UI = "$UI";
 export const TILE_UI = "$TILE_UI";
 export const CHIP_UI = "$CHIP_UI";
 export const FS = "$FS";
+// The reserved key a test pattern addresses its test steps under; the test
+// runner reads `[TESTS]` off the pattern output.
+export const TESTS = "$TESTS";
 
 // Symbol for accessing self-reference in patterns
 export const SELF: typeof SELFSymbol = Symbol("SELF") as any;

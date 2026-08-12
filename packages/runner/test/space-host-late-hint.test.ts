@@ -380,6 +380,84 @@ describe("late space host hints", () => {
     }
   });
 
+  it("replays every registered document after a late hint", async () => {
+    const signer = await Identity.fromPassphrase("late-hint-many-reads");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-many-reads-target",
+    )).did();
+    const firstId = "of:late-hint-many-reads-first" as URI;
+    const secondId = "of:late-hint-many-reads-second" as URI;
+    const defaultServer = makeServer("late-hint-many-reads-default");
+    const hintedServer = makeServer("late-hint-many-reads-hinted");
+    const writer = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory(() => hintedServer),
+    );
+    let targetSessions = 0;
+    const reader = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory((space) => {
+        if (space !== targetSpace) return defaultServer;
+        targetSessions++;
+        return targetSessions === 1 ? defaultServer : hintedServer;
+      }),
+    );
+
+    try {
+      const seeded = await (writer.open(targetSpace) as unknown as {
+        send(
+          batch: { uri: URI; value: { value: { name: string } } }[],
+        ): Promise<{ error?: unknown }>;
+      }).send([
+        { uri: firstId, value: { value: { name: "first" } } },
+        { uri: secondId, value: { value: { name: "second" } } },
+      ]);
+      expect(seeded.error).toBeUndefined();
+      await writer.synced();
+
+      const provider = reader.open(targetSpace);
+      const provisionalReplica = provider.replica;
+
+      // Register both documents, and register the first one repeatedly with
+      // freshly built but structurally equal selectors. Every registration
+      // after the first is the same read, so the replay set holds one entry
+      // per document however many times each was asked for.
+      for (let index = 0; index < 64; index++) {
+        expect(
+          (await provider.sync(firstId, {
+            path: ["value", "name"],
+            schema: false,
+          })).error,
+        ).toBeUndefined();
+      }
+      expect((await provider.sync(secondId)).error).toBeUndefined();
+      expect(provider.replica.getDocument(firstId)).toBeUndefined();
+      expect(provider.replica.getDocument(secondId)).toBeUndefined();
+
+      expect(
+        reader.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(true);
+      await reader.crossSpaceSettled();
+
+      expect(provider.replica).not.toBe(provisionalReplica);
+      expect(provider.replica.getDocument(firstId)).toEqual({
+        value: { name: "first" },
+      });
+      expect(provider.replica.getDocument(secondId)).toEqual({
+        value: { name: "second" },
+      });
+      expect(targetSessions).toBe(2);
+    } finally {
+      await reader.close();
+      await writer.close();
+      await defaultServer.close();
+      await hintedServer.close();
+    }
+  });
+
   it("rejects a transaction based on the replaced provisional replica", async () => {
     const signer = await Identity.fromPassphrase("late-hint-stale-transaction");
     const targetSpace = (await Identity.fromPassphrase(

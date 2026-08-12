@@ -270,10 +270,18 @@ function retryAfterDelayMs(value: string | null): number | undefined {
   return undefined;
 }
 
-function githubRetryDelayMs(resp: Response, attempt: number): number {
+/**
+ * How long to wait before the attempt after `attempt`. A `Retry-After` header
+ * on the response that failed sets the delay when GitHub sends one; without a
+ * response, or without that header, the delay doubles with each attempt. Both
+ * are capped.
+ */
+function githubRetryDelayMs(attempt: number, resp?: Response): number {
+  const retryAfter = resp
+    ? retryAfterDelayMs(resp.headers.get("retry-after"))
+    : undefined;
   return Math.min(
-    retryAfterDelayMs(resp.headers.get("retry-after")) ??
-      GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+    retryAfter ?? GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
     GITHUB_GET_RETRY_MAX_DELAY_MS,
   );
 }
@@ -309,32 +317,22 @@ export async function githubGet<T>(path: string): Promise<T> {
     try {
       resp = await fetch(url, { headers: apiHeaders() });
     } catch (error) {
-      if (attempt === GITHUB_GET_MAX_ATTEMPTS) {
-        throw error;
-      }
-      await sleep(
-        Math.min(
-          GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
-          GITHUB_GET_RETRY_MAX_DELAY_MS,
-        ),
-      );
+      if (attempt === GITHUB_GET_MAX_ATTEMPTS) throw error;
+      await sleep(githubRetryDelayMs(attempt));
       continue;
     }
 
-    if (resp.ok) {
-      return resp.json();
-    }
+    if (resp.ok) return resp.json();
 
+    await cancelResponseBody(resp);
     if (
       !RETRYABLE_GITHUB_STATUSES.has(resp.status) ||
       attempt === GITHUB_GET_MAX_ATTEMPTS
     ) {
-      await cancelResponseBody(resp);
       throw githubApiError(resp, path, "GET");
     }
 
-    await cancelResponseBody(resp);
-    await sleep(githubRetryDelayMs(resp, attempt));
+    await sleep(githubRetryDelayMs(attempt, resp));
   }
 
   throw new Error(`GitHub API GET retry loop exhausted unexpectedly: ${path}`);
@@ -536,6 +534,53 @@ export async function writeCoverageBaselineFile(
   );
 }
 
+/** What extracting one downloaded artifact zip produced. */
+type ArtifactExtraction =
+  | { extracted: true; tmpDir: string }
+  | { extracted: false; error: string };
+
+/**
+ * Write the artifact zip carried by `resp` into a fresh temporary directory and
+ * unzip it there, returning the directory. When either step fails the directory
+ * is removed again and the failure is described for the caller's attempt log.
+ */
+async function extractArtifactZip(
+  resp: Response,
+  tmpPrefix: string,
+): Promise<ArtifactExtraction> {
+  const tmpDir = await Deno.makeTempDir({ prefix: tmpPrefix });
+  const zipPath = `${tmpDir}/artifact.zip`;
+
+  let error: string;
+  try {
+    const data = new Uint8Array(await resp.arrayBuffer());
+    await Deno.writeFile(zipPath, data);
+
+    const unzip = new Deno.Command("unzip", {
+      args: ["-o", zipPath, "-d", tmpDir],
+      stdout: "null",
+      stderr: "piped",
+    });
+    const result = await unzip.output();
+    if (result.success) {
+      return { extracted: true, tmpDir };
+    }
+
+    const stderr = new TextDecoder().decode(result.stderr).trim();
+    error = `unzip failed with exit code ${result.code}${
+      stderr ? `: ${stderr}` : ""
+    }`;
+  } catch (caught) {
+    error = `${caught}`;
+  }
+
+  try {
+    await Deno.remove(tmpDir, { recursive: true });
+  } catch { /* ignore cleanup errors */ }
+
+  return { extracted: false, error };
+}
+
 export async function downloadAndExtractArtifact(
   artifactId: number,
   tmpPrefix: string,
@@ -544,79 +589,45 @@ export async function downloadAndExtractArtifact(
   const url = `https://api.github.com${artifactPath}`;
   let lastError = "unknown error";
   const attemptErrors: string[] = [];
+  const recordFailure = (attempt: number, message: string) => {
+    lastError = message;
+    attemptErrors.push(`attempt ${attempt}: ${message}`);
+  };
 
   for (let attempt = 1; attempt <= GITHUB_GET_MAX_ATTEMPTS; attempt++) {
     let resp: Response;
     try {
       resp = await fetch(url, { headers: apiHeaders() });
     } catch (error) {
-      lastError = `fetch failed: ${error}`;
-      attemptErrors.push(`attempt ${attempt}: ${lastError}`);
-      if (attempt < GITHUB_GET_MAX_ATTEMPTS) {
-        await sleep(
-          Math.min(
-            GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
-            GITHUB_GET_RETRY_MAX_DELAY_MS,
-          ),
-        );
-        continue;
-      }
-      break;
+      recordFailure(attempt, `fetch failed: ${error}`);
+      if (attempt === GITHUB_GET_MAX_ATTEMPTS) break;
+      await sleep(githubRetryDelayMs(attempt));
+      continue;
     }
 
     if (!resp.ok) {
       const statusText = resp.statusText ? ` ${resp.statusText}` : "";
-      lastError =
-        `GitHub artifact download ${resp.status}${statusText}: ${artifactPath}`;
-      attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+      recordFailure(
+        attempt,
+        `GitHub artifact download ${resp.status}${statusText}: ${artifactPath}`,
+      );
       await cancelResponseBody(resp);
       if (
-        attempt < GITHUB_GET_MAX_ATTEMPTS &&
-        RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES.has(resp.status)
+        attempt === GITHUB_GET_MAX_ATTEMPTS ||
+        !RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES.has(resp.status)
       ) {
-        await sleep(githubRetryDelayMs(resp, attempt));
-        continue;
+        break;
       }
-      break;
+      await sleep(githubRetryDelayMs(attempt, resp));
+      continue;
     }
 
-    const tmpDir = await Deno.makeTempDir({ prefix: tmpPrefix });
-    const zipPath = `${tmpDir}/artifact.zip`;
-
-    try {
-      const data = new Uint8Array(await resp.arrayBuffer());
-      await Deno.writeFile(zipPath, data);
-
-      const unzip = new Deno.Command("unzip", {
-        args: ["-o", zipPath, "-d", tmpDir],
-        stdout: "null",
-        stderr: "piped",
-      });
-      const result = await unzip.output();
-      if (result.success) {
-        return tmpDir;
-      }
-
-      const stderr = new TextDecoder().decode(result.stderr).trim();
-      lastError = `unzip failed with exit code ${result.code}${
-        stderr ? `: ${stderr}` : ""
-      }`;
-    } catch (error) {
-      lastError = `${error}`;
-    }
-    attemptErrors.push(`attempt ${attempt}: ${lastError}`);
-
-    try {
-      await Deno.remove(tmpDir, { recursive: true });
-    } catch { /* ignore cleanup errors */ }
+    const extraction = await extractArtifactZip(resp, tmpPrefix);
+    if (extraction.extracted) return extraction.tmpDir;
+    recordFailure(attempt, extraction.error);
 
     if (attempt < GITHUB_GET_MAX_ATTEMPTS) {
-      await sleep(
-        Math.min(
-          GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
-          GITHUB_GET_RETRY_MAX_DELAY_MS,
-        ),
-      );
+      await sleep(githubRetryDelayMs(attempt));
     }
   }
 
@@ -648,14 +659,6 @@ export async function downloadAndParseCoverageBaseline(
     try {
       await Deno.remove(tmpDir, { recursive: true });
     } catch { /* ignore cleanup errors */ }
-  }
-}
-
-export async function* walkFiles(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
-    const full = `${dir}/${entry.name}`;
-    if (entry.isDirectory) yield* walkFiles(full);
-    else yield full;
   }
 }
 

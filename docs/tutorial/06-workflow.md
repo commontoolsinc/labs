@@ -136,12 +136,13 @@ streams, same cells. The browser shell is just one more client.
 ## Testing patterns
 
 Tests are patterns that test patterns: instantiate the subject, alternate
-`action` steps and `computed(() => boolean)` assertions, and return them as
-a `tests` array. From `packages/patterns/counter/counter.test.tsx`:
+`action` steps and `computed(() => boolean)` assertions, and return them
+under the reserved `[TESTS]` key. From
+`packages/patterns/counter/counter.test.tsx`:
 
 ```tsx
 // Shown at module scope.
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern, TESTS } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -155,7 +156,7 @@ export default pattern(() => {
   const assert_value_is_1 = computed(() => counter.value === 1);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_value_is_0 },
       { action: action_increment },
       { assertion: assert_value_is_1 },

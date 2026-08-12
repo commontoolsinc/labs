@@ -131,6 +131,7 @@ import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   compactWatchEntries,
   normalizeSyncEntries,
+  normalizeSyncSelector,
   watchIdForEntry,
 } from "./v2-watch.ts";
 import {
@@ -1703,7 +1704,15 @@ type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
 class Provider implements IStorageProvider {
   replica: SpaceReplica;
-  #syncRequests = new Map<string, ProviderSyncRequest>();
+  // Registered reads to replay when a provisional replica is replaced, keyed
+  // by document and then by the normalized selector. A normalized selector is
+  // either the shared rejecting selector or an interned canonical instance,
+  // and the entry holds it, so structurally equal selectors are the same
+  // object here and identity separates them exactly.
+  #syncRequests = new Map<
+    string,
+    Map<SchemaPathSelector, ProviderSyncRequest>
+  >();
   #destroyed = false;
   #routeAbort = new AbortController();
 
@@ -1738,14 +1747,18 @@ class Provider implements IStorageProvider {
     selector?: SchemaPathSelector,
     scope?: CellScope,
   ): Promise<Result<Unit, Error>> {
-    const [[address, normalizedSelector]] = normalizeSyncEntries([[
-      { id: uri, type: DOCUMENT_MIME, scope },
-      selector,
-    ]]);
-    this.#syncRequests.set(
-      watchIdForEntry(address, normalizedSelector),
-      { uri, selector: normalizedSelector, scope },
-    );
+    const normalizedSelector = normalizeSyncSelector(selector);
+    const key = docKey(uri, scope);
+    let requests = this.#syncRequests.get(key);
+    if (requests === undefined) {
+      requests = new Map();
+      this.#syncRequests.set(key, requests);
+    }
+    requests.set(normalizedSelector, {
+      uri,
+      selector: normalizedSelector,
+      scope,
+    });
     return this.replica.sync(uri, normalizedSelector, scope) as Promise<
       Result<Unit, Error>
     >;
@@ -1807,7 +1820,8 @@ class Provider implements IStorageProvider {
     );
     previous.reset();
     previous.closeNow();
-    const requests = [...this.#syncRequests.values()];
+    const requests = [...this.#syncRequests.values()]
+      .flatMap((bySelector) => [...bySelector.values()]);
     await Promise.all(
       requests.map(({ uri, selector, scope }) =>
         this.replaySync(replacement, uri, selector, scope)

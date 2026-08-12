@@ -22,7 +22,7 @@
  *
  * Join order is deterministic (markers): Alice first, then Bob.
  */
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, computed, multiUserTest, pattern, TESTS } from "commonfabric";
 import Scrabble, { type GameOutput } from "./scrabble.tsx";
 
 interface Setup {
@@ -59,7 +59,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const assert_bag_consumed = computed(() => game.bagIndex === 14);
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join },
       { assertion: assert_joined },
       { label: "alice-joined" },
@@ -102,7 +102,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-joined" },
       { assertion: assert_sees_alice },
       { assertion: assert_not_joined_yet },

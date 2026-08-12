@@ -57,7 +57,6 @@ import {
   readAndParseEvent,
   REPO,
   shouldGateCoverageDebtMetric,
-  walkFiles,
   WORKFLOW_FILE,
   type WorkflowRun,
   writeCoverageBaselineFile,
@@ -67,6 +66,7 @@ import {
   inferCurrentRunFallbackState,
   recordUnstampedBaselineRunState,
 } from "./compile-cache-state.ts";
+import { walk } from "@std/fs/walk";
 import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
@@ -861,10 +861,10 @@ async function downloadCacheStateFiles(
   if (!tmpDir) return null;
   try {
     const contents: string[] = [];
-    for await (const file of walkFiles(tmpDir)) {
-      if (file.endsWith(".json")) {
-        contents.push(await Deno.readTextFile(file));
-      }
+    for await (
+      const entry of walk(tmpDir, { includeDirs: false, exts: [".json"] })
+    ) {
+      contents.push(await Deno.readTextFile(entry.path));
     }
     return contents;
   } finally {
@@ -1000,17 +1000,20 @@ export async function copyCoverageArtifactFiles(
   let profileFiles = 0;
   let lcovFiles = 0;
   try {
-    for await (const file of walkFiles(sourceDir)) {
-      const isProfile = file.endsWith(".json");
-      const isLcov = file.endsWith(".lcov");
-      if (!isProfile && !isLcov) continue;
+    for await (
+      const entry of walk(sourceDir, {
+        includeDirs: false,
+        exts: [".json", ".lcov"],
+      })
+    ) {
+      const isLcov = entry.path.endsWith(".lcov");
       const count = isLcov ? lcovFiles : profileFiles;
       const destDir = isLcov ? lcovDir : profileDir;
       const dest = path.join(
         destDir,
-        `${artifact.id}-${count}-${path.basename(file)}`,
+        `${artifact.id}-${count}-${path.basename(entry.path)}`,
       );
-      await Deno.copyFile(file, dest);
+      await Deno.copyFile(entry.path, dest);
       if (isLcov) lcovFiles++;
       else profileFiles++;
     }
@@ -1033,9 +1036,10 @@ export async function copyCoverageArtifactFiles(
 
 async function readCombinedLcov(lcovDir: string): Promise<string> {
   const chunks: string[] = [];
-  for await (const file of walkFiles(lcovDir)) {
-    if (!file.endsWith(".lcov")) continue;
-    chunks.push(await Deno.readTextFile(file));
+  for await (
+    const entry of walk(lcovDir, { includeDirs: false, exts: [".lcov"] })
+  ) {
+    chunks.push(await Deno.readTextFile(entry.path));
   }
   return chunks.join("\n");
 }

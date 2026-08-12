@@ -1,23 +1,27 @@
-// model spend: month-to-date API cost across the LLM providers we use, projected
-// to a full-month total against an optional monthly budget. Each provider's
-// authoritative billing API is read in real USD: OpenAI and Anthropic (org Admin
-// keys, which expose per-day cost) and OpenRouter (a key, which exposes only a
-// running monthly total).
-//
-// The two providers with a daily series are charted as one line each over the
-// trailing ~45 days, dimmed except for the daily-rate window that feeds the
-// headline (like the github-ci-spend sparkline), with each line's month-to-date
-// total in the right gutter. The headline is the projected full-month spend,
-// extrapolated from the recent daily rate — spilling into last month's tail when
-// this month is under two weeks old — summed across every provider we could read.
-// The subtitle is the key (which colour is which provider, plus OpenRouter's total
-// since it has no line); the combined month-to-date total sits in the header aside,
-// and the span the chart covers goes to the tile's duration slot.
-//
-// Any provider we can't read shows "$???" and drops the tile to gray, but the
-// rest still chart and total. All LLM traffic routes through the AI gateway, but
-// the gateway exposes tokens, not dollars — these provider APIs are the
-// authoritative source of spend.
+/**
+ * Reports month-to-date API cost across the language-model providers we use,
+ * projected to a full-month total against an optional monthly budget. Each
+ * provider's authoritative billing API is read in real US dollars: OpenAI and
+ * Anthropic through organization Admin keys, which expose per-day cost, and
+ * OpenRouter through a key, which exposes only a running monthly total.
+ *
+ * The two providers with a daily series are charted as one line each over the
+ * trailing 45 days or so, dimmed except for the daily-rate window that feeds
+ * the headline, in the same way the ci-spend sparkline is drawn, with each
+ * line's month-to-date total in the right gutter. The headline is the
+ * projected full-month spend, extrapolated from the recent daily rate and
+ * spilling into last month's tail when this month is under two weeks old,
+ * summed across every provider we could read. The subtitle is the key, saying
+ * which colour is which provider and carrying OpenRouter's total since it has
+ * no line of its own. The combined month-to-date total sits in the header
+ * aside, and the span the chart covers goes to the tile's duration slot.
+ *
+ * Any provider we cannot read shows "$???" and drops the tile to gray, but the
+ * rest still chart and total. All traffic to these models routes through the
+ * AI gateway, and the gateway exposes tokens rather than dollars, so these
+ * provider APIs are the authoritative source of spend.
+ */
+
 import type { Status, Tile, TileView } from "../types.ts";
 import { budgetStatus, readBudget, usd } from "../lib.ts";
 import { DAY_MS, SPEND_HISTORY_DAYS, spendChart, summarizeDailySpend } from "../spend.ts";

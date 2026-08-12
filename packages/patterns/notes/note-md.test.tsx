@@ -12,7 +12,7 @@
  *
  * Run: deno task cf test packages/patterns/notes/note-md.test.tsx --verbose
  */
-import { action, assert, NAME, pattern, Writable } from "commonfabric";
+import { action, assert, NAME, pattern, TESTS, Writable } from "commonfabric";
 import NoteMd from "./note-md.tsx";
 import Note from "./note.tsx";
 
@@ -397,7 +397,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Static properties ===
       { assertion: assert_is_hidden },
       { assertion: assert_is_not_mentionable },

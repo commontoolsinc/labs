@@ -5697,6 +5697,7 @@ export const prepareBoundaryCommit = (
     // When an ingest target failed verification we keep the runtime's mark
     // (appended below) but drop the payload's declared policy label — a
     // non-rejecting commit must not store claims that didn't verify.
+    const remintedDeclaredPaths = new Map<string, readonly string[]>();
     const persistedLabelEntries: LabelMapEntry[] = ingestVerificationFailed
       ? []
       : mergedSchemaEntries
@@ -5711,6 +5712,16 @@ export const prepareBoundaryCommit = (
             )
           ) {
             return [];
+          }
+          const ifc = isRecord(entry.schema) && isRecord(entry.schema.ifc)
+            ? entry.schema.ifc
+            : undefined;
+          if (
+            ifc !== undefined &&
+            (Object.hasOwn(ifc, "confidentiality") ||
+              Object.hasOwn(ifc, "integrity"))
+          ) {
+            remintedDeclaredPaths.set(pathKey(entry.path), entry.path);
           }
           const derived = gateRuntimeMintedIntegrity(
             derivePersistedLabel(
@@ -5767,11 +5778,24 @@ export const prepareBoundaryCommit = (
     // an ingest target keeps only the runtime's mark); under `observe` it
     // diagnoses and persists today's bytes; `off` runs nothing.
     if (state.declaredMonotonicityMode !== "off" && existing !== undefined) {
+      const proposedDeclaredPathKeys = new Set(
+        persistedLabelEntries
+          .filter((entry) => entry.origin === "declared")
+          .map((entry) => pathKey(entry.path)),
+      );
+      const proposedEntries = [
+        ...persistedLabelEntries,
+        ...[...remintedDeclaredPaths.entries()].flatMap(([key, path]) =>
+          proposedDeclaredPathKeys.has(key)
+            ? []
+            : [{ path, label: {}, origin: "declared" as const }]
+        ),
+      ];
       const monotonicityViolations = collectDeclaredMonotonicityViolations({
         space,
         docId: id,
         storedEntries: existing.labelMap.entries,
-        proposedEntries: persistedLabelEntries,
+        proposedEntries,
         exemption: state.declaredWideningExemption,
       });
       if (monotonicityViolations.length > 0) {
@@ -5782,6 +5806,7 @@ export const prepareBoundaryCommit = (
           // (appended below) still persists in non-rejecting modes, but the
           // non-monotone declared claims must not.
           persistedLabelEntries.length = 0;
+          remintedDeclaredPaths.clear();
         } else {
           for (const violation of monotonicityViolations) {
             tx.noteCfcDiagnostic(
@@ -5798,6 +5823,7 @@ export const prepareBoundaryCommit = (
       linkWriteInputs.map((input) => pathKey(input.target.path)),
     );
     let flowCleared = false;
+    let remintCleared = false;
     // Stage B: stored label-metadata templates this persist drops (they are
     // re-derived from the FINAL payload entry set below). Tracked so a
     // TEMPLATE-ONLY stale envelope — a mixed-version writer cleared the
@@ -5949,7 +5975,16 @@ export const prepareBoundaryCommit = (
           continue;
         }
       }
-      if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
+      if (
+        persistedLabelEntryKeys.has(key) || remintedDeclaredPaths.has(key) ||
+        currentLinkWritePaths.has(key)
+      ) {
+        if (
+          remintedDeclaredPaths.has(key) &&
+          !persistedLabelEntryKeys.has(key)
+        ) {
+          remintCleared = true;
+        }
         // A link write replacing a previously content-labeled path — or a
         // declared entry re-minting at the same path — drops the old
         // derived entries here, through a different skip than the
@@ -6646,7 +6681,7 @@ export const prepareBoundaryCommit = (
     const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
 
     if (
-      coalescedLabelEntries.length === 0 && !flowCleared &&
+      coalescedLabelEntries.length === 0 && !flowCleared && !remintCleared &&
       !droppedLabelMetadataTemplates
     ) {
       continue;

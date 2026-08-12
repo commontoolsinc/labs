@@ -330,6 +330,11 @@ One line per archived document; each document's header carries the fuller
   allocated per mint on the way to the base64url payload, which is fixed, and
   the canonical `FabricValue` encoding, whose cost is the price of content
   addressing and stays.
+- [2026-08-subscription-sync-replay-registry.md](development/performance/2026-08-subscription-sync-replay-registry.md)
+  — why registering many selectors on one document got a quarter slower: the
+  replay registry hashed a key on every `sync()` call. Also why the
+  write-vs-commit benchmark alongside it was not a regression at all, and how
+  normalizing by a run median can manufacture a step, August 2026.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`

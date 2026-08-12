@@ -4,14 +4,14 @@
  * assert-diagnostics.test.ts, which expects the failures; it is not a pattern
  * under test.
  */
-import { assert, cell, pattern } from "commonfabric";
+import { assert, cell, pattern, TESTS } from "commonfabric";
 
 export default pattern(() => {
   const a = cell<number>(-1);
   const b = cell<number>(20);
 
   return {
-    tests: [
+    [TESTS]: [
       // Fails on the left conjunct, so the right one never evaluates.
       { assertion: assert(() => a.get() > 0 && b.get() < 10) },
       // Both disjuncts evaluate, and both are false.

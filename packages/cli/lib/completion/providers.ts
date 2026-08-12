@@ -351,7 +351,9 @@ const ARGUMENT_PROVIDERS: Readonly<
 > = {
   "piece call:callable": callableCandidates,
   "piece get:path": cellPathCandidates,
+  "piece get-label:path": cellPathCandidates,
   "piece set:path": cellPathCandidates,
+  "piece set-label:path": cellPathCandidates,
   "piece link:source": linkEndpointCandidates,
   "piece link:target": linkEndpointCandidates,
   "piece new:main": patternFiles,

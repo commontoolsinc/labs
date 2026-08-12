@@ -8,6 +8,7 @@ import {
   executePieceCallable,
   formatViewTree,
   generateSpaceMap,
+  getCellCfcLabel,
   getCellValue,
   getPieceView,
   inspectPiece,
@@ -27,6 +28,7 @@ import {
   resetHomePattern,
   savePiecePattern,
   searchPieces,
+  setCellCfcLabel,
   setCellValue,
   setHomePattern,
   setPiecePattern,
@@ -1615,6 +1617,67 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
       throw error;
     }
   })
+  /* piece get-label */
+  .command(
+    "get-label",
+    `Get the effective CFC label view for a piece data path.
+
+The returned paths are relative to the selected path. The view includes
+declared, derived, and link-carried labels. Omit path to inspect the root.`,
+  )
+  .usage(`${pieceUsage} [path]`)
+  .example(
+    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
+    "Get the effective label on a nested result value.",
+  )
+  .example(
+    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} secret --input`),
+    "Get the effective label on an input value.",
+  )
+  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("--input", "Read from the piece's input cell instead of result cell")
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
+  .arguments("[path:string]")
+  .action(getCellCfcLabelFromCommand)
+  /* piece set-label */
+  .command(
+    "set-label",
+    cliText(`Set the declared CFC label at a piece data path from JSON on stdin.
+
+INPUT: An object with confidentiality and/or integrity arrays, plus an optional
+observes value: value, shape, enumerate, or followRef.
+
+The command records the label through the same checked write operation used for
+piece data. It never changes raw CFC metadata. Confidentiality may only become
+more restrictive. An integrity update may keep or remove existing claims, but
+cannot add trust. Conflicting observation classes are rejected. If observes is
+omitted, an existing unambiguous class is preserved. The command returns the
+updated effective label view.`),
+  )
+  .usage(`${pieceUsage} [path]`)
+  .example(
+    cliText(
+      `echo '{"confidentiality":["team"]}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} notes`,
+    ),
+    "Add a confidentiality requirement to a result value.",
+  )
+  .example(
+    cliText(
+      `echo '{"integrity":[],"observes":"value"}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} draft --input`,
+    ),
+    "Remove declared integrity claims from an input value.",
+  )
+  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("--input", "Write to the piece's input cell instead of result cell")
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
+  .arguments("[path:string]")
+  .action(setCellCfcLabelFromCommand)
   /* piece set */
   .command(
     "set",
@@ -2139,6 +2202,58 @@ export interface PieceCLIOptions {
 
 export interface PieceSummaryCLIOptions extends PieceCLIOptions {
   json?: boolean;
+}
+
+export interface PieceLabelCLIOptions extends PieceCLIOptions {
+  input?: boolean;
+  quiet?: boolean;
+}
+
+export interface PieceLabelCommandDependencies {
+  getCellCfcLabel?: typeof getCellCfcLabel;
+  setCellCfcLabel?: typeof setCellCfcLabel;
+  drainStdin?: typeof drainStdin;
+  render?: typeof render;
+}
+
+export async function getCellCfcLabelFromCommand(
+  options: PieceLabelCLIOptions,
+  pathString?: string,
+  deps: PieceLabelCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = {
+    ...parsePieceOptions(options),
+    jsonOutput: true,
+  };
+  const pathSegments = pathString ? parseCellPath(pathString) : [];
+  const label = await (deps.getCellCfcLabel ?? getCellCfcLabel)(
+    pieceConfig,
+    pathSegments,
+    { input: options.input },
+  );
+  (deps.render ?? render)(label, { json: true });
+}
+
+export async function setCellCfcLabelFromCommand(
+  options: PieceLabelCLIOptions,
+  pathString?: string,
+  deps: PieceLabelCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = {
+    ...parsePieceOptions(options),
+    jsonOutput: true,
+  };
+  const pathSegments = pathString ? parseCellPath(pathString) : [];
+  const update = await (deps.drainStdin ?? drainStdin)();
+  const label = await (deps.setCellCfcLabel ?? setCellCfcLabel)(
+    pieceConfig,
+    pathSegments,
+    update,
+    { input: options.input },
+  );
+  (deps.render ?? render)(label, { json: true });
 }
 
 export interface PieceListCommandDependencies {

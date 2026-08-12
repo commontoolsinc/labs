@@ -1,3 +1,15 @@
+/**
+ * Three predicates that form a ladder, tested together because what matters
+ * about each is where it stops. `isArrayIndexPropertyName()` judges a single
+ * key, `isArrayWithOnlyIndexProperties()` judges an array's key shape, and
+ * `isInertArray()` adds a per-index descriptor walk on top of that.
+ *
+ * The last rung is the expensive one, and the cases here are what say whether
+ * a caller needs it: a value can have nothing but index keys and still not be
+ * inert, because a key's descriptor can make it something other than a plain
+ * element.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {

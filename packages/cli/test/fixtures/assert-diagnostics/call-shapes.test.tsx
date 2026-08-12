@@ -4,7 +4,7 @@
  * arguments say nothing. Run by assert-diagnostics.test.ts, which expects the
  * failures; it is not a pattern under test.
  */
-import { assert, cell, pattern } from "commonfabric";
+import { assert, cell, pattern, TESTS } from "commonfabric";
 
 function allPositive(...values: number[]): boolean {
   return values.every((value) => value > 0);
@@ -14,7 +14,7 @@ export default pattern(() => {
   const nums = cell<number[]>([1, -2, 3]);
 
   return {
-    tests: [
+    [TESTS]: [
       // Fails: -2 is not positive. Recording the spread would pass only the
       // first element and turn this into `allPositive(1)`, which is true.
       { assertion: assert(() => allPositive(...nums.get())) },

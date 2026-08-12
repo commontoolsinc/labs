@@ -4,7 +4,7 @@
  * pattern actually reached to find — which is the whole point of the option
  * (the pattern-vintage capture snapshots the store afterwards).
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const count = new Writable(0).for("count");
@@ -12,7 +12,7 @@ export default pattern(() => {
 
   return {
     count,
-    tests: [
+    [TESTS]: [
       { action: bump },
       { action: bump },
       { assertion: computed(() => count.get() === 2) },

@@ -1,4 +1,4 @@
-import { action, assert, computed, pattern } from "commonfabric";
+import { action, assert, computed, pattern, TESTS } from "commonfabric";
 import Scrabble, { type Letter } from "./scrabble.tsx";
 
 const tile = (char: string, id: string): Letter => ({
@@ -121,7 +121,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join_alice },
       { action: action_try_rename_after_join },
       { assertion: assert_joined_name_is_immutable },

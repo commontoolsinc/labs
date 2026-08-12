@@ -352,6 +352,7 @@ export declare const UI: "$UI";
 export declare const TILE_UI: "$TILE_UI";
 export declare const CHIP_UI: "$CHIP_UI";
 export declare const FS: "$FS";
+export declare const TESTS: "$TESTS";
 
 /**
  * The size/representation spectrum a piece can be rendered at (CT-1321):
