@@ -1,9 +1,12 @@
 import type { FabricValue } from "@/interface.ts";
-import type {
-  MatchedCodec,
-  NonterminalCodec,
-  RegistrableCodec,
-  TerminalCodec,
+import {
+  CODEC,
+  type FabricCodecClass,
+  type MatchedCodec,
+  type NonterminalCodec,
+  type RegistrableCodec,
+  type TerminalCodec,
+  type WireFormat,
 } from "./interface.ts";
 import { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
@@ -69,6 +72,9 @@ function constructorOf(
  * {@link #extend} to build on one that is already frozen.
  */
 export class CodecRegistry<Encoded> {
+  /** The wire format this registry is over. */
+  readonly #format: WireFormat<Encoded>;
+
   /** Tag -> codec map for O(1) decode dispatch. */
   readonly #tagMap = new Map<string, MatchedCodec<Encoded>>();
 
@@ -83,6 +89,58 @@ export class CodecRegistry<Encoded> {
 
   /** Primitive `type`s that are self-representing (encoded as-is). */
   readonly #selfRepTypes = new Set<PrimitiveTypeName>();
+
+  /**
+   * Constructs an instance over the given wire format, which decides the
+   * symbol {@link #registerClass} reads a codec out from under.
+   *
+   * `format` must be frozen. A registry holds it for its lifetime and reads
+   * the symbol on every class registration, so a mutable descriptor could
+   * change which codec a class supplies partway through a registry being
+   * built. `readonly` does not carry that: it binds at the type level only,
+   * and says nothing about an object arriving from elsewhere.
+   *
+   * @throws If `format` is not frozen.
+   */
+  constructor(format: WireFormat<Encoded>) {
+    if (!Object.isFrozen(format)) {
+      throw new Error("`WireFormat` instances must be frozen.");
+    }
+
+    this.#format = format;
+  }
+
+  /**
+   * Registers the codec that the given class supplies for this registry's
+   * format: its `[CODEC]` if it has one, and otherwise the codec bound under
+   * the format's own symbol. A class with both supplies the former, that being
+   * the one which serves every format.
+   *
+   * This is what lets a single curated class list serve every format. Which
+   * symbol a given class binds is a question about that class and that format
+   * -- `FabricRegExp` supplies a nonterminal codec to JSON, having no pattern
+   * type of its own to terminate into -- and reading it here means no caller
+   * has to keep one list per format in step with the others.
+   *
+   * @throws If the class supplies a codec under neither symbol.
+   */
+  registerClass(cls: FabricCodecClass): void {
+    this.#assertNotFrozen();
+
+    const bound = cls as unknown as Partial<
+      Record<symbol, RegistrableCodec<Encoded>>
+    >;
+    const codec = bound[CODEC] ?? bound[this.#format.codecSymbol];
+
+    if (codec === undefined) {
+      throw new Error(
+        "Shouldn't happen: class supplies no codec for this registry's " +
+          `format: \`${cls.name}\``,
+      );
+    }
+
+    this.register(codec);
+  }
 
   /**
    * Registers a codec, indexing it by its `recognizedTypeTag` (for decode) and
@@ -151,26 +209,27 @@ export class CodecRegistry<Encoded> {
    * extending what a factory returns is what keeps a caller from omitting, by
    * accident, everything that factory put there.
    *
-   * It takes codecs rather than the classes carrying them, because which
-   * symbol a class binds its codec to is the caller's business: a
-   * `FabricPrimitive` binds one per wire format, a `FabricInstance` binds one
-   * for all of them. A caller therefore reads the symbol it means and passes
-   * the result, which is what lets this module stay format-agnostic.
+   * An argument may be a class, in which case its codec for this registry's
+   * format is found as {@link #registerClass} finds one. That is what a
+   * curated roster holds. A bare codec is also accepted, for the codecs that
+   * have no class to be bound to -- those handling JavaScript's own primitive
+   * types.
    *
    * Arguments are taken as `Array.concat()` takes them -- any number, each
-   * either a codec or a list of them -- so that a caller combining rosters
-   * need not splice them into one array first.
+   * either a single entry or a list of them -- so that a caller combining
+   * rosters need not splice them into one array first.
    *
-   * @param codecs The codecs to register in addition, individually or in
-   *   lists.
+   * @param entries The classes and codecs to register in addition,
+   *   individually or in lists.
    */
   extend(
-    ...codecs: readonly (
+    ...entries: readonly (
+      | FabricCodecClass
       | RegistrableCodec<Encoded>
-      | readonly RegistrableCodec<Encoded>[]
+      | readonly (FabricCodecClass | RegistrableCodec<Encoded>)[]
     )[]
   ): CodecRegistry<Encoded> {
-    const result = new CodecRegistry<Encoded>();
+    const result = new CodecRegistry<Encoded>(this.#format);
 
     for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
     for (const [key, value] of this.#classMap) result.#classMap.set(key, value);
@@ -179,13 +238,15 @@ export class CodecRegistry<Encoded> {
     }
     for (const type of this.#selfRepTypes) result.#selfRepTypes.add(type);
 
-    for (const arg of codecs) {
+    for (const arg of entries) {
       if (Array.isArray(arg)) {
-        for (const codec of arg) {
-          result.register(codec);
+        for (const entry of arg) {
+          result.#registerEntry(entry);
         }
       } else {
-        result.register(arg as RegistrableCodec<Encoded>);
+        result.#registerEntry(
+          arg as FabricCodecClass | RegistrableCodec<Encoded>,
+        );
       }
     }
 
@@ -194,6 +255,21 @@ export class CodecRegistry<Encoded> {
     // brand and so is not assignable back to `CodecRegistry`.
     Object.freeze(result);
     return result;
+  }
+
+  /**
+   * Registers one {@link #extend} entry, which is a class when it is callable
+   * and a codec otherwise. Nothing else in the codec system is a function, so
+   * the two cannot be confused.
+   */
+  #registerEntry(
+    entry: FabricCodecClass | RegistrableCodec<Encoded>,
+  ): void {
+    if (typeof entry === "function") {
+      this.registerClass(entry);
+    } else {
+      this.register(entry);
+    }
   }
 
   /**

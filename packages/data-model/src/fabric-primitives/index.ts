@@ -2,10 +2,7 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@/interface.ts";
-import type { RegistrableCodec } from "@/codec-common/interface.ts";
-import type { JsonCodecValue } from "@/codec-json/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
-import type { FabricClassWithJsonCodec } from "./BaseFabricPrimitive.ts";
+import type { FabricCodecClass } from "@/codec-common/interface.ts";
 import { FabricBytes } from "./FabricBytes.ts";
 import { FabricEpochDays } from "./FabricEpochDays.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
@@ -27,32 +24,17 @@ export { FabricEpochDays } from "./FabricEpochDays.ts";
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function codecClasses(): readonly FabricClassWithJsonCodec[] {
+export function codecClasses(): readonly FabricCodecClass[] {
   return CODEC_CLASSES;
 }
 
-/**
- * The JSON codecs of {@link codecClasses}, in the same order. This is what a
- * registry wants: reading `[JSON_CODEC]` is the business of the module that
- * knows these classes bind it, not of every caller assembling a registry.
- *
- * Returned frozen so callers cannot mutate the shared list.
- */
-export function jsonCodecs(): readonly RegistrableCodec<JsonCodecValue>[] {
-  return JSON_CODECS;
-}
-
-const CODEC_CLASSES: readonly FabricClassWithJsonCodec[] = Object.freeze([
+const CODEC_CLASSES: readonly FabricCodecClass[] = Object.freeze([
   FabricBytes,
   FabricHash,
   FabricEpochNsec,
   FabricEpochDays,
   FabricRegExp,
 ]);
-
-const JSON_CODECS: readonly RegistrableCodec<JsonCodecValue>[] = Object.freeze(
-  CODEC_CLASSES.map((cls) => cls[JSON_CODEC]),
-);
 
 /**
  * The `type` name in this system's schema dialect for a `FabricPrimitive`

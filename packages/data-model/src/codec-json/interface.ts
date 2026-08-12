@@ -1,3 +1,6 @@
+import type { WireFormat } from "@/codec-common/interface.ts";
+import { JSON_CODEC } from "@/interface.ts";
+
 /**
  * Tag prefix on the encoded form of a fabric value. The prefix is explicit so
  * as to make it unambiguous whether a given JSON-ish text string is the result
@@ -29,3 +32,12 @@ export type JsonCodecValue =
   | string
   | readonly JsonCodecValue[]
   | { readonly [key: string]: JsonCodecValue };
+
+/**
+ * The JSON wire format, for a `CodecRegistry` to be built over. Pairs the
+ * intermediate tree type with the symbol a `FabricPrimitive` binds its JSON
+ * codec under.
+ */
+export const JSON_FORMAT: WireFormat<JsonCodecValue> = Object.freeze({
+  codecSymbol: JSON_CODEC,
+});

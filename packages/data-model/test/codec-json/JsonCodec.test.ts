@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import { JsonCodec } from "@/codec-json/JsonCodec.ts";
 import { createDefaultJsonRegistry, newDefaultJsonCodec } from "@/codecs.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
-import type { JsonCodecValue } from "@/codec-json/interface.ts";
+import { JSON_FORMAT, type JsonCodecValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import {
@@ -124,7 +124,9 @@ describe("JsonCodec", () => {
     // the empty registry's behavior instead, in both directions.
 
     it("throws on encode for a class the supplied registry lacks", () => {
-      const jsonCodec = new JsonCodec({ registry: new CodecRegistry() });
+      const jsonCodec = new JsonCodec({
+        registry: new CodecRegistry(JSON_FORMAT),
+      });
       const value = FabricError.fromNativeError(new Error("boom"));
 
       expect(() => jsonCodec.encode(value)).toThrow(
@@ -136,7 +138,9 @@ describe("JsonCodec", () => {
       const wire = newDefaultJsonCodec().encode(
         FabricError.fromNativeError(new Error("boom")),
       );
-      const jsonCodec = new JsonCodec({ registry: new CodecRegistry() });
+      const jsonCodec = new JsonCodec({
+        registry: new CodecRegistry(JSON_FORMAT),
+      });
 
       const result = jsonCodec.decode(wire, new TestReconstructionContext());
 
