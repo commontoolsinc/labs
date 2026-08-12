@@ -1,7 +1,6 @@
-import {
-  type FabricClassWithNonterminalCodec,
-  type FabricCodecClass,
-} from "@/codec-common/interface.ts";
+import type { Constructor } from "@commonfabric/utils/types";
+
+import type { FabricClassWithNonterminalCodec } from "@/codec-common/interface.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricLink } from "./FabricLink.ts";
 import { FabricMap } from "./FabricMap.ts";
@@ -24,7 +23,7 @@ export { FabricSet } from "./FabricSet.ts";
  * a format-neutral `[CODEC]`. The second half is what a roster of primitives
  * cannot claim, their codecs being bound per format.
  */
-type InstanceCodecClass = FabricCodecClass & FabricClassWithNonterminalCodec;
+type InstanceCodecClass = Constructor & FabricClassWithNonterminalCodec;
 
 /**
  * The concrete instance classes whose instances are available over the wire,

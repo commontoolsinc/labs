@@ -1,7 +1,6 @@
 import type { FabricValue } from "@/interface.ts";
 import {
   CODEC,
-  type FabricCodecClass,
   type MatchedCodec,
   type NonterminalCodec,
   type RegistrableCodec,
@@ -122,9 +121,15 @@ export class CodecRegistry<Encoded> {
    * type of its own to terminate into -- and reading it here means no caller
    * has to keep one list per format in step with the others.
    *
+   * The parameter is only `Constructor`, and cannot be narrower: naming the
+   * symbol a class must bind would name a format, which is the thing a shared
+   * roster must not do. So this refuses at run time what a type cannot rule
+   * out. A registry is built at module scope, so the refusal still lands
+   * before anything has been encoded.
+   *
    * @throws If the class supplies a codec under neither symbol.
    */
-  registerClass(cls: FabricCodecClass): void {
+  registerClass(cls: Constructor): void {
     this.#assertNotFrozen();
 
     const bound = cls as unknown as Partial<
@@ -224,9 +229,9 @@ export class CodecRegistry<Encoded> {
    */
   extend(
     ...entries: readonly (
-      | FabricCodecClass
+      | Constructor
       | RegistrableCodec<Encoded>
-      | readonly (FabricCodecClass | RegistrableCodec<Encoded>)[]
+      | readonly (Constructor | RegistrableCodec<Encoded>)[]
     )[]
   ): CodecRegistry<Encoded> {
     const result = new CodecRegistry<Encoded>(this.#format);
@@ -245,7 +250,7 @@ export class CodecRegistry<Encoded> {
         }
       } else {
         result.#registerEntry(
-          arg as FabricCodecClass | RegistrableCodec<Encoded>,
+          arg as Constructor | RegistrableCodec<Encoded>,
         );
       }
     }
@@ -263,7 +268,7 @@ export class CodecRegistry<Encoded> {
    * the two cannot be confused.
    */
   #registerEntry(
-    entry: FabricCodecClass | RegistrableCodec<Encoded>,
+    entry: Constructor | RegistrableCodec<Encoded>,
   ): void {
     if (typeof entry === "function") {
       this.registerClass(entry);

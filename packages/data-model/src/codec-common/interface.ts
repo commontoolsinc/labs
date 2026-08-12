@@ -138,20 +138,6 @@ export type RegistrableCodec<Encoded> =
   | TerminalCodec<Encoded>;
 
 /**
- * A class that supplies a codec: under `[CODEC]` where one serves every wire
- * format, or under a particular format's own symbol.
- *
- * Which symbols a given class binds is deliberately not expressed here. A
- * curated roster of such classes is format-neutral -- the same list serves
- * every format -- so a type naming one format's symbol could not describe it.
- * {@link CodecRegistry#registerClass} reads for the symbol it wants and
- * refuses a class that binds neither, which moves that check from compile time
- * to registry construction. Registries are built at module scope, so the check
- * still runs before anything has been encoded.
- */
-export type FabricCodecClass = Constructor;
-
-/**
  * A wire format, as {@link CodecRegistry} needs to know one: the type its
  * encoded states live in, and the symbol under which a class binds its codec
  * for this format.

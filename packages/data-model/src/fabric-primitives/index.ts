@@ -1,8 +1,8 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
+import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@/interface.ts";
-import type { FabricCodecClass } from "@/codec-common/interface.ts";
 import { FabricBytes } from "./FabricBytes.ts";
 import { FabricEpochDays } from "./FabricEpochDays.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
@@ -22,13 +22,19 @@ export { FabricEpochDays } from "./FabricEpochDays.ts";
  * which primitive types participate in serialization: add a class here once it
  * gains a `[JSON_CODEC]`.
  *
+ * Typed only as classes, which is weaker than it looks: a `FabricPrimitive`
+ * binds its codec under a wire format's own symbol, so a type saying which
+ * symbol would name a format, and this list is meant to serve all of them.
+ * A class here that binds no codec for the format in play is refused by
+ * `CodecRegistry.registerClass()` when a registry is built.
+ *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function codecClasses(): readonly FabricCodecClass[] {
+export function codecClasses(): readonly Constructor[] {
   return CODEC_CLASSES;
 }
 
-const CODEC_CLASSES: readonly FabricCodecClass[] = Object.freeze([
+const CODEC_CLASSES: readonly Constructor[] = Object.freeze([
   FabricBytes,
   FabricHash,
   FabricEpochNsec,
