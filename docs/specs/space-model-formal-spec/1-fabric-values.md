@@ -1814,7 +1814,7 @@ export interface ReconstructionContext {
    *
    * Required (not optional): every context declares it. A shared
    * `BaseReconstructionContext`
-   * (`packages/data-model/codec-interface/BaseReconstructionContext.ts`)
+   * (`packages/data-model/src/codec-interface/BaseReconstructionContext.ts`)
    * centralizes the getter with a `true` default, mirroring
    * `cloneIfNecessary()`'s default; contexts opt out by overriding. An
    * `EmptyReconstructionContext` (same directory) covers context-less
@@ -1877,7 +1877,7 @@ import {
   type FabricCodec,
   type ReconstructionContext,
 } from '@commonfabric/data-model/codec-common';
-import { BaseFabricInstance } from '@commonfabric/data-model/fabric-instances';
+import { BaseFabricInstance } from '@commonfabric/data-model/codec-common';
 
 type TemperatureUnit = "C" | "F" | "K";
 
