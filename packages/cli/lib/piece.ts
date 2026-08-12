@@ -1438,17 +1438,19 @@ async function tryResolvePieceCallableAt(
   };
 }
 
-/** The forced-stream probe: cast `name` on `cell` to a stream and ask the
- * runtime whether it answers as a handler. This is the third resolution path
- * of `cf piece call` (tryResolvePieceHandler) — a handler whose stored schema
- * lost the stream marker still answers this cast — shared with the listing's
- * fallback probe and the read-path guard so all three classify identically.
- * Only meaningful at the piece cell, where every attribute is a
- * schema-carrying link or a genuine handler: for inline values and
- * schema-less links the cast schema itself survives resolution and
- * `Cell.isStream`'s schema branch answers "stream" from it, so probing
- * arbitrary cells would report plain data as handlers. Returns the proven
- * stream cell, or null. */
+/** The forced-stream cast: assert `name` on `cell` is a stream, then ask the
+ * runtime whether it answers as one. The third and last resolution path of
+ * `cf piece call` (tryResolvePieceHandler), where a handler whose stored
+ * schema lost the stream marker still answers.
+ *
+ * It proves nothing, and belongs ONLY here. The cast's stream schema survives
+ * link resolution for an inline value, so `Cell.isStream`'s schema branch
+ * answers from the assertion the caller just made and every name passes.
+ * That is acceptable as a dispatcher's last resort — the caller named this
+ * verb, and a wrong cast fails harmlessly against a value with no handler
+ * behind it. It is not acceptable anywhere that describes what a piece has:
+ * the listing and the read-path guard both classify on definite stored
+ * signals instead. Returns the cast cell, or null. */
 function probeForcedStreamCell(cell: any, name: string): any | null {
   if (
     typeof cell !== "object" || cell === null ||
@@ -1843,24 +1845,43 @@ export async function listPieceCallables(
     }
   }
 
-  // Third resolution path, mirrored from resolvePieceCallable: a handler whose
-  // schema lost the stream marker still dispatches via the forced stream cast
-  // (tryResolvePieceHandler). Probe every rejected name the same way so a
-  // callable-by-name verb can never be absent from the listing.
+  // Third resolution path, mirrored from resolvePieceCallable: a name the
+  // ordinary walk rejected can still be dispatched by name, so it is
+  // considered here too.
+  //
+  // It is classified on the two DEFINITE stored signals the read-path guard
+  // uses — a link-derived schema that answers as a stream, or the stored
+  // `{$stream: true}` sentinel — and never on the dispatcher's forced-stream
+  // cast. That cast asserts what it then asks: its stream schema survives link
+  // resolution for an inline value, so `Cell.isStream` answers from the
+  // caller's own assertion and EVERY name passes. Harmless in the dispatcher,
+  // where a wrong cast fails harmlessly on a call the caller asked for; false
+  // in a listing, which is a statement about what exists. A listing that names
+  // every data field costs more than one that misses a marker-less handler,
+  // because it makes the whole surface untrustworthy — and such a handler
+  // stays dispatchable regardless.
   const pieceCell = typeof piece.getCell === "function"
     ? piece.getCell()
     : undefined;
-  if (pieceCell && typeof pieceCell.asSchema === "function") {
+  if (pieceCell) {
     const pieceValue = pieceCell.get?.();
     if (isRecord(pieceValue)) {
       for (const name of Object.keys(pieceValue)) {
         if (!listings.has(name)) rejected.add(name);
       }
     }
+    const resultRootValue = resultRoot?.get?.();
     for (const name of rejected) {
       if (listings.has(name)) continue;
-      if (!probeForcedStreamCell(pieceCell, name)) continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
+      // `rejected` collects names from the result/input walk AND from the
+      // piece root's own value, so the sentinel is looked for on both — one
+      // cell in a live piece, two objects wherever they are supplied apart.
+      const storedValue = getCallableValue(resultRootValue, name) ??
+        getCallableValue(pieceValue, name);
+      if (!isStreamValue(storedValue) && !isHandlerCell(callableCell)) {
+        continue;
+      }
       const spec = callableCommandSpec(callableCell, "handler");
       const outputSchema = declaredResults.get(name);
       listings.set(name, {
