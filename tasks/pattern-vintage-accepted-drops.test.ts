@@ -5,20 +5,25 @@ import {
   type AcceptedStateDrop,
   withoutAcceptedDrops,
 } from "./pattern-vintage-accepted-drops.ts";
+import { isReduction } from "../packages/piece/test/state-continuity-harness.ts";
 
 describe("pattern-vintage-accepted-drops", () => {
   const drops: AcceptedStateDrop[] = [
-    { pattern: "topics/main.tsx", fields: ["crossrefs"], reason: "removed" },
+    {
+      pattern: "topics/main.tsx",
+      paths: ["crossrefs", "topics[].crossrefs"],
+      reason: "removed",
+    },
   ];
 
   describe("acceptedDropsFor", () => {
-    it("returns the fields for a repo-relative path ending in the key", () => {
+    it("returns the paths for a repo-relative path ending in the key", () => {
       expect(
-        acceptedDropsFor("/packages/patterns/topics/main.tsx", drops)?.fields,
-      ).toEqual(new Set(["crossrefs"]));
+        acceptedDropsFor("/packages/patterns/topics/main.tsx", drops)?.paths,
+      ).toEqual(new Set(["crossrefs", "topics[].crossrefs"]));
     });
 
-    it("returns the fields for the bare key", () => {
+    it("returns the entry for the bare key", () => {
       expect(acceptedDropsFor("topics/main.tsx", drops)?.pattern).toBe(
         "topics/main.tsx",
       );
@@ -37,52 +42,80 @@ describe("pattern-vintage-accepted-drops", () => {
   });
 
   describe("withoutAcceptedDrops", () => {
-    const fields = new Set(["crossrefs"]);
+    const paths = new Set(["crossrefs", "topics[].crossrefs"]);
+    const strip = (state: unknown, only = paths) =>
+      withoutAcceptedDrops(state, only, isReduction);
 
-    it("removes a named field from the root", () => {
-      expect(withoutAcceptedDrops({ title: "a", crossrefs: {} }, fields))
-        .toEqual({ value: { title: "a" }, applied: true });
-    });
-
-    it("removes a named field from every element of a nested list", () => {
-      // Where the field actually sits: a board's `topics` is a list of
-      // children, each of which carried the removed path.
-      expect(
-        withoutAcceptedDrops(
-          { topics: [{ title: "a", crossrefs: 1 }, { title: "b" }] },
-          fields,
-        ),
-      ).toEqual({
-        value: { topics: [{ title: "a" }, { title: "b" }] },
-        applied: true,
+    it("removes a root key the entry names", () => {
+      expect(strip({ title: "a", crossrefs: { refsOut: [1] } })).toEqual({
+        value: { title: "a" },
+        applied: new Set(["crossrefs"]),
       });
     });
 
-    it("reports applied false when no named field is present", () => {
-      expect(withoutAcceptedDrops({ title: "a" }, fields))
-        .toEqual({ value: { title: "a" }, applied: false });
+    it("removes a named path from every element of its list", () => {
+      expect(
+        strip({ topics: [{ title: "a", crossrefs: 1 }, { title: "b" }] }),
+      ).toEqual({
+        value: { topics: [{ title: "a" }, { title: "b" }] },
+        applied: new Set(["topics[].crossrefs"]),
+      });
     });
 
-    it("keeps every field the entry does not name", () => {
-      expect(
-        withoutAcceptedDrops({ crossrefs: 1, body: "", comments: [] }, fields)
-          .value,
-      ).toEqual({ body: "", comments: [] });
+    it("keeps a same-named field the entry did not anchor to that path", () => {
+      // The bound that stops a name-only entry blanking an unrelated object:
+      // `notes[].crossrefs` is not a path any entry names.
+      expect(strip({ notes: [{ crossrefs: "kept" }] }).value).toEqual({
+        notes: [{ crossrefs: "kept" }],
+      });
+    });
+
+    it("keeps a named field nested deeper than the path it names", () => {
+      expect(strip({ topics: [{ meta: { crossrefs: "kept" } }] }).value)
+        .toEqual({ topics: [{ meta: { crossrefs: "kept" } }] });
+    });
+
+    it("reports the paths it used, not the ones it did not", () => {
+      expect(strip({ topics: [{ crossrefs: 1 }] }).applied).toEqual(
+        new Set(["topics[].crossrefs"]),
+      );
+    });
+
+    it("returns a subtree that lost nothing as itself, not a copy", () => {
+      // The comparison must see the state it was handed. Anything off the path
+      // to a drop is shared by reference rather than rebuilt.
+      const untouched = { deeply: { nested: "value" } };
+      const state = { untouched, crossrefs: 1 };
+      const result = strip(state);
+      expect((result.value as typeof state).untouched).toBe(untouched);
+    });
+
+    it("returns the state itself when nothing was dropped", () => {
+      const state = { title: "a" };
+      const result = strip(state);
+      expect(result.value).toBe(state);
+      expect(result.applied).toEqual(new Set());
+    });
+
+    it("returns the state itself when the entry names no paths", () => {
+      const state = { crossrefs: 1 };
+      const result = strip(state, new Set<string>());
+      expect(result.value).toBe(state);
+    });
+
+    it("never opens a reduction, which is compared whole", () => {
+      // `comparableState` reduces a cell to `{"[cell]": …}`. Descending into
+      // one would compare its innards instead of the document it stands for.
+      const cell = { "[cell]": { space: "did:x", id: "y", path: [] } };
+      const state = { topics: [cell] };
+      const result = strip(state);
+      expect((result.value as typeof state).topics[0]).toBe(cell);
     });
 
     it("leaves the caller's own value unmodified", () => {
-      // The vintage's snapshot is compared against more than once, so the
-      // strip rebuilds rather than mutating.
       const before = { title: "a", crossrefs: {} };
-      withoutAcceptedDrops(before, fields);
+      strip(before);
       expect(before).toEqual({ title: "a", crossrefs: {} });
-    });
-
-    it("returns the value itself when the entry names no fields", () => {
-      const before = { title: "a" };
-      const result = withoutAcceptedDrops(before, new Set<string>());
-      expect(result.value).toBe(before);
-      expect(result.applied).toBe(false);
     });
   });
 });

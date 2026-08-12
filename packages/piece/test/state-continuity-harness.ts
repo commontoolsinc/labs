@@ -889,7 +889,7 @@ const REDUCTIONS: ReadonlySet<string> = new Set([
 ]);
 
 /** Whether `value` is one of `comparableState`'s reductions. */
-function isReduction(value: unknown): boolean {
+export function isReduction(value: unknown): boolean {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
   }

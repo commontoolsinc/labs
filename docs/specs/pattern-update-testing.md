@@ -175,17 +175,27 @@ sits.
 What a root holds at a cell or stream position is compared as the **document it
 points at**, so a field that moved to a different document is still a finding.
 
-A field a pattern **removed on purpose** is taken off both sides before the
-comparison, from the entry for that pattern in
+State a pattern **stopped holding on purpose** is taken off both sides before
+the comparison, from the entry for that pattern in
 `tasks/pattern-vintage-accepted-drops.ts`. It is the Tier 2 half of an accepted
 break, and reaches here only after Tier 1 has accepted the contract change:
 where the surface is gone, no pattern change makes the vintage readable, so the
-comparison would otherwise measure the decision itself. An entry names fields,
-not fixtures, and they are removed wherever they sit — at the root, or nested
-under a list of children. Every other field on the same root is compared
-exactly as before, so a removal that also strands a body or a timestamp still
-fails. The run prints what it held back, and fails on an entry that removed
-nothing from any vintage, so this list can only shrink too.
+comparison would otherwise measure the decision itself.
+
+An entry names **paths**, not fixtures and not bare field names.
+`crossrefs` forgives the root key of that name; `topics[].crossrefs` forgives it
+on each element of the `topics` list. A same-named field anywhere else is
+compared exactly as before, so a removal that also strands a body or a timestamp
+still fails. Nothing off the path to a drop is rebuilt either — a subtree that
+lost nothing is returned as itself, and a reduction (`{"[cell]": …}` and its
+kin) is never opened, because it stands for something the comparison must weigh
+whole.
+
+The run prints every path it held back, and fails on one that no vintage needed,
+so this list can only shrink too. A pattern no fixture records is reported
+separately: nothing replayed could have needed its entry, so the run has no
+evidence either way, and an exemption nothing can audit is one nobody can
+retire.
 
 ### Findings are graded
 
