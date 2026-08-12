@@ -1183,6 +1183,20 @@ interface ObjectProjectionMask extends ObjectMask<ProjectionMask> {}
  * Which positions a selection reads. `false` is the rejecting one: the
  * position contributes nothing to the read, and the runner never loads what
  * is behind it.
+ *
+ * **A rejecting position is always a marked one.**
+ * {@link normalizeProjectionSchema} refuses a bare `false` in a projection
+ * schema, so `false` enters a mask only where a `$link` marker took the whole
+ * selection at that position, and only ever spreads upward from there. A mask
+ * that rejects therefore always has markers to answer with, and a selection
+ * whose root mask is `false` selects no value anywhere.
+ *
+ * Two things rest on that. {@link deriveSelectedValue}'s whole-selection
+ * short-circuit answers from the stored links alone, which is a wrong answer
+ * rather than an empty one if a rejection ever arrives without a marker. And
+ * the item masks it dereferences beside a `--filter` are reachable only
+ * because a marker and a filter are refused together. Admitting `false` by
+ * any other route breaks both, silently.
  */
 type ProjectionMask =
   | true
@@ -1192,20 +1206,51 @@ type ProjectionMask =
 interface ObjectPredicateMask extends ObjectMask<PredicateMask> {}
 type PredicateMask = true | ObjectPredicateMask;
 
+/**
+ * The mask for an array whose elements `items` selects.
+ *
+ * An array whose elements are not read is not read. The rejecting selector has
+ * to sit at the array itself to suppress the fetch: array traversal follows
+ * each element's link before it consults the item schema, so a rejection one
+ * level down arrives after the load it was meant to prevent.
+ */
+function arrayProjectionMask(items: ProjectionMask): ProjectionMask {
+  return items === false ? false : { type: "array", items };
+}
+
+/**
+ * The mask for an object whose named positions `properties` selects.
+ *
+ * An object whose every named position rejects is not read, by the same rule
+ * {@link arrayProjectionMask} applies one level up: a rejection reaches the
+ * fetch it suppresses only from the position that holds the link. Reducing
+ * here is what carries a rejection below a link up to the array holding it, so
+ * a marker below a link costs the same one read as a marker on it.
+ *
+ * Callers filter out the object that admits keys it does not name, which
+ * cannot be narrowed and so is never all-rejecting. An object naming no
+ * positions rejects nothing and stays a selector for the empty object it
+ * describes.
+ */
+function objectProjectionMask(
+  properties: Record<string, ProjectionMask>,
+): ProjectionMask {
+  const children = Object.values(properties);
+  return children.length > 0 && children.every((child) => child === false)
+    ? false
+    : { type: "object", properties, additionalProperties: false };
+}
+
 function projectionMask(schema: JSONSchema): ProjectionMask {
   if (schema === true) return true;
   if (schema === false) return false;
   const objectSchema = schema as Exclude<JSONSchema, boolean>;
   if (objectSchema.type === "array" || objectSchema.items !== undefined) {
-    const items = objectSchema.items === undefined
-      ? true
-      : projectionMask(objectSchema.items);
-    // An array whose elements are not read is not read. The rejecting
-    // selector has to sit at the array itself to suppress the fetch: array
-    // traversal follows each element's link before it consults the item
-    // schema, so a rejection one level down arrives after the load it was
-    // meant to prevent.
-    return items === false ? false : { type: "array", items };
+    return arrayProjectionMask(
+      objectSchema.items === undefined
+        ? true
+        : projectionMask(objectSchema.items),
+    );
   }
   // An object that admits keys it does not name cannot be narrowed: the
   // selector has to read whatever is there. The array branch above takes a
@@ -1222,16 +1267,14 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
   if (
     objectSchema.type === "object" || objectSchema.properties !== undefined
   ) {
-    return {
-      type: "object",
-      properties: Object.fromEntries(
+    return objectProjectionMask(
+      Object.fromEntries(
         Object.entries(objectSchema.properties ?? {}).map(([key, child]) => [
           key,
           projectionMask(child),
         ]),
       ),
-      additionalProperties: false,
-    };
+    );
   }
   return true;
 }
@@ -1297,16 +1340,14 @@ function alignConciseProjectionMask(
 
   if (schemaMayBeArray(source, flag)) {
     const sourceItem = schemaAtArrayItem(source);
-    return {
-      type: "array",
-      items: alignConciseProjectionMask(sourceItem, mask, flag),
-    };
+    return arrayProjectionMask(
+      alignConciseProjectionMask(sourceItem, mask, flag),
+    );
   }
 
   const objectMask = mask as ObjectProjectionMask;
-  return {
-    ...objectMask,
-    properties: Object.fromEntries(
+  return objectProjectionMask(
+    Object.fromEntries(
       Object.entries(objectMask.properties).map(([key, childMask]) => {
         const child = ContextualFlowControl.schemaAtPath(source, [key]);
         return [
@@ -1319,7 +1360,7 @@ function alignConciseProjectionMask(
         ];
       }),
     ),
-  };
+  );
 }
 
 /**
@@ -1444,10 +1485,7 @@ export function mergeMasks(
   // predicate observes it.
   if (right === false) return left;
   if (right.type === "array") {
-    return {
-      type: "array",
-      items: mergeMasks(left, right.items),
-    };
+    return arrayProjectionMask(mergeMasks(left, right.items));
   }
   const properties: Record<string, ProjectionMask> = {};
   for (
@@ -1464,7 +1502,7 @@ export function mergeMasks(
       ? leftChild
       : mergeMasks(leftChild, rightChild);
   }
-  return { type: "object", properties, additionalProperties: false };
+  return objectProjectionMask(properties);
 }
 
 /** @internal Exported for focused source-schema selection tests. */
@@ -1627,7 +1665,10 @@ function resolveProjection(
           type: "array",
           items: projectionSchema,
         },
-        mask: { type: "array", items: mask },
+        // A field list read element-wise selects the array through its
+        // elements, so an element the list rejects entirely rejects the array
+        // the same way an item schema does.
+        mask: arrayProjectionMask(mask),
         projectsArrayItems: true,
         itemOutputSchema: outputSchema,
         itemProjectionSchema: projectionSchema,
@@ -1884,6 +1925,18 @@ async function composeLinkAddresses(
     : address;
 }
 
+/**
+ * The refusal a projection over array items earns when the value it meets is
+ * not an array. Both roads to that mismatch answer with it: the pattern graph
+ * reaches it through the map builtin, and a selection that is entirely
+ * addresses reaches it through the walk, which never runs one.
+ */
+function arrayItemProjectionError(flag: ProjectionFlag): CellSelectionError {
+  return new CellSelectionError(
+    `${flag} can only project array items from an array value`,
+  );
+}
+
 /** Optional hooks into {@link deriveSelectedValue}'s internals. */
 export interface DeriveSelectedValueDependencies {
   /** Called with the cell the returned value was read from. */
@@ -1970,9 +2023,38 @@ export async function deriveSelectedValue(
     // The whole selection was addresses. There is no value to compute, so the
     // pattern graph would run over the rejecting selector and produce nothing
     // for the composition to join. Read the stored links and answer.
-    await sourceValueCell.asSchema(false).pull();
+    //
+    // One cell reads and is walked: a sync is recorded on the cell it was
+    // asked of, so walking any other instance of the same position kicks a
+    // second sync of the document just loaded. The rejecting schema is what
+    // holds that load to the one document, because a sync selector carries
+    // the cell's schema.
+    const walked = sourceValueCell.asSchema(false);
+    await walked.pull();
+    const position = sourcePosition(walked);
+    // The graph path refuses a projection over array items that meets a value
+    // which is not an array, and the answer to a marked one is the same
+    // refusal: a walk over a non-array simply finds no elements to address,
+    // which renders as an absent value rather than as the mismatch it is.
+    //
+    // `undefined` is not a mismatch. An unset declared array is the empty
+    // array under the runner's map semantics, so the unmarked spelling
+    // answers `[]` — and a marked one has to answer `[]` too, or the two
+    // disagree about a piece that simply has nothing in it yet. A stored
+    // `null` or object still is a mismatch and still refuses.
+    const storedValue = await storedContainer(position);
+    if (projection.projectsArrayItems && !Array.isArray(storedValue)) {
+      // An unset declared array is the empty array under the runner's map
+      // semantics, which is why the unmarked spelling answers `[]`. A marked
+      // one answers `[]` as well rather than refusing or going absent: the
+      // piece is not malformed, it simply holds nothing yet, and that is the
+      // state every collection starts in. A stored `null` or object IS a
+      // mismatch and still refuses.
+      if (storedValue === undefined) return [];
+      throw arrayItemProjectionError(selection.projection!.flag);
+    }
     return await composeLinkAddresses(
-      sourcePosition(sourceValueCell),
+      position,
       markers,
       undefined,
       implicitArrayTraversal,
@@ -2210,10 +2292,7 @@ export async function deriveSelectedValue(
           error.message === "map currently only supports arrays"
         )
       ) {
-        throw new CellSelectionError(
-          `${selection.projection!.flag} can only project array items from ` +
-            "an array value",
-        );
+        throw arrayItemProjectionError(selection.projection!.flag);
       }
       const lastError = recorded.at(-1)!;
       throw new CellSelectionError(

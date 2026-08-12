@@ -465,8 +465,10 @@ title.
 
 A marked position is not fetched — the address is stored in the document that
 contains it, so a marked collection of a hundred notes costs the one read that
-document already needed. Where the marker is the whole selection, nothing
-behind it is read at all.
+document already needed. It costs the same whether the marker sits on the link
+or below it: a position that asks for nothing but addresses is not read either,
+so `notes.title@` reads what holds the collection and none of the notes. Where
+the marker is the whole selection, nothing behind it is read at all.
 
 The address a marked read returns is one `cf piece call` accepts, minus the
 `of:` prefix, which is the reason to ask for it.

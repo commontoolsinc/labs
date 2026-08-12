@@ -1932,6 +1932,59 @@ describe("cf piece get transforms", () => {
     })).rejects.toThrow(
       /^--schema can only project array items from an array value$/,
     );
+    // A selection that is entirely addresses meets the mismatch on the walk
+    // rather than through the map builtin, and answers with the same refusal:
+    // a walk over a value that is not an array finds no elements to address,
+    // which would otherwise render as an absent value.
+    await expect(deriveSelectedValue(runtime, space, objectSource, {
+      projection: await parseSelectionProjection(
+        '{"type":"array","items":{"properties":{"id":{"$link":true}}}}',
+      ),
+    })).rejects.toThrow(
+      /^--schema can only project array items from an array value$/,
+    );
+    await expect(deriveSelectedValue(runtime, space, objectSource, {
+      projection: parseSelectProjection("id@"),
+    })).rejects.toThrow(
+      /^--select can only project array items from an array value$/,
+    );
+  });
+
+  it("answers an unset declared array with no addresses rather than a refusal", async () => {
+    // An unset declared array is the empty array under the runner's map
+    // semantics, and the unmarked spelling already answers `[]`. A marked one
+    // must agree: refusing here would tell a caller its piece is malformed
+    // when it merely has nothing in it yet — the state every collection
+    // starts in.
+    const tx = runtime.edit();
+    const unsetSource = runtime.getCell(
+      space,
+      "declared-array-unset-source",
+      { type: "array", items: { type: "object" } },
+      tx,
+    );
+    expect((await tx.commit()).ok).toBeDefined();
+
+    // All three spellings agree, which is the property: an unmarked
+    // projection, a concise marker, and the JSON-schema marker each answer
+    // with no elements rather than one refusing and another going absent.
+    expect(
+      await deriveSelectedValue(runtime, space, unsetSource, {
+        projection: parseSelectProjection("id"),
+      }),
+    ).toEqual([]);
+    expect(
+      await deriveSelectedValue(runtime, space, unsetSource, {
+        projection: parseSelectProjection("id@"),
+      }),
+    ).toEqual([]);
+    expect(
+      await deriveSelectedValue(runtime, space, unsetSource, {
+        projection: await parseSelectionProjection(
+          '{"type":"array","items":{"properties":{"id":{"$link":true}}}}',
+        ),
+      }),
+    ).toEqual([]);
   });
 
   it("reports runtime predicate failures as transform errors", async () => {
@@ -2190,6 +2243,73 @@ describe("cf piece get transforms", () => {
       };
     }
 
+    const uriOf = (cell: Cell<unknown>) => cell.getAsNormalizedFullLink().id;
+
+    /**
+     * Which of `cells`' documents `read` reaches, in the order the provider
+     * first synced each. Answering a read from a document that is not loaded
+     * has to reach storage, so a document seeded unwritten is one whose read is
+     * observable here.
+     *
+     * Only the documents named are counted: a read of the transform's own
+     * session documents says nothing about which of the source's data the
+     * selection reached. Each is counted once — a document consulted twice is
+     * still one document read — so this bounds the documents a selection
+     * reaches rather than the syncs it issues, and the syncs run
+     * concurrently, so a caller comparing more than one sorts.
+     *
+     * A document already resident is reached without a sync, so absence from
+     * this list is evidence only for a document the fixture left unwritten.
+     * Name those, rather than asserting over documents the fixture wrote.
+     */
+    async function distinctDocumentsRead(
+      cells: Cell<unknown>[],
+      read: () => Promise<unknown>,
+    ): Promise<string[]> {
+      const provider = storageManager.open(space);
+      const originalSync = provider.sync.bind(provider);
+      const named = cells.map(uriOf);
+      const reached: string[] = [];
+      provider.sync = ((uri, selector, scope) => {
+        if (named.includes(uri) && !reached.includes(uri)) reached.push(uri);
+        return originalSync(uri, selector, scope);
+      }) as typeof provider.sync;
+      try {
+        await read();
+      } finally {
+        provider.sync = originalSync;
+      }
+      return reached;
+    }
+
+    /**
+     * How many times `read` syncs `cell`'s document.
+     * {@link distinctDocumentsRead} bounds which documents a selection
+     * reaches; this bounds how often it asks for one, which is what asking
+     * twice costs a caller across a real link. A sync is requested
+     * synchronously even where its result is not awaited, so a second request
+     * lands inside the window rather than racing it.
+     */
+    async function documentSyncs(
+      cell: Cell<unknown>,
+      read: () => Promise<unknown>,
+    ): Promise<number> {
+      const provider = storageManager.open(space);
+      const originalSync = provider.sync.bind(provider);
+      const uri = uriOf(cell);
+      let syncs = 0;
+      provider.sync = ((requested, selector, scope) => {
+        if (requested === uri) syncs++;
+        return originalSync(requested, selector, scope);
+      }) as typeof provider.sync;
+      try {
+        await read();
+      } finally {
+        provider.sync = originalSync;
+      }
+      return syncs;
+    }
+
     it("returns a marked position's address instead of its contents", async () => {
       const { board, notes } = await seedBoard("link-marker-instead", true);
       expect(
@@ -2339,52 +2459,169 @@ describe("cf piece get transforms", () => {
       });
     });
 
-    it("reads one document for a marked collection, not one per element", async () => {
+    it("reads one document for a marked collection, whether the marker sits on the link or below it", async () => {
       const { board, notes } = await seedBoard("link-marker-reads", false);
-      const provider = storageManager.open(space);
-      const originalSync = provider.sync.bind(provider);
-      let syncedUris: string[] = [];
-      provider.sync = ((uri, selector, scope) => {
-        syncedUris.push(uri);
-        return originalSync(uri, selector, scope);
-      }) as typeof provider.sync;
-      const boardUri = board.getAsNormalizedFullLink().id;
-      const noteUris: string[] = notes.map((note) =>
-        note.getAsNormalizedFullLink().id
+      const documents = [board, ...notes];
+      const reopened = () =>
+        runtime.getCell(space, "link-marker-reads-board", boardSchema);
+      const onTheLink = await parseSelectionProjection(
+        '{"properties":{"notes":{"type":"array","items":{"$link":true}}}}',
       );
-      // A read of the transform's own session documents says nothing about
-      // which of the board's data this selection reached.
-      const boardDocuments = (uris: string[]) =>
-        uris.filter((uri) => uri === boardUri || noteUris.includes(uri));
+      const belowTheLink = await parseSelectionProjection(
+        '{"properties":{"notes":{"type":"array","items":' +
+          '{"type":"object","properties":{"title":{"$link":true}}}}}}',
+      );
+      const unmarked = await parseSelectionProjection(
+        '{"properties":{"notes":{"type":"array","items":' +
+          '{"type":"object","properties":{"title":true}}}}}',
+      );
 
-      syncedUris = [];
-      await deriveSelectedValue(runtime, space, board, {
-        projection: await parseSelectionProjection(
-          '{"properties":{"notes":{"type":"array","items":{"$link":true}}}}',
+      expect(
+        await distinctDocumentsRead(
+          documents,
+          () =>
+            deriveSelectedValue(runtime, space, board, {
+              projection: onTheLink,
+            }),
         ),
-      });
-      const marked = boardDocuments(syncedUris);
+      ).toEqual([uriOf(board)]);
+      expect(
+        await distinctDocumentsRead(
+          documents,
+          () =>
+            deriveSelectedValue(runtime, space, reopened(), {
+              projection: belowTheLink,
+            }),
+        ),
+      ).toEqual([uriOf(board)]);
 
-      syncedUris = [];
-      await deriveSelectedValue(
-        runtime,
+      // The control: the same collection asked for its contents does load
+      // every element, which is what makes the two reads above evidence of a
+      // suppressed fetch rather than of a harness that observes nothing. It
+      // counts the element documents alone, so what it asserts does not depend
+      // on the reads above having warmed the board.
+      expect(
+        (await distinctDocumentsRead(
+          notes,
+          () =>
+            deriveSelectedValue(runtime, space, reopened(), {
+              projection: unmarked,
+            }),
+        )).toSorted(),
+      ).toEqual(notes.map(uriOf).toSorted());
+    });
+
+    it("loads the source document once for a selection that is entirely addresses", async () => {
+      const { board } = await seedBoard("link-marker-source-syncs", false);
+      const reopened = () =>
+        runtime.getCell(space, "link-marker-source-syncs-board", boardSchema);
+
+      // The read and the walk that composes the addresses are one cell, so
+      // the walk does not ask for the document the read just loaded.
+      expect(
+        await documentSyncs(
+          board,
+          () =>
+            deriveSelectedValue(runtime, space, board, {
+              projection: parseSelectProjection("notes@"),
+            }),
+        ),
+      ).toBe(1);
+      expect(
+        await documentSyncs(
+          board,
+          () =>
+            deriveSelectedValue(runtime, space, reopened(), {
+              projection: parseSelectProjection("notes.title@"),
+            }),
+        ),
+      ).toBe(1);
+    });
+
+    it("reads one document for a marker below a link, not the document the link names", async () => {
+      const { board, notes } = await seedBoard(
+        "link-marker-below-reads",
+        false,
+      );
+      const belowTheLink = await parseSelectionProjection(
+        '{"properties":{"topic":{"properties":{"title":{"$link":true}}}}}',
+      );
+
+      expect(
+        await distinctDocumentsRead(
+          [board, ...notes],
+          () =>
+            deriveSelectedValue(runtime, space, board, {
+              projection: belowTheLink,
+            }),
+        ),
+      ).toEqual([uriOf(board)]);
+    });
+
+    /**
+     * A board whose `notes` is itself a link to the document holding the
+     * array, which is the shape a value assembled elsewhere arrives in — a
+     * collection the source names but does not contain. The elements are the
+     * links `seedBoard` writes, and the note documents stay unwritten.
+     */
+    async function seedLinkedCollection(
+      cause: string,
+    ): Promise<{
+      board: Cell<unknown>;
+      holder: Cell<unknown>;
+      notes: Cell<unknown>[];
+    }> {
+      const tx = runtime.edit();
+      const notes = ["a", "b", "c"].map((suffix) =>
+        runtime.getCell(space, `${cause}-note-${suffix}`, noteSchema, tx)
+      );
+      const holderSchema = {
+        type: "object",
+        properties: { notes: { type: "array", items: noteSchema } },
+      } as const satisfies JSONSchema;
+      const holder = runtime.getCell(
         space,
-        runtime.getCell(space, "link-marker-reads-board", boardSchema),
-        {
-          projection: await parseSelectionProjection(
-            '{"properties":{"notes":{"type":"array","items":' +
-              '{"type":"object","properties":{"title":true}}}}}',
-          ),
-        },
+        `${cause}-holder`,
+        holderSchema,
+        tx,
       );
+      holder.setRaw({ notes: notes.map((note) => note.getAsLink()) } as never);
+      const board = runtime.getCell(space, `${cause}-board`, boardSchema, tx);
+      board.setRaw({
+        notes: holder.key("notes").getAsLink(),
+        topic: notes[0].getAsLink(),
+        label: "Field notes",
+      } as never);
+      expect((await tx.commit()).ok).toBeDefined();
+      return {
+        board: runtime.getCell(space, `${cause}-board`, boardSchema),
+        holder,
+        notes,
+      };
+    }
 
-      expect(marked).toEqual([boardUri]);
-      // `syncedUris` is a push-order log of concurrent syncs, so which
-      // documents were reached is the fact here and the order they resolved
-      // in is not.
-      expect(boardDocuments(syncedUris).toSorted()).toEqual(
-        noteUris.toSorted(),
+    it("reads no element document for a marker below a linked collection", async () => {
+      const { board, notes } = await seedLinkedCollection(
+        "link-marker-linked-collection",
       );
+      const titleAddresses = notes.map((note) => ({
+        title: { $link: { ...addressOf(note), path: ["title"] } },
+      }));
+      let value: unknown;
+
+      // The element documents are what this asserts over. Enumerating the
+      // collection reaches the document holding it — which a reader that did
+      // not write it fetches, and this one already holds — while the document
+      // each element links to is never reached, because every position asked
+      // for below there is an address the element's own slot already holds.
+      expect(
+        await distinctDocumentsRead(notes, async () => {
+          value = await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("notes.title@"),
+          });
+        }),
+      ).toEqual([]);
+      expect(value).toEqual({ notes: titleAddresses });
     });
 
     it("returns the address of the position it was read at for a marked root", async () => {
@@ -2748,38 +2985,57 @@ describe("cf piece get transforms", () => {
         });
       });
 
-      it("reads one document for a marked collection, not one per element", async () => {
+      it("reads one document for a marked collection, whether the marker sits on the link or below it", async () => {
         const { board, notes } = await seedBoard("at-suffix-reads", false);
-        const provider = storageManager.open(space);
-        const originalSync = provider.sync.bind(provider);
-        let syncedUris: string[] = [];
-        provider.sync = ((uri, selector, scope) => {
-          syncedUris.push(uri);
-          return originalSync(uri, selector, scope);
-        }) as typeof provider.sync;
-        const boardUri = board.getAsNormalizedFullLink().id;
-        const noteUris: string[] = notes.map((note) =>
-          note.getAsNormalizedFullLink().id
-        );
-        const boardDocuments = (uris: string[]) =>
-          uris.filter((uri) => uri === boardUri || noteUris.includes(uri));
+        const documents = [board, ...notes];
+        const reopened = () =>
+          runtime.getCell(space, "at-suffix-reads-board", boardSchema);
 
-        syncedUris = [];
-        await deriveSelectedValue(runtime, space, board, {
-          projection: parseSelectProjection("notes@"),
-        });
-        const marked = boardDocuments(syncedUris);
+        expect(
+          await distinctDocumentsRead(
+            documents,
+            () =>
+              deriveSelectedValue(runtime, space, board, {
+                projection: parseSelectProjection("notes@"),
+              }),
+          ),
+        ).toEqual([uriOf(board)]);
+        expect(
+          await distinctDocumentsRead(
+            documents,
+            () =>
+              deriveSelectedValue(runtime, space, reopened(), {
+                projection: parseSelectProjection("notes.title@"),
+              }),
+          ),
+        ).toEqual([uriOf(board)]);
 
-        syncedUris = [];
-        await deriveSelectedValue(
-          runtime,
-          space,
-          runtime.getCell(space, "at-suffix-reads-board", boardSchema),
-          { projection: parseSelectProjection("notes.title") },
-        );
+        // The control, as in the JSON spelling above: the unmarked field list
+        // loads every element, counted over the element documents alone so
+        // the board's residency does not decide it.
+        expect(
+          (await distinctDocumentsRead(
+            notes,
+            () =>
+              deriveSelectedValue(runtime, space, reopened(), {
+                projection: parseSelectProjection("notes.title"),
+              }),
+          )).toSorted(),
+        ).toEqual(notes.map(uriOf).toSorted());
+      });
 
-        expect(marked).toEqual([boardUri]);
-        expect(boardDocuments(syncedUris)).toEqual(noteUris);
+      it("reads one document for a marked field below the array the read starts at", async () => {
+        const { board, notes } = await seedBoard("at-suffix-root-reads", false);
+
+        expect(
+          await distinctDocumentsRead(
+            [board, ...notes],
+            () =>
+              deriveSelectedValue(runtime, space, board.key("notes"), {
+                projection: parseSelectProjection("title@"),
+              }),
+          ),
+        ).toEqual([uriOf(board)]);
       });
 
       it("reaches a field whose name holds an `@` of its own", async () => {
