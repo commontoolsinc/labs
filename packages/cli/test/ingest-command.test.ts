@@ -426,6 +426,40 @@ describe("cf ingest revoke", () => {
     expect(calls[1].body.expectedRevision).toBe(3);
   });
 
+  // Revoking an already-revoked channel is a legitimate confirm, not an error —
+  // and the CLI has to say which it is, or "it worked" and "it was already
+  // dead" are indistinguishable.
+  it("says a channel was already revoked before re-issuing", async () => {
+    const { output, calls } = await run([
+      "revoke",
+      "chan-1",
+      "--identity",
+      keyPath,
+      "--api-url",
+      API_URL,
+    ], {
+      list: {
+        channels: [
+          channel({
+            revision: 9,
+            enabled: false,
+            revoked: { at: "2026-08-01T09:00:00.000Z", by: "did:key:zOther" },
+          }),
+        ],
+      },
+      revoke: {
+        id: "chan-1",
+        revokedAt: "2026-08-01T09:00:00.000Z",
+        revision: 10,
+      },
+    });
+
+    expect(output).toContain("was already revoked at 2026-08-01T09:00:00.000Z");
+    // It still re-issues, binding to the generation it just read.
+    expect(calls[1].body.expectedRevision).toBe(9);
+    expect(output).toContain("retained as an audit record");
+  });
+
   it("refuses to revoke an id that is not among the caller's channels", async () => {
     await expect(
       run([
