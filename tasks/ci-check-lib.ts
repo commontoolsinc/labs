@@ -1042,6 +1042,169 @@ export function buildCoverageDebtSuggestionComment(
   return out.join("\n");
 }
 
+/** One file's lines that this PR leaves uncovered and the baseline covered. */
+export interface CoverageUnattributedFile {
+  relativePath: string;
+  lines: number[];
+}
+
+export interface CoverageDebtUnattributedInput {
+  groups: CoverageSuggestionGroup[];
+  files: CoverageUnattributedFile[];
+}
+
+/** How many affected files the comment names before it starts counting. */
+const MAX_UNATTRIBUTED_FILES = 20;
+/** How many line numbers one file contributes before the rest are counted. */
+const MAX_UNATTRIBUTED_LINES_PER_FILE = 20;
+
+/** `a.ts:3, 4, 5` — one file's affected lines, capped and counted. */
+function formatUnattributedFile(file: CoverageUnattributedFile): string {
+  const shown = file.lines.slice(0, MAX_UNATTRIBUTED_LINES_PER_FILE);
+  const rest = file.lines.length - shown.length;
+  const lines = shown.join(", ") + (rest > 0 ? `, …and ${rest} more` : "");
+  return `\`${file.relativePath}\`: ${lines}`;
+}
+
+/** The `ACCEPT_COVERAGE_DEBT:` line that takes one group off the ratchet. */
+export function coverageOverrideLine(group: CoverageSuggestionGroup): string {
+  return `ACCEPT_COVERAGE_DEBT: ${COVERAGE_METRIC_PREFIX} ${group.group} ` +
+    `uncovered lines = ${uncoveredLineCount(group.current)}`;
+}
+
+/**
+ * Build the prompt for an agent asked to make the affected lines cover the same
+ * way on every run. The work is on the lines themselves, not on this pull
+ * request, so the prompt is written to be pasted into a fresh session.
+ */
+function buildUnattributedPrompt(
+  files: CoverageUnattributedFile[],
+  omitted: number,
+): string[] {
+  const lines: string[] = [
+    "The lines below are covered on some runs of the CI test suite and not on",
+    "others, with no change to their source. That makes the coverage-debt gate",
+    "fail on pull requests that did not touch them, because the gate compares",
+    "one measurement of a source group against another.",
+    "",
+    "Find out what each line's coverage depends on, and add or extend a test so",
+    "the line is executed on every run and under every configuration. Common",
+    "causes: a branch taken only when an operation happens twice in one process,",
+    "a guard on elapsed wall-clock time, a path reached only when work lands in",
+    "a particular order, and a file that only some shards load. Write real",
+    "tests: do not delete assertions, mark lines ignored, or weaken the gate.",
+    "",
+    "Affected lines:",
+    "",
+  ];
+
+  for (const file of files) {
+    const shown = file.lines.slice(0, MAX_UNATTRIBUTED_LINES_PER_FILE);
+    const rest = file.lines.length - shown.length;
+    lines.push(
+      `  ${file.relativePath}: ${shown.join(", ")}${
+        rest > 0 ? `, and ${rest} more` : ""
+      }`,
+    );
+  }
+  if (omitted > 0) lines.push(`  ...and ${omitted} more file(s).`);
+
+  lines.push(
+    "",
+    'docs/development/COVERAGE.md, under "Coverage must not depend on the',
+    'execution environment", states the policy and works through examples of',
+    "each cause. Read it first.",
+    "",
+    "Do not try to establish that a line is fixed by running the suite several",
+    "times and finding it covered each time. A line covered on most runs looks",
+    "settled in any number of runs you have the patience for, and a run that",
+    "covers it by luck reads exactly like one that covers it by design. What",
+    "makes a line deterministic is a test that drives the condition the line",
+    "needs, so that reaching the line is what the test is for.",
+    "",
+    "Confirm that by measuring the test you added on its own. Run it the way",
+    "its package runs tests — the package's deno.jsonc gives the flags — with a",
+    "clean profile directory:",
+    "",
+    "  rm -rf coverage/raw/line-check",
+    '  DENO_COVERAGE_DIR="$(pwd)/coverage/raw/line-check" \\',
+    "    deno test <flags> <the test file you added>",
+    "  deno coverage --lcov coverage/raw/line-check > line-check.lcov",
+    "",
+    "Find the file's SF: record in line-check.lcov and read the DA:<line>,<hits>",
+    "entry for each affected line. Every one of them must show a nonzero hit",
+    "count from that test alone. A line still covered only when the rest of the",
+    "suite runs is a line still covered by accident.",
+  );
+
+  return lines;
+}
+
+/**
+ * Build the Markdown body for a regression none of the pull request's own added
+ * lines account for: every affected line is in a file the pull request left
+ * alone, and the baseline run covered it. Carries the same hidden marker as the
+ * other coverage comments, so the poster keeps updating the one comment.
+ */
+export function buildCoverageDebtUnattributedComment(
+  input: CoverageDebtUnattributedInput,
+): string {
+  const files = input.files.slice(0, MAX_UNATTRIBUTED_FILES);
+  const omitted = input.files.length - files.length;
+  const overBy = input.groups.reduce(
+    (sum, group) => sum + (group.current - group.target),
+    0,
+  );
+
+  const out: string[] = [COVERAGE_SUGGESTION_MARKER];
+  out.push("<details open>");
+  out.push(
+    coverageSummary(`Test coverage regressed by ${uncoveredLineCount(overBy)}`),
+  );
+  out.push("");
+  out.push(
+    "For some reason there are lines marked as uncovered in this PR that are " +
+      "not introduced by this PR and that were previously covered on `main`. " +
+      "This is likely because there are lines that are inconsistently covered " +
+      "on `main`.",
+  );
+  out.push("");
+  out.push("The following lines are affected:");
+  out.push("");
+  for (const file of files) {
+    out.push(`- ${formatUnattributedFile(file)}`);
+  }
+  if (omitted > 0) {
+    out.push(`- _…and ${omitted} more file(s)._`);
+  }
+  out.push("");
+  out.push(
+    "To skip coverage checking for this PR, add the following to the PR's " +
+      "description:",
+  );
+  out.push("");
+  out.push("```text");
+  for (const group of input.groups) {
+    out.push(coverageOverrideLine(group));
+  }
+  out.push("```");
+  out.push("");
+  out.push("### Prompt for an AI coding agent");
+  out.push("");
+  out.push(
+    "Copy the block below into a new AI coding agent session to improve our " +
+      "coverage and reduce this kind of flakiness in the future:",
+  );
+  out.push("");
+  out.push("````text");
+  out.push(...buildUnattributedPrompt(files, omitted));
+  out.push("````");
+  out.push("");
+  out.push("</details>");
+
+  return out.join("\n");
+}
+
 /**
  * Describe how a group's uncovered-line count moved between its `main` baseline
  * and this PR, for the "Change" column of the resolved comment's table.

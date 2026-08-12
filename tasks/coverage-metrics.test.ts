@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
+  collectRegressedLines,
   collectSourceFiles,
   collectUncoveredLinesForFiles,
   countTrackedSourceLines,
@@ -360,6 +361,132 @@ Deno.test("collectUncoveredLinesForFiles surfaces non-NotFound read failures", a
         files: ["packages/example/src/mod.ts"],
       })
     );
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("collectRegressedLines names lines the baseline covered and this run did not", async () => {
+  const rootDir = await Deno.makeTempDir({
+    prefix: "coverage-regressed-test-",
+  });
+  try {
+    const flakyPath = path.join(rootDir, "packages/example/src/flaky.ts");
+    const steadyPath = path.join(rootDir, "packages/example/src/steady.ts");
+    await Deno.mkdir(path.dirname(flakyPath), { recursive: true });
+    await Deno.writeTextFile(
+      flakyPath,
+      [
+        "export const one = 1;",
+        "export const two = 2;",
+        "export const three = 3;",
+      ].join("\n"),
+    );
+    await Deno.writeTextFile(steadyPath, "export const steady = 1;\n");
+
+    const report = (flakyHits: string[]) =>
+      [
+        `SF:${flakyPath}`,
+        ...flakyHits,
+        "end_of_record",
+        `SF:${steadyPath}`,
+        "DA:1,1",
+        "end_of_record",
+      ].join("\n");
+
+    const regressed = await collectRegressedLines({
+      rootDir,
+      // Line 2 covered before and not now; line 3 uncovered in both.
+      lcov: report(["DA:1,1", "DA:2,0", "DA:3,0"]),
+      baselineLcov: report(["DA:1,1", "DA:2,4", "DA:3,0"]),
+      groups: new Set(["packages/example"]),
+      changedFiles: new Set(),
+    });
+
+    assertEquals(regressed, [{
+      relativePath: "packages/example/src/flaky.ts",
+      metricGroup: "packages/example",
+      lines: [2],
+    }]);
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("collectRegressedLines skips changed files and other groups", async () => {
+  const rootDir = await Deno.makeTempDir({
+    prefix: "coverage-regressed-test-",
+  });
+  try {
+    const changedPath = path.join(rootDir, "packages/example/src/changed.ts");
+    const otherPath = path.join(rootDir, "packages/other/src/mod.ts");
+    await Deno.mkdir(path.dirname(changedPath), { recursive: true });
+    await Deno.mkdir(path.dirname(otherPath), { recursive: true });
+    await Deno.writeTextFile(changedPath, "export const changed = 1;\n");
+    await Deno.writeTextFile(otherPath, "export const other = 1;\n");
+
+    const regressed = await collectRegressedLines({
+      rootDir,
+      lcov: [
+        `SF:${changedPath}`,
+        "DA:1,0",
+        "end_of_record",
+        `SF:${otherPath}`,
+        "DA:1,0",
+        "end_of_record",
+      ].join("\n"),
+      baselineLcov: [
+        `SF:${changedPath}`,
+        "DA:1,2",
+        "end_of_record",
+        `SF:${otherPath}`,
+        "DA:1,2",
+        "end_of_record",
+      ].join("\n"),
+      // A file the PR changed has line numbers that moved between the two
+      // checkouts, and a group the PR did not regress is not being explained.
+      groups: new Set(["packages/example"]),
+      changedFiles: new Set(["packages/example/src/changed.ts"]),
+    });
+
+    assertEquals(regressed, []);
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("collectRegressedLines counts a file the baseline reported and this run did not", async () => {
+  const rootDir = await Deno.makeTempDir({
+    prefix: "coverage-regressed-test-",
+  });
+  try {
+    const droppedPath = path.join(rootDir, "packages/example/src/dropped.ts");
+    await Deno.mkdir(path.dirname(droppedPath), { recursive: true });
+    await Deno.writeTextFile(
+      droppedPath,
+      ["export const first = 1;", "export const second = 2;"].join("\n"),
+    );
+
+    const regressed = await collectRegressedLines({
+      rootDir,
+      // No record at all: a file no job loaded this time owes every tracked
+      // line, the same rule the debt metric charges it by.
+      lcov: "",
+      baselineLcov: [
+        `SF:${droppedPath}`,
+        "DA:1,1",
+        "DA:2,1",
+        "end_of_record",
+      ].join("\n"),
+      groups: new Set(["packages/example"]),
+      changedFiles: new Set(),
+    });
+
+    assertEquals(regressed, [{
+      relativePath: "packages/example/src/dropped.ts",
+      metricGroup: "packages/example",
+      lines: [1, 2],
+    }]);
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }

@@ -15,10 +15,12 @@ import {
   type WorkflowRun,
 } from "./ci-check-lib.ts";
 import {
+  baselineLcovForRun,
   type BaselineRunContext,
   type BaselineRunReading,
   buildBaselineRunContext,
   buildCoverageRows,
+  buildUnattributedRegressionBody,
   collectCurrentCacheStates,
   copyCoverageArtifactFiles,
   currentWorkflowRunFromEvent,
@@ -2134,4 +2136,147 @@ Deno.test("buildCoverageRows reports a rise from a zero baseline as complete", (
   );
   assertEquals(held.rows[0].status, "OK");
   assertEquals(held.rows[0].pctIncrease, 0);
+});
+
+/** A regressed group whose baseline came from `main` run 900. */
+function unattributedFailure(): Row {
+  return {
+    metric: "coverage-debt: packages/example uncovered lines",
+    status: "OVER",
+    current: 3,
+    baseline: 1,
+    baselineRunId: 900,
+  };
+}
+
+/** A checkout holding one source file, with reports for two runs of it. */
+async function withFlakyLineCheckout(
+  run: (context: {
+    rootDir: string;
+    lcov: string;
+    baselineLcov: string;
+  }) => Promise<void>,
+): Promise<void> {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-unattributed-" });
+  try {
+    const sourcePath = path.join(rootDir, "packages/example/src/racy.ts");
+    await Deno.mkdir(path.dirname(sourcePath), { recursive: true });
+    await Deno.writeTextFile(
+      sourcePath,
+      ["export const a = 1;", "export const b = 2;"].join("\n"),
+    );
+    const report = (secondLineHits: number) =>
+      [
+        `SF:${sourcePath}`,
+        "DA:1,1",
+        `DA:2,${secondLineHits}`,
+        "end_of_record",
+      ].join("\n");
+    await run({
+      rootDir,
+      lcov: report(0),
+      baselineLcov: report(2),
+    });
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+}
+
+Deno.test("buildUnattributedRegressionBody names lines the baseline run covered", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov, baselineLcov }) => {
+    const body = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [{ group: "packages/example", target: 1, current: 3 }],
+      coverageFailures: [unattributedFailure()],
+      // The PR changed a file in another group entirely.
+      prFiles: [{ filename: "packages/other/src/mod.ts" }],
+      lcov,
+      readBaselineLcov: (runId) => {
+        assertEquals(runId, 900);
+        return Promise.resolve(baselineLcov);
+      },
+    });
+
+    assertStringIncludes(body ?? "", "`packages/example/src/racy.ts`: 2");
+    assertStringIncludes(body ?? "", "not introduced by this PR");
+  });
+});
+
+Deno.test("buildUnattributedRegressionBody skips a line in a file the PR changed", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov, baselineLcov }) => {
+    const body = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [{ group: "packages/example", target: 1, current: 3 }],
+      coverageFailures: [unattributedFailure()],
+      prFiles: [{ filename: "packages/example/src/racy.ts" }],
+      lcov,
+      readBaselineLcov: () => Promise.resolve(baselineLcov),
+    });
+
+    assertEquals(body, null);
+  });
+});
+
+Deno.test("buildUnattributedRegressionBody gives up without a readable baseline run", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov }) => {
+    const noRunId = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [{ group: "packages/example", target: 1, current: 3 }],
+      coverageFailures: [{
+        ...unattributedFailure(),
+        baselineRunId: undefined,
+      }],
+      prFiles: [],
+      lcov,
+      readBaselineLcov: () => {
+        throw new Error("must not be read without a baseline run");
+      },
+    });
+    assertEquals(noRunId, null);
+
+    // The run exists but its coverage artifacts have expired or failed to
+    // download; the caller falls back to the ordinary comment.
+    const unreadable = await buildUnattributedRegressionBody({
+      rootDir,
+      groups: [{ group: "packages/example", target: 1, current: 3 }],
+      coverageFailures: [unattributedFailure()],
+      prFiles: [],
+      lcov,
+      readBaselineLcov: () => Promise.resolve(null),
+    });
+    assertEquals(unreadable, null);
+  });
+});
+
+Deno.test("writeCoverageDebtSuggestion falls back to the ordinary comment when the baseline is unreadable", async () => {
+  const failures = [unattributedFailure()];
+  const payload = await payloadFrom(() =>
+    writeCoverageDebtSuggestion(
+      4211,
+      failures,
+      [],
+      "",
+      () => Promise.resolve(null),
+    )
+  );
+
+  assertEquals(payload?.state, "regressed");
+  assertStringIncludes(payload?.body ?? "", "Could not tie the regression");
+});
+
+Deno.test("baselineLcovForRun gives up on a run with no coverage artifacts", async () => {
+  const lcov = await baselineLcovForRun(900, () =>
+    Promise.resolve([
+      { id: 1, name: "perf-metrics", size_in_bytes: 10, expired: false },
+    ]));
+
+  assertEquals(lcov, null);
+});
+
+Deno.test("baselineLcovForRun gives up when the artifact listing fails", async () => {
+  const lcov = await baselineLcovForRun(900, () => {
+    throw new Error("artifact listing unavailable");
+  });
+
+  assertEquals(lcov, null);
 });

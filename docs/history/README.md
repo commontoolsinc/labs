@@ -343,6 +343,10 @@ One line per archived document; each document's header carries the fuller
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`
   uncovered-line count with no change to that package, July 2026.
+- [coverage-flake-idempotency-dedup-2026-08-12.md](development/coverage-flake-idempotency-dedup-2026-08-12.md)
+  — which two lines a benchmark-only pull request was charged for, and why the
+  suggestion comment could not name a file: a guard reached only when one
+  action is caught non-idempotent twice in a process, August 2026.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)

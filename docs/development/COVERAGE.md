@@ -269,6 +269,51 @@ the one-line and the braced form of the same guard, and it changed between deno
 condition's own count. See
 [deno coverage: one-line guard reported uncovered when its branch is not taken](deno-coverage-guard-line-artifact.md).
 
+### Paths reached only when something happens twice
+
+The other common shape is a line that runs only on the second occurrence of
+something within one process: a cache that is populated the second time it is
+asked, a guard that turns away a duplicate, a retry that only a second failure
+reaches. Whether a suite produces that second occurrence is often decided by
+scheduling rather than by anything a test asserts, so the line is covered on
+some runs and not on others.
+
+Write a test that produces the second occurrence itself rather than one that
+performs an operation and hopes the suite repeats it. The
+`records one violation for an action caught twice` case in
+`packages/runner/test/scheduler-pull-idempotency.test.ts` is the worked
+example. It reaches the deduplication guard in `runIdempotencyRecheck()` by
+running one action twice over an input it moves, and it distinguishes a
+deduplicated second detection from a single detection by having the action
+write an incrementing count, so the recorded violation says which detection it
+came from.
+
+An assertion that only counts the outcome would pass either way and would leave
+the line's coverage exactly as environment-dependent as it was.
+[The August 2026 record](../history/development/coverage-flake-idempotency-dedup-2026-08-12.md)
+follows one such line from a group-level `+2` down to the guard and the test.
+
+### What the check says when the regression is not the pull request's
+
+The gate compares whole-group counts, so a flapping line fails whichever pull
+request is measured against a run that happened to cover it, however unrelated
+the diff. The check recognizes that case and says so: when a gated group is over
+its baseline and none of the lines the pull request added are uncovered, it
+reads the coverage reports of the `main` run its baseline came from and names
+every line this run leaves uncovered that the baseline run covered.
+
+The comment lists those lines file by file, gives the `ACCEPT_COVERAGE_DEBT`
+line that lets the pull request through, and carries a prompt for a fresh agent
+session to make the lines cover the same way every time. The author's pull
+request is not the place to fix them, and it is not held up waiting for someone
+to.
+
+Only files the pull request left alone are compared. A file it changed has
+different content in the two checkouts, so the same line number means a
+different line in each report and no comparison is possible. When the baseline
+run's coverage artifacts cannot be read — expired, or the download failed — the
+check falls back to the ordinary regression comment.
+
 ## Ratchet baselines and accepting debt
 
 The ratchet applies per source group and only to the groups a PR changes: for

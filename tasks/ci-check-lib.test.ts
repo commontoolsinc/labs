@@ -12,6 +12,7 @@ import {
   type Artifact,
   type BaselineSample,
   buildCoverageDebtSuggestionComment,
+  buildCoverageDebtUnattributedComment,
   buildCoverageResolvedComment,
   type CompileCacheStates,
   COVERAGE_BASELINE_RESET_MARKER,
@@ -1018,4 +1019,69 @@ Deno.test("newestArtifactsByName keeps the latest re-run upload per name", () =>
       ["test-timing-pattern-unit-4", 200],
     ],
   );
+});
+
+Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip the check", () => {
+  const comment = buildCoverageDebtUnattributedComment({
+    groups: [{ group: "packages/runner", target: 4612, current: 4614 }],
+    files: [
+      {
+        relativePath: "packages/runner/src/scheduler/diagnosis.ts",
+        lines: [333, 334],
+      },
+    ],
+  });
+
+  // Same marker as the other coverage comments, so the poster keeps updating
+  // the one comment rather than adding a second.
+  assertStringIncludes(comment, COVERAGE_SUGGESTION_MARKER);
+  assertStringIncludes(
+    comment,
+    "<summary><h3>🕵🏻‍♀️ Test coverage regressed by 2 lines</h3></summary>",
+  );
+  assertStringIncludes(comment, "not introduced by this PR");
+  assertStringIncludes(comment, "inconsistently covered");
+  assertStringIncludes(comment, "The following lines are affected:");
+  assertStringIncludes(
+    comment,
+    "`packages/runner/src/scheduler/diagnosis.ts`: 333, 334",
+  );
+  // The line to paste into the description, with the count this PR measured.
+  assertStringIncludes(
+    comment,
+    "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 4614 lines",
+  );
+  // The agent prompt is about the flapping lines, not about this PR.
+  assertStringIncludes(comment, "### Prompt for an AI coding agent");
+  assertStringIncludes(comment, "covered on some runs");
+  assertStringIncludes(
+    comment,
+    "  packages/runner/src/scheduler/diagnosis.ts: 333, 334",
+  );
+  assertStringIncludes(comment, "docs/development/COVERAGE.md");
+  // Repetition is not offered as evidence: the prompt asks for the new test to
+  // be measured on its own instead.
+  assertStringIncludes(comment, "Do not try to establish that a line is fixed");
+  assertStringIncludes(comment, "deno coverage --lcov coverage/raw/line-check");
+  assertStringIncludes(comment, "DA:<line>,<hits>");
+  assertFalse(comment.includes("twice from a clean profile directory"));
+  // None of the "this PR adds uncovered lines" copy survives.
+  assertFalse(comment.includes("This PR adds source lines"));
+  assertFalse(comment.includes("Could not tie the regression"));
+});
+
+Deno.test("buildCoverageDebtUnattributedComment counts files and lines past the cap", () => {
+  const comment = buildCoverageDebtUnattributedComment({
+    groups: [{ group: "tasks", target: 0, current: 40 }],
+    files: Array.from({ length: 25 }, (_, index) => ({
+      relativePath: `tasks/file-${String(index).padStart(2, "0")}.ts`,
+      lines: Array.from({ length: 30 }, (_, line) => line + 1),
+    })),
+  });
+
+  // 20 files listed, 5 counted; 20 lines listed per file, 10 counted.
+  assertStringIncludes(comment, "`tasks/file-19.ts`");
+  assertFalse(comment.includes("`tasks/file-20.ts`"));
+  assertStringIncludes(comment, "…and 5 more file(s)._");
+  assertStringIncludes(comment, "…and 10 more");
 });
