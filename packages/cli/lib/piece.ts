@@ -280,6 +280,16 @@ async function resultProjectionFailedAtPath(
 
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
+  /** This verb's declared result, resolved on demand.
+   *
+   * A THUNK rather than a value, because the two callers want it at different
+   * prices. Every `cf piece call` passes through resolution, and only `--help`
+   * has anything to do with a result schema — so the compiled pattern this
+   * needs is loaded when a page asks for it and never for a dispatch. Present
+   * for a handler exposed on the piece's result cell, which is the only place
+   * a declared result can be matched from; a tool's result schema already
+   * rides its callable cell and reaches `commandSpec` directly. */
+  declaredResult?: () => Promise<JSONSchema | undefined>;
 }
 
 export interface PieceCallableDependencies extends CallableExecutionDeps {
@@ -1694,25 +1704,45 @@ async function resolvePieceCallable(
     deps,
   );
 
-  const resolved = (await tryResolvePieceCallableAt(
+  const onResultCell = await tryResolvePieceCallableAt(
     piece,
     pieces,
     space,
     callableName,
     "result",
-  )) ??
-    (await tryResolvePieceCallableAt(
-      piece,
-      pieces,
-      space,
-      callableName,
-      "input",
-    )) ??
+  );
+  // Held apart from the walk only to record WHERE the callable was found: a
+  // declared result is keyed by the PATTERN's result properties, so a
+  // same-named verb reached on the input cell is a different stream that
+  // merely shares its name. The listing draws the same line.
+  const onInputCell = onResultCell ? null : await tryResolvePieceCallableAt(
+    piece,
+    pieces,
+    space,
+    callableName,
+    "input",
+  );
+  const resolved = onResultCell ?? onInputCell ??
     (await tryResolvePieceHandler(piece, pieces, space, callableName));
   if (!resolved) {
     throw new Error(
       `Callable "${callableName}" not found on piece ${config.piece}`,
     );
+  }
+
+  if (
+    resolved.callableKind === "handler" && resolved !== onInputCell &&
+    typeof piece?.getPattern === "function"
+  ) {
+    // The forced-stream fallback dispatches on the result cell too, so it
+    // claims a declared result on the same terms the ordinary result-cell path
+    // does. A piece surface with no pattern to consult carries no thunk at all,
+    // which is the honest statement — the absence says this resolution cannot
+    // describe a result, rather than promising an answer that is always none.
+    return {
+      ...resolved,
+      declaredResult: () => declaredVerbResult(piece, callableName),
+    };
   }
 
   if (resolved.callableKind === "tool") {
@@ -1858,6 +1888,30 @@ function declaredVerbResults(
   return declared;
 }
 
+/** One verb's declared result, matched through the piece's compiled pattern.
+ *
+ * The same lookup a listing makes for every row, made for a single name — one
+ * matcher, so the help page and `cf piece verbs` can never describe the same
+ * verb differently. It runs on the help path alone, reached through the thunk
+ * on `ResolvedPieceCallable`, which is why loading the pattern is affordable
+ * here.
+ *
+ * The pattern is advisory exactly as it is in the listing: a piece whose
+ * pattern will not resolve still calls its verbs, it just cannot say what one
+ * hands back. `getPattern` throwing is the whole of that condition here —
+ * whether a piece HAS one is settled before the thunk is attached.
+ */
+async function declaredVerbResult(
+  piece: any,
+  callableName: string,
+): Promise<JSONSchema | undefined> {
+  try {
+    return declaredVerbResults(await piece.getPattern()).get(callableName);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Enumerate every callable a piece exposes (verb contract: Verb discovery,
  * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
@@ -1997,6 +2051,24 @@ export async function listPieceCallables(
   };
 }
 
+/** The command spec a help page is rendered from: the resolved one, plus the
+ * verb's declared result where the resolution can supply one.
+ *
+ * Only a handler's resolution carries the thunk, so a tool's spec passes
+ * through untouched and `callableCommandSpec` keeps deciding what a tool
+ * publishes — its result schema rides its callable cell and is already on the
+ * spec. */
+async function withDeclaredResult(
+  spec: ExecCommandSpec,
+  resolved: ResolvedPieceCallable,
+): Promise<ExecCommandSpec> {
+  const declared = await resolved.declaredResult?.();
+  return declared === undefined ? spec : {
+    ...spec,
+    outputSchemaSummary: declared,
+  };
+}
+
 export async function executePieceCallable(
   config: PieceConfig,
   callableName: string,
@@ -2014,14 +2086,21 @@ export async function executePieceCallable(
     commandSpec: resolved.commandSpec,
     rawArgs,
     deps,
-    renderHelp: (commandSpec, parsed) =>
-      parsed.showHelpJson
-        ? renderExecHelpJson(commandSpec)
+    renderHelp: async (commandSpec, parsed) => {
+      // The declared result is fetched HERE and nowhere earlier: the parse has
+      // established that a page is being rendered, so the pattern load it
+      // costs is spent on a caller who asked what the verb hands back. Both
+      // spellings of the page take it — `--help --json` serves the schema
+      // itself as `outputSchema`, the text page enumerates its fields.
+      const spec = await withDeclaredResult(commandSpec, resolved);
+      return parsed.showHelpJson
+        ? renderExecHelpJson(spec)
         : renderPieceCallHelp(
           deps.helpCommandPrefix ??
             cliCommand(["piece", "call", "...", callableName]),
-          commandSpec,
-        ),
+          spec,
+        );
+    },
   });
 }
 

@@ -94,6 +94,21 @@ check "false" "$(echo "$VERBS" | jq -r '.verbs[] |
   select(.name == "touch") | has("outputSchema")' 2>/dev/null)" \
   "a value-less verb advertises no result"
 
+# The same declaration reaches the page a caller reads before calling ONE verb,
+# where the listing answers for the whole piece. It names where the value
+# arrives — the Invocation JSON's result — because that is what a handler's
+# caller collects rather than stdout.
+HELP=$($CF piece call --piece "$BOARD" $ARGS createNote --help 2>/dev/null)
+check "1" "$(printf '%s\n' "$HELP" | grep -c '^Output:')" \
+  "createNote's help page carries an Output section"
+check "1" "$(printf '%s\n' "$HELP" | grep -c '^    note ')" \
+  "createNote's help page enumerates the result field it declared"
+# And a value-less verb's page carries no Output section at all, the same
+# distinction the listing draws.
+VOID_HELP=$($CF piece call --piece "$BOARD" $ARGS touch --help 2>/dev/null)
+check "0" "$(printf '%s\n' "$VOID_HELP" | grep -c '^Output:')" \
+  "a value-less verb's help page carries no Output section"
+
 step "3. A create hands back the piece it created"
 R=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation create-1 \
   createNote '{"title":"First note","body":"written at create"}' 2>/dev/null)
