@@ -333,8 +333,11 @@ function installWaiter(
       return value;
     }
     if (typeof value === "number") {
-      if (!Number.isFinite(value)) {
-        throw new TypeError(`Non-finite number at ${path} is not JSON-safe`);
+      if (!Number.isFinite(value) || Object.is(value, -0)) {
+        const kind = Object.is(value, -0)
+          ? "Negative zero"
+          : "Non-finite number";
+        throw new TypeError(`${kind} at ${path} is not JSON-safe`);
       }
       return value;
     }
@@ -348,9 +351,30 @@ function installWaiter(
     seen.add(value);
     try {
       if (Array.isArray(value)) {
-        return value.map((item, index) =>
-          copyJsonAnswer(item, `${path}[${index}]`, seen)
-        );
+        if (typeof (value as { toJSON?: unknown }).toJSON === "function") {
+          throw new TypeError(`toJSON at ${path} is not JSON-safe`);
+        }
+        if (
+          Object.keys(value).some((key) => {
+            const index = Number(key);
+            return !Number.isInteger(index) || index < 0 ||
+              index >= value.length || String(index) !== key;
+          }) ||
+          Object.getOwnPropertySymbols(value).some((symbol) =>
+            Object.prototype.propertyIsEnumerable.call(value, symbol)
+          )
+        ) {
+          throw new TypeError(`Array properties at ${path} are not JSON-safe`);
+        }
+
+        const copy: unknown[] = [];
+        for (let index = 0; index < value.length; index++) {
+          if (!Object.prototype.hasOwnProperty.call(value, index)) {
+            throw new TypeError(`Sparse array at ${path} is not JSON-safe`);
+          }
+          copy.push(copyJsonAnswer(value[index], `${path}[${index}]`, seen));
+        }
+        return copy;
       }
 
       const prototype = Object.getPrototypeOf(value);

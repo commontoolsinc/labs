@@ -25,6 +25,63 @@ Deno.test("waitForCondition transports only lossless JSON answers", async () => 
       Error,
       "function at $ is not JSON-safe",
     );
+    await assertRejects(
+      () => waitForCondition(page, () => ({ value: -0 })),
+      Error,
+      "Negative zero at $.value is not JSON-safe",
+    );
+
+    await assertRejects(
+      () =>
+        waitForCondition(page, () => {
+          const sparse = ["placeholder"];
+          delete sparse[0];
+          return sparse;
+        }),
+      Error,
+      "Sparse array at $ is not JSON-safe",
+    );
+
+    await assertRejects(
+      () =>
+        waitForCondition(page, () => {
+          const augmented = ["value"];
+          Object.defineProperty(augmented, "label", {
+            enumerable: true,
+            value: "lost by JSON.stringify",
+          });
+          return augmented;
+        }),
+      Error,
+      "Array properties at $ are not JSON-safe",
+    );
+
+    await assertRejects(
+      () =>
+        waitForCondition(page, () => {
+          const augmented = ["value"];
+          Object.defineProperty(augmented, Symbol("label"), {
+            enumerable: true,
+            value: "lost by JSON.stringify",
+          });
+          return augmented;
+        }),
+      Error,
+      "Array properties at $ are not JSON-safe",
+    );
+
+    await assertRejects(
+      () =>
+        waitForCondition(page, () => {
+          const overridden = ["value"];
+          Object.defineProperty(overridden, "toJSON", {
+            value: () => "different value",
+          });
+          return overridden;
+        }),
+      Error,
+      "toJSON at $ is not JSON-safe",
+    );
   } finally {
     await page.close().finally(() => browser.close());
   }
