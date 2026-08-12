@@ -53,8 +53,12 @@ Deno.test("Page navigation does not depend on Astral's retry wrapper", async () 
   const lifecycleCalls: unknown[] = [];
   const celestial = new EventTarget() as EventTarget & {
     Page: {
-      setLifecycleEventsEnabled(options: unknown): Promise<Record<string, never>>;
-      navigate(options: unknown): Promise<{ frameId: string; loaderId: string }>;
+      setLifecycleEventsEnabled(
+        options: unknown,
+      ): Promise<Record<string, never>>;
+      navigate(
+        options: unknown,
+      ): Promise<{ frameId: string; loaderId: string }>;
     };
   };
   celestial.Page = {
@@ -64,16 +68,16 @@ Deno.test("Page navigation does not depend on Astral's retry wrapper", async () 
     },
     navigate(options) {
       navigationCalls.push(options);
-      queueMicrotask(() => {
-        celestial.dispatchEvent(new CustomEvent("Page.lifecycleEvent", {
+      celestial.dispatchEvent(
+        new CustomEvent("Page.lifecycleEvent", {
           detail: {
             frameId: "frame",
             loaderId: "loader",
-            name: "DOMContentLoaded",
+            name: "networkAlmostIdle",
             timestamp: 0,
           },
-        }));
-      });
+        }),
+      );
       return Promise.resolve({ frameId: "frame", loaderId: "loader" });
     },
   };
