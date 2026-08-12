@@ -6,6 +6,7 @@ import {
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
   type MemorySpace,
+  parseLinkOrThrow,
   preparePieceSourceTransitionBaseline,
   resolveSystemPatternSource,
   Runtime,
@@ -16,6 +17,11 @@ import {
   DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+import {
+  preloadCloneValue,
+  snapshotCloneValue,
+} from "../src/ops/clone-data-snapshot.ts";
+import { FabricInstance } from "@commonfabric/data-model/fabric-value";
 
 // The route that ref resolves to.
 const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
@@ -112,6 +118,29 @@ const ARRAY_INPUT_SOURCE = [
   "}));",
   "",
 ].join("\n");
+
+const DERIVED_AND_STREAM_SOURCE = [
+  "import { action, computed, pattern, Writable } from 'commonfabric';",
+  "export default pattern<{ value: number }>(({ value }) => {",
+  "  const count = new Writable(0).for('count');",
+  "  return {",
+  "    count,",
+  "    doubled: computed(() => value * 2),",
+  "    increment: action(() => count.set(count.get() + 1)),",
+  "  };",
+  "});",
+  "",
+].join("\n");
+
+class CloneTestInstance extends FabricInstance {
+  deepClone(): FabricInstance {
+    return this;
+  }
+
+  shallowClone(): FabricInstance {
+    return this;
+  }
+}
 
 /**
  * Serve pattern source from memory, so the resolver and runtime.fetch need no
@@ -1045,6 +1074,347 @@ describe("reading a piece's source state", () => {
     expect(await clone.input.get()).toEqual({
       value: [1, { nested: [2, 3] }],
     });
+  });
+
+  it("rejects cells that appeared after clone data was preloaded", () => {
+    const cell = runtime.getImmutableCell(
+      controller.getSpace(),
+      { value: 1 },
+    );
+
+    const get = cell.get.bind(cell);
+    let read = false;
+    try {
+      cell.get = (() => {
+        read = true;
+        return get();
+      }) as typeof cell.get;
+      expect(() =>
+        snapshotCloneValue(
+          cell,
+          undefined,
+          new WeakMap(),
+          new Map(),
+          new Set(),
+        )
+      ).toThrow("piece data changed while it was being cloned");
+      expect(read).toBe(false);
+    } finally {
+      cell.get = get;
+    }
+    expect(() =>
+      snapshotCloneValue(
+        cell.get(),
+        cell,
+        new WeakMap(),
+        new Map(),
+        new Set(),
+      )
+    ).toThrow("piece data changed while it was being cloned");
+  });
+
+  it("snapshots cycles and rejects unsupported materialized values", () => {
+    const cycle: { self?: unknown } = {};
+    cycle.self = cycle;
+    const snapshot = snapshotCloneValue(cycle) as { self: unknown };
+    expect(snapshot.self).toBe(snapshot);
+
+    expect(() => snapshotCloneValue(new Date(0))).toThrow(
+      "piece data containing unsupported object values cannot be copied",
+    );
+
+    const cell = runtime.getImmutableCell(controller.getSpace(), "safe");
+    const getRawUntyped = cell.getRawUntyped.bind(cell);
+    try {
+      cell.getRawUntyped = (() =>
+        new CloneTestInstance()) as typeof cell.getRawUntyped;
+      expect(() => snapshotCloneValue("safe", cell)).toThrow(
+        "piece data containing FabricInstance values cannot be copied",
+      );
+    } finally {
+      cell.getRawUntyped = getRawUntyped;
+    }
+  });
+
+  it("preloads each entity once and rejects stream inputs", async () => {
+    const cell = runtime.getImmutableCell(
+      controller.getSpace(),
+      { first: 1, second: 2 },
+    );
+    const first = cell.key("first");
+    const second = cell.key("second");
+    const cells = new Map<string, Cell<unknown>>();
+    const firstPull = first.pull.bind(first);
+    const secondPull = second.pull.bind(second);
+    let pulls = 0;
+    first.pull = (async () => {
+      pulls++;
+      return await firstPull();
+    }) as typeof first.pull;
+    second.pull = (async () => {
+      pulls++;
+      return await secondPull();
+    }) as typeof first.pull;
+    try {
+      await preloadCloneValue(
+        [first, second, first],
+        undefined,
+        cells,
+      );
+    } finally {
+      first.pull = firstPull;
+      second.pull = secondPull;
+    }
+    expect(pulls).toBe(1);
+    expect(cells.size).toBe(2);
+
+    const stream = runtime.getImmutableCell(controller.getSpace(), "event");
+    const streamShape = stream as unknown as { isStream(): boolean };
+    const isStream = streamShape.isStream.bind(streamShape);
+    try {
+      streamShape.isStream = () => true;
+      await expect(preloadCloneValue(stream, undefined, new Map())).rejects
+        .toThrow("piece input containing streams cannot be copied");
+    } finally {
+      streamShape.isStream = isStream;
+    }
+  });
+
+  it("recreates computed values and streams instead of copying them", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: DERIVED_AND_STREAM_SOURCE }],
+    }, { input: { value: 4 } });
+    const destination = await cloneDestination("source-clone-derived-stream");
+    const create = destination.create.bind(destination);
+    const startPiece = destination.startPiece.bind(destination);
+    const getCellFromLink = runtime.getCellFromLink.bind(runtime);
+    const linkKey = (cell: Cell<unknown>) =>
+      JSON.stringify(cell.getAsNormalizedFullLink());
+    const sourceManifest = source.getCell().getMetaRaw("internal") as {
+      kind?: unknown;
+      link: unknown;
+    }[];
+    const sourceComputed = sourceManifest.find((entry) =>
+      entry.kind === "computed"
+    );
+    expect(sourceComputed).toBeDefined();
+    const sourceComputedKey = linkKey(getCellFromLink(
+      parseLinkOrThrow(sourceComputed!.link, source.getCell()),
+    ));
+    let destinationComputedKey: string | undefined;
+    let sourceAccessesBeforeStart: number | undefined;
+    let destinationAccessesBeforeStart: number | undefined;
+    let sourceAccesses = 0;
+    let destinationAccesses = 0;
+    runtime.getCellFromLink = ((
+      ...linkArgs: Parameters<typeof getCellFromLink>
+    ) => {
+      const cell = getCellFromLink(...linkArgs);
+      const key = linkKey(cell);
+      if (key === sourceComputedKey) sourceAccesses++;
+      if (key === destinationComputedKey) destinationAccesses++;
+      return cell;
+    }) as typeof runtime.getCellFromLink;
+    destination.create = (async (...args) => {
+      const clone = await create(...args);
+      const manifest = clone.getCell().getMetaRaw("internal") as {
+        kind?: unknown;
+        link: unknown;
+      }[];
+      const computed = manifest.find((entry) => entry.kind === "computed");
+      expect(computed).toBeDefined();
+      destinationComputedKey = linkKey(getCellFromLink(
+        parseLinkOrThrow(computed!.link, clone.getCell()),
+      ));
+      return clone;
+    }) as typeof destination.create;
+    destination.startPiece = async (...args) => {
+      sourceAccessesBeforeStart = sourceAccesses;
+      destinationAccessesBeforeStart = destinationAccesses;
+      runtime.getCellFromLink = getCellFromLink;
+      return await startPiece(...args);
+    };
+
+    let clone: Awaited<ReturnType<typeof source.cloneTo>>;
+    try {
+      clone = await source.cloneTo(destination, { copyData: true });
+    } finally {
+      runtime.getCellFromLink = getCellFromLink;
+    }
+
+    expect(sourceAccessesBeforeStart).toBe(0);
+    expect(destinationAccessesBeforeStart).toBe(0);
+    expect(await clone.input.get()).toEqual({ value: 4 });
+    expect(await clone.result.get(["doubled"])).toBe(8);
+    await clone.input.set({ value: 6 });
+    await runtime.idle();
+    expect(await clone.result.get(["doubled"])).toBe(12);
+    (await clone.result.getCell()).key("increment").send(undefined);
+    await runtime.idle();
+    expect(await clone.result.get(["count"])).toBe(1);
+    expect(await source.result.get(["count"])).toBe(0);
+  });
+
+  it("rejects a source change visible to the snapshot transaction", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { input: { label: "before" } });
+    const destination = await cloneDestination("source-clone-tx-source-change");
+    const cell = source.getCell();
+    const withTx = cell.withTx.bind(cell);
+
+    try {
+      cell.withTx = ((tx) => {
+        const txCell = withTx(tx);
+        const getMetaRaw = txCell.getMetaRaw.bind(txCell);
+        txCell.getMetaRaw = ((key) =>
+          key === "patternIdentity"
+            ? undefined
+            : getMetaRaw(key)) as typeof txCell.getMetaRaw;
+        return txCell;
+      }) as typeof cell.withTx;
+      await expect(source.cloneTo(destination, { copyData: true })).rejects
+        .toThrow("piece source changed while it was being cloned");
+    } finally {
+      cell.withTx = withTx;
+    }
+  });
+
+  it("rejects an internal manifest changed during snapshotting", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { input: { label: "before" } });
+    const destination = await cloneDestination("source-clone-manifest-change");
+    const cell = source.getCell();
+    const withTx = cell.withTx.bind(cell);
+
+    try {
+      cell.withTx = ((tx) => {
+        const txCell = withTx(tx);
+        const getMetaRaw = txCell.getMetaRaw.bind(txCell);
+        txCell.getMetaRaw = ((key) =>
+          key === "internal"
+            ? []
+            : getMetaRaw(key)) as typeof txCell.getMetaRaw;
+        return txCell;
+      }) as typeof cell.withTx;
+      await expect(source.cloneTo(destination, { copyData: true })).rejects
+        .toThrow("piece data changed while it was being cloned");
+    } finally {
+      cell.withTx = withTx;
+    }
+  });
+
+  it("surfaces a snapshot transaction rejection reason", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { input: { label: "before" } });
+    const destination = await cloneDestination("source-clone-snapshot-reject");
+    const edit = runtime.edit.bind(runtime);
+    let rejectNextCommit = true;
+
+    try {
+      runtime.edit = () => {
+        const tx = edit();
+        const commit = tx.commit.bind(tx);
+        tx.commit = (options) => {
+          const validatesSnapshot = tx.getCommitPreconditions?.(
+            controller.getSpace(),
+          )?.some((precondition) =>
+            precondition.kind === "entity-value-hash"
+          ) ?? false;
+          if (!rejectNextCommit || !validatesSnapshot) return commit(options);
+          rejectNextCommit = false;
+          return Promise.resolve({
+            error: {
+              name: "StorageTransactionAborted" as const,
+              message: "snapshot rejected",
+              reason: new Error("snapshot commit rejected"),
+            },
+          });
+        };
+        return tx;
+      };
+      await expect(source.cloneTo(destination, { copyData: true })).rejects
+        .toThrow("snapshot commit rejected");
+      expect(rejectNextCommit).toBe(false);
+    } finally {
+      runtime.edit = edit;
+    }
+  });
+
+  it("rejects a destination missing a copied internal cell", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { input: { label: "before" } });
+    await source.result.set(3, ["count"]);
+    const destination = await cloneDestination("source-clone-missing-internal");
+    const create = destination.create.bind(destination);
+    destination.create = (async (...args) => {
+      const clone = await create(...args);
+      await setRawMeta(clone.getCell(), "internal", []);
+      return clone;
+    }) as typeof destination.create;
+
+    await expect(source.cloneTo(destination, { copyData: true })).rejects
+      .toThrow("cloned piece is missing a source data cell");
+  });
+
+  it("surfaces destination restore transaction failures", async () => {
+    const failures = [
+      {
+        error: {
+          name: "StorageTransactionAborted" as const,
+          message: "restore rejected",
+          reason: new Error("restore commit rejected"),
+        },
+        expected: "restore commit rejected",
+      },
+      {
+        error: new Error("restore storage failed"),
+        expected: "restore storage failed",
+      },
+    ];
+
+    for (const [index, failure] of failures.entries()) {
+      const source = await controller.create({
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+      }, { input: { label: "before" } });
+      await source.result.set(index + 1, ["count"]);
+      const destination = await cloneDestination(
+        `source-clone-restore-reject-${index}`,
+      );
+      const create = destination.create.bind(destination);
+      const edit = runtime.edit.bind(runtime);
+      let rejectRestore = false;
+      destination.create = (async (...args) => {
+        const clone = await create(...args);
+        rejectRestore = true;
+        return clone;
+      }) as typeof destination.create;
+      runtime.edit = () => {
+        const tx = edit();
+        if (rejectRestore) {
+          rejectRestore = false;
+          tx.commit = (() =>
+            Promise.resolve({ error: failure.error })) as typeof tx.commit;
+        }
+        return tx;
+      };
+
+      try {
+        await expect(source.cloneTo(destination, { copyData: true })).rejects
+          .toThrow(failure.expected);
+      } finally {
+        runtime.edit = edit;
+      }
+    }
   });
 
   it("reports cleanup failures without hiding the clone failure", async () => {

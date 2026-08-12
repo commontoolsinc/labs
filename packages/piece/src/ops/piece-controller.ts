@@ -7,7 +7,6 @@ import {
   deepEqual,
   extractDefaultValues,
   formatFabricRef,
-  getCellOrThrow,
   getMetaLink,
   getPatternIdentityRef,
   getPatternRepository,
@@ -16,7 +15,6 @@ import {
   getPieceSourceSnapshot,
   getValueAtPath,
   isCell,
-  isCellResult,
   isLink,
   isStream,
   type JSONSchema,
@@ -62,17 +60,13 @@ import {
 } from "./piece-origin.ts";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import {
-  assertCloneDataUnlabeled,
-  assertNoCloneFabricInstance,
-  cloneCellKey,
-  cloneEntityKey,
   cloneInternalManifest,
   pinCloneSnapshotCells,
 } from "./clone-data-guards.ts";
 import {
-  FabricInstance,
-  FabricPrimitive,
-} from "@commonfabric/data-model/fabric-value";
+  preloadCloneValue,
+  snapshotCloneValue,
+} from "./clone-data-snapshot.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -84,159 +78,6 @@ interface CloneInternalSnapshot {
   partialCause: unknown;
   kind?: unknown;
   value: unknown;
-}
-
-/** Copy materialized piece data into detached arrays and plain objects. */
-function snapshotCloneValue(
-  value: unknown,
-  sourceCell?: Cell<unknown>,
-  seen = new WeakMap<object, unknown>(),
-  cells = new Map<string, Cell<unknown>>(),
-  preloadedCells?: { has(key: string): boolean },
-): unknown {
-  let cell = sourceCell;
-  if (isCell(value)) {
-    cell = value;
-    if (
-      preloadedCells !== undefined && !preloadedCells.has(cloneCellKey(cell))
-    ) {
-      throw new Error("piece data changed while it was being cloned");
-    }
-    value = value.get();
-  } else if (isCellResult(value)) {
-    cell = getCellOrThrow(value);
-  }
-
-  if (cell !== undefined) {
-    const key = cloneCellKey(cell);
-    if (preloadedCells !== undefined && !preloadedCells.has(key)) {
-      throw new Error("piece data changed while it was being cloned");
-    }
-    cells.set(key, cell);
-  }
-  assertCloneDataUnlabeled(cell);
-  assertCloneDataUnlabeled(value);
-  const raw = cell?.getRawUntyped();
-  if (value instanceof FabricInstance || raw instanceof FabricInstance) {
-    throw new Error(
-      "piece data containing FabricInstance values cannot be copied",
-    );
-  }
-  if (
-    value === null || typeof value !== "object" ||
-    value instanceof FabricPrimitive
-  ) {
-    return value;
-  }
-
-  const existing = seen.get(value);
-  if (existing !== undefined) return existing;
-  if (Array.isArray(value)) {
-    const snapshot: unknown[] = [];
-    seen.set(value, snapshot);
-    for (let index = 0; index < value.length; index++) {
-      snapshot[index] = snapshotCloneValue(
-        value[index],
-        cell?.key(index),
-        seen,
-        cells,
-        preloadedCells,
-      );
-    }
-    return snapshot;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new Error(
-      "piece data containing unsupported object values cannot be copied",
-    );
-  }
-  const snapshot = Object.create(prototype) as Record<string, unknown>;
-  seen.set(value, snapshot);
-  for (const key of Object.keys(value)) {
-    Object.defineProperty(snapshot, key, {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: snapshotCloneValue(
-        (value as Record<string, unknown>)[key],
-        cell?.key(key),
-        seen,
-        cells,
-        preloadedCells,
-      ),
-    });
-  }
-  return snapshot;
-}
-
-/** Load every linked cell that a later synchronous transaction read can reach. */
-async function preloadCloneValue(
-  value: unknown,
-  sourceCell: Cell<unknown> | undefined,
-  cells: Map<string, Cell<unknown>>,
-  loadedEntities = new Set<string>(),
-  seen = new WeakSet<object>(),
-): Promise<void> {
-  let cell = sourceCell;
-  if (isCell(value)) {
-    cell = value;
-  } else if (isCellResult(value)) {
-    cell = getCellOrThrow(value);
-  }
-
-  if (cell !== undefined) {
-    const key = cloneCellKey(cell);
-    if (!cells.has(key)) {
-      cells.set(key, cell);
-      const entityKey = cloneEntityKey(cell);
-      if (!loadedEntities.has(entityKey)) {
-        if (isStream(cell)) {
-          throw new Error("piece input containing streams cannot be copied");
-        }
-        assertNoCloneFabricInstance(cell.getRawUntyped());
-        loadedEntities.add(entityKey);
-        value = await cell.pull();
-      } else if (isCell(value)) {
-        value = value.get();
-      }
-    }
-    if (isCell(value)) value = value.get();
-  }
-
-  assertNoCloneFabricInstance(value);
-  assertCloneDataUnlabeled(cell);
-  assertCloneDataUnlabeled(value);
-  if (
-    value === null || typeof value !== "object" ||
-    value instanceof FabricPrimitive || value instanceof FabricInstance ||
-    seen.has(value)
-  ) {
-    return;
-  }
-  seen.add(value);
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index++) {
-      await preloadCloneValue(
-        value[index],
-        cell?.key(index),
-        cells,
-        loadedEntities,
-        seen,
-      );
-    }
-    return;
-  }
-  for (const key of Object.keys(value)) {
-    await preloadCloneValue(
-      (value as Record<string, unknown>)[key],
-      cell?.key(key),
-      cells,
-      loadedEntities,
-      seen,
-    );
-  }
 }
 
 /** Read the input and stateful internal cells from one storage version. */
