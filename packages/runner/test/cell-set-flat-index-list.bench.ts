@@ -52,6 +52,7 @@ import { benchDiagnostic } from "./bench-diagnostics.ts";
 import {
   accountNovelty,
   addAccounts,
+  jsonBytes,
   type WriteAccount,
 } from "./bench-write-accounting.ts";
 
@@ -204,7 +205,7 @@ function creationLine(
 function updateLine({ docs, bytes }: WriteAccount): string {
   return `txs=${UPDATE_TXS} avgBytes/tx=${Math.round(bytes / UPDATE_TXS)} ` +
     `avgDocs/tx=${(docs / UPDATE_TXS).toFixed(1)} ` +
-    `(one raw item≈${JSON.stringify(makeItem(0)).length}B)`;
+    `(one raw item≈${jsonBytes(makeItem(0))}B)`;
 }
 
 // =============================================================================
@@ -273,7 +274,7 @@ async function writePerItem(
 }
 
 for (const N of SIZES) {
-  const rawBytes = JSON.stringify(makeList(N)).length;
+  const rawBytes = jsonBytes(makeList(N));
 
   Deno.bench({
     name: `flat list ONE doc - cell.set(${N} items) + commit`,

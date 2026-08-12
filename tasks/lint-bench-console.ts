@@ -10,7 +10,9 @@
  *
  *   - A `console` method that writes to stdout puts non-JSON text into
  *     `results.json`, which invalidates the artifact for every benchmark in the
- *     run, not just the file that printed it.
+ *     run, not just the file that printed it. Only `error`, `warn`, `trace`,
+ *     and `assert` write to stderr, so those four are the whole of what a
+ *     benchmark file may call outside a body.
  *   - The JSON reporter captures whatever a benchmark body writes through
  *     `console`, on either stream, and drops it. A diagnostic written that way
  *     reaches neither the artifact nor the workflow log. A write straight to
@@ -27,21 +29,16 @@
  */
 
 /**
- * The `console` methods that write to stdout. The rest — `error`, `warn`,
- * `trace`, `assert` — write to stderr.
+ * The `console` methods that write to stderr. Everything else on `console`
+ * either writes to stdout or writes nothing, and naming the short list this way
+ * round is what makes the rule safe: a method nobody here has heard of is
+ * rejected rather than allowed through.
  */
-const STDOUT_METHODS: ReadonlySet<string> = new Set([
-  "count",
-  "debug",
-  "dir",
-  "group",
-  "groupCollapsed",
-  "groupEnd",
-  "info",
-  "log",
-  "table",
-  "timeEnd",
-  "timeLog",
+const STDERR_METHODS: ReadonlySet<string> = new Set([
+  "assert",
+  "error",
+  "trace",
+  "warn",
 ]);
 
 const BODY_MESSAGE =
@@ -50,10 +47,12 @@ const BODY_MESSAGE =
   "`Deno.stderr.writeSync(...)` instead. See docs/development/BENCHMARKS.md.";
 
 const STDOUT_MESSAGE =
-  "This `console` method writes to stdout, which carries the `deno bench " +
-  "--json` report. One stray line invalidates the results artifact for every " +
-  "benchmark in the run. Use `console.error` at module scope, or " +
-  "`Deno.stderr.writeSync(...)`. See docs/development/BENCHMARKS.md.";
+  "A benchmark file may use only the `console` methods that write to stderr: " +
+  "`error`, `warn`, `trace`, `assert`. Any other one risks a line on stdout, " +
+  "which carries the `deno bench --json` report, where one stray line " +
+  "invalidates the results artifact for every benchmark in the run. Use " +
+  "`console.error`, or `Deno.stderr.writeSync(...)`. See " +
+  "docs/development/BENCHMARKS.md.";
 
 const FUNCTION_TYPES: ReadonlySet<string> = new Set([
   "ArrowFunctionExpression",
@@ -197,7 +196,7 @@ export default {
               for (const { node, method } of scope.consoleCalls) {
                 if (reached.has(scope)) {
                   context.report({ node, message: BODY_MESSAGE });
-                } else if (STDOUT_METHODS.has(method)) {
+                } else if (!STDERR_METHODS.has(method)) {
                   context.report({ node, message: STDOUT_MESSAGE });
                 }
               }

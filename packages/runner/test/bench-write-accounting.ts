@@ -42,6 +42,20 @@ export interface WriteAccount {
   bytes: number;
 }
 
+const encoder = new TextEncoder();
+
+/**
+ * The number of bytes `value` occupies as JSON, and zero for a value JSON does
+ * not represent. Counted as encoded bytes rather than as string length, which
+ * counts UTF-16 code units and so reads one byte for a character that takes
+ * two, three, or four.
+ */
+export function jsonBytes(value: unknown): number {
+  const json = JSON.stringify(value);
+  if (json === undefined) return 0;
+  return encoder.encode(json).byteLength;
+}
+
 interface PathNode {
   /** True when an attestation named this exact path. */
   written: boolean;
@@ -147,10 +161,7 @@ export function accountNovelty(
   const writes = noveltyWrites(novelty);
   const ids = new Set(writes.map((write) => write.id));
   let bytes = 0;
-  for (const { value } of writes) {
-    if (value === undefined) continue;
-    bytes += JSON.stringify(value).length;
-  }
+  for (const { value } of writes) bytes += jsonBytes(value);
   return { docs: ids.size, bytes };
 }
 

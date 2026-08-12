@@ -17,7 +17,7 @@ function diagnose(source: string, fileName = "sample.bench.ts"): string[] {
 
 /** The distinguishing phrase of each of the rule's two messages. */
 const LOST = "never reaches stderr";
-const STDOUT = "writes to stdout";
+const STDOUT = "may use only the `console` methods that write to stderr";
 
 describe("lint-bench-console", () => {
   it("reports a console call written in a benchmark body", () => {
@@ -92,6 +92,29 @@ describe("lint-bench-console", () => {
     `);
     expect(messages.length).toBe(1);
     expect(messages[0]).toContain(STDOUT);
+  });
+
+  it("reports every console method outside the four stderr ones", () => {
+    // `dirxml` and `table` write to stdout; `time` writes nothing but is not
+    // one of the four, and the rule turns on the permitted list rather than on
+    // an enumeration of the ways a method can reach stdout.
+    for (const method of ["dirxml", "table", "count", "group", "time"]) {
+      const messages = diagnose(`
+        console.${method}("x");
+        Deno.bench("a", () => {});
+      `);
+      expect(messages.length).toBe(1);
+      expect(messages[0]).toContain(STDOUT);
+    }
+  });
+
+  it("returns nothing for the four console methods that reach stderr", () => {
+    for (const method of ["assert", "error", "trace", "warn"]) {
+      expect(diagnose(`
+        console.${method}("x");
+        Deno.bench("a", () => {});
+      `)).toEqual([]);
+    }
   });
 
   it("returns nothing for a module-scope console.error", () => {
