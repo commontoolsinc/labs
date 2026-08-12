@@ -439,6 +439,10 @@ const Note = pattern<NoteInput, NoteOutput>(
 
       const split = splitDefinitions(body);
       const resolutions = pendingResolutions;
+      // Read once, before anything is written: these are the addresses the
+      // map held when the edit arrived, and what a definition is compared
+      // against to decide whether it has been repointed.
+      const before = referenceAddresses(references);
       // An empty array passes `some`, and "not resolved yet" looks exactly
       // like "nothing to resolve" through it. The count is what tells them
       // apart, and applying the edit early would drop every mention in it.
@@ -458,12 +462,12 @@ const Note = pattern<NoteInput, NoteOutput>(
         // A key whose destination is unchanged keeps whatever the user
         // decided about its label; one that has been repointed starts over,
         // so the label follows the piece it now names.
-        const before = (previous as MentionRefMap)[definition.key];
-        const unchanged = before !== undefined &&
-          referenceAddresses(references)[definition.key] === definition.address;
+        const entry = (previous as MentionRefMap)[definition.key];
+        const unchanged = entry !== undefined &&
+          before[definition.key] === definition.address;
         next[definition.key] = {
           destination,
-          modifiedTitle: unchanged ? before.modifiedTitle : false,
+          modifiedTitle: unchanged ? entry.modifiedTitle : false,
         };
       });
 
