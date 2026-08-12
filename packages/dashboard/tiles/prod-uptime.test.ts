@@ -372,23 +372,77 @@ Deno.test("prod uptime: one proxy client serves both health checks and closes af
   }
 });
 
-Deno.test("prod uptime: an invalid proxy leaves two orange exceptions", async () => {
-  let fetched = 0;
-  const restore = stub(() => {
-    fetched++;
-    return new Response(null, { status: 200 });
-  });
-  try {
-    const view = await prodUptime.collect(ctx({ PROD_PROXY: "not a url" }));
-    assertEquals(fetched, 0);
-    assertEquals(view.status, "warn");
-    assertEquals(view.value, "invalid proxy");
-    assertStringIncludes(view.extra ?? "", "estuary");
-    assertStringIncludes(view.extra ?? "", "rapids");
-    assertStringIncludes(view.extra ?? "", "invalid proxy");
-    assert(!(view.extra ?? "").includes("bastion"));
-  } finally {
-    restore();
+Deno.test("prod uptime: accepted proxy schemes configure one shared client", async () => {
+  for (
+    const [proxy, expected] of [
+      [
+        "http://127.0.0.1:8080",
+        { proxy: { url: "http://127.0.0.1:8080" } },
+      ],
+      [
+        "https://127.0.0.1:8080",
+        { proxy: { url: "https://127.0.0.1:8080" } },
+      ],
+      [
+        "socks5://127.0.0.1:1055",
+        {
+          proxy: {
+            transport: "socks5" as const,
+            url: "socks5://127.0.0.1:1055",
+          },
+        },
+      ],
+    ] as const
+  ) {
+    let options: Parameters<typeof Deno.createHttpClient>[0] | undefined;
+    let closed = 0;
+    const client = fakeClient(() => closed++);
+    const restoreClient = setProdUptimeHttpClientFactoryForTest((value) => {
+      options = value;
+      return client;
+    });
+    const restore = stub((_url, init) => {
+      assertEquals(init?.client, client);
+      return new Response(null, { status: 200 });
+    });
+    try {
+      const view = await prodUptime.collect(ctx({ PROD_PROXY: proxy }));
+      assertEquals(view.status, "good");
+      assertEquals(options, expected);
+      assertEquals(closed, 1);
+    } finally {
+      restore();
+      restoreClient();
+    }
+  }
+});
+
+Deno.test("prod uptime: malformed and unsafe proxies fail closed", async () => {
+  for (
+    const proxy of [
+      "not a url",
+      "http://user@127.0.0.1:8080",
+      "http://:password@127.0.0.1:8080",
+      "ftp://127.0.0.1:2121",
+    ]
+  ) {
+    let fetched = 0;
+    const restore = stub(() => {
+      fetched++;
+      return new Response(null, { status: 200 });
+    });
+    try {
+      const view = await prodUptime.collect(ctx({ PROD_PROXY: proxy }));
+      assertEquals(fetched, 0);
+      assertEquals(view.status, "warn");
+      assertEquals(view.value, "invalid proxy");
+      assertStringIncludes(view.extra ?? "", "estuary");
+      assertStringIncludes(view.extra ?? "", "rapids");
+      assertStringIncludes(view.extra ?? "", "invalid proxy");
+      assert(!(view.extra ?? "").includes("bastion"));
+    } finally {
+      restore();
+    }
   }
 });
 

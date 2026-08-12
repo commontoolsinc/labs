@@ -19,6 +19,12 @@ const STATUS_DOT: Record<Status, string> = {
   bad: "red",
   unknown: "grey",
 };
+const STATUS_RANK: Record<Status, number> = {
+  good: 0,
+  unknown: 1,
+  warn: 2,
+  bad: 3,
+};
 
 type HealthTargetName = "estuary" | "rapids";
 type CreateHttpClient = typeof Deno.createHttpClient;
@@ -116,23 +122,18 @@ function dnsTarget(name: string, value: string, href?: string): Target {
 }
 
 function worstStatus(statuses: readonly Status[]): Status {
-  if (statuses.includes("bad")) return "bad";
-  if (statuses.includes("warn")) return "warn";
-  if (statuses.includes("unknown")) return "unknown";
-  return "good";
+  return statuses.reduce<Status>(
+    (worst, status) =>
+      STATUS_RANK[status] > STATUS_RANK[worst] ? status : worst,
+    "good",
+  );
 }
 
 function worstHeadline(results: readonly TargetResult[]): string | undefined {
-  const statusRank: Record<Status, number> = {
-    good: 0,
-    unknown: 1,
-    warn: 2,
-    bad: 3,
-  };
   const candidates = results.flatMap((result) => [result.http, result.dns])
     .filter((check) => check.headline !== undefined);
   candidates.sort((a, b) =>
-    statusRank[b.status] - statusRank[a.status] ||
+    STATUS_RANK[b.status] - STATUS_RANK[a.status] ||
     (b.headline?.priority ?? 0) - (a.headline?.priority ?? 0) ||
     (b.headline?.magnitude ?? 0) - (a.headline?.magnitude ?? 0)
   );
@@ -309,9 +310,7 @@ export const prodUptime: Tile = {
     try {
       const results = await Promise.all(targets.map(async (target) => {
         const [http, dns] = await Promise.all([
-          target.health === null
-            ? Promise.resolve({ status: "good" as const, detail: "" })
-            : checkHttp(target, client, invalidProxy),
+          checkHttp(target, client, invalidProxy),
           checkDns(target.hostname),
         ]);
         return {
