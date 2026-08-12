@@ -3432,6 +3432,7 @@ export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
+export declare const cellFromUrl: CellFromUrlFunction;
 export declare const fetchBinary: FetchBinaryFunction;
 export declare const fetchText: FetchTextFunction;
 export declare const fetchJson: FetchJsonFunction;

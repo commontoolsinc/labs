@@ -155,9 +155,10 @@ so this is the same rewrite a rename gets.
 without the map, so text pasted into another document reads as ordinary text
 there, and a consumer reading raw content sees a label with no destination.
 
-Neither is recovered. Emitting the map as the markdown reference-definition
-block it resembles would make an exported document whole, but not through
-`[FS]`: `writeFsFile` (`packages/fuse/cell-bridge.ts`) writes the entire edited
-body back to `$FS.content`, so emitted definitions would return as note text on
-the first edit through the filesystem. That needs a read-only projection
-surface, or an `[FS]` write-back that strips a generated section.
+A paste between two live documents is not recovered. The exported file is:
+`note.tsx` emits the map as the markdown reference-definition block it
+resembles, so a projected note is self-contained. That projection is read-only
+— `writeFsFile` (`packages/fuse/cell-bridge.ts`) writes an entire edited body
+back to `$FS.content`, and a note that accepted it would take its own generated
+definitions in as text — and an edit arrives through the note's
+`editProjection` verb instead, which reads the block back as its mentions.
