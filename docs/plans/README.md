@@ -71,14 +71,16 @@ a record: archive it to `docs/history/plans/` following the procedure in
   already diverged. It carries the measurement, the size, and the gate-by-gate
   evidence that the refusal is drift rather than policy — the dispatch gate
   already accepts link values; the outer gates never got the option.
-- [Designing verbs so they can change](verb-evolution.md) frames one decision
-  for the pattern owners: how verbs should be declared so that adding to and
-  changing them later is possible. It states what the update gate enforces
-  today, names the five dimensions any answer has to settle, weighs five
-  candidate designs (one considered and set aside), and records the longer
-  arc — versioned interfaces, per-piece upgrade policy, migrations that run
-  code — with the prior art for each. Written to be followable by anyone on
-  the team, not only by pattern authors.
+- [Designing verbs so they can change](verb-evolution.md) records how verbs are
+  declared so that adding to and changing them later is possible: verbs are
+  promises and their names are permanent, a holder declares only what it uses,
+  an optional member's maybe is resolved once at binding, and an output change
+  gets a new verb name. It states what the update gate enforces today, what
+  the transformer and authoring tools should carry so a one-off author never
+  has to learn a rule, and the open stream — named versioned interfaces,
+  per-piece upgrade policy, migrations that run code — that everything else
+  stands as the interim for. Written to be followable by anyone on the team,
+  not only by pattern authors.
 - [Verb calls: working notes](verb-result-selection.md) holds the call-specific
   investigation those documents do not carry: what produces a receipt and what
   its existence proves, how a receipt's address is derived, and the error and

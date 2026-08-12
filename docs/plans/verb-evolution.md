@@ -1,14 +1,12 @@
 # Designing verbs so they can change
 
-This document exists so the team can make one decision together: **how should
-verbs be designed, so that changing them later is possible?**
+This document records how verbs are designed so that changing them later is
+possible: what a verb promises, what an author may change about one, what a
+holder of a piece has to write down, and what the tooling does about it.
 
-The decision belongs to the pattern owners. The argument should be followable
-by anyone on the team, so this starts from first principles and avoids
-shorthand. It frames the problem, names the dimensions the answer has to
-settle, weighs the candidate designs — including one considered and set
-aside — and records the longer arc of versioned interfaces and managed
-upgrades that any near-term choice is an interim for.
+Two audiences share it. Pattern authors need the rules. Everybody else needs
+the argument to be checkable, so it starts from first principles and avoids
+shorthand.
 
 ## The vocabulary, briefly
 
@@ -22,12 +20,11 @@ do exactly that, and so do `cf piece set` and the filesystem mount. A piece's
 interface is its fields and its verbs together, the same way an object's
 interface is its public fields and its methods.
 
-This document is about the verb half, because that is where the open design
-questions are. The field half is already governed by the same update gate —
-its accept-more/provide-more rules below are field rules — and a writable
-field is the tightest contract of the lot, because it is promised in both
-directions at once: writers rely on what it accepts, readers on what it
-holds.
+This document is about the verb half, because that is where the design
+questions are. The field half is governed by the same update gate — its
+accept-more/provide-more rules below are field rules — and a writable field is
+the tightest contract of the lot, because it is promised in both directions at
+once: writers rely on what it accepts, readers on what it holds.
 
 The runtime writes down the **shape** of every pattern automatically, from the
 TypeScript types the author wrote. The shape records what a pattern accepts,
@@ -38,7 +35,37 @@ exist and already hold data. That is the whole source of the problem: the new
 code has to keep working for everything that was already talking to the old
 code.
 
-## The problem
+## Two kinds of pattern
+
+Two populations share this runtime, and the rules have to serve both without
+charging both the same price.
+
+Most patterns are **one-offs**. Somebody wanted a thing, worked with a model
+for an afternoon, and now has it. That author will not read a compatibility
+rule, and will not be around to debug a refused update six months later. For
+these, the right rule is the one nobody has to learn — applied by the
+transformer and the authoring tools, so the ordinary way to write a pattern is
+already the compatible way.
+
+Some patterns are **long-lived and shared**: made deliberately, depended on by
+people the author has never met, expected to keep working for years. Their
+authors are motivated to get it right and will spend time on it. For these,
+the right rule is the complete one — named interfaces, declared versions,
+explicit compatibility boundaries — and those tools have to exist even though
+most patterns never reach for them.
+
+The two are served by one substrate, not two systems. The default path is the
+simple one; the deliberate path adds machinery on top of it and never
+contradicts it.
+
+That ordering carries a constraint worth stating plainly: **prefer the simple
+rule to the precise one.** Most of the code around these patterns is written
+by models, including inexpensive ones, and an elaborate rule is one more thing
+to get subtly wrong at a moment when nobody is watching. A rule that is
+slightly less precise and considerably easier to follow is the better rule
+here.
+
+## The problem this answers
 
 When a pattern is updated, the runtime compares the old shape to the new one
 and **refuses the update** if the new shape would break something relying on
@@ -74,8 +101,8 @@ This one is a straightforward defect, filed with its fix decided
 here because it shapes how much the gate can be trusted while it is open.
 
 So the gate refuses changes that are safe, and permits at least one that is
-not. Pattern authors will learn to work around it either way. The question is
-what we want them working around.
+not. Pattern authors will learn to work around it either way. The design below
+settles what they should be working around.
 
 ## What is true today
 
@@ -96,24 +123,22 @@ Measured against the current runtime, not inferred:
 Two entries deserve emphasis.
 
 **A verb's name is permanent.** Removal and renaming are both refused, and
-that is unlikely to change — it is the one rule genuinely protecting callers.
-Retiring a verb therefore means adding its replacement and marking the old one
-`@deprecated`, which hides it from listings while keeping it callable.
+that is not going to change — it is the one rule genuinely protecting callers.
 
 **A verb's output is completely unprotected.** The shape the runtime writes
 down records a verb's input and discards its output. Renaming a field of what
 a verb hands back passes every check and breaks callers silently. This is a
-known, deliberate deferral — recording outputs would commit us to a format
-that the planned Fabric-types work is expected to replace — but it means
-output changes are governed by care alone.
+deliberate deferral — recording outputs would commit us to a format that the
+planned Fabric-types work is expected to replace — and it means output changes
+are governed by convention alone.
 
 ## What a piece promises
 
 In ordinary object-oriented programming, an object promises an interface:
 these fields, these methods. Code that holds the object leans on that promise
-without checking. Take the promise away and every caller turns defensive —
-if this method exists use it, otherwise try that one, otherwise fall back.
-Agents can cope with code like that. People maintaining it are miserable.
+without checking. Take the promise away and every caller turns defensive — if
+this method exists use it, otherwise try that one, otherwise fall back. Agents
+can cope with code like that. People maintaining it are miserable.
 
 The promise is worth keeping. What makes keeping it hard here is that pieces
 are persistent: each one carries the interface it was created with, and keeps
@@ -123,10 +148,9 @@ impossible.
 
 So the uncertainty cannot be removed — but it can be **placed**. The livable
 designs concentrate it at one moment: when a caller first takes hold of a
-piece, it establishes what it is holding, and relies on a guaranteed
-interface from then on. The miserable designs spread it across every call.
-That is the standard to hold each option below against: after the first
-check, does the caller hold a promise or a maybe?
+piece, it establishes what it is holding, and relies on a guaranteed interface
+from then on. The miserable designs spread it across every call. That standard
+decides most of what follows.
 
 Who is doing the calling matters too, because the callers are not alike:
 
@@ -137,254 +161,248 @@ Who is doing the calling matters too, because the callers are not alike:
   piece — bind when the code is written. They are exactly what the interface
   promise exists for.
 - **Stored references** — a board holding a list of notes — are bindings
-  that persist. What a pattern demands of the pieces it stores is written
-  into its own shape and outlives everyone's code. These are the hardest
-  case, and they are where today's refusal comes from.
+  that persist. What a pattern demands of the pieces it stores is written into
+  its own shape and outlives everyone's code. These are the hardest case, and
+  they are where today's refusal comes from.
 
-## The dimensions
+## The design
 
-Any answer has to settle five things. They are listed in order of leverage:
-the first one changes how much the others matter.
+### Verbs are promises, and names are permanent
 
-### 1. How much do we want to depend on updating in place?
+A verb is declared as something a piece definitely has, not something it may
+have. Code that holds a piece and calls a verb holds a guarantee, and does not
+check first.
 
-This is the real question, and the others are downstream of it.
+Names never change. A verb is never removed and never renamed. Retiring one
+means adding its replacement and marking the old one `@deprecated`, which
+hides it from listings while keeping it callable. A verb whose contract must
+change incompatibly gets a new name, spelled `append_v2`, introduced when the
+second generation actually appears rather than reserved on day one.
 
-If updating a running piece is the normal way patterns change, then the shape
-rules are a permanent design constraint and type design has to bend around
-them. If deploying a new pattern and migrating the data is normal, the gate is
-a safety net for small changes and stops driving design at all.
+This is the floor. Everything below stands on it.
 
-This is a product-stage question more than a technical one. Today nothing
-outside the team holds a piece running our patterns, and migrating data
-between shapes is something we control end to end. That will not always be
-true.
+### A holder demands only what it uses
 
-### 2. Should a verb promise that it exists?
+When one pattern stores another, it writes down what it *uses*, not what the
+other pattern *is*: the fields it reads or writes, the verbs it calls, and the
+reference itself. A board that keeps notes but never appends to them does not
+mention `append`.
 
-A verb can be declared as something a piece definitely has, or as something it
-may have. That single choice decides the refusal above: a verb declared as
-"definitely has" must be present everywhere the type is used, including inside
-patterns that merely store it — which is why adding one is refused. A verb
-declared as "may have" can be added anywhere, at any time.
+The refusal that motivated this document then disappears at its root. Adding
+`append` to notes no longer changes the board's shape, because the board never
+demanded `append`. Nobody's promise weakens: a holder that *does* call a verb
+declares it, and holds a guarantee for exactly what it declared.
 
-In the source this is one character. The verb an author writes today:
+The principle is old — declare what you need, not what they are. It is how Go
+interfaces work: declared by the consumer, satisfied by shape, and best kept
+tiny ("the bigger the interface, the weaker the abstraction"). Pattern code
+already lives this way at compile time, because TypeScript types structurally;
+this extends the same discipline to the stored contract. The difference from
+Go is that a demand here is durable — written into the holder's shape and
+proved again at link time, against a provider that evolves independently.
 
-```tsx
-// Shown as interface or class members.
-/** Append a line to the body. */
-append: Stream<{ text: string }>;
-```
+Most of the machinery already exists: the runtime already proves that a stored
+link satisfies the shape its holder demands, and shared narrow projections — a
+board-facing view of a topic — are already in use across patterns. What is new
+is that holder-side types are *demands*, written that way on purpose, and that
+the tooling says so.
 
-and the same verb declared as "may have":
-
-```tsx
-// Shown as interface or class members.
-/** Append a line to the body. */
-append?: Stream<{ text: string }>;
-```
-
-The cost is what a caller can assume. If verbs may be absent, every piece of
-TypeScript that reads one off another piece has to cope with it not being
-there — and most of that code is our own tests. Option B below carries the
-measurement.
-
-### 3. How does a changed contract get a name?
-
-Since names are permanent, a verb whose contract must change incompatibly
-needs a new name. Two spellings are available: a name that describes the
-difference (`appendFormatted`), or a version suffix (`append_v2`).
-
-A related question is whether to version from the start — `append_v1` on day
-one — or only when a second generation appears. Versioning from the start is
-uniform but taxes every verb forever to serve the few that ever change.
-
-### 4. What should the gate protect?
-
-Today it protects names and inputs, and ignores outputs. It could protect
-outputs too, at the cost of committing to a format now rather than after the
-Fabric-types work. Or output safety could stay a matter of convention and
-review.
-
-### 5. What does a holder of a piece have to declare about it?
-
-When one pattern stores another — the board holding notes — today it embeds
-the note's whole shape, verbs included, into its own. That is why adding a
-verb to notes is refused as an update to the *board*: the board's shape
-changed, even though the board never calls the new verb.
-
-The alternative is for a holder to declare only what it actually uses: the
-fields it reads or writes, the verbs it calls, and the reference itself.
-Then a provider growing a new verb never touches its holders. Option D below is
-this choice taken deliberately.
-
-## The options
-
-These are coherent packages, not a menu — each settles the dimensions
-together.
-
-### Option A — Verbs are permanent public contracts
-
-Declare every verb as something a piece definitely has. Never remove or
-rename. Version by new name when a contract must change. Accept that adding a
-verb to a stored type requires a redeploy rather than an update.
-
-**Good when** things outside our control call our verbs, and stability matters
-more than iteration speed.
-
-**Costs** the most common evolution step — adding an action — becomes a
-migration event whenever the type is stored elsewhere. Option D removes
-exactly this cost, and composes with A.
-
-### Option B — All verbs optional (considered, and set aside)
-
-Declare every verb as something a piece may have. Adding a verb is then
-always allowed, anywhere, including on types other patterns store. Names
-stay permanent and retirement still goes through `@deprecated`.
-
-This buys the most evolution for the least machinery, and it is set aside
-anyway, for the reason the promise section gives: it moves the maybe into
-every call site, permanently. An interface whose every member is optional is
-not a contract, it is a suggestion — and code consuming a suggestion turns
-defensive. It is convenient for probing callers and for data upgrades, and
-wrong for everything the promise exists to serve. Every system in the longer
-arc bought the same evolution while keeping the promise.
-
-The measurements are recorded because they locate who actually depends on
-verb declarations:
-
-- **8 call sites** in shipped pattern code read a verb off another piece,
-  across four files.
-- **396 call sites across 50 test files** do the same, every one of the form
-  `instance.verb.send(...)` — the documented way to test a pattern.
-
-Making verbs optional turns each of those into a possibly-absent value, and
-the obvious rewrite, `instance.verb?.send(...)`, **does nothing at all when
-the verb is absent** — in a test, a real failure becomes a pass. Whether the
-compiler would even catch a missed rewrite is unestablished: pattern
-`*.test.tsx` files are excluded from `deno task test` in `packages/patterns`
-and run through the `cf` binary instead.
-
-Optional declaration stays legitimate where absence is a real state of the
-piece — a capability present by configuration, not by version. Even then,
-the right shape for it is a separate small contract a caller probes for once
-at binding (Go spells this `if f, ok := w.(http.Flusher)`), not optional
-members scattered through the primary interface. What it must not become is
-an evolution device.
-
-### Option C — Redeploy first
-
-Treat a significant pattern change as a new deployment plus a data migration,
-rather than an in-place update. Do not bend type design around the gate at
-all; let it catch what it catches.
-
-**Good when** we are still learning what these patterns should be, and the
-data we would migrate is ours.
-
-**Costs** it needs migration to be genuinely easy, and it stops being
-available the moment someone outside the team holds a piece we cannot
-redeploy for them.
-
-It also has a hole. A redeploy mints a
-**new piece with a new identity**, and other pieces hold references to the
-old one — boards hold notes, topics hold cross-references. Those stored
-references keep pointing at the old piece; nothing re-points them. In-place
-update exists precisely because identity persists through it. A
-redeploy-first posture is therefore incomplete without a re-pointing or
-forwarding story — a way for an old identity to hand its callers on to its
-successor — and that is a mechanism someone has to design, not a workflow
-note.
-
-### Option D — Holders demand only what they use
-
-Keep every verb a promise, and change what a *holder* writes down. Today a
-board storing notes embeds the note's whole shape in its own; under this
-option it declares only its demand: the fields it reads or writes, the verbs
-it actually calls, and the reference itself. A note is still everything its own
-pattern says it is — this changes the consumer's declaration, not the
-provider's.
-
-The measured refusal disappears at the root: adding `append` to notes never
-changes the board's shape, because the board never demanded `append`. And
-the promise survives, because a holder that *does* call a verb declares it —
-and then holds a guarantee for exactly what it declared.
-
-The principle is old — declare what you need, not what they are. It is how
-Go interfaces work: declared by the consumer, satisfied by shape, and best
-kept tiny ("the bigger the interface, the weaker the abstraction"). Our
-pattern code already lives this way at compile time, because TypeScript
-types structurally; this option extends the same discipline to the stored
-contract. The difference from Go is that a demand here is durable — it is
-written into the holder's shape and proved again at link time, against a
-provider that evolves independently.
-
-Most of the machinery already exists: the runtime already proves that a
-stored link satisfies the shape its holder demands, and shared narrow
-projections (a board-facing view of a topic) are already in use across
-patterns. What is missing is the decision that holder-side types are
-*demands*, written that way on purpose, and the authoring guidance to match.
+The cost is that an author writes two kinds of type: a pattern's own full
+truth, and its demands on others. A demand is a real contract and has to stay
+as small as it claims.
 
 One limit to know about: shape carries no meaning. A demand can say "has a
 verb named `append` taking text"; it cannot say "and `append` means what I
 think it does". Small demands keep that gap harmless, the same way small Go
-interfaces do — and closing it properly is what Option E's names and
-versions are for.
+interfaces do. Closing it properly is what names and versions are for.
 
-**Costs** an author writes two kinds of type — a pattern's own full truth,
-and its demands on others — and a demand is a real contract that must stay
-as small as it claims. It does nothing for the other evolution problems:
-changing an existing verb still means a new name, and outputs are still
-unprotected.
+### Named, versioned interfaces are where this goes
 
-### Option E — Named, versioned interfaces
+An interface gets a name and a version of its own, separate from any one
+pattern: "Notes, version 2" is a first-class thing, patterns declare which
+interfaces they provide, and consumers declare the minimum version they
+accept. Binding checks once; after that the caller holds a guarantee.
 
-Give interfaces names and versions of their own, separate from any one
-pattern: a "Notes, version 2" interface exists as a first-class thing,
-patterns declare which interfaces they provide, and consumers declare the
-minimum version they accept. Binding checks once; after that the caller
-holds a guarantee.
+This is the mechanism that survives contact with **patterns owned by different
+people**, and that is why it is scheduled rather than left in the distance.
+Holder-side demands answer the shape question, and shape carries no meaning; a
+name and a version are what let one author rely on another author's contract
+and know when it has moved. Without it, the honest advice to somebody building
+on a pattern they do not own is to fork it, which forfeits the substrate.
 
-This is the full form of the longer arc's first mechanism, and the only
-option here that still works when pieces and callers are owned by different
-people. It is also the most machinery: an interface needs an identity, a
-registry, a compatibility rule of its own, and a place to live in the shape
-— the planned Fabric-types work is the natural vehicle. A nominal interface
-mechanism was considered once before and deliberately deferred; this option
-is the argument for scheduling that work rather than rediscovering it.
+It is also the most machinery of anything here: an interface needs an
+identity, a registry, a compatibility rule of its own, and a place to live in
+the shape. The planned Fabric-types work is the natural vehicle. This is a
+design stream of its own — see [the longer arc](#the-longer-arc) — and it is
+open, with everything else in this document standing as the interim until it
+lands.
 
-### How they compose
+### A maybe is resolved once, at binding
 
-A is the floor everything else stands on: names permanent, contracts kept.
-D removes the one measured refusal without weakening anyone's promise, and
-can be adopted pattern by pattern. C handles the true breaks D cannot — but
-it is incomplete until redeploy has a re-pointing story. E is the
-destination the longer arc describes, and the only complete answer once
-outside callers exist. B is set aside as a posture; optional declaration
-remains a scalpel for verbs whose absence is a real state.
+A published interface may carry optional members, because a piece deployed
+under an earlier generation genuinely does not have the later generation's
+verbs. Absence there is a fact about the piece, not a hedge — and an interface
+that is handed to consumers has to cover every generation still running,
+including where the pattern's own declaration marks the member required.
 
-Sequencing matters more than the labels: D and the three items under "Worth
-doing under any posture" are compatible with every posture, so they need not
-wait on the larger decision.
+What an optional member does not license is a maybe at every call site. A
+caller resolves it **once, when it takes hold of the piece**, into a real
+fallback or a real failure, and holds a promise from then on:
 
-## The longer arc: versioned interfaces and managed upgrades
+```tsx
+// Shown at module scope.
+declare const activityLog: { logEvent?: Stream<{ text: string }> };
 
-Whichever posture wins now, the pressure behind this document does not go
-away: pieces live a long time, they carry their interface with them, and the
-code around them keeps changing. Other systems have faced exactly this —
-long-lived stateful things, evolving interfaces, no way to update everything
-at once — and they converged on the same small set of mechanisms. None of
-them solved it by making the interface uncertain. They kept the promise,
-versioned it, and built machinery for old and new to live side by side.
+// Resolve once. Every later call site holds a guarantee.
+const logEvent = activityLog.logEvent;
+if (logEvent !== undefined) logEvent.send({ text: "started" });
 
-Four mechanisms recur, and ours will likely need a form of each:
+// Never this. When the verb is absent, nothing happens and nothing says so.
+activityLog.logEvent?.send({ text: "started" });
+```
+
+The second form is the tempting rewrite and the one to refuse. It is not the
+resolution of a maybe, it is the deferral of one, and it fails silently: no
+error, no log, no signal. In a test, a real failure becomes a pass.
+
+And when a caller cannot proceed without the member at all, an optional is the
+wrong tool. The answer is a new interface version, and a caller that declares
+it requires that version. "This needs Notes v2, and the piece provides v1" is
+a failure someone can act on; a skipped `send` is not.
+
+### A verb's output changes by getting a new name
+
+Nothing checks outputs, so the convention has to do the work: **a change to
+what a verb hands back is treated exactly like a rename, and gets a new verb
+name.** Adding to an output is safe; changing or removing anything in one is
+not, and there is no gate to catch it.
+
+This costs nothing to adopt and is the only protection available until outputs
+are recorded in the shape. Recording them is Fabric-types' job, and when it
+lands the convention is replaced by a check rather than supplemented by one.
+
+### A true break is a redeploy
+
+Some changes are genuinely incompatible, and no declaration discipline makes
+them compatible. Those are handled by deploying a new pattern and migrating
+the data, rather than by updating in place.
+
+Migration is a good bet to get cheaper: migrating data from an old shape to a
+new one is work a model can do, and the useful form of that is generated
+migration logic rather than per-piece hand-holding. It is still the exception,
+not the path. The default is to stay compatible, because most patterns are
+updated by models that will cheerfully jump through hoops to avoid a break,
+and because a compatible update keeps the piece's identity.
+
+That last part is the gap to know about. A redeploy mints a **new piece with a
+new identity**, and other pieces hold references to the old one — boards hold
+notes, topics hold cross-references. Those stored references keep pointing at
+the old piece, and nothing re-points them; migrating the data does not move
+the references. Anyone redeploying a pattern whose pieces are referenced
+elsewhere has to re-point those references themselves. There is no general
+forwarding mechanism — no way for an old identity to hand its callers on to
+its successor — and building one has not been scheduled.
+
+## What the tooling does
+
+The rules above are only as good as the number of authors who never have to
+learn them. These are the mechanisms that carry them.
+
+### A pattern exports interfaces, not the type it returns
+
+Exporting the type a pattern declares its own output with is the fast route
+into the incompatibility this document exists to remove: every consumer that
+imports it embeds the provider's whole shape, and every addition to the
+provider becomes a change to each consumer.
+
+A pattern exports **interfaces describing how to use it** instead. Those grow
+by optional member, by version, or by both — an optional member covering the
+deployed generations that lack it, a version for the consumer that requires
+what the new generation added. The pattern's own declaration is free to mark
+the same member required; the two are different artifacts with different jobs.
+
+The transformer is the natural place to enforce this, and it is the highest
+leverage item here, because it is a rule the one-off author never has to know.
+
+Landing it has a known cost: compatibility baselines involving re-exports need
+resetting, because a pattern that today returns `B[]` will afterwards return
+considerably less. That is a deliberate one-time break of the recorded
+baselines, not a regression, and it interacts with the append-only baselines
+gate — so it needs planning rather than a quiet edit.
+
+### A holder declares what it uses
+
+The consumer half of the same rule: a pattern does not import a provider's
+type in order to store or call it. It declares the fields and verbs it
+actually uses, which is usually a title and a single verb.
+
+Importing the provider's type stays right in two cases. One is legitimate: the
+holder genuinely means "that interface, at that version, with those required
+verbs". The other is practical rather than principled — the type is large and
+restating it is redundant — and it is the case worth designing away.
+
+Nothing checks this today. `skills/pattern-critic/SKILL.md` has no rule for it,
+and adding one is the cheapest first step, ahead of anything in the
+transformer.
+
+### Authoring time shows the blast radius
+
+Compatibility is discovered today by having an update refused. The same
+comparison the gate runs can run before anything deploys, over two versions of
+a pattern — and, because holders record what they demand, it can go further
+than pass or fail and report what a change would actually hit:
+
+```
+This update breaks 14 recorded consumer contracts across 6 patterns:
+- 9 are owned by you
+- 3 appear automatically adaptable
+- 2 belong to other authors
+
+Choose: revise the change, generate migrations or adapters, or proceed and
+mark affected consumers incompatible.
+```
+
+This is the shape that lets nobody classify a pattern's permanence up front.
+An author does not declare whether a pattern is a one-off or a long-lived
+contract; its dependencies say so, and the report is where they say it.
+Compatibility stays the default, and an intentional break stays possible with
+its impact and its recourse both visible. Generated migrations and adapters —
+applied eagerly, or lazily when a piece is next touched — are the recourse
+this grows into.
+
+### A break is acknowledged one at a time
+
+The only override today turns the entire gate off at once, which makes
+accepting one deliberate break silence every other protection. A break should
+be acknowledgeable by name — this field, this verb — which is also what
+"proceed and mark affected consumers incompatible" needs underneath it.
+
+### Verb calls are counted
+
+Retirement policy is guesswork without usage data; deprecation windows work in
+other systems because usage is observable. The planned invocation-record work
+is the natural place for this to ride, and the blast-radius report is a good
+deal more useful when it can say which of those contracts is live.
+
+## The longer arc
+
+The pressure behind this document does not go away: pieces live a long time,
+they carry their interface with them, and the code around them keeps changing.
+Other systems have faced exactly this — long-lived stateful things, evolving
+interfaces, no way to update everything at once — and they converged on the
+same small set of mechanisms. None of them solved it by making the interface
+uncertain. They kept the promise, versioned it, and built machinery for old
+and new to live side by side.
+
+This is an open design stream, and four mechanisms recur in it:
 
 **1. Interfaces carry versions, and consumers name the minimum they accept.**
-COM froze every published interface permanently: you never changed `IFoo`,
-you published `IFoo2`, and an object implemented both. A caller asked once —
-"do you support `IFoo2`?" — and held a guaranteed interface from then on.
-OSGi modules import each other at "version 1.2 or newer". Kubernetes serves
-the same API at several versions at the same time. The planned Fabric-types
-shape for verbs is the natural place a declared version would ride.
+COM froze every published interface permanently: you never changed `IFoo`, you
+published `IFoo2`, and an object implemented both. A caller asked once — "do
+you support `IFoo2`?" — and held a guaranteed interface from then on. OSGi
+modules import each other at "version 1.2 or newer". Kubernetes serves the
+same API at several versions at the same time. The planned Fabric-types shape
+for verbs is the natural place a declared version would ride.
 
 **2. Compatibility has declared boundaries, and breaking one is a decision.**
 Semantic versioning is the everyday form: additions are minor, breaks are
@@ -415,60 +433,58 @@ through a hook the author writes. Rails migrations and event-sourcing
 upcasters are the same idea for databases and event logs. Kubernetes converts
 stored objects between API versions through registered conversion code. The
 recurring design fork is eager (upgrade everything now) against lazy (upgrade
-each piece when next touched); systems with many small stateful things
-mostly chose lazy.
+each piece when next touched); systems with many small stateful things mostly
+chose lazy.
 
 Two of the rules recorded above were derived by measurement against our own
-runtime and then turned out to be classical results — which suggests the
-rest of this map is worth reading before we draw more of it ourselves. "A published interface only grows" is COM's frozen
-interfaces and protobuf's permanent field numbers. "A newly required input
-breaks callers" is so well established that proto3 removed the `required`
-keyword from the language entirely.
+runtime and then turned out to be classical results — which suggests the rest
+of this map is worth reading before we draw more of it ourselves. "A published
+interface only grows" is COM's frozen interfaces and protobuf's permanent
+field numbers. "A newly required input breaks callers" is so well established
+that proto3 removed the `required` keyword from the language entirely.
 
-None of this machinery is designed here. It is recorded so the near-term
-choice is made knowing where the road leads, and so the owners can decide
-whether to open it as its own design stream.
+## Considered and set aside
 
-## Worth doing under any posture
+**All verbs optional, as the default.** Declaring every verb as something a
+piece may have buys the most evolution for the least machinery: adding a verb
+is then always allowed, anywhere, including on types other patterns store. It
+is set aside because it moves the maybe into every call site, permanently. An
+interface whose every member is optional is not a contract, it is a
+suggestion, and code consuming a suggestion turns defensive. Every system in
+the longer arc bought the same evolution while keeping the promise.
 
-Three items fall out of this analysis that no option contradicts:
+The measurements are kept because they locate who depends on verb
+declarations:
 
-- **Move compatibility discovery to authoring time.** Today an author learns
-  the rules when an update is refused. The same comparison the gate runs can
-  run as a `cf` command over two versions of a pattern before anything
-  deploys — the difference between a published contract and a wall you find
-  by walking into it.
-- **Make deliberate breaks scoped.** The only override today turns off the
-  entire gate at once. A deliberate break should be acknowledgeable by name
-  — this field, this verb — so accepting one break does not silence every
-  other protection.
-- **Count verb calls.** Retirement policy is guesswork without usage data:
-  deprecation windows work in other systems because usage is observable. The
-  planned invocation-record work is the natural place for this to ride.
+- **8 call sites** in shipped pattern code read a verb off another piece,
+  across four files.
+- **396 call sites across 50 test files** do the same, every one of the form
+  `instance.verb.send(...)` — the documented way to test a pattern.
 
-## What this document asks the owners to decide
+Making verbs optional turns each of those into a possibly-absent value, and
+the obvious rewrite, `instance.verb?.send(...)`, does nothing at all when the
+verb is absent. Whether the compiler would even catch a missed rewrite is
+unestablished: pattern `*.test.tsx` files are excluded from `deno task test`
+in `packages/patterns` and run through the `cf` binary instead. This is the
+measurement behind the call-site rule above.
 
-1. **The posture**: A alone, A+D, or A+D with C for true breaks — and
-   whether to schedule E now or leave it in the longer arc.
-2. **Whether optional verbs remain permitted as a targeted tool** — for
-   absence that is a real state of the piece — now that they are set aside
-   as a default.
-3. **Whether output shape protection waits for Fabric-types** or gets an
-   interim, given that nothing checks outputs at all right now.
-4. **Whether to open the longer arc as its own design stream** — versioned
-   interfaces, declared compatibility boundaries, per-piece upgrade policy
-   and ownership, and upgrades that run code — with today's choice named
-   explicitly as the interim until that stream lands.
+Optional members survive where absence is a real state — a generation that
+lacks a verb, or a capability present by configuration — resolved once at
+binding. What they are not is an evolution device applied across the board.
 
-Two questions are already settled and are recorded here so they do not get
-reopened: verb names are permanent and retirement runs through `@deprecated`;
-and a version suffix is spelled `append_v2`, introduced only when a second
-generation is needed.
+**Versioning every verb from day one.** Spelling the first generation
+`append_v1` is uniform, and it taxes every verb forever to serve the few that
+ever need a second generation. A version suffix appears when the second
+generation does.
 
-## The one thing that is not optional
+## What is not settled here
 
-Whatever posture we take, **a verb's output needs a convention**, because
-nothing enforces one. The cheapest version: treat a change to what a verb
-hands back exactly like a rename, and give it a new verb name. That costs
-nothing to adopt and is the only protection available until outputs are
-recorded in the shape.
+Three implementation calls belong to whoever does the work, not to this
+document:
+
+- Whether the holder-demand rule is a transformer error, a lint, or authoring
+  guidance backed by `pattern-critic` — and in what order those arrive.
+- How wide the re-export baseline reset has to be, and how it is sequenced
+  against the append-only baselines gate.
+- Whether an interim output check is possible before Fabric-types, given that
+  the shape discards verb outputs today.
