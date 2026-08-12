@@ -16,6 +16,7 @@
  *                 If not set, picks a random offset and cleans up after.
  */
 
+import { walk } from "@std/fs/walk";
 import * as path from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 
@@ -169,12 +170,15 @@ async function findPatternTests(
 
   // Find all .test.tsx files
   const testFiles: string[] = [];
-  for await (const entry of walkDir(patternsDir)) {
-    if (entry.endsWith(".test.tsx")) {
-      const relative = path.relative(rootDir, entry);
-      if (!nameFilter || relative.includes(nameFilter)) {
-        testFiles.push(relative);
-      }
+  for await (
+    const entry of walk(patternsDir, {
+      includeDirs: false,
+      exts: [".test.tsx"],
+    })
+  ) {
+    const relative = path.relative(rootDir, entry.path);
+    if (!nameFilter || relative.includes(nameFilter)) {
+      testFiles.push(relative);
     }
   }
 
@@ -496,18 +500,6 @@ export async function runFilteredIntegration(
     env,
     inheritStdio: true,
   });
-}
-
-/** Recursively walk a directory yielding file paths. */
-async function* walkDir(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory) {
-      yield* walkDir(fullPath);
-    } else {
-      yield fullPath;
-    }
-  }
 }
 
 export async function runPackageIntegration(
