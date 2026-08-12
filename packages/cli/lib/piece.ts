@@ -26,8 +26,10 @@ import {
 import {
   type CfcLabelView,
   cfcLabelViewForCellWithStatus,
+  cfcLabelViewFromSchema,
   getCarriedCfcLabelView,
   type IFCLabel,
+  mergeCfcLabelViews,
   redactCaveatSourcesForDisplay,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
@@ -230,7 +232,16 @@ function cfcLabelViewForCommand(
     const location = path.length === 0 ? "<root>" : path.join("/");
     throw new Error(`Could not read CFC labels at "${location}".`);
   }
-  return view === undefined ? null : redactCaveatSourcesForDisplay(view);
+  const schema = isObjectOrArray(cell)
+    ? cell.schema as JSONSchema | undefined
+    : undefined;
+  const effectiveView = mergeCfcLabelViews([
+    view,
+    cfcLabelViewFromSchema(schema),
+  ]);
+  return effectiveView === undefined
+    ? null
+    : redactCaveatSourcesForDisplay(effectiveView);
 }
 
 /** A `cf piece get` path that lands ON a verb. Reading a verb returns the

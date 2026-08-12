@@ -6,6 +6,7 @@ import {
   cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
 } from "../src/cfc/label-view.ts";
+import { cfcLabelViewFromSchema } from "../src/cfc/schema-label-view.ts";
 import {
   redactSigilCfcLabelViewsForDisplay,
   stripSigilCfcLabelViews,
@@ -58,6 +59,45 @@ describe("CFC label view helpers", () => {
         },
       ],
     });
+  });
+
+  it("collects declared labels from schema paths and local references", () => {
+    expect(cfcLabelViewFromSchema({
+      type: "object",
+      ifc: {
+        confidentiality: ["workspace"],
+        maxConfidentiality: ["workspace"],
+      },
+      properties: {
+        items: {
+          type: "array",
+          items: { $ref: "#/$defs/Reviewed" },
+        },
+      },
+      $defs: {
+        Reviewed: {
+          type: "string",
+          ifc: { integrity: ["reviewed"], observes: "value" },
+        },
+      },
+    })).toEqual({
+      version: 1,
+      entries: [
+        {
+          path: [],
+          label: { confidentiality: ["workspace"] },
+        },
+        {
+          path: ["items", "*"],
+          label: { integrity: ["reviewed"] },
+          observes: "value",
+        },
+      ],
+    });
+  });
+
+  it("ignores a root value that is not a schema", () => {
+    expect(cfcLabelViewFromSchema(null as never)).toBeUndefined();
   });
 
   it("rebases wildcard label paths onto concrete array item paths", () => {

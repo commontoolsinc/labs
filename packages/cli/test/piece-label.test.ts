@@ -204,6 +204,53 @@ describe("cf piece CFC labels", () => {
     ).toEqual(updated);
   });
 
+  it("returns labels declared only by the selected cell schema", async () => {
+    const schemaOnlyRoot = root.asSchema({
+      type: "object",
+      ifc: {
+        confidentiality: ["workspace"],
+        observes: "shape",
+      },
+      properties: {
+        body: {
+          type: "string",
+          ifc: { integrity: ["reviewed"] },
+        },
+      },
+      required: ["body"],
+    });
+    const schemaOnlyDeps = {
+      ...deps,
+      loadPieces: () =>
+        Promise.resolve({
+          runtime,
+          get: () =>
+            Promise.resolve({
+              input: { getCell: () => Promise.resolve(schemaOnlyRoot) },
+              result: { getCell: () => Promise.resolve(schemaOnlyRoot) },
+            }),
+          synced: () => Promise.resolve(),
+        }),
+    };
+
+    expect(
+      await getCellCfcLabel(pieceConfig, [], {}, schemaOnlyDeps as never),
+    ).toEqual({
+      version: 1,
+      entries: [
+        {
+          path: [],
+          label: { confidentiality: ["workspace"] },
+          observes: "shape",
+        },
+        {
+          path: ["body"],
+          label: { integrity: ["reviewed"] },
+        },
+      ],
+    });
+  });
+
   it("requires a transaction and an existing value for a CFC schema update", async () => {
     expect(() =>
       root.key("body").asSchema({
