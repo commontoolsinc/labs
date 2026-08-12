@@ -103,10 +103,15 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * `context` supplies what reconstruction needs beyond the data itself,
    * chiefly the ability to resolve a cell reference.
    *
-   * A codec that rejects the state it is handed either throws or is wrapped in
-   * a `ProblematicValue`, according to {@link #lenient}. A tag no codec in the
-   * registry claims becomes an `UnknownValue`, which is not a failure: it is
-   * how a value survives a round trip through a reader that does not know the
+   * A codec rejects a state it will not accept in one of two ways, by
+   * throwing or by returning a `ProblematicValue`, and which one it picks is
+   * the codec author's business. {@link #lenient} decides what a caller sees,
+   * settling both into the same answer: strictly, either form of rejection
+   * raises; leniently, either becomes a `ProblematicValue` in the result.
+   *
+   * A tag no codec in the registry claims is a different matter, and becomes
+   * an `UnknownValue` under both settings. That is not a rejection: it is how
+   * a value survives a round trip through a reader that does not know the
    * type.
    *
    * @throws If `data` does not carry this format's marker, or if a codec
@@ -233,21 +238,16 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
     const terminal = matched instanceof BaseTerminalCodec;
     const state = terminal ? rawState : this.decodeValue(rawState, context);
 
+    let decoded: FabricValue;
+
     try {
-      // A codec's `decode()` promises deep-frozen results rather than relying
-      // on every caller to freeze, so both returns here pass through
-      // `deepFreeze()`. That covers the codec's own product -- a
-      // `FabricPrimitive` is already frozen, making it an O(1) cache hit --
-      // and the lenient fallback alike.
-      return deepFreeze(
-        terminal
-          ? (matched as TerminalCodec<Encoded>).decode(tag, rawState, context)
-          : (matched as NonterminalCodec).decode(
-            tag,
-            state as FabricValue,
-            context,
-          ),
-      );
+      decoded = terminal
+        ? (matched as TerminalCodec<Encoded>).decode(tag, rawState, context)
+        : (matched as NonterminalCodec).decode(
+          tag,
+          state as FabricValue,
+          context,
+        );
     } catch (e: unknown) {
       if (!this.lenient) {
         throw e;
@@ -263,6 +263,21 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
         ),
       );
     }
+
+    if (!this.lenient && (decoded instanceof ProblematicValue)) {
+      // The two ways a codec reports a state it will not accept -- throwing,
+      // and returning one of these -- are the codec author's choice and say
+      // nothing about what a caller wants. `lenient` is what says that, so
+      // this instance settles both into the same answer: a strict decode
+      // fails, whichever way the codec spelled it.
+      throw new Error(`\`${tag}\`: ${decoded.error}`);
+    }
+
+    // A codec's `decode()` promises deep-frozen results rather than relying on
+    // every caller to freeze. That covers the codec's own product -- a
+    // `FabricPrimitive` is already frozen, making it an O(1) cache hit -- and
+    // the lenient fallback above alike.
+    return deepFreeze(decoded);
   }
 
   /** Encodes an array, which is this format's business entirely. */

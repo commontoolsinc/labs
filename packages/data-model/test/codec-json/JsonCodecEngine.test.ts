@@ -310,11 +310,11 @@ describe("JsonCodecEngine", () => {
 
     it("lets a terminal codec judge a state that names a tag", () => {
       // A terminal codec's state is its own business, so a tag appearing
-      // inside one is just data. `BigInt@1` sees a non-string and reports by
-      // returning a `ProblematicValue` -- which the spec sanctions alongside
-      // throwing, `3-json-encoding.md` Section 7 letting a codec do either.
-      // Non-lenient, so nothing here is wrapping a throw.
-      const jsonCodecEngine = newDefaultJsonCodecEngine();
+      // inside one is just data rather than something the walker expands.
+      // `BigInt@1` sees a non-string and rejects it, which is the judgment
+      // this pins; a lenient engine keeps that verdict as a value, naming the
+      // tag whose codec made it.
+      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
 
       const result = jsonCodecEngine.decode(
         JsonCodecEngine.wrapEncodedValueForTesting(
@@ -324,11 +324,28 @@ describe("JsonCodecEngine", () => {
         new TestReconstructionContext(),
       );
 
-      expect(jsonCodecEngine.lenient).toBe(false);
       expect(result).toBeInstanceOf(ProblematicValue);
       expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
         "BigInt@1",
       );
+    });
+
+    it("throws a codec's rejection when not lenient, tag named", () => {
+      // The same rejection, through a strict engine. `BigInt@1` reports by
+      // RETURNING a `ProblematicValue` rather than throwing, and the engine
+      // settles the two reporting styles into one answer.
+      const jsonCodecEngine = newDefaultJsonCodecEngine();
+
+      expect(jsonCodecEngine.lenient).toBe(false);
+      expect(() =>
+        jsonCodecEngine.decode(
+          JsonCodecEngine.wrapEncodedValueForTesting(
+            JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
+            true, // Undecodable on purpose; that is what this test is about.
+          ),
+          new TestReconstructionContext(),
+        )
+      ).toThrow(/`BigInt@1`: bigint: expected string state/);
     });
 
     it("hands a nonterminal codec state that has been expanded", () => {
@@ -1437,7 +1454,10 @@ describe("JsonCodecEngine", () => {
       // in lenient mode because the handler validates the state type.
       const data = { "/BigInt@1": 42 } as JsonCodecValue;
       const result = jsonCodecEngine.decode(
-        JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(data)),
+        JsonCodecEngine.wrapEncodedValueForTesting(
+          JSON.stringify(data),
+          true, // Malformed on purpose; the helper's own check is strict.
+        ),
         runtime,
       );
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -1586,6 +1606,7 @@ describe("JsonCodecEngine", () => {
       const result = jsonCodecEngine.decode(
         JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify({ "/BigInt@1": 42 }),
+          true, // Malformed on purpose; the helper's own check is strict.
         ),
         runtime,
       );

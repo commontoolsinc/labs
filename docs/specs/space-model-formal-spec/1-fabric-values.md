@@ -2266,11 +2266,11 @@ under the preserved tag, so the wire form is identical to that of the
 value the `ProblematicValue` stands in for (and a later decode under a
 then-recognized tag can recover the real value). The `error` field aids
 in-process debugging by recording what went wrong; the failure-construction
-paths (e.g., lenient mode) populate it. Whether to wrap failures in
-`ProblematicValue` or to throw is an implementation decision that may vary
-by context — strict contexts (e.g., tests) may prefer to throw, while
-lenient contexts (e.g., production reconstruction) may prefer graceful
-degradation.
+paths populate it. Whether a decode failure surfaces as a
+`ProblematicValue` or as a throw is the encoding context's `lenient`
+setting alone, not the codec's: a strict context (e.g., tests) raises
+either form of rejection, while a lenient one (e.g., production
+reconstruction) degrades either into a value.
 
 ---
 
@@ -2543,8 +2543,10 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    bare `"/"` key) as an encoding error, producing a `ProblematicValue`
    (Section 3.5; see also Section 9 of `3-json-encoding.md`).
 4. **Codec dispatch** — `codecFromTag()` routes the tag to its registered
-   codec's `decode()`. When `JsonCodecEngine` is in lenient mode, codec
-   exceptions produce `ProblematicValue`. Values returned from this arm
+   codec's `decode()`, and settles the codec's verdict against `lenient`:
+   leniently, a throw becomes a `ProblematicValue`; strictly, a
+   `ProblematicValue` the codec returned becomes a throw. Values returned
+   from this arm
    are guaranteed deep-frozen at the walker boundary (the contract holds
    for both the codec-produced value and the lenient-mode
    `ProblematicValue`), so callers need not each freeze. This contract is
@@ -3188,10 +3190,10 @@ This applies at every point where deserialized data is consumed:
   concrete example.
 
 - **JSON-side codec decoding** (Section 3 of `3-json-encoding.md`) must
-  validate the format of its state before processing. Malformed input
-  should produce a `ProblematicValue` rather than throwing or silently
-  producing garbage (a codec may also throw and rely on a lenient context
-  to do the wrapping; Section 4.5).
+  validate the format of its state before processing. Malformed input must
+  be rejected rather than silently producing garbage; a codec rejects by
+  throwing or by returning a `ProblematicValue`, and the encoding context
+  settles the two against its `lenient` setting (Section 4.5).
 
 - **Hashing** (Section 6.3) may operate on values that have been
   through a deserialization round-trip. Code that extracts properties from

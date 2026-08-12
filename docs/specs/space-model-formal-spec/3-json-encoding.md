@@ -221,11 +221,13 @@ round-trip correctly.
 > `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
 > its state is a `string` containing valid base64url (padded or unpadded) before decoding. On
 > malformed input — wrong type, invalid format, or missing fields — the codec
-> should produce a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
-> rather than silently producing garbage; a codec may either construct the
-> `ProblematicValue` directly or throw and rely on a lenient encoding
-> context to do the wrapping (see `1-fabric-values.md` Section 4.5). This
-> principle applies to
+> must reject it rather than silently produce garbage. A codec may reject by
+> throwing, or by returning a `ProblematicValue` (see `1-fabric-values.md`
+> Section 3.5); the two are equivalent, because the encoding context settles
+> them into one answer according to its own `lenient` setting (see
+> `1-fabric-values.md` Section 4.5). Which one a codec uses is therefore a
+> matter of what reads well where it is written, and carries no meaning for a
+> caller. This principle applies to
 > all codecs. Wire data is untrusted input. See `1-fabric-values.md`
 > Section 7.4 for the broader principle that applies to all code consuming
 > deserialized values.
@@ -379,8 +381,9 @@ for:
   in `UnknownValue` / `ProblematicValue` (read back through their codecs'
   `tagForValue()`), and constructing `UnknownValue` for tags with no
   registered codec.
-- In lenient mode, converting codec `decode()` throws into
-  `ProblematicValue`.
+- Settling a codec's rejection according to `lenient`: in lenient mode a
+  codec's throw becomes a `ProblematicValue`, and in strict mode a
+  `ProblematicValue` a codec returns becomes a throw.
 
 Note: `/object` escaping (Section 6) is applied directly by the context's
 private encode walker in its plain-objects path, since it is structural
