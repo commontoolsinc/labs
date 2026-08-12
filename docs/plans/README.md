@@ -19,6 +19,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   remaining owner decisions and blocked stages for exchange rules.
 - [CFC TypeScript authoring](cfc_typescript_authoring.md) sequences the
   TypeScript and JSX authoring surface for CFC metadata.
+- [URLs as mentions](urls-as-mentions.md) proposes a `cellFromUrl` builtin —
+  does this URL name a cell, and which one — and the two things that follow: a
+  pasted piece URL becoming a mention, and a read-only filesystem projection
+  whose edit verb reads newly written URLs back as references. A builtin
+  because the answer cannot stay synchronous: host recognition becomes a probe
+  and space-name resolution becomes a lookup.
 - [First-class serializable factories](first-class-serializable-factories.md)
   sequences the implementation of durable pattern, module, and handler
   factories.
