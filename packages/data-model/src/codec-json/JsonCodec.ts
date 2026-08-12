@@ -345,29 +345,54 @@ export class JsonCodec implements SerializationContext<string> {
         //
         // Otherwise the tag is simply one this registry does not carry, and
         // the unknown form is preserved so that it round-trips. Neither of
-        // these is covered by the deep-frozen contract described on
-        // `#decodeChecked()`.
+        // these is covered by the deep-frozen contract that the codec arm
+        // below states.
         return (tag === "")
           ? new ProblematicValue(tag, state, `object has bare "/" key`)
           : new UnknownValue(tag, state);
       }
 
-      if (matched instanceof BaseTerminalCodec) {
-        return this.#decodeChecked(
-          tag,
-          rawState,
-          () =>
-            (matched as TerminalCodec<JsonCodecValue>)
-              .decode(tag, rawState, context),
+      // A terminal codec takes the state exactly as it arrived; a nonterminal
+      // one takes it expanded. The two casts restate what `instanceof` just
+      // established, which TypeScript drops on a generic class.
+      const terminal = matched instanceof BaseTerminalCodec;
+      const state = terminal ? rawState : this.#decodeValue(rawState, context);
+
+      try {
+        // A codec's `decode()` promises deep-frozen results rather than
+        // relying on every caller to freeze, so both returns here pass through
+        // `deepFreeze()`. That covers the codec's own product -- a
+        // `FabricPrimitive` is already frozen, making it an O(1) cache hit --
+        // and the lenient fallback alike. The two arms above are separate and
+        // deliberately not covered.
+        return deepFreeze(
+          terminal
+            ? (matched as TerminalCodec<JsonCodecValue>).decode(
+              tag,
+              rawState,
+              context,
+            )
+            : (matched as NonterminalCodec).decode(
+              tag,
+              state as FabricValue,
+              context,
+            ),
+        );
+      } catch (e: unknown) {
+        if (!this.lenient) {
+          throw e;
+        }
+
+        // Report over the state the codec was actually handed, so that it says
+        // what the codec choked on.
+        return deepFreeze(
+          new ProblematicValue(
+            tag,
+            state,
+            e instanceof Error ? e.message : String(e),
+          ),
         );
       }
-
-      const state = this.#decodeValue(rawState, context);
-      return this.#decodeChecked(
-        tag,
-        state,
-        () => (matched as NonterminalCodec).decode(tag, state, context),
-      );
     }
 
     // Primitives pass through.
@@ -391,13 +416,11 @@ export class JsonCodec implements SerializationContext<string> {
     // underestimate otherwise -- growing from there beats growing from empty,
     // and a short array of holes is common enough to be worth not pessimizing.
     //
-    // Nothing validates a `/hole` count. A negative one is not something an
-    // encoder emits -- a run is at least one -- so what it does here is
-    // unspecified rather than designed: it moves the write index backwards,
-    // and the decode then either truncates or throws `RangeError` out of the
-    // length assignment, according to whether the index ends up below zero.
-    // Neither outcome is reported as a `ProblematicValue`, this arm being the
-    // walker's own rather than a codec's.
+    // A run's count is validated, wire data being untrusted. Left unchecked it
+    // is added to the write index directly, so a string concatenates onto it
+    // and a negative or fractional one makes the length assignment throw --
+    // failures with no bearing on what went wrong. A run stands for at least
+    // one absent index, and anything else is reported instead.
     if (Array.isArray(data)) {
       const result: FabricValue[] = new Array(data.length);
       let targetIndex = 0;
@@ -406,12 +429,38 @@ export class JsonCodec implements SerializationContext<string> {
         if (
           entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
         ) {
-          targetIndex += entryDecoded.state as number;
+          const count = entryDecoded.state;
+          if (!JsonCodec.#isHoleCount(count)) {
+            return new ProblematicValue(
+              CODEC_META_TAGS.hole,
+              count,
+              `hole: expected a positive integer count, got ${
+                backtickQuote(toCompactDebugString(count, 30))
+              }`,
+            );
+          }
+          targetIndex += count;
         } else {
           result[targetIndex] = this.#decodeValue(entry, context);
           targetIndex++;
         }
       }
+
+      // The total is bounded here rather than each advance being bounded as
+      // it happens, because both a single run and the running total can pass
+      // what an array may hold, and one check at the end covers both. Beyond
+      // that, the assignment below throws `RangeError` from the array
+      // machinery, which says nothing about the wire that caused it.
+      const MAX_ARRAY_LENGTH = 0xffff_ffff;
+      if (targetIndex > MAX_ARRAY_LENGTH) {
+        return new ProblematicValue(
+          CODEC_META_TAGS.hole,
+          data,
+          `hole: runs total ${targetIndex} elements, past the ` +
+            `${MAX_ARRAY_LENGTH} an array can hold`,
+        );
+      }
+
       result.length = targetIndex;
       return Object.freeze(result);
     }
@@ -443,42 +492,6 @@ export class JsonCodec implements SerializationContext<string> {
       result[key] = this.#decodeValue(val, context);
     }
     return Object.freeze(result);
-  }
-
-  /**
-   * Runs a codec's `decode()` under this class's two standing guarantees.
-   *
-   * Deep-frozen contract: a codec's `decode()` promises deep-frozen results
-   * rather than relying on every caller to freeze, so every return from here
-   * passes through `deepFreeze()`. That covers the codec's own product (a
-   * `FabricPrimitive` is already frozen, making this an O(1) cache hit) and
-   * the lenient-mode fallback alike.
-   *
-   * Lenience: when `lenient` is set, a throw becomes a `ProblematicValue` over
-   * `state`. Nothing here ties `state` to what `decode` goes on to hand the
-   * codec, the two being separate arguments; each call site passes the same
-   * value for both, so that the report says what the codec choked on.
-   */
-  #decodeChecked(
-    tag: string,
-    state: FabricValue,
-    decode: () => FabricValue,
-  ): FabricValue {
-    if (!this.lenient) {
-      return deepFreeze(decode());
-    }
-
-    try {
-      return deepFreeze(decode());
-    } catch (e: unknown) {
-      return deepFreeze(
-        new ProblematicValue(
-          tag,
-          state,
-          e instanceof Error ? e.message : String(e),
-        ),
-      );
-    }
   }
 
   //
@@ -527,6 +540,19 @@ export class JsonCodec implements SerializationContext<string> {
       "no runtime context (validity check in a test-only helper).",
     ),
   );
+
+  /**
+   * Indicates whether `count` is usable as a `/hole` run length: a safe
+   * integer of at least one. A run always stands for at least one absent
+   * index, so zero is refused along with everything else that is not a count.
+   */
+  static #isHoleCount(count: JsonCodecValue): count is number {
+    // `isSafeInteger()` returns `false` for a non-number, but it cannot be a
+    // TypeScript type predicate on `number` since it also returns `false` for
+    // plenty of numbers. So, the subsequent cast `as number` is safe by
+    // construction but is nonetheless required.
+    return Number.isSafeInteger(count) && ((count as number) >= 1);
+  }
 
   /**
    * Returns true if `v` is a single-key object whose key starts with `/` --
