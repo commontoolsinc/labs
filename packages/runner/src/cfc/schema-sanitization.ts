@@ -117,17 +117,10 @@ export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
 // (`{anyOf:[risk, A]}` → `A`) — descending is load-bearing: a hidden caveat
 // alternative is not more-restrictive when preserved (a ceiling naming the
 // sibling subsumes the whole clause), so it must be discharged, not left.
-// Legacy §4.7.3 bare-STRING material-risk atoms — e.g. the raw string
-// "prompt-injection-risk" rather than a `{type:Caveat,kind}` record — predate
-// the caveat-record form. The discharge rules all match `{type:Caveat,kind}`,
-// so a bare string never fires one and would survive, regressing the old
-// strip's byte-for-byte reach (which classified the string form too). Normalize
-// any bare-string material-risk atom — top-level or nested as an OR-clause
-// alternative — into its canonical caveat-record form (§10.1 SHOULD-normalize
-// aliases before evaluation) so the ordinary rule then drops it. Non-risk
-// strings are left untouched (no rule matches them, exactly as before). This
-// keeps discharge a single rule-driven mechanism rather than reintroducing a
-// hardcoded strip (codex P2 on #4567).
+// A short material-risk alias does not match the caveat-record rule directly.
+// Normalize each alias, including aliases nested in an OR-clause, into the
+// caveat-record form before evaluation (§10.1 SHOULD-normalize aliases before
+// evaluation). Non-risk strings remain unchanged.
 const normalizeMaterialRiskStringForms = (
   clause: CfcConfClause,
 ): CfcConfClause => {

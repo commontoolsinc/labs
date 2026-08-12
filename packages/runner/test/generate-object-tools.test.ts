@@ -1710,7 +1710,8 @@ describe("generateObject with tools", () => {
 
     const promptRisk = {
       type: "https://commonfabric.org/cfc/atom/Caveat",
-      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      kind:
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
       source: "of:hostile",
     } as const;
     const promptInfluence = {
@@ -2058,7 +2059,8 @@ describe("generateObject with tools", () => {
   it("redacts free-form strings from a userland dynamic subagent messages result", async () => {
     const promptRisk = {
       type: "https://commonfabric.org/cfc/atom/Caveat",
-      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      kind:
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
       source: "of:hostile",
     } as const;
     const promptInfluence = {

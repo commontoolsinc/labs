@@ -21,7 +21,8 @@ import {
 
 const promptRisk = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
-  kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+  kind:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
   source: "of:hostile",
 } as const;
 
@@ -39,8 +40,12 @@ describe("cfc schema sanitization", () => {
     expect(isPrimitiveJsonValue(false)).toBe(true);
     expect(isPrimitiveJsonValue({})).toBe(false);
 
-    expect(isPromptInjectionMaterialRiskAtom("prompt-injection-risk"))
+    expect(
+      isPromptInjectionMaterialRiskAtom("prompt-injection-risk-unscreened"),
+    )
       .toBe(true);
+    expect(isPromptInjectionMaterialRiskAtom("prompt-injection-risk"))
+      .toBe(false);
     expect(isPromptInjectionMaterialRiskAtom({
       type: CFC_ATOM_TYPE.Caveat,
       kind: "prompt-injection-risk-value-screened",
@@ -1312,7 +1317,8 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     // alternative-count path the fuel budget sums over.
     const risk = (i: number) => ({
       type: CFC_ATOM_TYPE.Caveat,
-      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      kind:
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
       source: `of:hostile-${i}`,
     });
     const keep = (i: number) => ({
@@ -1339,8 +1345,8 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       [
         ...flatRisks,
         ...orRisks,
-        "prompt-injection-risk",
-        { anyOf: ["prompt-injection-risk", keep(100)] },
+        "prompt-injection-risk-unscreened",
+        { anyOf: ["prompt-injection-risk-unscreened", keep(100)] },
       ],
     ) as any;
 
