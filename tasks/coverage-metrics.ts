@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env
 import * as path from "@std/path";
 import { hasExecutableCode } from "./executable-source.ts";
+import { type LcovFileCoverage, parseLcovReports } from "./lcov.ts";
 import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
@@ -57,10 +58,6 @@ interface SourceFile {
   relativePath: string;
   metricGroup: string;
   trackedLineCount: number;
-}
-
-interface LcovFileCoverage {
-  lineHits: Map<number, number>;
 }
 
 export async function collectCoverageDebtMetrics(
@@ -305,44 +302,17 @@ export function trackedSourceLineNumbers(content: string): number[] {
   return lineNumbers;
 }
 
+/**
+ * Read one `deno coverage --lcov` report, keyed by normalized source path.
+ *
+ * Per-instance suffixes (`?testRun=<uuid>` cache-busting imports) are
+ * normalized away at LCOV GENERATION (write-coverage-lcov.ts,
+ * `normalizeLcovInstancePaths` — CT-1861), so records arriving here already
+ * share one path per physical file; duplicate `SF:` sections accumulate into
+ * the same entry.
+ */
 export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
-  const files = new Map<string, LcovFileCoverage>();
-  let currentPath: string | undefined;
-
-  for (const line of lcov.split(/\r?\n/)) {
-    if (line.startsWith("SF:")) {
-      // Per-instance suffixes (`?testRun=<uuid>` cache-busting imports) are
-      // normalized away at LCOV GENERATION (write-coverage-lcov.ts,
-      // `normalizeLcovInstancePaths` — CT-1861), so records arriving here
-      // already share one path per physical file; duplicate `SF:` sections
-      // accumulate into the same entry below.
-      currentPath = path.normalize(line.slice(3));
-      if (!files.has(currentPath)) {
-        files.set(currentPath, { lineHits: new Map() });
-      }
-      continue;
-    }
-
-    if (line.startsWith("DA:") && currentPath) {
-      const [lineNumberRaw, hitsRaw] = line.slice(3).split(",");
-      const lineNumber = Number(lineNumberRaw);
-      const hits = Number(hitsRaw);
-      if (Number.isFinite(lineNumber) && Number.isFinite(hits)) {
-        const file = files.get(currentPath)!;
-        file.lineHits.set(
-          lineNumber,
-          (file.lineHits.get(lineNumber) ?? 0) + hits,
-        );
-      }
-      continue;
-    }
-
-    if (line === "end_of_record") {
-      currentPath = undefined;
-    }
-  }
-
-  return files;
+  return parseLcovReports([lcov], { mapPath: path.normalize });
 }
 
 export function countUncoveredProfileLines(coverage: LcovFileCoverage): number {
