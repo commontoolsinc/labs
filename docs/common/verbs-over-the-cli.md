@@ -100,6 +100,26 @@ do I get" are answerable before the first call rather than by making one:
 A value-less verb carries no `outputSchema` at all, which is how a caller tells
 the two apart without calling.
 
+One verb at a time, `--help` answers the same question from the callable
+itself:
+
+```bash
+cf piece call --piece <piece> <verb> --help
+```
+
+```text
+Output:
+  The invocation's `result`:
+    note <json>
+```
+
+The section names where the value arrives rather than describing stdout,
+because a handler's result rides the Invocation JSON below. A value-less verb's
+page carries no `Output:` section at all — the same distinction the listing
+draws, drawn on the page a caller is already reading before the first call.
+`--help --json` serves the declared result as `outputSchema`, descriptions and
+all, for a client that wants the schema rather than the summary.
+
 ### Call a verb and read its result
 
 `cf piece call` prints one settled **Invocation JSON** object on stdout:

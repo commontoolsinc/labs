@@ -1074,6 +1074,73 @@ describe("renderPieceCallHelp", () => {
       "Invoke alone will call the handler without any inputs.",
     );
   });
+
+  it("enumerates a handler's declared result under Output", () => {
+    const help = renderPieceCallHelp(
+      "cf piece call ... addItem",
+      makeSpec(
+        "handler",
+        {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+        {
+          type: "object",
+          properties: {
+            item: { type: "object" },
+            openBelow: { type: "number" },
+          },
+        },
+      ),
+    );
+
+    // The section closes the page, so comparing the tail compares the whole
+    // section: `title <string>` also occurs in the flags above it as
+    // `--title <string>`, which a containment check could not tell apart.
+    expect(help.slice(help.indexOf("\n\nOutput:\n"))).toBe(
+      [
+        "",
+        "",
+        "Output:",
+        "  The invocation's `result`:",
+        "    item <json-object>",
+        "    openBelow <number>",
+      ].join("\n"),
+    );
+  });
+
+  it("names the type of a handler result that is not an object", () => {
+    const help = renderPieceCallHelp(
+      "cf piece call ... rename",
+      makeSpec(
+        "handler",
+        { type: "object", properties: { title: { type: "string" } } },
+        { type: "array", items: { type: "string" } },
+      ),
+    );
+
+    expect(help.slice(help.indexOf("\n\nOutput:\n"))).toBe(
+      [
+        "",
+        "",
+        "Output:",
+        "  The invocation's `result`:",
+        "    string[]",
+      ].join("\n"),
+    );
+  });
+
+  it("carries no Output section for a handler that declares no result", () => {
+    const help = renderPieceCallHelp(
+      "cf piece call ... archive",
+      makeSpec("handler", { type: "object", properties: {} }),
+    );
+
+    // The value-less shape, which is the common one: the page says nothing
+    // about output rather than asserting there is none.
+    expect(help).not.toContain("Output:");
+  });
 });
 
 describe("exec command user-facing errors", () => {

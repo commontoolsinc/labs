@@ -106,9 +106,9 @@ interface ItemOutput {
 **A verb says what it does; its parameters describe themselves.** The comment
 on `addItem` does not restate what it takes or returns, because
 `AddItemEvent.title` and `AddItemResult.item` already say so where they are
-declared — which is also where `--help` would source a flag's prose and an
-`Output:` line. Restating it in the verb comment would be the same content
-twice, and the copy that goes stale when a parameter changes.
+declared — which is where `--help` sources its `Output:` line today, and where
+it would source a flag's prose. Restating it in the verb comment would be the
+same content twice, and the copy that goes stale when a parameter changes.
 
 **One interface, holding both.** An item's fields and its verbs sit together
 because that is what an item *is*: a child in `children` is a full item, and
@@ -192,17 +192,27 @@ JSON input:
 
 Flags after `--`:
   --title <string>    Required.
+
+Output:
+  The invocation's `result`:
+    item <json>
 ```
 
-**Structure is published; prose is not.** The flags are the whole of what `cf`
-can currently say about a verb — there is no `Output:` section, because this
-page cannot see a declared result and a fixed claim about output would be false
-for every verb that declares one. The split is worth holding onto:
+**Structure is published; prose is not.** The flags and the result fields are
+the whole of what `cf` can currently say about a verb. The split is worth
+holding onto:
 
 | | Where it comes from | Survives? |
 | --- | --- | --- |
 | flag name, placeholder, required-ness | the event's **type** — `{ title: string }` | **yes** |
+| result field name and placeholder | the result's **type** — `AddItemResult` | **yes** |
 | what `title` means, what the verb is for | the author's **doc comments** | **no** |
+
+The `Output:` section names the position a caller collects the value from —
+the settled Invocation JSON's `result` — because that is where a handler's
+result arrives, rather than on stdout the way a tool's does. A verb that
+declares nothing carries no such section at all, which is how the page tells
+the two shapes apart without asserting anything false about either.
 
 The structural half needs nothing authored per pattern:
 `parseObjectInput` builds a `FlagDescriptor` per input-schema property, so
@@ -229,15 +239,17 @@ The renderer is ready for two of the three: `specificFlagLines` reads a
 were given one, and a listing row would carry one as soon as it were supplied.
 The verb's *purpose* needs a second change on top, because
 `renderPieceCallHelp` has nowhere to put it — the page runs Usage, JSON input,
-Flags, with no summary line.
+Flags, Output, with no summary line.
 
-So the help page shows `--title <string>  Required.` and stops.
+So the help page names `--title <string>  Required.` and `item <json>`, and
+says nothing about what either means.
 
 ### What the page becomes **[blocked]**
 
 Every line below already exists as a doc comment in `tracker.tsx`. Nothing here
 is invented for the illustration — this is that file's own prose, reaching a
-caller:
+caller. The structure around it is what the page renders today; the prose is
+what it does not:
 
 ```text
 Usage:
@@ -252,7 +264,8 @@ Flags after `--`:
   --title <string>    Required. One line naming the work.
 
 Output:
-  item     The root item this call created.
+  The invocation's `result`:
+    item <json>       The root item this call created.
 ```
 
 **Three levels of documentation, three different fates.** An author writes each
@@ -263,23 +276,23 @@ each parameter describes itself:
 | --- | --- | --- | --- |
 | the verb — *what it does* | the `Stream` property | **yes**, beside the `$ref` | no |
 | an **input** parameter | a field of the event interface | **yes**, in `$defs.<Event>.properties` | no |
-| an **output** parameter | a field of the result interface | **no** | no |
+| an **output** parameter | a field of the result interface | **yes**, on the declared result | **yes**, under `--help --json` |
 
 The first two are the same loss: emitted, then absent from the resolved schema
 the CLI is served, so they come back together
 ([#5637](https://github.com/commontoolsinc/labs/issues/5637)).
 
-The third is different in kind, and it is the one worth understanding. There is
-no structured description of an output parameter *anywhere*, no matter what the
-author writes — because the result type is not compiled at all. `Stream<E, R>`
-compiles `E` and drops `R`, so `$defs` on this pattern holds
-`AddItemEvent`, `AddChildEvent`, `BlockOnEvent`, `FinishEvent`,
-`RecordNoteEvent` and no `Result` interface of any kind. A comment on
-`AddItemResult.item` has nothing to be attached to.
+The third travels furthest, and it is the one worth understanding. A verb's
+declared result reaches `cf` **unresolved** — `--help --json` on `addItem`
+serves `properties.item` as a `$ref` into `$defs.ItemOutput` carrying
+`"description": "The root item this call created."`, the author's own comment,
+verbatim. Nothing strips it, because nothing resolves it. Where the input side
+loses its prose to `$ref` resolution, the output side keeps it.
 
-That is verbs plan item 1 — a verb's declared result reaching the runtime —
-and until it lands, output documentation has no home rather than a broken
-pipe.
+What drops it is the last step: the text page renders each result property as
+`name <placeholder>` and never reads the `description` beside it. So the prose
+is on the wire and one line of rendering away, which is a different problem
+from the two above and a much smaller one.
 
 The summary is worth one more note. An event *interface's* comment would be the
 other candidate for that line, and it is the one thing here that genuinely
@@ -287,19 +300,15 @@ never compiles — so sourcing the summary from the verb's own comment, which is
 already emitted, is both the smaller change and the better place for an author
 to write it.
 
-Three things are wrong with that page rather than missing from it.
-
-**`Output:` is false.** `addItem` declares a result and returns one; the value
-arrives on `invocation.result`. The handler branch of `renderPieceCallHelp`
-prints the fixed string regardless.
+Two things are missing from that page, and they are the same thing twice.
 
 **A flag's prose never arrives**, per the measurement above — the renderer is
 ready for it and the resolution does not carry it.
 
 **The verb's purpose is absent** for the same reason, not a different one: its
 comment is emitted and lost in the same step, and the page has no summary line
-to print it on even once it survives. `cf` can say what `addItem` takes and not
-what it is for.
+to print it on even once it survives. `cf` can say what `addItem` takes and
+hands back, and not what either is for.
 
 ## 3. Complete against the live piece **[today]**
 
@@ -313,7 +322,10 @@ Verb names and piece addresses complete against the space
 `packages/cli/lib/completion/providers.ts`), in bash and zsh.
 
 What does not complete is a result field — `--select 'it<TAB>'` has nothing to
-offer, because nothing in the system knows the result has a field called `item`.
+offer. The knowledge exists now: the help page above enumerates `item`, off the
+same declared result a completion provider would read. What is missing is the
+provider consulting it, which is the same wiring a derived default selection
+needs.
 
 ## 4. Create, and carry the address forward **[today]**
 
@@ -408,16 +420,15 @@ Declared results make an **output** self-describing; this is about what an
 
 | Gap | Needs |
 | --- | --- |
-| `Output:` claims a handler returns nothing | Nothing — it is wrong, not missing |
 | A flag's prose absent from its help page | Same loss as the row below — emitted into the `$def`, absent from the resolved schema the CLI is served |
 | A verb's purpose absent from its help page | A genuine emission gap, then a renderer one — an event interface's comment never compiles, and the page has no summary line |
 | A verb's own doc comment absent everywhere | Not emission — it is emitted and lost when the event `$ref` is resolved for the CLI |
-| A result field's prose | Item 1 first — there is no declared result on the wire to hang it on |
-| Result fields listed in help | A declared result |
-| `--select` completion, and refusal before the call | A declared result |
+| A result field's prose absent from the text page | Only the renderer — the description is already served under `--help --json`, beside the field it documents |
+| `--select` completion, and refusal before the call | A provider reading the declared result the help page already resolves |
 | An address accepted as an argument | The round-trip property above |
 
-Eight rows, six distinct gaps: the three prose rows are one problem seen from
-three sides — an author writes about a verb on its event interface, on an event
-field, or on the verb itself, and none of it reaches a caller. Of the six,
-three need no decision from anyone.
+Six rows, five distinct gaps: the three prose rows above the fourth are one
+problem seen from three sides — an author writes about a verb on its event
+interface, on an event field, or on the verb itself, and none of it reaches a
+caller. The fourth is not that problem: an output field's prose does reach the
+CLI, and only the text renderer drops it.
