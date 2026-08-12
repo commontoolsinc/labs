@@ -4,7 +4,7 @@
  * Test patterns (.test.tsx) are patterns that:
  * 1. Import and instantiate the pattern under test
  * 2. Define test steps as an array of { assertion } or { action } objects
- * 3. Return { tests: TestStep[] }
+ * 3. Return { [TESTS]: TestStep[] } under the reserved `[TESTS]` output key
  *
  * TestStep is a discriminated union:
  * - { assertion: Reactive<boolean> } from computed(() => condition)
@@ -14,7 +14,7 @@
  * that occur when mixing Cell and Stream types in the same array.
  *
  * Example:
- * tests: [
+ * [TESTS]: [
  *   { assertion: computed(() => game.phase === "playing") },
  *   { action: action(() => game.start.send(undefined)) },
  *   { assertion: computed(() => game.phase === "started") },
