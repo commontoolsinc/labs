@@ -17,8 +17,8 @@ import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/codec-common/BaseFabricInstance.ts";
-import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+} from "./codec-common/BaseFabricInstance.ts";
+import { BaseFabricPrimitive } from "./codec-common/BaseFabricPrimitive.ts";
 import { isFabricValue } from "./type-check.ts";
 
 /** Cache of confirmed deep-frozen objects. */

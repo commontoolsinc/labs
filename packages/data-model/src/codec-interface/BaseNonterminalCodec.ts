@@ -1,6 +1,6 @@
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/codec-interface/BaseFabricCodec.ts";
-import type { NonterminalCodec } from "@/codec-interface/interface.ts";
+import { BaseFabricCodec } from "./BaseFabricCodec.ts";
+import type { NonterminalCodec } from "./interface.ts";
 
 /**
  * Base class for a `NonterminalCodec`: one whose essential state is made of

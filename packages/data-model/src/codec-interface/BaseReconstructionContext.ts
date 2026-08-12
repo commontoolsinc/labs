@@ -5,7 +5,7 @@
  */
 
 import type { FabricInstance } from "@/interface.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import type { ReconstructionContext } from "./interface.ts";
 
 /**
  * Abstract base that supplies the `shouldDeepFreeze` getter from a

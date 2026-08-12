@@ -4,14 +4,14 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "@/codec-common/BaseFabricInstance.ts";
+} from "./BaseFabricInstance.ts";
 import {
   CODEC,
   type NonterminalCodec,
   type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
-import { ExplicitTagValue } from "@/codec-common/ExplicitTagValue.ts";
+import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 
 /**

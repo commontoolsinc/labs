@@ -17,8 +17,8 @@
 import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
-import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
+import type { ReconstructionContext } from "./codec-interface/interface.ts";
+import { EmptyReconstructionContext } from "./codec-interface/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodec } from "./codec-json/JsonCodec.ts";

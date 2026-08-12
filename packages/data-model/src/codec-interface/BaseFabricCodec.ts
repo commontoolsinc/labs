@@ -1,9 +1,6 @@
 import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
-import type {
-  FabricCodec,
-  ReconstructionContext,
-} from "@/codec-interface/interface.ts";
+import type { FabricCodec, ReconstructionContext } from "./interface.ts";
 
 /**
  * Base class for `FabricCodec` which provides commonly-needed functionality:

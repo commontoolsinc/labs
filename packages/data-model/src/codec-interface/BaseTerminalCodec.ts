@@ -1,5 +1,5 @@
-import { BaseFabricCodec } from "@/codec-interface/BaseFabricCodec.ts";
-import type { TerminalCodec } from "@/codec-interface/interface.ts";
+import { BaseFabricCodec } from "./BaseFabricCodec.ts";
+import type { TerminalCodec } from "./interface.ts";
 
 /**
  * Base class for a `TerminalCodec`: one whose essential state is already in the

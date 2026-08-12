@@ -7,8 +7,8 @@
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { FabricInstance } from "@/interface.ts";
-import type { ReconstructionContext } from "@/codec-interface/interface.ts";
-import { BaseReconstructionContext } from "@/codec-interface/BaseReconstructionContext.ts";
+import type { ReconstructionContext } from "./interface.ts";
+import { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
 
 /**
  * `ReconstructionContext` whose `getCell()` always throws. `shouldDeepFreeze`
