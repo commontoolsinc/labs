@@ -89,7 +89,11 @@ Waits split into two groups with different primitives.
   flip with no DOM mutation (for example a runtime global being set). The
   predicate is serialized and runs in the page, so it closes over nothing from
   the test module — inline any collection it needs, and pass values in through
-  `args`.
+  `args`. A predicate that returns a truthy value instead of `true` hands that
+  value back to the caller in the same binding notification, so it must be a
+  `PageConditionValue`: a plain JSON value. Maps, functions, class instances,
+  cycles, and other lossy JSON inputs are rejected at the boundary instead of
+  being changed silently.
 - `awaitViewSettled(page)` resolves once the worker has settled reactively, the
   resulting vdom batch has crossed to the main thread and been applied, and Lit
   has finished its update cycle. This is the "is the control interactive yet"

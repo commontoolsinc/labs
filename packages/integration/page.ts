@@ -19,6 +19,7 @@ import type {
   SelectorOptions,
 } from "./astral-adapter.ts";
 import {
+  measureRetainedContentQuad,
   queryAllPierce,
   queryPierce,
   waitForPierceSelector,
@@ -757,7 +758,7 @@ export class Page extends EventTarget {
     element: AstralElementHandle,
     options?: Parameters<AstralElementHandle["click"]>[0],
   ): Promise<void> {
-    const aim = await aimAtElement(element, options?.offset);
+    const aim = await aimAtElement(this.page!, element, options?.offset);
     if ("unclickable" in aim) {
       throw new Error(`Cannot click ${describeAimTarget(aim)}`);
     }
@@ -852,15 +853,25 @@ export type AimResult =
     detail?: string;
   };
 
+type RetainedAim = {
+  retained: true;
+  tag: string;
+  id: string;
+  rootHost?: string;
+  width: number;
+  height: number;
+  pageWidth: number;
+  pageHeight: number;
+  rect: { x: number; y: number; width: number; height: number };
+};
+
 /**
- * Scroll `element` into view and measure the point to click, both inside a
- * single page turn.
+ * Scroll `element` into view and measure the point to click.
  *
- * Aiming is one turn on purpose. Scrolling and measuring as two protocol
- * commands leaves the page free to relayout or rebuild between them, and the
- * second command then measures something other than what the first scrolled to.
- * Doing both in the page means the coordinates describe the element as it was
- * at one instant, and the only remaining gap is the one dispatch that follows.
+ * A center aim scrolls and measures in one page turn. An offset aim scrolls and
+ * retains the exact element in that turn, then asks CDP for its composed content
+ * quad. The remote-object reference survives DOM-agent node-id invalidation and
+ * CDP accounts for ancestor transforms, 3D projection, and SVG layout.
  *
  * The point is the middle of the part of the element's box that lies inside the
  * page, which for an element the page has room for is the middle of the whole
@@ -875,17 +886,22 @@ export type AimResult =
  * yield `unclickable` naming what is wrong with it, rather than an empty
  * measurement the caller has to guess at.
  */
+let aimElementSequence = 0;
+
 async function aimAtElement(
+  page: AstralPage,
   element: AstralElementHandle,
   offset?: { x: number; y: number },
 ): Promise<AimResult> {
+  const retainedKey = offset
+    ? `__common_tools_aim_element_${++aimElementSequence}`
+    : null;
   try {
-    return await element.evaluate(
+    const prepared = await element.evaluate(
       (
         el: Element,
-        offsetX: number | null,
-        offsetY: number | null,
-      ): AimResult => {
+        retainedKey: string | null,
+      ): AimResult | RetainedAim => {
         const describe = () => ({
           tag: el.tagName.toLowerCase(),
           id: el.id,
@@ -927,32 +943,79 @@ async function aimAtElement(
         const right = Math.min(rect.x + rect.width, pageWidth);
         const top = Math.max(rect.y, 0);
         const bottom = Math.min(rect.y + rect.height, pageHeight);
-        // A caller's offset names a point on the element, so it is used as
-        // given; what it names still has to be a point the page has.
-        const point = offsetX === null || offsetY === null
-          ? { x: (left + right) / 2, y: (top + bottom) / 2 }
-          : { x: rect.x + offsetX, y: rect.y + offsetY };
-        if (
-          right <= left || bottom <= top ||
-          point.x < 0 || point.x >= pageWidth ||
-          point.y < 0 || point.y >= pageHeight
-        ) {
+        if (right <= left || bottom <= top) {
           return {
             unclickable: "off-page",
             ...describe(),
             width: rect.width,
             height: rect.height,
             detail: `box ${JSON.stringify(rect)}, ` +
-              `point ${JSON.stringify(point)}, ` +
               `page ${
                 JSON.stringify({ width: pageWidth, height: pageHeight })
               }`,
           };
         }
-        return point;
+        if (retainedKey !== null) {
+          Object.defineProperty(globalThis, retainedKey, {
+            configurable: true,
+            value: el,
+          });
+          return {
+            retained: true,
+            ...describe(),
+            width: rect.width,
+            height: rect.height,
+            pageWidth,
+            pageHeight,
+            rect: {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            },
+          };
+        }
+
+        return { x: (left + right) / 2, y: (top + bottom) / 2 };
       },
-      { args: [offset?.x ?? null, offset?.y ?? null] },
+      { args: [retainedKey] },
     );
+    if (!("retained" in prepared)) return prepared;
+
+    const contentQuad = await measureRetainedContentQuad(page, retainedKey!);
+    let contentOrigin = contentQuad[0];
+    for (const point of contentQuad) {
+      // This deliberately mirrors published Astral's definition of top-left.
+      if (point.x < contentOrigin.x && point.y < contentOrigin.y) {
+        contentOrigin = point;
+      }
+    }
+    const point = {
+      x: contentOrigin.x + offset!.x,
+      y: contentOrigin.y + offset!.y,
+    };
+    if (
+      point.x < 0 || point.x >= prepared.pageWidth ||
+      point.y < 0 || point.y >= prepared.pageHeight
+    ) {
+      return {
+        unclickable: "off-page",
+        tag: prepared.tag,
+        id: prepared.id,
+        rootHost: prepared.rootHost,
+        width: prepared.width,
+        height: prepared.height,
+        detail: `box ${JSON.stringify(prepared.rect)}, ` +
+          `point ${JSON.stringify(point)}, ` +
+          `page ${
+            JSON.stringify({
+              width: prepared.pageWidth,
+              height: prepared.pageHeight,
+            })
+          }`,
+      };
+    }
+    return point;
   } catch (error) {
     // A handle whose node the DOM agent no longer knows about cannot be
     // resolved to a page object at all. That happens to every outstanding
