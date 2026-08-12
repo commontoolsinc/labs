@@ -256,19 +256,20 @@ describe("main command", () => {
 
   it("shows exec command help before trying to resolve a mounted file", async () => {
     const { code, stdout } = await cf("exec --help");
+    const help = stripAnsi(stdout.join("\n"));
 
     expect(code).toBe(0);
-    expect(stdout.join("\n")).toContain(
+    expect(help).toContain(
       "Execute a mounted callable file from a Common Fabric FUSE mount.",
     );
-    expect(stdout.join("\n")).not.toContain("not within a mounted cf fuse");
+    expect(help).not.toContain("not within a mounted cf fuse");
   });
 
   it("shows help for the direct FUSE daemon entry point", async () => {
     const { code, stdout } = await cf("fuse-daemon --help");
 
     expect(code).toBe(0);
-    expect(stdout.join("\n")).toContain(
+    expect(stripAnsi(stdout.join("\n"))).toContain(
       "Usage:   cf fuse-daemon <mountpoint> [options]",
     );
   });

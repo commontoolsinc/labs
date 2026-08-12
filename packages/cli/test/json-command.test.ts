@@ -189,9 +189,9 @@ describe("JSON command contracts", () => {
     const wish = await cf("wish --help");
 
     expect(pieceGet.code).toBe(0);
-    expect(pieceGet.stdout.join("\n")).toContain("--json");
+    expect(stripAnsi(pieceGet.stdout.join("\n"))).toContain("--json");
     expect(wish.code).toBe(0);
-    expect(wish.stdout.join("\n")).toContain("--json");
+    expect(stripAnsi(wish.stdout.join("\n"))).toContain("--json");
   });
 
   it("rejects --json forwarded to fuse-daemon", async () => {

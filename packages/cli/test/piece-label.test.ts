@@ -647,7 +647,7 @@ describe("cf piece CFC labels", () => {
     expect(stripAnsi(getHelp.stdout.join("\n"))).toContain(
       "effective CFC label view",
     );
-    expect(getHelp.stdout.join("\n")).toContain("--json");
+    expect(stripAnsi(getHelp.stdout.join("\n"))).toContain("--json");
 
     const setHelp = await cf("piece set-label --help");
     expect(setHelp.code).toBe(0);
