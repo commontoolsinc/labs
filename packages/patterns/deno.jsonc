@@ -21,17 +21,17 @@
   // instantiates it in the runtime; it is not a `deno test`. Colocate it next
   // to the pattern it exercises. The `.tsx` extension alone routes it here: the
   // `test` task's `**/*.test.ts` glob never matches `.test.tsx`. CI runs these
-  // in the "Pattern Unit Tests" job, split into chunks by filename (the
-  // `pattern-tests` target in tasks/integration.ts), and they are the only
-  // source of authored-pattern coverage (see docs/development/COVERAGE.md).
+  // in the "Pattern Unit Tests" job, assigned to chunks by a stable filename
+  // hash (the `pattern-tests` target in tasks/integration.ts), and they are the
+  // only source of authored-pattern coverage (see docs/development/COVERAGE.md).
   //
   // Lane 3 — integration test. A `*.test.ts` file under `integration/` that
   // needs a running shell/toolshed/browser (PiecesController, ShellIntegration,
   // end-to-end flows). It is run by `deno task integration`. CI runs these in
-  // the "Pattern Integration Tests" job across four shards; a heavy new file
-  // can be pinned to a shard in tasks/select-pattern-integration-files.ts, and
-  // otherwise falls back to round-robin. Reload-specific cases live in
-  // integration/reload/ and run via `integration:reload`.
+  // the "Pattern Integration Tests" job across its shard matrix. Measured
+  // files have weights in tasks/select-pattern-integration-files.ts.
+  // Unmeasured files receive the default weight. Reload-specific cases live
+  // in integration/reload/ and run via `integration:reload`.
   //
   // Every workspace member must define a `test` task. The root runner
   // (tasks/test.ts) calls `deno task test` in each member, and a member with no

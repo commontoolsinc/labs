@@ -183,7 +183,7 @@ export class CFRender extends BaseElement {
       background-repeat: no-repeat;
       background-size: 250% 100%;
       box-shadow: inset 0 0 2.5rem rgba(129, 140, 248, 0.38);
-      animation: cf-piece-menu-shine 1.7s ease-in-out infinite;
+      animation: cf-piece-menu-shine 1.7s ease-in-out;
     }
 
     @keyframes cf-piece-menu-shine {

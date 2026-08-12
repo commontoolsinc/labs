@@ -294,25 +294,42 @@ NEW_COVERAGE_BASELINE
 ```
 
 When that PR merges, the main run's coverage metrics become the new ratchet
-baseline for later PRs. The check still requires the full expected coverage
-artifact set during that reset cycle. Jobs with no reportable covered files
-upload an empty LCOV report, so a missing artifact means the report upload
-itself failed.
+baseline for later PRs, and no run before it is one: the accepted level is what
+later runs are held to, and nothing older can undo it. That floor applies to the
+metrics the acceptance named, or to every coverage metric for the broad reset
+marker. It reaches only the PRs whose base-branch commit already contains the
+acceptance; a PR whose run started earlier is gated against the ancestry it does
+contain, and picks the floor up when a later run of it merges the acceptance. The
+check still requires the full expected coverage artifact set during that reset
+cycle. Jobs with no reportable covered files upload an empty LCOV report, so a
+missing artifact means the report upload itself failed.
 
 Each run writes a per-run baseline artifact recording its coverage-debt metrics
 and its compile cache states. It is named `perf-metrics` for historical reasons
 — it once also carried CI timing metrics for the removed performance gate — and
 keeps that name so the ratchet needs no migration; a run from before the gate
-was removed reads as a valid baseline unchanged. A later PR run reads its ratchet
-baseline from the `perf-metrics` artifact of the `main` run for the base-branch
-commit it merged, or of the nearest ancestor of that commit which has one; there
-is no separate history store. The workflow downloads the current run's
-`coverage-profile-*` artifacts before starting `tasks/coverage-check.ts`.
-`COVERAGE_ARTIFACTS_DIR` points the script at one subdirectory per artifact. The
-download step checks the artifact digests. The script separately checks the
-expected artifact names (`EXPECTED_COVERAGE_ARTIFACT_NAMES`). It also rejects an
-artifact containing no coverage files. A manual run without the environment
-variable uses the GitHub API download path instead.
+was removed reads as a valid baseline unchanged. The file records each metric's
+uncovered-line count under a `durationSeconds` key, for the same reason the
+artifact keeps its name.
+
+A later PR run reads its ratchet baseline from the `perf-metrics` artifact of the
+`main` run for the base-branch commit it merged, or of the nearest ancestor of
+that commit which has one; there is no separate history store. It finds that run
+by ordering the recent `main` runs from the nearest ancestor of that commit
+outwards — leaving out the runs for commits it does not contain — and then
+reading one run at a time, stopping as soon as every metric has a baseline.
+Usually the nearest run measured every metric, and that is the only baseline
+artifact read; reading further back happens when a run uploaded nothing, ran
+cold, or measured a metric no nearer run did. The runs the walk read are the
+ones the "Baseline source runs" log group names.
+
+The workflow downloads the current run's `coverage-profile-*` artifacts before
+starting `tasks/coverage-check.ts`. `COVERAGE_ARTIFACTS_DIR` points the script at
+one subdirectory per artifact. The download step checks the artifact digests. The
+script separately checks the expected artifact names
+(`EXPECTED_COVERAGE_ARTIFACT_NAMES`). It also rejects an artifact containing no
+coverage files. A manual run without the environment variable uses the GitHub API
+download path instead.
 
 ## Compile cache state and cold runs
 

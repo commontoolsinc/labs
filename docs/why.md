@@ -23,6 +23,9 @@ already inside. Nobody had to conspire; the rule did the work, and the
 entity that is supposed to be working for you ends up holding power over
 you.
 
+Our current physics of trust are insanely hard to navigate, even for
+professionals. Our current physics of trust are dangerous by default.
+
 The patches never addressed it, because they could not. A permission
 prompt is responsibility laundering — technically you consented, and the
 consent is hollow, and the company you consented to may belong to
@@ -41,10 +44,9 @@ to write for an empty ecosystem.
 
 So we built a runtime on the opposite rule. The software is untrusted,
 and safety attaches to the data. Every datum carries its own policies,
-the way GPL code carries its license, and anything derived from it
-carries them too. Code that cannot prove it honors those policies does
-not compile. What it adds up to is a distributed, trusted microkernel
-for networked software in the AI era.
+and anything derived from it carries them too. Code that cannot prove it
+honors those policies does not compile. What it adds up to is a
+distributed, trusted microkernel for networked software in the AI era.
 
 Concretely. A program that imports your mail gets a token that could
 read all of it. In the fabric that token carries four lines: never
@@ -52,7 +54,9 @@ logged, never leaves the verified runtime, only ever sent to the one
 place that issued it, and only in the one field that place expects. That
 is the whole list. Any program can hold that token now, including one a
 model wrote thirty seconds ago, because the rules ride with the data
-instead of with the program's good intentions.
+instead of with the program's good intentions. In the fabric, how your
+data may be used is structurally aligned with your interests — not
+promised to be, or audited to be. Structurally.
 
 Identity is a keypair, not an account. There is nothing to suspend, and
 no one to ask.

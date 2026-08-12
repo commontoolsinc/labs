@@ -30,6 +30,7 @@ decision is reversed or superseded).
 - [Content-addressed action identity](content-addressed-action-identity.md)
 - [Content-addressed module loading](module-loading.md)
 - [Piece source lifecycle](piece-source-lifecycle.md)
+- [Hosted pattern authoring](hosted-pattern-authoring.md)
 - [Scoped cell instances](scoped-cell-instances.md)
 
 ### Data, storage, and execution

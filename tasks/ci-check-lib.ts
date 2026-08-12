@@ -93,9 +93,6 @@ export const COVERAGE_LOCAL_CHECK_COMMAND = [
   '  --profile-dir="$(pwd)/coverage/raw/local" --root="$(pwd)"',
 ].join("\n");
 
-/** Concurrency limit for API calls. */
-export const API_CONCURRENCY = 5;
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -121,16 +118,29 @@ interface ArtifactsResponse {
   artifacts: Artifact[];
 }
 
-export interface TimingSample {
+/** What one `main` run measured for one coverage-debt metric. */
+export interface BaselineSample {
+  runId: number;
+  sha: string;
+  createdAt: string;
+  uncoveredLines: number;
+}
+
+/**
+ * One metric as the baseline artifact stores it. The `durationSeconds` and
+ * `runUrl` keys are the ones that file has always carried: `durationSeconds`
+ * holds the uncovered-line count, and `runUrl` is the run's GitHub page. Both
+ * are kept so a file written before the performance gate was removed still
+ * parses, and a file written now still parses in a checkout that predates this
+ * shape.
+ */
+export interface MetricRecord {
+  name: string;
   runId: number;
   runUrl: string;
   sha: string;
   createdAt: string;
   durationSeconds: number;
-}
-
-export interface MetricRecord extends TimingSample {
-  name: string;
 }
 
 /**
@@ -186,11 +196,6 @@ export interface CoverageBaselineFile {
    * when no cache-state artifact recorded for the run.
    */
   compileCacheStates?: CompileCacheStates;
-}
-
-export interface MetricTimeline {
-  name: string;
-  samples: TimingSample[];
 }
 
 export interface PRInfo {
@@ -368,31 +373,6 @@ export async function githubPatch<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Concurrency limiter
-// ---------------------------------------------------------------------------
-
-export async function mapConcurrent<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-
-  async function worker() {
-    while (next < items.length) {
-      const idx = next++;
-      results[idx] = await fn(items[idx]);
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, worker),
-  );
-  return results;
-}
-
-// ---------------------------------------------------------------------------
 // Fetch artifacts
 // ---------------------------------------------------------------------------
 
@@ -441,8 +421,13 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
   return [...byName.values()];
 }
 
+/** The GitHub page of a workflow run, as the baseline file records it. */
+function workflowRunUrl(runId: number): string {
+  return `https://github.com/${REPO}/actions/runs/${runId}`;
+}
+
 export function serializeCoverageBaseline(
-  metrics: Map<string, TimingSample>,
+  metrics: Map<string, BaselineSample>,
   compileCacheStates?: CompileCacheStates,
 ): CoverageBaselineFile {
   const file: CoverageBaselineFile = {
@@ -457,48 +442,23 @@ export function serializeCoverageBaseline(
 }
 
 function metricsToRecords(
-  metrics: Map<string, TimingSample>,
+  metrics: Map<string, BaselineSample>,
 ): MetricRecord[] {
   return [...metrics.entries()]
-    .map(([name, sample]) => ({ name, ...sample }))
+    .map(([name, sample]) => ({
+      name,
+      runId: sample.runId,
+      runUrl: workflowRunUrl(sample.runId),
+      sha: sample.sha,
+      createdAt: sample.createdAt,
+      durationSeconds: sample.uncoveredLines,
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-export function parseCoverageBaseline(
-  content: string,
-): Map<string, TimingSample> {
-  const parsed = JSON.parse(content) as Partial<CoverageBaselineFile>;
-  if (parsed.version !== 1 || !Array.isArray(parsed.metrics)) {
-    throw new Error("Unsupported coverage baseline file format.");
-  }
-
-  const metrics = new Map<string, TimingSample>();
-  for (const metric of parsed.metrics) {
-    if (
-      typeof metric.name !== "string" ||
-      typeof metric.runId !== "number" ||
-      typeof metric.runUrl !== "string" ||
-      typeof metric.sha !== "string" ||
-      typeof metric.createdAt !== "string" ||
-      typeof metric.durationSeconds !== "number"
-    ) {
-      throw new Error("Invalid coverage baseline metric record.");
-    }
-
-    metrics.set(metric.name, {
-      runId: metric.runId,
-      runUrl: metric.runUrl,
-      sha: metric.sha,
-      createdAt: metric.createdAt,
-      durationSeconds: metric.durationSeconds,
-    });
-  }
-  return metrics;
 }
 
 /** Parsed coverage baseline plus the run's compile cache states, when tagged. */
 export interface CoverageBaselineDetailed {
-  metrics: Map<string, TimingSample>;
+  metrics: Map<string, BaselineSample>;
   /** Null when the file recorded no compile cache states. */
   compileCacheStates: CompileCacheStates | null;
 }
@@ -508,16 +468,40 @@ const COMPILE_CACHE_FAMILY_SET: ReadonlySet<string> = new Set(
 );
 
 /**
- * Parse a perf metrics file, also surfacing its optional compile cache
- * states. Metric validation matches {@link parseCoverageBaseline}; unknown
- * families and invalid state values are dropped rather than failing, so a
- * malformed tag degrades to "unknown" instead of losing the run's metrics.
+ * Parse a baseline artifact file into its metrics and its optional compile
+ * cache states. A metric record missing a field the ratchet reads fails the
+ * whole file, because a baseline that silently lost a metric would read as a
+ * group with no debt to beat. Unknown cache families and invalid state values
+ * are dropped instead, so a malformed tag degrades to "unknown" rather than
+ * losing the run's metrics.
  */
 export function parseCoverageBaselineDetailed(
   content: string,
 ): CoverageBaselineDetailed {
-  const metrics = parseCoverageBaseline(content);
   const parsed = JSON.parse(content) as Partial<CoverageBaselineFile>;
+  if (parsed.version !== 1 || !Array.isArray(parsed.metrics)) {
+    throw new Error("Unsupported coverage baseline file format.");
+  }
+
+  const metrics = new Map<string, BaselineSample>();
+  for (const metric of parsed.metrics) {
+    if (
+      typeof metric.name !== "string" ||
+      typeof metric.runId !== "number" ||
+      typeof metric.sha !== "string" ||
+      typeof metric.createdAt !== "string" ||
+      typeof metric.durationSeconds !== "number"
+    ) {
+      throw new Error("Invalid coverage baseline metric record.");
+    }
+
+    metrics.set(metric.name, {
+      runId: metric.runId,
+      sha: metric.sha,
+      createdAt: metric.createdAt,
+      uncoveredLines: metric.durationSeconds,
+    });
+  }
 
   const rawStates = parsed.compileCacheStates;
   if (rawStates === undefined || rawStates === null) {
@@ -537,7 +521,7 @@ export function parseCoverageBaselineDetailed(
 
 export async function writeCoverageBaselineFile(
   path: string,
-  metrics: Map<string, TimingSample>,
+  metrics: Map<string, BaselineSample>,
   compileCacheStates?: CompileCacheStates,
 ): Promise<void> {
   await Deno.writeTextFile(
@@ -1309,76 +1293,14 @@ export function formatOverrideSuggestion(value: number): string {
   return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
 }
 
-// ---------------------------------------------------------------------------
-// Timeline helpers
-// ---------------------------------------------------------------------------
-
-/** Add a sample to a timeline map, creating the timeline if necessary. */
-export function addSample(
-  timelines: Map<string, MetricTimeline>,
-  name: string,
-  sample: TimingSample,
-): void {
-  let timeline = timelines.get(name);
-  if (!timeline) {
-    timeline = { name, samples: [] };
-    timelines.set(name, timeline);
-  }
-  timeline.samples.push(sample);
-}
-
 /**
- * Apply baseline overrides to timelines by truncating samples before the
- * latest override point.
- *
- * `overridesBySha` maps commit SHA -> BaselineOverrides parsed from the
- * merged PR for that commit.  When a commit has a per-metric override, or a
- * whole-coverage reset for coverage-debt metrics, we discard all samples for
- * the affected metrics that precede that commit (keeping the override commit's
- * sample and everything after).
+ * Whether a merged PR's overrides accept the debt one metric carries, either
+ * with a per-metric acceptance or with the whole-coverage reset marker.
  */
-export function applyBaselineOverrides(
-  timelines: Map<string, MetricTimeline>,
-  overridesBySha: Map<string, BaselineOverrides>,
-): void {
-  // Find the latest override commit index for each metric
-  for (const [metricName, timeline] of timelines) {
-    let latestOverrideIdx = -1;
-
-    for (let i = 0; i < timeline.samples.length; i++) {
-      const sha = timeline.samples[i].sha;
-      const overrides = overridesBySha.get(sha);
-      if (!overrides) continue;
-
-      if (
-        overrides.metrics.has(metricName) ||
-        (overrides.coverageBaselineReset &&
-          isCoverageDebtMetric(metricName))
-      ) {
-        latestOverrideIdx = i;
-      }
-    }
-
-    if (latestOverrideIdx > 0) {
-      timeline.samples = timeline.samples.slice(latestOverrideIdx);
-    }
-  }
-}
-
-/**
- * The latest sample whose run is not known-cold, for the coverage-debt ratchet
- * that compares against the most recent baseline. A cold main run covers
- * cold-compile-only branches, so ratcheting against its lower debt would fail
- * later warm PRs with phantom regressions. Falls back to the last sample when
- * every sample is known-cold, preserving the override-truncation reset
- * semantics of `samples.at(-1)`.
- */
-export function latestNonColdSample(
-  samples: TimingSample[],
-  isRunCold: (runId: number) => boolean,
-): TimingSample | undefined {
-  for (let i = samples.length - 1; i >= 0; i--) {
-    if (!isRunCold(samples[i].runId)) return samples[i];
-  }
-  return samples.at(-1);
+export function acceptsCoverageDebt(
+  overrides: BaselineOverrides,
+  metric: string,
+): boolean {
+  return overrides.metrics.has(metric) ||
+    (overrides.coverageBaselineReset && isCoverageDebtMetric(metric));
 }

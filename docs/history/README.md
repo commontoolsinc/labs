@@ -87,6 +87,11 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cf-view-parser-adapter-spike-2026-08.md](packages/cli/cf-view-parser-adapter-spike-2026-08.md)
+  — Python, Go, shell, and HTML parser-adapter measurements, August 2026.
+- [cf-view-parser-adapter-spike-2026-08-methodology.md](packages/cli/cf-view-parser-adapter-spike-2026-08-methodology.md)
+  — retained fixtures and procedure for the parser-adapter measurements,
+  August 2026.
 - [estuary-source-migration-2026-08-04.md](packages/patterns/lunch-poll/estuary-source-migration-2026-08-04.md)
   — rehearsal and live `setsrc` moving the Estuary lunch poll onto the mainline
   pattern, August 2026.
@@ -313,6 +318,10 @@ One line per archived document; each document's header carries the fuller
   an eager default-route resolution in the constructor, why the benchmark
   times only construction, and why the guard for it counts URL parses rather
   than comparing values, August 2026.
+- [2026-08-schemaless-read-membership-walk.md](development/performance/2026-08-schemaless-read-membership-walk.md)
+  — why the schemaless whole-array read benchmarks stepped by two to three
+  times: the storage read path re-derived, per read, that what the replica
+  holds is a `FabricValue`, August 2026.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`
