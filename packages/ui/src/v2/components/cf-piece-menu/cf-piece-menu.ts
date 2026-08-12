@@ -776,6 +776,9 @@ export class CFPieceMenu extends BaseElement {
   private accessor revisionReadError: string | undefined = undefined;
 
   @state()
+  private accessor revisionReadPending = false;
+
+  @state()
   private accessor readError: string | undefined = undefined;
 
   @state()
@@ -1220,6 +1223,7 @@ export class CFPieceMenu extends BaseElement {
     this.sourceRevision = undefined;
     this.revisionSource = undefined;
     this.revisionReadError = undefined;
+    this.revisionReadPending = false;
   }
 
   #onKeyDown = (e: KeyboardEvent) => {
@@ -1381,11 +1385,16 @@ export class CFPieceMenu extends BaseElement {
     event.preventDefault();
     event.stopPropagation();
     const cell = this.cell;
-    if (cell === undefined) return;
+    if (
+      cell === undefined ||
+      (this.revisionReadPending &&
+        this.sourceRevision?.revisionId === revision.revisionId)
+    ) return;
     const token = ++this.revisionReadToken;
     this.sourceRevision = revision;
     this.revisionSource = undefined;
     this.revisionReadError = undefined;
+    this.revisionReadPending = true;
     this.selectedFile = 0;
     this.panel = "source";
     void this.updateComplete.then(() => {
@@ -1407,6 +1416,8 @@ export class CFPieceMenu extends BaseElement {
       this.revisionReadError = error instanceof Error
         ? error.message
         : String(error);
+    } finally {
+      if (token === this.revisionReadToken) this.revisionReadPending = false;
     }
   }
 
@@ -2176,14 +2187,28 @@ export class CFPieceMenu extends BaseElement {
 
   #renderOrigin(source: PieceSourceView): TemplateResult {
     const origin = describeOrigin(source.origin);
+    const originView = source.origin?.kind === "fabric-piece"
+      ? fabricPieceNavigation(source.origin.url, source.space)
+      : undefined;
     return html`
       <dl class="facts">
         <dt>Origin</dt>
         <dd class="prose">
           ${origin.label}${source.origin
-            ? html`
-              — <code>${source.origin.url}</code>
-            `
+            ? originView
+              ? html`
+                —
+                <a
+                  class="text-link"
+                  href="${navigationHref(originView)}"
+                  test-id="piece-source-origin-current"
+                  @click="${(event: MouseEvent) =>
+                    this.#navigate(event, originView)}"
+                ><code>${source.origin.url}</code></a>
+              `
+              : html`
+                — <code>${source.origin.url}</code>
+              `
             : nothing}
           <div class="note">${origin.detail}</div>
         </dd>
@@ -2363,6 +2388,8 @@ export class CFPieceMenu extends BaseElement {
             type="button"
             class="text-link"
             test-id="piece-source-view-${revision.revisionId}"
+            ?disabled="${this.revisionReadPending &&
+              this.sourceRevision?.revisionId === revision.revisionId}"
             @click="${(event: MouseEvent) =>
               this.#showRevisionSource(event, revision)}"
           >view source</button>
