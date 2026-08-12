@@ -445,6 +445,7 @@ export class JsonCodec implements SerializationContext<string> {
           targetIndex++;
         }
       }
+
       // The total is bounded here rather than each advance being bounded as
       // it happens, because both a single run and the running total can pass
       // what an array may hold, and one check at the end covers both. Beyond

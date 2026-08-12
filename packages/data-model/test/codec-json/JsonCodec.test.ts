@@ -716,6 +716,20 @@ describe("JsonCodec", () => {
       );
     });
 
+    it("places an entry at the last index a run can leave free", () => {
+      // The bound is on length, where the largest index is one less, so this
+      // is where an off-by-one would show: the entry lands at the last legal
+      // index and the array is exactly as long as one may be. A step further
+      // and the entry would become a plain property rather than an element,
+      // which the previous case is what catches.
+      const result = decodeArray(
+        [{ "/hole": (2 ** 32 - 1) - 1 }, "z"],
+      ) as FabricValue[];
+
+      expect(result.length).toBe(2 ** 32 - 1);
+      expect(result[(2 ** 32 - 1) - 1]).toBe("z");
+    });
+
     it("decodes a run reaching exactly the array maximum", () => {
       const result = decodeArray([{ "/hole": 2 ** 32 - 1 }]) as FabricValue[];
 
