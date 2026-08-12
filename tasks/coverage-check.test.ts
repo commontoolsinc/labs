@@ -25,22 +25,16 @@ import {
   fetchAncestorRanks,
   fetchArtifactsForRunBestEffort,
   fetchBaselineRunsForCheck,
-  fetchCommitsBehindMain,
   fetchGroupsChangedOnBase,
   fetchLatestBaselineRunSha,
   fetchMainHeadSha,
   fetchPRForCommitWithError,
-  formatBaselineSourceRunAge,
-  formatCommitDistance,
   formatCompileCacheStates,
   formatErrorForLog,
   formatMetricDelta,
   formatMetricValueForTable,
-  formatRelativeAge,
-  formatRelativeDuration,
   githubApiOrSkip,
   isComparableBaseline,
-  logBaselineSourceRuns,
   main,
   metricTableRows,
   newestArtifactNamed,
@@ -52,12 +46,10 @@ import {
   reportBaselineContextResults,
   reportBaselineDistance,
   reportBaselineRunAvailability,
-  reportPRLookupResults,
   reportUngatedGroups,
   type Row,
   selectBaselines,
   selectMergedPRForCommit,
-  summarizeBaselinePRLookups,
   validateBaselineRunsForMainHead,
   walkBaselineRuns,
   workflowRunsPathForBaseline,
@@ -659,97 +651,6 @@ Deno.test("fetchBaselineRunsForCheck fetches main head and baseline runs", async
   assertStringIncludes(logs.join("\n"), "Current main head");
 });
 
-Deno.test("relative duration formatting uses two readable parts", () => {
-  assertEquals(formatRelativeDuration(45), "45 seconds");
-  assertEquals(formatRelativeDuration(65), "1 minute 5 seconds");
-  assertEquals(
-    formatRelativeDuration(2 * 60 * 60 + 3 * 60 + 4),
-    "2 hours 3 minutes",
-  );
-  assertEquals(
-    formatRelativeDuration(3 * 24 * 60 * 60 + 2 * 60 * 60),
-    "3 days 2 hours",
-  );
-  assertEquals(formatRelativeDuration(Number.NaN), "unknown");
-});
-
-Deno.test("relative age formatting compares two timestamps", () => {
-  assertEquals(
-    formatRelativeAge(
-      "2026-06-18T10:00:00Z",
-      "2026-06-18T12:03:04Z",
-    ),
-    "2 hours 3 minutes",
-  );
-  assertEquals(
-    formatRelativeAge("not a date", "2026-06-18T12:03:04Z"),
-    "unknown",
-  );
-});
-
-Deno.test("commit distance formatting handles known and unknown values", () => {
-  assertEquals(formatCommitDistance(0), "0 commits");
-  assertEquals(formatCommitDistance(1), "1 commit");
-  assertEquals(formatCommitDistance(12), "12 commits");
-  assertEquals(formatCommitDistance(null), "an unknown number of commits");
-});
-
-Deno.test("baseline source run age combines time and commit distance", () => {
-  assertEquals(
-    formatBaselineSourceRunAge(
-      "2026-06-18T10:00:00Z",
-      "2026-06-18T12:03:04Z",
-      7,
-    ),
-    "created 2 hours 3 minutes ago; 7 commits behind current main",
-  );
-  assertEquals(
-    formatBaselineSourceRunAge("not a date", "2026-06-18T12:03:04Z", null),
-    "age unknown; an unknown number of commits behind current main",
-  );
-});
-
-Deno.test("fetchCommitsBehindMain reports zero for the current main commit", async () => {
-  assertEquals(await fetchCommitsBehindMain(SHA_A, SHA_A), 0);
-});
-
-Deno.test("fetchCommitsBehindMain reads GitHub compare distance", async () => {
-  const result = await withMockFetch(
-    (input) => {
-      assertStringIncludes(String(input), `/compare/${SHA_A}...${SHA_B}`);
-      return new Response(JSON.stringify({ ahead_by: 3 }));
-    },
-    () => fetchCommitsBehindMain(SHA_A, SHA_B),
-  );
-
-  assertEquals(result, 3);
-});
-
-Deno.test("fetchCommitsBehindMain treats malformed compare data as unknown", async () => {
-  const result = await withMockFetch(
-    () => new Response(JSON.stringify({ ahead_by: "3" })),
-    () => fetchCommitsBehindMain(SHA_A, SHA_B),
-  );
-
-  assertEquals(result, null);
-});
-
-Deno.test("fetchCommitsBehindMain warns and continues after compare failure", async () => {
-  const captured = await captureConsoleAsync(() =>
-    withMockFetch(
-      () => new Response("missing", { status: 404 }),
-      () => fetchCommitsBehindMain(SHA_A, SHA_B),
-    )
-  );
-
-  assertEquals(captured.result, null);
-  assertStringIncludes(
-    captured.warnings.join("\n"),
-    "could not compare baseline",
-  );
-  assertStringIncludes(captured.warnings.join("\n"), SHA_A.slice(0, 8));
-});
-
 Deno.test("fetchPRForCommitWithError returns selected PR metadata", async () => {
   const pr = makePR(42, "2026-06-18T00:00:00Z");
   const result = await withMockFetch(
@@ -908,7 +809,7 @@ Deno.test("currentWorkflowRunFromEvent reads event and environment metadata", ()
   }
 });
 
-Deno.test("logBaselineSourceRuns prints age, PR, lookup, and artifact details", () => {
+Deno.test("reportBaselineContextResults lists each run's PR and artifact", () => {
   const contexts: BaselineRunContext[] = [
     {
       run: makeRun(1, SHA_A, "2026-06-18T10:00:00Z"),
@@ -919,94 +820,56 @@ Deno.test("logBaselineSourceRuns prints age, PR, lookup, and artifact details", 
       ],
       pr: makePR(10, "2026-06-18T00:00:00Z"),
       prLookupError: null,
-      commitsBehindMain: 0,
     },
     {
       run: makeRun(2, SHA_B, "2026-06-18T11:00:00Z"),
       artifacts: [],
       pr: null,
-      prLookupError: new Error("lookup failed\nsecond line"),
-      commitsBehindMain: null,
-    },
-    {
-      run: makeRun(3, SHA_C, "2026-06-18T11:30:00Z"),
-      artifacts: [],
-      pr: null,
       prLookupError: null,
-      commitsBehindMain: 5,
     },
   ];
 
-  const captured = captureConsole(() =>
-    logBaselineSourceRuns(contexts, "2026-06-18T12:00:00Z")
-  );
+  const captured = captureConsole(() => reportBaselineContextResults(contexts));
   const output = captured.logs.join("\n");
 
   assertStringIncludes(output, "Baseline source runs:");
   assertStringIncludes(
     output,
-    "created 2 hours ago; 0 commits behind current main",
+    `2026-06-18T10:00:00Z run 1 ${
+      SHA_A.slice(0, 8)
+    } PR #10; perf-metrics artifact 2`,
   );
-  assertStringIncludes(output, "PR #10");
-  assertStringIncludes(output, "perf-metrics artifact 2");
-  assertStringIncludes(output, "PR lookup failed");
   assertStringIncludes(
     output,
-    "an unknown number of commits behind current main",
+    `2026-06-18T11:00:00Z run 2 ${
+      SHA_B.slice(0, 8)
+    } no PR found; no perf-metrics artifact`,
   );
-  assertStringIncludes(output, "no PR found");
-  assertStringIncludes(output, "no perf-metrics artifact");
+  assertEquals(captured.warnings, []);
 });
 
-Deno.test("reportPRLookupResults logs clean and failed lookup summaries", () => {
-  const clean = captureConsole(() =>
-    reportPRLookupResults([
-      {
-        run: makeRun(1),
-        artifacts: [],
-        pr: makePR(1),
-        prLookupError: null,
-        commitsBehindMain: 0,
-      },
-    ])
-  );
-  assertEquals(clean.result, 0);
-  assertStringIncludes(clean.logs.join("\n"), "0 failed");
+Deno.test("reportBaselineContextResults names each failed PR lookup", () => {
+  const contexts: BaselineRunContext[] = [
+    {
+      run: makeRun(1, SHA_A),
+      artifacts: [],
+      pr: makePR(10, "2026-06-18T00:00:00Z"),
+      prLookupError: null,
+    },
+    {
+      run: makeRun(2, SHA_B),
+      artifacts: [],
+      pr: null,
+      prLookupError: new Error("lookup failed\nsecond line"),
+    },
+  ];
 
-  const failed = captureConsole(() =>
-    reportPRLookupResults([
-      {
-        run: makeRun(2, SHA_B),
-        artifacts: [],
-        pr: null,
-        prLookupError: new Error("boom\nsecond line"),
-        commitsBehindMain: null,
-      },
-    ])
-  );
-  assertEquals(failed.result, 1);
-  assertStringIncludes(
-    failed.warnings.join("\n"),
-    "failed to fetch PR metadata",
-  );
-  assertStringIncludes(failed.warnings.join("\n"), "boom");
-});
+  const captured = captureConsole(() => reportBaselineContextResults(contexts));
 
-Deno.test("reportBaselineContextResults logs incomplete PR metadata warning", () => {
-  const context: BaselineRunContext = {
-    run: makeRun(1),
-    artifacts: [],
-    pr: null,
-    prLookupError: new Error("lookup failed"),
-    commitsBehindMain: null,
-  };
-
-  const captured = captureConsole(() =>
-    reportBaselineContextResults([context], "2026-06-18T12:00:00Z")
-  );
-
-  assertEquals(captured.result, 1);
-  assertStringIncludes(captured.warnings.join("\n"), "incomplete PR metadata");
+  assertStringIncludes(captured.logs.join("\n"), "PR lookup failed;");
+  assertEquals(captured.warnings, [
+    `  Warning: run 2 (${SHA_B.slice(0, 8)}) PR lookup failed: lookup failed`,
+  ]);
 });
 
 Deno.test("baseline main validation reports stale newest run", () => {
@@ -1134,14 +997,13 @@ Deno.test("fetchArtifactsForRunBestEffort returns artifacts or an empty fallback
   assertStringIncludes(warnings.join("\n"), "artifact API failed");
 });
 
-Deno.test("buildBaselineRunContext collects artifacts, PRs, and commit distance", async () => {
+Deno.test("buildBaselineRunContext collects artifacts and PRs", async () => {
   const run = makeRun(11, SHA_A);
   const artifact = makeArtifact(5, PERF_METRICS_ARTIFACT_NAME);
   const pr = makePR(11, "2026-06-18T00:00:00Z");
 
   const context = await buildBaselineRunContext({
     run,
-    mainHeadSha: SHA_B,
     fetchArtifactsForRun: (requestedRun) => {
       assertEquals(requestedRun, run);
       return Promise.resolve([artifact]);
@@ -1150,11 +1012,6 @@ Deno.test("buildBaselineRunContext collects artifacts, PRs, and commit distance"
       assertEquals(sha, SHA_A);
       return Promise.resolve({ pr, error: null });
     },
-    fetchCommitsBehindMain: (baselineSha, mainHeadSha) => {
-      assertEquals(baselineSha, SHA_A);
-      assertEquals(mainHeadSha, SHA_B);
-      return Promise.resolve(4);
-    },
   });
 
   assertEquals(context, {
@@ -1162,7 +1019,6 @@ Deno.test("buildBaselineRunContext collects artifacts, PRs, and commit distance"
     artifacts: [artifact],
     pr,
     prLookupError: null,
-    commitsBehindMain: 4,
   });
 });
 
@@ -1424,19 +1280,6 @@ Deno.test("selectMergedPRForCommit falls back to the first PR", () => {
 
   assertEquals(selectMergedPRForCommit(prs)?.number, 1);
   assertEquals(selectMergedPRForCommit([]), null);
-});
-
-Deno.test("baseline PR lookup summary counts found, missing, and failed lookups", () => {
-  const pr = { number: 1, merged_at: "2026-06-18T00:00:00Z" } as PRInfo;
-
-  assertEquals(
-    summarizeBaselinePRLookups([
-      { pr, prLookupError: null },
-      { pr: null, prLookupError: null },
-      { pr: null, prLookupError: new Error("boom") },
-    ]),
-    { found: 1, noPR: 1, failed: 1 },
-  );
 });
 
 Deno.test("readBaseBranchSha reads the first parent of a merge checkout", async () => {

@@ -218,60 +218,6 @@ function pluralize(value: number, unit: string): string {
   return `${value} ${unit}${value === 1 ? "" : "s"}`;
 }
 
-export function formatRelativeDuration(seconds: number): string {
-  if (!Number.isFinite(seconds)) return "unknown";
-
-  let remaining = Math.max(0, Math.floor(seconds));
-  const parts: string[] = [];
-  const units = [
-    { seconds: 24 * 60 * 60, unit: "day" },
-    { seconds: 60 * 60, unit: "hour" },
-    { seconds: 60, unit: "minute" },
-    { seconds: 1, unit: "second" },
-  ];
-
-  for (const unit of units) {
-    const value = Math.floor(remaining / unit.seconds);
-    if (value > 0) {
-      parts.push(pluralize(value, unit.unit));
-      remaining -= value * unit.seconds;
-    }
-    if (parts.length === 2) break;
-  }
-
-  return parts.length > 0 ? parts.join(" ") : "0 seconds";
-}
-
-export function formatRelativeAge(fromIso: string, toIso: string): string {
-  const fromMs = Date.parse(fromIso);
-  const toMs = Date.parse(toIso);
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return "unknown";
-
-  return formatRelativeDuration((toMs - fromMs) / 1_000);
-}
-
-export function formatCommitDistance(commitsBehindMain: number | null): string {
-  return commitsBehindMain === null
-    ? "an unknown number of commits"
-    : pluralize(commitsBehindMain, "commit");
-}
-
-export function formatBaselineSourceRunAge(
-  runCreatedAt: string,
-  currentCreatedAt: string,
-  commitsBehindMain: number | null,
-): string {
-  const age = formatRelativeAge(runCreatedAt, currentCreatedAt);
-  const timePart = age === "unknown" ? "age unknown" : `created ${age} ago`;
-  return `${timePart}; ${
-    formatCommitDistance(commitsBehindMain)
-  } behind current main`;
-}
-
-interface GitHubCompareResponse {
-  ahead_by?: unknown;
-}
-
 export async function readHeadCommitObject(
   cwd?: string,
 ): Promise<string | null> {
@@ -713,30 +659,6 @@ export function reportBaselineDistance(
   }
 }
 
-export async function fetchCommitsBehindMain(
-  baselineSha: string,
-  mainHeadSha: string,
-): Promise<number | null> {
-  if (baselineSha === mainHeadSha) return 0;
-
-  try {
-    const comparison = await githubGet<GitHubCompareResponse>(
-      `/repos/${REPO}/compare/${encodeURIComponent(baselineSha)}...${
-        encodeURIComponent(mainHeadSha)
-      }`,
-    );
-    return typeof comparison.ahead_by === "number" ? comparison.ahead_by : null;
-  } catch (error) {
-    console.warn(
-      `  Warning: could not compare baseline ${baselineSha.slice(0, 8)} ` +
-        `to current main ${mainHeadSha.slice(0, 8)}: ${
-          formatErrorForLog(error)
-        }`,
-    );
-    return null;
-  }
-}
-
 export function selectMergedPRForCommit(prs: PRInfo[]): PRInfo | null {
   return prs.find((pr) => pr.merged_at !== null) ?? prs[0] ?? null;
 }
@@ -751,7 +673,6 @@ export interface BaselineRunContext {
   artifacts: Artifact[];
   pr: PRInfo | null;
   prLookupError: unknown | null;
-  commitsBehindMain: number | null;
 }
 
 export async function fetchPRForCommitWithError(
@@ -779,84 +700,6 @@ export function newestArtifactNamed(
 export function formatErrorForLog(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.split("\n")[0];
-}
-
-export function logBaselineSourceRuns(
-  contexts: BaselineRunContext[],
-  currentRunCreatedAt: string,
-): void {
-  console.log("\n::group::Baseline source runs:\n");
-  for (
-    const { run, artifacts, pr, prLookupError, commitsBehindMain } of contexts
-  ) {
-    const baselineArtifact = newestArtifactNamed(
-      artifacts,
-      PERF_METRICS_ARTIFACT_NAME,
-    );
-    const prLabel = pr
-      ? `PR #${pr.number}`
-      : prLookupError
-      ? "PR lookup failed"
-      : "no PR found";
-    const artifactLabel = baselineArtifact
-      ? `perf-metrics artifact ${baselineArtifact.id}`
-      : "no perf-metrics artifact";
-    const ageLabel = formatBaselineSourceRunAge(
-      run.created_at,
-      currentRunCreatedAt,
-      commitsBehindMain,
-    );
-    console.log(
-      `  ${run.created_at} run ${run.id} ${run.head_sha.slice(0, 8)} ` +
-        `${ageLabel}; ${prLabel}; ${artifactLabel}`,
-    );
-  }
-  console.log("\n::endgroup::\n");
-}
-
-export interface BaselinePRLookupSummary {
-  found: number;
-  noPR: number;
-  failed: number;
-}
-
-export function summarizeBaselinePRLookups(
-  contexts: { pr: PRInfo | null; prLookupError: unknown | null }[],
-): BaselinePRLookupSummary {
-  const failed = contexts.filter((context) => context.prLookupError).length;
-  const found = contexts.filter((context) => context.pr).length;
-  return {
-    found,
-    noPR: contexts.length - found - failed,
-    failed,
-  };
-}
-
-export function reportPRLookupResults(
-  contexts: BaselineRunContext[],
-): number {
-  const summary = summarizeBaselinePRLookups(contexts);
-  const failures = contexts.filter((context) => context.prLookupError);
-
-  console.log(
-    `Baseline PR lookup: found ${summary.found}/${contexts.length}; ` +
-      `${summary.noPR} had no associated PR; ${summary.failed} failed.`,
-  );
-
-  if (summary.failed === 0) return 0;
-
-  console.warn(
-    `  Warning: failed to fetch PR metadata for ${summary.failed} baseline run(s).`,
-  );
-  for (const { run, prLookupError } of failures) {
-    console.warn(
-      `  Warning: run ${run.id} (${
-        run.head_sha.slice(0, 8)
-      }) PR lookup failed: ${formatErrorForLog(prLookupError)}`,
-    );
-  }
-
-  return summary.failed;
 }
 
 export async function fetchArtifactsForRunBestEffort(
@@ -925,13 +768,8 @@ export function reportBaselineRunAvailability(
 
 export interface BuildBaselineRunContextOptions {
   run: WorkflowRun;
-  mainHeadSha: string;
   fetchArtifactsForRun?: (run: WorkflowRun) => Promise<Artifact[]>;
   fetchPRForCommit?: (sha: string) => Promise<PRLookupResult>;
-  fetchCommitsBehindMain?: (
-    baselineSha: string,
-    mainHeadSha: string,
-  ) => Promise<number | null>;
 }
 
 /** Reads everything one baseline run contributes: its artifacts and its PR. */
@@ -941,35 +779,59 @@ export async function buildBaselineRunContext(
   const fetchArtifacts = options.fetchArtifactsForRun ??
     fetchArtifactsForRunBestEffort;
   const fetchPR = options.fetchPRForCommit ?? fetchPRForCommitWithError;
-  const fetchCommitDistance = options.fetchCommitsBehindMain ??
-    fetchCommitsBehindMain;
 
-  const [artifacts, prLookup, commitsBehindMain] = await Promise.all([
+  const [artifacts, prLookup] = await Promise.all([
     fetchArtifacts(options.run),
     fetchPR(options.run.head_sha),
-    fetchCommitDistance(options.run.head_sha, options.mainHeadSha),
   ]);
   return {
     run: options.run,
     artifacts,
     pr: prLookup.pr,
     prLookupError: prLookup.error,
-    commitsBehindMain,
   };
 }
 
+/**
+ * Logs one line per baseline run: when it ran, the commit it measured, the
+ * pull request that merged that commit, and whether it carries a perf-metrics
+ * artifact. Names each run whose pull-request lookup failed a second time
+ * after the group, with the error.
+ */
 export function reportBaselineContextResults(
   contexts: BaselineRunContext[],
-  currentRunCreatedAt: string,
-): number {
-  logBaselineSourceRuns(contexts, currentRunCreatedAt);
-  const prLookupFailures = reportPRLookupResults(contexts);
-  if (prLookupFailures > 0) {
-    console.warn(
-      "  Warning: running the coverage check with incomplete PR metadata. Some merged baseline overrides may be missing.",
+): void {
+  console.log("\n::group::Baseline source runs:\n");
+  for (const { run, artifacts, pr, prLookupError } of contexts) {
+    const baselineArtifact = newestArtifactNamed(
+      artifacts,
+      PERF_METRICS_ARTIFACT_NAME,
+    );
+    const prLabel = pr
+      ? `PR #${pr.number}`
+      : prLookupError
+      ? "PR lookup failed"
+      : "no PR found";
+    const artifactLabel = baselineArtifact
+      ? `perf-metrics artifact ${baselineArtifact.id}`
+      : "no perf-metrics artifact";
+    console.log(
+      `  ${run.created_at} run ${run.id} ${run.head_sha.slice(0, 8)} ` +
+        `${prLabel}; ${artifactLabel}`,
     );
   }
-  return prLookupFailures;
+  console.log("\n::endgroup::\n");
+
+  // The gate reads accepted coverage debt out of the merged pull request body,
+  // so a run whose lookup failed contributes no overrides.
+  for (const { run, prLookupError } of contexts) {
+    if (!prLookupError) continue;
+    console.warn(
+      `  Warning: run ${run.id} (${
+        run.head_sha.slice(0, 8)
+      }) PR lookup failed: ${formatErrorForLog(prLookupError)}`,
+    );
+  }
 }
 
 export async function parseCoverageBaselineFromArtifacts(
@@ -1868,7 +1730,7 @@ export async function main() {
 
   const readBaselineRun = (run: WorkflowRun): Promise<BaselineRunReading> =>
     githubApiOrSkip("reading a baseline run", async () => {
-      const context = await buildBaselineRunContext({ run, mainHeadSha });
+      const context = await buildBaselineRunContext({ run });
       visitedContexts.push(context);
 
       const baseline = await parseCoverageBaselineFromArtifacts(
@@ -1917,9 +1779,7 @@ export async function main() {
     isPullRequest: prNumber !== null,
     guard: (description, operation) =>
       githubApiOrSkip(description, operation, currentMetrics),
-  }).finally(() =>
-    reportBaselineContextResults(visitedContexts, currentRunInfo.created_at)
-  );
+  }).finally(() => reportBaselineContextResults(visitedContexts));
 
   if (acceptingRuns > 0) {
     console.log(
