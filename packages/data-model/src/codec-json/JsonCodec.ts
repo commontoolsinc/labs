@@ -170,6 +170,7 @@ export class JsonCodec implements SerializationContext<string> {
       // of `value`, because `value` might not actually know what codec is being
       // used for it, and it is up to the _codec_ not the value per se to
       // determine the correct tag.
+      //
       // A terminal codec's state is already in this format's domain, so it is
       // final; a nonterminal codec's is made of fabric values, which this
       // walker has yet to expand.
