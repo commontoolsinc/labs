@@ -124,6 +124,10 @@ export type NonterminalCodec = FabricCodec<FabricValue>;
  * have the same members -- but in what its state means to the walker. A class
  * declares which it is by the base class it extends, and that declaration is
  * the only record of it.
+ *
+ * `Encoded` ranges over the wire formats' own value types. `FabricValue` is
+ * not among them, and instantiating at it is unsound; see
+ * {@link BaseTerminalCodec}.
  */
 export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
 

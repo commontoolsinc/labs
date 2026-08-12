@@ -390,6 +390,13 @@ export class JsonCodec implements SerializationContext<string> {
     // whenever the array has no holes, which is the ordinary case, and an
     // underestimate otherwise -- growing from there beats growing from empty,
     // and a short array of holes is common enough to be worth not pessimizing.
+    //
+    // Setting the length is also what bounds a `/hole` count from below.
+    // Nothing validates one, and a negative count moves the write index
+    // backwards; the assignment then truncates rather than leaving whatever
+    // earlier writes had stretched the array to. No encoder emits such a
+    // count -- a run is at least one -- so this decides only what malformed
+    // wire produces, and it produces the shorter of two meaningless answers.
     if (Array.isArray(data)) {
       const result: FabricValue[] = new Array(data.length);
       let targetIndex = 0;

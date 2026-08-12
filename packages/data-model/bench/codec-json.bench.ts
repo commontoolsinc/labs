@@ -102,7 +102,9 @@ function makeArray(size: number): FabricValue {
  * informative one: a run of any length costs exactly one wire entry, so
  * alternating present and absent would measure one run length over and over
  * and never exercise a large count. Widening the gaps covers the range
- * instead, from a single missing index up to runs of thousands.
+ * instead, from ten missing indices up to runs of thousands. (Not from one:
+ * the first gap is already ten wide, `Math.max((1 * 3) - 10, 10)` having
+ * floored it there. A run of a single hole is exercised by the omnibus.)
  *
  * A consequence worth expecting rather than being surprised by: gaps that
  * widen geometrically leave a count of present elements that grows with the
@@ -229,8 +231,13 @@ function groupKey(prefix: string, size: number): string {
   return `${prefix}-${String(size).padStart(6, "0")}`;
 }
 
-// Warm up, so that the first group measured does not also pay for JIT.
+// Warm up. Deno warms each benchmark on its own, so this is belt-and-braces
+// -- but it covers the codec paths rather than only the container walks,
+// since the single-value groups are measured first and are the shortest.
 for (let i = 0; i < 50; i++) {
+  for (const [, value] of SINGLES) {
+    valueFromJson(jsonFromValue(value));
+  }
   valueFromJson(jsonFromValue(ARRAYS[2]![1]));
   valueFromJson(jsonFromValue(OBJECTS[2]![1]));
 }
