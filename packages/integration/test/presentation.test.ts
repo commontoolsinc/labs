@@ -366,6 +366,119 @@ Deno.test("Page detects an early frame detachment without a loader", async () =>
   );
 });
 
+Deno.test("Page rejects when its frame stops before becoming ready", async () => {
+  const celestial = new EventTarget() as EventTarget & {
+    Page: {
+      setLifecycleEventsEnabled(): Promise<Record<string, never>>;
+      navigate(): Promise<{ frameId: string; loaderId: string }>;
+    };
+  };
+  celestial.Page = {
+    setLifecycleEventsEnabled: () => Promise.resolve({}),
+    navigate: () => {
+      celestial.dispatchEvent(
+        new CustomEvent("Page.frameStoppedLoading", {
+          detail: { frameId: "frame" },
+        }),
+      );
+      celestial.dispatchEvent(
+        new CustomEvent("Page.lifecycleEvent", {
+          detail: { loaderId: "loader", name: "DOMContentLoaded" },
+        }),
+      );
+      return Promise.resolve({ frameId: "frame", loaderId: "loader" });
+    },
+  };
+  const page = new Page(
+    {
+      timeout: 0,
+      unsafelyGetCelestialBindings: () => celestial,
+    } as unknown as ConstructorParameters<typeof Page>[0],
+    { timeout: 10 },
+  );
+
+  await assertRejects(
+    () => page.goto("https://example.test/"),
+    Error,
+    "Navigation frame stopped loading before it became ready.",
+  );
+});
+
+Deno.test("Page rejects when another loader supersedes navigation", async () => {
+  const celestial = new EventTarget() as EventTarget & {
+    Page: {
+      setLifecycleEventsEnabled(): Promise<Record<string, never>>;
+      navigate(): Promise<{ frameId: string; loaderId: string }>;
+    };
+  };
+  celestial.Page = {
+    setLifecycleEventsEnabled: () => Promise.resolve({}),
+    navigate: () => {
+      celestial.dispatchEvent(
+        new CustomEvent("Page.frameNavigated", {
+          detail: {
+            frame: { id: "frame", loaderId: "replacement" },
+            type: "Navigation",
+          },
+        }),
+      );
+      celestial.dispatchEvent(
+        new CustomEvent("Page.lifecycleEvent", {
+          detail: { loaderId: "loader", name: "DOMContentLoaded" },
+        }),
+      );
+      return Promise.resolve({ frameId: "frame", loaderId: "loader" });
+    },
+  };
+  const page = new Page(
+    {
+      timeout: 0,
+      unsafelyGetCelestialBindings: () => celestial,
+    } as unknown as ConstructorParameters<typeof Page>[0],
+    { timeout: 10 },
+  );
+
+  await assertRejects(
+    () => page.goto("https://example.test/"),
+    Error,
+    "Navigation was superseded by another document.",
+  );
+});
+
+Deno.test("Page accepts readiness before its frame stops", async () => {
+  const celestial = new EventTarget() as EventTarget & {
+    Page: {
+      setLifecycleEventsEnabled(): Promise<Record<string, never>>;
+      navigate(): Promise<{ frameId: string; loaderId: string }>;
+    };
+  };
+  celestial.Page = {
+    setLifecycleEventsEnabled: () => Promise.resolve({}),
+    navigate: () => {
+      celestial.dispatchEvent(
+        new CustomEvent("Page.lifecycleEvent", {
+          detail: { loaderId: "loader", name: "DOMContentLoaded" },
+        }),
+      );
+      celestial.dispatchEvent(
+        new CustomEvent("Page.frameStoppedLoading", {
+          detail: { frameId: "frame" },
+        }),
+      );
+      return Promise.resolve({ frameId: "frame", loaderId: "loader" });
+    },
+  };
+  const page = new Page(
+    {
+      timeout: 0,
+      unsafelyGetCelestialBindings: () => celestial,
+    } as unknown as ConstructorParameters<typeof Page>[0],
+    { timeout: 10 },
+  );
+
+  await page.goto("https://example.test/");
+});
+
 Deno.test("Page preserves a navigation command failure after detachment", async () => {
   let navigationStarted!: () => void;
   const started = new Promise<void>((resolve) => {
