@@ -1,6 +1,9 @@
-// Barrel for the JSON wire-format encoding area. This is the sole public entry
-// point for the `codec-json` directory; the individual files are not exported
-// directly via `deno.jsonc`.
+/**
+ * This directory holds everything specific to the JSON wire format: the
+ * whole-value codec, the codecs for the four types JSON cannot carry, and the
+ * registry factory that puts them together. This file is its sole public entry
+ * point; the individual files are not exported via `deno.jsonc`.
+ */
 
 // Public entry-point functions.
 export { seemsLikeJsonEncodedFabricValue } from "./impl.ts";
