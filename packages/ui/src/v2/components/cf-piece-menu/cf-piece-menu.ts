@@ -2007,7 +2007,11 @@ export class CFPieceMenu extends BaseElement {
     if (this.revisionReadError !== undefined) {
       return `Could not read source revision: ${this.revisionReadError}`;
     }
-    if (this.revisionSource === undefined) return "Reading source revision.";
+    if (this.revisionSource === undefined) {
+      return this.revisionReadPending
+        ? "Reading source revision."
+        : "Source revision read was cancelled.";
+    }
     const count = this.revisionSource.files.length;
     if (count === 0) return "Source revision is not available.";
     return `Source revision loaded with ${count} ${
@@ -2156,7 +2160,9 @@ export class CFPieceMenu extends BaseElement {
         `;
       }
       if (this.revisionSource === undefined) {
-        return html`<p>Reading source revision…</p>`;
+        return this.revisionReadPending
+          ? html`<p>Reading source revision…</p>`
+          : html`<p>Source revision read was cancelled.</p>`;
       }
     }
     const files = this.sourceRevision === undefined
@@ -2460,7 +2466,10 @@ function fabricPieceNavigation(
   } catch {
     return undefined;
   }
-  if (ref === undefined || ref.pin !== undefined || ref.subpath !== undefined) {
+  if (
+    ref === undefined || ref.host !== undefined || ref.pin !== undefined ||
+    ref.subpath !== undefined
+  ) {
     return undefined;
   }
   const space = ref.space;

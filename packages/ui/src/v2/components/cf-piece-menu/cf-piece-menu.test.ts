@@ -114,11 +114,14 @@ function withLocation<T>(href: string, run: () => T): T {
   }
 }
 
-function clickHandler(
+function templateForTestId(
   menu: CFPieceMenu,
   testId: string,
-): (event: MouseEvent) => unknown {
-  const candidates: Array<{ node: { values: unknown[] }; text: string }> = [];
+): { strings: readonly string[]; values: unknown[] } {
+  const candidates: Array<{
+    node: { strings: readonly string[]; values: unknown[] };
+    text: string;
+  }> = [];
   const visit = (node: unknown): void => {
     if (Array.isArray(node)) {
       for (const child of node) visit(child);
@@ -136,12 +139,29 @@ function clickHandler(
       text.includes(testId) &&
       template.values.some((value) => typeof value === "function")
     ) {
-      candidates.push({ node: template as { values: unknown[] }, text });
+      candidates.push({
+        node: template as {
+          strings: readonly string[];
+          values: unknown[];
+        },
+        text,
+      });
     }
   };
   visit((menu as unknown as { render(): unknown }).render());
   candidates.sort((left, right) => left.text.length - right.text.length);
-  const handler = candidates[0]?.node.values.find(
+  const template = candidates[0]?.node;
+  if (template === undefined) {
+    throw new Error(`no rendered template found for ${testId}`);
+  }
+  return template;
+}
+
+function clickHandler(
+  menu: CFPieceMenu,
+  testId: string,
+): (event: MouseEvent) => unknown {
+  const handler = templateForTestId(menu, testId).values.find(
     (value) => typeof value === "function",
   );
   if (typeof handler !== "function") {
@@ -1032,6 +1052,15 @@ describe("the origin and history panel", () => {
       })
     ));
     await menu.showPanel("origin");
+    const link = withLocation(
+      `https://example.test/.embed/${SPACE}/of:fid1:piece`,
+      () => templateForTestId(menu, "piece-source-origin-current"),
+    );
+    const hrefIndex = link.strings.findIndex((part) => part.includes('href="'));
+    expect(link.strings.join("")).toContain("<a");
+    expect(link.values[hrefIndex]).toBe(
+      `/.embed/${SPACE}/of:fid1:${hash}`,
+    );
     let prevented = false;
 
     clickTestId(menu, "piece-source-origin-current", {
@@ -1083,6 +1112,7 @@ describe("the origin and history panel", () => {
     const hash = "c".repeat(43);
     const urls = [
       "cf:/not a Fabric ref",
+      `cf://source.example/${SPACE}/of:fid1:${hash}`,
       `cf:/${SPACE}/of:fid1:${hash}@${hash}`,
       `cf:/${SPACE}/of:fid1:${hash}/source.ts`,
       `cf:pattern:${hash}`,
@@ -1853,18 +1883,27 @@ describe("source history actions", () => {
   });
 
   it("does not report a historical read cancelled by runtime disposal", async () => {
+    let reads = 0;
     const menu = openMenu(pieceCell(
       () => Promise.resolve(historySource),
       {
         aborted: true,
-        readRevision: () => Promise.reject(new Error("disposed runtime")),
+        readRevision: () => {
+          reads++;
+          return Promise.reject(new Error("disposed runtime"));
+        },
       },
     ));
     await menu.showPanel("origin");
     await clickTestId(menu, "piece-source-view-older");
 
+    expect(reads).toBe(1);
     expect(shows(menu)).not.toContain("disposed runtime");
-    expect(shows(menu)).toContain("Reading source revision");
+    expect(shows(menu)).toContain("Source revision read was cancelled");
+    expect(liveRegionText(menu)).toContain(
+      "Source revision read was cancelled",
+    );
+    expect(shows(menu)).not.toContain("Reading source revision");
   });
 });
 
@@ -2316,9 +2355,9 @@ describe("piece-state read lifecycle", () => {
 describe("formatPieceValue", () => {
   it("formats undefined and values JSON cannot render", () => {
     expect(formatPieceValue(undefined)).toBe("undefined");
-    expect(formatPieceValue(1n)).toContain(
-      "Do not know how to serialize a BigInt",
-    );
+    const unrenderable = formatPieceValue(1n);
+    expect(unrenderable.startsWith("<unrenderable: ")).toBe(true);
+    expect(unrenderable.endsWith(">")).toBe(true);
   });
 
   it("stubs a linked cell instead of printing its sigil form", () => {
