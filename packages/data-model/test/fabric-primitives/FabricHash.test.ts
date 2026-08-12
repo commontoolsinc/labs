@@ -1,3 +1,16 @@
+/**
+ * A hash as a fabric primitive: bytes, plus the tag naming the algorithm that
+ * produced them.
+ *
+ * The tag is part of the value rather than decoration on it, which is why the
+ * string form carries it, why parsing rejects a string with no tag or with
+ * more than one separator, and why a tag other than the usual one has to
+ * survive a round trip rather than being normalized away.
+ *
+ * It hands out copies rather than views, and takes ownership of its input only
+ * when a caller explicitly transfers it.
+ */
+
 import { JSON_CODEC } from "@/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

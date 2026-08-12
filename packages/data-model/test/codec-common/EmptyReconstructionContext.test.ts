@@ -1,3 +1,15 @@
+/**
+ * The stand-in used when a decode has no runtime behind it: a shared singleton
+ * that refuses every cell resolution, and the class it is an instance of.
+ *
+ * Refusing is the entire behavior, so what is left to get right is that it
+ * refuses informatively and cannot be talked out of it -- the failure names
+ * the ref it was asked for, and the singleton is frozen so `getCell()` cannot
+ * be swapped. The class is exported so a caller can frame that failure for its
+ * own situation, and only the clause after the colon is the caller's to
+ * supply.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

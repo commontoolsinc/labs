@@ -1,3 +1,16 @@
+/**
+ * A day count as a fabric primitive: always frozen, wrapping a `bigint`, and
+ * encoded to a flat base64 string.
+ *
+ * Days before the epoch are the case worth keeping, a negative count being
+ * where an encoding stops round-tripping if it was only ever tried on
+ * positive ones. Conversion leaves an instance alone even when asked for
+ * something mutable, the value being immutable by construction rather than by
+ * request.
+ *
+ * Malformed state decodes to a `ProblematicValue` rather than throwing.
+ */
+
 import { JSON_CODEC } from "@/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

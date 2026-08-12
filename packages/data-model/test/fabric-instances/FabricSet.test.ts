@@ -1,3 +1,15 @@
+/**
+ * A `Set` as a fabric instance, which is at present only half a value.
+ *
+ * Native conversion is the part that works: a frozen form is produced on
+ * request, an already-frozen one is passed through rather than rebuilt, and a
+ * mutable form is copied only when what it holds is frozen.
+ *
+ * The freeze protocols and the codec throw as unimplemented stubs, and these
+ * cases assert that throwing on purpose. A gap that is asserted is recorded; a
+ * gap that is merely untested is invisible.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

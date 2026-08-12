@@ -1,3 +1,27 @@
+/**
+ * The JSON codec end to end: what a value becomes as text and as bytes, and
+ * what comes back.
+ *
+ * The hard part is that JSON is also the escape mechanism. A tagged form is
+ * itself a `/`-keyed object, so a plain object that happens to carry such a
+ * key is ambiguous with one, and the quoting rules exist to tell the two apart
+ * in every direction. Several groups of cases here do nothing but police that
+ * boundary.
+ *
+ * Arrays are the other place the format has to express something JSON cannot.
+ * A hole is not `null`, so runs of them are written explicitly, and a run
+ * arriving malformed has to be handled rather than trusted.
+ *
+ * Two invariants run underneath all of it. Encoding is deterministic, key
+ * order included, so the same value yields the same text. And decoding
+ * produces a deep-frozen result, identically whether it began as text or as
+ * bytes -- the places where the decoder hands back an extracted sub-tree
+ * directly are sound only if nothing can mutate it afterward.
+ *
+ * Lenient mode is what happens when a value will not decode at all: it becomes
+ * a `ProblematicValue` rather than an exception.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

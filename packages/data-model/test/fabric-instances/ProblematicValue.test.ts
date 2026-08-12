@@ -1,3 +1,15 @@
+/**
+ * What a decode produces when it recognized the tag but could not make sense
+ * of the state: the tag, the state as it arrived, and the error explaining the
+ * refusal.
+ *
+ * Keeping all three is what lets a bad encoding survive a round trip without
+ * being either lost or believed. Encoding one writes back the bare state, the
+ * tag it carries being per-instance and travelling separately, so a value that
+ * could not be understood is re-emitted as what it was rather than as what
+ * this runtime would have written in its place.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

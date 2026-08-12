@@ -1,3 +1,19 @@
+/**
+ * The clone template methods, and exactly when one may answer with the
+ * instance it was given rather than a new one.
+ *
+ * Identity comes back only where it is indistinguishable from a fresh copy,
+ * which is a narrower condition than it first looks. A shallow clone may
+ * return `this` for an already-frozen instance; a deep clone may not, unless
+ * the instance is deep-frozen -- a merely-shallowly-frozen one still has a
+ * mutable interior, and is the case separating the two rules. Asking for a
+ * mutable result allocates regardless of what the original was.
+ *
+ * The cases count core invocations rather than only comparing results, since
+ * producing a correct value and producing it without allocating are different
+ * claims and only one of them shows up in the output.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

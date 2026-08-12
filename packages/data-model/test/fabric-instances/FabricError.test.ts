@@ -1,3 +1,24 @@
+/**
+ * `Error` as a fabric value, where most of the difficulty is that a native
+ * error carries two names and arbitrary extra properties.
+ *
+ * `type` and `name` are stored separately, and the encoding leans on their
+ * usual agreement: `name` is written as `null` when it matches `type`, and
+ * spelled out only when it does not. Decoding has to invert that, rebuild the
+ * right `Error` subclass from `type`, and still accept older state in which
+ * only `name` was present.
+ *
+ * Everything beyond the fixed slots goes to the extras bag, which is where the
+ * refusals concentrate. A slot's own name cannot be used as an extras key, and
+ * a prototype-reaching key is refused on the way in and dropped again when it
+ * arrives from the wire -- state parsed from outside cannot be assumed to have
+ * been built by this code.
+ *
+ * One case records a gap rather than a guarantee: a mutable deep clone still
+ * shares its nested `cause`, and the assertion states that as the behavior
+ * today.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

@@ -1,3 +1,13 @@
+/**
+ * What a decode produces for a tag it does not recognize: that tag, and the
+ * state untouched.
+ *
+ * Nothing here can interpret the state, so nothing tries. Encoding one writes
+ * the bare state back under the tag it came with, which is what lets a value
+ * this runtime has no codec for pass through unharmed rather than being
+ * dropped or rewritten into something it was not.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

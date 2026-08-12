@@ -1,3 +1,12 @@
+/**
+ * The base shared by values that carry their own wire tag rather than taking
+ * one from their class.
+ *
+ * There is little to pin at this level. The base only exposes what a concrete
+ * subclass supplies, and what carrying a tag per instance actually means is
+ * settled by the subclasses that do it.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

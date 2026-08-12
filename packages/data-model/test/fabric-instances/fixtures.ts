@@ -1,3 +1,13 @@
+/**
+ * Shared doubles for the fabric-instance tests: a reconstruction context that
+ * refuses to resolve a cell, and the two recursion callbacks for driving the
+ * freeze protocols by hand.
+ *
+ * The callbacks let a test invoke a protocol member on an instance directly,
+ * rather than reaching it through the generic entry point that would otherwise
+ * do the walking.
+ */
+
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
 import type { FabricValue } from "@/interface.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";

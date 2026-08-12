@@ -1,3 +1,18 @@
+/**
+ * Which symbol a value's codec is found under, and what happens when the
+ * answer is absent or ambiguous.
+ *
+ * An instance binds one format-agnostic `[CODEC]`, while a primitive's codec
+ * terminates an encoding and so is bound per wire format under that format's
+ * own symbol. Asking without naming a format therefore succeeds for the one
+ * and fails for the other, which is most of what these cases pin.
+ *
+ * The precedence case is built on a double rather than a real class, because
+ * nothing in the tree binds both symbols. With a real class the two could not
+ * disagree, and the case would pass whichever way the lookup happened to be
+ * written.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

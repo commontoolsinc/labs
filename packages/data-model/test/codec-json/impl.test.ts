@@ -1,3 +1,14 @@
+/**
+ * The cheap test for whether a string is this package's encoded form rather
+ * than JSON from somewhere else.
+ *
+ * It decides on the prefix alone and never parses, so the cases are about
+ * where that suffices and where it would be too eager: the bare prefix counts,
+ * a prefix that is partial or not at the front does not, and plain JSON that
+ * happens to look similar does not. One case feeds it real encoder output, so
+ * the shape recognized here cannot drift from the shape produced.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
