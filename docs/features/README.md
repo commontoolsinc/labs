@@ -67,6 +67,10 @@ Add a line for each new document to the index below.
 - [`vouched-ingest-channel-mint.md`](vouched-ingest-channel-mint.md) — the
   split-mint seam that lets an outside source deposit data carrying a trusted
   provenance mark, without ever authoring that mark itself
+- [`self-serve-ingest-channels.md`](self-serve-ingest-channels.md) — how a user
+  mints an ingest channel for their own space without an operator: the
+  space-ACL authorization model, why the two obvious designs are unsound, and
+  the procedure for retiring channels when the trust conditions change
 - [`gateway-request-provenance.md`](gateway-request-provenance.md) — how a
   request to the LLM gateway says which workload produced it, what a value is
   allowed to contain given that it reaches the provider, and why the machine
