@@ -24,6 +24,29 @@ export interface FabricUrlOptions {
   hosts?: readonly string[];
 }
 
+/**
+ * Percent-decoding that answers rather than throws. A malformed escape is a
+ * URL this cannot read, and the contract is that such a URL names no cell —
+ * not that asking about it fails.
+ */
+function decode(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A path segment as the cell key it stands for. `createLLMFriendlyLink` writes
+ * paths as a JSON Pointer, so a key holding `/` or `~` arrives escaped and a
+ * segment taken verbatim would name a key nothing has.
+ */
+function decodePathSegment(segment: string): string | undefined {
+  const decoded = decode(segment);
+  return decoded?.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
 /** `fid1:<payload>`, with the colon percent-encoded or not. */
 const TAGGED_HASH = /^fid1(?::|%3a)([A-Za-z0-9_-]{20,})$/i;
 
@@ -33,7 +56,8 @@ const TAGGED_HASH = /^fid1(?::|%3a)([A-Za-z0-9_-]{20,})$/i;
  * rather than assumed.
  */
 function asEntityId(segment: string): string | undefined {
-  const decoded = decodeURIComponent(segment);
+  const decoded = decode(segment);
+  if (decoded === undefined) return undefined;
   const schemeAt = decoded.indexOf(":");
   if (schemeAt === -1) return undefined;
 
@@ -51,12 +75,23 @@ function asEntityId(segment: string): string | undefined {
 
 /** A `@did:key:…` segment, as the LLM-friendly link form writes a space. */
 function asSpaceSegment(segment: string): string | undefined {
-  const decoded = decodeURIComponent(segment);
-  return decoded.startsWith("@") ? decoded.slice(1) : undefined;
+  const decoded = decode(segment);
+  return decoded?.startsWith("@") ? decoded.slice(1) : undefined;
 }
 
 function splitPath(pathname: string): string[] {
   return pathname.split("/").filter((segment) => segment.length > 0);
+}
+
+/** Every segment as its key, or undefined when any of them cannot be read. */
+function decodePath(segments: string[]): string[] | undefined {
+  const path: string[] = [];
+  for (const segment of segments) {
+    const key = decodePathSegment(segment);
+    if (key === undefined) return undefined;
+    path.push(key);
+  }
+  return path;
 }
 
 /**
@@ -101,7 +136,8 @@ export function parseFabricUrl(
     if (segments.length === 0) return undefined;
     const id = asEntityId(segments[0]);
     if (id === undefined) return undefined;
-    return { space, id, path: segments.slice(1) };
+    const path = decodePath(segments.slice(1));
+    return path === undefined ? undefined : { space, id, path };
   }
 
   let parsed: URL;
@@ -119,13 +155,18 @@ export function parseFabricUrl(
   // shorter is one of its own pages rather than a piece.
   if (segments.length < 2) return undefined;
 
-  space = decodeURIComponent(segments[0]);
+  space = decode(segments[0]);
+  if (space === undefined) return undefined;
+
   const target = segments[1];
-  const path = segments.slice(2);
+  const path = decodePath(segments.slice(2));
+  if (path === undefined) return undefined;
 
   const id = asEntityId(target);
   if (id !== undefined) return { space, id, path };
 
-  const decoded = decodeURIComponent(target);
-  return isSlugAddress(decoded) ? { space, slug: decoded, path } : undefined;
+  const decoded = decode(target);
+  return decoded !== undefined && isSlugAddress(decoded)
+    ? { space, slug: decoded, path }
+    : undefined;
 }

@@ -136,6 +136,29 @@ describe("fabric-url", () => {
       });
     });
 
+    describe("escaping", () => {
+      it("returns a path key that arrived JSON Pointer-escaped", () => {
+        // `createLLMFriendlyLink` writes a key holding `/` as `~1`.
+        expect(parseFabricUrl(`/of:fid1:${HASH}/foo~1bar/~0tilde`)?.path)
+          .toEqual(["foo/bar", "~tilde"]);
+      });
+
+      it("returns a path key that arrived percent-encoded", () => {
+        expect(parseFabricUrl(`/of:fid1:${HASH}/a%20b`)?.path).toEqual(["a b"]);
+      });
+
+      it("returns undefined for a malformed percent escape", () => {
+        // The contract is that an unreadable URL names no cell, not that
+        // asking about it throws.
+        expect(parseFabricUrl(`/of:fid1:${HASH}/%ZZ`)).toBeUndefined();
+        expect(parseFabricUrl("%ZZ")).toBeUndefined();
+        expect(
+          parseFabricUrl("https://fabric.example/%ZZ/thing", { hosts: HOSTS }),
+        )
+          .toBeUndefined();
+      });
+    });
+
     describe("everything else", () => {
       it("returns undefined for an ordinary web page", () => {
         expect(parseFabricUrl("https://example.com/blog/post"))

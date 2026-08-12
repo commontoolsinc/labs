@@ -2821,6 +2821,13 @@ export type FetchJsonFunction = <T>(
  * parsed body is returned as `any` and never verified. Prefer fetchJson with
  * an explicit type argument where a type exists.
  */
+export type FetchJsonUncheckedFunction = (
+  params: FactoryInput<{
+    url: string;
+    options?: FetchOptions;
+  }>,
+) => Reactive<{ pending: boolean; result: any; error?: any }>;
+
 /**
  * The cell a URL names, if it names one.
  *
@@ -2835,13 +2842,6 @@ export type CellFromUrlFunction = (
     hosts?: string[];
   }>,
 ) => Reactive<{ pending: boolean; cell?: ReadonlyCell<{ [NAME]: string }> }>;
-
-export type FetchJsonUncheckedFunction = (
-  params: FactoryInput<{
-    url: string;
-    options?: FetchOptions;
-  }>,
-) => Reactive<{ pending: boolean; result: any; error?: any }>;
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
