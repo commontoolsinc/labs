@@ -36,8 +36,15 @@ import { FabricError } from "../src/fabric-instances/FabricError.ts";
 // Subjects
 //
 
-/** Container sizes, spanning five orders of magnitude. */
-const SIZES = [1, 10, 100, 1000, 10000, 100000] as const;
+/** Container sizes: the empty case, then five orders of magnitude. */
+const SIZES = [0, 1, 10, 100, 1000, 10000, 100000] as const;
+
+/**
+ * Sizes for the sparse series. Below ten there is nothing for a gap pattern to
+ * do: the generator always fills index zero, so a one-element array comes out
+ * dense, and an empty one has nothing to be sparse about.
+ */
+const SPARSE_SIZES = SIZES.filter((size) => size >= 10);
 
 /**
  * One subject per interesting path through the codec system: the
@@ -87,6 +94,36 @@ function makeArray(size: number): FabricValue {
   return Object.freeze(new Array(size).fill(0));
 }
 
+/**
+ * Builds a sparse array of `size` logical elements, with gaps that widen as
+ * the array goes on.
+ *
+ * Runs of a single hole would be the easy shape to generate and the least
+ * informative one: a run of any length costs exactly one wire entry, so
+ * alternating present and absent would measure one run length over and over
+ * and never exercise a large count. Widening the gaps covers the range
+ * instead, from a single missing index up to runs of thousands.
+ *
+ * A consequence worth expecting rather than being surprised by: gaps that
+ * widen geometrically leave a count of present elements that grows with the
+ * logarithm of `size`, so the decode side of this series is nearly flat across
+ * the magnitudes while the encode side still scales with the index range it
+ * walks. The flat column is the result to expect. Large sparse arrays ceasing
+ * to decode quickly would mean a `/hole` run had stopped costing one entry,
+ * which is the property this series exists to hold.
+ */
+function makeSparseArray(size: number): FabricValue {
+  const result = new Array(size);
+  let holeCount = 1;
+
+  for (let at = 0; at < size; at += holeCount + 1) {
+    result[at] = 0;
+    holeCount = Math.max((holeCount * 3) - 10, 10);
+  }
+
+  return Object.freeze(result);
+}
+
 /** Builds a plain object of `size` distinct keys, every value zero. */
 function makeObject(size: number): FabricValue {
   const result: Record<string, FabricValue> = {};
@@ -98,9 +135,9 @@ function makeObject(size: number): FabricValue {
 
 /**
  * Builds a mixed tree of roughly `leaves` leaf values: nested containers, a
- * sample of each codec, an array hole, and a rare `/`-prefixed key. This is
- * the shape a real payload has, where the size series above deliberately has
- * none of it.
+ * sample of each codec, a rare array hole, and a rare `/`-prefixed key. This
+ * is the shape a real payload has, where the size series above deliberately
+ * has none of it.
  *
  * About one item in a hundred carries a `/`-prefixed key, which in a real
  * payload rounds to none at all; giving one to every item would measure the
@@ -143,7 +180,12 @@ function makeOmnibus(leaves: number): FabricValue {
       blob: new FabricBytes(new Uint8Array([i & 0xff, (i >> 8) & 0xff])),
       nested: Object.freeze({
         depth: 1,
-        items: Object.freeze([i, , i + 2]),
+        // Sparse for about one item in a hundred. A hole is at least as rare
+        // in a real payload as a reserved key is, so making every item carry
+        // one would weight this toward a shape that does not occur.
+        items: Object.freeze(
+          (i % 100) === 2 ? [i, , i + 2] : [i, i + 1, i + 2],
+        ),
       }),
     };
 
@@ -167,12 +209,16 @@ function makeOmnibus(leaves: number): FabricValue {
 //
 
 const ARRAYS = SIZES.map((size) => [size, makeArray(size)] as const);
+const SPARSE = SPARSE_SIZES.map(
+  (size) => [size, makeSparseArray(size)] as const,
+);
 const OBJECTS = SIZES.map((size) => [size, makeObject(size)] as const);
 const OMNIBUSES = [10, 1000].map((n) => [n, makeOmnibus(n)] as const);
 
 /** Encoded forms, for the decode direction. */
 const SINGLES_JSON = SINGLES.map(([n, v]) => [n, jsonFromValue(v)] as const);
 const ARRAYS_JSON = ARRAYS.map(([n, v]) => [n, jsonFromValue(v)] as const);
+const SPARSE_JSON = SPARSE.map(([n, v]) => [n, jsonFromValue(v)] as const);
 const OBJECTS_JSON = OBJECTS.map(([n, v]) => [n, jsonFromValue(v)] as const);
 const OMNIBUSES_JSON = OMNIBUSES.map(([n, v]) =>
   [n, jsonFromValue(v)] as const
@@ -233,6 +279,31 @@ for (const [size, json] of ARRAYS_JSON) {
   Deno.bench({
     name: `decode ${groupKey("array", size)}`,
     group: groupKey("array", size),
+    fn() {
+      valueFromJson(json);
+    },
+  });
+}
+
+//
+// Sparse arrays, by magnitude
+//
+
+for (const [size, value] of SPARSE) {
+  Deno.bench({
+    name: `encode ${groupKey("sparse", size)}`,
+    group: groupKey("sparse", size),
+    baseline: true,
+    fn() {
+      jsonFromValue(value);
+    },
+  });
+}
+
+for (const [size, json] of SPARSE_JSON) {
+  Deno.bench({
+    name: `decode ${groupKey("sparse", size)}`,
+    group: groupKey("sparse", size),
     fn() {
       valueFromJson(json);
     },
