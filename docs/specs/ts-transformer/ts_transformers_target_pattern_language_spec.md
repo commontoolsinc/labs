@@ -78,7 +78,8 @@ Each construct family is classified as one of:
 | Optional receiver navigation and optional invocation on otherwise-supported call roots | Supported | Optionality does not define a separate call family: `value?.method()`, `value.method?.()`, and combined chains lower wherever the corresponding non-optional call is supported, with receiver binding, evaluation order, nullish short-circuiting, and skipped argument evaluation preserved |
 | Direct non-JSX receiver-method calls on reactive values in top-level pattern-body expression sites | Supported | Value-like receiver-method roots at top-level object-property, call-argument, variable-initializer, array-element, or return-expression sites lower to derived local value expressions |
 | Direct receiver-method roots inside supported collection callbacks | Supported | Callback-local value-like receiver-method roots lower to callback-local lift-applied computations instead of remaining raw or requiring manual wrapper calls |
-| Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
+| Direct top-level `.get()` reads on explicitly cell-like values at a lowerable expression site | Supported | On a true `Cell`/`Writable`/`Stream`, an eager read is part of the language wherever a lowerable expression site can carry it: a variable initializer, a return, an object property, an array element, a call argument, a computation over the read, or a call whose receiver chain reaches it. That site lowers into a lift, so the read stays live rather than freezing. Parentheses, the computed-key spelling `cell["get"]()`, and the optional spellings `cell?.get()` / `cell.get?.()` do not change the classification |
+| Direct top-level `.get()` reads with no lowerable expression site | Unsupported | A read with nothing to carry it stays outside the language, because there is no site to lower into a lift: statement position (`count.get();`), a reactive array-method callback (`rows.map((row) => row.cell.get())`), and a plain array-method callback (`["-", "+"].map((sep) => rows.get().join(sep))`). These move into an explicit computation callback such as `computed`, `action`, `lift`, or `handler` |
 | `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `lift` results, and other ordinary reactive values should be read directly rather than through `.get()` |
 | Statement-boundary imperative constructs in top-level pattern-owned code (`let`, loops, function creation, early return) | Unsupported | Top-level pattern context is intentionally declarative; imperative statement structure belongs in explicit callback bodies such as `computed`, `action`, `lift`, or `handler` |
 
@@ -136,9 +137,10 @@ pattern(({ items, show }) => ({
 
 ```ts
 // Shown for illustration only.
-pattern(({ user, count }) => ({
-  value: count.get(),
-}));
+pattern(({ count }) => {
+  count.get();
+  return { value: 1 };
+});
 ```
 
 Why:
@@ -148,7 +150,9 @@ Why:
 - top-level helper control flow is part of the language
 - top-level receiver-method roots are supported at lowerable non-JSX
   expression sites
-- eager `.get()` reads still move into JSX, authored helper control flow, or an explicit
+- an eager `.get()` read on a true cell is supported wherever a lowerable
+  expression site carries it, so `{ value: count.get() }` belongs here; a read
+  in statement position has no such site and moves into an explicit
   computation callback
 
 ### JSX Expressions
@@ -258,14 +262,18 @@ Why:
 When an authored form is unsupported, the right answer is usually to move it
 into a context that already has a clear language meaning.
 
-### Top-Level Eager `.get()` -> Helper Control Flow Or Computation Callback
+### Site-Less Eager `.get()` -> Computation Callback
+
+An eager read on a true cell needs a lowerable expression site to become a
+lift. A read in statement position, or inside an array-method callback, has
+none, so it moves into a callback that supplies one.
 
 **Avoid**
 
 ```ts
 // Shown for illustration only.
-pattern(({ count }) => ({
-  value: count.get(),
+pattern(({ rows }) => ({
+  labels: ["-", "+"].map((sep) => rows.get().join(sep)),
 }));
 ```
 
@@ -273,19 +281,14 @@ pattern(({ count }) => ({
 
 ```ts
 // Shown for illustration only.
-pattern(({ count, show }) => ({
-  value: ifElse(show, count.get(), 0),
+pattern(({ rows }) => ({
+  labels: computed(() => ["-", "+"].map((sep) => rows.get().join(sep))),
 }));
 ```
 
-or:
-
-```ts
-// Shown for illustration only.
-pattern(({ count }) => ({
-  value: computed(() => count.get()),
-}));
-```
+A read that already has a site needs no relocation — `{ value: count.get() }`,
+`const total = rows.get().length`, and `{ifElse(show, count.get(), 0)}` are all
+part of the language as written.
 
 ### Bare Dynamic Key Access -> JSX, Callback, Or Structural Binding
 
@@ -529,23 +532,41 @@ The intended split is:
      values is part of the authored language
    - example:
      - `input.key("foo")` where `input` is a declared `Writable<{ ... }>`
-2. **true cell-style eager read inside JSX, authored helper control flow, or an explicit computation callback**
-   - `.get()` remains valid when the authored value truly has cell semantics
-     and the read occurs inside JSX, helper control flow, or an explicit
-     computation callback
+2. **true cell-style eager read inside an explicit computation callback**
+   - `.get()` is ordinary eager reading inside a `computed` / `lift` /
+     `handler` / `action` body, where the callback already supplies the
+     compute context
    - examples:
      - `computed(() => input.key("foo").get())`
-     - JSX expression sites like `{input.key("foo").get()}`
-     - `ifElse(show, count.get(), 0)`
      - `lift` / `handler` / `action` callbacks that preserve declared cell
        semantics
-3. **direct top-level eager read in pattern-owned reactive context**
-   - not part of the target language, even for true cells
-   - example:
-     - `{ value: input.key("foo").get() }` directly in a top-level pattern body
-   - the implementation accepts this example today; see the nuance at the end
-     of this section for the shape of that unratified carve-out
-4. **`.get()` on ordinary opaque/reactive values**
+3. **true cell-style eager read at a lowerable expression site**
+   - `.get()` is part of the authored language in pattern-owned context
+     wherever a lowerable expression site can carry it; that site lowers into
+     a lift, which is what keeps the read live instead of freezing it to a
+     construction-time snapshot
+   - the qualifying sites are the variable initializer, the return, the object
+     property, the array element, the call argument, a computation over the
+     read, a call whose receiver chain reaches the read, and the JSX
+     expression
+   - examples:
+     - `{ value: input.key("foo").get() }` in a top-level pattern body
+     - `const total = rows.get().length`
+     - `const sorted = rows.get().toSorted(byDate)`
+     - JSX expression sites like `{input.key("foo").get()}`
+     - `ifElse(show, count.get(), 0)`
+   - the spelling of the read does not change the classification: parentheses
+     around the site, the computed-key form `cell["get"]()`, and the optional
+     forms `cell?.get()` and `cell.get?.()` all follow the same rule (§5.6)
+4. **eager read with no lowerable expression site**
+   - not part of the target language, even for true cells — there is no site
+     to lower into a lift, so the read cannot be kept live
+   - examples:
+     - statement position: `count.get();`
+     - a reactive array-method callback: `rows.map((row) => row.cell.get())`
+     - a plain array-method callback:
+       `["-", "+"].map((sep) => rows.get().join(sep))`
+5. **`.get()` on ordinary opaque/reactive values**
    - not part of the target language
    - examples:
      - `input.get()` where `input` is an ordinary pattern value
@@ -555,24 +576,17 @@ So the language should not be read as “`.get()` / `.key()` are transitional.�
 The real rule is:
 
 - `.key(...)` is a real source-level API for true cell-like values
-- `.get()` is valid only when both the value semantics and the authored
-  expression context justify an eager read, including helper control flow
+- `.get()` is valid when the value truly has cell semantics **and** the read
+  either sits inside an explicit computation callback or has a lowerable
+  expression site to carry it
 - ordinary opaque/reactive values should still prefer direct property access
   and canonical lowered traversal rather than authored `.get()`
 
-One important nuance: the implementation has moved on this boundary since
-this spec's v1. Validation accepts a top-level eager read on a true cell
-wherever the read has a lowerable expression site to carry it — a binding, a
-return, an object property, an array element, an argument, a computation over
-the read, or a call whose receiver chain reaches it — and auto-wraps that site
-into a lift-applied computation. A read with no such site (statement position,
-inside a reactive array-method callback, or inside a plain array-method
-callback) still rejects, as does a read on an ordinary opaque value. That
-carve-out is an unratified delta recorded in
-`ts_transformers_design_deltas.md` (2026-07-10), which also tracks the parallel
-tension with the lowering contract's §3.9: either this matrix gains the
-carve-out or the implementation reverts; per §1, do not treat the accident of
-acceptance as language policy in the meantime.
+The site rule is deliberately about the site rather than the shape of the
+read. A terminal read and a read feeding a computation are the same construct
+at the same site, and an author who extracts a JSX expression into a named
+binding is refactoring, not changing what their program means — so both
+spellings resolve the same way.
 
 ## 5.8 Verb Results Are Declared, Never Inferred
 

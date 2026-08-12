@@ -453,9 +453,8 @@ Diagnostics emitted in all modes:
     optionality-orthogonality resolution. Each lift's input schema shrinks to
     what its body reads (`test/validation.test.ts:3179`; goldens
     `cell-get-binding-autowrap`, `cell-get-terminal-binding-autowrap`,
-    `with-reactive`). This is an unratified delta from the target-language
-    matrix's unconditional "Unsupported" and from the lowering contract's §3.9
-    eager-read bullet — see the design-deltas 2026-07-10 record
+    `with-reactive`). This is the ratified has-a-lowerable-site rule —
+    target-language spec §5.7 and its matrix rows are normative for it
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
