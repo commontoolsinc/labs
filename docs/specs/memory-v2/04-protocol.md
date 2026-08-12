@@ -569,13 +569,24 @@ coverage; the server stages the marker at the highest entry localSeq).
 Entries are decided independently: a stale observation is `dropped` as
 obsolete scheduler metadata, never rejected as a semantic conflict.
 
-Delivery ordering: the runner issues requests in allocation order (the
-issue-order gate), so the session's localSeq stream stays monotonic on the
-wire — the property INV-5 states — instead of a flush-time envelope number
-leapfrogging a semantic commit held behind the batch. Failures are
-droppable end to end: a rejected or lost batch resolves its observations
-client-side as dropped (the resume re-runs fresh) and is never retained
-for reconnect replay.
+Delivery ordering: a client MUST NOT issue a batch while any lower
+allocated localSeq is still unissued — the batch takes the in-order
+delivery obligation of its LOWEST entry, keeping the session's localSeq
+stream monotonic on the wire (the property INV-5 states; the runner's
+issue-order gate supplies it). Two server mechanisms lean on the
+obligation: catch-up markers are staged at the batch's HIGHEST entry,
+which is honest only when everything below is decided by the time the
+batch applies, and entries advance the in-order guard's decided bound,
+so a leapfrogging batch would false-reject the session's own later
+inferred-shape commits. A violation harms only the violating session —
+the same trust model as `verdictsThrough` — so the server does not
+validate batch ordering itself. No OTHER ordering is required: entry
+order within a batch is immaterial (decisions are per-entry and the
+marker takes a max), and batches MAY be pipelined without awaiting each
+other's responses — same-connection FIFO plus the per-space publication
+lock order their application. Failures are droppable end to end: a
+rejected or lost batch resolves its observations client-side as dropped
+(the resume re-runs fresh) and is never retained for reconnect replay.
 
 Only valid toward a peer advertising `observationBatchRequests`.
 
