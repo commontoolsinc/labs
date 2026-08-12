@@ -11,8 +11,11 @@
  * for: equality is about what a value holds, not about whether it can still be
  * written to.
  *
- * Signed zeros and the non-finite numbers get their own group, being exactly
- * where a comparison written with `===` would answer differently.
+ * Signed zeros and `NaN` get their own group, being where a comparison written
+ * with `===` answers differently: `-0` and `+0` are distinct here though `===`
+ * merges them, and `NaN` equals itself though `===` denies it. The infinities
+ * sit in that group as the counterweight -- `===` already answers correctly
+ * for those, and so must this, so they pin the absence of an over-correction.
  */
 
 import { describe, it } from "@std/testing/bdd";
