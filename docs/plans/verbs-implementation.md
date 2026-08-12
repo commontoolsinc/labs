@@ -412,10 +412,14 @@ Whoever takes this should confirm or discard that before assuming a single
 cause: what is established is only that the emitter is not where two of the
 three go missing, so a patch aimed there would close one symptom and leave two.
 
-**Carried alongside, not sequenced.** A capability probe that covers nothing
-(#5534) is a test asserting something it cannot observe, so it reports green
-continuously until fixed; it belongs to whoever next touches that suite rather
-than to a step here.
+**Carried alongside, not sequenced.** Two defects that no gate can see, which
+is why they are written down rather than left to be met again. A capability
+probe that covers nothing (#5534) asserts something it cannot observe, so it
+reports green continuously until fixed. And the renderer writes a click count
+into `detail` and a cell-ref into `target.value`, both slots patterns declare
+with other types (#5589) — closed event schemas were the only thing that ever
+compared the two, and ruling against them removed the detector rather than the
+mismatch.
 
 ## How this is driven
 
@@ -542,7 +546,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | step 10 |
 | #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 |
 | #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | step 11, if it proves to be the same root |
-| #5589 | ruling: does a closed verb schema govern the renderer's DOM-event envelope? | **answered** — no. Item 9b does not land, and the capability moves to item 12 |
+| #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
 | #5560 | an address a call returns cannot be passed back as a verb argument | item 11 |
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
 
