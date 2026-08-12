@@ -1,36 +1,58 @@
-// production uptime: a synthetic round-trip check of the production server. Times
-// the fetch and maps reachability + latency to a status. A single unreachable
-// check is treated as "can't tell" (calm gray), not an outage — only a sustained
-// run of failures escalates to a red "down" alarm, so a network blip on the
-// dashboard's side doesn't cry wolf. An HTTP 5xx (reached but erroring) is a real
-// bad state immediately, since that isn't a connectivity blip.
+// production uptime: synthetic round-trip checks for the estuary and rapids
+// servers, plus DNS checks for the company hosts they depend on or run beside.
+// Each health request goes to /_health on the configured origin. The tile keeps
+// successful health-check times visible, while resolved DNS-only hosts stay out
+// of the body. It also lists unconfirmed requests, non-200 responses, and DNS
+// failures.
 //
-// PROD_URL is the production server: an origin, not the thing to fetch. The tile
-// checks HEALTH_PATH on it, because that answers only while the server is really
-// serving, and links to the origin, because that is what someone clicking a tile
-// wants to open. The default is estuary, which is the production toolshed.
-//
-// The old default, production.commontools.dev, is not the server: it is the shell,
-// a static site in a GCS bucket (tofu/shell/README.md in the infra repository). It
-// has no health endpoint, and its index page answers 200 for as long as Google's
-// object storage is up — which is to say, through a total outage of the server
-// behind it.
-//
-// Estuary is on the tailnet. A dashboard that cannot reach the tailnet reads it as
-// unreachable, and a sustained run of that is a red "down" about the dashboard
-// rather than about production, so such a deployment must route this check over
-// the tailnet with PROD_PROXY or point PROD_URL at another truthful health source.
+// Both servers are on the tailnet. PROD_PROXY routes the health requests through
+// a proxy when the dashboard cannot reach the tailnet directly. The DNS result
+// reports whether the dashboard host resolves an A or AAAA record itself.
+import { escapeHtml } from "../lib.ts";
 import type { Status, Tile, TileView } from "../types.ts";
 
-const FAIL_THRESHOLD = 3; // consecutive unreachable checks before declaring "down"
 const HEALTH_PATH = "/_health";
-let fails = 0;
+const WARN_LATENCY_MS = 275;
+const BAD_LATENCY_MS = 500;
+const STATUS_DOT: Record<Status, string> = {
+  good: "green",
+  warn: "amber",
+  bad: "red",
+  unknown: "grey",
+};
 
+type HealthTargetName = "estuary" | "rapids";
 type CreateHttpClient = typeof Deno.createHttpClient;
 type HttpClientOptions = Parameters<CreateHttpClient>[0];
 type ProxyFetchInit = RequestInit & { client?: Deno.HttpClient };
+type ResolveDns = (
+  query: string,
+  recordType: "A" | "AAAA",
+) => Promise<readonly string[]>;
+
+interface Target {
+  name: string;
+  origin?: string;
+  href?: string;
+  hostname: string;
+  health: HealthTargetName | null;
+}
+
+interface Check {
+  status: Status;
+  detail: string;
+}
+
+interface TargetResult {
+  target: Target;
+  http: Check;
+  dns: Check;
+  status: Status;
+}
 
 let createHttpClient: CreateHttpClient = Deno.createHttpClient;
+let resolveDns: ResolveDns = (query, recordType) =>
+  Deno.resolveDns(query, recordType);
 
 export function setProdUptimeHttpClientFactoryForTest(
   factory: CreateHttpClient,
@@ -39,6 +61,16 @@ export function setProdUptimeHttpClientFactoryForTest(
   createHttpClient = factory;
   return () => {
     createHttpClient = previous;
+  };
+}
+
+export function setProdUptimeDnsResolverForTest(
+  resolver: ResolveDns,
+): () => void {
+  const previous = resolveDns;
+  resolveDns = resolver;
+  return () => {
+    resolveDns = previous;
   };
 }
 
@@ -63,70 +95,195 @@ function optionsForProxy(proxy: string): HttpClientOptions {
   throw new TypeError(`unsupported PROD_PROXY URL scheme: ${url.protocol}`);
 }
 
+function healthTarget(name: HealthTargetName, value: string): Target {
+  const url = new URL(value);
+  return {
+    name,
+    origin: url.origin,
+    href: url.origin,
+    hostname: url.hostname,
+    health: name,
+  };
+}
+
+function dnsTarget(name: string, value: string, href?: string): Target {
+  const url = new URL(value.includes("://") ? value : `https://${value}`);
+  return { name, hostname: url.hostname, href, health: null };
+}
+
+function worstStatus(statuses: readonly Status[]): Status {
+  if (statuses.includes("bad")) return "bad";
+  if (statuses.includes("warn")) return "warn";
+  if (statuses.includes("unknown")) return "unknown";
+  return "good";
+}
+
+async function checkDns(hostname: string): Promise<Check> {
+  const answers = await Promise.allSettled([
+    resolveDns(hostname, "A"),
+    resolveDns(hostname, "AAAA"),
+  ]);
+  const resolves = answers.some((answer) =>
+    answer.status === "fulfilled" && answer.value.length > 0
+  );
+  if (resolves) return { status: "good", detail: "" };
+  const missing = answers.every((answer) =>
+    answer.status === "fulfilled"
+      ? answer.value.length === 0
+      : answer.reason instanceof Deno.errors.NotFound
+  );
+  return {
+    status: missing ? "bad" : "warn",
+    detail: missing ? "DNS down" : "DNS unknown",
+  };
+}
+
+async function checkHttp(
+  target: Target,
+  client: Deno.HttpClient | undefined,
+  invalidProxy: boolean,
+): Promise<Check> {
+  if (target.health === null || target.origin === undefined) {
+    return { status: "good", detail: "" };
+  }
+  if (invalidProxy) return { status: "warn", detail: "invalid proxy" };
+
+  try {
+    const t0 = Date.now();
+    const init: ProxyFetchInit = {
+      signal: AbortSignal.timeout(8000),
+      redirect: "manual",
+    };
+    if (client !== undefined) init.client = client;
+    const res = await fetch(`${target.origin}${HEALTH_PATH}`, init);
+    const ms = Date.now() - t0;
+    try {
+      await res.body?.cancel();
+    } catch {
+      // A received status establishes reachability when body cleanup fails.
+    }
+    const status: Status = res.status !== 200 || ms > BAD_LATENCY_MS
+      ? "bad"
+      : ms > WARN_LATENCY_MS
+      ? "warn"
+      : "good";
+    return {
+      status,
+      detail: res.status === 200 ? `${ms} ms` : `HTTP ${res.status} · ${ms} ms`,
+    };
+  } catch {
+    return {
+      status: "warn",
+      detail: "unreachable",
+    };
+  }
+}
+
+function resultRow(result: TargetResult): string {
+  const target = result.target;
+  const details = [result.http.detail, result.dns.detail].filter(Boolean).join(
+    " · ",
+  );
+  const content =
+    `<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600"><span class="dot ${
+      STATUS_DOT[result.status]
+    }"></span>${
+      escapeHtml(target.name)
+    }</span><span style="color:var(--text-muted);font-variant-numeric:tabular-nums">${
+      escapeHtml(details)
+    }</span>`;
+  return target.href === undefined
+    ? content
+    : `<a href="${
+      escapeHtml(target.href)
+    }" target="_blank" rel="noopener" style="display:contents;color:inherit;text-decoration:none">${content}</a>`;
+}
+
+function view(results: readonly TargetResult[]): TileView {
+  const status = worstStatus(results.map((result) => result.status));
+  const affected = results.filter((result) => result.status !== "good");
+  const visible = results.filter(
+    (result) => result.target.health !== null || result.status !== "good",
+  );
+  const rows = visible.map(resultRow).join("");
+  return {
+    label: "production",
+    status,
+    value: affected.length === 0
+      ? `${results.length}/${results.length} hosts up`
+      : `${affected.length} affected`,
+    extra: rows === ""
+      ? undefined
+      : `<div style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${rows}</div>`,
+  };
+}
+
 export const prodUptime: Tile = {
   id: "prod-uptime",
   intervalMs: 30_000,
   async collect(ctx): Promise<TileView> {
-    const origin =
-      new URL(ctx.env("PROD_URL") ?? "https://estuary.saga-castor.ts.net")
-        .origin;
+    const targets = [
+      healthTarget(
+        "estuary",
+        ctx.env("ESTUARY_URL") ?? ctx.env("PROD_URL") ??
+          "https://estuary.saga-castor.ts.net",
+      ),
+      healthTarget(
+        "rapids",
+        ctx.env("RAPIDS_URL") ?? "https://rapids.saga-castor.ts.net",
+      ),
+      dnsTarget(
+        "bastion",
+        ctx.env("BASTION_HOST") ?? "bastion.saga-castor.ts.net",
+      ),
+      dnsTarget(
+        "prod shell",
+        "production.commontools.dev",
+        "https://production.commontools.dev",
+      ),
+      dnsTarget(
+        "stage shell",
+        "staging.commontools.dev",
+        "https://staging.commontools.dev",
+      ),
+      dnsTarget(
+        "LLM",
+        "llm.stage.commontools.dev",
+        "https://llm.stage.commontools.dev",
+      ),
+      dnsTarget(
+        "sandbox",
+        "sandbox.stage.commontools.dev",
+        "https://sandbox.stage.commontools.dev",
+      ),
+    ];
     const proxy = ctx.env("PROD_PROXY");
-    const url = `${origin}${HEALTH_PATH}`;
-    const host = new URL(origin).host;
-    const drill = { href: origin, hint: "open ↗" };
     let client: Deno.HttpClient | undefined;
+    let invalidProxy = false;
     try {
       client = proxy === undefined
         ? undefined
         : createHttpClient(optionsForProxy(proxy));
     } catch {
-      return {
-        ...drill,
-        label: "production",
-        status: "unknown",
-        value: "—",
-        sub: "invalid PROD_PROXY",
-      };
+      invalidProxy = true;
     }
 
     try {
-      const t0 = Date.now();
-      const init: ProxyFetchInit = {
-        signal: AbortSignal.timeout(8000),
-        redirect: "manual",
-      };
-      if (client !== undefined) init.client = client;
-      const res = await fetch(url, init);
-      const ms = Date.now() - t0;
-      try {
-        await res.body?.cancel();
-      } catch {
-        // A received status establishes reachability when body cleanup fails.
-      }
-      fails = 0; // reachable — reset the outage counter
-
-      const status: Status = res.status >= 500
-        ? "bad"
-        : res.status >= 400 || ms > 2500
-        ? "warn"
-        : "good";
-      return {
-        ...drill,
-        label: "production",
-        status,
-        value: res.status >= 500 ? "erroring" : `${ms} ms`,
-        sub: `HTTP ${res.status} · ${host}`,
-      };
-    } catch {
-      fails++;
-      const status: Status = fails >= FAIL_THRESHOLD ? "bad" : "unknown";
-      return {
-        ...drill,
-        label: "production",
-        status,
-        value: fails >= FAIL_THRESHOLD ? "down" : "—",
-        sub: `unreachable · ${host}`,
-      };
+      const results = await Promise.all(targets.map(async (target) => {
+        const [http, dns] = await Promise.all([
+          target.health === null
+            ? Promise.resolve({ status: "good" as const, detail: "" })
+            : checkHttp(target, client, invalidProxy),
+          checkDns(target.hostname),
+        ]);
+        return {
+          target,
+          http,
+          dns,
+          status: worstStatus([http.status, dns.status]),
+        };
+      }));
+      return view(results);
     } finally {
       client?.close();
     }
