@@ -546,11 +546,14 @@ describe("cf piece CFC labels", () => {
 
     await expect(setCellCfcLabel(
       pieceConfig,
-      [],
+      ["body"],
       { confidentiality: ["team", "legal"] },
       {},
       ambiguousDeps as never,
-    )).rejects.toThrow("effective label uses multiple observation classes");
+    )).rejects.toThrow(
+      'Cannot preserve observes at "body": ' +
+        "the effective label uses multiple observation classes.",
+    );
   });
 
   it("redacts caveat sources from command-facing label views", async () => {
