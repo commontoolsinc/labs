@@ -15,7 +15,7 @@
  *
  * At the container it is built over: the value's type against the schema's, and
  * the schema's `required` keys — that the value carries each of them, and that
- * the schema does not also reject one it requires. Both come off the container
+ * the schema selects each one it requires. Both come off the container
  * read a view takes anyway, so neither descends.
  *
  * Everything below that is checked where the reader touches it. A subtree the
@@ -108,9 +108,10 @@ const EXCLUDED_MISSING: JSONSchema = Object.freeze({
 });
 
 /**
- * A property the schema declares as the `false` schema.
+ * A property the schema turns down: declared as the `false` schema, or left
+ * unnamed by a schema that refuses the properties it does not name.
  *
- * `false` matches no value, so such a property contributes nothing to a read,
+ * Neither matches any value, so such a property contributes nothing to a read,
  * and the answer has to come off the schema rather than out of a failed read:
  * writing `false` is how a selection asks for a link's address without the
  * document behind it, and reading first would resolve the link and fetch the
@@ -118,21 +119,18 @@ const EXCLUDED_MISSING: JSONSchema = Object.freeze({
  *
  * This is its own marker because `schemaAtPath` also answers `false` for a
  * shape it cannot read a child out of — an `allOf`, or an object schema that
- * omits `type` — where the schema has not rejected anything and the subschema
- * is still reachable below.
+ * omits `type` — where the schema has turned nothing down and the subschema is
+ * still reachable below.
  */
 const EXCLUDED_REJECTED: JSONSchema = Object.freeze({
   $comment: "rejectedProperty",
 });
 
-const isRejectedProperty = (schema: JSONSchema): boolean =>
-  isRecord(schema) && schema.$comment === "rejectedProperty";
-
 const isExcluded = (schema: JSONSchema): boolean =>
-  isRejectedProperty(schema) ||
-  (isRecord(schema) &&
-    (schema.$comment === "emptyProperties" ||
-      schema.$comment === "missingProperty"));
+  isRecord(schema) &&
+  (schema.$comment === "emptyProperties" ||
+    schema.$comment === "missingProperty" ||
+    schema.$comment === "rejectedProperty");
 
 /**
  * The type name a schema's `type` keyword would use for this value.
@@ -342,14 +340,6 @@ const childSchema = (
   if (narrowed !== false || !isRecord(schema)) {
     return preferAsCellBranch(narrowed);
   }
-  // A property declared as `false` is the schema rejecting this child, which
-  // the fallback below would otherwise hand back as a schema to read through.
-  if (
-    isRecord(schema.properties) && Object.hasOwn(schema.properties, key) &&
-    (schema.properties as Record<string, JSONSchema>)[key] === false
-  ) {
-    return EXCLUDED_REJECTED;
-  }
   // `schemaAtPath` decides which children exist from the schema's `type`, so a
   // schema that declares `properties` or `items` and omits `type` narrows to
   // `false` — no child selected. An eager read reaches those children, and the
@@ -357,10 +347,20 @@ const childSchema = (
   // costs more than a refusal: the child's `asCell` marker goes with it, and
   // the reader gets a plain view where the pattern declared a `Cell`.
   if (isRecord(schema.properties) && Object.hasOwn(schema.properties, key)) {
-    return (schema.properties as Record<string, JSONSchema>)[key];
+    const declared = (schema.properties as Record<string, JSONSchema>)[key];
+    // Except where the subschema is `false`, which turns the child down rather
+    // than describing one to read through.
+    return declared === false ? EXCLUDED_REJECTED : declared;
   }
   if (isArrayIndexPropertyName(key) && schema.items !== undefined) {
     return schema.items as JSONSchema;
+  }
+  // A schema that names its properties and refuses the ones it does not name
+  // has turned this key down. Without `additionalProperties` the same shape
+  // reaches `schemaAtPath` as a missing property rather than as `false`, and an
+  // eager read drops the property either way.
+  if (isRecord(schema.properties) && schema.additionalProperties === false) {
+    return EXCLUDED_REJECTED;
   }
   return false;
 };
@@ -530,14 +530,14 @@ export function materializeSchemaView(
       if (declaredDefault(narrowed) !== undefined) continue;
       return mismatch(`missing required property ${JSON.stringify(key)}`);
     }
-    // A required property the schema declares as `false` cannot be satisfied
-    // while the data carries it: nothing matches `false`, and `required` says
-    // the filtered result has to hold this key. An eager read voids the whole
+    // A required property the schema does not select cannot be satisfied while
+    // the data carries it: nothing reaches the filtered result at that key, and
+    // `required` says the result has to hold it. An eager read voids the whole
     // object here rather than dropping the property, which is what it does for
-    // the same declaration on an optional one.
-    if (isRejectedProperty(narrowed)) {
+    // the same schema on an optional one.
+    if (isExcluded(narrowed)) {
       return mismatch(
-        `required property ${JSON.stringify(key)} matches nothing`,
+        `required property ${JSON.stringify(key)} is not selected`,
       );
     }
   }

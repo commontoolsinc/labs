@@ -34,7 +34,7 @@ the child's link and lets the front door decide what the child is.
 
 At the container it is built over: the value's type against the schema's, and
 the schema's `required` keys — that the value carries each of them, and that the
-schema does not also reject one it requires. Both come off the container read a
+schema selects each one it requires. Both come off the container read a
 view takes anyway, so neither descends.
 
 Everything below is checked where the reader touches it. **A subtree the reader
@@ -88,17 +88,18 @@ wrong. Six rules exist only to hold that:
   [`data:` identifier](data-uri-identifiers.md), and the view does the same. The
   read stays on the slot, and recursively: the identity is derived from the whole
   element value.
-- **A property the schema declares as `false` is answered off the schema, not
-  by reading it.** `false` matches no value, so the property is absent to a
-  reader — from `in`, from enumeration and from a plain access alike — and the
-  link under it is never followed. Deciding it by reading and letting the read
-  fail would fetch the document first, which is the cost writing `false` was
-  meant to avoid: a selection projection asks for a link's address that way,
+- **A property the schema turns down is answered off the schema, not by reading
+  it.** Declaring it `false` turns it down, and so does leaving it unnamed by a
+  schema that refuses the properties it does not name. Either way it is absent
+  to a reader — from `in`, from enumeration and from a plain access alike — and
+  the link under it is never followed. Deciding it by reading and letting the
+  read fail would fetch the document first, which is the cost the declaration
+  was meant to avoid: a selection projection asks for a link's address that way,
   and a marked collection would otherwise load one document per element.
-  Requiring the same property instead voids the object, because nothing
-  satisfies both `false` and `required`. This is narrower than it sounds —
-  schema narrowing also answers `false` where it cannot read a child out of the
-  shape it was given, an `allOf` among them, and there the subschema is still
+  Requiring such a property instead voids the object, since nothing reaches the
+  filtered result at that key. This is narrower than it sounds — schema
+  narrowing also answers `false` where it cannot read a child out of the shape
+  it was given, an `allOf` among them, and there the subschema is still
   reachable below.
 - **A read-only array method visits every element, even past one that does not
   match.** An eager read walks the whole array before it calls the array

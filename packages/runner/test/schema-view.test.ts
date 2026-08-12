@@ -844,12 +844,13 @@ describe("schema-view", () => {
     });
   });
 
-  describe("a property the schema declares as `false`", () => {
-    /** A document holding a link to another, under a schema that rejects the
-     * property the link sits at. */
+  describe("a property the schema turns down", () => {
+    /** A document holding a link to another, under a schema that turns down the
+     * property the link sits at — by declaring it `false`, or by refusing the
+     * properties it does not name and not naming this one. */
     const seededLink = async (
       cause: string,
-      rejected: JSONSchema,
+      rejected: JSONSchema | "unnamed",
       required?: readonly string[],
     ) => {
       const write = runtime.edit();
@@ -871,7 +872,10 @@ describe("schema-view", () => {
 
       const schema = {
         type: "object",
-        properties: { p: rejected, q: { type: "number" } },
+        properties: {
+          q: { type: "number" },
+          ...(rejected === "unnamed" ? {} : { p: rejected }),
+        },
         additionalProperties: false,
         ...(required === undefined ? {} : { required }),
       } as JSONSchema;
@@ -886,51 +890,92 @@ describe("schema-view", () => {
       };
     };
 
-    it("leaves the property out, as an eager read does", async () => {
-      const { read } = await seededLink("rejected-property", false);
-      const eager = read(false);
-      const lazy = read(true);
-      try {
-        expect(JSON.parse(JSON.stringify(lazy.get()))).toEqual(
-          JSON.parse(JSON.stringify(eager.get())),
+    const shapes: Array<[string, JSONSchema | "unnamed"]> = [
+      ["declared as `false`", false],
+      [
+        "left unnamed where the schema refuses what it does not name",
+        "unnamed",
+      ],
+    ];
+
+    for (const [index, [shape, rejected]] of shapes.entries()) {
+      it(`leaves out a property ${shape}, as an eager read does`, async () => {
+        const { read } = await seededLink(`turned-down-${index}`, rejected);
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect(JSON.parse(JSON.stringify(lazy.get()))).toEqual(
+            JSON.parse(JSON.stringify(eager.get())),
+          );
+          const value = lazy.get() as Record<string, unknown>;
+          expect("p" in value).toBe(false);
+          expect(Object.keys(value)).toEqual(["q"]);
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
+
+      it(`never loads what a property ${shape} links to`, async () => {
+        // The target is never fetched: a selection asking for a link's address
+        // wants the address, not the document. Deciding it by reading and
+        // letting the read fail would fetch the document first, which is the
+        // cost turning the property down was meant to avoid.
+        const { read, targetId } = await seededLink(
+          `turned-down-link-${index}`,
+          rejected,
         );
-        const value = lazy.get() as Record<string, unknown>;
-        expect("p" in value).toBe(false);
-        expect(Object.keys(value)).toEqual(["q"]);
-      } finally {
-        await eager.tx.commit();
-        await lazy.tx.commit();
-      }
-    });
+        const lazy = read(true);
+        try {
+          const value = lazy.get() as Record<string, unknown>;
+          // Enumerating asks whether each key is there, which is where a reader
+          // that never names `p` still reaches it.
+          expect(Object.keys(value)).toEqual(["q"]);
+          expect("p" in value).toBe(false);
+          expect(value.p).toBe(undefined);
+          const ids = [...getTransactionReadActivities(lazy.tx) ?? []]
+            .map((activity) => activity.id);
+          expect(ids.includes(targetId)).toBe(false);
+        } finally {
+          await lazy.tx.commit();
+        }
+      });
 
-    it("never loads what the rejected property links to", async () => {
-      // The point of writing `false` is that the target is never fetched: a
-      // selection asking for a link's address wants the address, not the
-      // document. Deciding it by reading and letting the read fail would fetch
-      // the document first, which is the cost the `false` was written to avoid.
-      const { read, targetId } = await seededLink("rejected-link", false);
-      const lazy = read(true);
-      try {
-        const value = lazy.get() as Record<string, unknown>;
-        // Enumerating asks whether each key is there, which is where a reader
-        // that never names `p` still reaches it.
-        expect(Object.keys(value)).toEqual(["q"]);
-        expect("p" in value).toBe(false);
-        expect(value.p).toBe(undefined);
-        const ids = [...getTransactionReadActivities(lazy.tx) ?? []]
-          .map((activity) => activity.id);
-        expect(ids.includes(targetId)).toBe(false);
-      } finally {
-        await lazy.tx.commit();
-      }
-    });
+      it(`voids the object when a property ${shape} is required`, async () => {
+        // Dropping the property is the answer for an optional one. Where the
+        // schema also requires it, nothing reaches the filtered result at that
+        // key, and an eager read hands back nothing rather than an object
+        // missing a key it declared mandatory.
+        const { read } = await seededLink(
+          `turned-down-required-${index}`,
+          rejected,
+          ["p"],
+        );
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect(eager.get()).toBe(undefined);
+          expect(lazy.get()).toBe(undefined);
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
+    }
 
-    it("voids the object when the rejected property is required", async () => {
-      // Dropping the property is the answer for an optional one. Where the
-      // schema also requires it, there is no value that satisfies both, and an
-      // eager read hands back nothing rather than an object missing a key it
-      // declared mandatory.
-      const { read } = await seededLink("rejected-required", false, ["p"]);
+    it("voids the object when a required property is one it does not describe", async () => {
+      // A schema that names its properties and says nothing about the rest
+      // reaches the narrowing as a missing property rather than as `false`, and
+      // an eager read voids the object for that one too.
+      const read = await seeded(
+        "turned-down-undescribed",
+        { p: 1, q: 2 },
+        {
+          type: "object",
+          properties: { q: { type: "number" } },
+          required: ["p"],
+        } as const,
+      );
       const eager = read(false);
       const lazy = read(true);
       try {
