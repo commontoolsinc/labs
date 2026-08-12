@@ -2333,9 +2333,13 @@ export class CFCodeEditor extends BaseElement {
       if (!entry) continue;
 
       const name = this._refNames.get(ref.key);
-      // With no name to compare against, an edit is taken as divergence: the
-      // reading that keeps the user's wording is the safe one.
-      const modifiedTitle = name === undefined ? true : ref.label !== name;
+      // Against the name AS A LABEL, not the raw name: a destination named
+      // with a `]` is written into the token in the shape the parser reads,
+      // and comparing against the raw form would find every such mention
+      // permanently diverged and stop its renames from ever arriving.
+      const modifiedTitle = name === undefined
+        ? true
+        : ref.label !== labelForToken(name);
 
       // Only the WRITE is conditional. Every label edit is an edit, including
       // one custom wording replacing another, and a listener told the event

@@ -194,7 +194,12 @@ export const mentionRefEditFilter = EditorState.transactionFilter.of((tr) => {
         shouldInclude = false;
         break;
       }
-      if (reachesIntoKey(ref, fromA, toA)) adjustedTo = ref.labelTo;
+      // The EARLIEST boundary wins. One change can reach from inside one
+      // mention's label into a later mention's key, and taking the last
+      // match would move the cut past the first mention's key and delete it.
+      if (reachesIntoKey(ref, fromA, toA)) {
+        adjustedTo = Math.min(adjustedTo, ref.labelTo);
+      }
     }
 
     if (shouldInclude) {

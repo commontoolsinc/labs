@@ -226,6 +226,26 @@ describe("mention-refs", () => {
       expect(edited.state.doc.toString()).toBe(`[No][${KEY}]`);
     });
 
+    it("cuts at the first key when one edit reaches into a later one", () => {
+      // The boundary has to be the earliest match: taking the last would move
+      // the cut past the first mention's key and delete it.
+      const state = createState(
+        `[One][${KEY}] and [Two][${OTHER_KEY}]`,
+        [KEY, OTHER_KEY],
+      );
+      const [first, second] = mentionRefs(state);
+      const edited = state.update({
+        changes: {
+          from: first.labelFrom + 1,
+          to: second.labelTo + 2,
+          insert: "",
+        },
+      });
+      // Both keys survive; only label text between them is gone.
+      expect(edited.state.doc.toString()).toContain(`[${KEY}]`);
+      expect(edited.state.doc.toString()).toContain(`[${OTHER_KEY}]`);
+    });
+
     it("applies an edit covering the whole token", () => {
       const state = createState(`x [Note][${KEY}] y`);
       const ref = mentionRefs(state)[0];
