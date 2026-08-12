@@ -2111,6 +2111,7 @@ class SpaceReplica implements ISpaceReplica {
   #issuedLocalSeqs = new Set<number>();
   #issueTurnWaiters: Array<{
     localSeq: number;
+    exempt?: ReadonlySet<number>;
     turn: PromiseWithResolvers<void>;
   }> = [];
   #closed = false;
@@ -3181,12 +3182,17 @@ class SpaceReplica implements ISpaceReplica {
       if (issueEntries.length === 0) {
         return { ok: {} };
       }
-      // Issue-order gate: the request carries its entries’ localSeqs, so
-      // it takes its turn at the LOWEST one — everything allocated below
-      // the batch reaches the wire first, keeping delivery monotonic.
-      await this.awaitIssueTurn(
-        Math.min(...issueEntries.map((entry) => entry.commit.localSeq)),
+      // Issue-order gate: the batch takes the delivery obligation of its
+      // HIGHEST entry — everything allocated below that entry reaches the
+      // wire first, with the batch's own lower entries exempt (they issue
+      // via this request). Entries are contiguous today (every semantic
+      // allocation bumps the batch generation), which would make a
+      // lowest-entry turn equivalent — but the obligation is stated and
+      // enforced at the highest so nothing leans on that contiguity.
+      const entryLocalSeqs = new Set(
+        issueEntries.map((entry) => entry.commit.localSeq),
       );
+      await this.awaitIssueTurn(Math.max(...entryLocalSeqs), entryLocalSeqs);
       try {
         const { session } = await this.activeSessionHandle();
         this.markRouteWriteIssued(routeSources);
@@ -3274,21 +3280,36 @@ class SpaceReplica implements ISpaceReplica {
   // never replay: one that could not send resolves as dropped, and a
   // non-delivery cannot be out of order.
 
-  private issueTurnBlocked(localSeq: number): boolean {
+  private issueTurnBlocked(
+    localSeq: number,
+    exempt?: ReadonlySet<number>,
+  ): boolean {
     for (const pending of this.#unsettledFates) {
-      if (pending < localSeq && !this.#issuedLocalSeqs.has(pending)) {
+      if (
+        pending < localSeq &&
+        !this.#issuedLocalSeqs.has(pending) &&
+        exempt?.has(pending) !== true
+      ) {
         return true;
       }
     }
     return false;
   }
 
-  private awaitIssueTurn(localSeq: number): Promise<void> {
-    if (!this.issueTurnBlocked(localSeq)) {
+  /** Opens when every allocated localSeq below `localSeq` has issued or
+   * settled without issuing. `exempt` is for observation batches, which
+   * take the delivery obligation of their HIGHEST entry: the batch's own
+   * lower entries are unissued by definition — they issue VIA this very
+   * request — so they must not block its turn. */
+  private awaitIssueTurn(
+    localSeq: number,
+    exempt?: ReadonlySet<number>,
+  ): Promise<void> {
+    if (!this.issueTurnBlocked(localSeq, exempt)) {
       return Promise.resolve();
     }
     const turn = Promise.withResolvers<void>();
-    this.#issueTurnWaiters.push({ localSeq, turn });
+    this.#issueTurnWaiters.push({ localSeq, exempt, turn });
     return turn.promise;
   }
 
@@ -3303,10 +3324,11 @@ class SpaceReplica implements ISpaceReplica {
     }
     const blocked: Array<{
       localSeq: number;
+      exempt?: ReadonlySet<number>;
       turn: PromiseWithResolvers<void>;
     }> = [];
     for (const waiter of this.#issueTurnWaiters) {
-      if (this.issueTurnBlocked(waiter.localSeq)) {
+      if (this.issueTurnBlocked(waiter.localSeq, waiter.exempt)) {
         blocked.push(waiter);
       } else {
         waiter.turn.resolve();

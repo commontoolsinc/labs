@@ -572,9 +572,13 @@ obsolete scheduler metadata, never rejected as a semantic conflict.
 Delivery ordering: requests carrying localSeqs MUST be DELIVERED on a
 session's connection in allocation order — delivery meaning the order
 frames arrive at the server, the only phase the server can observe. A
-batch takes the delivery obligation of its LOWEST entry, keeping the
-session's localSeq stream monotonic on the wire (the property INV-5
-states). How a client discharges the obligation is its own affair; the
+batch takes the delivery obligation of its HIGHEST entry, with its own
+lower entries exempt from the wait (they are delivered BY this request),
+keeping the session's localSeq stream monotonic on the wire (the
+property INV-5 states). Entries are contiguous in practice — every
+semantic allocation opens a new batch generation — which would make a
+lowest-entry obligation equivalent; the obligation is stated at the
+highest entry so that nothing leans on contiguity. How a client discharges the obligation is its own affair; the
 runner does it by gating SUBMISSION (the hand-off into the session's
 request path) in allocation order and sending every request down an
 identical path from there to the transport write, so submission order is
