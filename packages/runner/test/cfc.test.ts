@@ -1,3 +1,21 @@
+/**
+ * Schema traversal as contextual flow control needs it, where the recurring
+ * hazard is scope. A `$defs` block is visible to what sits under it and not to
+ * what sits beside it, so descending through a `$ref` changes which
+ * definitions are in scope, and a traversal carrying the wrong root either
+ * resolves a name it should not see or fails to resolve one it should.
+ *
+ * Two narrower ways that goes wrong get their own cases. An inherited property
+ * name is not a declared definition, however much it looks like one to a bare
+ * property read. And a definition the derived schema cannot reach is dropped
+ * rather than carried along -- not merely left unresolved, but neither
+ * enumerated nor read.
+ *
+ * The label side is here too, and its point is that the lattice is open: a
+ * join preserves whatever confidentiality atoms it is given rather than
+ * rounding them to fixed levels.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";

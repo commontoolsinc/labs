@@ -1,3 +1,16 @@
+/**
+ * The `cfcLabelView` side-channel that rides on a cell link's inner: the two
+ * accessors for the view on a single link, and the two walks that rewrite
+ * every view in a whole value.
+ *
+ * A view is display state rather than part of what a link addresses, and that
+ * is what makes the two directions different rather than symmetric. Outbound,
+ * the view may be shown but the caveat sources behind it may not, so a value
+ * on its way to the main thread is rewritten rather than withheld. Inbound, a
+ * view is an untrusted artifact that must not become worker label state, so it
+ * is removed outright.
+ */
+
 import {
   isLinkRef,
   linkRefFrom,

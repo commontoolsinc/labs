@@ -1,3 +1,19 @@
+/**
+ * The walk that replaces artifacts, and the two single-value questions
+ * underneath it.
+ *
+ * A serializing member may be accessor-backed, so reading it twice can produce
+ * two different answers; several cases here assert a single read rather than a
+ * particular result. Structure is the other recurring subject: what the walk
+ * did not have to rebuild comes back by identity, a shared artifact stays
+ * shared, and a hole in an array is still a hole afterward.
+ *
+ * A cell and the reactive standing for it are the interesting non-artifacts.
+ * They carry the member the walk looks for, so the single-value questions
+ * answer for them, while the walk itself leaves them alone -- they are no
+ * builder's artifact, and what they encode to is the link naming the cell.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
