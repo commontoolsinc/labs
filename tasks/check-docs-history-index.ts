@@ -19,7 +19,7 @@
 //
 // Usage: deno run --allow-read ./tasks/check-docs-history-index.ts
 
-import { dirname, fromFileUrl, join, relative } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 const HISTORY_DIR = "docs/history";
@@ -136,75 +136,103 @@ export function coversPath(target: string, documentPath: string): boolean {
   return target === documentPath;
 }
 
-async function markdownFilesUnder(directory: string): Promise<string[]> {
-  const found: string[] = [];
-  for await (const entry of Deno.readDir(join(REPO_ROOT, directory))) {
-    const path = `${directory}/${entry.name}`;
-    if (entry.isDirectory) {
-      found.push(...await markdownFilesUnder(path));
-    } else if (entry.name.endsWith(".md")) {
-      found.push(path);
-    }
-  }
-  return found;
+/** The tree the index describes, as paths relative to docs/history/. */
+export interface HistoryTree {
+  /** Every archived document, excluding README.md and INDEX.md. */
+  readonly documents: readonly string[];
+  /** Every path an entry may point at: those documents and every directory. */
+  readonly paths: ReadonlySet<string>;
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await Deno.stat(join(REPO_ROOT, path));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function main() {
-  const text = await Deno.readTextFile(join(REPO_ROOT, INDEX_PATH));
+/** Everything wrong with an index, given the tree it is supposed to describe. */
+export function checkIndex(
+  text: string,
+  tree: HistoryTree,
+): { problems: IndexProblem[]; entryCount: number } {
   const { problems, entries } = checkShape(text);
-
   const targets = entries.flatMap((entry) =>
     entry.targets.map((target) => ({ target, lineNumber: entry.lineNumber }))
   );
+
   for (const { target, lineNumber } of targets) {
-    if (await exists(`${HISTORY_DIR}/${target}`)) continue;
-    problems.push({
-      lineNumber,
-      message: `${target} does not exist`,
-    });
+    if (tree.paths.has(target)) continue;
+    problems.push({ lineNumber, message: `${target} does not exist` });
   }
 
-  const documents = (await markdownFilesUnder(HISTORY_DIR))
-    .map((path) => relative(HISTORY_DIR, path))
-    .filter((path) => path !== "README.md" && path !== "INDEX.md")
-    .sort();
-  const unindexed = documents.filter((document) =>
-    !targets.some(({ target }) => coversPath(target, document))
-  );
-  for (const document of unindexed) {
+  for (const document of tree.documents) {
+    if (targets.some(({ target }) => coversPath(target, document))) continue;
     problems.push({
       message: `${HISTORY_DIR}/${document} is missing from the index`,
     });
   }
 
+  return { problems, entryCount: entries.length };
+}
+
+/** The lines a run prints, so that reporting is decided without printing. */
+export function report(
+  problems: readonly IndexProblem[],
+  entryCount: number,
+  documentCount: number,
+): string[] {
   if (problems.length === 0) {
-    console.log(
-      `${INDEX_PATH}: ${entries.length} entries covering ` +
-        `${documents.length} documents.`,
-    );
+    return [
+      `${INDEX_PATH}: ${entryCount} entries covering ${documentCount} documents.`,
+    ];
+  }
+  return [
+    `${INDEX_PATH} needs fixing:`,
+    "",
+    ...problems.map((problem) => {
+      const where = problem.lineNumber === undefined
+        ? ""
+        : `line ${problem.lineNumber}: `;
+      return `  ${where}${problem.message}`;
+    }),
+    "",
+    `The rules, and why they are what they are, are in ` +
+    `${HISTORY_DIR}/README.md under "Index".`,
+  ];
+}
+
+/** Reads the tree under an absolute root into the shape `checkIndex` takes. */
+export async function readTree(root: string): Promise<HistoryTree> {
+  const documents: string[] = [];
+  const paths = new Set<string>();
+  const walk = async (relativeDirectory: string): Promise<void> => {
+    const absolute = join(root, relativeDirectory);
+    for await (const entry of Deno.readDir(absolute)) {
+      const path = relativeDirectory === ""
+        ? entry.name
+        : `${relativeDirectory}/${entry.name}`;
+      if (entry.isDirectory) {
+        // Trailing slash included and omitted: an entry may write either.
+        paths.add(path);
+        paths.add(`${path}/`);
+        await walk(path);
+        continue;
+      }
+      paths.add(path);
+      if (!entry.name.endsWith(".md")) continue;
+      if (path === "README.md" || path === "INDEX.md") continue;
+      documents.push(path);
+    }
+  };
+  await walk("");
+  documents.sort();
+  return { documents, paths };
+}
+
+async function main() {
+  const text = await Deno.readTextFile(join(REPO_ROOT, INDEX_PATH));
+  const tree = await readTree(join(REPO_ROOT, HISTORY_DIR));
+  const { problems, entryCount } = checkIndex(text, tree);
+  const lines = report(problems, entryCount, tree.documents.length);
+  if (problems.length === 0) {
+    console.log(lines.join("\n"));
     return;
   }
-
-  console.error(`${INDEX_PATH} needs fixing:\n`);
-  for (const problem of problems) {
-    const where = problem.lineNumber === undefined
-      ? ""
-      : `line ${problem.lineNumber}: `;
-    console.error(`  ${where}${problem.message}`);
-  }
-  console.error(
-    `\nThe rules, and why they are what they are, are in ` +
-      `${HISTORY_DIR}/README.md under "Index".`,
-  );
+  console.error(lines.join("\n"));
   Deno.exit(1);
 }
 
