@@ -20,12 +20,13 @@ import { escapeHtml } from "../lib.ts";
 import type { Status, Tile, TileView } from "../types.ts";
 
 const HEALTH_PATH = "/_health";
-const WARN_LATENCY_MS = 275;
-const BAD_LATENCY_MS = 500;
+const WARN_LATENCY_MS = 500;
+const BAD_LATENCY_MS = 1000;
 const TAILNET_SUFFIX = ".ts.net";
-// Each connect probe opens and closes a connection the far host records in its
-// own logs, so a probed host is revisited far less often than the tile refreshes
-// and keeps its last answer in between.
+// A connect that reaches a host opens and closes a session the host records in
+// its own logs, so a host that answers is left alone for this long and counts as
+// reachable in between. A connect that reaches nothing leaves nothing behind, so
+// a host that does not answer is asked again on the next refresh.
 const PROBE_INTERVAL_MS = 3_600_000;
 const SOCKS5_VERSION = 5;
 const SOCKS5_NO_AUTHENTICATION = 0;
@@ -77,6 +78,9 @@ interface Target {
 interface Check {
   status: Status;
   detail: string;
+  // Set when the check found no host at the other end at all, as opposed to
+  // finding one that answered badly or slowly. The headline names these.
+  down?: true;
   headline?: {
     text: string;
     priority: number;
@@ -95,7 +99,7 @@ let createHttpClient: CreateHttpClient = Deno.createHttpClient;
 let resolveDns: ResolveDns = (query, recordType) =>
   Deno.resolveDns(query, recordType);
 let openProxyStream: OpenProxyStream = Deno.connect;
-const probed = new Map<string, { at: number; check: Check }>();
+const reachedAt = new Map<string, number>();
 
 export function setProdUptimeHttpClientFactoryForTest(
   factory: CreateHttpClient,
@@ -122,10 +126,10 @@ export function setProdUptimeProxyStreamOpenerForTest(
 ): () => void {
   const previous = openProxyStream;
   openProxyStream = opener;
-  probed.clear();
+  reachedAt.clear();
   return () => {
     openProxyStream = previous;
-    probed.clear();
+    reachedAt.clear();
   };
 }
 
@@ -199,6 +203,18 @@ function worstStatus(statuses: readonly Status[]): Status {
       STATUS_RANK[status] > STATUS_RANK[worst] ? status : worst,
     "good",
   );
+}
+
+// A host nothing answered for is the plainest thing the tile can say, so it
+// takes the headline over any host that answered.
+function downHeadline(results: readonly TargetResult[]): string | undefined {
+  const down = results.filter(
+    (result) => result.http.down === true || result.reach.down === true,
+  );
+  if (down.length === 0) return undefined;
+  return down.length === 1
+    ? `${down[0].target.name} down`
+    : `${down.length} hosts down`;
 }
 
 function worstHeadline(results: readonly TargetResult[]): string | undefined {
@@ -303,9 +319,9 @@ async function checkReach(
 
   const key = `${proxy.protocol}//${proxy.host}|${target.hostname}:${target.port}`;
   const now = Date.now();
-  const previous = probed.get(key);
-  if (previous !== undefined && now - previous.at < PROBE_INTERVAL_MS) {
-    return previous.check;
+  const previous = reachedAt.get(key);
+  if (previous !== undefined && now - previous < PROBE_INTERVAL_MS) {
+    return { status: "good", detail: "" };
   }
 
   let reached = false;
@@ -314,13 +330,12 @@ async function checkReach(
   } catch {
     // An exchange that breaks down reads the same as a connection refused.
   }
-  const check: Check = reached ? { status: "good", detail: "" } : {
-    status: "bad",
-    detail: "unreachable",
-    headline: { text: "unreachable", priority: 3, magnitude: 0 },
-  };
-  probed.set(key, { at: now, check });
-  return check;
+  if (!reached) {
+    reachedAt.delete(key);
+    return { status: "bad", detail: "unreachable", down: true };
+  }
+  reachedAt.set(key, now);
+  return { status: "good", detail: "" };
 }
 
 async function checkDns(hostname: string): Promise<Check> {
@@ -337,14 +352,11 @@ async function checkDns(hostname: string): Promise<Check> {
       ? answer.value.length === 0
       : answer.reason instanceof Deno.errors.NotFound
   );
+  if (missing) return { status: "bad", detail: "DNS down", down: true };
   return {
-    status: missing ? "bad" : "warn",
-    detail: missing ? "DNS down" : "DNS unknown",
-    headline: {
-      text: missing ? "DNS down" : "DNS unknown",
-      priority: 3,
-      magnitude: 0,
-    },
+    status: "warn",
+    detail: "DNS unknown",
+    headline: { text: "DNS unknown", priority: 3, magnitude: 0 },
   };
 }
 
@@ -393,11 +405,7 @@ async function checkHttp(
         : undefined,
     };
   } catch {
-    return {
-      status: "warn",
-      detail: "unreachable",
-      headline: { text: "unreachable", priority: 2, magnitude: 0 },
-    };
+    return { status: "bad", detail: "unreachable", down: true };
   }
 }
 
@@ -422,7 +430,7 @@ function resultRow(result: TargetResult): string {
 
 function view(results: readonly TargetResult[]): TileView {
   const status = worstStatus(results.map((result) => result.status));
-  const headline = worstHeadline(results);
+  const headline = downHeadline(results) ?? worstHeadline(results);
   const visible = results.filter(
     (result) =>
       result.status !== "good" ||
