@@ -712,6 +712,102 @@ describe("schema-view", () => {
     });
   });
 
+  describe("an array view", () => {
+    const ITEMS = {
+      type: "object",
+      properties: {
+        xs: {
+          type: "array",
+          items: { type: "object", properties: { n: { type: "number" } } },
+        },
+      },
+    } as const;
+
+    const readArray = async (cause: string) => {
+      const read = await seeded(
+        cause,
+        { xs: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+        ITEMS,
+      );
+      return read;
+    };
+
+    it("runs a read-only method against element views", async () => {
+      const read = await readArray("array-methods");
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        const of = (v: unknown) => (v as { xs: Array<{ n: number }> }).xs;
+        expect(of(lazy.get()).map((item) => item.n)).toEqual([1, 2, 3]);
+        expect(of(lazy.get()).filter((item) => item.n > 1).map((i) => i.n))
+          .toEqual([2, 3]);
+        expect(of(lazy.get()).map((i) => i.n)).toEqual(
+          of(eager.get()).map((i) => i.n),
+        );
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
+    it("iterates and spreads into element views", async () => {
+      const read = await readArray("array-iterate");
+      const lazy = read(true);
+      try {
+        const xs = (lazy.get() as { xs: Array<{ n: number }> }).xs;
+        expect([...xs].map((item) => item.n)).toEqual([1, 2, 3]);
+        const seen: number[] = [];
+        for (const item of xs) seen.push(item.n);
+        expect(seen).toEqual([1, 2, 3]);
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+
+    it("refuses a method that would reshape it", async () => {
+      const read = await readArray("array-mutation");
+      const lazy = read(true);
+      try {
+        const xs = (lazy.get() as { xs: Array<unknown> }).xs;
+        expect(() => xs.push({ n: 4 })).toThrow("it is a read");
+        expect(() => xs.sort()).toThrow("it is a read");
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+
+    it("enumerates its indices, as an eager read does", async () => {
+      const read = await readArray("array-enumerate");
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        const of = (v: unknown) => (v as { xs: Array<{ n: number }> }).xs;
+        const lazyXs = of(lazy.get());
+        expect(Object.keys(lazyXs)).toEqual(Object.keys(of(eager.get())));
+        expect(Object.entries(lazyXs).map(([, item]) => item.n))
+          .toEqual([1, 2, 3]);
+        expect(1 in lazyXs).toBe(true);
+        expect(9 in lazyXs).toBe(false);
+        expect(lazyXs.length).toBe(3);
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
+    it("hands back a Cell for the array itself", async () => {
+      const read = await readArray("array-tocell");
+      const lazy = read(true);
+      try {
+        const xs = (lazy.get() as { xs: Record<symbol, unknown> }).xs;
+        const cell = (xs[toCell] as () => { get: () => unknown })();
+        expect(typeof cell.get).toBe("function");
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+  });
+
   describe("an array element that is an inline object", () => {
     /** Seed a cell with the value stored as given — `set()` would split array
      * elements into documents of their own, which is the other shape. */
