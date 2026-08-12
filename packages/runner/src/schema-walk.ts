@@ -28,10 +28,26 @@
  *
  * `$ref` resolution is opt-in per walk (see `SchemaWalkOptions.resolveRef`):
  * following a ref needs a definition scope, which is caller/runtime specific.
+ *
+ * ## Values that are not schemas
+ *
+ * A schema reaching the runtime has not necessarily come from the schema
+ * generator — it may have been written into a space by anything — so a keyword
+ * here can hold a value that is not a schema at all, and a keyword taking
+ * several subschemas can hold something that is not an array or an object. Such
+ * a value has no subschemas and cannot be rewritten into one, so the walk treats
+ * the edge as leading nowhere: the value is not visited, not descended into, and
+ * not rewritten, and it stays in place in a mapped result. Each one is reported
+ * once per walk that reaches it, at warn level, naming the keyword, the value,
+ * and the schema holding it.
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+
+const logger = getLogger("schema-walk", { level: "warn" });
 
 // The supported subschema-bearing keywords, grouped by how each keyword holds
 // its subschema(s). See the module docstring for the keywords we deliberately
@@ -88,6 +104,16 @@ export type SubschemaKeyword =
   | (typeof DEFS_KEYS)[number]
   | (typeof UNUSED_SINGLE_SUBSCHEMA_KEYS)[number]
   | (typeof UNUSED_RECORD_SUBSCHEMA_KEYS)[number];
+
+/**
+ * Everything a schema can be: `true`, `false`, or an object. `null`, a string
+ * and a number are the values a stored schema document has been seen to hold
+ * where a subschema belongs; see the module docstring for how the walk treats
+ * one. An array satisfies this, as it does every object test in this module.
+ */
+export function isSubschema(value: unknown): value is JSONSchema {
+  return typeof value === "boolean" || isRecord(value);
+}
 
 export interface SchemaWalkOptions {
   /** Also descend into `$defs` bodies. Default false. */
@@ -158,6 +184,63 @@ const recordKeywordsFor = (
   return keys;
 };
 
+/** Report a keyword holding `found` where `expected` belongs. */
+const warnNotSchema = (
+  expected: string,
+  keyword: SubschemaKeyword,
+  key: string | number | undefined,
+  found: unknown,
+  parent: JSONSchema,
+): void => {
+  logger.warn("non-schema", () => [
+    `Ignoring \`${key === undefined ? keyword : `${keyword}/${key}`}\`:`,
+    `expected ${expected}, found`,
+    toCompactDebugString(found, 120),
+    "in schema",
+    toCompactDebugString(parent, 500),
+  ]);
+};
+
+/** Whether a subschema position holds a subschema, reporting it when not. */
+const holdsSubschema = (
+  value: unknown,
+  keyword: SubschemaKeyword,
+  key: string | number | undefined,
+  parent: JSONSchema,
+): value is JSONSchema => {
+  if (isSubschema(value)) return true;
+  warnNotSchema("a schema", keyword, key, value, parent);
+  return false;
+};
+
+/** Whether an array-valued keyword holds an array, reporting it when not. */
+const holdsSubschemaArray = (
+  value: unknown,
+  keyword: SubschemaKeyword,
+  parent: JSONSchema,
+): value is readonly JSONSchema[] => {
+  if (Array.isArray(value)) return true;
+  warnNotSchema("an array of schemas", keyword, undefined, value, parent);
+  return false;
+};
+
+/** Whether a record-valued keyword holds an object, reporting it when not. */
+const holdsSubschemaRecord = (
+  value: unknown,
+  keyword: SubschemaKeyword,
+  parent: JSONSchema,
+): value is Readonly<Record<string, unknown>> => {
+  if (isRecord(value)) return true;
+  warnNotSchema(
+    "an object of named schemas",
+    keyword,
+    undefined,
+    value,
+    parent,
+  );
+  return false;
+};
+
 /**
  * Invoke `visit` on each immediate subschema of `schema` (shallow — one level).
  * A boolean schema has no subschemas. `$defs` is visited only when
@@ -178,33 +261,28 @@ export function forEachSubschema(
   const node = schema as JSONSchemaObj;
   for (const keyword of singleKeywordsFor(opts)) {
     const child = node[keyword];
-    if (child !== undefined && visit(child, keyword, undefined, undefined)) {
-      return true;
-    }
+    if (child === undefined) continue;
+    if (!holdsSubschema(child, keyword, undefined, node)) continue;
+    if (visit(child, keyword, undefined, undefined)) return true;
   }
   for (const keyword of ARRAY_SUBSCHEMA_KEYS) {
     const arr = node[keyword];
-    if (Array.isArray(arr)) {
-      for (let index = 0; index < arr.length; index++) {
-        if (visit(arr[index], keyword, undefined, index)) return true;
-      }
+    if (arr === undefined) continue;
+    if (!holdsSubschemaArray(arr, keyword, node)) continue;
+    for (let index = 0; index < arr.length; index++) {
+      const child = arr[index];
+      if (!holdsSubschema(child, keyword, index, node)) continue;
+      if (visit(child, keyword, undefined, index)) return true;
     }
   }
   for (const keyword of recordKeywordsFor(opts)) {
     const record = node[keyword];
-    if (isRecord(record)) {
-      for (const key of Object.keys(record)) {
-        if (
-          visit(
-            (record as Record<string, JSONSchema>)[key],
-            keyword,
-            key,
-            undefined,
-          )
-        ) {
-          return true;
-        }
-      }
+    if (record === undefined) continue;
+    if (!holdsSubschemaRecord(record, keyword, node)) continue;
+    for (const key of Object.keys(record)) {
+      const child = record[key];
+      if (!holdsSubschema(child, keyword, key, node)) continue;
+      if (visit(child, keyword, key, undefined)) return true;
     }
   }
   return false;
@@ -243,22 +321,27 @@ export function* subschemaEdges(
   const node = schema as JSONSchemaObj;
   for (const keyword of singleKeywordsFor(opts)) {
     const child = node[keyword];
-    if (child !== undefined) yield { schema: child, keyword };
+    if (child === undefined) continue;
+    if (!holdsSubschema(child, keyword, undefined, node)) continue;
+    yield { schema: child, keyword };
   }
   for (const keyword of ARRAY_SUBSCHEMA_KEYS) {
     const arr = node[keyword];
-    if (Array.isArray(arr)) {
-      for (let index = 0; index < arr.length; index++) {
-        yield { schema: arr[index], keyword, index };
-      }
+    if (arr === undefined) continue;
+    if (!holdsSubschemaArray(arr, keyword, node)) continue;
+    for (let index = 0; index < arr.length; index++) {
+      const child = arr[index];
+      if (!holdsSubschema(child, keyword, index, node)) continue;
+      yield { schema: child, keyword, index };
     }
   }
   for (const keyword of recordKeywordsFor(opts)) {
     const record = node[keyword];
-    if (isRecord(record)) {
-      for (const [key, child] of Object.entries(record)) {
-        yield { schema: child as JSONSchema, keyword, key };
-      }
+    if (record === undefined) continue;
+    if (!holdsSubschemaRecord(record, keyword, node)) continue;
+    for (const [key, child] of Object.entries(record)) {
+      if (!holdsSubschema(child, keyword, key, node)) continue;
+      yield { schema: child, keyword, key };
     }
   }
 }
@@ -284,15 +367,18 @@ export function mapSubschemas(
   for (const keyword of singleKeywordsFor(opts)) {
     const child = schema[keyword];
     if (child === undefined) continue;
+    if (!holdsSubschema(child, keyword, undefined, schema)) continue;
     const mapped = map(child);
     if (mapped !== child) update(keyword, mapped);
   }
   for (const keyword of ARRAY_SUBSCHEMA_KEYS) {
     const children = schema[keyword];
     if (children === undefined) continue;
+    if (!holdsSubschemaArray(children, keyword, schema)) continue;
     let mapped: JSONSchema[] | undefined;
     for (let index = 0; index < children.length; index++) {
       const child = children[index];
+      if (!holdsSubschema(child, keyword, index, schema)) continue;
       const next = map(child);
       if (next !== child) {
         mapped ??= [...children];
@@ -304,13 +390,15 @@ export function mapSubschemas(
   for (const keyword of recordKeywordsFor(opts)) {
     const children = schema[keyword];
     if (children === undefined) continue;
+    if (!holdsSubschemaRecord(children, keyword, schema)) continue;
     const entries = Object.entries(children);
-    let mapped: [string, JSONSchema][] | undefined;
+    let mapped: [string, unknown][] | undefined;
     for (let index = 0; index < entries.length; index++) {
       const [name, child] = entries[index];
-      const next = map(child as JSONSchema);
+      if (!holdsSubschema(child, keyword, name, schema)) continue;
+      const next = map(child);
       if (next !== child) {
-        mapped ??= entries as [string, JSONSchema][];
+        mapped ??= entries;
         mapped[index] = [name, next];
       }
     }
@@ -386,6 +474,9 @@ export function walkSchema(
     parent: JSONSchemaObj | undefined,
   ): void => {
     if (stopped) return;
+    // The root and a `resolveRef` result come straight from the caller; every
+    // other node arrives already filtered by `forEachSubschema`.
+    if (!isSubschema(schema)) return;
     const record = isRecord(schema);
     if (!record && !opts.visitBooleans) return;
     const control = visit({ schema, path, ...edge, parent });

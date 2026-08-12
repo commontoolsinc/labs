@@ -1,18 +1,23 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { getLogger } from "@commonfabric/utils/logger";
 
-import type { JSONSchema } from "@commonfabric/api";
+import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import {
   anySchema,
   ARRAY_SUBSCHEMA_KEYS,
+  DEFS_KEYS,
   findSchema,
   forEachSubschema,
+  isSubschema,
   mapSubschemas,
   RECORD_SUBSCHEMA_KEYS,
   type SchemaNode,
   SINGLE_SUBSCHEMA_KEYS,
   subschemaEdges,
   type SubschemaKeyword,
+  UNUSED_RECORD_SUBSCHEMA_KEYS,
+  UNUSED_SINGLE_SUBSCHEMA_KEYS,
   walkSchema,
 } from "../src/schema-walk.ts";
 
@@ -398,6 +403,215 @@ describe("deliberately-excluded keywords", () => {
   });
 });
 
+describe("values that are not schemas", () => {
+  // A stored schema is not always schema-generator output, so a keyword can
+  // hold one of these where a subschema belongs.
+  const NON_SCHEMAS: [label: string, value: unknown][] = [
+    ["null", null],
+    ["a string", "ab"],
+    ["a number", 7],
+  ];
+  const ALL_TIERS = { includeDefs: true, includeUnused: true } as const;
+
+  /**
+   * Run `fn`, returning what it produced alongside the walk's warnings, each
+   * flattened to one line. Captured at the logger, which is where the message
+   * is decided, rather than at the console, which also answers to
+   * `LOG_TO_STDERR` and to the logger's configured level.
+   */
+  const withWarnings = <T>(
+    fn: () => T,
+  ): { result: T; warnings: string[] } => {
+    const logger = getLogger("schema-walk") as unknown as {
+      warn: (key: string, ...messages: unknown[]) => void;
+    };
+    const original = logger.warn;
+    const warnings: string[] = [];
+    logger.warn = (key, ...messages) => {
+      warnings.push([
+        key,
+        ...messages.flatMap((message) =>
+          typeof message === "function" ? message() : message
+        ),
+      ].join(" "));
+    };
+    try {
+      return { result: fn(), warnings };
+    } finally {
+      logger.warn = original;
+    }
+  };
+
+  it("isSubschema accepts booleans and objects and rejects the rest", () => {
+    expect(isSubschema(true)).toBe(true);
+    expect(isSubschema(false)).toBe(true);
+    expect(isSubschema({})).toBe(true);
+    expect(isSubschema({ type: "string" })).toBe(true);
+    for (const [, value] of NON_SCHEMAS) expect(isSubschema(value)).toBe(false);
+    expect(isSubschema(undefined)).toBe(false);
+  });
+
+  it("visits no edge for one under any keyword, in any tier", () => {
+    // Driven off the exported keyword constants, so a keyword added to the
+    // vocabulary is covered here the day it is added.
+    const positions: [label: string, schema: (value: unknown) => JSONSchema][] =
+      [];
+    for (
+      const keyword of [
+        ...SINGLE_SUBSCHEMA_KEYS,
+        ...UNUSED_SINGLE_SUBSCHEMA_KEYS,
+      ]
+    ) {
+      positions.push([keyword, (value) => ({ [keyword]: value })]);
+    }
+    for (
+      const keyword of [
+        ...RECORD_SUBSCHEMA_KEYS,
+        ...UNUSED_RECORD_SUBSCHEMA_KEYS,
+        ...DEFS_KEYS,
+      ]
+    ) {
+      positions.push([keyword, (value) => ({ [keyword]: value })]);
+      positions.push([
+        `${keyword}/x`,
+        (value) => ({ [keyword]: { x: value } }),
+      ]);
+    }
+    for (const keyword of ARRAY_SUBSCHEMA_KEYS) {
+      positions.push([keyword, (value) => ({ [keyword]: value })]);
+      positions.push([`${keyword}/0`, (value) => ({ [keyword]: [value] })]);
+    }
+
+    for (const [position, build] of positions) {
+      for (const [label, value] of NON_SCHEMAS) {
+        const where = `${position}: ${label}`;
+        const schema = build(value);
+        const walked = withWarnings(() => edgesOf(schema, ALL_TIERS));
+        expect(walked.result, where).toEqual([]);
+        expect(walked.warnings.length, where).toBe(1);
+        expect(walked.warnings[0], where).toContain(position);
+        const mapped = withWarnings(() =>
+          mapSubschemas(schema as Record<never, never>, () => ({
+            type: "string",
+          }), ALL_TIERS)
+        );
+        expect(mapped.result, where).toBe(schema);
+      }
+    }
+  });
+
+  it("visits the well-formed siblings of one, at their own key and index", () => {
+    const { result: edges } = withWarnings(() =>
+      edgesOf({
+        properties: { bad: null, good: { type: "string" } },
+        prefixItems: [null, { type: "number" }],
+      } as unknown as JSONSchema)
+    );
+    expect(edges.length).toBe(2);
+    expect(edges.find((edge) => edge.keyword === "properties")?.key).toBe(
+      "good",
+    );
+    const prefixItem = edges.find((edge) => edge.keyword === "prefixItems");
+    expect(prefixItem?.index).toBe(1);
+    expect(prefixItem?.schema).toEqual({ type: "number" });
+  });
+
+  it("yields the same edges from the generator form", () => {
+    const { result: edges } = withWarnings(() => [
+      ...subschemaEdges(
+        {
+          additionalProperties: "ab",
+          properties: { bad: 7, good: { type: "string" } },
+          allOf: null,
+        } as unknown as JSONSchema,
+        ALL_TIERS,
+      ),
+    ]);
+    expect(edges).toEqual([
+      { schema: { type: "string" }, keyword: "properties", key: "good" },
+    ]);
+  });
+
+  it("leaves one in place when mapping, and maps around it", () => {
+    const schema = {
+      additionalProperties: null,
+      properties: { bad: "ab", good: { type: "string" } },
+      prefixItems: [7, { type: "number" }],
+    } as unknown as JSONSchemaObj;
+    const { result } = withWarnings(() =>
+      mapSubschemas(
+        schema,
+        (child) =>
+          typeof child === "boolean" ? child : { ...child, title: "mapped" },
+        ALL_TIERS,
+      )
+    );
+    expect(result).toEqual({
+      additionalProperties: null,
+      properties: { bad: "ab", good: { type: "string", title: "mapped" } },
+      prefixItems: [7, { type: "number", title: "mapped" }],
+    });
+  });
+
+  it("does not descend into one, with or without visitBooleans", () => {
+    const schema = {
+      properties: { bad: null, good: { properties: { deep: true } } },
+    } as unknown as JSONSchema;
+    const plain = withWarnings(() => pathKeys(schema));
+    expect(plain.result).toEqual(["", "properties/good"]);
+    // `visitBooleans` opens the walk to `true` and `false`, not to values a
+    // schema cannot be.
+    const booleans = withWarnings(() =>
+      pathKeys(schema, { visitBooleans: true })
+    );
+    expect(booleans.result).toEqual([
+      "",
+      "properties/good",
+      "properties/good/properties/deep",
+    ]);
+  });
+
+  it("walks nothing for a root that is one", () => {
+    for (const [label, value] of NON_SCHEMAS) {
+      const root = value as JSONSchema;
+      expect(edgesOf(root), label).toEqual([]);
+      expect([...subschemaEdges(root)], label).toEqual([]);
+      expect(collect(root, { visitBooleans: true }), label).toEqual([]);
+    }
+  });
+
+  it("names the keyword, the value, and the schema holding it", () => {
+    const { warnings } = withWarnings(() =>
+      forEachSubschema(
+        {
+          type: "object",
+          properties: { a: { type: "number" } },
+          additionalProperties: null,
+        } as unknown as JSONSchema,
+        () => {},
+      )
+    );
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("additionalProperties");
+    expect(warnings[0]).toContain("null");
+    expect(warnings[0]).toContain('"properties":{"a":{"type":"number"}}');
+  });
+
+  it("names the entry of a record keyword by key, and of an array by index", () => {
+    const byKey = withWarnings(() =>
+      forEachSubschema(
+        { properties: { a: 7 } } as unknown as JSONSchema,
+        () => {
+        },
+      )
+    );
+    expect(byKey.warnings[0]).toContain("properties/a");
+    const byIndex = withWarnings(() =>
+      forEachSubschema({ allOf: [true, 7] } as unknown as JSONSchema, () => {})
+    );
+    expect(byIndex.warnings[0]).toContain("allOf/1");
+  });
+});
 describe("resolveRef option", () => {
   const rootWithDefs: JSONSchema = {
     $defs: { Labeled: { type: "string", ifc: { integrity: ["y"] } } },

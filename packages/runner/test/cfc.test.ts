@@ -20,7 +20,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
-import { schemaHasIfc } from "../src/schema.ts";
+import { resolveSchema, schemaHasIfc } from "../src/schema.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
@@ -724,6 +724,82 @@ describe("CFC schema reference discovery", () => {
     expect(ContextualFlowControl.schemaAtPath(pruned, ["child"])).toEqual(
       ContextualFlowControl.schemaAtPath(schema, ["child"]),
     );
+  });
+
+  // A schema reaching the runtime has not necessarily come from the schema
+  // generator, so a keyword can hold a value no schema can be. Pruning walks
+  // every subschema-bearing keyword, so each one is a way in.
+  describe("a keyword holding a value that is not a schema", () => {
+    const MALFORMED: [label: string, schema: JSONSchema][] = [
+      ["additionalProperties", {
+        type: "object",
+        properties: { a: { type: "number" } },
+        additionalProperties: null,
+      } as unknown as JSONSchema],
+      [
+        "properties",
+        { type: "object", properties: "ab" } as unknown as JSONSchema,
+      ],
+      [
+        "a properties entry",
+        { type: "object", properties: { a: null } } as unknown as JSONSchema,
+      ],
+      ["items", { type: "array", items: null } as unknown as JSONSchema],
+      [
+        "prefixItems",
+        { type: "array", prefixItems: "ab" } as unknown as JSONSchema,
+      ],
+      [
+        "a prefixItems entry",
+        { type: "array", prefixItems: [null] } as unknown as JSONSchema,
+      ],
+      ["allOf", { allOf: null } as unknown as JSONSchema],
+      ["an anyOf entry", { anyOf: [7] } as unknown as JSONSchema],
+      ["oneOf", { oneOf: "ab" } as unknown as JSONSchema],
+      ["not", { not: 3 } as unknown as JSONSchema],
+      ["patternProperties", { patternProperties: 4 } as unknown as JSONSchema],
+      ["$defs", { $defs: null } as unknown as JSONSchema],
+    ];
+
+    for (const [label, schema] of MALFORMED) {
+      it(`prunes a schema whose ${label} holds one`, () => {
+        expect(pruneCfcSchemaDefinitions(schema)).toEqual(schema);
+        expect(pruneCfcSchemaDefinitions(deepFreeze(schema))).toEqual(schema);
+        const refs = new Set<string>();
+        findCfcSchemaRefs(schema, refs);
+        expect(refs.size).toBe(0);
+        expect(selectReferencedCfcSchemaDefs(schema)).toBeUndefined();
+      });
+    }
+
+    it("prunes around one, keeping the definitions its siblings reach", () => {
+      const schema = {
+        type: "object",
+        properties: { bad: null, good: { $ref: "#/$defs/Kept" } },
+        additionalProperties: "ab",
+        $defs: { Kept: { type: "string" }, Dropped: { type: "number" } },
+      } as unknown as JSONSchema;
+
+      expect(pruneCfcSchemaDefinitions(schema)).toEqual({
+        type: "object",
+        properties: { bad: null, good: { $ref: "#/$defs/Kept" } },
+        additionalProperties: "ab",
+        $defs: { Kept: { type: "string" } },
+      });
+    });
+
+    it("leaves a $ref at a definition holding one unresolved", () => {
+      const schema = {
+        $ref: "#/$defs/Broken",
+        $defs: { Broken: null },
+      } as unknown as JSONSchemaObj;
+
+      expect(resolveCfcSchemaRef(schema, "#/$defs/Broken")).toBeUndefined();
+      expect(resolveCfcSchemaRefs(schema)).toBeUndefined();
+      // A schema the runtime cannot read matches nothing, rather than letting
+      // the raw value through.
+      expect(resolveSchema(schema)).toBe(false);
+    });
   });
 });
 
