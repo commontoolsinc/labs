@@ -922,9 +922,11 @@ gray-out contract. These ordinary unit tests are hermetic and need only
 `--allow-env` for module-load configuration reads. The full `test` task also
 verifies that Resvg reproduces the embedded PNGs and runs the favicon
 behavior in the local browser test runner. The package tasks grant the additional
-permissions those two checks need. The one live tile, `production`, is exercised
-by running the board rather than in the unit suite. This is a workspace package,
-so its ordinary unit tests also run as part of the repo-wide `deno task test`.
+permissions those two checks need. `tiles/prod-uptime.test.ts` exercises the
+production tile with canned HTTP responses, an injected DNS resolver, and an
+injected proxy client factory, so its unit tests never reach the network. This is
+a workspace package, so its ordinary unit tests also run as part of the repo-wide
+`deno task test`.
 
 ## Deploying (stage GKE, tailnet-only)
 
