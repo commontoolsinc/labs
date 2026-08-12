@@ -7,6 +7,11 @@
  * when another source's line runs further. A line skips the days its source
  * has no report to draw on, breaking across the hole rather than charting
  * zeros.
+ *
+ * A settled day with no report counts as a real $0, which holds only while the
+ * source is still reporting. A tile establishes that from the newest day its
+ * source has a report for, and stops reading a source whose reports have run
+ * dry further back than its lag allows.
  */
 
 import type { Status } from "./types.ts";
@@ -61,6 +66,34 @@ export function settled(
   while (withData > 0 && daily[withData - 1] === 0) withData--;
   const known = Math.max(withData, elapsedDays - lagDays);
   return daily.slice(0, Math.max(0, Math.min(daily.length, known)));
+}
+
+/**
+ * The newest day a source has a figure for, or undefined when it has none.
+ */
+export function newestReportedDay(
+  byDay: Map<string, number>,
+): string | undefined {
+  let newest: string | undefined;
+  for (const day of byDay.keys()) {
+    if (newest === undefined || day > newest) newest = day;
+  }
+  return newest;
+}
+
+/**
+ * How many days back the newest day a source has a report for sits. Compare it
+ * against the lag the source declares: a report that ends further back than
+ * that allows has stopped, and the days after it are unreported rather than
+ * days that cost nothing.
+ */
+export function reportLagDays(reportedThrough: string, now: Date): number {
+  const today = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  return (today - Date.parse(`${reportedThrough}T00:00:00Z`)) / DAY_MS;
 }
 
 export function calendarMonth(
