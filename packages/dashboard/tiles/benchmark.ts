@@ -1,46 +1,50 @@
-// benchmark: trends one scale-invariant index of benchmark performance per
-// processor on main. Each index changes by the geometric mean of the benchmark
-// changes between consecutive runs on that processor. Every benchmark has the
-// same weight regardless of size. Only a broad move shifts an index. One slow
-// benchmark barely registers. The drill-down shows individual benchmarks.
-// Each processor has its own coloured line. The headline shows the largest
-// established trend. Orange means at least one processor trends up. Green means
-// every established processor stays flat or falls. Red means the most recent
-// run failed, or finished successfully without readable benchmark data. A tile
-// in the failed state drops its benchmark count and window span and names the
-// failure in their place: how long ago the benchmarks last worked, and how many
-// runs have failed since. A run under way puts a "running" badge in the header.
-// Deno
-// bench samples each benchmark to a fixed time budget. Performance changes the
-// per-operation times without materially changing the run's wall-clock time.
-//
-// A benchmark added or removed is absent from one side of an adjacent
-// comparison, so it does not move the index. A processor change starts another
-// line instead of connecting unlike machines. Each line's recent window
-// contains the runs in the last BENCH_TREND_MAX_AGE_DAYS or the newest
-// BENCH_TREND_MIN_RUNS, whichever is larger. The full line spans about 45 days.
-// The failed state reads the workflow-run list and the latest run's cached
-// result. It therefore works when artifacts cannot be read. Without usable
-// data, the dashboard keeps the last completed color and values while a fetch
-// runs. It reads "benchmark data unavailable" after an empty fetch. A failed
-// fetch keeps the last-known processor lines gray and names the reason.
-//
-// Every collection pages the run list, once a minute, which is the cadence the
-// run state needs. The artifact history behind the tile moves with the runs
-// instead: a collection whose sampled runs match the last refresh downloads
-// nothing.
-//
-// The /bench drill-down keeps the deeper picture, and closes with a link that
-// hands a rerun to GitHub: this token reads, so GitHub is where a run starts.
-// The benchmarks.yml job runs `deno bench --json` and uploads the output as a
-// `bench-results` artifact with 90-day retention. There is no committed history. The drill-down lists recent
-// main runs and keeps one artifact per shortest-view time bucket. It unzips
-// each artifact in the process and reads every benchmark's timings and
-// processor identity. Results for a run attempt are immutable and persisted.
-// Later collections fetch only new runs and attempts. The drill-down overlays
-// one coloured line per processor for each benchmark. The CI duration and
-// Gantt views also live behind /bench. The tile's collection keeps this
-// history warm.
+/**
+ * Trends one scale-invariant index of benchmark performance per processor on
+ * main. Each index changes by the geometric mean of the benchmark changes
+ * between consecutive runs on that processor. Every benchmark carries the same
+ * weight regardless of size, so only a broad move shifts an index and one slow
+ * benchmark barely registers. `deno bench` samples each benchmark to a fixed
+ * time budget, so a performance change moves the per-operation times without
+ * materially changing the run's wall-clock time.
+ *
+ * Each processor has its own coloured line, and the headline shows the largest
+ * established trend. Orange means at least one processor trends up. Green
+ * means every established processor stays flat or falls. Red means the most
+ * recent run failed, or finished successfully without readable benchmark data.
+ * A tile in the failed state drops its benchmark count and window span and
+ * names the failure in their place: how long ago the benchmarks last worked,
+ * and how many runs have failed since. A run under way puts a "running" badge
+ * in the header.
+ *
+ * A benchmark added or removed is absent from one side of an adjacent
+ * comparison, so it does not move the index. A processor change starts another
+ * line instead of connecting unlike machines. Each line's recent window
+ * contains the runs in the last BENCH_TREND_MAX_AGE_DAYS or the newest
+ * BENCH_TREND_MIN_RUNS, whichever is larger, and the full line spans about 45
+ * days. The failed state reads the workflow-run list and the latest run's
+ * cached result, so it works when artifacts cannot be read. Without usable
+ * data, the dashboard keeps the last completed color and values while a fetch
+ * runs, and reads "benchmark data unavailable" after an empty fetch. A failed
+ * fetch keeps the last-known processor lines gray and names the reason.
+ *
+ * Every collection pages the run list, once a minute, which is the cadence the
+ * run state needs. The artifact history behind the tile moves with the runs
+ * instead: a collection whose sampled runs match the last refresh downloads
+ * nothing.
+ *
+ * The /bench drill-down keeps the deeper picture, and closes with a link that
+ * hands a rerun to GitHub: this token reads, so GitHub is where a run starts.
+ * The benchmarks.yml job runs `deno bench --json` and uploads the output as a
+ * `bench-results` artifact with 90-day retention, and there is no committed
+ * history. The drill-down lists recent main runs and keeps one artifact per
+ * shortest-view time bucket. It unzips each artifact in the process and reads
+ * every benchmark's timings and processor identity. Results for a run attempt
+ * are immutable and persisted, so later collections fetch only new runs and
+ * attempts. The drill-down overlays one coloured line per processor for each
+ * benchmark. The CI duration and Gantt views also live behind /bench, and this
+ * tile's collection keeps their history warm.
+ */
+
 import type { Ctx, Route, Status, Tile, TileView } from "../types.ts";
 import {
   BenchmarkHistoryStore,

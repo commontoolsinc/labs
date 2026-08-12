@@ -1,7 +1,11 @@
-// ci build: the last completed attempt on main drives the status (good/bad), or
-// unknown before the first completed attempt is known. A newer in-flight run is
-// a minor secondary facet. Drills through to the main commit history. One factory
-// builds both the labs and loom instances against their own repo + workflow.
+/**
+ * Reports whether main builds. The last completed attempt on main drives the
+ * status, good or bad, and the tile is unknown until a first completed attempt
+ * is known. A newer in-flight run is a minor secondary facet. The tile drills
+ * through to the commit history of main. One factory builds both the labs and
+ * loom instances against their own repository and workflow.
+ */
+
 import {
   runSource,
   type Run,

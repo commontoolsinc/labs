@@ -1,5 +1,9 @@
-// Uniform rendering: every tile becomes the same markup from its TileView, and
-// the shell wraps the grid + wide tiles in the dark page with the SSE client.
+/**
+ * Renders every tile the same way, turning each one's `TileView` into the same
+ * markup whatever produced it. The shell around them wraps the grid and the
+ * wide tiles in the page, together with the client that listens for updates.
+ */
+
 import type { Status, TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
 import {

@@ -1,12 +1,17 @@
-// production uptime: synthetic round-trip checks for the estuary and rapids
-// servers, plus DNS checks for the company hosts they depend on or run beside.
-// Each health request goes to /_health on the configured origin. Successful
-// health-check times stay visible in healthy and warning states. Red states show
-// only non-good hosts. Resolved DNS-only hosts stay out of the body.
-//
-// Both servers are on the tailnet. PROD_PROXY routes the health requests through
-// a proxy when the dashboard cannot reach the tailnet directly. The DNS result
-// reports whether the dashboard host resolves an A or AAAA record itself.
+/**
+ * Checks that production is up, with a synthetic round trip to the estuary and
+ * rapids servers and a DNS lookup for the company hosts they depend on or run
+ * beside. Each health request goes to /_health on the configured origin.
+ * Successful health-check times stay visible in the healthy and warning
+ * states, a red state shows only the hosts that are not good, and a DNS-only
+ * host that resolves stays out of the body.
+ *
+ * Both servers are on the tailnet. PROD_PROXY routes the health requests
+ * through a proxy when the dashboard cannot reach the tailnet directly. The
+ * DNS result reports whether the dashboard host resolves an A or AAAA record
+ * itself.
+ */
+
 import { escapeHtml } from "../lib.ts";
 import type { Status, Tile, TileView } from "../types.ts";
 

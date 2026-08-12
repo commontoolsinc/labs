@@ -1,13 +1,17 @@
-// ci spend: month-to-date CI cost across GitHub Actions and Blacksmith,
-// projected to a full-month total. Each configured source contributes one line
-// to a shared 45-day daily-spend chart. The line labels show each source's
-// month-to-date spend and the header shows the combined month-to-date total.
-//
-// GitHub's enhanced billing report supplies daily net Actions spend. Blacksmith
-// supplies an all-in invoice total and daily runner cost. The invoice is the
-// month-to-date source of truth and the runner history supplies the chart. A
-// configured source that cannot be read shows "$???" and makes the combined
-// projection a lower bound.
+/**
+ * Reports month-to-date CI cost across GitHub Actions and Blacksmith, and
+ * projects it to a full-month total. Each configured source contributes one
+ * line to a shared 45-day daily-spend chart. The line labels show each
+ * source's month-to-date spend and the header shows the combined
+ * month-to-date total.
+ *
+ * GitHub's enhanced billing report supplies daily net Actions spend.
+ * Blacksmith supplies an all-in invoice total and daily runner cost. The
+ * invoice is the month-to-date source of truth and the runner history supplies
+ * the chart. A configured source that cannot be read shows "$???" and makes
+ * the combined projection a lower bound.
+ */
+
 import type { Status, Tile, TileView } from "../types.ts";
 import {
   budgetStatus,

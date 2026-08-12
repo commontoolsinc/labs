@@ -1,4 +1,10 @@
-// Central configuration and tunable thresholds.
+/**
+ * Gathers the dashboard's configuration in one place: the environment
+ * variables it reads at startup, the repositories and workflows its CI tiles
+ * follow, and the thresholds that decide when a tile turns orange or red. A
+ * threshold is tuned here rather than in the tile that applies it.
+ */
+
 export const PORT = Number(Deno.env.get("DASHBOARD_PORT") ?? "8731");
 export const REPO = Deno.env.get("DASHBOARD_REPO") ?? "commontoolsinc/labs";
 export const CI_WORKFLOW = "deno.yml";

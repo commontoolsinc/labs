@@ -1,24 +1,29 @@
 #!/usr/bin/env -S deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env
-// Fabric wall — modular live dashboard.
-//
-// Each tile lives in tiles/ and is registered once in registry.ts. This file is
-// generic: it schedules every tile's collect() on its own interval, renders the
-// results uniformly, serves the page, pushes SSE updates, and mounts any
-// drill-down routes a tile declares. It knows nothing about individual tiles.
-//
-//   cd <repo root>
-//   deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env \
-//     packages/dashboard/server.ts
-//   open http://localhost:8731
-//
-// Optional env for the token-gated tiles (each grays out cleanly without it):
-//   SIGNOZ_URL, SIGNOZ_API_KEY        production error-rate tile
-//   GCP_BILLING_TABLE                 cloud-spend tile (BigQuery REST; Workload
-//                                     Identity in GKE, or GCP_SA_KEY locally)
-//   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
-//   GH_TOKEN                          GitHub tiles; org Members read also powers
-//                                     the organization-users tile
-//   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
+/**
+ * Runs the fabric wall: the live dashboard everything else in this package
+ * feeds. Each tile lives under tiles/ and is registered once in registry.ts,
+ * and this file stays generic about all of them. It schedules every tile's
+ * collect() on that tile's own interval, renders the results uniformly, serves
+ * the page, pushes updates down the event stream, and mounts whatever
+ * drill-down routes a tile declares. It knows nothing about individual tiles.
+ *
+ *   cd <repo root>
+ *   deno run --allow-net --allow-run=deno,git --allow-read --allow-write \
+ *     --allow-env packages/dashboard/server.ts
+ *   open http://localhost:8731
+ *
+ * The token-gated tiles read optional environment variables, and each one
+ * grays out cleanly when its own is unset:
+ *   SIGNOZ_URL, SIGNOZ_API_KEY        production error-rate tile
+ *   GCP_BILLING_TABLE                 cloud-spend tile, over the BigQuery REST
+ *                                     API, authenticating as the workload in
+ *                                     GKE or with GCP_SA_KEY locally
+ *   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
+ *   GH_TOKEN                          GitHub tiles; read access to the
+ *                                     organization's members also powers the
+ *                                     organization-users tile
+ *   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
+ */
 
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
