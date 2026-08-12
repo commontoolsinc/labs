@@ -1367,6 +1367,9 @@ export class CFCodeEditor extends BaseElement {
       if (this.mentioned) {
         this.mentioned = this.mentioned.asSchema(MentionableArraySchema);
       }
+      // A new cell has none of the old one's contents, so the signature that
+      // described what was last written to the old one says nothing about it.
+      this._lastMentionedSignature = null;
       this._setupMentionedSyncHandler();
       this._updateMentionedFromContent();
     }
@@ -1377,6 +1380,7 @@ export class CFCodeEditor extends BaseElement {
       this._cleanupRefDestinationSubscriptions();
       this._previousRefLabels.clear();
       this._refKeysAtLoad = null;
+      this._lastMentionedSignature = null;
       this._setupReferencesSyncHandler();
       this._publishKnownRefKeys();
       this._initializeRefTracking();
@@ -1391,6 +1395,8 @@ export class CFCodeEditor extends BaseElement {
     if (changedProperties.has("value")) {
       // Cancel pending debounced updates from old Cell to prevent race condition
       this._cellController.cancel();
+      // A different document has a different set of mentions in it.
+      this._lastMentionedSignature = null;
       // Clean up old Cell subscription and set up new one
       this._cleanupCellSyncHandler();
       this._cellController.bind(this.value, stringSchema);
