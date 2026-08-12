@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { $conn, CellHandle, RequestType } from "@commonfabric/runtime-client";
 import type {
   CellRef,
+  PieceSourceRevisionSourceView,
   PieceSourceView,
   RuntimeClient,
   SpaceAclView,
@@ -61,8 +62,66 @@ function shows(menu: CFPieceMenu): string {
   return textOf((menu as unknown as { render(): unknown }).render());
 }
 
-function clickTestId(menu: CFPieceMenu, testId: string): unknown {
-  const candidates: Array<{ node: { values: unknown[] }; text: string }> = [];
+function liveRegionText(menu: CFPieceMenu): string {
+  const regions: string[] = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    const template = node as {
+      strings?: readonly string[];
+      values?: unknown[];
+    };
+    if (!template.strings || !template.values) return;
+    for (const child of template.values) visit(child);
+    const liveRegionIndex = template.strings.findIndex((part) =>
+      part.includes('aria-live="polite"')
+    );
+    if (liveRegionIndex >= 0) {
+      regions.push(textOf(template.values[liveRegionIndex]));
+    }
+  };
+  visit((menu as unknown as { render(): unknown }).render());
+  regions.sort((left, right) => left.length - right.length);
+  return regions[0] ?? "";
+}
+
+function withLocation<T>(href: string, run: () => T): T {
+  const hadLocation = "location" in globalThis &&
+    globalThis.location !== undefined;
+  // deno-lint-ignore no-explicit-any
+  const originalLocation = (globalThis as any).location;
+  Object.defineProperty(globalThis, "location", {
+    value: { href },
+    configurable: true,
+    writable: true,
+  });
+  try {
+    return run();
+  } finally {
+    if (hadLocation) {
+      Object.defineProperty(globalThis, "location", {
+        value: originalLocation,
+        configurable: true,
+        writable: true,
+      });
+    } else {
+      // deno-lint-ignore no-explicit-any
+      delete (globalThis as any).location;
+    }
+  }
+}
+
+function templateForTestId(
+  menu: CFPieceMenu,
+  testId: string,
+): { strings: readonly string[]; values: unknown[] } {
+  const candidates: Array<{
+    node: { strings: readonly string[]; values: unknown[] };
+    text: string;
+  }> = [];
   const visit = (node: unknown): void => {
     if (Array.isArray(node)) {
       for (const child of node) visit(child);
@@ -80,18 +139,54 @@ function clickTestId(menu: CFPieceMenu, testId: string): unknown {
       text.includes(testId) &&
       template.values.some((value) => typeof value === "function")
     ) {
-      candidates.push({ node: template as { values: unknown[] }, text });
+      candidates.push({
+        node: template as {
+          strings: readonly string[];
+          values: unknown[];
+        },
+        text,
+      });
     }
   };
   visit((menu as unknown as { render(): unknown }).render());
   candidates.sort((left, right) => left.text.length - right.text.length);
-  const handler = candidates[0]?.node.values.find(
+  const template = candidates[0]?.node;
+  if (template === undefined) {
+    throw new Error(`no rendered template found for ${testId}`);
+  }
+  return template;
+}
+
+function clickHandler(
+  menu: CFPieceMenu,
+  testId: string,
+): (event: MouseEvent) => unknown {
+  const handler = templateForTestId(menu, testId).values.find(
     (value) => typeof value === "function",
   );
   if (typeof handler !== "function") {
     throw new Error(`no click handler found for ${testId}`);
   }
-  return handler();
+  return handler as (event: MouseEvent) => unknown;
+}
+
+function testMouseEvent(): MouseEvent {
+  return {
+    preventDefault() {},
+    stopPropagation() {},
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+  } as unknown as MouseEvent;
+}
+
+function clickTestId(
+  menu: CFPieceMenu,
+  testId: string,
+  event: MouseEvent = testMouseEvent(),
+): unknown {
+  return clickHandler(menu, testId)(event);
 }
 
 /** Find a rendered event handler on the element identified by `marker`. */
@@ -169,12 +264,19 @@ function pieceCell(
   read: () => Promise<PieceSourceView> = () => Promise.resolve(SOURCE),
   {
     aborted = false,
+    readRevision = () =>
+      Promise.resolve({ pattern: SOURCE.pattern!, files: SOURCE.files }),
     update = () => Promise.resolve({ source: SOURCE }),
     getAccess = () => Promise.resolve(OWNER_ACCESS),
     setAccess = () => Promise.resolve(OWNER_ACCESS),
     removeAccess = () => Promise.resolve(OWNER_ACCESS),
   }: {
     aborted?: boolean | (() => boolean);
+    readRevision?: (
+      pieceId: string,
+      space: typeof SPACE,
+      revisionId: string,
+    ) => Promise<PieceSourceRevisionSourceView>;
     update?: (
       pieceId: string,
       space: typeof SPACE,
@@ -203,6 +305,7 @@ function pieceCell(
     space: () => SPACE,
     runtime: () => ({
       getPieceSource: read,
+      getPieceSourceRevision: readRevision,
       updatePieceSource: update,
       getSpaceAcl: getAccess,
       setSpaceAclEntry: setAccess,
@@ -849,6 +952,196 @@ describe("the origin and history panel", () => {
     expect(rendered).toContain("No source changes have been recorded yet");
   });
 
+  it("links the space to its default piece", async () => {
+    const menu = openMenu();
+    await menu.showPanel("origin");
+    let target: unknown;
+    const onNavigate = (event: Event) => {
+      target = (event as CustomEvent).detail;
+    };
+    globalThis.addEventListener("cf-navigate", onNavigate);
+    try {
+      clickTestId(menu, "piece-source-space");
+    } finally {
+      globalThis.removeEventListener("cf-navigate", onNavigate);
+    }
+
+    expect(target).toEqual({ spaceDid: SPACE });
+    expect(shows(menu)).toBe("");
+  });
+
+  it("keeps the dialog open when the space opens in a new tab", async () => {
+    const menu = openMenu();
+    await menu.showPanel("origin");
+    let target: unknown;
+    const onOpen = (event: Event) => {
+      event.preventDefault();
+      target = (event as CustomEvent).detail;
+    };
+    globalThis.addEventListener("cf-open-external", onOpen);
+    try {
+      clickTestId(menu, "piece-source-space", {
+        preventDefault() {},
+        stopPropagation() {},
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+      } as unknown as MouseEvent);
+    } finally {
+      globalThis.removeEventListener("cf-open-external", onOpen);
+    }
+
+    expect(target).toEqual({ spaceDid: SPACE });
+    expect(shows(menu)).toContain("Origin and history");
+  });
+
+  it("keeps embedded mode in the space link's native target", async () => {
+    const menu = openMenu();
+    await menu.showPanel("origin");
+
+    const rendered = withLocation(
+      `https://example.test/.embed/${SPACE}/of:fid1:piece`,
+      () => shows(menu),
+    );
+
+    expect(rendered).toContain(`/.embed/${SPACE}`);
+  });
+
+  it("links a current Fabric piece origin to its own space", async () => {
+    const originSpace = "did:key:z6Mk-origin-space" as const;
+    const hash = "b".repeat(43);
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...SOURCE,
+        origin: {
+          url: `cf:/${originSpace}/of:fid1:${hash}`,
+          kind: "fabric-piece",
+        },
+      })
+    ));
+    await menu.showPanel("origin");
+    expect(shows(menu)).toContain("piece-source-origin-current");
+    let target: unknown;
+    const onNavigate = (event: Event) => {
+      target = (event as CustomEvent).detail;
+    };
+    globalThis.addEventListener("cf-navigate", onNavigate);
+    try {
+      clickTestId(menu, "piece-source-origin-current");
+    } finally {
+      globalThis.removeEventListener("cf-navigate", onNavigate);
+    }
+
+    expect(target).toEqual({
+      spaceDid: originSpace,
+      pieceId: `of:fid1:${hash}`,
+    });
+    expect(shows(menu)).toBe("");
+  });
+
+  it("leaves modified current-origin navigation to the native link", async () => {
+    const hash = "b".repeat(43);
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...SOURCE,
+        origin: {
+          url: `cf:/${SPACE}/of:fid1:${hash}`,
+          kind: "fabric-piece",
+        },
+      })
+    ));
+    await menu.showPanel("origin");
+    const link = withLocation(
+      `https://example.test/.embed/${SPACE}/of:fid1:piece`,
+      () => templateForTestId(menu, "piece-source-origin-current"),
+    );
+    const hrefIndex = link.strings.findIndex((part) => part.includes('href="'));
+    expect(link.strings.join("")).toContain("<a");
+    expect(link.values[hrefIndex]).toBe(
+      `/.embed/${SPACE}/of:fid1:${hash}`,
+    );
+    let prevented = false;
+
+    clickTestId(menu, "piece-source-origin-current", {
+      ...testMouseEvent(),
+      shiftKey: true,
+      preventDefault: () => {
+        prevented = true;
+      },
+    } as MouseEvent);
+
+    expect(prevented).toBe(false);
+    expect(shows(menu)).toContain("Origin and history");
+  });
+
+  it("links current Fabric slugs in named and current spaces", async () => {
+    const cases = [
+      {
+        url: "cf:/common-knowledge/demo",
+        target: { spaceName: "common-knowledge", pieceSlug: "demo" },
+      },
+      {
+        url: "cf:demo",
+        target: { spaceDid: SPACE, pieceSlug: "demo" },
+      },
+    ];
+    for (const { url, target: expected } of cases) {
+      const menu = openMenu(pieceCell(() =>
+        Promise.resolve({
+          ...SOURCE,
+          origin: { url, kind: "fabric-piece" },
+        })
+      ));
+      await menu.showPanel("origin");
+      let target: unknown;
+      const onNavigate = (event: Event) => {
+        target = (event as CustomEvent).detail;
+      };
+      globalThis.addEventListener("cf-navigate", onNavigate);
+      try {
+        clickTestId(menu, "piece-source-origin-current");
+      } finally {
+        globalThis.removeEventListener("cf-navigate", onNavigate);
+      }
+      expect(target).toEqual(expected);
+    }
+  });
+
+  it("leaves non-navigable current Fabric origins as text", async () => {
+    const hash = "c".repeat(43);
+    const urls = [
+      "cf:/not a Fabric ref",
+      `cf://source.example/${SPACE}/of:fid1:${hash}`,
+      `cf:/${SPACE}/of:fid1:${hash}@${hash}`,
+      `cf:/${SPACE}/of:fid1:${hash}/source.ts`,
+      `cf:pattern:${hash}`,
+    ];
+    for (const url of urls) {
+      const menu = openMenu(pieceCell(() =>
+        Promise.resolve({
+          ...SOURCE,
+          origin: { url, kind: "fabric-piece" },
+        })
+      ));
+      await menu.showPanel("origin");
+      expect(shows(menu)).toContain(url);
+      expect(shows(menu)).not.toContain("piece-source-origin-current");
+    }
+
+    const pattern = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...SOURCE,
+        origin: {
+          url: `cf:pattern:${hash}`,
+          kind: "fabric-pattern",
+        },
+      })
+    ));
+    await pattern.showPanel("origin");
+    expect(shows(pattern)).not.toContain("piece-source-origin-current");
+  });
+
   it("says a piece with no origin is detached", async () => {
     const menu = openMenu(
       pieceCell(() => Promise.resolve({ ...SOURCE, origin: undefined })),
@@ -1383,6 +1676,235 @@ describe("source history actions", () => {
     const rendered = shows(menu);
     for (const [, label] of operations) expect(rendered).toContain(label);
   });
+
+  it("links a Fabric piece origin to that piece in its space", async () => {
+    const hash = "a".repeat(43);
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...historySource,
+        history: [{
+          revisionId: "fabric-piece",
+          timestamp: 1,
+          pattern: SOURCE.pattern!,
+          origin: {
+            url: `cf:/${SPACE}/of:fid1:${hash}`,
+            kind: "fabric-piece",
+          },
+          operation: "baseline",
+        }],
+      })
+    ));
+    await menu.showPanel("origin");
+    let target: unknown;
+    const onNavigate = (event: Event) => {
+      target = (event as CustomEvent).detail;
+    };
+    globalThis.addEventListener("cf-navigate", onNavigate);
+    try {
+      clickTestId(menu, "piece-source-origin-fabric-piece");
+    } finally {
+      globalThis.removeEventListener("cf-navigate", onNavigate);
+    }
+
+    expect(target).toEqual({
+      spaceDid: SPACE,
+      pieceId: `of:fid1:${hash}`,
+    });
+    expect(shows(menu)).toBe("");
+  });
+
+  it("shows the exact retained source for a history entry", async () => {
+    const requests: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...historySource,
+          history: [{
+            revisionId: "older",
+            timestamp: 1,
+            pattern: SOURCE.pattern!,
+            operation: "baseline",
+          }],
+        }),
+      {
+        readRevision: (pieceId, space, revisionId) => {
+          requests.push({ pieceId, space, revisionId });
+          return Promise.resolve({
+            pattern: SOURCE.pattern!,
+            files: [{ name: "/main.tsx", contents: "the older source" }],
+          });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    expect(shows(menu)).toContain("view source");
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(requests).toEqual([{
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      revisionId: "older",
+    }]);
+    expect(shows(menu)).toContain("the older source");
+    expect(shows(menu)).not.toContain("the main file");
+  });
+
+  it("starts one revision read for rapid repeated activations", async () => {
+    let finish!: (source: PieceSourceRevisionSourceView) => void;
+    let reads = 0;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(historySource),
+      {
+        readRevision: () => {
+          reads++;
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    const viewSource = clickHandler(menu, "piece-source-view-older");
+
+    const first = viewSource(testMouseEvent()) as Promise<void>;
+    const second = viewSource(testMouseEvent()) as Promise<void>;
+
+    expect(reads).toBe(1);
+    expect(liveRegionText(menu)).toContain("Reading source revision");
+    finish({
+      pattern: SOURCE.pattern!,
+      files: [{ name: "/main.tsx", contents: "one retained read" }],
+    });
+    await Promise.all([first, second]);
+
+    expect(shows(menu)).toContain("one retained read");
+    expect(liveRegionText(menu)).toContain(
+      "Source revision loaded with 1 file",
+    );
+  });
+
+  it("does not let an older revision read affect a newer one", async () => {
+    const finishes: Array<
+      (source: PieceSourceRevisionSourceView) => void
+    > = [];
+    let reads = 0;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(historySource),
+      {
+        readRevision: () => {
+          reads++;
+          return new Promise((resolve) => finishes.push(resolve));
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    const first = clickHandler(menu, "piece-source-view-older")(
+      testMouseEvent(),
+    ) as Promise<void>;
+
+    await menu.showPanel("origin");
+    const secondHandler = clickHandler(menu, "piece-source-view-older");
+    const second = secondHandler(testMouseEvent()) as Promise<void>;
+    finishes[0]({
+      pattern: SOURCE.pattern!,
+      files: [{ name: "/main.tsx", contents: "stale revision" }],
+    });
+    await first;
+
+    expect(shows(menu)).not.toContain("stale revision");
+    expect(liveRegionText(menu)).toContain("Reading source revision");
+    await secondHandler(testMouseEvent());
+    expect(reads).toBe(2);
+
+    finishes[1]({
+      pattern: SOURCE.pattern!,
+      files: [{ name: "/main.tsx", contents: "new revision" }],
+    });
+    await second;
+
+    expect(shows(menu)).toContain("new revision");
+  });
+
+  it("moves focus into the source panel and announces revision reads", async () => {
+    let focusCalls = 0;
+    const menu = openMenu(pieceCell(() => Promise.resolve(historySource)));
+    Object.defineProperty(menu, "updateComplete", {
+      value: Promise.resolve(true),
+      configurable: true,
+    });
+    Object.defineProperty(menu, "shadowRoot", {
+      value: {
+        querySelector: () => ({ focus: () => focusCalls++ }),
+      },
+      configurable: true,
+    });
+    await menu.showPanel("origin");
+    expect(liveRegionText(menu).trim()).toBe("");
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(focusCalls).toBe(1);
+    expect(liveRegionText(menu)).toContain(
+      "Source revision loaded with 2 files",
+    );
+    expect(liveRegionText(menu)).not.toContain("the main file");
+  });
+
+  it("does not substitute current source for an unavailable revision", async () => {
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(historySource),
+      {
+        readRevision: () =>
+          Promise.resolve({ pattern: SOURCE.pattern!, files: [] }),
+      },
+    ));
+    await menu.showPanel("origin");
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(shows(menu)).toContain("revision's source is not available");
+    expect(liveRegionText(menu)).toContain("Source revision is not available");
+    expect(shows(menu)).not.toContain("the main file");
+  });
+
+  it("reports a historical source read failure without hiding history", async () => {
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(historySource),
+      {
+        readRevision: () => Promise.reject(new Error("old source failed")),
+      },
+    ));
+    await menu.showPanel("origin");
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(shows(menu)).toContain("old source failed");
+    await menu.showPanel("origin");
+    expect(shows(menu)).toContain("Source history");
+    expect(shows(menu)).not.toContain("old source failed");
+  });
+
+  it("does not report a historical read cancelled by runtime disposal", async () => {
+    let reads = 0;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(historySource),
+      {
+        aborted: true,
+        readRevision: () => {
+          reads++;
+          return Promise.reject(new Error("disposed runtime"));
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(reads).toBe(1);
+    expect(shows(menu)).not.toContain("disposed runtime");
+    expect(shows(menu)).toContain("Source revision read was cancelled");
+    expect(liveRegionText(menu)).toContain(
+      "Source revision read was cancelled",
+    );
+    expect(shows(menu)).not.toContain("Reading source revision");
+  });
 });
 
 /**
@@ -1831,6 +2353,13 @@ describe("piece-state read lifecycle", () => {
 });
 
 describe("formatPieceValue", () => {
+  it("formats undefined and values JSON cannot render", () => {
+    expect(formatPieceValue(undefined)).toBe("undefined");
+    const unrenderable = formatPieceValue(1n);
+    expect(unrenderable.startsWith("<unrenderable: ")).toBe(true);
+    expect(unrenderable.endsWith(">")).toBe(true);
+  });
+
   it("stubs a linked cell instead of printing its sigil form", () => {
     const piece = statefulPiece();
     const linked = new CellHandle(piece.rt, {

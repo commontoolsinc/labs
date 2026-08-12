@@ -120,6 +120,40 @@ describe("RuntimeClient.getPieceSource", () => {
   });
 });
 
+describe("RuntimeClient.getPieceSourceRevision", () => {
+  it("asks the worker for one recorded revision's retained source", async () => {
+    const source = {
+      pattern: { identity: "pattern-identity", symbol: "default" },
+      files: [{ name: "/main.tsx", contents: "export default 1;" }],
+    };
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ source });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    const result = await client.getPieceSourceRevision(
+      "of:fid1:piece",
+      "did:key:z6Mk-runtime-client-source" as never,
+      "revision-1",
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceGetSourceRevision,
+      pieceId: "of:fid1:piece",
+      space: "did:key:z6Mk-runtime-client-source",
+      revisionId: "revision-1",
+    }]);
+    expect(result).toBe(source);
+  });
+});
+
 describe("RuntimeClient.updatePieceSource", () => {
   it("sends a discriminated source action to the worker", async () => {
     const source = {

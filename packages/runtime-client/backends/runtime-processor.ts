@@ -9,6 +9,7 @@ import {
   PiecesController,
   type PreparedPieceSourceChange,
   readPieceSourceMetadata,
+  readPieceSourceRevision,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
 import {
@@ -115,7 +116,9 @@ import {
   type PatternCoverageResponse,
   type PatternSourcesResponse,
   type PieceGetSourceRequest,
+  type PieceGetSourceRevisionRequest,
   type PieceSourceResponse,
+  type PieceSourceRevisionResponse,
   type PieceUpdateSourceRequest,
   type PieceUpdateSourceResponse,
   type RecreateSpaceRootPatternRequest,
@@ -1362,6 +1365,23 @@ export class RuntimeProcessor {
     return { source: { ...state, space: state.space as DID } };
   }
 
+  async handlePieceGetSourceRevision(
+    request: PieceGetSourceRevisionRequest,
+  ): Promise<PieceSourceRevisionResponse> {
+    const pieces = this.getSpaceCtx(request.space);
+    const cell = this.runtime.getCellFromEntityId(
+      pieces.getSpace(),
+      entityIdFrom(request.pieceId),
+    );
+    return {
+      source: await readPieceSourceRevision(
+        this.runtime,
+        cell,
+        request.revisionId,
+      ),
+    };
+  }
+
   async handlePieceUpdateSource(
     request: PieceUpdateSourceRequest,
   ): Promise<PieceUpdateSourceResponse> {
@@ -1801,6 +1821,8 @@ export class RuntimeProcessor {
         return await this.handlePageGetAll(request);
       case RequestType.PieceGetSource:
         return await this.handlePieceGetSource(request);
+      case RequestType.PieceGetSourceRevision:
+        return await this.handlePieceGetSourceRevision(request);
       case RequestType.PieceUpdateSource:
         return await this.handlePieceUpdateSource(request);
       case RequestType.SpaceGetAcl:

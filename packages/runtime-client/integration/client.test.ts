@@ -438,6 +438,13 @@ describe("RuntimeClient", () => {
         source.files.some((file) => file.contents.includes("home")),
         true,
       );
+      const revisionSource = await rt.getPieceSourceRevision(
+        page.id(),
+        session.space,
+        source.history[0].revisionId,
+      );
+      assertEquals(revisionSource.pattern, source.history[0].pattern);
+      assertEquals(revisionSource.files, source.files);
     });
 
     it("detaches a followed root through the runtime-client protocol", async () => {

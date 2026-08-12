@@ -11,11 +11,23 @@ import {
 import type {
   JSONValue,
   PieceSourceAction,
+  PieceSourceRevisionSourceView,
   PieceSourceRevisionView,
   PieceSourceView,
   SpaceAclCapability,
   SpaceAclView,
 } from "@commonfabric/runtime-client";
+import type { DID } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity";
+import { parseFabricRef } from "@commonfabric/runner/shared";
+import {
+  appViewToUrlPath,
+  navigate,
+  type NavigationCommand,
+  openInNewTab,
+  preserveAppViewMode,
+  urlToAppView,
+} from "@commonfabric/shell/shared";
 import {
   getPieceBoundary,
   subscribePieceBoundary,
@@ -392,6 +404,18 @@ export class CFPieceMenu extends BaseElement {
       padding: 1rem 1.25rem;
     }
 
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
     .file-tabs {
       display: flex;
       flex-wrap: wrap;
@@ -444,6 +468,13 @@ export class CFPieceMenu extends BaseElement {
 
     dl.facts dd.prose {
       font-family: inherit;
+    }
+
+    .text-link {
+      color: inherit;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 0.12em;
     }
 
     .note {
@@ -605,6 +636,15 @@ export class CFPieceMenu extends BaseElement {
       cursor: pointer;
     }
 
+    .revision button.text-link {
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: none;
+      color: inherit;
+      font: inherit;
+    }
+
     .revision button:disabled,
     .source-action:disabled,
     .warning button:disabled {
@@ -725,6 +765,20 @@ export class CFPieceMenu extends BaseElement {
   private accessor source: PieceSourceView | undefined = undefined;
 
   @state()
+  private accessor sourceRevision: PieceSourceRevisionView | undefined =
+    undefined;
+
+  @state()
+  private accessor revisionSource: PieceSourceRevisionSourceView | undefined =
+    undefined;
+
+  @state()
+  private accessor revisionReadError: string | undefined = undefined;
+
+  @state()
+  private accessor revisionReadPending = false;
+
+  @state()
   private accessor readError: string | undefined = undefined;
 
   @state()
@@ -784,6 +838,7 @@ export class CFPieceMenu extends BaseElement {
   private readToken = 0;
   private sourceRead: Promise<void> | undefined;
   private accessRead: Promise<void> | undefined;
+  private revisionReadToken = 0;
 
   /** Set once a data/actions panel has started its piece-state read. */
   #dataRequested = false;
@@ -867,6 +922,7 @@ export class CFPieceMenu extends BaseElement {
     this.panel = undefined;
     this.selectedFile = 0;
     this.source = undefined;
+    this.#resetRevisionSource();
     this.readError = undefined;
     this.#resetPieceState();
     this.payloadText = "";
@@ -888,6 +944,7 @@ export class CFPieceMenu extends BaseElement {
     this.panel = undefined;
     this.cell = undefined;
     this.source = undefined;
+    this.#resetRevisionSource();
     this.#resetPieceState();
     this.sourceRead = undefined;
     this.sourceActionPending = false;
@@ -1161,12 +1218,22 @@ export class CFPieceMenu extends BaseElement {
     this.dispatchNote = undefined;
   }
 
+  #resetRevisionSource(): void {
+    this.revisionReadToken++;
+    this.sourceRevision = undefined;
+    this.revisionSource = undefined;
+    this.revisionReadError = undefined;
+    this.revisionReadPending = false;
+  }
+
   #onKeyDown = (e: KeyboardEvent) => {
     if (this.hidden || e.key !== "Escape") return;
     e.preventDefault();
     // Escape steps back from a panel to the menu, then closes.
-    if (this.panel) this.panel = undefined;
-    else this.close();
+    if (this.panel) {
+      this.panel = undefined;
+      this.#resetRevisionSource();
+    } else this.close();
   };
 
   /** Show the source file at `index`, as choosing its tab does. */
@@ -1192,6 +1259,7 @@ export class CFPieceMenu extends BaseElement {
   async showPanel(panel: Panel) {
     this.panel = panel;
     this.selectedFile = 0;
+    this.#resetRevisionSource();
     const cell = this.cell;
     if (!cell) return;
     if (panel === "data" || panel === "actions") {
@@ -1295,6 +1363,63 @@ export class CFPieceMenu extends BaseElement {
       this.newAccessCapability,
     );
   };
+
+  /** Navigate through the shell, preserving normal modified-link behavior. */
+  #navigate(event: MouseEvent, command: NavigationCommand): void {
+    if (event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.metaKey || event.ctrlKey) {
+      openInNewTab(command);
+      return;
+    }
+    this.close();
+    navigate(command);
+  }
+
+  /** Show the retained files for one exact source revision. */
+  async #showRevisionSource(
+    event: MouseEvent,
+    revision: PieceSourceRevisionView,
+  ): Promise<void> {
+    event.preventDefault();
+    event.stopPropagation();
+    const cell = this.cell;
+    if (
+      cell === undefined ||
+      (this.revisionReadPending &&
+        this.sourceRevision?.revisionId === revision.revisionId)
+    ) return;
+    const token = ++this.revisionReadToken;
+    this.sourceRevision = revision;
+    this.revisionSource = undefined;
+    this.revisionReadError = undefined;
+    this.revisionReadPending = true;
+    this.selectedFile = 0;
+    this.panel = "source";
+    void this.updateComplete.then(() => {
+      if (token !== this.revisionReadToken || this.panel !== "source") return;
+      this.shadowRoot?.querySelector<HTMLButtonElement>(".panel-close")
+        ?.focus();
+    });
+    try {
+      const source = await cell.runtime().getPieceSourceRevision(
+        cell.id(),
+        cell.space(),
+        revision.revisionId,
+      );
+      if (token !== this.revisionReadToken) return;
+      this.revisionSource = source;
+    } catch (error) {
+      if (token !== this.revisionReadToken) return;
+      if (cell.runtime().signal.aborted) return;
+      this.revisionReadError = error instanceof Error
+        ? error.message
+        : String(error);
+    } finally {
+      if (token === this.revisionReadToken) this.revisionReadPending = false;
+    }
+  }
 
   #readSource(cell: CellHandle): Promise<void> {
     this.sourceRead ??= this.#performSourceRead(cell);
@@ -1663,7 +1788,9 @@ export class CFPieceMenu extends BaseElement {
     const title = PANEL_TITLES[panel];
     const subject = panel === "access"
       ? this.cell?.space() ?? ""
-      : this.source?.name ?? this.cell?.id() ?? "";
+      : panel !== "source" || this.sourceRevision === undefined
+      ? this.source?.name ?? this.cell?.id() ?? ""
+      : `Pattern ${this.sourceRevision.pattern.identity} · ${this.sourceRevision.pattern.symbol}`;
     return html`
       <div class="backdrop dimmed" @click="${() => this.close()}"></div>
       <div
@@ -1679,6 +1806,14 @@ export class CFPieceMenu extends BaseElement {
             Close
           </button>
         </div>
+        <span
+          class="sr-only"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >${panel === "source" && this.sourceRevision !== undefined
+          ? this.#revisionReadStatus()
+          : ""}</span>
         ${panel === "source" ? this.#renderSourceTabs() : nothing}
         <div class="panel-body">
           ${panel === "access"
@@ -1868,6 +2003,22 @@ export class CFPieceMenu extends BaseElement {
     `;
   }
 
+  #revisionReadStatus(): string {
+    if (this.revisionReadError !== undefined) {
+      return `Could not read source revision: ${this.revisionReadError}`;
+    }
+    if (this.revisionSource === undefined) {
+      return this.revisionReadPending
+        ? "Reading source revision."
+        : "Source revision read was cancelled.";
+    }
+    const count = this.revisionSource.files.length;
+    if (count === 0) return "Source revision is not available.";
+    return `Source revision loaded with ${count} ${
+      count === 1 ? "file" : "files"
+    }.`;
+  }
+
   /** A read failure with the retry the failure would otherwise block. */
   #renderDataError(what: string): TemplateResult {
     return html`
@@ -1979,7 +2130,9 @@ export class CFPieceMenu extends BaseElement {
   }
 
   #renderSourceTabs() {
-    const files = this.source?.files ?? [];
+    const files = this.sourceRevision === undefined
+      ? this.source?.files ?? []
+      : this.revisionSource?.files ?? [];
     if (files.length < 2) return nothing;
     return html`
       <div class="file-tabs">
@@ -1998,20 +2151,41 @@ export class CFPieceMenu extends BaseElement {
   }
 
   #renderSource(source: PieceSourceView): TemplateResult {
-    if (source.files.length === 0) {
+    if (this.sourceRevision !== undefined) {
+      if (this.revisionReadError !== undefined) {
+        return html`
+          <p class="error">
+            Could not read this source revision: ${this.revisionReadError}
+          </p>
+        `;
+      }
+      if (this.revisionSource === undefined) {
+        return this.revisionReadPending
+          ? html`<p>Reading source revision…</p>`
+          : html`<p>Source revision read was cancelled.</p>`;
+      }
+    }
+    const files = this.sourceRevision === undefined
+      ? source.files
+      : this.revisionSource!.files;
+    const pattern = this.sourceRevision === undefined
+      ? source.pattern
+      : this.revisionSource!.pattern;
+    if (files.length === 0) {
       return html`
         <p>
-          This piece's source is not available in its space. Its pattern is ${source
-              .pattern
+          This ${this.sourceRevision
+            ? "revision"
+            : "piece"}'s source is not available in its space. Its pattern is
+          ${pattern
             ? html`
-              <code>${source.pattern.identity}</code>
+              <code>${pattern.identity}</code>
             `
             : "not recorded"}.
         </p>
       `;
     }
-    const file =
-      source.files[Math.min(this.selectedFile, source.files.length - 1)];
+    const file = files[Math.min(this.selectedFile, files.length - 1)];
     return html`
       <pre class="source">${file.contents}</pre>
     `;
@@ -2019,14 +2193,28 @@ export class CFPieceMenu extends BaseElement {
 
   #renderOrigin(source: PieceSourceView): TemplateResult {
     const origin = describeOrigin(source.origin);
+    const originView = source.origin?.kind === "fabric-piece"
+      ? fabricPieceNavigation(source.origin.url, source.space)
+      : undefined;
     return html`
       <dl class="facts">
         <dt>Origin</dt>
         <dd class="prose">
           ${origin.label}${source.origin
-            ? html`
-              — <code>${source.origin.url}</code>
-            `
+            ? originView
+              ? html`
+                —
+                <a
+                  class="text-link"
+                  href="${navigationHref(originView)}"
+                  test-id="piece-source-origin-current"
+                  @click="${(event: MouseEvent) =>
+                    this.#navigate(event, originView)}"
+                ><code>${source.origin.url}</code></a>
+              `
+              : html`
+                — <code>${source.origin.url}</code>
+              `
             : nothing}
           <div class="note">${origin.detail}</div>
         </dd>
@@ -2081,7 +2269,15 @@ export class CFPieceMenu extends BaseElement {
         <dt>Piece</dt>
         <dd>${source.pieceId}</dd>
         <dt>Space</dt>
-        <dd>${source.space}</dd>
+        <dd>
+          <a
+            class="text-link"
+            href="${navigationHref({ spaceDid: source.space })}"
+            test-id="piece-source-space"
+            @click="${(event: MouseEvent) =>
+              this.#navigate(event, { spaceDid: source.space })}"
+          >${source.space}</a>
+        </dd>
       </dl>
       ${this.sourceActionError
         ? html`
@@ -2178,6 +2374,9 @@ export class CFPieceMenu extends BaseElement {
     const origin = describeOrigin(revision.origin);
     const alreadyFollowing = revision.origin !== undefined &&
       source.origin?.url === revision.origin.url;
+    const originView = revision.origin?.kind === "fabric-piece"
+      ? fabricPieceNavigation(revision.origin.url, source.space)
+      : undefined;
     return html`
       <article class="revision" test-id="piece-source-revision">
         <div class="revision-head">
@@ -2190,13 +2389,33 @@ export class CFPieceMenu extends BaseElement {
         </div>
         <div class="revision-details">
           Pattern ${shortIdentity(revision.pattern.identity)} · ${revision
-            .pattern.symbol}
+            .pattern.symbol} ·
+          <button
+            type="button"
+            class="text-link"
+            test-id="piece-source-view-${revision.revisionId}"
+            ?disabled="${this.revisionReadPending &&
+              this.sourceRevision?.revisionId === revision.revisionId}"
+            @click="${(event: MouseEvent) =>
+              this.#showRevisionSource(event, revision)}"
+          >view source</button>
         </div>
         <div class="revision-details">
           ${origin.label}${revision.origin
-            ? html`
-              — <code>${revision.origin.url}</code>
-            `
+            ? originView
+              ? html`
+                —
+                <a
+                  class="text-link"
+                  href="${navigationHref(originView)}"
+                  test-id="piece-source-origin-${revision.revisionId}"
+                  @click="${(event: MouseEvent) =>
+                    this.#navigate(event, originView)}"
+                ><code>${revision.origin.url}</code></a>
+              `
+              : html`
+                — <code>${revision.origin.url}</code>
+              `
             : nothing}
         </div>
         ${current ? nothing : html`
@@ -2233,6 +2452,53 @@ export class CFPieceMenu extends BaseElement {
         `}
       </article>
     `;
+  }
+}
+
+/** The shell view named by a mutable Fabric piece origin. */
+function fabricPieceNavigation(
+  url: string,
+  currentSpace: DID,
+): NavigationCommand | undefined {
+  let ref;
+  try {
+    ref = parseFabricRef(url);
+  } catch {
+    return undefined;
+  }
+  if (
+    ref === undefined || ref.host !== undefined || ref.pin !== undefined ||
+    ref.subpath !== undefined
+  ) {
+    return undefined;
+  }
+  const space = ref.space;
+  const spaceView = space === undefined
+    ? { spaceDid: currentSpace }
+    : isDID(space)
+    ? { spaceDid: space }
+    : { spaceName: space };
+  if (ref.ref.kind === "slug") {
+    return { ...spaceView, pieceSlug: ref.ref.slug };
+  }
+  if (ref.ref.scheme === "pattern") return undefined;
+  return {
+    ...spaceView,
+    pieceId: `${ref.ref.scheme}:fid1:${ref.ref.hash}`,
+  };
+}
+
+/** A native link target that keeps the shell's current display mode. */
+function navigationHref(command: NavigationCommand): string {
+  try {
+    return appViewToUrlPath(
+      preserveAppViewMode(
+        urlToAppView(new URL(globalThis.location.href)),
+        command,
+      ),
+    );
+  } catch {
+    return appViewToUrlPath(command);
   }
 }
 
