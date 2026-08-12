@@ -1,6 +1,4 @@
 /**
- * Array-predicate Performance Benchmarks
- *
  * `isInertArray()` is called once per array node by the fabric membership,
  * cloning, and conversion walks, so its cost is paid per container rather than
  * once per operation; `isArrayWithOnlyIndexProperties()` is its cheaper
