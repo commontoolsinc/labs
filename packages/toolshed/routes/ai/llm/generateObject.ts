@@ -3,7 +3,7 @@ import {
   type LLMGenerateObjectResponse,
 } from "@commonfabric/llm/types";
 import { LLMRequestError } from "./errors.ts";
-import { findModel, whenModelsReady } from "./models.ts";
+import { resolveModel } from "./models.ts";
 import {
   generateObject as generateObjectCore,
   jsonSchema,
@@ -38,8 +38,7 @@ async function generateObjectCall(
       unknown
     >;
     const modelName = params.model ?? DEFAULT_GENERATE_OBJECT_MODELS;
-    await whenModelsReady();
-    const modelConfig = findModel(modelName);
+    const modelConfig = await resolveModel(modelName);
     if (!modelConfig) {
       throw new LLMRequestError(`Unsupported model: ${modelName}`);
     }

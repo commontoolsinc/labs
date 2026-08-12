@@ -87,10 +87,17 @@ export function gatewayProvenanceHeaders(
  * made. Headers already on the request are kept, apart from the ones
  * provenance sets: the AI SDK sends a User-Agent naming itself, and that is
  * the one the access log would otherwise record.
+ *
+ * Which headers those are follows what `fetch` itself would use. An `init`
+ * that names headers replaces whatever a `Request` argument carried, so the
+ * headers on the request are read only where the caller passed a `Request` and
+ * left `init` silent about them.
  */
 export function withGatewayProvenance(inner: typeof fetch): typeof fetch {
   return (input, init) => {
-    const headers = new Headers(init?.headers);
+    const headers = new Headers(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined),
+    );
     for (const [name, value] of Object.entries(gatewayProvenanceHeaders())) {
       headers.set(name, value);
     }

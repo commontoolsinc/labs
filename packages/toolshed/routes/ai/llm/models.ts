@@ -457,6 +457,23 @@ export const findModel = (name: string) => {
   return MODELS[name];
 };
 
+/**
+ * The model registered under `name`, waiting for gateway discovery only where
+ * waiting could change the answer. A model a provider registered as this
+ * module loaded is returned straight away, so a request for one of those is
+ * served whatever the gateway is doing. A name that is not registered yet is
+ * answered once discovery has finished, which is what a gateway model, the
+ * `default` alias, and a name that is no model at all have in common.
+ */
+export async function resolveModel(
+  name: string,
+): Promise<ModelConfig | undefined> {
+  const registered = MODELS[name];
+  if (registered !== undefined) return registered;
+  await modelsReady;
+  return MODELS[name];
+}
+
 const registerDefaultModel = () => {
   const chosenName = DEFAULT_MODEL_CANDIDATES.find((name) => MODELS[name]);
   if (!chosenName) {
@@ -489,8 +506,8 @@ const modelsReady: Promise<void> = (async () => {
 
 /**
  * Resolves once the model list holds everything it is going to hold. Await
- * this before reading {@link MODELS} or calling {@link findModel}: until it
- * resolves, a gateway model is a model this process has not heard of.
+ * this before reading {@link MODELS} whole; to answer for one model, prefer
+ * {@link resolveModel}, which waits only where the answer is still open.
  */
 export function whenModelsReady(): Promise<void> {
   return modelsReady;

@@ -96,6 +96,29 @@ describe("gateway-provenance", () => {
       expect(recorder.headers().get("user-agent")).toMatch(/^toolshed \(/);
     });
 
+    it("keeps the headers of a request it was handed", async () => {
+      const recorder = recordingFetch();
+      await withGatewayProvenance(recorder.fetch)(
+        new Request("https://gateway.invalid/", {
+          headers: { authorization: "Bearer gateway-internal" },
+        }),
+      );
+      expect(recorder.headers().get("authorization")).toBe(
+        "Bearer gateway-internal",
+      );
+    });
+
+    it("prefers the headers of the init to those of the request", async () => {
+      const recorder = recordingFetch();
+      await withGatewayProvenance(recorder.fetch)(
+        new Request("https://gateway.invalid/", {
+          headers: { authorization: "Bearer from-request" },
+        }),
+        { headers: { authorization: "Bearer from-init" } },
+      );
+      expect(recorder.headers().get("authorization")).toBe("Bearer from-init");
+    });
+
     it("reports the operation in hand when the request was made", async () => {
       const recorder = recordingFetch();
       const send = withGatewayProvenance(recorder.fetch);

@@ -17,7 +17,7 @@ import { CacheItem, hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
-import { findModel } from "./models.ts";
+import { findModel, resolveModel } from "./models.ts";
 import { isLLMRequest } from "@commonfabric/llm/types";
 import { type BuiltInLLMMessage } from "@commonfabric/api";
 
@@ -56,12 +56,12 @@ async function readJsonBody(
  * Validates that the model and JSON mode settings are compatible
  * @returns An error response object if validation fails, or null if validation passes
  */
-function validateModelAndJsonMode(
+async function validateModelAndJsonMode(
   c: Context,
   modelString: string | undefined,
   mode: string | undefined,
 ) {
-  const model = modelString ? findModel(modelString) : null;
+  const model = modelString ? await resolveModel(modelString) : null;
 
   if (!model) {
     return c.json(
@@ -212,8 +212,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     }
   };
 
-  await whenModelsReady();
-  const validationError = validateModelAndJsonMode(
+  const validationError = await validateModelAndJsonMode(
     c,
     payload.model,
     payload.mode,

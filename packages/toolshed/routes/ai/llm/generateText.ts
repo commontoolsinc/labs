@@ -19,7 +19,7 @@ import {
   LLMUpstreamError,
   upstreamStatusOf,
 } from "./errors.ts";
-import { findModel, type ModelConfig, whenModelsReady } from "./models.ts";
+import { type ModelConfig, resolveModel } from "./models.ts";
 import { normalizeSchemaForProvider } from "./schema.ts";
 import {
   metadataAttributeValue,
@@ -305,8 +305,7 @@ async function generateTextCall(
   params: GenerateTextParams,
 ): Promise<GenerateTextResult> {
   // Validate and configure model
-  await whenModelsReady();
-  const modelConfig = findModel(params.model!);
+  const modelConfig = await resolveModel(params.model!);
   if (!modelConfig) {
     console.error("Unsupported model:", params.model);
     throw new LLMRequestError(`Unsupported model: ${params.model}`);
