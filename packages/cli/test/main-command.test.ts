@@ -82,6 +82,26 @@ describe("main command", () => {
     expect(mismatchedUsage).toEqual([]);
   });
 
+  it("tells a caller what a same-id retry costs, on every waiting flag", async () => {
+    // Both waiting flags invite a retry, and a retry runs the handler body
+    // again — at-most-once is per commit, not per execution. `--wait` is the
+    // sharper case: an expiry is exactly when the caller cannot tell whether
+    // the handling committed. The two sit adjacent in `--help`, so a caveat
+    // on one and silence on the other reads as a real difference between
+    // them.
+    const { code, stdout, stderr } = await cf("piece call --help");
+    checkStderr(stderr);
+    const help = stripAnsi(stdout.join("\n")).replaceAll(/\s+/g, " ");
+    expect(help).toContain(
+      "Re-invoking under the same id and session cannot commit twice — but " +
+        "it runs the handler body again",
+    );
+    expect(help).toContain(
+      "recovers it too, but runs the handler body again",
+    );
+    expect(code).toBe(0);
+  });
+
   it("describes and parses piece call's accepted input forms", async () => {
     const { piece } = await import(
       "../commands/piece.ts?piece-call-usage-test"

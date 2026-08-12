@@ -339,8 +339,11 @@ export function exitPieceCallFailure(
   const exit = deps?.exit ?? Deno.exit;
   printError(error instanceof Error ? error.message : String(error));
   // Where the invocation stopped decides retry semantics: anything at or
-  // past "dispatched" retries SAFELY ONLY with this same id (same-id
-  // retries deduplicate; a fresh id would re-execute).
+  // past "dispatched" retries SAFELY ONLY with this same id. At-most-once
+  // is per COMMIT, not per execution: a same-id retry runs the handler
+  // body again and then loses the race for the receipt, so nothing
+  // commits twice but effects outside the transaction repeat. A fresh id
+  // loses nothing and commits a second time.
   printError(`invocation: ${invocationId} phase: ${phase}`);
   return exit(1);
 }
@@ -480,8 +483,10 @@ export function resolveInvocationIdentity(
  * Build the phase observer for a handler invocation. Its whole job is to put
  * the invocation id on stderr at the moment the event is about to dispatch —
  * BEFORE any network work — so a caller whose process dies past that line
- * still holds the exact id to retry with, and the retry deduplicates instead
- * of executing a second time. Announcing once matters: a caller scraping
+ * still holds the exact id to retry with. At-most-once is per COMMIT, not per
+ * execution: the retry runs the handler body again and loses the race for the
+ * receipt, so nothing commits twice while effects outside the transaction
+ * repeat. Announcing once matters: a caller scraping
  * stderr for its id should not have to decide which of several to trust.
  *
  * The id is half of what a retry names: it deduplicates only under the session
@@ -1796,9 +1801,10 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "Bound the settlement wait by a chosen patience, in seconds (before " +
       "the callable name). On expiry the exit is nonzero with the " +
       "invocation id and furthest phase on stderr; the invocation may not " +
-      "have executed or committed, and re-invoking under the same id and " +
-      "session is safe in every phase — it finishes the work or reads the " +
-      "outcome back.",
+      "have executed or committed. Re-invoking under the same id and " +
+      "session cannot commit twice — but it runs the handler body again, " +
+      "so effects outside the transaction repeat. An expiry is exactly the " +
+      "case where you cannot tell whether it committed.",
   )
   .option(
     "--no-wait",
@@ -1922,8 +1928,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
       console.error(message);
       observer.finish("failed");
       // Where the invocation stopped decides retry semantics: anything at or
-      // past "dispatched" retries SAFELY ONLY with this same id (same-id
-      // retries deduplicate; a fresh id would re-execute).
+      // past "dispatched" retries SAFELY ONLY with this same id. At-most-once
+      // is per COMMIT, not per execution: a same-id retry runs the handler
+      // body again and then loses the race for the receipt, so nothing
+      // commits twice but effects outside the transaction repeat. A fresh id
+      // loses nothing and commits a second time.
       console.error(`invocation: ${invocationId} phase: ${phase}`);
       if (error instanceof WaitBoundExpired) {
         // The caller's patience expired. The handler runs in this process,
