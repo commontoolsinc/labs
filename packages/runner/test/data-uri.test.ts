@@ -280,6 +280,53 @@ describe("data-uri", () => {
         .toBeUndefined();
     });
 
+    // The walk rebuilds a container only when something under it was
+    // rewritten, so these two exercise the rebuilding branch and pin what it
+    // has to carry across: the holes in a sparse array, and every sibling of
+    // the member that changed.
+    it("keeps the holes in a sparse array that also holds a link", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const sparse: unknown[] = [];
+      sparse[0] = { "/": { [LINK_V1_TAG]: { path: ["item"] } } };
+      sparse[3] = "after the gap";
+
+      const parsed = valueFromDataUri(
+        dataUriFromValueWithResolvedLinks(sparse as any, baseCell),
+      );
+
+      expect(parsed.length).toBe(4);
+      expect(1 in parsed).toBe(false);
+      expect(2 in parsed).toBe(false);
+      expect(parsed[3]).toBe("after the gap");
+    });
+
+    it("keeps the siblings of a rewritten link untouched", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+      const data = {
+        before: { deep: [1, 2, { three: true }] },
+        link: { "/": { [LINK_V1_TAG]: { path: ["item"] } } },
+        after: "unchanged",
+      };
+
+      const parsed = valueFromDataUri(
+        dataUriFromValueWithResolvedLinks(data, baseCell),
+      );
+
+      expect(parsed.link["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.before).toEqual({ deep: [1, 2, { three: true }] });
+      expect(parsed.after).toBe("unchanged");
+    });
+
+    // A value with no fabric representation reaches the encoder as it came
+    // in, rather than being emptied out into a plain object on the way.
+    it("refuses a value that no codec can represent", () => {
+      expect(() =>
+        dataUriFromValueWithResolvedLinks({ when: new Date() } as any)
+      )
+        .toThrow(/no applicable codec/);
+    });
+
     it("represents a `FabricPrimitive` leaf correctly", () => {
       const h = hashOf({ some: "value" });
       const parsed = valueFromDataUri(dataUriFromValueWithResolvedLinks({ h }));

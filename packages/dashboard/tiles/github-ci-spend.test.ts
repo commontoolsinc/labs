@@ -314,6 +314,20 @@ Deno.test("ci spend: an unavailable prior month is not zero-spend history", asyn
   assertEquals(v.duration, 2 * D);
 });
 
+Deno.test("ci spend: a prior month that 404s leaves a hole in the chart, not zeros", async () => {
+  // December's report is missing between two months that answered. The 45-day
+  // window still reaches back to 20 November, and December is left undrawn.
+  const v = await view("2026-01-05T09:00:00Z", {
+    [usagePath(2026, 1)]: { usageItems: days(2026, 1, 1, 3, 20) },
+    [usagePath(2025, 11)]: { usageItems: days(2025, 11, 20, 30, 10) },
+  });
+  assertEquals(v.value, "~$620/mo");
+  assertEquals(v.duration, 45 * D);
+  // November and January are drawn as two separate pieces of line, plus the
+  // bright trailing slice.
+  assertEquals((v.extra ?? "").match(/<polyline/g)?.length, 3);
+});
+
 Deno.test("ci spend: one day of data is not a chart, but it is still a projection", async () => {
   const v = await view("2026-01-20T09:00:00Z", {
     [usagePath(2026, 1)]: { usageItems: [item("2026-01-01", 180)] },

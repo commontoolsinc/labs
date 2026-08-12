@@ -2184,4 +2184,223 @@ describe("CFC browser helpers", () => {
       await background.close();
     }
   });
+
+  it("clicks the part of a control that lies inside the page", async () => {
+    // A control can reach past the edge of the page it is drawn on: a surface
+    // positioned towards the right of a narrow viewport, a control wider than
+    // the column it sits in. The middle of such a control's box is a point the
+    // page does not have, and a trusted click dispatched there is delivered to
+    // the browser, lands outside the page, and reaches nothing at all.
+    //
+    // The control the mark is placed on is counted as well as clicked. The aim
+    // and the measurement taken just before dispatch answer the point
+    // separately, and a click whose two answers disagree clears its mark and
+    // places it again on a control that never moved.
+    const observed: { x: number; y: number }[] = [];
+    const narrow = await browser.newPage();
+    narrow.setInteractionObserver({
+      afterClick: (_element, point) =>
+        void observed.push({ x: point.x, y: point.y }),
+    });
+    try {
+      await narrow.setViewportSize({ width: 800, height: 600 });
+      await narrow.evaluate((clickTargetAttr: string) => {
+        const host = document.createElement("div");
+        const root = host.attachShadow({ mode: "open" });
+        // Fixed, so the control cannot be brought into the page by scrolling
+        // to it: the part of it inside the page is the whole of what a click
+        // has to work with.
+        const surface = document.createElement("div");
+        Object.assign(surface.style, {
+          position: "fixed",
+          left: "700px",
+          top: "300px",
+          width: "420px",
+        });
+        // Spans 700 to 1100 in a page 800 wide. The middle of the whole box is
+        // at 900, a hundred columns past the last column the page has; the
+        // middle of the part inside the page is at 750.
+        const button = document.createElement("button");
+        button.id = "clipped-guest-button";
+        button.textContent = "Continue as guest";
+        Object.assign(button.style, {
+          display: "block",
+          width: "400px",
+          height: "40px",
+        });
+        let clicked = 0;
+        button.addEventListener("click", () => {
+          clicked++;
+        });
+        surface.append(button);
+        root.append(surface);
+        document.body.append(host);
+
+        let marks = 0;
+        const observer = new MutationObserver(() => {
+          if (button.hasAttribute(clickTargetAttr)) marks++;
+        });
+        observer.observe(button, {
+          attributes: true,
+          attributeFilter: [clickTargetAttr],
+        });
+
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = { viewSettled: () => Promise.resolve() };
+        (globalThis as typeof globalThis & {
+          __clippedClicks: () => { clicks: number; marks: number };
+        }).__clippedClicks = () => ({ clicks: clicked, marks });
+      }, { args: [CLICK_TARGET_ATTR] });
+
+      await clickCfButton(narrow, "#clipped-guest-button");
+
+      const result = await narrow.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __clippedClicks: () => { clicks: number; marks: number };
+        }).__clippedClicks()
+      );
+      assertEquals(
+        result.clicks,
+        1,
+        "the click never landed on the part of the control inside the page",
+      );
+      assertEquals(
+        result.marks,
+        1,
+        "the control was marked again for a click that had not moved",
+      );
+      // The part of the box inside the page spans 700 to 800 across and 300 to
+      // 340 down, so the point to click is 750,320.
+      assertEquals(observed, [{ x: 750, y: 320 }]);
+    } finally {
+      narrow.setInteractionObserver(undefined);
+      await narrow.close();
+    }
+  });
+
+  it("clicks a control the left-hand edge of the page cuts off", async () => {
+    // The edge a control reaches past can be any of the four. A control that
+    // starts to the left of the page has a negative middle, which is as
+    // unreachable as one past the right-hand edge.
+    const observed: { x: number; y: number }[] = [];
+    const narrow = await browser.newPage();
+    narrow.setInteractionObserver({
+      afterClick: (_element, point) =>
+        void observed.push({ x: point.x, y: point.y }),
+    });
+    try {
+      await narrow.setViewportSize({ width: 800, height: 600 });
+      await narrow.evaluate(() => {
+        const host = document.createElement("div");
+        const root = host.attachShadow({ mode: "open" });
+        // Spans -300 to 100 across and -20 to 20 down, so the middle of the
+        // whole box is at -100,0 and the middle of the part inside the page is
+        // at 50,10.
+        const button = document.createElement("button");
+        button.id = "left-clipped-button";
+        button.textContent = "Continue as guest";
+        Object.assign(button.style, {
+          position: "fixed",
+          left: "-300px",
+          top: "-20px",
+          width: "400px",
+          height: "40px",
+          margin: "0",
+        });
+        let clicked = 0;
+        button.addEventListener("click", () => {
+          clicked++;
+        });
+        root.append(button);
+        document.body.append(host);
+
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = { viewSettled: () => Promise.resolve() };
+        (globalThis as typeof globalThis & {
+          __leftClippedClicks: () => number;
+        }).__leftClippedClicks = () => clicked;
+      });
+
+      await clickCfButton(narrow, "#left-clipped-button");
+
+      assertEquals(
+        await narrow.evaluate(() =>
+          (globalThis as typeof globalThis & {
+            __leftClippedClicks: () => number;
+          }).__leftClippedClicks()
+        ),
+        1,
+        "the click never landed on the part of the control inside the page",
+      );
+      assertEquals(observed, [{ x: 50, y: 10 }]);
+    } finally {
+      narrow.setInteractionObserver(undefined);
+      await narrow.close();
+    }
+  });
+
+  it("reports a control with no part of it inside the page", async () => {
+    // Every point on the control is outside the page, so there is nowhere to
+    // aim that a click can reach. Saying so is the only honest answer: a click
+    // dispatched past the edge of the page reaches nothing, and a helper that
+    // returns from that has told its caller the control was pressed.
+    const narrow = await browser.newPage();
+    try {
+      await narrow.setViewportSize({ width: 800, height: 600 });
+      await narrow.evaluate(() => {
+        const host = document.createElement("div");
+        const root = host.attachShadow({ mode: "open" });
+        const surface = document.createElement("div");
+        Object.assign(surface.style, {
+          position: "fixed",
+          left: "900px",
+          top: "300px",
+          width: "220px",
+        });
+        const button = document.createElement("button");
+        button.id = "offscreen-guest-button";
+        button.textContent = "Continue as guest";
+        Object.assign(button.style, {
+          display: "block",
+          width: "200px",
+          height: "40px",
+        });
+        let clicked = 0;
+        button.addEventListener("click", () => {
+          clicked++;
+        });
+        surface.append(button);
+        root.append(surface);
+        document.body.append(host);
+
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = { viewSettled: () => Promise.resolve() };
+        (globalThis as typeof globalThis & {
+          __offscreenClicks: () => number;
+        }).__offscreenClicks = () => clicked;
+      });
+
+      const error = await assertRejects(
+        () => clickCfButton(narrow, "#offscreen-guest-button"),
+        Error,
+      );
+      assertStringIncludes(error.message, "outside the page");
+      // The size of the page, so a message that names some other 800 cannot
+      // satisfy this.
+      assertStringIncludes(error.message, '"width": 800');
+      assertStringIncludes(error.message, '"height": 600');
+
+      const clicks = await narrow.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __offscreenClicks: () => number;
+        }).__offscreenClicks()
+      );
+      assertEquals(clicks, 0, "a click reached a control the page cannot show");
+    } finally {
+      await narrow.close();
+    }
+  });
 });

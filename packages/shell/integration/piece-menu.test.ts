@@ -450,6 +450,75 @@ async function waitForPanelText(
   );
 }
 
+/** Wait until the current identity's access row shows the expected level. */
+async function waitForCurrentIdentityAccess(
+  page: ReturnType<ShellIntegration["page"]>,
+  expected: "READ" | "WRITE" | "OWNER",
+): Promise<void> {
+  await waitForCondition(page, (probe, access: string) => {
+    const root = document.querySelector("cf-piece-menu")?.shadowRoot;
+    const row = [...(root?.querySelectorAll("tbody tr") ?? [])].find((entry) =>
+      probe.deepText(entry).includes("(you)")
+    );
+    return row?.querySelector<HTMLSelectElement>(".access-select")?.value ===
+      access;
+  }, { args: [expected] });
+}
+
+/** Choose an access level in the current identity's rendered ACL row. */
+async function changeCurrentIdentityAccess(
+  page: ReturnType<ShellIntegration["page"]>,
+  access: "READ" | "WRITE" | "OWNER",
+): Promise<void> {
+  await page.evaluate((nextAccess: string) => {
+    const root = document.querySelector("cf-piece-menu")?.shadowRoot;
+    const row = [...(root?.querySelectorAll("tbody tr") ?? [])].find((entry) =>
+      entry.textContent?.includes("(you)")
+    );
+    const select = row?.querySelector<HTMLSelectElement>(".access-select");
+    if (!select) throw new Error("current identity access row is unavailable");
+    select.value = nextAccess;
+    select.dispatchEvent(
+      new Event("change", { bubbles: true, composed: true }),
+    );
+  }, { args: [access] });
+}
+
+/** Add one ACL entry through the rendered access form. */
+async function addSpaceAccessEntry(
+  page: ReturnType<ShellIntegration["page"]>,
+  user: string,
+): Promise<void> {
+  await page.evaluate((identity: string) => {
+    const root = document.querySelector("cf-piece-menu")?.shadowRoot;
+    const input = root?.querySelector<HTMLInputElement>(".access-input");
+    const form = root?.querySelector<HTMLFormElement>(".access-add-form");
+    if (!input || !form) throw new Error("space access form is unavailable");
+    input.value = identity;
+    input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    form.requestSubmit();
+  }, { args: [user] });
+}
+
+/** Remove the ACL row for `user` through its rendered button. */
+async function removeSpaceAccessEntry(
+  page: ReturnType<ShellIntegration["page"]>,
+  user: string,
+): Promise<void> {
+  await waitForCondition(page, (probe, identity: string) => {
+    const root = document.querySelector("cf-piece-menu")?.shadowRoot;
+    const row = [...(root?.querySelectorAll("tbody tr") ?? [])].find((entry) =>
+      probe.deepText(entry).includes(identity)
+    );
+    const button = row?.querySelector<HTMLButtonElement>(
+      '[test-id="space-access-remove"]',
+    );
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  }, { args: [user] });
+}
+
 describe("piece context menu", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
@@ -457,7 +526,7 @@ describe("piece context menu", () => {
   // The menu and its panels are cf-piece-menu's, mounted on document.body by
   // cf-render. Driving them through a real right-click is what proves the
   // announcement, the portalled overlay, and the worker read all line up.
-  it("shows a piece's source and the origin it records", async () => {
+  it("shows a piece's source, origin, and space access rights", async () => {
     const page = shell.page();
     const { identity } = await writeTempIdentity({ implementation: "noble" });
 
@@ -530,6 +599,37 @@ describe("piece context menu", () => {
       page,
       "piece-panel-origin",
       "/api/patterns/system/default-app.tsx",
+    );
+
+    await rightClickRenderedPiece(page);
+    await clickPierce(page, '[test-id="piece-menu-space-access"]');
+    await waitForPanelText(
+      page,
+      "piece-panel-access",
+      "you have OWNER access",
+    );
+    await waitForCurrentIdentityAccess(page, "OWNER");
+    await waitForPanelText(page, "piece-panel-access", "Anyone (*)");
+
+    await changeCurrentIdentityAccess(page, "READ");
+    await waitForPanelText(
+      page,
+      "piece-panel-access",
+      "Could not change access rights",
+    );
+    await waitForCurrentIdentityAccess(page, "OWNER");
+
+    const reader = "did:key:z6Mk-piece-menu-integration-reader";
+    await addSpaceAccessEntry(page, reader);
+    await waitForPanelText(page, "piece-panel-access", reader);
+    await removeSpaceAccessEntry(page, reader);
+    await waitForCondition(
+      page,
+      (probe, identity: string) =>
+        probe.collect('[test-id="piece-panel-access"]').some((panel) =>
+          probe.isRendered(panel) && !probe.deepText(panel).includes(identity)
+        ),
+      { args: [reader] },
     );
 
     expect(await closePieceMenu(page)).toEqual({

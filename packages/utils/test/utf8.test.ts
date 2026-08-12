@@ -74,9 +74,36 @@ describe("utf8SortedKeysOf()", () => {
     expect(sorted).toEqual(["a", "b", "c"]);
   });
 
+  it("returns the keys of an object that has just one", () => {
+    expect(utf8SortedKeysOf({ solo: 1 })).toEqual(["solo"]);
+  });
+
+  it("returns an empty array for an object with no keys", () => {
+    expect(utf8SortedKeysOf({})).toEqual([]);
+  });
+
+  it("returns keys that arrive already in order, in that order", () => {
+    const obj = { a: 1, b: 2, c: 3 };
+    expect(utf8SortedKeysOf(obj)).toEqual(["a", "b", "c"]);
+  });
+
+  it("sorts keys that are in UTF-16 order but not UTF-8 order", () => {
+    // `"\u{10000}"` is a surrogate pair, so by UTF-16 code unit it comes
+    // before `"￿"`; by code point, which is what UTF-8 byte order
+    // follows, it comes after. Arriving in UTF-16 order is arriving out of
+    // order, and has to be sorted.
+    const obj = { "\u{10000}": 1, "￿": 2 };
+    expect(utf8SortedKeysOf(obj)).toEqual(["￿", "\u{10000}"]);
+  });
+
   it("returns a frozen value", () => {
     const obj = { beep: "x", bop: "y", awOOOOga: "z" };
     const sorted = utf8SortedKeysOf(obj);
+    expect(Object.isFrozen(sorted)).toBe(true);
+  });
+
+  it("returns a frozen value for keys that arrive already in order", () => {
+    const sorted = utf8SortedKeysOf({ awOOOOga: "z", beep: "x", bop: "y" });
     expect(Object.isFrozen(sorted)).toBe(true);
   });
 

@@ -110,18 +110,36 @@ export function dataUriFromValueWithResolvedLinks(
         // relative link within it stays relative).
         return value;
       } else if (Array.isArray(value)) {
-        return value.map((item) =>
-          traverseAndAddBaseIdToRelativeLinks(item, seen)
-        );
+        // Copy on write, here and in the object branch below: a container
+        // whose members all come back by identity is returned by identity
+        // too, so the encoder that reads the result gets the caller's own
+        // containers. A value carrying no link anywhere within it comes
+        // through this walk without an allocation.
+        let next: FabricValue[] | undefined;
+        for (let index = 0; index < value.length; index++) {
+          if (!(index in value)) continue;
+          const current = value[index];
+          const rewritten = traverseAndAddBaseIdToRelativeLinks(current, seen);
+          if (next) {
+            next[index] = rewritten;
+          } else if (!Object.is(rewritten, current)) {
+            next = value.slice();
+            next[index] = rewritten;
+          }
+        }
+        return next ?? value;
       } else { // isObject
-        return Object.fromEntries(
-          Object.entries(value).map((
-            [key, value],
-          ) => [
-            key,
-            traverseAndAddBaseIdToRelativeLinks(value, seen),
-          ]),
-        );
+        let next: Record<string, FabricValue> | undefined;
+        for (const [key, entry] of Object.entries(value)) {
+          const rewritten = traverseAndAddBaseIdToRelativeLinks(entry, seen);
+          if (next) {
+            next[key] = rewritten;
+          } else if (!Object.is(rewritten, entry)) {
+            next = { ...value };
+            next[key] = rewritten;
+          }
+        }
+        return next ?? value;
       }
     } finally {
       seen.delete(value);

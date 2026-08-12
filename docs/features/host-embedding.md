@@ -143,21 +143,40 @@ untested here by design — it lands and is tested with CT-1830.
 **Contract.** A right-click on a piece rendered by `cf-render` opens
 `cf-piece-menu` for that piece. **View source** shows the piece's retained
 authored files. **Origin and history** shows its active origin and recorded
-source revisions. A piece with an active origin also has **Stop following
-source**. That action keeps the exact current source and clears the active
-origin.
+source revisions. **Clone fresh piece into new space** creates a copy with
+default input data in a unique named space owned by the current user, then
+navigates to it. **Clone piece and copy data into new space** takes detached
+snapshots of the selected piece's current input and stateful internal data.
+Computed values are recomputed in the new space. Data linked from another space
+is rejected because it cannot be captured atomically. Both actions move clone
+progress and failures from the context menu into a dialog. The copy follows
+the selected piece when that piece is detached. When the selected piece already
+follows an origin, the copy follows that same origin. A piece with an active
+origin also has **Stop following source**. That action keeps the exact current
+source and clears the active origin.
 
 Historical entries can restore an exact retained source version or resume
-following an earlier web or fabric origin. An incompatible pattern contract or
-retained link is shown before mutation and requires a second explicit
-confirmation. The runtime binds that confirmation to the exact reviewed code
-and source-state snapshot. If the piece's actual retained input does not satisfy
-the candidate's argument schema, the runtime rejects the transition instead.
-The input must be repaired before that source can be selected. Nothing is
-required of the host to get these controls. Importing `cf-render` registers the
-menu. The menu reads and changes the piece through
-`RuntimeClient.getPieceSource()` and `RuntimeClient.updatePieceSource()` on the
-runtime the piece already runs in.
+following an earlier web or fabric origin. Each entry can show its exact
+retained source. A mutable Fabric piece origin links to that piece in its own
+space, and the space fact links to the space's default piece. An incompatible
+pattern contract or retained link is shown before mutation and requires a
+second explicit confirmation. The runtime binds that confirmation to the exact
+reviewed code and source-state snapshot. If the piece's actual retained input
+does not satisfy the candidate's argument schema, the runtime rejects the
+transition instead. The input must be repaired before that source can be
+selected. Nothing is required of the host to get these controls. Importing
+`cf-render` registers the menu. The menu reads, clones, and changes the piece
+through `RuntimeClient.getPieceSource()`,
+`RuntimeClient.getPieceSourceRevision()`, `RuntimeClient.clonePiece()`, and
+`RuntimeClient.updatePieceSource()` on the runtime the piece already runs in.
+
+After the piece-specific entries, a divider separates **Space access rights...**.
+The dialog reads the target space's ACL through `RuntimeClient.getSpaceAcl()`.
+Every principal that can read the space sees the entries. A principal whose
+effective ACL capability is `OWNER` also gets controls backed by
+`RuntimeClient.setSpaceAclEntry()` and `RuntimeClient.removeSpaceAclEntry()`.
+The runtime uses `ACLManager` for these mutations, so the memory server remains
+the authority that accepts owner changes and preserves a concrete owner.
 
 Calling `RuntimeClient.createPage()` with an HTTP or HTTPS `URL` creates a
 followed piece. The runtime records the canonical URL and retained initial

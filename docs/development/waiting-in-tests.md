@@ -176,10 +176,23 @@ between. The hold is frame-driven and drops its baseline whenever the box
 disappears. A control hidden partway through is picked up once it returns rather
 than clicked mid-shift. The stuck-condition net bounds a box that never settles.
 
+The point that measurement answers is the middle of the part of the control's
+box that lies inside the page, which for a control the page has room for is the
+middle of the whole box. A control reaching past the edge of the page — a
+surface positioned towards that edge in a narrow viewport, a control wider than
+the space it is drawn in — can have the middle of its whole box outside the
+page. The browser accepts a trusted click dispatched outside the page, delivers
+it to nothing, and reports no error for having done so, so a click aimed there
+leaves the caller told that a control was pressed which never was. A control
+with no part of it inside the page has no point to aim at, and `clickMarked`
+reports it, naming the control's box and the size of the page. What the page
+shows of a control is a wider question than this one: an ancestor's overflow can
+clip it, and anything painted over it can cover it. Neither moves this point.
+
 The page can move again after that first measurement. An interaction observer
 also runs before the trusted click and can give the page time to change. Just
 before dispatch, `clickMarked` resolves the marked control in one page turn and
-reads its current center. If the control has moved or disappeared, the helper
+reads its current point. If the control has moved or disappeared, the helper
 settles it again and applies the caller's tagging predicate to any replacement.
 It takes one final current measurement after that settle, then dispatches the
 single trusted click at that point.

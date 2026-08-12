@@ -32,6 +32,8 @@ import {
 import { TILES } from "./registry.ts";
 import { labsCi } from "./tiles/main-build.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
+import { DASHBOARD_MESSAGE_LIFETIME_MS } from "./dashboard-message.ts";
+import { dashboardCacheFile } from "./history-files.ts";
 
 const req = (path: string) => new Request(`http://localhost${path}`);
 
@@ -101,6 +103,7 @@ interface TestUpdate {
   faviconStatus: "good" | "warn" | "bad";
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
+  message: { text: string; updatedAt: number | null; revision: number };
 }
 
 function updateFromEvent(event: string): TestUpdate {
@@ -1190,6 +1193,158 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(clients.size, 0, "a disconnected browser is not kept as a client");
 });
 
+Deno.test("message: an edit is saved and sent to every connected dashboard", async () => {
+  const events = await handle(req("/events"));
+  const reader = events.body!.getReader();
+  await chunk(reader);
+  await chunk(reader);
+  try {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "  Deploying <main>  " }),
+    }));
+    assertEquals(response.status, 200);
+    const saved = await response.json();
+    assertEquals(saved.text, "Deploying <main>");
+    assertEquals(typeof saved.updatedAt, "number");
+    assertEquals(typeof saved.revision, "number");
+
+    const update = updateFromEvent(await chunk(reader));
+    assertEquals(update.message, saved);
+    const html = await (await handle(req("/"))).text();
+    assertStringIncludes(html, `value="Deploying &lt;main&gt;"`);
+  } finally {
+    await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "" }),
+    }));
+    await reader.cancel();
+  }
+});
+
+Deno.test("message: malformed edits are rejected without changing the message", async () => {
+  const malformedJson = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: "{",
+  }));
+  assertEquals(malformedJson.status, 400);
+  assertEquals(await malformedJson.json(), {
+    error: "Expected a JSON request body.",
+  });
+
+  const missingText = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "wrong field" }),
+  }));
+  assertEquals(missingText.status, 400);
+
+  for (const body of ["null", "42", "[]"]) {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body,
+    }));
+    assertEquals(response.status, 400);
+  }
+
+  const tooLong = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: "x".repeat(501) }),
+  }));
+  assertEquals(tooLong.status, 400);
+  assertEquals(await tooLong.json(), {
+    error: "Messages are limited to 500 characters.",
+  });
+
+  const wrongMethod = await handle(req("/message"));
+  assertEquals(wrongMethod.status, 405);
+  assertEquals(wrongMethod.headers.get("allow"), "PUT");
+});
+
+Deno.test("message: a persistence failure returns an error", async () => {
+  const temporary = `${dashboardCacheFile("fabric-wall-message.json")}.tmp`;
+  await Deno.mkdir(temporary);
+  try {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Cannot persist" }),
+    }));
+    assertEquals(response.status, 500);
+    assertEquals(await response.json(), {
+      error: "Could not save the dashboard message.",
+    });
+  } finally {
+    await Deno.remove(temporary);
+  }
+});
+
+Deno.test("message: a failed expiry write retains the saved text", async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  const temporary = `${dashboardCacheFile("fabric-wall-message.json")}.tmp`;
+  try {
+    const saved = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Still visible" }),
+    }));
+    assertEquals(saved.status, 200);
+    await Deno.mkdir(temporary);
+    now += DASHBOARD_MESSAGE_LIFETIME_MS;
+
+    await serveTick(() => {});
+    assertStringIncludes(
+      await (await handle(req("/"))).text(),
+      `value="Still visible"`,
+    );
+  } finally {
+    Date.now = realNow;
+    await Deno.remove(temporary);
+    await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "" }),
+    }));
+  }
+});
+
+Deno.test("message: the serving clock clears text after its fade completes", async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  const events = await handle(req("/events"));
+  const reader = events.body!.getReader();
+  await chunk(reader);
+  await chunk(reader);
+  try {
+    const saved = await (await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Fading announcement" }),
+    }))).json();
+    assertEquals(updateFromEvent(await chunk(reader)).message.text, "Fading announcement");
+
+    now += DASHBOARD_MESSAGE_LIFETIME_MS;
+    await serveTick(() => {});
+    assertStringIncludes(await chunk(reader), "event: ping\n");
+    assertEquals(updateFromEvent(await chunk(reader)).message, {
+      text: "",
+      updatedAt: null,
+      revision: saved.revision + 1,
+    });
+  } finally {
+    Date.now = realNow;
+    await reader.cancel();
+  }
+});
+
 Deno.test("sse: every serving tick sends a heartbeat, so silence means a broken stream", async () => {
   const res = await handle(req("/events"));
   const reader = res.body!.getReader();
@@ -1241,6 +1396,7 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
     faviconStatus: "good",
     faviconRedSince: null,
     faviconRedAgeMs: null,
+    message: { text: "", updatedAt: null, revision: 0 },
   });
   assertEquals(clients.size, 0);
 });

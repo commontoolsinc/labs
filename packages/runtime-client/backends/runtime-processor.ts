@@ -3,11 +3,13 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { newDefaultJsonCodec } from "@commonfabric/data-model/codecs";
+import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
   PieceController,
   PiecesController,
   type PreparedPieceSourceChange,
   readPieceSourceMetadata,
+  readPieceSourceRevision,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
 import {
@@ -20,6 +22,7 @@ import {
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
 import {
+  ACLManager,
   type BrowserWorkerPresetParams,
   type Cancel,
   type Cell,
@@ -112,8 +115,11 @@ import {
   type PageSyncedRequest,
   type PatternCoverageResponse,
   type PatternSourcesResponse,
+  type PieceCloneRequest,
   type PieceGetSourceRequest,
+  type PieceGetSourceRevisionRequest,
   type PieceSourceResponse,
+  type PieceSourceRevisionResponse,
   type PieceUpdateSourceRequest,
   type PieceUpdateSourceResponse,
   type RecreateSpaceRootPatternRequest,
@@ -131,7 +137,11 @@ import {
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
   type SlugResponse,
+  type SpaceAclResponse,
+  type SpaceGetAclRequest,
+  type SpaceRemoveAclEntryRequest,
   type SpaceResponse,
+  type SpaceSetAclEntryRequest,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -174,6 +184,25 @@ import {
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadCodec = newDefaultJsonCodec();
+
+function spaceAclResponse(
+  runtime: Runtime,
+  space: DID,
+  acl: ACL | null,
+): SpaceAclResponse {
+  const principal = runtime.userIdentityDID;
+  const capability = principal === space
+    ? "OWNER"
+    : acl?.[principal] ?? acl?.["*"];
+  return {
+    access: {
+      space,
+      principal,
+      acl: { ...(acl ?? {}) } as SpaceAclResponse["access"]["acl"],
+      canEdit: capability === "OWNER",
+    },
+  };
+}
 
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
@@ -1337,6 +1366,38 @@ export class RuntimeProcessor {
     return { source: { ...state, space: state.space as DID } };
   }
 
+  async handlePieceGetSourceRevision(
+    request: PieceGetSourceRevisionRequest,
+  ): Promise<PieceSourceRevisionResponse> {
+    const pieces = this.getSpaceCtx(request.space);
+    const cell = this.runtime.getCellFromEntityId(
+      pieces.getSpace(),
+      entityIdFrom(request.pieceId),
+    );
+    return {
+      source: await readPieceSourceRevision(
+        this.runtime,
+        cell,
+        request.revisionId,
+      ),
+    };
+  }
+
+  /** Clone a source piece into another space. */
+  async handlePieceClone(request: PieceCloneRequest): Promise<PageResponse> {
+    const sourcePieces = this.getSpaceCtx(request.sourceSpace);
+    const sourceCell = this.runtime.getCellFromEntityId(
+      sourcePieces.getSpace(),
+      entityIdFrom(request.pieceId),
+    );
+    const source = new PieceController(sourcePieces, sourceCell);
+    const clone = await source.cloneTo(
+      this.getSpaceCtx(request.destinationSpace),
+      { copyData: request.copyData === true },
+    );
+    return { page: createPageRef(clone.getCell()) };
+  }
+
   async handlePieceUpdateSource(
     request: PieceUpdateSourceRequest,
   ): Promise<PieceUpdateSourceResponse> {
@@ -1418,6 +1479,49 @@ export class RuntimeProcessor {
         }
         : {}),
     };
+  }
+
+  async handleSpaceGetAcl(
+    request: SpaceGetAclRequest,
+  ): Promise<SpaceAclResponse> {
+    this.getSpaceCtx(request.space);
+    const acl = await new ACLManager(this.runtime, request.space).get();
+    return spaceAclResponse(this.runtime, request.space, acl);
+  }
+
+  async handleSpaceSetAclEntry(
+    request: SpaceSetAclEntryRequest,
+  ): Promise<SpaceAclResponse> {
+    if (!isACLUser(request.user)) {
+      throw new Error("user must be `*` or a valid DID");
+    }
+    if (!isCapability(request.capability)) {
+      throw new Error("capability must be `READ`, `WRITE`, or `OWNER`");
+    }
+    this.getSpaceCtx(request.space);
+    const manager = new ACLManager(this.runtime, request.space);
+    const acl = await manager.set(request.user, request.capability);
+    return spaceAclResponse(
+      this.runtime,
+      request.space,
+      acl,
+    );
+  }
+
+  async handleSpaceRemoveAclEntry(
+    request: SpaceRemoveAclEntryRequest,
+  ): Promise<SpaceAclResponse> {
+    if (!isACLUser(request.user)) {
+      throw new Error("user must be `*` or a valid DID");
+    }
+    this.getSpaceCtx(request.space);
+    const manager = new ACLManager(this.runtime, request.space);
+    const acl = await manager.remove(request.user);
+    return spaceAclResponse(
+      this.runtime,
+      request.space,
+      acl,
+    );
   }
 
   handleRegisterSpaceHost(
@@ -1733,8 +1837,18 @@ export class RuntimeProcessor {
         return await this.handlePageGetAll(request);
       case RequestType.PieceGetSource:
         return await this.handlePieceGetSource(request);
+      case RequestType.PieceGetSourceRevision:
+        return await this.handlePieceGetSourceRevision(request);
+      case RequestType.PieceClone:
+        return await this.handlePieceClone(request);
       case RequestType.PieceUpdateSource:
         return await this.handlePieceUpdateSource(request);
+      case RequestType.SpaceGetAcl:
+        return await this.handleSpaceGetAcl(request);
+      case RequestType.SpaceSetAclEntry:
+        return await this.handleSpaceSetAclEntry(request);
+      case RequestType.SpaceRemoveAclEntry:
+        return await this.handleSpaceRemoveAclEntry(request);
       case RequestType.PageSynced:
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:
