@@ -300,7 +300,7 @@ surveillance tool.
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond. A month whose usage report cannot be read breaks that source's line across those days rather than charting them as $0 | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
-| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
+| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same, divided by the same run's machine calibration so a busy host does not read as a code change): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
@@ -630,7 +630,8 @@ Notes:
   `bench-results` artifact with 90-day retention. There is no committed
   history. Each CPU's index compares a run with the previous run on the same
   CPU. It multiplies the previous index by the **geometric mean of the
-  per-benchmark changes**. Every benchmark weighs the same regardless of size.
+  per-benchmark changes**, then **divides out the machine**. Every benchmark
+  weighs the same regardless of size.
   **Only a broad, across-the-board move shifts an index.** A regression in one
   benchmark barely registers, however slow that benchmark is. The drill-down
   covers individual benchmarks. A summed total would instead be dominated by
@@ -676,7 +677,23 @@ Notes:
   absent from one side of that adjacent comparison, so it drops out of the
   geometric mean.
   A CPU change starts another line instead of connecting measurements from
-  unlike machines. A gap longer than one fifth of the chart width breaks a
+  unlike machines. A CPU model is not a machine, though. The runner group has
+  served six processor models over a forty-five day stretch, and two runs on
+  one model have measured a fifth apart on work that touches no repository code
+  at all, because a run gets whatever share of a shared host the other tenants
+  leave it. So the workflow also runs
+  `packages/dashboard/machine-calibration.bench.ts`, whose benchmarks call no
+  repository code, and each step divides their geometric mean out of the
+  product benchmarks' one. What is left is what the repository did. Those
+  calibration benchmarks are the tile's ruler rather than one of the things it
+  measures: they are absent from the index, from the benchmark count, and from
+  the drill-down. A run from before the calibration landed carries none, and
+  the step into or out of it is left uncorrected rather than guessed at. The
+  index also reads **one run per `BENCH_TREND_BUCKET_MS`**, matching the
+  workflow's four-hourly cron, so a rerun or a manual dispatch minutes from a
+  scheduled run does not put two samples of one moment into the fit. The
+  drill-down keeps every run. A gap longer than one fifth of the chart width
+  breaks a
   CPU's line. Any sample isolated by those breaks appears as a point. A CPU
   with one sample also appears as a point until another sample can form a line.
   A large rise reads as a fold multiplier (`▲44×`) once it passes 4x. This
@@ -711,10 +728,17 @@ Notes:
     to download.
   - The tile drills through to the per-benchmark history behind `/bench`, which the
     tile's collection keeps warm in the background. The collection lists
-    benchmark runs on main. It samples one run per shortest-view bucket,
-    downloads that artifact, and unzips it in the process. It then reads each
-    benchmark's timings and CPU. A report without a CPU identity is cached as
-    unusable instead of being pooled with measurements from unknown machines.
+    benchmark runs on main. It samples one completed run per shortest-view
+    bucket, whatever colour it finished, downloads that artifact, and unzips it
+    in the process. It then reads each benchmark's timings and CPU. A run's
+    colour does not say whether it measured anything: `deno bench` exits
+    non-zero when one benchmark throws, having already written a complete report
+    of the rest, and dropping those runs cost about a seventh of the history in
+    blocks a dozen runs long. The artifact decides instead. A report without a
+    CPU identity, or one that will not parse, is cached as unusable instead of
+    being pooled with measurements from unknown machines; because a run
+    attempt's artifact never changes, that verdict is kept rather than retried,
+    while a read that failed outright is retried.
     Cache entries written before CPU identity was stored are fetched again.
     Each completed artifact check is persisted before it is counted as
     finished. Only new runs and attempts are fetched after the first fill or a

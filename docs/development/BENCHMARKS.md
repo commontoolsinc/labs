@@ -7,21 +7,51 @@ work.
 ## The pipeline
 
 The Benchmarks workflow (`.github/workflows/benchmarks.yml`) runs every four
-hours on a schedule, on the dedicated runner group so results stay comparable
-across runs. It runs `deno bench --json` over `packages/runner/test/*.bench.ts`
-plus explicitly listed benchmarks in `packages/utils`, `packages/fuse`,
-`packages/memory`, and `packages/patterns`. It uploads JSON stdout and a copy of
-stderr in the `bench-results` artifact with 90-day retention. A bench file
-outside those paths does not run in CI until it is added to the workflow. The
-workflow's manual trigger measures a specific commit.
+hours on a schedule, on the dedicated runner group. It runs `deno bench --json`
+over `packages/runner/test/*.bench.ts` plus explicitly listed benchmarks in
+`packages/utils`, `packages/fuse`, `packages/memory`, `packages/dashboard`, and
+`packages/patterns`. It uploads JSON stdout and a copy of stderr in the
+`bench-results` artifact with 90-day retention. A bench file outside those paths
+does not run in CI until it is added to the workflow. The workflow's manual
+trigger measures a specific commit.
 
-The team ops dashboard charts benchmark trends on its `/bench` page, sampling
-one successful run per four-hour window from those artifacts. Each
+The team ops dashboard charts benchmark trends on its `/bench` page, and its
+trend reads one completed run per four-hour window from those artifacts. Each
 benchmark is identified by its origin file, group, and name. The report's CPU
 field divides that benchmark into one line per processor. The dashboard never
 connects measurements from different processors. A report without a CPU
 identity is unusable for trends because its measurements cannot be assigned to
 a processor.
+
+The runner group does not make two runs comparable, and the processor field
+only goes part of the way. Over a forty-five day stretch the group served six
+processor models, and within one model two runs have measured a fifth apart on
+work that touches no repository code, because a run gets whatever share of a
+shared host the other tenants leave it. So every run also measures the machine,
+through the benchmarks in `packages/dashboard/machine-calibration.bench.ts`,
+which call no repository code. The dashboard divides their geometric mean out of
+each step of its index, and leaves them out of the index, the benchmark count
+and the drill-down. See
+[the investigation](../history/development/performance/2026-08-benchmark-headline-machine-noise.md)
+for what an uncorrected run did to the tile.
+
+That correction reaches as far as the machine and no further. A host that is
+busy for the whole job is measured and divided out. Anything that slows one
+phase of the job and not another is not, because the calibration is one
+measurement taken at one point. The browser benchmarks below are the case to
+hold in mind: they run against a toolshed this same job started, and contention
+between the browser and that server sits inside their numbers with nothing to
+subtract it against.
+
+Which point of the job the calibration is taken at is `deno bench`'s to choose,
+not the workflow's. It does not run files in the order they are listed: listing
+the same files in reverse produces the identical report, and the two browser
+files run first rather than last where the list puts them. The order it picks
+is stable — repeated runs of one file set agree — and stability is what the
+calibration actually needs, because a ruler read at the same point of every job
+compares across jobs. Adding a bench file to the list does not place it, so
+neither the calibration's position nor any other file's can be arranged from
+here.
 
 Benchmark numbers are not gated, and neither is CI wall time. The only per-PR
 gate is the coverage-debt ratchet (`tasks/coverage-check.ts`), which never
@@ -37,9 +67,11 @@ single file.
 **Stdout must stay pure JSON.** The workflow redirects all of stdout to
 `results.json`. One stray line printed by any bench file corrupts the
 artifact for every benchmark in the run, not just the offending file. A
-validation step fails the run when the artifact is not valid JSON or lists
-no benches; since the dashboard samples successful runs only, corruption
-never reaches the charts and shows up as a red run in the Actions tab. This
+validation step fails the run when the artifact is not valid JSON, lists no
+benches, or carries no machine calibration, so each of those shows up as a red
+run in the Actions tab. What keeps corruption off the charts is the dashboard
+applying the same test to the artifact it downloads, rather than the run's
+colour: a red run's measurements are charted like any other run's. This
 applies to module-scope code as well as bench bodies. Write diagnostics to
 stderr. Module-scope diagnostics may use `console.error`. The JSON reporter
 captures console output from benchmark bodies, so body diagnostics that need
@@ -96,6 +128,20 @@ over. So:
 `packages/runner/test/esm-verifier.bench.ts` shows the pattern: short stable
 names, per-module labels derived from source paths, sizes logged to stderr.
 
+**The calibration bodies stay as they are.** The bodies in
+`packages/dashboard/machine-calibration.bench.ts` are the ruler every other
+benchmark is measured against, so editing one moves its timings and the
+dashboard reads that move as the machine changing under a processor that did
+not change. Adding a benchmark to that file is safe, and so is removing one:
+each pair of runs is compared over the calibration benchmarks they share, so
+one present on only one side takes no part. Rewriting one is not. Two things
+keep those bodies honest, and both are easy to undo by accident. Each runs long
+enough — a few hundred microseconds — that the just-in-time compiler has
+settled before the measurement, because a body of a few tens of microseconds is
+measured partly interpreted and partly compiled, and which it is varies between
+runs by more than the machine does. And each takes an explicit warmup, so that
+settling happens before the timings start.
+
 ## The end-to-end navigation benchmark
 
 `packages/patterns/integration/topic-board-navigation.bench.ts` measures what a
@@ -116,13 +162,14 @@ Three things follow from it being an end-to-end measurement:
   it, and relaxes the AppArmor restriction Astral needs, all before the
   benchmark step. Locally, start the dev servers and pass `API_URL` and
   `FRONTEND_URL`.
-- **A failure is a red run.** `deno bench` exits non-zero when a benchmark
-  throws, and this one throws when the shell raises an uncaught exception or a
-  navigation never completes. The report still lists every other benchmark, and
-  the dashboard drops only the series it could not measure — but the run is red
-  and that window contributes nothing to any chart. Each segment waits on the
-  event it is waiting for, with no deadline of its own, so it fails when
-  something is genuinely broken rather than when the runner is busy.
+- **A failure is a red run, but not a lost window.** `deno bench` exits
+  non-zero when a benchmark throws, and this one throws when the shell raises an
+  uncaught exception or a navigation never completes. The report still lists
+  every other benchmark, the workflow still uploads it, and the dashboard reads
+  it: the run is red in the Actions tab and drops only the series it could not
+  measure. Each segment waits on the event it is waiting for, with no deadline
+  of its own, so it fails when something is genuinely broken rather than when
+  the runner is busy.
 - **The `sign in` segment reads coarser than the others.** It calls the shared
   `login` helper from `@commonfabric/integration/shell-utils`, which polls the
   page on a 50ms interval, and a wall-clock measurement taken around a poll is

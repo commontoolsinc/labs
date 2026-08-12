@@ -1,14 +1,24 @@
 name: Benchmarks
 
 # The bench-results artifacts feed the benchmark trend charts on the team ops
-# dashboard (its /bench page), which samples one successful run per four-hour
-# window, so per-push samples add no resolution beyond a four-hourly cadence.
-# Scheduled runs stay on the dedicated runner group so results remain
-# comparable across runs; use the manual trigger to measure a specific commit.
+# dashboard (its /bench page), whose trend reads one completed run per
+# four-hour window, so per-push samples add no resolution beyond a four-hourly
+# cadence. Scheduled runs stay on the dedicated runner group; use the manual
+# trigger to measure a specific commit.
 #
 # One of the benchmarks drives a browser against a running toolshed; the steps
 # that build and start that server are part of this job for its sake. See
 # docs/development/BENCHMARKS.md.
+#
+# The group is not a machine. It has served six processor models over a
+# forty-five day stretch, and two runs on one model can be a fifth apart on
+# work that touches no repository code at all, because each run gets whatever
+# share of a host the other tenants leave it. The dashboard draws a separate
+# line per processor model, which tells the models apart but not the hosts. So
+# every run also measures the machine it landed on, through
+# packages/dashboard/machine-calibration.bench.ts below, and the dashboard
+# divides that measurement out of its trend. Without it a run that landed on a
+# busy host reads on the tile as a code regression.
 on:
   schedule:
     - cron: "0 */4 * * *" # Every 4 hours
@@ -59,9 +69,14 @@ jobs:
             echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
           fi
 
-      # The two browser bench files go last so their boards are seeded and their
-      # browsers run after the micro-benchmarks have taken their measurements,
-      # rather than alongside them.
+      # The order files are listed in is not the order they run in. `deno bench`
+      # picks its own, and holds to it: listing these same files in the reverse
+      # order produces the identical report, and repeated runs of one order agree
+      # with each other. What it picks puts the two browser files first and the
+      # machine calibration near the end. That is stable enough for the
+      # calibration to measure the same point of the job every time, which is
+      # what makes it comparable across runs, but it is not something this list
+      # chooses. Adding a file here does not place it.
       - name: 🏋️ Run benchmarks
         env:
           CF_LOG_LEVEL: silent
@@ -76,16 +91,22 @@ jobs:
             packages/memory/test/v2-entity-id-list.bench.ts \
             packages/data-model/bench/hashing.bench.ts \
             packages/data-model/bench/codec-json.bench.ts \
+            packages/dashboard/machine-calibration.bench.ts \
             packages/patterns/integration/topic-board-navigation.bench.ts \
             packages/patterns/integration/topic-board-scale.bench.ts \
             > bench-results/results.json \
             2> >(tee bench-results/diagnostics.log >&2)
 
-      # Fail the run if any bench file wrote non-JSON to stdout, or if the
-      # report lists no benches. The dashboard samples successful runs only,
-      # so a corrupt artifact never reaches the charts and the failure is a
-      # visible red run. The script rides in a single-quoted shell argument —
-      # keep apostrophes out of it.
+      # Fail the run if any bench file wrote non-JSON to stdout, if the report
+      # lists no benches, or if it carries no machine calibration. Failing here
+      # makes each of those a visible red run. It does not keep the artifact
+      # out of the charts, because the dashboard reads a red run's artifact
+      # too: what it drops is an artifact it cannot parse, which is this same
+      # test applied on its side. A report without calibration is not corrupt,
+      # but the dashboard cannot tell a busy host from a code change in it, so
+      # it fails here rather than feeding an uncorrected run into the trend.
+      # The script rides in a single-quoted shell argument — keep apostrophes
+      # out of it.
       - name: ✅ Validate benchmark results
         run: |
           deno eval '
@@ -95,7 +116,20 @@ jobs:
             if (!Array.isArray(data.benches) || data.benches.length === 0) {
               throw new Error("results.json parsed but contains no benches");
             }
-            console.log(`results.json OK: ${data.benches.length} benches`);
+            const calibration = data.benches.filter((bench) =>
+              String(bench.origin ?? "").endsWith(
+                "/packages/dashboard/machine-calibration.bench.ts",
+              )
+            );
+            if (calibration.length === 0) {
+              throw new Error(
+                "results.json carries no machine-calibration benches",
+              );
+            }
+            console.log(
+              `results.json OK: ${data.benches.length} benches, ` +
+                `${calibration.length} of them machine calibration`,
+            );
           '
 
       - name: 📤 Upload benchmark results
