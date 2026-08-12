@@ -296,12 +296,24 @@ export async function startProfilerIfReady(
   }
   state.profilerStarting = true;
   try {
-    await settleInspectorCommand(ws, () => profiler.enable());
-    await settleInspectorCommand(
-      ws,
-      () => profiler.setSamplingInterval({ interval: 100 }),
-    );
-    await settleInspectorCommand(ws, () => profiler.start());
+    const steps = [
+      { name: "Profiler.enable", command: () => profiler.enable() },
+      {
+        name: "Profiler.setSamplingInterval",
+        command: () => profiler.setSamplingInterval({ interval: 100 }),
+      },
+      { name: "Profiler.start", command: () => profiler.start() },
+    ] as const;
+    for (const step of steps) {
+      try {
+        await settleInspectorCommand(ws, step.command);
+      } catch (error) {
+        throw new Error(
+          `Profiler.start failed during ${step.name}: ${error}`,
+          { cause: error },
+        );
+      }
+    }
     markProfilerStarted(state, options);
     log("profile: profiler started");
     return true;
@@ -457,7 +469,10 @@ export async function captureDenoInspectorProfile(
     requestStop(reason);
   };
   const recordProfilerStartError = (error: unknown): void => {
-    profilerStartError = `Profiler.start failed: ${error}`;
+    const message = error instanceof Error ? error.message : String(error);
+    profilerStartError = message.startsWith("Profiler.start failed")
+      ? message
+      : `Profiler.start failed: ${message}`;
     output.error(`profile: ${profilerStartError}`);
     requestStop("profiler-start-failed");
   };
