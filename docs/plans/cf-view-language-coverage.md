@@ -112,6 +112,11 @@ relative value. Record the reason in this plan.
   [August 2026 report](../history/packages/cli/cf-view-parser-adapter-spike-2026-08.md)
   records the measurements and leaves the decision to the next item.
 - [x] Record the parser decision before the remaining Stage 2 work.
+- [ ] Before the first Tree-sitter-backed implementation, measure the lazy
+  selected-language path and record accepted maximums for 95th-percentile
+  initialization, full highlighting, and incremental editing; shipped parser
+  bytes; downloaded or unpacked dependency bytes; owned non-generated adapter
+  and workaround source lines; and parser-specific build and deployment steps.
 
 ### Parser decision
 
@@ -168,6 +173,44 @@ The focused Python scanner remains in place until the Stage 2 structure change
 replaces it through the shared adapter. Do not add another focused scanner for
 Python, Go, shell, or HTML.
 
+#### Reconsidering the dependency
+
+Reopen the parser decision for a language when any of these conditions becomes
+true:
+
+- the shared fixture contract or stage-specific tests cannot pass without a
+  grammar fork or local grammar patch;
+- measured initialization, full highlighting, incremental editing, shipped
+  bytes, downloaded or unpacked dependency bytes, owned adapter or workaround
+  source lines, or build and deployment work exceeds a recorded maximum;
+- the runtime or grammar is archived, or has no release compatible with the
+  supported Deno version or with a required security fix; or
+- an unresolved license or security problem prevents shipping the dependency.
+
+A trigger starts a new measured comparison; it does not select the replacement.
+Before switching, require the focused implementation to pass the shared fixture
+contract and every stage-specific selection, highlighting, structure, and
+embedded-language test. If the dependency cannot ship or cannot meet those
+contracts, switch when the focused implementation passes them and remains within
+the recorded operating maximums.
+
+Otherwise compare these dimensions separately: owned non-generated parser,
+adapter, and workaround source lines; local patches or forks; 95th-percentile
+initialization, full-highlight, and incremental-edit latency; shipped runtime
+bytes; downloaded or unpacked dependency bytes; and parser-specific build and
+deployment steps. Compare only the marginal costs that the proposed switch would
+remove. Count language-specific grammar bytes, capture and structure mappings,
+workarounds, and selected-language latency as marginal costs. Treat the common
+adapter core, runtime package bytes, and shared deployment steps as unchanged
+while another language still uses them; count them as removable only when the
+switch removes their final consumer. Switch automatically only when the focused
+implementation is no worse in every dimension and strictly better in at least
+one. When the dimensions trade off, record a new parser decision with the
+individual measurements and priorities instead of combining unlike units into a
+single cost score. Carrying a grammar fork is sufficient to start the comparison
+because it takes on grammar maintenance while retaining the external runtime and
+integration costs.
+
 The parser spike must compare available Deno-compatible parsers with focused
 scanners. Measure startup cost, dependency size, exact source preservation,
 behavior on incomplete edits, state across lines, diff integration, and
@@ -177,7 +220,8 @@ itself.
 
 Completion gate: unknown text and binary input are no longer presented as
 TypeScript. Exact names, compound names, shebangs, and explicit overrides use
-one tested selection path. The parser decision is recorded with measurements.
+one tested selection path. The parser decision and operating maximums are
+recorded with measurements.
 
 ## Stage 1: JSON aliases and line-oriented JSON
 
