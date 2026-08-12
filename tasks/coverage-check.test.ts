@@ -639,7 +639,11 @@ Deno.test("fetchBaselineRunsForCheck fetches main head and baseline runs", async
       return new Response("unexpected request", { status: 404 });
     },
     () =>
-      fetchBaselineRunsForCheck(new Map(), 1, (message) => logs.push(message)),
+      fetchBaselineRunsForCheck(
+        { metrics: new Map() },
+        1,
+        (message) => logs.push(message),
+      ),
   );
 
   assertEquals(result, { mainHeadSha: SHA_A, baselineRuns: [run] });
@@ -695,7 +699,7 @@ Deno.test("formatErrorForLog keeps the first line only", () => {
   assertEquals(formatErrorForLog("plain\nsecond"), "plain");
 });
 
-Deno.test("githubApiOrSkip writes metrics and exits on rate limits", async () => {
+Deno.test("githubApiOrSkip writes the stamped artifact and exits on rate limits", async () => {
   const metrics = new Map<string, BaselineSample>([
     ["job: Check", makeSample()],
   ]);
@@ -706,7 +710,7 @@ Deno.test("githubApiOrSkip writes metrics and exits on rate limits", async () =>
         githubApiOrSkip(
           "collecting test data",
           () => Promise.reject(new Error("rate limit exceeded")),
-          metrics,
+          { metrics, compileCacheStates: { "pattern-unit": "cold" } },
         ).then(() => {})
       )
     );
@@ -719,6 +723,9 @@ Deno.test("githubApiOrSkip writes metrics and exits on rate limits", async () =>
     );
     const file = JSON.parse(await Deno.readTextFile("perf-metrics.json"));
     assertEquals(file.metrics[0].name, "job: Check");
+    // The skip path carries the compile cache stamp, so a later run reading
+    // this artifact still sees that this run was cold.
+    assertEquals(file.compileCacheStates, { "pattern-unit": "cold" });
   } finally {
     await Deno.remove("perf-metrics.json").catch(() => {});
   }
@@ -730,7 +737,7 @@ Deno.test("githubApiOrSkip rethrows non-rate-limit errors", async () => {
       githubApiOrSkip(
         "collecting test data",
         () => Promise.reject(new Error("plain failure")),
-        new Map(),
+        { metrics: new Map() },
       ),
     Error,
     "plain failure",

@@ -8,10 +8,11 @@ import {
   inferCurrentRunFallbackState,
   matcherForGlob,
   pathTouchesCompileCacheKey,
-  recordUnstampedBaselineRunState,
-  uniformCacheStates,
 } from "./compile-cache-state.ts";
-import type { CompileCacheStates } from "./ci-check-lib.ts";
+import {
+  COMPILE_CACHE_FAMILIES,
+  type CompileCacheStates,
+} from "./ci-check-lib.ts";
 
 async function captureLogs(fn: () => void | Promise<void>): Promise<string[]> {
   const logs: string[] = [];
@@ -65,14 +66,6 @@ Deno.test("classifyCacheKeyState is cold iff a changed file touches the key set"
     "cold",
   );
   assertEquals(classifyCacheKeyState([]), "warm");
-});
-
-Deno.test("uniformCacheStates covers every compile-cache family", () => {
-  const cold = uniformCacheStates("cold");
-  assertEquals(Object.values(cold), Object.keys(cold).map(() => "cold"));
-  assert(Object.keys(cold).includes("pattern-unit"));
-  assert(Object.keys(cold).includes("pattern-integration"));
-  assert(Object.keys(cold).includes("generated-patterns"));
 });
 
 Deno.test("classifyRunAgainstPredecessor classifies via changed files", async () => {
@@ -315,7 +308,7 @@ Deno.test("fillMissingFamiliesFromFingerprint fills only unknown families, only 
   assertEquals(recorded["pattern-integration"], "cold");
   assertEquals(recorded["generated-patterns"], "cold");
 
-  const allFamilies = Object.keys(uniformCacheStates("cold")).sort();
+  const allFamilies = [...COMPILE_CACHE_FAMILIES].sort();
   assertEquals(Object.keys(recorded).sort(), allFamilies);
   assertEquals(filled, allFamilies.length - 1);
   // A non-zero fill is announced in the transcript, with the count.
@@ -335,54 +328,4 @@ Deno.test("fillMissingFamiliesFromFingerprint is a no-op (and silent) for warm a
     assertEquals(recorded, { "pattern-unit": "warm" });
     assertEquals(logs.length, 0);
   }
-});
-
-Deno.test("recordUnstampedBaselineRunState retro-classifies against the predecessor and logs only cold", async () => {
-  // Cold: the compare against the predecessor touches the key set → every
-  // family recorded cold, with a transcript line naming the run.
-  const cold = new Map<number, CompileCacheStates>();
-  const coldLogs = await captureLogs(() =>
-    recordUnstampedBaselineRunState(
-      cold,
-      { id: 42, head_sha: "head" },
-      "prev",
-      "PR #4586",
-      (base, head) => {
-        assertEquals([base, head], ["prev", "head"]);
-        return Promise.resolve(["deno.lock"]);
-      },
-    )
-  );
-  assertEquals(cold.get(42), uniformCacheStates("cold"));
-  assertEquals(coldLogs.length, 1);
-  assert(coldLogs[0]!.includes("42"));
-  assert(coldLogs[0]!.includes("PR #4586"));
-  assert(coldLogs[0]!.includes("retro-classified cold"));
-
-  // Warm: the compare touches nothing in the key set → uniform-warm, no log.
-  const warm = new Map<number, CompileCacheStates>();
-  const warmLogs = await captureLogs(() =>
-    recordUnstampedBaselineRunState(
-      warm,
-      { id: 7, head_sha: "head" },
-      "prev",
-      "abc1234",
-      () => Promise.resolve(["docs/readme.md"]),
-    )
-  );
-  assertEquals(warm.get(7), uniformCacheStates("warm"));
-  assertEquals(warmLogs.length, 0);
-
-  // Unknown: no predecessor → records nothing, and never runs the compare.
-  const unknown = new Map<number, CompileCacheStates>();
-  await recordUnstampedBaselineRunState(
-    unknown,
-    { id: 9, head_sha: "head" },
-    undefined,
-    "def5678",
-    () => {
-      throw new Error("must not compare without a predecessor");
-    },
-  );
-  assertEquals(unknown.size, 0);
 });
