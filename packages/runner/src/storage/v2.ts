@@ -3256,12 +3256,23 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   // --- Issue-order gate (CT-1910) ------------------------------------
-  // Requests carrying localSeqs reach the wire in allocation order, so the
-  // session's sequence is monotonic on delivery (INV-5): a commit's turn
+  // The protocol obligation is on DELIVERY: requests carrying localSeqs
+  // arrive at the server in allocation order (04-protocol.md §4.3.2,
+  // INV-5). This gate discharges it by ordering SUBMISSION — "issued"
+  // here means handed to the session layer (SpaceSession.transact /
+  // observationBatch), the point noteIssued marks — and a commit's turn
   // opens when every lower allocated localSeq has been issued or has
-  // settled without issuing. The legacy observation envelope bypasses the
-  // gate — its flush-time number sits above the semantic commits held
-  // behind it by design (the pre-`observationBatchRequests` status quo).
+  // settled without issuing. Submission order becomes delivery order
+  // because every request traverses an IDENTICAL await chain from
+  // submission to `transport.send` (both paths reach Client.request
+  // synchronously and suspend first at the same ensureConnected), and
+  // same-promise continuations resume in attach order. That bridge is an
+  // invariant, not an accident: adding a conditionally-awaited step to
+  // one submission path and not the other would silently break delivery
+  // ordering. Reconnect preserves it per shape — commits re-submit from
+  // #outstandingCommits in insertion (= submission) order, and batches
+  // never replay: one that could not send resolves as dropped, and a
+  // non-delivery cannot be out of order.
 
   private issueTurnBlocked(localSeq: number): boolean {
     for (const pending of this.#unsettledFates) {
