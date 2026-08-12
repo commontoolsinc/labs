@@ -379,20 +379,19 @@ export class JsonCodec implements SerializationContext<string> {
     }
 
     // Arrays: recursively deserialize elements.
+    //
+    // One pass. A `/hole` run advances the write index past the indices it
+    // stands for, leaving them absent, and the final length is set from that
+    // index so that a run in the last position is preserved. Counting the
+    // logical length first would mean walking and unwrapping every entry a
+    // second time, for a number this pass arrives at anyway.
+    //
+    // The result is still sized up front, at the entry count. That is exact
+    // whenever the array has no holes, which is the ordinary case, and an
+    // underestimate otherwise -- growing from there beats growing from empty,
+    // and a short array of holes is common enough to be worth not pessimizing.
     if (Array.isArray(data)) {
-      let logicalLength = 0;
-      for (const entry of data) {
-        const entryDecoded = this.unwrapTag(entry);
-        if (
-          entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
-        ) {
-          logicalLength += entryDecoded.state as number;
-        } else {
-          logicalLength++;
-        }
-      }
-
-      const result = new Array(logicalLength);
+      const result: FabricValue[] = new Array(data.length);
       let targetIndex = 0;
       for (const entry of data) {
         const entryDecoded = this.unwrapTag(entry);
@@ -405,6 +404,7 @@ export class JsonCodec implements SerializationContext<string> {
           targetIndex++;
         }
       }
+      result.length = targetIndex;
       return Object.freeze(result);
     }
 
