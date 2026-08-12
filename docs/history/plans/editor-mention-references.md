@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-08-11
+archived: 2026-08-12
+reason: "Executed plan; the reference mention form shipped across cf-code-editor, note-md, and note."
+---
+
 # Editor mention references
 
 ## The short version
@@ -230,7 +237,7 @@ removed locally.
 **Reading a destination.** `destination` is a cell of `unknown`, and an object
 read under `{ type: "unknown" }` returns `undefined` while rendering the same
 path still works
-([`../development/debugging/gotchas/unknown-typed-field-reads-undefined.md`](../development/debugging/gotchas/unknown-typed-field-reads-undefined.md)).
+([`../../development/debugging/gotchas/unknown-typed-field-reads-undefined.md`](../../development/debugging/gotchas/unknown-typed-field-reads-undefined.md)).
 Reads of a destination's name go through `asSchema` first. This one type-checks
 and fails silently, which is the combination worth a test rather than a
 comment.
