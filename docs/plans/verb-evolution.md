@@ -69,7 +69,7 @@ change does.
 a verb's input passes the check and then fails every existing caller at the
 moment they call it. The check treats a verb's input as though it were an
 output — the one place the two rules above get applied the wrong way round.
-This one is a straightforward defect and is being fixed
+This one is a straightforward defect, filed with its fix decided
 ([#5663](https://github.com/commontoolsinc/labs/issues/5663)); it is listed
 here because it shapes how much the gate can be trusted while it is open.
 
