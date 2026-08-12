@@ -806,6 +806,173 @@ describe("schema-view", () => {
         await lazy.tx.commit();
       }
     });
+
+    it("reads every element when one of them does not match", async () => {
+      // An eager read walks the whole array before it calls the array invalid,
+      // so each element is a dependency of the reader either way. A method that
+      // stopped at the first mismatch would take a dependency on the elements
+      // up to it and nothing would wake the reader when the rest arrived.
+      const read = await seeded(
+        "array-element-mismatch",
+        { xs: [{ n: 1 }, { other: true }, { n: 3 }] },
+        {
+          type: "object",
+          properties: {
+            xs: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { n: { type: "number" } },
+                required: ["n"],
+              },
+            },
+          },
+        } as const,
+      );
+
+      const lazy = read(true);
+      try {
+        const xs = (lazy.get() as { xs: Array<{ n: number }> }).xs;
+        expect(() => xs.map((item) => item.n)).toThrow("Schema mismatch");
+        const paths = pathsRead(lazy.tx);
+        expect(paths.some((path) => path.endsWith("xs/0"))).toBe(true);
+        expect(paths.some((path) => path.endsWith("xs/1"))).toBe(true);
+        expect(paths.some((path) => path.endsWith("xs/2"))).toBe(true);
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+  });
+
+  describe("a property the schema declares as `false`", () => {
+    /** A document holding a link to another, under a schema that rejects the
+     * property the link sits at. */
+    const seededLink = async (
+      cause: string,
+      rejected: JSONSchema,
+      required?: readonly string[],
+    ) => {
+      const write = runtime.edit();
+      const target = runtime.getCell<Record<string, unknown>>(
+        space,
+        `${cause}-target`,
+        undefined,
+        write,
+      );
+      target.set({ title: "Behind the link" });
+      const arg = runtime.getCell<Record<string, unknown>>(
+        space,
+        `${cause}-arg`,
+        undefined,
+        write,
+      );
+      arg.setRaw({ p: target.getAsLink(), q: 1 });
+      await write.commit();
+
+      const schema = {
+        type: "object",
+        properties: { p: rejected, q: { type: "number" } },
+        additionalProperties: false,
+        ...(required === undefined ? {} : { required }),
+      } as JSONSchema;
+      return {
+        targetId: target.getAsNormalizedFullLink().id,
+        read: (lazy: boolean) => {
+          const tx = runtime.edit();
+          if (lazy) tx.markLazyMaterialize(true);
+          const cell = runtime.getCell(space, `${cause}-arg`, schema, tx);
+          return { tx, get: () => cell.get() };
+        },
+      };
+    };
+
+    it("leaves the property out, as an eager read does", async () => {
+      const { read } = await seededLink("rejected-property", false);
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        expect(JSON.parse(JSON.stringify(lazy.get()))).toEqual(
+          JSON.parse(JSON.stringify(eager.get())),
+        );
+        const value = lazy.get() as Record<string, unknown>;
+        expect("p" in value).toBe(false);
+        expect(Object.keys(value)).toEqual(["q"]);
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
+    it("never loads what the rejected property links to", async () => {
+      // The point of writing `false` is that the target is never fetched: a
+      // selection asking for a link's address wants the address, not the
+      // document. Deciding it by reading and letting the read fail would fetch
+      // the document first, which is the cost the `false` was written to avoid.
+      const { read, targetId } = await seededLink("rejected-link", false);
+      const lazy = read(true);
+      try {
+        const value = lazy.get() as Record<string, unknown>;
+        // Enumerating asks whether each key is there, which is where a reader
+        // that never names `p` still reaches it.
+        expect(Object.keys(value)).toEqual(["q"]);
+        expect("p" in value).toBe(false);
+        expect(value.p).toBe(undefined);
+        const ids = [...getTransactionReadActivities(lazy.tx) ?? []]
+          .map((activity) => activity.id);
+        expect(ids.includes(targetId)).toBe(false);
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+
+    it("voids the object when the rejected property is required", async () => {
+      // Dropping the property is the answer for an optional one. Where the
+      // schema also requires it, there is no value that satisfies both, and an
+      // eager read hands back nothing rather than an object missing a key it
+      // declared mandatory.
+      const { read } = await seededLink("rejected-required", false, ["p"]);
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        expect(eager.get()).toBe(undefined);
+        expect(lazy.get()).toBe(undefined);
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
+    it("still reads a property whose shape the narrowing cannot see through", async () => {
+      // `schemaAtPath` also answers `false` where it cannot read a child out of
+      // the shape it was given. That is not a rejection, and the subschema is
+      // still reachable below it.
+      const read = await seeded(
+        "rejected-allof",
+        { p: { name: "Ada", secret: "hidden" } },
+        {
+          type: "object",
+          properties: {
+            p: {
+              allOf: [
+                { type: "object", properties: { name: { type: "string" } } },
+                { type: "object", properties: { secret: { type: "string" } } },
+              ],
+            },
+          },
+        } as const,
+      );
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        expect(JSON.parse(JSON.stringify(lazy.get()))).toEqual(
+          JSON.parse(JSON.stringify(eager.get())),
+        );
+        expect((lazy.get() as { p: { name: string } }).p.name).toBe("Ada");
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
   });
 
   describe("an array element that is an inline object", () => {

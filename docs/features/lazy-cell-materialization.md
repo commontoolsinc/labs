@@ -33,7 +33,8 @@ the child's link and lets the front door decide what the child is.
 ## What a view checks, and when
 
 At the container it is built over: the value's type against the schema's, and
-the presence of the schema's `required` keys. Both come off the container read a
+the schema's `required` keys — that the value carries each of them, and that the
+schema does not also reject one it requires. Both come off the container read a
 view takes anyway, so neither descends.
 
 Everything below is checked where the reader touches it. **A subtree the reader
@@ -66,7 +67,7 @@ goes on reading its default however late the value arrives.
 ## Agreeing with an eager read
 
 A view and an eager read must answer alike; where they do not, the view is
-wrong. Four rules exist only to hold that:
+wrong. Six rules exist only to hold that:
 
 - **The last link hop's schema is combined in.** Eager traversal walks *through*
   a link and combines the link's schema — which describes the value at its
@@ -87,6 +88,23 @@ wrong. Four rules exist only to hold that:
   [`data:` identifier](data-uri-identifiers.md), and the view does the same. The
   read stays on the slot, and recursively: the identity is derived from the whole
   element value.
+- **A property the schema declares as `false` is answered off the schema, not
+  by reading it.** `false` matches no value, so the property is absent to a
+  reader — from `in`, from enumeration and from a plain access alike — and the
+  link under it is never followed. Deciding it by reading and letting the read
+  fail would fetch the document first, which is the cost writing `false` was
+  meant to avoid: a selection projection asks for a link's address that way,
+  and a marked collection would otherwise load one document per element.
+  Requiring the same property instead voids the object, because nothing
+  satisfies both `false` and `required`. This is narrower than it sounds —
+  schema narrowing also answers `false` where it cannot read a child out of the
+  shape it was given, an `allOf` among them, and there the subschema is still
+  reachable below.
+- **A read-only array method visits every element, even past one that does not
+  match.** An eager read walks the whole array before it calls the array
+  invalid, so each element is a dependency of the reader either way. Stopping at
+  the first mismatch would leave the reader depending on the elements up to it,
+  and nothing would wake it when the rest arrived.
 
 ## The refusal, and how the runner disposes of it
 

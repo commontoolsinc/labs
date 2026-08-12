@@ -14,8 +14,9 @@
  * ## What a view checks, and when
  *
  * At the container it is built over: the value's type against the schema's, and
- * the presence of the schema's `required` keys. Both come off the container read
- * a view takes anyway, so neither descends.
+ * the schema's `required` keys — that the value carries each of them, and that
+ * the schema does not also reject one it requires. Both come off the container
+ * read a view takes anyway, so neither descends.
  *
  * Everything below that is checked where the reader touches it. A subtree the
  * reader never reads is never validated — the deliberate cost of not
@@ -106,10 +107,32 @@ const EXCLUDED_MISSING: JSONSchema = Object.freeze({
   $comment: "missingProperty",
 });
 
+/**
+ * A property the schema declares as the `false` schema.
+ *
+ * `false` matches no value, so such a property contributes nothing to a read,
+ * and the answer has to come off the schema rather than out of a failed read:
+ * writing `false` is how a selection asks for a link's address without the
+ * document behind it, and reading first would resolve the link and fetch the
+ * document the `false` was there to avoid.
+ *
+ * This is its own marker because `schemaAtPath` also answers `false` for a
+ * shape it cannot read a child out of — an `allOf`, or an object schema that
+ * omits `type` — where the schema has not rejected anything and the subschema
+ * is still reachable below.
+ */
+const EXCLUDED_REJECTED: JSONSchema = Object.freeze({
+  $comment: "rejectedProperty",
+});
+
+const isRejectedProperty = (schema: JSONSchema): boolean =>
+  isRecord(schema) && schema.$comment === "rejectedProperty";
+
 const isExcluded = (schema: JSONSchema): boolean =>
-  isRecord(schema) &&
-  (schema.$comment === "emptyProperties" ||
-    schema.$comment === "missingProperty");
+  isRejectedProperty(schema) ||
+  (isRecord(schema) &&
+    (schema.$comment === "emptyProperties" ||
+      schema.$comment === "missingProperty"));
 
 /**
  * The type name a schema's `type` keyword would use for this value.
@@ -319,6 +342,14 @@ const childSchema = (
   if (narrowed !== false || !isRecord(schema)) {
     return preferAsCellBranch(narrowed);
   }
+  // A property declared as `false` is the schema rejecting this child, which
+  // the fallback below would otherwise hand back as a schema to read through.
+  if (
+    isRecord(schema.properties) && Object.hasOwn(schema.properties, key) &&
+    (schema.properties as Record<string, JSONSchema>)[key] === false
+  ) {
+    return EXCLUDED_REJECTED;
+  }
   // `schemaAtPath` decides which children exist from the schema's `type`, so a
   // schema that declares `properties` or `items` and omits `type` narrows to
   // `false` — no child selected. An eager read reaches those children, and the
@@ -492,11 +523,23 @@ export function materializeSchemaView(
   }
 
   for (const key of requiredKeys(schema)) {
-    if (Object.hasOwn(value, key)) continue;
-    // A declared default stands in for an absent required key, exactly as it
-    // does for an eager read.
-    if (declaredDefault(childSchema(schema, key)) !== undefined) continue;
-    return mismatch(`missing required property ${JSON.stringify(key)}`);
+    const narrowed = childSchema(schema, key);
+    if (!Object.hasOwn(value, key)) {
+      // A declared default stands in for an absent required key, exactly as it
+      // does for an eager read.
+      if (declaredDefault(narrowed) !== undefined) continue;
+      return mismatch(`missing required property ${JSON.stringify(key)}`);
+    }
+    // A required property the schema declares as `false` cannot be satisfied
+    // while the data carries it: nothing matches `false`, and `required` says
+    // the filtered result has to hold this key. An eager read voids the whole
+    // object here rather than dropping the property, which is what it does for
+    // the same declaration on an optional one.
+    if (isRejectedProperty(narrowed)) {
+      return mismatch(
+        `required property ${JSON.stringify(key)} matches nothing`,
+      );
+    }
   }
 
   return createObjectView(runtime, tx, viewLink, value, cfcLabelView, synced);
@@ -747,12 +790,28 @@ function createArrayView(
 
   // A read-only array method runs against element views built on demand. The
   // methods that would reshape the array are absent: a view is a read.
+  //
+  // Every element is visited even once one has failed. An eager read walks the
+  // whole array before it decides the array invalid, registering each element's
+  // read on the way; stopping at the first failure would leave a reader
+  // depending on one element where the eager path had it depending on all of
+  // them, and nothing would wake it when the rest arrived. The first refusal is
+  // the one that surfaces — the others are the view's own, and are cleared so
+  // they do not outlive the call that provoked them.
   const materialize = (): unknown[] => {
     const copy = new Array<unknown>(value.length);
+    let refusal: SchemaMismatchError | undefined;
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
-      copy[index] = element(index);
+      try {
+        copy[index] = element(index);
+      } catch (error) {
+        if (!isSchemaMismatchError(error)) throw error;
+        if (refusal === undefined) refusal = error;
+        else tx.clearSchemaRefusal(error);
+      }
     }
+    if (refusal !== undefined) throw refusal;
     return copy;
   };
 
