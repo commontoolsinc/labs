@@ -1,9 +1,8 @@
 // production uptime: synthetic round-trip checks for the estuary and rapids
 // servers, plus DNS checks for the company hosts they depend on or run beside.
-// Each health request goes to /_health on the configured origin. The tile keeps
-// successful health-check times visible, while resolved DNS-only hosts stay out
-// of the body. It also lists unconfirmed requests, non-200 responses, and DNS
-// failures.
+// Each health request goes to /_health on the configured origin. Successful
+// health-check times stay visible in healthy and warning states. Red states show
+// only non-good hosts. Resolved DNS-only hosts stay out of the body.
 //
 // Both servers are on the tailnet. PROD_PROXY routes the health requests through
 // a proxy when the dashboard cannot reach the tailnet directly. The DNS result

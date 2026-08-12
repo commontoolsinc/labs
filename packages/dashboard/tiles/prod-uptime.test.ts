@@ -194,7 +194,7 @@ Deno.test("prod uptime: a missing hostname is a red DNS down exception", async (
   }
 });
 
-Deno.test("prod uptime: one host with HTTP and DNS failures counts once", async () => {
+Deno.test("prod uptime: HTTP and DNS failures headline DNS down", async () => {
   const restore = stub(
     (url) => new Response(null, { status: url.includes("rapids") ? 503 : 200 }),
     (hostname) =>
