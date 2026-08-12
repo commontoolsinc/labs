@@ -20,6 +20,7 @@ import {
 import {
   type CellSelection,
   CellSelectionError,
+  declaredResultProjection,
   deriveSelectedValue,
 } from "./cell-selection.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
@@ -41,6 +42,19 @@ export interface CallableResolution {
   cellKey: string;
   pieces: PiecesController;
   space: MemorySpace;
+  /** This verb's declared result, resolved on demand.
+   *
+   * A THUNK rather than a value, because reaching it costs a pattern load and
+   * almost no call needs it. Two callers do: `--help`, which enumerates what a
+   * verb hands back, and a readback whose value closes a circle, which bounds
+   * itself with the declaration rather than failing. A readback that renders
+   * asks nothing of it, so an ordinary dispatch still loads no pattern.
+   *
+   * Absent where the resolution cannot match a declaration to the verb — a
+   * handler reached on the piece's input cell, a piece surface with no pattern
+   * to consult — which says this resolution cannot describe a result rather
+   * than promising there is none. */
+  declaredResult?: () => Promise<JSONSchema | undefined>;
 }
 
 /** The phases a handler invocation passes through, reported on early exit so
@@ -652,6 +666,146 @@ async function selectCallResult(
   return selected;
 }
 
+/**
+ * A result that cannot be written as JSON because it closes a circle, and that
+ * nothing in reach bounds: the verb declared no result, or the declaration it
+ * did make leaves the closing position unbounded.
+ *
+ * A distinct type because the condition is a rendering failure over a handling
+ * that COMMITTED, which is the one thing the message has to carry — the caller
+ * is holding a nonzero exit for a mutation that landed.
+ */
+export class CyclicResultError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CyclicResultError";
+  }
+}
+
+/**
+ * Helper for {@link circularResultPath}: the position, as a JSON pointer, that
+ * is reachable from inside itself.
+ *
+ * Ancestors, not visits: a value reachable by two paths is written twice and
+ * renders fine, while a value reachable from inside itself has no rendering at
+ * all. Own enumerable keys and nothing else, which is what a serializer reads.
+ *
+ * A node carrying `toJSON` is a leaf here, because it is a leaf to the
+ * serializer too: what gets written is whatever that method returns, and the
+ * properties underneath are never visited. The runtime objects a readback
+ * surfaces — a stream on a returned piece — are exactly that case, and their
+ * internals do refer back to themselves.
+ */
+function locateResultCycle(value: unknown): string | undefined {
+  const ancestors = new Set<object>();
+  const walk = (node: unknown, path: string[]): string | undefined => {
+    if (typeof node !== "object" || node === null) return undefined;
+    if (ancestors.has(node)) return encodeJsonPointer(["", ...path]);
+    if (typeof (node as { toJSON?: unknown }).toJSON === "function") {
+      return undefined;
+    }
+    ancestors.add(node);
+    try {
+      const keys = Array.isArray(node)
+        ? node.map((_, index) => String(index))
+        : Object.keys(node);
+      for (const key of keys) {
+        const found = walk(
+          (node as Record<string, unknown>)[key],
+          [...path, key],
+        );
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    } finally {
+      ancestors.delete(node);
+    }
+  };
+  return walk(value, []);
+}
+
+/**
+ * The JSON pointer of the position where `value` closes a circle, or
+ * `undefined` where `value` can be written as JSON.
+ *
+ * Two witnesses have to agree before this reports one. The serializer decides
+ * whether the value renders at all — it is the thing whose failure is being
+ * prevented, so nothing else gets to overrule it — and the walk beside it
+ * decides where. A value the serializer writes is left alone whatever the walk
+ * thinks, and a serializer failure the walk cannot place is left alone too:
+ * `JSON.stringify` refuses more than circles, and a refusal that is not one is
+ * not this path's to answer.
+ */
+function circularResultPath(value: unknown): string | undefined {
+  try {
+    JSON.stringify(value);
+    return undefined;
+  } catch {
+    return locateResultCycle(value);
+  }
+}
+
+/**
+ * Bound a readback that closes a circle with the verb's own declared result,
+ * and hand back the value that bounds to.
+ *
+ * The declaration is the boundary the AUTHOR drew: the position where the
+ * declared type re-enters itself is the position that closes the circle, so
+ * rendering an address there cuts exactly where the shape says it should, and
+ * leaves every other position reading as it already did. It is applied through
+ * the same selection step `--select`/`--schema` are answered by, so a derived
+ * bound and a hand-written one produce the same vocabulary.
+ *
+ * A caller who named a selection never reaches here: their shape is applied to
+ * the receipt first and there is no circle left to bound. Nothing derived can
+ * therefore overrule what a caller asked for.
+ *
+ * Refuses where the declaration cannot bound it — no declaration at all, or one
+ * whose recursion does not reach the closing position. A refusal names where
+ * the circle closes and how to collect the outcome, which beats a stack trace
+ * for a handling that already committed.
+ */
+async function boundCyclicResult(
+  resolved: CallableResolution,
+  receiptCell: Cell<any>,
+  cycle: string,
+  receiptId: string | undefined,
+  deps: CallableExecutionDeps,
+): Promise<unknown> {
+  const declared = await resolved.declaredResult?.();
+  const projection = declaredResultProjection(declared);
+  if (projection !== undefined) {
+    const bounded = await (deps.deriveSelectedValue ?? deriveSelectedValue)(
+      resolved.pieces.runtime,
+      resolved.space,
+      receiptCell,
+      { projection },
+    );
+    // The bound is only as good as the declaration: a position the declaration
+    // left wide can still expand into the circle, and answering with a value
+    // that cannot be written would move the same failure one step later.
+    if (bounded !== undefined && circularResultPath(bounded) === undefined) {
+      return bounded;
+    }
+  }
+  throw new CyclicResultError(
+    `Cannot render the result of "${resolved.cellKey}": it closes a circle at ` +
+      `"${cycle}", and JSON has no way to write one. The handling ` +
+      "COMMITTED — the write landed, and only this rendering failed. " +
+      (declared === undefined
+        ? "This verb declares no result for `cf` to bound the readback with."
+        : "This verb's declared result leaves the closing position " +
+          "unbounded.") +
+      " Collect the outcome with a shape that bounds it: " +
+      (receiptId === undefined
+        ? "read the receipt with --select or --schema."
+        : `cf piece get --piece ${receiptId} ` +
+          `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
+      " Calling the verb again under --select or --schema shapes it at the " +
+      "call, but runs the handler body a second time.",
+  );
+}
+
 export async function executeResolvedCallable(
   resolved: CallableResolution,
   input: unknown,
@@ -774,6 +928,21 @@ export async function executeResolvedCallable(
           deps.selection,
           deps,
         );
+      } else if (result !== undefined) {
+        // Nobody asked for a shape, so the whole result is what goes out —
+        // unless it closes a circle, which has no JSON rendering at all. The
+        // check reads a value already in hand and touches no storage, so a
+        // result that renders reaches stdout exactly as it always has.
+        const cycle = circularResultPath(result);
+        if (cycle !== undefined) {
+          result = await boundCyclicResult(
+            resolved,
+            receipt,
+            cycle,
+            receiptAddress?.id,
+            deps,
+          );
+        }
       }
       if (deps.showLinks) {
         // After readback and after the selection, off the same receipt the

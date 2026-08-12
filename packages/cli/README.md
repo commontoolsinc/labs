@@ -397,6 +397,50 @@ Three cases follow from that:
   are no longer the ones they came from — so `--filter --show-links` is refused,
   the same refusal a `$link` marker meets for the same reason.
 
+#### A result that points back at itself
+
+A verb returning the piece it created hands back a value that can be reached
+from inside itself, whenever that piece carries a back-reference — `parent`
+beside `children`, the shape
+[self-reference](../../docs/common/concepts/self-reference.md) documents. A
+circle has no JSON rendering at all, so a readback that follows one has nothing
+to write.
+
+Where the caller named no shape, `cf` derives one from the verb's declared
+result. The declaration is the boundary the author drew: the position where the
+declared type re-enters itself is the position that closes the circle, so that
+position renders its address and everything else reads as it always did.
+
+```json
+{
+  "item": {
+    "title": "Rotate signing key",
+    "status": "open",
+    "children": [],
+    "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+  }
+}
+```
+
+Three things follow:
+
+- **It is the same `$link` a caller writes by hand.** The derived bound is
+  answered by the selection step above, so `--schema` over the same position
+  produces the same address.
+- **A caller's own shape is never overruled.** `--filter`, `--select` and
+  `--schema` are applied to the receipt first, which leaves no circle for
+  anything to derive a bound for. Nothing derived can reach a call that asked
+  for a shape.
+- **Nothing else pays for it.** A result that renders is written out exactly as
+  it was read, and the compiled pattern a declared result is matched through is
+  loaded only where a readback cannot render.
+
+Where nothing bounds the circle — the verb declares no result, or the
+declaration it made leaves the closing position wide — the call reports the
+position the circle closes at, states that the handling committed, and names the
+receipt to collect the outcome from. It exits nonzero: the outcome could not be
+rendered. The write still landed, which is the property the message leads with.
+
 ## Built Binary
 
 `deno task build-binaries cf` compiles the CLI to `dist/cf` — fully

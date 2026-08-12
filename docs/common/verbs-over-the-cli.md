@@ -190,6 +190,49 @@ projection leaves every surviving path where it was; it does not compose with
 
 `packages/cli/README.md` has the grammar and the supported schema subset.
 
+### A result that points back at its container
+
+A verb that hands back the piece it created returns a value you can reach from
+inside itself, whenever that piece carries a back-reference — `parent` beside
+`children`, the shape [self-reference](concepts/self-reference.md) documents.
+A circle has no JSON rendering, so there is nothing to write for a readback
+that follows one.
+
+Ask for no shape and `cf` derives one from the verb's declared result. The
+position where the declared type re-enters itself is the position that closes
+the circle, so that position renders its address and the rest reads as it
+always did:
+
+```bash
+cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
+```
+
+```json
+{
+  "invocation": "c5df…",
+  "status": "settled",
+  "result": {
+    "item": {
+      "title": "Session cookie handling",
+      "status": "open",
+      "children": [],
+      "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+    }
+  }
+}
+```
+
+That address is the one a `$link` marker would have produced by hand, so the
+derived answer and a written one agree. A shape you asked for wins outright:
+`--filter`, `--select` and `--schema` are applied to the receipt first and
+leave no circle behind for anything to bound.
+
+Where nothing bounds it — the verb declares no result, or the declaration
+leaves the closing position wide — the call names the position the circle
+closes at and the receipt to collect the outcome from, and exits nonzero. Read
+that as the result being unrenderable, never as the mutation having failed:
+**the write landed**, and the message says so.
+
 ### Retries are safe, and cheap to reason about
 
 `--invocation <id>` makes a call idempotent. The id is your own word for the

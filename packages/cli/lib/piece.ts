@@ -278,18 +278,17 @@ async function resultProjectionFailedAtPath(
   ) !== undefined;
 }
 
+/**
+ * A resolved piece callable: the shared resolution plus the command spec its
+ * flags and help page are built from.
+ *
+ * `declaredResult` (on {@link CallableResolution}) is attached here for a
+ * handler exposed on the piece's result cell, which is the only place a
+ * declared result can be matched from; a tool's result schema already rides
+ * its callable cell and reaches `commandSpec` directly.
+ */
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
-  /** This verb's declared result, resolved on demand.
-   *
-   * A THUNK rather than a value, because the two callers want it at different
-   * prices. Every `cf piece call` passes through resolution, and only `--help`
-   * has anything to do with a result schema — so the compiled pattern this
-   * needs is loaded when a page asks for it and never for a dispatch. Present
-   * for a handler exposed on the piece's result cell, which is the only place
-   * a declared result can be matched from; a tool's result schema already
-   * rides its callable cell and reaches `commandSpec` directly. */
-  declaredResult?: () => Promise<JSONSchema | undefined>;
 }
 
 export interface PieceCallableDependencies extends CallableExecutionDeps {

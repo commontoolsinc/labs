@@ -1011,6 +1011,181 @@ export async function parseCellSelectionOptions(options: {
     : { filter, projection };
 }
 
+/**
+ * The `source` a derived projection records, in place of the text a caller
+ * would have typed. It reaches the derived read's cause, so it is a fixed
+ * string rather than a rendering of the schema: two calls that derive the same
+ * bound from the same receipt should land on the same cell.
+ */
+const DERIVED_PROJECTION_SOURCE = "<the verb's declared result>";
+
+/**
+ * One position of a derivation, and whether the walk cut anything at or below
+ * it. An absent `schema` drops the position: nothing is read there and no
+ * address stands in for it.
+ */
+interface DerivedPosition {
+  schema?: unknown;
+  /** A `$link` marker was emitted at or below this position. */
+  cut: boolean;
+}
+
+/** The position reads whatever is stored, which is what an unbounded read
+ * already does — so a derivation that only ever answers this bounds nothing. */
+const DERIVED_WHOLE: DerivedPosition = { schema: true, cut: false };
+
+/** The position renders its address instead of being followed. */
+const DERIVED_ADDRESS: DerivedPosition = {
+  schema: { [LINK_MARKER_KEY]: true },
+  cut: true,
+};
+
+/** The position contributes nothing: a stream is a dispatch surface, and there
+ * is no value at it to read or address. */
+const DERIVED_DROPPED: DerivedPosition = { cut: false };
+
+/**
+ * The schema a local JSON pointer names inside `root`. Only the local form is
+ * resolved, which is the only form a lowered declared result carries; anything
+ * else reads as an unresolvable reference and leaves the position unbounded.
+ */
+function schemaAtLocalRef(
+  root: JSONSchema,
+  ref: string,
+): JSONSchema | undefined {
+  if (!ref.startsWith("#")) return undefined;
+  const pointer = ref.slice(1);
+  if (pointer !== "" && !pointer.startsWith("/")) return undefined;
+  let current: unknown = root;
+  for (const segment of pointer.split("/").slice(1)) {
+    if (!isRecord(current)) return undefined;
+    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current === undefined || typeof current === "boolean" ||
+      isRecord(current)
+    ? current as JSONSchema | undefined
+    : undefined;
+}
+
+/**
+ * Helper for {@link declaredResultProjection}: one position of the declared
+ * result, written as the projection position it derives.
+ *
+ * `following` holds the references the walk is already inside. A reference it
+ * already holds is the cut: the declared type re-enters itself there, so
+ * following it once more is what closes the circle. Every other position is
+ * left as wide as it was declared — the derivation bounds a recursion and
+ * narrows nothing else.
+ */
+function derivePosition(
+  schema: JSONSchema | undefined,
+  root: JSONSchema,
+  following: ReadonlySet<string>,
+): DerivedPosition {
+  if (schema === undefined || typeof schema === "boolean") return DERIVED_WHOLE;
+  // A stream carries no value: it renders as the empty object and reading it
+  // says nothing. `asCell` otherwise says how a position is held rather than
+  // what shape it has, and the shape beside it is what decides the cut.
+  if (Array.isArray(schema.asCell) && schema.asCell.includes("stream")) {
+    return DERIVED_DROPPED;
+  }
+
+  if (typeof schema.$ref === "string") {
+    if (following.has(schema.$ref)) return DERIVED_ADDRESS;
+    const target = schemaAtLocalRef(root, schema.$ref);
+    if (target === undefined) return DERIVED_WHOLE;
+    return derivePosition(
+      target,
+      root,
+      new Set([...following, schema.$ref]),
+    );
+  }
+
+  const branches = [
+    ...schema.anyOf ?? [],
+    ...schema.oneOf ?? [],
+    ...schema.allOf ?? [],
+  ];
+  if (branches.length > 0) {
+    // A projection states one shape per position, and a union does not. Where
+    // any branch re-enters, the position renders its address: that answers
+    // every branch, since an address names the position rather than describing
+    // what sits at it. `parent: Item | null` is the case — a root's null still
+    // has a position, and it is the position the caller would follow.
+    return branches.some((branch) =>
+        derivePosition(branch, root, following).cut
+      )
+      ? DERIVED_ADDRESS
+      : DERIVED_WHOLE;
+  }
+
+  if (schema.type === "array" || schema.items !== undefined) {
+    const items = derivePosition(schema.items, root, following);
+    if (!items.cut) return DERIVED_WHOLE;
+    // The elements are what re-enter, so each renders its own address rather
+    // than the array position's — a caller wants the children, not the slot
+    // holding them.
+    return items.schema === undefined
+      ? DERIVED_DROPPED
+      : { schema: { type: "array", items: items.schema }, cut: true };
+  }
+
+  if (schema.type === "object" || schema.properties !== undefined) {
+    const declared = schema.properties;
+    if (!isRecord(declared)) return DERIVED_WHOLE;
+    const properties: Record<string, unknown> = {};
+    let cut = false;
+    for (const [key, child] of Object.entries(declared)) {
+      const derived = derivePosition(child as JSONSchema, root, following);
+      cut ||= derived.cut;
+      if (derived.schema !== undefined) properties[key] = derived.schema;
+    }
+    // Only where something below re-enters. An object that holds no recursion
+    // is left whole, so the positions this derivation does not need to bound
+    // read exactly as an unbounded readback reads them.
+    return cut
+      ? { schema: { type: "object", properties }, cut }
+      : DERIVED_WHOLE;
+  }
+
+  return DERIVED_WHOLE;
+}
+
+/**
+ * The projection a verb's declared result bounds its own readback with, or
+ * `undefined` where the declaration bounds nothing.
+ *
+ * A declared result that re-enters itself — the `parent`/`children` shape
+ * `docs/common/concepts/self-reference.md` documents — describes a value that
+ * closes a circle, and a circle has no JSON rendering. The bound is written in
+ * the author's own terms: every position the declaration names is read as
+ * declared, and the position where the declaration re-enters renders its
+ * address instead of being followed. That is a cut at the boundary the author
+ * drew, and it is the same `$link` vocabulary a caller writes by hand.
+ *
+ * `undefined` where nothing re-enters: a declaration that describes a finite
+ * value is not a bound, and answering with one would narrow a result that
+ * renders perfectly well. The caller's own `--select`/`--schema` is the wider
+ * instrument and stays the only thing that narrows a result on request.
+ *
+ * The derived projection is written in the `--schema` language and reports
+ * itself as that flag, which is the flag that replaces it.
+ */
+export function declaredResultProjection(
+  declared: JSONSchema | undefined,
+): SelectionProjection | undefined {
+  if (declared === undefined || typeof declared === "boolean") return undefined;
+  const derived = derivePosition(declared, declared, new Set());
+  if (!derived.cut || derived.schema === undefined) return undefined;
+  return {
+    source: DERIVED_PROJECTION_SOURCE,
+    ...normalizeProjectionSchema(derived.schema),
+    kind: "json",
+    flag: "--schema",
+  };
+}
+
 function schemaTypes(schema: JSONSchema | undefined): string[] {
   if (!isRecord(schema)) return [];
   return Array.isArray(schema.type)
