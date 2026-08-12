@@ -431,16 +431,30 @@ Compute wrappers override restrictions:
 Diagnostics emitted in all modes:
 
 - **Error** `pattern-context:get-call`
-  - a **terminal** `.get()` read in restricted reactive context — one whose
-    value is used directly (`{ value: count.get() }`,
-    `const v = count.get()`, `input.key("count").get()` at a return site)
-  - since #3725 (2026-05-28), a **computation-feeding** read at a lowerable
-    site (`{ value: count.get() * 2 }`) is NOT rejected: the containing
-    expression is auto-wrapped into a lift-applied computation
-    (`test/validation.test.ts:3179`; goldens `cell-get-binding-autowrap`,
-    `with-reactive`). This is an unratified delta from the target-language
-    matrix's unconditional "Unsupported" — see the design-deltas 2026-07-10
-    record
+  - a `.get()` read in restricted reactive context with no lowerable
+    expression site to carry it: a statement-position read (`count.get();`),
+    a read inside a reactive array-method callback
+    (`rows.map((row) => row.cell.get())`), a read inside a plain
+    (non-reactive) array-method callback
+    (`["-", "+"].map((sep) => rows.get().join(sep))`, which is not an eligible
+    pattern-owned wrapper site), or a read whose receiver is not a
+    `Cell`/`Writable`/`Stream` (`items.get()` on a plain pattern input, which
+    also draws `opaque-get:invalid-call`)
+  - a cell read that DOES sit at a lowerable site is not rejected: the site is
+    auto-wrapped into a lift-applied computation. That covers the read itself
+    (`const v = count.get()`, `{ value: count.get() }`,
+    `input.key("count").get()` at a return site), a computation over it
+    (`{ value: count.get() * 2 }`), and a call whose receiver chain reaches it
+    (`rows.get().join(",")`, `rows.get().filter(...)`, which lowers through
+    `filterWithPattern`). Parentheses around the site and the computed-key
+    spelling of the read (`layout["get"]()`) do not change the decision, and
+    neither does optionality — `layout?.get()` and `layout?.get?.()` on a cell
+    lower like their non-optional spellings, per the 2026-07-23
+    optionality-orthogonality resolution. Each lift's input schema shrinks to
+    what its body reads (`test/validation.test.ts:3179`; goldens
+    `cell-get-binding-autowrap`, `cell-get-terminal-binding-autowrap`,
+    `with-reactive`). This is the ratified has-a-lowerable-site rule —
+    target-language spec §5.7 and its matrix rows are normative for it
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
