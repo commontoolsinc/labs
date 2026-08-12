@@ -427,9 +427,14 @@ export class CFCodeEditor extends BaseElement {
           apply: (view, _completion, from, to) => {
             // If auto-close added ]], extend replacement to include them
             const replaceTo = hasAutoCloseBrackets ? to + 2 : to;
-            if (this._refMode) {
-              // `from` sits after the `[[` that opened the query, and the
-              // reference form replaces those two characters too.
+            // `from` sits after the `[[` that opened the query, and the
+            // reference form replaces those two characters too. Read rather
+            // than assumed: were they anything else, extending the replacement
+            // backwards would eat two characters of the user's prose, and do
+            // it silently.
+            const opensQuery = view.state.doc.sliceString(from - 2, from) ===
+              "[[";
+            if (this._refMode && opensQuery) {
               const key = this._createRefEntry(index);
               if (key) {
                 this._insertRefToken(view, from - 2, replaceTo, pieceName, key);
