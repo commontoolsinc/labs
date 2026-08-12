@@ -203,6 +203,20 @@ Deno.test("model spend: a provider reporting empty days is quiet, and still read
   });
 });
 
+Deno.test("model spend: a provider with no bucket at all draws no line of $0", async () => {
+  // OpenAI answers with an empty report. Anthropic's days supply the chart's
+  // day axis, but they are Anthropic's days: OpenAI reported on none of them,
+  // so its total is $0 and its line is absent rather than flat along the floor.
+  await withFetch({ "api.openai.com": () => json({ data: [] }), "api.anthropic.com": anthropicPaged }, async () => {
+    const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa", ANTHROPIC_ADMIN_KEY: "an" }));
+    assertEquals(v.status, "good");
+    assertEquals(v.aside, `<span class="hmtd">$${2 * DOM} MTD</span>`); // Anthropic's $2/day alone
+    // OpenAI's colour survives in the key's swatch and nowhere in the chart.
+    assertEquals((v.extra ?? "").match(/#10a37f/gi)?.length, 1);
+    assertStringIncludes(v.extra ?? "", "#d97757");
+  });
+});
+
 Deno.test("model spend: a one-key deployment still turns green (an unset key doesn't gate the budget)", async () => {
   await withFetch({ "openrouter.ai": openrouterFive }, async () => {
     const v = await modelSpend.collect(ctx({ OPENROUTER_KEY: "or" }));

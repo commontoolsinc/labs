@@ -54,13 +54,23 @@ const OPENAI_COLOR = "#10a37f";
 const ANTHROPIC_COLOR = "#d97757";
 
 // The provider's days, or null when its report ends too far back to read the
-// days after it. A provider with no bucket at all reported nothing to date and
-// charts nothing, so there is no reading of it to protect.
+// days after it. A provider with no bucket at all has dated nothing, so there
+// is nothing to hold against the limit.
 function stillReporting(byDay: Map<string, number> | null, now: Date): Map<string, number> | null {
   const newest = byDay === null ? undefined : newestReportedDay(byDay);
   if (newest !== undefined && reportLagDays(newest, now) > MAX_REPORT_LAG_DAYS) return null;
   return byDay;
 }
+
+// One provider's line. A provider with no bucket at all has no day of its own,
+// and the day axis the other provider supplies says nothing about this one, so
+// it draws no line rather than a run of $0 across days it never reported on.
+const chartSource = (byDay: Map<string, number> | null, color: string, label?: string) => ({
+  spend: byDay && byDay.size > 0 ? { byDay } : null,
+  color,
+  label,
+  lagDays: PROVIDER_LAG_DAYS,
+});
 
 // Daily billable USD, keyed by "YYYY-MM-DD", from OpenAI's org cost buckets.
 async function openaiDaily(key: string, startSec: number): Promise<Map<string, number>> {
@@ -196,18 +206,8 @@ export const modelSpend: Tile = {
 
     const chart = spendChart(
       [
-        {
-          spend: oaMap ? { byDay: oaMap } : null,
-          color: OPENAI_COLOR,
-          label: oa ? usd(oa.mtd) : undefined,
-          lagDays: PROVIDER_LAG_DAYS,
-        },
-        {
-          spend: anMap ? { byDay: anMap } : null,
-          color: ANTHROPIC_COLOR,
-          label: an ? usd(an.mtd) : undefined,
-          lagDays: PROVIDER_LAG_DAYS,
-        },
+        chartSource(oaMap, OPENAI_COLOR, oa ? usd(oa.mtd) : undefined),
+        chartSource(anMap, ANTHROPIC_COLOR, an ? usd(an.mtd) : undefined),
       ],
       now,
       status,
