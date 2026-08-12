@@ -133,6 +133,22 @@ piece, and a mention persisted against that path would later name whatever moved
 into the slot; the older form's id comes from the same resolution, so falling
 back to it costs the form and not the target.
 
+## A pasted URL
+
+Pasting a piece's URL is how someone says "this one" when they have the link
+rather than the name, and left as a URL it is invisible to everything that reads
+mentions. In reference mode a paste that names a piece becomes one.
+
+Which URLs name a piece is `parseFabricUrl` (`@commonfabric/runner/fabric-url`),
+judged against this document's own host plus anything in `fabricHosts`. Two
+cases deliberately paste as text: a URL naming its space by name rather than by
+DID, which this side cannot resolve, and a slug, which addresses a redirect
+document and would need a read before it could name the piece.
+
+The label starts as the pasted text and becomes the destination's name when the
+subscription delivers it. Nothing special does that: `modifiedTitle` is false,
+so this is the same rewrite a rename gets.
+
 ## What the form gives up
 
 `[[Name (id)]]` survives being copied anywhere. `[Label][a3f9zz]` means nothing

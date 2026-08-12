@@ -93,6 +93,7 @@ import {
   backlinkField,
   createBacklinkDecorationPlugin,
 } from "./features/backlinks.ts";
+import { parseFabricUrl } from "@commonfabric/runner/fabric-url";
 import {
   atomicMentionRefRanges,
   createMentionRefDecorationPlugin,
@@ -176,6 +177,7 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 500)
  * @attr {CellHandle<MentionableArray>} mentionable - Cell of mentionable items for @/@[[ completion
  * @attr {Array} mentioned - Optional Cell of live Pieces mentioned in content
+ * @attr {Array<string>} fabricHosts - Extra hosts whose page URLs name pieces
  * @attr {CellHandle<MentionRefMap>} references - Optional Cell of the document's
  *   mention references. Given one, a new mention is written as `[Label][key]`
  *   and its destination lives in the map; without one, mentions stay
@@ -218,6 +220,7 @@ export class CFCodeEditor extends BaseElement {
     mentionable: { type: Object },
     mentioned: { type: Array },
     references: { type: Object },
+    fabricHosts: { type: Array },
     pattern: { type: Object },
     // New editor configuration props
     wordWrap: { type: Boolean },
@@ -260,6 +263,11 @@ export class CFCodeEditor extends BaseElement {
    * working either way.
    */
   declare references?: CellHandle<MentionRefMap> | null;
+  /**
+   * Hosts, besides this document's own, whose page URLs name pieces. A pasted
+   * URL from anywhere else is a link to a web page.
+   */
+  declare fabricHosts: string[];
   declare pattern: CellHandle<string>;
   declare wordWrap: boolean;
   declare lineNumbers: boolean;
@@ -375,6 +383,7 @@ export class CFCodeEditor extends BaseElement {
     this.cursorPosition = "start";
     this.mentionable = null;
     this.references = null;
+    this.fabricHosts = [];
   }
 
   /** Whether a reference map is available to mint mentions into. */
@@ -1821,11 +1830,12 @@ export class CFCodeEditor extends BaseElement {
           if (this.readonly || this.disabled) return false;
           const files = Array.from(event.clipboardData?.files ?? [])
             .filter((file) => file.type.startsWith("image/"));
-          if (files.length === 0) return false;
-
-          event.preventDefault();
-          this._handleImagePaste(files, view);
-          return true;
+          if (files.length > 0) {
+            event.preventDefault();
+            this._handleImagePaste(files, view);
+            return true;
+          }
+          return this._handleUrlPaste(event, view);
         },
       }),
       // Add backlink click handler for Cmd/Ctrl+Click
@@ -1971,6 +1981,82 @@ export class CFCodeEditor extends BaseElement {
    */
   get editorView(): EditorView | undefined {
     return this._editorView;
+  }
+
+  /**
+   * Turn a pasted URL that names a piece into a mention.
+   *
+   * Pasting a piece's URL is how someone says "this one" when they have the
+   * link rather than the name, and leaving it as a URL makes it invisible to
+   * everything that reads mentions. Only in reference mode: the wiki-link form
+   * carries an id the paste would have to be rewritten into, and the reference
+   * form is the one whose destination can be any cell.
+   *
+   * The label starts as the pasted text and is replaced by the destination's
+   * name when the subscription delivers it — `modifiedTitle` is false, so the
+   * rewrite that already exists for a rename does this too.
+   */
+  private _handleUrlPaste(event: ClipboardEvent, view: EditorView): boolean {
+    if (!this._refMode || !this.pattern) return false;
+
+    const text = event.clipboardData?.getData("text/plain")?.trim();
+    if (!text || /\s/.test(text)) return false;
+
+    const target = parseFabricUrl(text, { hosts: this._fabricHosts() });
+    // No space at all means the reader's own, which is this editor's. A space
+    // named rather than addressed cannot be resolved here, and a paste that
+    // stays a URL is the honest outcome.
+    if (!target || (target.space && !target.space.startsWith("did:"))) {
+      return false;
+    }
+
+    event.preventDefault();
+    this._insertPastedMention(view, text, target);
+    return true;
+  }
+
+  /** Hosts whose page URLs name pieces: this document's own, plus any given. */
+  private _fabricHosts(): string[] {
+    const own = globalThis.location?.host;
+    return own ? [own, ...this.fabricHosts] : [...this.fabricHosts];
+  }
+
+  private async _insertPastedMention(
+    view: EditorView,
+    text: string,
+    target: { space?: string; id?: string; slug?: string; path: string[] },
+  ): Promise<void> {
+    // A slug addresses a redirect document, and following it needs a read the
+    // client would have to await before it could name the piece. Until it can,
+    // a slug URL pastes as text.
+    if (!target.id) return;
+
+    const key = mintRefKey(this._takenRefKeys());
+    const { from, to } = view.state.selection.main;
+    this._insertRefToken(view, from, to, text, key);
+
+    const rt = this.pattern.runtime();
+    try {
+      const space = (target.space ?? this.pattern.space()) as DID;
+      const destination = await rt.getCell(space, target.id);
+      if (!destination) throw new Error("Could not read the pasted cell.");
+
+      // The token may have been edited or removed while the read was in
+      // flight, exactly as for a mention whose piece is being created.
+      if (!this._findRefToken(key)) return;
+
+      this.references?.key(key).set(
+        {
+          destination: destination as unknown as CellHandle<unknown>,
+          modifiedTitle: false,
+        } as unknown as MentionRef,
+      );
+      this._refKeysAtLoad?.add(key);
+    } catch (error) {
+      if (rt.signal.aborted) return;
+      console.error("Error resolving a pasted mention:", error);
+      this._removeRefToken(key);
+    }
   }
 
   private async _handleImagePaste(

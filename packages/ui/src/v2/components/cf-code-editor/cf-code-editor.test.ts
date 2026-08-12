@@ -21,6 +21,8 @@ describe("CFCodeEditor", () => {
     expect(element.cursorPosition).toBe("start");
     // No reference map, so mentions are minted as wiki-links.
     expect(element.references).toBe(null);
+    // No extra hosts; a pasted page URL is judged against this document's own.
+    expect(element.fabricHosts).toEqual([]);
   });
 
   it("should have MimeType constants", () => {
