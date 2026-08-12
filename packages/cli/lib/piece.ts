@@ -1845,18 +1845,14 @@ export async function listPieceCallables(
 
   // Third resolution path, mirrored from resolvePieceCallable: a handler whose
   // schema lost the stream marker still dispatches via the forced stream cast
-  // (tryResolvePieceHandler). Probe every rejected name the same way so a
-  // callable-by-name verb can never be absent from the listing.
+  // (tryResolvePieceHandler). Probe only names that detectCallableKind
+  // explicitly rejected on the result/input walk — do NOT sweep every key of
+  // the piece root, because probeForcedStreamCell answers from the schema it
+  // manufactures, so probing data fields reports them as handlers.
   const pieceCell = typeof piece.getCell === "function"
     ? piece.getCell()
     : undefined;
   if (pieceCell && typeof pieceCell.asSchema === "function") {
-    const pieceValue = pieceCell.get?.();
-    if (isRecord(pieceValue)) {
-      for (const name of Object.keys(pieceValue)) {
-        if (!listings.has(name)) rejected.add(name);
-      }
-    }
     for (const name of rejected) {
       if (listings.has(name)) continue;
       if (!probeForcedStreamCell(pieceCell, name)) continue;
