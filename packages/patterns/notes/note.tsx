@@ -163,6 +163,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     isHidden,
     linkPattern,
     parentNotebook: _parentNotebook,
+    references,
     [SELF]: self,
   }) => {
     // Ensure parentNotebook is always a Writable (input is optional)
@@ -252,6 +253,7 @@ const Note = pattern<NoteInput, NoteOutput>(
           },
           sourceNoteRef: self as NotePiece,
           content,
+          references: references!,
         }),
       );
     });
@@ -393,6 +395,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         $value={content}
         $mentionable={mentionable!}
         $mentioned={mentioned}
+        $references={references!}
         $pattern={patternJson}
         onbacklink-click={handlePieceLinkClick}
         onbacklink-create={handleNewBacklink({

@@ -101,6 +101,12 @@ export interface NoteInput {
   linkPattern?: Writable<string | Default<"">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
   parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
+  /**
+   * The note's mentions in reference form. Stored beside `content` because it
+   * has to stay in lockstep with it: the text carries keys, and this is what
+   * says where they point.
+   */
+  references?: Writable<MentionRefMap | Default<Record<never, never>>>;
 }
 
 export interface NotebookInput {

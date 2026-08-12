@@ -179,8 +179,15 @@ reference form.
 
 ## Stage 3 — the note pattern
 
-- [ ] `note.tsx` owns a `references` cell, passes it to the editor, and threads
-      it into `note-md`.
+- [x] `note.tsx` takes a `references` cell beside `content`, passes it to the
+      editor, and threads it into `note-md`.
+
+**The map is note state, not part of `NoteOutput`.** Publishing it in the
+result breaks every consumer that captures a Note: `destination` is typed
+`unknown`, so a captured piece carrying the map materializes as undefined and
+an action bound to it stops running with `stream action argument is undefined`.
+Storing it beside `content` in the argument document gives it the same
+durability without putting an unknown-typed field in a public result.
 **`[FS]` is left alone, and that is a decision rather than an omission.** The
 appealing idea is to emit the map as the markdown reference-definition block it
 already resembles, so a projected note is self-contained standard markdown.
