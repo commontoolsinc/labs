@@ -136,7 +136,7 @@ The seam requires these changes on loom's side (Workstream A/D-read):
 - **Absent ≠ empty:** a never-written day cell reads back as `undefined` (ABSENT), not `[]`; the create path writes no day cell.
 - **Mark present (hard gate):** after ingest the appended records carry the `ExternalIngest` mark; fail the build if absent.
 - **Payload purity:** records at rest deep-equal the POSTed body with no labs-added fields.
-- **Auth contract:** identical 401 body across missing-token / missing-registration / disabled / wrong-token; storage-error → 502 (not 401); resolve/commit failure → 502.
+- **Auth contract:** identical 401 body across missing-token / missing-registration / wrong-token, so nothing a guesser can reach distinguishes them. A *correct* token (current or the one most recently rotated away from) presented to a disabled, revoked or expired channel is the one deliberate exception: an actionable 403 "re-pair this device", unreachable without proof-of-possession. Storage-error → 502 (not 401); resolve/commit failure → 502.
 - **Hostile leaf:** `../`, empty, malformed → 400, no write.
 - **Concurrency:** concurrent POSTs to the same day cell all land (no lost update); retry-exhaustion returns a loud retryable error, never a silent 200.
 

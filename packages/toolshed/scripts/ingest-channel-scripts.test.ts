@@ -519,9 +519,36 @@ describe("ingest channel operator scripts", () => {
         reg({ id, space: SPACE, installId: "phone-race", revision: 2 }),
       );
 
+      // A barrier, so the interleaving is forced rather than hoped for. Both
+      // provisions must finish READING before either is allowed to WRITE —
+      // otherwise a fast first call completes outright, the second reads the
+      // revision it just wrote, and both succeed. `saveRegistration` is the
+      // only thing that reaches `editWithRetry`, so holding there holds
+      // exactly at the read/write seam.
+      let arrived = 0;
+      let release!: () => void;
+      const bothHaveRead = new Promise<void>((r) => (release = r));
+      const barrier = new Proxy(runtime, {
+        get(target, prop, receiver) {
+          if (prop === "editWithRetry") {
+            return async (...args: unknown[]) => {
+              if (++arrived === 2) release();
+              await bothHaveRead;
+              return await (target as unknown as {
+                editWithRetry: (...a: unknown[]) => Promise<unknown>;
+              }).editWithRetry(...args);
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as typeof runtime;
+
+      const race = (installId: string) =>
+        provisionChannel(barrier, serviceSpace, { space: SPACE, installId });
       const outcomes = await Promise.all([
-        provision({ installId: "phone-race" }),
-        provision({ installId: "phone-race" }),
+        race("phone-race"),
+        race("phone-race"),
       ]);
       const won = outcomes.filter((o) => o.ok);
       const lost = outcomes.filter((o) => !o.ok);

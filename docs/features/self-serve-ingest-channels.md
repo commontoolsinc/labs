@@ -398,8 +398,17 @@ Revocation is a **soft disable**, diverging from webhooks' hard delete
 (`webhooks.utils.ts:154-157`). Justified: a webhook registration is dispatch
 config; an ingest registration is the only record of who was authorized to write
 provenance-marked data into a user's space. Destroying it destroys the audit
-trail. The ingest path already treats disabled identically to missing under the
-equalized 401.
+trail.
+
+The ingest path answers a disabled channel by what the caller proved, not by the
+channel's state. A wrong or unknown token gets the equalized 401, identical to
+an unknown channel — a guesser learns nothing. A *cryptographically correct*
+current or previous token on a channel that is disabled, revoked or expired gets
+an actionable **403 "re-pair this device"**, because reaching that answer already
+required proof-of-possession, so it reveals nothing a guesser could use. Without
+it the device on the single most likely path to that state cannot tell "my
+credential was retired" from "the server is down", and has to choose between
+dropping its buffer and retrying forever.
 
 `space` is pinned to `^did:key:z[1-9A-HJ-NP-Za-km-z]+$` in the create path. The
 existing `space.startsWith("did:")` check admits newlines and case variants,
