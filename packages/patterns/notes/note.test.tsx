@@ -413,6 +413,11 @@ export default pattern(() => {
     projected.editProjection.send({ body: "See the target." });
   });
 
+  // Clearing the file is an edit, not an absent one.
+  const action_clear_through_projection = action(() => {
+    projected.editProjection.send({ body: "" });
+  });
+
   const assert_projection_carries_definition = assert(
     () =>
       String(projected[FS].content ?? "").startsWith(
@@ -430,6 +435,10 @@ export default pattern(() => {
 
   const assert_dropped_definition_drops_reference = assert(
     () => Object.keys(projectedRefs.get() ?? {}).length === 0,
+  );
+
+  const assert_cleared_projection_clears_content = assert(
+    () => projected.content === "",
   );
 
   // ==========================================================================
@@ -450,6 +459,8 @@ export default pattern(() => {
       { assertion: assert_round_trip_keeps_reference },
       { action: action_drop_definition },
       { assertion: assert_dropped_definition_drops_reference },
+      { action: action_clear_through_projection },
+      { assertion: assert_cleared_projection_clears_content },
       // === Initial state ===
       { assertion: assert_name },
       { assertion: assert_initial_title },

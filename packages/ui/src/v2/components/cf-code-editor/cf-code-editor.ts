@@ -2003,15 +2003,21 @@ export class CFCodeEditor extends BaseElement {
     if (!text || /\s/.test(text)) return false;
 
     const target = parseFabricUrl(text, { hosts: this._fabricHosts() });
-    // No space at all means the reader's own, which is this editor's. A space
-    // named rather than addressed cannot be resolved here, and a paste that
-    // stays a URL is the honest outcome.
-    if (!target || (target.space && !target.space.startsWith("did:"))) {
+    // Everything this cannot turn into a mention has to fall through to the
+    // ordinary paste, and the decision has to be complete BEFORE the default
+    // is prevented — a `preventDefault` followed by a later bail swallows what
+    // the user pasted. A space named rather than addressed cannot be resolved
+    // on this side, and a slug addresses a redirect document that would need a
+    // read before it could name a piece.
+    if (
+      !target || !target.id ||
+      (target.space && !target.space.startsWith("did:"))
+    ) {
       return false;
     }
 
     event.preventDefault();
-    this._insertPastedMention(view, text, target);
+    this._insertPastedMention(view, text, target.id, target.space);
     return true;
   }
 
@@ -2024,21 +2030,19 @@ export class CFCodeEditor extends BaseElement {
   private async _insertPastedMention(
     view: EditorView,
     text: string,
-    target: { space?: string; id?: string; slug?: string; path: string[] },
+    id: string,
+    space?: string,
   ): Promise<void> {
-    // A slug addresses a redirect document, and following it needs a read the
-    // client would have to await before it could name the piece. Until it can,
-    // a slug URL pastes as text.
-    if (!target.id) return;
-
     const key = mintRefKey(this._takenRefKeys());
     const { from, to } = view.state.selection.main;
     this._insertRefToken(view, from, to, text, key);
 
     const rt = this.pattern.runtime();
     try {
-      const space = (target.space ?? this.pattern.space()) as DID;
-      const destination = await rt.getCell(space, target.id);
+      const destination = await rt.getCell(
+        (space ?? this.pattern.space()) as DID,
+        id,
+      );
       if (!destination) throw new Error("Could not read the pasted cell.");
 
       // The token may have been edited or removed while the read was in

@@ -412,14 +412,16 @@ const Note = pattern<NoteInput, NoteOutput>(
     );
 
     // A body handed to `editProjection` waits here while its definitions
-    // resolve. Empty means nothing is staged.
-    const pendingEdit = new Writable("");
+    // resolve. `null` is what "nothing staged" means — an empty string is a
+    // note someone cleared through the filesystem, which is an edit like any
+    // other and has to be applied rather than read as an absent one.
+    const pendingEdit = new Writable<string | null>(null);
 
     // Every address the staged body defines, in the order it defines them, so
     // the resolutions below line up with it.
     const pendingAddresses = computed(() => {
       const body = pendingEdit.get();
-      if (!body) return [] as string[];
+      if (body === null) return [] as string[];
       return splitDefinitions(body).definitions.map((d) => d.address);
     });
 
@@ -435,7 +437,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     // hold it; the guard on `pendingEdit` is what stops it running again.
     computed(() => {
       const body = pendingEdit.get();
-      if (!body) return;
+      if (body === null) return;
 
       const split = splitDefinitions(body);
       const resolutions = pendingResolutions;
@@ -473,7 +475,7 @@ const Note = pattern<NoteInput, NoteOutput>(
 
       content.set(attachDefinitions(split.content, kept));
       references?.set(next as MentionRefMap);
-      pendingEdit.set("");
+      pendingEdit.set(null);
     });
 
     /**

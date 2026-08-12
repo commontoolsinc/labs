@@ -1,4 +1,4 @@
-import { isSlugAddress } from "./slugs.ts";
+import { isSlugAddress, isValidSlug } from "./slugs.ts";
 
 /**
  * What a URL names, when it names a cell.
@@ -165,8 +165,10 @@ export function parseFabricUrl(
   const id = asEntityId(target);
   if (id !== undefined) return { space, id, path };
 
+  // A colon-free segment only looks like a slug; it has to BE one, or the id
+  // derived from it would be derived from something the space cannot hold.
   const decoded = decode(target);
-  return decoded !== undefined && isSlugAddress(decoded)
+  return decoded !== undefined && isSlugAddress(decoded) && isValidSlug(decoded)
     ? { space, slug: decoded, path }
     : undefined;
 }

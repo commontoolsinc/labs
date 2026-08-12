@@ -254,7 +254,7 @@
           "cell"
         ],
         "default": {},
-        "description": "The note's mentions in reference form. Stored beside `content` because it\nhas to stay in lockstep with it: the text carries keys, and this is what\nsays where they point.\n\nThe `Default<Record<PropertyKey, never>>` has to match the one `NoteOutput` declares. A map\npublished in the result under a different default than its input carries\ncannot be materialized, and a consumer that captures the note then gets\n`undefined` for the whole capture — which stops any action bound to it\nfrom running, rather than merely leaving this field empty."
+        "description": "The note's mentions in reference form. Stored beside `content` because it\nhas to stay in lockstep with it: the text carries keys, and this is what\nsays where they point.\n\nThe default has to be the same one `NoteOutput` declares. A map published\nin the result under a different default than its input carries cannot be\nmaterialized, and a consumer that captures the note then gets `undefined`\nfor the whole capture — which stops any action bound to it from running,\nrather than merely leaving this field empty."
       },
       "title": {
         "asCell": [

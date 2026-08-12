@@ -157,8 +157,8 @@ there, and a consumer reading raw content sees a label with no destination.
 
 A paste between two live documents is not recovered. The exported file is:
 `note.tsx` emits the map as the markdown reference-definition block it
-resembles, so a projected note is self-contained. That projection is read-only
-— `writeFsFile` (`packages/fuse/cell-bridge.ts`) writes an entire edited body
-back to `$FS.content`, and a note that accepted it would take its own generated
-definitions in as text — and an edit arrives through the note's
-`editProjection` verb instead, which reads the block back as its mentions.
+resembles, so a projected note is self-contained. That projection is read-only —
+`writeFsFile` (`packages/fuse/cell-bridge.ts`) writes an entire edited body back
+to `$FS.content`, and a note that accepted it would take its own generated
+definitions in as text — and an edit arrives through the note's `editProjection`
+verb instead, which reads the block back as its mentions.

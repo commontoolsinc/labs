@@ -128,6 +128,15 @@ describe("fabric-url", () => {
           .toBeUndefined();
       });
 
+      it("returns undefined for a segment that is not a valid slug", () => {
+        // `slugIdForSpace` validates, and would throw on these — the id it
+        // derived would name something the space cannot hold.
+        expect(parseFabricUrl("https://fabric.example/work/Hello", options))
+          .toBeUndefined();
+        expect(parseFabricUrl("https://fabric.example/work/a--b", options))
+          .toBeUndefined();
+      });
+
       it("returns undefined for a slug segment carrying a colon it cannot use", () => {
         expect(
           parseFabricUrl("https://fabric.example/work/not:a:slug", options),
