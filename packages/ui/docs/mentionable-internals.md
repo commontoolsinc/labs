@@ -130,7 +130,7 @@ wish("#mentionable")  ──►  $mentionable prop    ──►  @link array
                     │             │              destination in that cell
                     ▼             ▼
              LLM sees links   note-md.tsx converts
-             in user message  a wiki-link to [Name](/of:id)
+             in user message  either form to [Name](/of:id)
                                   │
                                   ▼
                               cf-markdown renders
