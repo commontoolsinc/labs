@@ -623,15 +623,24 @@ export function renderPieceCallOutcome(
     // Invocation JSON — settled, or stopped at "committed" under --no-wait —
     // prose stays on stderr via hint().
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
+    // The address the envelope published, when the runtime wrote a receipt.
+    // It leads the detached next steps because it collects the outcome
+    // without running the verb again — a same-id replay returns the original
+    // outcome but re-executes the handler body, so a verb with effects
+    // outside its transaction repeats them.
+    const receiptId = result.invocation.receipt?.id;
     hintOut(
-      // The readback names its session through the environment rather than
+      // The replay names its session through the environment rather than
       // `--invocation-session`, because a session is what keeps an outcome's
       // address out of reach of anyone who can guess a piece, a verb and an
       // id — and an argument is readable in a process listing where an
       // environment variable is not.
       opts.detached
-        ? cliText(`NEXT STEPS:
-  → Read the outcome: CF_INVOCATION_SESSION=${
+        ? cliText(`NEXT STEPS:${
+          receiptId === undefined ? "" : `
+  → Read the outcome: cf piece get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)`
+        }
+  → Or replay it:     CF_INVOCATION_SESSION=${
           opts.invocation?.session ?? "<session>"
         } cf piece call --piece ${piece} --invocation ${
           opts.invocation?.id ?? "<id>"
@@ -658,6 +667,11 @@ export function renderPieceCallOutcome(
  * `null`, which would be indistinguishable from a verb that returned null.
  * `links` appears only under --show-links: provenance beside the value,
  * never inline in it.
+ *
+ * `receipt` is the one key that does not depend on a readback or a flag: it
+ * is the address of the cell holding this outcome, known at commit, so it
+ * rides a `--no-wait` envelope as well as a settled one. It is absent only
+ * where the runtime wrote no receipt to address.
  */
 export function invocationJson(
   outcome: InvocationOutcome,
@@ -666,6 +680,7 @@ export function invocationJson(
     invocation: outcome.id,
     status: outcome.status,
     ...(outcome.deduplicated ? { deduplicated: true } : {}),
+    ...(outcome.receipt !== undefined ? { receipt: outcome.receipt } : {}),
     ...("result" in outcome && outcome.result !== undefined
       ? { result: outcome.result }
       : {}),
@@ -1783,9 +1798,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "--no-wait",
     "Exit once this handling's commit is acknowledged (before the callable " +
       "name), skipping only the receipt readback: stdout reports status " +
-      '"committed", and a later call naming the same invocation session and ' +
-      "--invocation reads the outcome back. The handler still executes here " +
-      "and its commit is durable. Handler invocations only.",
+      '"committed" plus the receipt address, so `cf piece get --piece <that ' +
+      "id>` collects the outcome later without re-running the handler; a " +
+      "later call naming the same invocation session and --invocation " +
+      "recovers it too. The handler still executes here and its commit is " +
+      "durable. Handler invocations only.",
   )
   .option(
     "--show-links",

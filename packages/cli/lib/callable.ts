@@ -89,10 +89,11 @@ export interface CallableExecutionDeps {
    * THIS process's runtime, so exiting before the commit is acknowledged
    * would abandon the invocation un-executed — nothing durable would have
    * happened — not leave it settling elsewhere. What CAN be skipped is
-   * fetching the outcome back, because a caller-supplied id keeps that
-   * fetch available forever: a later same-id call deduplicates against the
-   * create-only receipt and returns the original outcome (verb contract
-   * D1/D3). Requires an `invocationId` — without one there is no receipt to
+   * fetching the outcome back, because the exit publishes the receipt's
+   * address (`InvocationOutcome.receipt`), so collecting it later is an
+   * ordinary read; a same-id replay recovers it too, deduplicating against
+   * the create-only receipt (verb contract D1/D3), but re-runs the handler
+   * body. Requires an `invocationId` — without one there is no receipt to
    * come back for — and only the handler send path supports it (a tool's
    * result is delivered by this process, not read back from a receipt). */
   skipReadback?: boolean;
@@ -134,6 +135,24 @@ export interface InvocationOutcome {
    * (commit acknowledged, readback skipped), and a caller-bounded wait
    * reports the phase its bound expired in. */
   status: "settled" | InvocationPhase;
+  /** Durable address of this handling's receipt — the cell the outcome is
+   * written to, and the one `result` is read from.
+   *
+   * Published from the transaction's handling receipt link, which the commit
+   * callback carries, so the address is known BEFORE the outcome is read.
+   * That is what makes it available under `--no-wait`: a caller that chose
+   * not to wait still holds the address to collect from, and reads it back
+   * with `cf piece get --piece <id>` rather than re-invoking the verb — a
+   * same-id replay returns the original outcome but re-runs the handler
+   * body, so a verb with effects outside its transaction repeats them.
+   *
+   * On a create-only collision this addresses the ORIGINAL handling's
+   * receipt, which is the outcome a caller wants either way.
+   *
+   * Absent when the runtime published no link: with `commitPreconditions`
+   * off nothing writes a receipt, and an address naming a cell that does not
+   * exist is worse than no address. */
+  receipt?: InvocationResultLink;
   /** The verb's result read back from the handling's receipt, when the
    * receipt carried one (a reactive-bearing return, or a plain return under
    * the plainResultReceipts flag). Absent for value-less verbs. */
@@ -695,17 +714,28 @@ export async function executeResolvedCallable(
 
     if (invocationId === undefined) return {};
 
+    // The handling's receipt address, taken off the transaction the commit
+    // callback handed back (verb contract WS-D). It is known HERE — at
+    // commit, before anything is read — which is what lets the detached exit
+    // below publish an address for an outcome nobody waited for.
+    const link = tx.handlingReceiptLink;
+    const receiptAddress = link === undefined
+      ? undefined
+      : toInvocationResultLink(link);
+
     if (deps.skipReadback) {
       // --no-wait's exit point: the commit is acknowledged, so the
       // handling — and on a collision, the original one — is durable on
       // the server and survives this process. Only the readback
-      // (sync + read of the outcome) is skipped; a later same-id call
-      // retrieves it by deduplicating against the create-only receipt.
+      // (sync + read of the outcome) is skipped; the address of the outcome
+      // rides out regardless, so collecting it later is an ordinary read
+      // rather than a same-id replay that re-runs the handler body.
       return {
         invocation: {
           id: invocationId,
           status: "committed",
           ...(deduplicated ? { deduplicated: true } : {}),
+          ...(receiptAddress !== undefined ? { receipt: receiptAddress } : {}),
         },
       };
     }
@@ -716,7 +746,6 @@ export async function executeResolvedCallable(
     deps.onPhase?.("readback");
     let result: unknown;
     let links: Record<string, InvocationResultLink> | undefined;
-    const link = tx.handlingReceiptLink;
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
       const value = await receipt.pull();
@@ -754,6 +783,7 @@ export async function executeResolvedCallable(
         id: invocationId,
         status: "settled",
         ...(deduplicated ? { deduplicated: true } : {}),
+        ...(receiptAddress !== undefined ? { receipt: receiptAddress } : {}),
         ...(result !== undefined ? { result } : {}),
         ...(links !== undefined ? { links } : {}),
       },
