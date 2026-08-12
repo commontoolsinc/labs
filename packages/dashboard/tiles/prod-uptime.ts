@@ -41,6 +41,11 @@ interface Target {
 interface Check {
   status: Status;
   detail: string;
+  headline?: {
+    text: string;
+    priority: number;
+    magnitude: number;
+  };
 }
 
 interface TargetResult {
@@ -118,6 +123,23 @@ function worstStatus(statuses: readonly Status[]): Status {
   return "good";
 }
 
+function worstHeadline(results: readonly TargetResult[]): string | undefined {
+  const statusRank: Record<Status, number> = {
+    good: 0,
+    unknown: 1,
+    warn: 2,
+    bad: 3,
+  };
+  const candidates = results.flatMap((result) => [result.http, result.dns])
+    .filter((check) => check.headline !== undefined);
+  candidates.sort((a, b) =>
+    statusRank[b.status] - statusRank[a.status] ||
+    (b.headline?.priority ?? 0) - (a.headline?.priority ?? 0) ||
+    (b.headline?.magnitude ?? 0) - (a.headline?.magnitude ?? 0)
+  );
+  return candidates[0]?.headline?.text;
+}
+
 async function checkDns(hostname: string): Promise<Check> {
   const answers = await Promise.allSettled([
     resolveDns(hostname, "A"),
@@ -135,6 +157,11 @@ async function checkDns(hostname: string): Promise<Check> {
   return {
     status: missing ? "bad" : "warn",
     detail: missing ? "DNS down" : "DNS unknown",
+    headline: {
+      text: missing ? "DNS down" : "DNS unknown",
+      priority: 3,
+      magnitude: 0,
+    },
   };
 }
 
@@ -146,7 +173,13 @@ async function checkHttp(
   if (target.health === null || target.origin === undefined) {
     return { status: "good", detail: "" };
   }
-  if (invalidProxy) return { status: "warn", detail: "invalid proxy" };
+  if (invalidProxy) {
+    return {
+      status: "warn",
+      detail: "invalid proxy",
+      headline: { text: "invalid proxy", priority: 2, magnitude: 0 },
+    };
+  }
 
   try {
     const t0 = Date.now();
@@ -170,11 +203,17 @@ async function checkHttp(
     return {
       status,
       detail: res.status === 200 ? `${ms} ms` : `HTTP ${res.status} · ${ms} ms`,
+      headline: res.status !== 200
+        ? { text: `HTTP ${res.status}`, priority: 2, magnitude: res.status }
+        : ms > WARN_LATENCY_MS
+        ? { text: `${ms} ms`, priority: 1, magnitude: ms }
+        : undefined,
     };
   } catch {
     return {
       status: "warn",
       detail: "unreachable",
+      headline: { text: "unreachable", priority: 2, magnitude: 0 },
     };
   }
 }
@@ -201,17 +240,17 @@ function resultRow(result: TargetResult): string {
 
 function view(results: readonly TargetResult[]): TileView {
   const status = worstStatus(results.map((result) => result.status));
-  const affected = results.filter((result) => result.status !== "good");
+  const headline = worstHeadline(results);
   const visible = results.filter(
-    (result) => result.target.health !== null || result.status !== "good",
+    (result) =>
+      result.status !== "good" ||
+      (status !== "bad" && result.target.health !== null),
   );
   const rows = visible.map(resultRow).join("");
   return {
     label: "production",
     status,
-    value: affected.length === 0
-      ? `${results.length}/${results.length} hosts up`
-      : `${affected.length} affected`,
+    value: headline ?? `${results.length}/${results.length} hosts up`,
     extra: rows === ""
       ? undefined
       : `<div style="display:grid;grid-template-columns:auto 1fr;gap:7px 10px;margin-top:11px;font-size:12px;line-height:1.35">${rows}</div>`,

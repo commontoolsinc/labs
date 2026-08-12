@@ -138,8 +138,8 @@ Deno.test("prod uptime: every non-200 health response is a red exception", async
     try {
       const view = await prodUptime.collect(ctx());
       assertEquals(view.status, "bad");
-      assertEquals(view.value, "1 affected");
-      assertStringIncludes(view.extra ?? "", "estuary");
+      assertEquals(view.value, `HTTP ${responseStatus}`);
+      assert(!(view.extra ?? "").includes("estuary"));
       assertStringIncludes(view.extra ?? "", "rapids");
       assertStringIncludes(view.extra ?? "", `HTTP ${responseStatus}`);
       assert(!(view.extra ?? "").includes("HTTP 200"));
@@ -158,15 +158,17 @@ Deno.test("prod uptime: latency is orange above 275 ms and red above 500 ms", as
 
   const slow = await withLatency(276);
   assertEquals(slow.status, "warn");
-  assertEquals(slow.value, "2 affected");
+  assertEquals(slow.value, "276 ms");
   assertStringIncludes(slow.extra ?? "", "276 ms");
 
   const edge = await withLatency(500);
   assertEquals(edge.status, "warn");
+  assertEquals(edge.value, "500 ms");
   assertStringIncludes(edge.extra ?? "", "500 ms");
 
   const bad = await withLatency(501);
   assertEquals(bad.status, "bad");
+  assertEquals(bad.value, "501 ms");
   assertStringIncludes(bad.extra ?? "", "501 ms");
 });
 
@@ -181,10 +183,11 @@ Deno.test("prod uptime: a missing hostname is a red DNS down exception", async (
   try {
     const view = await prodUptime.collect(ctx());
     assertEquals(view.status, "bad");
-    assertEquals(view.value, "1 affected");
+    assertEquals(view.value, "DNS down");
     assertStringIncludes(view.extra ?? "", "bastion");
     assertStringIncludes(view.extra ?? "", "DNS down");
-    assertStringIncludes(view.extra ?? "", "estuary");
+    assert(!(view.extra ?? "").includes("estuary"));
+    assert(!(view.extra ?? "").includes("rapids"));
     assert(!(view.extra ?? "").includes("DNS yes"));
   } finally {
     restore();
@@ -202,11 +205,36 @@ Deno.test("prod uptime: one host with HTTP and DNS failures counts once", async 
   try {
     const view = await prodUptime.collect(ctx());
     assertEquals(view.status, "bad");
-    assertEquals(view.value, "1 affected");
+    assertEquals(view.value, "DNS down");
+    assert(!(view.extra ?? "").includes("estuary"));
     assertStringIncludes(view.extra ?? "", "rapids");
     assertStringIncludes(view.extra ?? "", "HTTP 503");
     assertStringIncludes(view.extra ?? "", "DNS down");
   } finally {
+    restore();
+  }
+});
+
+Deno.test("prod uptime: red outranks orange and HTTP outranks latency", async () => {
+  const realNow = Date.now;
+  const readings = [0, 0, 501, 300];
+  Date.now = () => readings.shift() ?? 0;
+  const restore = stub(
+    (url) => new Response(null, { status: url.includes("rapids") ? 502 : 200 }),
+    (hostname) =>
+      hostname.startsWith("bastion")
+        ? new Deno.errors.PermissionDenied("resolver unavailable")
+        : ["100.64.0.1"],
+  );
+  try {
+    const view = await prodUptime.collect(ctx());
+    assertEquals(view.status, "bad");
+    assertEquals(view.value, "HTTP 502");
+    assertStringIncludes(view.extra ?? "", "501 ms");
+    assertStringIncludes(view.extra ?? "", "HTTP 502");
+    assertStringIncludes(view.extra ?? "", "DNS unknown");
+  } finally {
+    Date.now = realNow;
     restore();
   }
 });
@@ -222,7 +250,7 @@ Deno.test("prod uptime: resolver failures are orange DNS unknown exceptions", as
   try {
     const view = await prodUptime.collect(ctx());
     assertEquals(view.status, "warn");
-    assertEquals(view.value, "1 affected");
+    assertEquals(view.value, "DNS unknown");
     assertStringIncludes(view.extra ?? "", "rapids");
     assertStringIncludes(view.extra ?? "", "DNS unknown");
   } finally {
@@ -354,7 +382,7 @@ Deno.test("prod uptime: an invalid proxy leaves two orange exceptions", async ()
     const view = await prodUptime.collect(ctx({ PROD_PROXY: "not a url" }));
     assertEquals(fetched, 0);
     assertEquals(view.status, "warn");
-    assertEquals(view.value, "2 affected");
+    assertEquals(view.value, "invalid proxy");
     assertStringIncludes(view.extra ?? "", "estuary");
     assertStringIncludes(view.extra ?? "", "rapids");
     assertStringIncludes(view.extra ?? "", "invalid proxy");
@@ -372,7 +400,7 @@ Deno.test("prod uptime: an unreachable health check is orange without confirmati
   try {
     const view = await prodUptime.collect(ctx());
     assertEquals(view.status, "warn");
-    assertEquals(view.value, "1 affected");
+    assertEquals(view.value, "unreachable");
     assertStringIncludes(view.extra ?? "", "estuary");
     assertStringIncludes(view.extra ?? "", "rapids");
     assertStringIncludes(view.extra ?? "", "unreachable");
