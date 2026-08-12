@@ -502,11 +502,16 @@ not create semantic revisions or normal storage notifications, but they do
 update scheduler read/write indexes and action state.
 
 The runner batches adjacent no-op observations into a single
-`schedulerObservationBatch` commit. Each batch entry carries its own local
-sequence, read watermarks, and observation payload. The batch has an envelope
-local sequence for the transport request, but keep/drop/replay decisions are
-made per entry. A semantic write flushes any queued no-op batch first so the
-server observes the same action order as the runner.
+`observation.batch` request (memory-v2 `04-protocol.md` §4.3.2). Each batch
+entry carries its own local sequence, read watermarks, and observation
+payload; keep/drop/replay decisions are made per entry. The request itself
+carries NO local sequence — it is transport, not a session-stream event —
+and the runner issues requests in allocation order, so the session's local
+sequence stream stays monotonic on the wire. A semantic write still
+flushes any queued no-op batch first so the server observes the same
+action order as the runner, and batch failures drop their observations
+(the resume re-runs fresh) instead of failing the writes queued behind
+them.
 
 This preserves the memory semantic log while making scheduler state durable and
 server-visible. If cross-device scheduler rehydration becomes a requirement,

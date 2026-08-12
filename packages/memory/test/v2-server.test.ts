@@ -1416,7 +1416,7 @@ Deno.test("memory v2 server accepts scheduler-state flag mismatch", async () => 
       protocol: MEMORY_PROTOCOL,
       flags: {
         ...HELLO_FLAGS,
-        persistentSchedulerState: !HELLO_FLAGS.persistentSchedulerState,
+        observationBatchRequests: !HELLO_FLAGS.observationBatchRequests,
       },
     }));
 

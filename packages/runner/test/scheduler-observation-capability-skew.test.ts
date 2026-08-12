@@ -1,5 +1,5 @@
 /**
- * Capability-skew regression: a persistentSchedulerState=ON client against a
+ * Capability-skew regression: a scheduler-state=ON client against a
  * server that did NOT advertise the capability at hello.
  *
  * Scheduler-state persistence is an OPTIONAL protocol capability
@@ -62,7 +62,7 @@ type WireTransact = {
 
 /**
  * Minimal in-process stand-in for a memory v2 server whose ambient
- * `persistentSchedulerState` is OFF: hello.ok advertises the capability as
+ * `observationBatchRequests` is OFF: hello.ok advertises the capability as
  * absent, and `transact` reproduces the flag-off server verbatim — scheduler
  * payloads are stripped, and a commit that is empty after stripping is
  * rejected exactly like memory/v2/engine.ts does.
@@ -97,11 +97,11 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
           type: "hello.ok",
           protocol: "memory",
           // The one divergence from this realm's ambient flags: the server
-          // never advertises persistentSchedulerState (an off-flag or older
+          // never advertises observationBatchRequests (an off-flag or older
           // deployment). Everything else mirrors the real handshake.
           flags: {
             ...getMemoryProtocolFlags(),
-            persistentSchedulerState: false,
+            observationBatchRequests: false,
           },
           sessionOpen: TEST_HELLO_SESSION_OPEN,
         });
@@ -148,8 +148,7 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
         this.transacts.push({
           localSeq: commit.localSeq,
           operationCount: commit.operations.length,
-          carriesObservations: commit.schedulerObservation !== undefined ||
-            (commit.schedulerObservationBatch?.length ?? 0) > 0,
+          carriesObservations: commit.schedulerObservation !== undefined,
         });
         // Faithful flag-off server: strip scheduler payloads
         // (memory/v2/server.ts `transact`), then apply engine validation

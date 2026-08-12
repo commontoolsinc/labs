@@ -1,5 +1,6 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
+  type BranchName,
   type ClientCommit,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
@@ -16,9 +17,11 @@ import {
   MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
+  type ObservationBatchResult,
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
+  type SchedulerObservationCommit,
   type SchedulerSnapshotListResult,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
@@ -827,6 +830,29 @@ export class SpaceSession {
 
     this.noteResult(result.serverSeq);
     return result;
+  }
+
+  /**
+   * Sends a scheduler-observation batch as its own `observation.batch`
+   * request (CT-1910): pure transport with no localSeq of its own, and NOT
+   * retained for reconnect replay — observations are droppable
+   * bookkeeping, so a batch that dies with its connection is dropped
+   * (flag-off semantics: the resume re-runs fresh) instead of replayed.
+   * Only valid toward a server advertising `observationBatchRequests`.
+   */
+  async observationBatch(
+    entries: SchedulerObservationCommit[],
+    branch?: BranchName,
+  ): Promise<ObservationBatchResult> {
+    this.#assertOpen();
+    return await this.client.request<ObservationBatchResult>({
+      type: "observation.batch",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      ...(branch !== undefined ? { branch } : {}),
+      entries,
+    });
   }
 
   async watchSet(watches: WatchSpec[]): Promise<WatchView> {

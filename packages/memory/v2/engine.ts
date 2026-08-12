@@ -32,6 +32,7 @@ import {
   type SchedulerActionSnapshotCursor,
   type SchedulerExecutionContextKey,
   type SchedulerObservationAddress,
+  type SchedulerObservationCommit,
   type SessionId,
   type SqliteOperation,
   tableDeclaresRowLabel,
@@ -2619,9 +2620,77 @@ export const applyCommit = (
     // in-memory maps are not covered by SQLite rollback, so mutating them
     // only after the commit's fate is final keeps them agreeing with the
     // durable log.
-    noteRejectedCommit(engine, options);
+    recordRejectedCommit(engine, options);
     throw error;
   }
+};
+
+/**
+ * Applies a scheduler-observation batch delivered as its own request
+ * (`observation.batch`, CT-1910) — the localSeq-less transport wrapper
+ * that replaced the zero-op `ClientCommit` envelope. Entry semantics are
+ * identical to the legacy envelope path: per-entry keep/drop decisions and
+ * replay identity against each entry's OWN localSeq; the wrapper itself is
+ * not a session-stream event and leaves no commit row.
+ */
+export const applyObservationBatch = (
+  engine: Engine,
+  options: {
+    sessionId: SessionId;
+    space?: string;
+    principal?: string;
+    branch?: BranchName;
+    batch: SchedulerObservationCommit[];
+  },
+): AppliedCommit => {
+  const applied = engine.database.transaction(applyObservationBatchTransaction)
+    .immediate(engine, options);
+  // Every entry is DECIDED (kept or dropped) with this application;
+  // advancing the in-order guard's bound outside the transaction keeps the
+  // in-memory state agreeing with what actually persisted.
+  const state = inferenceStateFor(
+    engine,
+    resolveCommitSessionKey(options.sessionId, options.principal),
+  );
+  for (const entry of options.batch) {
+    state.maxDecidedLocalSeq = Math.max(
+      state.maxDecidedLocalSeq,
+      entry.localSeq,
+    );
+  }
+  return applied;
+};
+
+const applyObservationBatchTransaction = (
+  engine: Engine,
+  { sessionId, space, principal, branch: declaredBranch, batch }: {
+    sessionId: SessionId;
+    space?: string;
+    principal?: string;
+    branch?: BranchName;
+    batch: SchedulerObservationCommit[];
+  },
+): AppliedCommit => {
+  if (!principal) {
+    throw new ProtocolError(
+      "scheduler observations require an authenticated principal",
+    );
+  }
+  if (batch.length === 0) {
+    throw new ProtocolError(
+      "observation.batch requires at least one entry",
+    );
+  }
+  const branch = declaredBranch ?? DEFAULT_BRANCH;
+  ensureActiveBranch(engine, branch);
+  return applySchedulerObservationBatchCommit(engine, {
+    sessionId,
+    sessionKey: resolveCommitSessionKey(sessionId, principal),
+    space,
+    principal,
+    branch,
+    batch,
+  });
 };
 
 const inferenceStateFor = (
@@ -2701,9 +2770,23 @@ const noteAcceptedCommit = (
   pruneByWatermark(state, commit.verdictsThrough);
 };
 
-const noteRejectedCommit = (
+/**
+ * Records a REJECTED commit's write footprint in the session's inference
+ * retention (CT-1910). `applyCommit` calls this for every throw it
+ * classifies; the SERVER calls it for verdicts it produces WITHOUT
+ * reaching the engine — ACL and authorization denials, SQLite attachment
+ * failures — because those retire the client's optimistic layer exactly
+ * like an engine rejection and a later inferred reader must be doomed by
+ * them the same way. Idempotent: double-recording merges footprints, and a
+ * durably-accepted localSeq (a replay-mismatch throw) is never retained.
+ */
+export const recordRejectedCommit = (
   engine: Engine,
-  { sessionId, principal, commit }: ApplyCommitOptions,
+  { sessionId, principal, commit }: {
+    sessionId: SessionId;
+    principal?: string;
+    commit: ClientCommit;
+  },
 ): void => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
   // A replay mismatch (or any other throw) on a commit that is durably
@@ -5288,28 +5371,19 @@ const applyCommitTransaction = (
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
   const schedulerObservation = commit
     .schedulerObservation as SchedulerActionObservation | undefined;
-  const schedulerObservationBatch = commit.schedulerObservationBatch ?? [];
-  const hasSchedulerObservationBatch = schedulerObservationBatch.length > 0;
-  if ((schedulerObservation || hasSchedulerObservationBatch) && !principal) {
+  if (schedulerObservation && !principal) {
     throw new ProtocolError(
       "scheduler observations require an authenticated principal",
-    );
-  }
-  if (schedulerObservation && hasSchedulerObservationBatch) {
-    throw new ProtocolError(
-      "memory v2 commit cannot mix schedulerObservation and schedulerObservationBatch",
-    );
-  }
-  if (commit.operations.length > 0 && hasSchedulerObservationBatch) {
-    throw new ProtocolError(
-      "memory v2 schedulerObservationBatch commits must not include semantic operations",
     );
   }
   const hasPreconditions = (commit.preconditions?.length ?? 0) > 0;
   if (
     commit.operations.length === 0 && !schedulerObservation &&
-    !hasSchedulerObservationBatch && !hasPreconditions
+    !hasPreconditions
   ) {
+    // Observation BATCHES are not commits: they travel as the dedicated
+    // `observation.batch` request (CT-1910). The retired zero-op envelope
+    // shape lands here.
     throw new Error("memory v2 commit requires at least one operation");
   }
 
@@ -5384,17 +5458,6 @@ const applyCommitTransaction = (
     principal,
     sessionId,
   });
-
-  if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
-    return applySchedulerObservationBatchCommit(engine, {
-      sessionId,
-      sessionKey,
-      space,
-      principal,
-      branch,
-      batch: schedulerObservationBatch,
-    });
-  }
 
   if (commit.operations.length === 0 && schedulerObservation) {
     return applySchedulerObservationOnlyCommit(engine, {
@@ -5934,13 +5997,21 @@ const resolvePendingReads = (
     | { state: SessionInferenceState; watermark: number }
     | undefined;
   if (commit.reads.pending.some((read) => read.localSeq === undefined)) {
-    const watermark = commit.verdictsThrough;
-    if (watermark === undefined) {
+    if (commit.verdictsThrough === undefined) {
       throw new ProtocolError(
         `commit ${commit.localSeq} carries an inferred-shape pending read but no verdictsThrough`,
       );
     }
     const state = inferenceStateFor(engine, sessionKey);
+    // Watermarks are monotonic per session: judge at the max of this
+    // commit's attestation and the session's high-water, matching the
+    // pruning bound — a commit built before an already-delivered higher
+    // attestation must not be doomed by entries (or an overflow floor)
+    // that attestation already retired. Sound because delivery is
+    // monotonic in localSeq: a commit whose attestation raised the
+    // high-water was built (and issued) before this one, so this one's
+    // composite also postdates the processing that attestation proved.
+    const watermark = Math.max(commit.verdictsThrough, state.watermark);
     if (
       commit.localSeq <= state.maxDecidedLocalSeq &&
       !state.rejected.some((entry) => entry.localSeq === commit.localSeq)
@@ -6416,7 +6487,7 @@ const applySchedulerObservationBatchCommit = (
     space?: string;
     principal?: string;
     branch: BranchName;
-    batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
+    batch: SchedulerObservationCommit[];
   },
 ): AppliedCommit => {
   const results: AppliedSchedulerObservationResult[] = [];

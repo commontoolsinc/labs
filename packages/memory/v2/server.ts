@@ -21,6 +21,8 @@ import {
   type GraphQueryResult,
   type HelloMessage,
   MAX_ENTITY_ID_PAGE_SIZE,
+  type ObservationBatchRequest,
+  type ObservationBatchResult,
   type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
@@ -216,18 +218,9 @@ const schedulerObservationsFromCommit = (
     return [{ localSeq: commit.localSeq, observation: single }];
   }
 
-  const batch = commit.schedulerObservationBatch ?? [];
-  const observations: CommitSchedulerObservation[] = [];
-  for (const item of batch) {
-    const observation = Engine.schedulerObservationFromValue(
-      item.schedulerObservation,
-    );
-    if (!observation) {
-      continue;
-    }
-    observations.push({ localSeq: item.localSeq, observation });
-  }
-  return observations;
+  // Observation BATCHES no longer ride commits: they arrive as the
+  // dedicated `observation.batch` request (CT-1910).
+  return [];
 };
 
 const toError = (name: string, message: string): V2Error => ({
@@ -381,7 +374,8 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
-  // Negotiated persistentSchedulerState: when both sides carry the flag,
+  // Negotiated observationBatchRequests (the persistent-scheduler-state
+  // capability in its current shape): when both sides carry the flag,
   // subscription sync pushes to this connection include the scheduler
   // observation rows of the sync window, so its runtimes can ADOPT other
   // clients' action runs instead of re-running them
@@ -634,8 +628,8 @@ class Connection {
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
       this.#persistentSchedulerState =
-        clientFlags?.persistentSchedulerState === true &&
-        serverFlags?.persistentSchedulerState === true;
+        clientFlags?.observationBatchRequests === true &&
+        serverFlags?.observationBatchRequests === true;
       this.#ready = true;
       return;
     }
@@ -677,6 +671,23 @@ class Connection {
           parsed.space,
           parsed.sessionId,
         );
+        return;
+      }
+      case "observation.batch": {
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        // Same in-lock publication as transact: the entry verdicts leave
+        // before any same-space fan-out can build a covering frame.
+        await this.server.observationBatch(parsed, (verdict) => {
+          this.send(verdict);
+        });
         return;
       }
       case "graph.query":
@@ -1042,9 +1053,12 @@ export class Server {
       };
     },
   ) {
-    this.#sessions = options.sessions ?? new SessionRegistry({
-      onRemoved: (session) => this.#releaseSessionInference(session),
-    });
+    this.#sessions = options.sessions ?? new SessionRegistry();
+    // Registered on injected registries too — a session that leaves the
+    // registry by any route releases its engine-held inference retention.
+    this.#sessions.onSessionRemoved((session) =>
+      this.#releaseSessionInference(session)
+    );
     this.#store = options.store;
   }
 
@@ -2126,6 +2140,30 @@ export class Server {
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
     return await this.withSpacePublicationLock(message.space, async () => {
       const decision = await this.decideTransaction(message);
+      // CT-1910: every verdict that retires the client's optimistic layer
+      // must reach inference retention, INCLUDING those decided before the
+      // engine was ever called — ACL-shape and authorization denials, and
+      // SQLite attachment failures. This is the one point every transact
+      // verdict passes through exactly once. SessionError responses are
+      // excluded: the client keeps those commits for replay, so they are
+      // not fates. Recording is idempotent with the engine's own
+      // rejection-path recording.
+      if (
+        decision.response.error !== undefined &&
+        decision.response.error.name !== "SessionError"
+      ) {
+        try {
+          const engine = await this.openEngine(message.space);
+          Engine.recordRejectedCommit(engine, {
+            sessionId: message.sessionId,
+            principal: this.#sessions.get(message.space, message.sessionId)
+              ?.principal,
+            commit: message.commit,
+          });
+        } catch {
+          // The engine never opened; nothing to retain.
+        }
+      }
       let verdictError: { value: unknown } | undefined;
       try {
         publishVerdict?.(decision.response);
@@ -2147,6 +2185,174 @@ export class Server {
         throw verdictError.value;
       }
       return decision.response;
+    });
+  }
+
+  /**
+   * Handles an `observation.batch` request (CT-1910): the localSeq-less
+   * transport wrapper for scheduler-observation entries. Runs under the
+   * per-space publication lock like `transact` — the batch mutates
+   * scheduler tables the fan-out reads, and the response (each entry's
+   * kept/dropped verdict) must publish before a covering frame can be
+   * built — and stages the catch-up marker at the HIGHEST ENTRY localSeq:
+   * the entries are the decided things, and the wrapper has no number of
+   * its own to stage.
+   */
+  async observationBatch(
+    message: ObservationBatchRequest,
+    publishVerdict?: (
+      verdict: ResponseMessage<ObservationBatchResult>,
+    ) => void,
+  ): Promise<ResponseMessage<ObservationBatchResult>> {
+    return await this.withSpacePublicationLock(message.space, async () => {
+      const session = this.#sessions.get(message.space, message.sessionId);
+      if (session === null) {
+        const response = respondTypedError<ObservationBatchResult>(
+          message.requestId,
+          toError("SessionError", "Unknown session for space"),
+        );
+        publishVerdict?.(response);
+        return response;
+      }
+      let response: ResponseMessage<ObservationBatchResult>;
+      let postCommit: (() => Promise<void>) | undefined;
+      try {
+        const engine = await this.openEngine(message.space);
+        if (
+          this.#sessions.get(message.space, message.sessionId) !== session
+        ) {
+          response = respondTypedError<ObservationBatchResult>(
+            message.requestId,
+            toError("SessionError", "Unknown or replaced session for space"),
+          );
+        } else {
+          const deny = this.#authorizeMessageWithEngine(
+            engine,
+            message.space,
+            session.principal,
+            "WRITE",
+          );
+          const schedulerStateEnabled = getPersistentSchedulerStateConfig() &&
+            session.principal !== undefined;
+          if (deny) {
+            response = respondTypedError<ObservationBatchResult>(
+              message.requestId,
+              deny,
+            );
+          } else if (!schedulerStateEnabled) {
+            // Mirrors transact's scheduler stripping: without persistent
+            // scheduler state (or a principal) the observations have
+            // nowhere to go. They are droppable bookkeeping, so the
+            // request succeeds with every entry dropped (flag-off
+            // semantics: resumes re-run fresh) instead of failing.
+            response = {
+              type: "response",
+              requestId: message.requestId,
+              ok: {
+                results: message.entries.map((entry) => ({
+                  localSeq: entry.localSeq,
+                  status: "dropped" as const,
+                  reason: "scheduler-state-disabled",
+                })),
+              },
+            };
+          } else {
+            const observations: CommitSchedulerObservation[] = [];
+            for (const item of message.entries) {
+              const observation = Engine.schedulerObservationFromValue(
+                item.schedulerObservation,
+              );
+              if (observation) {
+                observations.push({ localSeq: item.localSeq, observation });
+              }
+            }
+            const previousReadSpaces = new Map<number, Set<string>>();
+            for (const { localSeq, observation } of observations) {
+              const previousSnapshots = Engine.listSchedulerActionSnapshots(
+                engine,
+                {
+                  branch: message.branch ?? "",
+                  ownerSpace: message.space,
+                  pieceId: observation.pieceId,
+                  processGeneration: observation.processGeneration,
+                  actionId: observation.actionId,
+                  applicableExecutionContextKeys:
+                    schedulerApplicableContextKeys(
+                      session.principal,
+                      message.sessionId,
+                    ),
+                },
+              ).snapshots;
+              previousReadSpaces.set(
+                localSeq,
+                new Set(
+                  previousSnapshots.flatMap((
+                    snapshot,
+                  ) => [...this.schedulerObservationReadSpaces(
+                    snapshot.observation,
+                  )]),
+                ),
+              );
+            }
+            const applied = Engine.applyObservationBatch(engine, {
+              sessionId: message.sessionId,
+              space: message.space,
+              principal: session.principal,
+              branch: message.branch,
+              batch: message.entries,
+            });
+            const decidedThrough = message.entries.reduce(
+              (max, entry) => Math.max(max, entry.localSeq),
+              0,
+            );
+            session.pendingCaughtUpLocalSeq = Math.max(
+              session.pendingCaughtUpLocalSeq,
+              decidedThrough,
+            );
+            postCommit = () =>
+              this.runPostCommitSchedulerSideEffects(
+                message.space,
+                applied,
+                observations,
+                previousReadSpaces,
+                session,
+              );
+            response = {
+              type: "response",
+              requestId: message.requestId,
+              ok: {
+                results: (applied.schedulerObservationResults ?? []).map(
+                  (result) => ({
+                    localSeq: result.localSeq,
+                    status: result.status,
+                    ...(result.reason !== undefined
+                      ? { reason: result.reason }
+                      : {}),
+                  }),
+                ),
+              },
+            };
+          }
+        }
+      } catch (error) {
+        const messageText = error instanceof Error
+          ? error.message
+          : String(error);
+        response = respondTypedError<ObservationBatchResult>(
+          message.requestId,
+          toError(
+            error instanceof Engine.ProtocolError
+              ? "ProtocolError"
+              : error instanceof Engine.ConflictError
+              ? "ConflictError"
+              : "TransactionError",
+            messageText,
+          ),
+        );
+      }
+      publishVerdict?.(response);
+      await postCommit?.();
+      return response;
     });
   }
 
@@ -2243,7 +2449,6 @@ export class Server {
           const commitPayload = schedulerStateEnabled ? message.commit : {
             ...message.commit,
             schedulerObservation: undefined,
-            schedulerObservationBatch: undefined,
           };
           const schedulerObservations = schedulerStateEnabled
             ? schedulerObservationsFromCommit(commitPayload)
@@ -3445,7 +3650,7 @@ export class Server {
   // Attach the sync window's scheduler observation rows so the receiving
   // client can ADOPT other clients' committed action runs instead of
   // re-running them (incremental-observation-adoption.md §4). Only for
-  // connections that negotiated persistentSchedulerState, on any advancing
+  // connections that negotiated observationBatchRequests, on any advancing
   // sync window (including an empty catch-up), and echo-suppressed by the
   // observation writer session.
   // Adoption is an optimization: a failed observation query must never fail
@@ -4260,6 +4465,24 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       commit: parsed.commit as unknown as TransactRequest["commit"],
+    };
+  }
+
+  if (
+    parsed.type === "observation.batch" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    Array.isArray(parsed.entries)
+  ) {
+    return {
+      type: "observation.batch",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      ...(typeof parsed.branch === "string" ? { branch: parsed.branch } : {}),
+      entries: parsed
+        .entries as unknown as ObservationBatchRequest["entries"],
     };
   }
 

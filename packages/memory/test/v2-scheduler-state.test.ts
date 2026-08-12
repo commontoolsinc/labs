@@ -4,6 +4,7 @@ import { Database } from "@db/sqlite";
 import {
   type AppliedCommit,
   applyCommit as applyCommitEngine,
+  applyObservationBatch as applyObservationBatchEngine,
   close,
   createBranch,
   type Engine,
@@ -47,6 +48,15 @@ const DIRECT_TEST_SCOPE_CONTEXT = {
 
 const applyCommit: typeof applyCommitEngine = (engine, options) =>
   applyCommitEngine(engine, {
+    ...options,
+    principal: options.principal ?? DIRECT_TEST_SCOPE_CONTEXT.principal,
+  });
+
+const applyObservationBatch: typeof applyObservationBatchEngine = (
+  engine,
+  options,
+) =>
+  applyObservationBatchEngine(engine, {
     ...options,
     principal: options.principal ?? DIRECT_TEST_SCOPE_CONTEXT.principal,
   });
@@ -744,11 +754,9 @@ Deno.test("memory v2 accepts batched no-op scheduler observations", async () => 
 
   try {
     const beforeHead = headSeq(engine);
-    const commit = {
-      localSeq: 100,
-      reads: { confirmed: [], pending: [] },
-      operations: [],
-      schedulerObservationBatch: [
+    const result = applyObservationBatch(engine, {
+      sessionId: "session:scheduler-observation-batch",
+      batch: [
         {
           localSeq: 101,
           reads: { confirmed: [], pending: [] },
@@ -760,11 +768,6 @@ Deno.test("memory v2 accepts batched no-op scheduler observations", async () => 
           schedulerObservation: observationForAction("pattern.tsx:computed:2"),
         },
       ],
-    };
-
-    const result = applyCommit(engine, {
-      sessionId: "session:scheduler-observation-batch",
-      commit,
     });
 
     assertEquals(result.seq, beforeHead);
@@ -852,83 +855,78 @@ Deno.test("memory v2 scheduler observations resolve array pending reads at the h
       },
     });
 
-    const result = applyCommit(engine, {
+    const result = applyObservationBatch(engine, {
       sessionId,
-      commit: {
-        localSeq: 100,
-        reads: { confirmed: [], pending: [] },
-        operations: [],
-        schedulerObservationBatch: [
-          {
-            // Array read via [1, 2]: kept — element 1 resolves, staleness
-            // scans after layer 2's resolution, past the foreign write.
-            localSeq: 101,
-            reads: {
-              confirmed: [],
-              pending: [{
-                id: "entity:sched-doc",
-                path: toDocumentPath([]),
-                localSeq: [1, 2],
-              }],
-            },
-            schedulerObservation: observationForAction(
-              "pattern.tsx:array-read:kept",
-            ),
+      batch: [
+        {
+          // Array read via [1, 2]: kept — element 1 resolves, staleness
+          // scans after layer 2's resolution, past the foreign write.
+          localSeq: 101,
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "entity:sched-doc",
+              path: toDocumentPath([]),
+              localSeq: [1, 2],
+            }],
           },
-          {
-            // An unresolved element drops the observation, exactly like the
-            // ordinary-commit resolution requirement.
-            localSeq: 102,
-            reads: {
-              confirmed: [],
-              pending: [{
-                id: "entity:sched-doc",
-                path: toDocumentPath([]),
-                localSeq: [1, 99],
-              }],
-            },
-            schedulerObservation: observationForAction(
-              "pattern.tsx:array-read:unresolved",
-            ),
+          schedulerObservation: observationForAction(
+            "pattern.tsx:array-read:kept",
+          ),
+        },
+        {
+          // An unresolved element drops the observation, exactly like the
+          // ordinary-commit resolution requirement.
+          localSeq: 102,
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "entity:sched-doc",
+              path: toDocumentPath([]),
+              localSeq: [1, 99],
+            }],
           },
-          {
-            // CT-1910 repaired shape: the same read as 101 but declaring its
-            // true basis. The scan now covers (0, head] and reaches the
-            // foreign x = 2 the legacy basis skipped — dropped.
-            localSeq: 103,
-            reads: {
-              confirmed: [],
-              pending: [{
-                id: "entity:sched-doc",
-                path: toDocumentPath([]),
-                localSeq: [1, 2],
-                basisSeq: 0,
-              }],
-            },
-            schedulerObservation: observationForAction(
-              "pattern.tsx:array-read:true-basis-stale",
-            ),
+          schedulerObservation: observationForAction(
+            "pattern.tsx:array-read:unresolved",
+          ),
+        },
+        {
+          // CT-1910 repaired shape: the same read as 101 but declaring its
+          // true basis. The scan now covers (0, head] and reaches the
+          // foreign x = 2 the legacy basis skipped — dropped.
+          localSeq: 103,
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "entity:sched-doc",
+              path: toDocumentPath([]),
+              localSeq: [1, 2],
+              basisSeq: 0,
+            }],
           },
-          {
-            // Repaired shape, coherent: basis 2 reflects the foreign write;
-            // the only writes above it are the session's own predecessor
-            // layers (localSeq 1 and 2, both below 104), excluded — kept.
-            localSeq: 104,
-            reads: {
-              confirmed: [],
-              pending: [{
-                id: "entity:sched-doc",
-                path: toDocumentPath([]),
-                localSeq: [1, 2],
-                basisSeq: 2,
-              }],
-            },
-            schedulerObservation: observationForAction(
-              "pattern.tsx:array-read:true-basis-kept",
-            ),
+          schedulerObservation: observationForAction(
+            "pattern.tsx:array-read:true-basis-stale",
+          ),
+        },
+        {
+          // Repaired shape, coherent: basis 2 reflects the foreign write;
+          // the only writes above it are the session's own predecessor
+          // layers (localSeq 1 and 2, both below 104), excluded — kept.
+          localSeq: 104,
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "entity:sched-doc",
+              path: toDocumentPath([]),
+              localSeq: [1, 2],
+              basisSeq: 2,
+            }],
           },
-        ],
-      },
+          schedulerObservation: observationForAction(
+            "pattern.tsx:array-read:true-basis-kept",
+          ),
+        },
+      ],
     });
 
     assertEquals(
@@ -1126,39 +1124,34 @@ Deno.test("memory v2 drops stale batched no-op observations independently", asyn
       writes: [sourceRead],
     });
 
-    const result = applyCommit(engine, {
+    const result = applyObservationBatch(engine, {
       sessionId: "session:scheduler-observation-batch-drop",
-      commit: {
-        localSeq: 100,
-        reads: { confirmed: [], pending: [] },
-        operations: [],
-        schedulerObservationBatch: [
-          {
-            localSeq: 101,
-            reads: {
-              confirmed: [{
-                id: sourceRead.id,
-                scope: sourceRead.scope,
-                path: toDocumentPath(sourceRead.path),
-                seq: 0,
-              }],
-              pending: [],
-            },
-            schedulerObservation: observationForAction(
-              "pattern.tsx:computed:1",
-              { observedAtLocalSeq: 101 },
-            ),
+      batch: [
+        {
+          localSeq: 101,
+          reads: {
+            confirmed: [{
+              id: sourceRead.id,
+              scope: sourceRead.scope,
+              path: toDocumentPath(sourceRead.path),
+              seq: 0,
+            }],
+            pending: [],
           },
-          {
-            localSeq: 102,
-            reads: { confirmed: [], pending: [] },
-            schedulerObservation: observationForAction(
-              "pattern.tsx:computed:2",
-              { observedAtLocalSeq: 102 },
-            ),
-          },
-        ],
-      },
+          schedulerObservation: observationForAction(
+            "pattern.tsx:computed:1",
+            { observedAtLocalSeq: 101 },
+          ),
+        },
+        {
+          localSeq: 102,
+          reads: { confirmed: [], pending: [] },
+          schedulerObservation: observationForAction(
+            "pattern.tsx:computed:2",
+            { observedAtLocalSeq: 102 },
+          ),
+        },
+      ],
     });
 
     assertEquals(
@@ -2292,39 +2285,34 @@ Deno.test("memory v2 server mirrors batched scheduler observations into read spa
   const keptActionId = "pattern.tsx:computed:mirror-kept";
 
   try {
-    const applied = await owner.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [],
-      schedulerObservationBatch: [
-        {
-          localSeq: 2,
-          reads: {
-            confirmed: [],
-            pending: [{
-              id: mirroredRead.id,
-              scope: mirroredRead.scope,
-              path: toDocumentPath(mirroredRead.path),
-              localSeq: 404,
-            }],
-          },
-          schedulerObservation: {
-            ...mirroredObservation,
-            actionId: droppedActionId,
-          },
+    const applied = await owner.observationBatch([
+      {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: mirroredRead.id,
+            scope: mirroredRead.scope,
+            path: toDocumentPath(mirroredRead.path),
+            localSeq: 404,
+          }],
         },
-        {
-          localSeq: 3,
-          reads: { confirmed: [], pending: [] },
-          schedulerObservation: {
-            ...mirroredObservation,
-            actionId: keptActionId,
-          },
+        schedulerObservation: {
+          ...mirroredObservation,
+          actionId: droppedActionId,
         },
-      ],
-    });
+      },
+      {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        schedulerObservation: {
+          ...mirroredObservation,
+          actionId: keptActionId,
+        },
+      },
+    ]);
     assertEquals(
-      applied.schedulerObservationResults?.map((entry) => ({
+      applied.results.map((entry) => ({
         localSeq: entry.localSeq,
         status: entry.status,
         reason: entry.reason,

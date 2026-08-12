@@ -711,40 +711,15 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
         ? { ...read, localSeq: scalarizeLocalSeq(read.localSeq) }
         : read
     );
-  const needsCommit = hasStack(commit.reads.pending);
-  const needsBatch =
-    commit.schedulerObservationBatch?.some((entry) =>
-      hasStack(entry.reads.pending)
-    ) === true;
-  if (!needsCommit && !needsBatch) {
+  if (!hasStack(commit.reads.pending)) {
     return commit;
   }
   return {
     ...commit,
-    ...(needsCommit
-      ? {
-        reads: {
-          confirmed: commit.reads.confirmed,
-          pending: scalarizeReads(commit.reads.pending),
-        },
-      }
-      : {}),
-    ...(needsBatch
-      ? {
-        schedulerObservationBatch: commit.schedulerObservationBatch!.map(
-          (entry) =>
-            hasStack(entry.reads.pending)
-              ? {
-                ...entry,
-                reads: {
-                  confirmed: entry.reads.confirmed,
-                  pending: scalarizeReads(entry.reads.pending),
-                },
-              }
-              : entry,
-        ),
-      }
-      : {}),
+    reads: {
+      confirmed: commit.reads.confirmed,
+      pending: scalarizeReads(commit.reads.pending),
+    },
   };
 };
 
@@ -2129,6 +2104,15 @@ class SpaceReplica implements ISpaceReplica {
   // commit and every later reader of its documents would be doomed forever
   // — the livelock the watermark exists to break.
   #unsettledFates = new Set<number>();
+  // LocalSeqs handed to the wire (transact issued, or riding an
+  // observation.batch request). Consumed by the issue-order gate below;
+  // entries retire at fate settlement, so both sets stay bounded by the
+  // in-flight window.
+  #issuedLocalSeqs = new Set<number>();
+  #issueTurnWaiters: Array<{
+    localSeq: number;
+    turn: PromiseWithResolvers<void>;
+  }> = [];
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
@@ -2426,11 +2410,11 @@ class SpaceReplica implements ISpaceReplica {
     }
     const { client, session } = await this.activeSessionHandle();
     // Optional capability, negotiated at hello: a server that did not
-    // advertise `persistentSchedulerState` keeps no scheduler rows (and an
+    // advertise `observationBatchRequests` keeps no scheduler rows (and an
     // older build may not know the message at all) — treat as "no snapshots"
     // so the resume path degrades to running fresh, instead of depending on
     // a capability-specific RPC the server never offered.
-    if (client.serverFlags?.persistentSchedulerState !== true) {
+    if (client.serverFlags?.observationBatchRequests !== true) {
       return { serverSeq: 0, snapshots: [] };
     }
     return await session.listSchedulerActionSnapshots(query);
@@ -3064,7 +3048,7 @@ class SpaceReplica implements ISpaceReplica {
     // payloads have nowhere to go.
     if (
       this.#sessionClient !== undefined &&
-      this.#sessionClient.serverFlags?.persistentSchedulerState !== true
+      this.#sessionClient.serverFlags?.observationBatchRequests !== true
     ) {
       return Promise.resolve({ ok: {} });
     }
@@ -3072,16 +3056,24 @@ class SpaceReplica implements ISpaceReplica {
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
     >();
-    const entry: SchedulerObservationBatchEntry = {
-      commit: {
-        localSeq,
-        reads: this.buildReads(source, localSeq),
-        schedulerObservation,
-      },
-      pending,
-      source,
-      batchGeneration: this.#schedulerObservationBatchGeneration,
-    };
+    let entry: SchedulerObservationBatchEntry;
+    try {
+      entry = {
+        commit: {
+          localSeq,
+          reads: this.buildReads(source, localSeq),
+          schedulerObservation,
+        },
+        pending,
+        source,
+        batchGeneration: this.#schedulerObservationBatchGeneration,
+      };
+    } catch (error) {
+      // A throw during build (the read-activity provider) would otherwise
+      // abandon this fate, freezing the frontier and the issue gate.
+      this.settleFate(localSeq);
+      throw error;
+    }
     this.#schedulerObservationBatch.push(entry);
     this.#unsettledSchedulerObservations.add(entry);
     void pending.promise.then(() => {
@@ -3152,99 +3144,85 @@ class SpaceReplica implements ISpaceReplica {
         ? this.#schedulerObservationBatch.length
         : nextGeneration,
     );
-    const localSeq = this.allocateLocalSeq();
-    const commit: ClientCommit = {
-      localSeq,
-      reads: { confirmed: [], pending: [] },
-      operations: [],
-      schedulerObservationBatch: entries.map((entry) => entry.commit),
-    };
+    // The batch travels as its own `observation.batch` request with NO
+    // localSeq of its own (CT-1910): the wrapper is transport, not a
+    // session-stream event, so the session's sequence stays monotonic on
+    // the wire. There is no legacy fallback — the retired zero-op envelope
+    // shape is neither emitted nor accepted anywhere.
     const promise = (async (): Promise<
       Result<Unit, StorageTransactionRejected>
     > => {
-      // Persistent scheduler state is an OPTIONAL capability negotiated at
-      // hello (memory/v2.ts `compatibleMemoryProtocolFlags`): peers with
-      // different scheduler flags must still share memory data. A server that
-      // did not advertise it strips scheduler payloads at `transact`, so this
-      // observation-only commit would arrive as zero operations and be
-      // TERMINALLY rejected ("memory v2 commit requires at least one
-      // operation") — and the flush-before-semantic-commit ordering in
-      // pushCommit would then spread that rejection to every subsequent
-      // semantic commit (event handlers drop their writes without retry;
-      // the whole session's writes starve). Fail closed instead: drop the
-      // observations — the feature degrades to flag-off semantics (resumes
-      // re-run fresh) while semantic traffic proceeds untouched.
+      // The persistent-scheduler-state capability (observationBatchRequests,
+      // negotiated at hello): a server that did not advertise it keeps no
+      // scheduler rows, so these observations have nowhere to go. They are
+      // droppable bookkeeping — resolve them {ok} (flag-off semantics: the
+      // resume re-runs fresh) instead of failing, which would spread a
+      // rejection into every semantic commit ordering behind them.
       const { client } = await this.activeSessionHandle();
-      if (client.serverFlags?.persistentSchedulerState !== true) {
+      if (client.serverFlags?.observationBatchRequests !== true) {
         return { ok: {} };
       }
-      // Same fail-closed degradation for the OTHER capability gap: against a
-      // server without `pendingReadStacks`, an observation whose read sat on
-      // MORE than one pending layer cannot be expressed soundly — the scalar
-      // wire would omit lower layers, and the old server could persist an
-      // observation that observed a dropped write (data commits get the
-      // pushCommit hold instead; observations are droppable bookkeeping, so
-      // dropping beats holding — a held envelope would chain verdict latency
-      // into every semantic commit awaiting this flush). Resolve the dropped
-      // entries {ok} and send the rest.
-      let wireEntries = entries;
-      if (client.serverFlags?.pendingReadStacks !== true) {
-        const expressible = (entry: SchedulerObservationBatchEntry): boolean =>
-          entry.commit.reads.pending.every((read) =>
-            !Array.isArray(read.localSeq) || read.localSeq.length <= 1
-          );
-        wireEntries = entries.filter(expressible);
-        for (const entry of entries) {
-          if (!expressible(entry)) {
-            entry.pending.resolve({ ok: {} });
-          }
+      const routeSources: IStorageTransaction[] = [];
+      const issueEntries: SchedulerObservationBatchEntry[] = [];
+      for (const entry of entries) {
+        const validation = entry.source?.validateReplicaRoutes?.();
+        if (validation?.error !== undefined) {
+          entry.pending.resolve({ error: validation.error });
+          continue;
         }
-        if (wireEntries.length === 0) {
-          return { ok: {} };
+        issueEntries.push(entry);
+        if (
+          entry.source !== undefined &&
+          !routeSources.includes(entry.source)
+        ) {
+          routeSources.push(entry.source);
         }
       }
-      const wireBatch: ClientCommit = wireEntries === entries ? commit : {
-        ...commit,
-        schedulerObservationBatch: wireEntries.map((entry) => entry.commit),
-      };
-      const routeSources: IStorageTransaction[] = [];
-      const prepareIssue = (issueCommit: ClientCommit): boolean => {
-        const issueEntries: SchedulerObservationBatchEntry[] = [];
-        for (const entry of wireEntries) {
-          const validation = entry.source?.validateReplicaRoutes?.();
-          if (validation?.error !== undefined) {
-            entry.pending.resolve({ error: validation.error });
-            continue;
-          }
-          issueEntries.push(entry);
-          if (
-            entry.source !== undefined &&
-            !routeSources.includes(entry.source)
-          ) {
-            routeSources.push(entry.source);
-          }
-        }
-        issueCommit.schedulerObservationBatch = issueEntries.map((entry) =>
-          entry.commit
-        );
-        return issueEntries.length > 0;
-      };
-      return await this.pushCommit(
-        localSeq,
-        [],
-        wireBatch,
-        undefined,
-        { routeSources, prepareIssue },
+      if (issueEntries.length === 0) {
+        return { ok: {} };
+      }
+      // Issue-order gate: the request carries its entries’ localSeqs, so
+      // it takes its turn at the LOWEST one — everything allocated below
+      // the batch reaches the wire first, keeping delivery monotonic.
+      await this.awaitIssueTurn(
+        Math.min(...issueEntries.map((entry) => entry.commit.localSeq)),
       );
+      try {
+        const { session } = await this.activeSessionHandle();
+        this.markRouteWriteIssued(routeSources);
+        for (const entry of issueEntries) {
+          this.noteIssued(entry.commit.localSeq);
+        }
+        await session.observationBatch(
+          issueEntries.map((entry) => entry.commit),
+        );
+      } catch (error) {
+        // Droppable bookkeeping: a failed batch request DROPS its
+        // observations (flag-off semantics — the resume re-runs fresh)
+        // instead of spreading a rejection into the semantic commits
+        // ordering behind these entries. There is no reconnect replay
+        // either: the request has no localSeq to retain.
+        logger.debug("observation-batch-dropped", () => [
+          `observation batch dropped: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { entries: issueEntries.length },
+        ]);
+      }
+      for (const entry of issueEntries) {
+        entry.pending.resolve({ ok: {} });
+      }
+      return { ok: {} };
     })()
       .then((result) => {
         for (const entry of entries) {
           entry.pending.resolve(result);
         }
         return result;
-      }, (error) => {
-        const rejection = toRejectedError(error, commit, this.#space);
-        const result = { error: rejection };
+      }, () => {
+        // Unexpected throws outside the request itself degrade the same
+        // way: the observations drop, semantic traffic proceeds.
+        const result: Result<Unit, StorageTransactionRejected> = { ok: {} };
         for (const entry of entries) {
           entry.pending.resolve(result);
         }
@@ -3253,9 +3231,6 @@ class SpaceReplica implements ISpaceReplica {
     this.#schedulerObservationFlushPromise = promise;
     this.#commitPromises.add(promise);
     promise.finally(() => {
-      // Covers the envelope's capability-gated early returns, which never
-      // reach settleAccept/finalizeRejection; settling twice is a no-op.
-      this.settleFate(localSeq);
       this.#commitPromises.delete(promise);
       if (this.#schedulerObservationFlushPromise === promise) {
         this.#schedulerObservationFlushPromise = undefined;
@@ -3272,6 +3247,61 @@ class SpaceReplica implements ISpaceReplica {
 
   private settleFate(localSeq: number): void {
     this.#unsettledFates.delete(localSeq);
+    this.#issuedLocalSeqs.delete(localSeq);
+    // A fate settled WITHOUT issuing (build failure, pre-send cascade
+    // drop, capability-dropped observation) releases gate turns the same
+    // way issuance does: nothing will ever reach the wire under that
+    // number.
+    this.releaseIssueTurns();
+  }
+
+  // --- Issue-order gate (CT-1910) ------------------------------------
+  // Requests carrying localSeqs reach the wire in allocation order, so the
+  // session's sequence is monotonic on delivery (INV-5): a commit's turn
+  // opens when every lower allocated localSeq has been issued or has
+  // settled without issuing. The legacy observation envelope bypasses the
+  // gate — its flush-time number sits above the semantic commits held
+  // behind it by design (the pre-`observationBatchRequests` status quo).
+
+  private issueTurnBlocked(localSeq: number): boolean {
+    for (const pending of this.#unsettledFates) {
+      if (pending < localSeq && !this.#issuedLocalSeqs.has(pending)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private awaitIssueTurn(localSeq: number): Promise<void> {
+    if (!this.issueTurnBlocked(localSeq)) {
+      return Promise.resolve();
+    }
+    const turn = Promise.withResolvers<void>();
+    this.#issueTurnWaiters.push({ localSeq, turn });
+    return turn.promise;
+  }
+
+  private noteIssued(localSeq: number): void {
+    this.#issuedLocalSeqs.add(localSeq);
+    this.releaseIssueTurns();
+  }
+
+  private releaseIssueTurns(): void {
+    if (this.#issueTurnWaiters.length === 0) {
+      return;
+    }
+    const blocked: Array<{
+      localSeq: number;
+      turn: PromiseWithResolvers<void>;
+    }> = [];
+    for (const waiter of this.#issueTurnWaiters) {
+      if (this.issueTurnBlocked(waiter.localSeq)) {
+        blocked.push(waiter);
+      } else {
+        waiter.turn.resolve();
+      }
+    }
+    this.#issueTurnWaiters = blocked;
   }
 
   /** The verdict watermark to attest on a commit being built at `localSeq`
@@ -3319,111 +3349,124 @@ class SpaceReplica implements ISpaceReplica {
     if (source !== undefined) {
       recordCommitLocalSeq(source, this.#space, localSeq);
     }
-    const commit = withCommitTiming(
-      ["commitOperations", "buildCommit"],
-      (): ClientCommit => ({
-        localSeq,
-        verdictsThrough: this.verdictFrontierBefore(localSeq),
-        reads: this.buildReads(source, localSeq),
-        // Cell ops first, folded SQLite ops last (applied in array order by the
-        // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: [
-          ...operations.map((operation) => {
-            switch (operation.op) {
-              case "delete":
-                return operation;
-              case "patch":
-                return {
-                  op: "patch" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  patches: operation.patches,
-                };
-              case "set":
-                return {
-                  op: "set" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  value: operation.value,
-                };
-            }
-          }),
-          ...sqliteOps,
-        ],
-        ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
-        ...(activePreconditions.length > 0
-          ? { preconditions: [...activePreconditions] }
-          : {}),
-      }),
-    );
-    const touched = operations.map((operation) => ({
-      id: operation.id,
-      scope: operation.scope,
-    }));
-    const hasSemanticOperations = operations.length > 0;
-    const shouldNotifySubscribers = hasSemanticOperations &&
-      this.hasNotificationSubscribers();
-    const shouldNotifySinks = hasSemanticOperations &&
-      this.hasSinkSubscribers(touched);
-    const before = withCommitTiming(
-      ["commitOperations", "snapshotBefore"],
-      () =>
-        shouldNotifySubscribers
-          ? Differential.checkout(
-            this,
-            touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-          )
-          : undefined,
-    );
-
-    withCommitTiming(["commitOperations", "applyPending"], () => {
-      for (const operation of operations) {
-        this.applyPending(operation, localSeq);
-      }
-    });
-
-    withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
-      if (before !== undefined) {
-        const optimistic = before.compare(this);
-        this.#subscription.next({
-          type: "commit",
-          space: this.#space,
-          changes: optimistic,
-          source,
-        });
-        if (shouldNotifySinks) {
-          this.notifySinks(optimistic);
-        }
-      } else if (shouldNotifySinks) {
-        this.notifySinksForIds(touched);
-      }
-    });
-
-    const promise = withCommitTiming(
-      ["commitOperations", "pushCommitStart"],
-      () =>
-        this.pushCommit(
+    // Any throw between the allocation above and pushCommit's own
+    // settlement paths (a read-activity provider throwing during build, a
+    // subscriber throwing during the optimistic notify) must still settle
+    // this fate: an abandoned entry freezes the verdict frontier below
+    // this localSeq forever — and now also wedges the issue-order gate for
+    // every later send.
+    try {
+      const commit = withCommitTiming(
+        ["commitOperations", "buildCommit"],
+        (): ClientCommit => ({
           localSeq,
-          operations,
-          commit,
-          source,
-          { waitForSchedulerObservations: true, commitOptions },
-        ),
-    );
-    this.#commitPromises.add(promise);
-    // Keyed registration for the old-server scalarization hold: a later
-    // stacked commit awaits its omitted lower dependencies' outcomes here.
-    // Removed on settlement (absent key = settled); the .catch keeps the
-    // tracking copy from surfacing as an unhandled rejection.
-    this.#commitOutcomeBySeq.set(
-      localSeq,
-      promise.catch(() => {}).finally(() => {
-        this.#commitOutcomeBySeq.delete(localSeq);
-      }),
-    );
-    const result = await promise;
-    this.#commitPromises.delete(promise);
-    return result;
+          verdictsThrough: this.verdictFrontierBefore(localSeq),
+          reads: this.buildReads(source, localSeq),
+          // Cell ops first, folded SQLite ops last (applied in array order by the
+          // engine; sqlite ops are not entity revisions and carry no id/scope).
+          operations: [
+            ...operations.map((operation) => {
+              switch (operation.op) {
+                case "delete":
+                  return operation;
+                case "patch":
+                  return {
+                    op: "patch" as const,
+                    id: operation.id,
+                    scope: operation.scope,
+                    patches: operation.patches,
+                  };
+                case "set":
+                  return {
+                    op: "set" as const,
+                    id: operation.id,
+                    scope: operation.scope,
+                    value: operation.value,
+                  };
+              }
+            }),
+            ...sqliteOps,
+          ],
+          ...(schedulerObservation !== undefined
+            ? { schedulerObservation }
+            : {}),
+          ...(activePreconditions.length > 0
+            ? { preconditions: [...activePreconditions] }
+            : {}),
+        }),
+      );
+      const touched = operations.map((operation) => ({
+        id: operation.id,
+        scope: operation.scope,
+      }));
+      const hasSemanticOperations = operations.length > 0;
+      const shouldNotifySubscribers = hasSemanticOperations &&
+        this.hasNotificationSubscribers();
+      const shouldNotifySinks = hasSemanticOperations &&
+        this.hasSinkSubscribers(touched);
+      const before = withCommitTiming(
+        ["commitOperations", "snapshotBefore"],
+        () =>
+          shouldNotifySubscribers
+            ? Differential.checkout(
+              this,
+              touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+            )
+            : undefined,
+      );
+
+      withCommitTiming(["commitOperations", "applyPending"], () => {
+        for (const operation of operations) {
+          this.applyPending(operation, localSeq);
+        }
+      });
+
+      withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
+        if (before !== undefined) {
+          const optimistic = before.compare(this);
+          this.#subscription.next({
+            type: "commit",
+            space: this.#space,
+            changes: optimistic,
+            source,
+          });
+          if (shouldNotifySinks) {
+            this.notifySinks(optimistic);
+          }
+        } else if (shouldNotifySinks) {
+          this.notifySinksForIds(touched);
+        }
+      });
+
+      const promise = withCommitTiming(
+        ["commitOperations", "pushCommitStart"],
+        () =>
+          this.pushCommit(
+            localSeq,
+            operations,
+            commit,
+            source,
+            { waitForSchedulerObservations: true, commitOptions },
+          ),
+      );
+      this.#commitPromises.add(promise);
+      // Keyed registration for the old-server scalarization hold: a later
+      // stacked commit awaits its omitted lower dependencies' outcomes here.
+      // Removed on settlement (absent key = settled); the .catch keeps the
+      // tracking copy from surfacing as an unhandled rejection.
+      this.#commitOutcomeBySeq.set(
+        localSeq,
+        promise.catch(() => {}).finally(() => {
+          this.#commitOutcomeBySeq.delete(localSeq);
+        }),
+      );
+      const result = await promise;
+      this.#commitPromises.delete(promise);
+      return result;
+    } catch (error) {
+      this.settleFate(localSeq);
+      throw error;
+    }
   }
 
   /**
@@ -3665,10 +3708,14 @@ class SpaceReplica implements ISpaceReplica {
             await Promise.all(waits);
           }
         }
+        // Issue-order gate (CT-1910): hold the send until every lower
+        // allocated localSeq has reached the wire or settled without
+        // issuing, so delivery stays monotonic in localSeq (INV-5).
+        await this.awaitIssueTurn(localSeq);
         if (inFlight?.localRejectionValue !== undefined) {
           // A pending dependency was dropped while we awaited the scheduler
-          // batch flush or the session handshake — do not send a commit whose
-          // doom is already provable.
+          // batch flush, the session handshake, or the issue-order gate —
+          // do not send a commit whose doom is already provable.
           telemetry?.submit({
             type: "storage.push.error",
             id: pushOpId,
@@ -3686,6 +3733,7 @@ class SpaceReplica implements ISpaceReplica {
         if (inFlight === undefined) {
           // No pending reads → no dependency that can be dropped from under
           // this commit; keep the direct await.
+          this.noteIssued(localSeq);
           const applied = await session.transact(
             wireCommit,
             () => this.markRouteWriteIssued(routeSources),
@@ -3717,6 +3765,7 @@ class SpaceReplica implements ISpaceReplica {
         // Race the server verdict against a locally-fabricated rejection (a
         // dependency dropped mid-flight, or a replica reset). A server
         // rejection wins the race by REJECTING it, landing in the catch below.
+        this.noteIssued(localSeq);
         const verdict = session.transact(
           wireCommit,
           () => this.markRouteWriteIssued(routeSources),

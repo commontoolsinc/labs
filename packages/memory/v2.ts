@@ -267,9 +267,9 @@ export type ClientCommit = {
   preconditions?: CommitPrecondition[];
   /** The observation, opaque here: this layer stores and forwards it, and
    *  the runner owns its shape and validation. `FabricValue` says only what
-   *  the wire requires of it. */
+   *  the wire requires of it. Observation BATCHES do not ride commits: they
+   *  travel as the dedicated `observation.batch` request (CT-1910). */
   schedulerObservation?: FabricValue;
-  schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;
   merge?: {
@@ -292,7 +292,6 @@ export type SessionOpenResult = {
 
 export type MemoryProtocolFlags = {
   modernCellRep: boolean;
-  persistentSchedulerState: boolean;
   commitPreconditions: boolean;
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
@@ -334,6 +333,20 @@ export type MemoryProtocolFlags = {
    */
   inferredPendingDependencies: boolean;
   /**
+   * Persistent scheduler state, spoken in its current shape (CT-1910):
+   * scheduler-observation batches travel as the dedicated
+   * `observation.batch` request — the transport wrapper carries no
+   * localSeq, so the session's commit sequence stays monotonic on the
+   * wire (INV-5) — and inline observations, snapshot lists, and
+   * sync-frame observation rows are accepted per connection when BOTH
+   * peers advertise this. REPLACES the retired `persistentSchedulerState`
+   * flag, whose zero-op envelope wire shape never worked (a flush-time
+   * envelope localSeq leapfrogged held semantic commits) and is no longer
+   * emitted or accepted. Advertised when the ambient
+   * persistent-scheduler-state config is on.
+   */
+  observationBatchRequests: boolean;
+  /**
    * Server capability (CT-1927): the server stages a `caughtUpLocalSeq`
    * catch-up obligation for every accept and every conflict rejection —
    * other rejection kinds carry none — so the batched fan-out's next frame to the
@@ -361,12 +374,12 @@ export type MemoryProtocolFlags = {
  */
 export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
-  persistentSchedulerState?: boolean;
   commitPreconditions?: boolean;
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
   inferredPendingDependencies?: boolean;
+  observationBatchRequests?: boolean;
   verdictCatchUpMarkers?: boolean;
   entityIdListing?: boolean;
   entityIdPagination?: boolean;
@@ -497,10 +510,10 @@ export type SessionSync = {
   // (fromSeq, toSeq] window, so subscribers can ADOPT the writer's action
   // runs instead of re-running them
   // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
-  // Present only when both the server flag and the receiving connection's
-  // negotiated persistentSchedulerState flag are on. Same row shape as the
-  // scheduler.snapshot.list result; `observation` is intentionally
-  // `unknown` — the runner owns validation.
+  // Present only when the receiving connection negotiated the
+  // `observationBatchRequests` capability (both peers advertising it).
+  // Same row shape as the scheduler.snapshot.list result; `observation`
+  // is intentionally `unknown` — the runner owns validation.
   observations?: SchedulerActionSnapshotResult[];
 };
 
@@ -524,6 +537,38 @@ export type TransactRequest = {
   space: string;
   sessionId: SessionId;
   commit: ClientCommit;
+};
+
+/**
+ * A scheduler-observation batch as its own request (CT-1910): the transport
+ * wrapper for no-op observation entries, replacing the historical zero-op
+ * `ClientCommit` envelope. The wrapper itself carries NO localSeq — it is
+ * not a session-stream event: it writes nothing, reads nothing, and leaves
+ * no commit row. Each ENTRY keeps its own localSeq (per-entry keep/drop,
+ * replay identity, and catch-up-marker coverage), and delivery ordering is
+ * the entries' — the runner issues requests in allocation order, so the
+ * session's localSeq stream stays monotonic on the wire (INV-5) instead of
+ * a flush-time envelope number leapfrogging a held semantic commit.
+ * Emitted only toward servers advertising `observationBatchRequests`;
+ * legacy envelopes remain accepted for older clients.
+ */
+export type ObservationBatchRequest = {
+  type: "observation.batch";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  branch?: BranchName;
+  entries: SchedulerObservationCommit[];
+};
+
+export type ObservationBatchEntryResult = {
+  localSeq: number;
+  status: "kept" | "dropped";
+  reason?: string;
+};
+
+export type ObservationBatchResult = {
+  results: ObservationBatchEntryResult[];
 };
 
 export type GraphQueryRequest = {
@@ -874,6 +919,7 @@ export type ClientMessage =
   | HelloMessage
   | SessionOpenRequest
   | TransactRequest
+  | ObservationBatchRequest
   | GraphQueryRequest
   | EntityIdListRequest
   | EntityIdLookupRequest
@@ -996,7 +1042,6 @@ export function resetInferredPendingDependenciesConfig(): void {
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
-  persistentSchedulerState: getPersistentSchedulerStateConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
@@ -1011,6 +1056,11 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // advertisement is a rollout lever: off sends new clients back to
   // declared arrays without a redeploy of either side.
   inferredPendingDependencies: getInferredPendingDependenciesConfig(),
+  // The persistent-scheduler-state capability in its current shape:
+  // advertised only while the ambient config is on, and negotiated per
+  // connection (both peers must carry it). Peers that see it absent send
+  // no scheduler payloads at all — there is no legacy fallback shape.
+  observationBatchRequests: getPersistentSchedulerStateConfig(),
   // Likewise build-inherent: this build's server stages the catch-up
   // obligation for every verdict (accepts included), so it always
   // advertises it. Clients that see it absent apply verdicts immediately.
@@ -1045,14 +1095,9 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
-  const persistentSchedulerState = value.persistentSchedulerState;
-  if (
-    persistentSchedulerState !== undefined &&
-    typeof persistentSchedulerState !== "boolean"
-  ) {
-    return null;
-  }
-
+  // A `persistentSchedulerState` key from an older peer parses as an
+  // unknown field: the capability it advertised was the retired zero-op
+  // envelope shape, which this build neither emits nor accepts.
   const commitPreconditions = value.commitPreconditions;
   if (
     commitPreconditions !== undefined &&
@@ -1101,6 +1146,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const observationBatchRequests = value.observationBatchRequests;
+  if (
+    observationBatchRequests !== undefined &&
+    typeof observationBatchRequests !== "boolean"
+  ) {
+    return null;
+  }
+
   const verdictCatchUpMarkers = value.verdictCatchUpMarkers;
   if (
     verdictCatchUpMarkers !== undefined &&
@@ -1135,7 +1188,6 @@ export const parseMemoryProtocolFlags = (
 
   return {
     modernCellRep: modernCellRep === true,
-    persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTableV2: syncSchemaTableV2 === true,
     // Absent (an older peer) parses to false: the capability must be
@@ -1147,6 +1199,9 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older server, or advertisement turned off) parses to
     // false: clients keep declaring full localSeq arrays.
     inferredPendingDependencies: inferredPendingDependencies === true,
+    // Absent (an older server, or the feature off) parses to false:
+    // clients send no scheduler payloads at all.
+    observationBatchRequests: observationBatchRequests === true,
     // Absent (an older server that stamps markers only for conflicts)
     // parses to false: clients apply verdicts immediately instead of
     // parking them on marker coverage.
@@ -1164,12 +1219,12 @@ export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
-  persistentSchedulerState: flags.persistentSchedulerState,
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
   inferredPendingDependencies: flags.inferredPendingDependencies,
+  observationBatchRequests: flags.observationBatchRequests,
   verdictCatchUpMarkers: flags.verdictCatchUpMarkers,
   entityIdListing: flags.entityIdListing,
   entityIdPagination: flags.entityIdPagination,

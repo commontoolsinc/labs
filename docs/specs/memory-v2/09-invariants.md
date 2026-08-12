@@ -210,6 +210,17 @@ the basis layer's seq, so the scan interval past the basis contains no
 own-session commits.
 
 It is also the completeness premise of inferred pending dependencies
+(03-commit-model.md §3.6.3) and of the monotonic-watermark judgment there.
+The CLIENT upholds it structurally: requests carrying localSeqs reach the
+wire in allocation order (the runner's issue-order gate), and
+scheduler-observation batches travel as the unnumbered `observation.batch`
+request — the retired zero-op envelope commit allocated its localSeq at
+flush time, above semantic commits held behind it, and was this
+invariant's one standing violation. Checked by the runner's
+monotonic-delivery pins in
+`packages/runner/test/memory-v2-stacked-commit.test.ts`.
+
+It is also the completeness premise of inferred pending dependencies
 (03-commit-model.md §3.6.3): at an inferred-shape commit's decision, every
 lower same-session localSeq is decided, so the server's decided-commit
 record is the whole candidate set. The engine enforces the premise for

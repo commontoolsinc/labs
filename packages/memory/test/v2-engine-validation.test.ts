@@ -10,6 +10,7 @@ import { assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   applyCommit,
+  applyObservationBatch,
   close,
   type Engine,
   open,
@@ -52,38 +53,35 @@ Deno.test("rejects a commit with no operations, observation, or preconditions", 
   });
 });
 
-Deno.test("rejects mixing schedulerObservation with schedulerObservationBatch", async () => {
+Deno.test("rejects an observation batch without a principal", async () => {
   await withEngine((engine) => {
     assertThrows(
       () =>
-        applyCommit(engine, {
+        applyObservationBatch(engine, {
           sessionId: "s:a",
-          principal: "did:key:alice",
-          commit: commit(1, {
+          batch: [{
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
             schedulerObservation: { x: 1 },
-            schedulerObservationBatch: [{ y: 1 }],
-          }),
+          }],
         }),
       ProtocolError,
-      "cannot mix schedulerObservation and schedulerObservationBatch",
+      "require an authenticated principal",
     );
   });
 });
 
-Deno.test("rejects semantic operations on an observation-batch commit", async () => {
+Deno.test("rejects an observation batch without entries", async () => {
   await withEngine((engine) => {
     assertThrows(
       () =>
-        applyCommit(engine, {
+        applyObservationBatch(engine, {
           sessionId: "s:a",
           principal: "did:key:alice",
-          commit: commit(1, {
-            operations: [setOp("of:fid1:a", 1)],
-            schedulerObservationBatch: [{ y: 1 }],
-          }),
+          batch: [],
         }),
       ProtocolError,
-      "must not include semantic operations",
+      "requires at least one entry",
     );
   });
 });

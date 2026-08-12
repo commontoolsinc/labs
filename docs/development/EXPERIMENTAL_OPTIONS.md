@@ -119,7 +119,10 @@ propagate](#how-flags-propagate).
   point is `setPersistentSchedulerStateConfig` in
   [`packages/memory/v2.ts`](../../packages/memory/v2.ts) (the runner owns the
   feature, but the value has to be known at the memory client and server
-  handshake, so it lives beside the memory protocol flags).
+  handshake, so it lives beside the memory protocol flags). On the wire the
+  capability is advertised as `observationBatchRequests` (CT-1910), which
+  replaced the retired `persistentSchedulerState` hello flag along with its
+  zero-op envelope commit shape.
 - **Added by.** Bernhard Seefeld, in "persist scheduler state for rehydration"
   (#3646, 2026-05-28).
 - **Purpose.** Persists the scheduler's observations to durable storage through

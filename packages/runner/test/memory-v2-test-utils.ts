@@ -124,6 +124,8 @@ export type ScriptedTransportMessage = {
     query?: { roots?: Array<{ id: string }> };
   }>;
   commit?: unknown;
+  /** `observation.batch` requests: the entries the wrapper carries. */
+  entries?: unknown;
 };
 
 /**

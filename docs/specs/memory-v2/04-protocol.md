@@ -51,7 +51,7 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true,
+    "observationBatchRequests": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
@@ -69,7 +69,7 @@ If the server accepts the protocol, it returns:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true,
+    "observationBatchRequests": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
@@ -129,15 +129,20 @@ After a successful `session.open`, the response includes a new
 `sessionOpen.challenge`. The client uses that new challenge for the next
 `session.open` on the same connection.
 
-`persistentSchedulerState` advertises whether the runner and memory server are
-allowed to write and serve internal scheduler observations. It defaults to
-`false` when absent. When `false`, clients should not send scheduler observation
-payloads, servers ignore scheduler observation payloads if received, and
-snapshot-list requests return no scheduler snapshots even if older scheduler
-rows exist in the database. This flag is negotiated as an optional capability:
-a client and server may connect when their scheduler-state flags differ, and
-the server's flag controls the scheduler-observation data plane for that
-connection.
+`observationBatchRequests` advertises whether the peer speaks the
+persistent-scheduler-state data plane in its current shape: no-op
+observation batches travel as the dedicated `observation.batch` request
+(§4.3.2), inline observations may ride semantic commits, and snapshot
+lists and sync-frame observation rows are served. It defaults to `false`
+when absent. When `false`, clients send no scheduler payloads at all and
+snapshot-list requests degrade to "no snapshots" client-side. The flag is
+negotiated as an optional capability per connection (both peers must
+advertise it), and it REPLACES the retired `persistentSchedulerState`
+flag: the zero-op `ClientCommit` envelope that flag's data plane used is
+neither emitted nor accepted — its flush-time envelope localSeq broke
+monotonic delivery (INV-5), which the request shape restores. A
+`persistentSchedulerState` key from an older peer parses as an unknown
+field.
 
 `syncSchemaTableV2` advertises support for the hash-keyed schema table described
 in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
@@ -291,7 +296,7 @@ interface HelloMessage {
   protocol: "memory";
   flags: {
     modernCellRep: boolean;
-    persistentSchedulerState?: boolean;
+    observationBatchRequests?: boolean;
     syncSchemaTableV2?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
@@ -526,7 +531,55 @@ Path conventions on the wire:
 - query selectors remain value-relative and are re-rooted by the shared
   traversal layer.
 
-### 4.3.2 `query` — Deferred In This Pass
+### 4.3.2 `observation.batch` — Scheduler-Observation Batches
+
+```typescript
+// Shown at module scope.
+interface SchedulerObservationCommit {
+  localSeq: number;
+  reads: ClientCommit["reads"];
+  schedulerObservation: unknown;
+}
+
+interface ObservationBatchRequest {
+  type: "observation.batch";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  branch?: BranchId;
+  entries: SchedulerObservationCommit[];
+}
+
+interface ObservationBatchEntryResult {
+  localSeq: number;
+  status: "kept" | "dropped";
+  reason?: string;
+}
+
+interface ObservationBatchResult {
+  results: ObservationBatchEntryResult[];
+}
+```
+
+The transport wrapper for no-op scheduler observations. The wrapper itself
+carries NO localSeq — it is not a session-stream event: it writes nothing,
+reads nothing, and leaves no commit row. Each ENTRY keeps its own localSeq
+(per-entry keep/drop decisions, replay identity, and catch-up-marker
+coverage; the server stages the marker at the highest entry localSeq).
+Entries are decided independently: a stale observation is `dropped` as
+obsolete scheduler metadata, never rejected as a semantic conflict.
+
+Delivery ordering: the runner issues requests in allocation order (the
+issue-order gate), so the session's localSeq stream stays monotonic on the
+wire — the property INV-5 states — instead of a flush-time envelope number
+leapfrogging a semantic commit held behind the batch. Failures are
+droppable end to end: a rejected or lost batch resolves its observations
+client-side as dropped (the resume re-runs fresh) and is never retained
+for reconnect replay.
+
+Only valid toward a peer advertising `observationBatchRequests`.
+
+### 4.3.3 `query` — Deferred In This Pass
 
 The older simple `/memory/query` surface is not currently exposed on the v2
 wire. One-shot reads in this pass use `graph.query` directly.

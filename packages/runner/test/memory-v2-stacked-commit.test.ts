@@ -29,6 +29,7 @@ import type {
   ConfirmedRead,
   Operation,
   PendingRead,
+  SchedulerObservationCommit,
 } from "@commonfabric/memory/v2";
 import {
   parentPath,
@@ -179,6 +180,8 @@ const localSeqTop = (read: { localSeq?: number | number[] }): number => {
 class ScriptedServerModel {
   connectionCount = 0;
   transactLocalSeqs: number[] = [];
+  /** Entry payloads of every observation.batch request, receipt order. */
+  observationBatches: SchedulerObservationCommit[][] = [];
   readonly confirmed = new Map<URI, DocState>();
   readonly applied = new Map<number, AppliedRecord>();
   readonly rejected = new Map<number, RejectedRecord>();
@@ -501,6 +504,56 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
         void verdictTask.finally(() => this.#verdictTasks.delete(verdictTask));
         break;
       }
+      case "observation.batch": {
+        const entries = message.entries as SchedulerObservationCommit[];
+        // Delivery-order bookkeeping: entries carry the batch's localSeqs
+        // (the request itself has none), so receipt records THEM — the
+        // monotonic-delivery pins read this exactly like transact receipts.
+        this.model.observationBatches.push(entries);
+        for (const entry of entries) {
+          this.model.transactLocalSeqs.push(entry.localSeq);
+        }
+        const scripted = entries.length > 0
+          ? this.model.scripted.get(entries[0].localSeq)
+          : undefined;
+        scripted?.onReceipt?.();
+        const responseGate = scripted?.responseGate;
+        const verdictTask = new Promise<void>((resolveVerdict) => {
+          setTimeout(() => {
+            void (async () => {
+              try {
+                await responseGate;
+                if (scripted?.kind === "rejectConflict") {
+                  this.respond({
+                    type: "response",
+                    requestId: message.requestId!,
+                    error: {
+                      name: "ConflictError",
+                      message: scripted.message ?? "scripted batch rejection",
+                    },
+                  });
+                  return;
+                }
+                this.respond({
+                  type: "response",
+                  requestId: message.requestId!,
+                  ok: {
+                    results: entries.map((entry) => ({
+                      localSeq: entry.localSeq,
+                      status: "kept" as const,
+                    })),
+                  },
+                });
+              } finally {
+                resolveVerdict();
+              }
+            })();
+          }, 0);
+        });
+        this.#verdictTasks.add(verdictTask);
+        void verdictTask.finally(() => this.#verdictTasks.delete(verdictTask));
+        break;
+      }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
@@ -747,14 +800,11 @@ const schedulerObservationFor = (actionId: string) => ({
 });
 
 const schedulerBatchActionIds = (harness: Harness): string[][] =>
-  [...harness.model.applied.values()]
-    .filter((record) => record.commit.schedulerObservationBatch !== undefined)
-    .sort((left, right) => left.applied.seq - right.applied.seq)
-    .map((record) =>
-      record.commit.schedulerObservationBatch!.map((entry) =>
-        (entry.schedulerObservation as { actionId: string }).actionId
-      )
-    );
+  harness.model.observationBatches.map((entries) =>
+    entries.map((entry) =>
+      (entry.schedulerObservation as { actionId: string }).actionId
+    )
+  );
 
 Deno.test("memory v2 ignores no-op scheduler observations when persistent scheduler state is off", async () => {
   resetPersistentSchedulerStateConfig();
@@ -788,16 +838,13 @@ Deno.test("memory v2 batches adjacent no-op scheduler observations", async () =>
     const [firstResult, secondResult] = await Promise.all([first, second]);
     assertEquals(firstResult, { ok: {} });
     assertEquals(secondResult, { ok: {} });
-    assertEquals(harness.model.transactLocalSeqs.length, 1);
-
-    const applied = [...harness.model.applied.values()][0];
-    assertEquals(applied.commit.operations, []);
-    assertEquals(
-      applied.commit.schedulerObservationBatch?.map((entry) =>
-        (entry.schedulerObservation as { actionId: string }).actionId
-      ),
+    // One batch REQUEST carried both entries; delivery records the entries'
+    // own localSeqs (the request has none of its own).
+    assertEquals(harness.model.observationBatches.length, 1);
+    assertEquals(harness.model.transactLocalSeqs, [1, 2]);
+    assertEquals(schedulerBatchActionIds(harness), [
       ["action:first", "action:second"],
-    );
+    ]);
   } finally {
     await harness.close();
     resetPersistentSchedulerStateConfig();
@@ -829,18 +876,12 @@ Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", as
     assertEquals(writeResult, { ok: {} });
     assertEquals(harness.model.transactLocalSeqs.length, 2);
 
+    assertEquals(schedulerBatchActionIds(harness), [["action:first"]]);
     const applied = [...harness.model.applied.values()].sort((a, b) =>
       a.applied.seq - b.applied.seq
     );
-    assertEquals(applied[0].commit.operations, []);
     assertEquals(
-      applied[0].commit.schedulerObservationBatch?.map((entry) =>
-        (entry.schedulerObservation as { actionId: string }).actionId
-      ),
-      ["action:first"],
-    );
-    assertEquals(
-      applied[1].commit.operations.map((operation) => operation.op),
+      applied[0].commit.operations.map((operation) => operation.op),
       [
         "set",
       ],
@@ -851,7 +892,7 @@ Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", as
   }
 });
 
-Deno.test("memory v2 keeps a semantic write behind every queued scheduler batch", async () => {
+Deno.test("memory v2 keeps a semantic write behind every queued scheduler batch, delivered in localSeq order", async () => {
   setPersistentSchedulerStateConfig(true);
   const harness = createHarness();
   const firstStarted = Promise.withResolvers<void>();
@@ -863,7 +904,7 @@ Deno.test("memory v2 keeps a semantic write behind every queued scheduler batch"
       operations: [],
       schedulerObservation: schedulerObservationFor("action:first"),
     });
-    harness.model.setOutcome(2, {
+    harness.model.setOutcome(1, {
       kind: "accept",
       responseGate: releaseFirst.promise,
       onReceipt: () => firstStarted.resolve(),
@@ -874,7 +915,7 @@ Deno.test("memory v2 keeps a semantic write behind every queued scheduler batch"
       operations: [],
       schedulerObservation: schedulerObservationFor("action:second"),
     });
-    harness.model.setOutcome(5, {
+    harness.model.setOutcome(2, {
       kind: "accept",
       responseGate: releaseSecond.promise,
       onReceipt: () => secondStarted.resolve(),
@@ -893,7 +934,12 @@ Deno.test("memory v2 keeps a semantic write behind every queued scheduler batch"
     releaseFirst.resolve();
     await secondStarted.promise;
     await Promise.resolve();
-    assertEquals(harness.model.transactLocalSeqs, [2, 5]);
+    // Entry 2's batch reached the wire while the semantic write (3) still
+    // waits behind it — and with the batch request carrying no number of
+    // its own, DELIVERY stays monotonic in localSeq: the pre-CT-1910
+    // envelope shape put a flush-time number above the held write here
+    // (the historical [2, 5, 4] ordering this test used to pin).
+    assertEquals(harness.model.transactLocalSeqs, [1, 2]);
 
     releaseSecond.resolve();
     await Promise.all([
@@ -901,7 +947,7 @@ Deno.test("memory v2 keeps a semantic write behind every queued scheduler batch"
       assertResultOk(second),
       assertResultOk(write),
     ]);
-    assertEquals(harness.model.transactLocalSeqs, [2, 5, 4]);
+    assertEquals(harness.model.transactLocalSeqs, [1, 2, 3]);
   } finally {
     releaseFirst.resolve();
     releaseSecond.resolve();
@@ -923,7 +969,7 @@ Deno.test("memory v2 does not hold a semantic write behind a later scheduler bat
       operations: [],
       schedulerObservation: schedulerObservationFor("action:first"),
     });
-    harness.model.setOutcome(2, {
+    harness.model.setOutcome(1, {
       kind: "accept",
       responseGate: releaseFirst.promise,
       onReceipt: () => firstStarted.resolve(),
@@ -938,7 +984,7 @@ Deno.test("memory v2 does not hold a semantic write behind a later scheduler bat
         value: { value: valueFor("write") },
       }],
     });
-    harness.model.setOutcome(3, {
+    harness.model.setOutcome(2, {
       kind: "accept",
       onReceipt: () => {
         writeWasIssued = true;
@@ -949,7 +995,7 @@ Deno.test("memory v2 does not hold a semantic write behind a later scheduler bat
       operations: [],
       schedulerObservation: schedulerObservationFor("action:second"),
     });
-    harness.model.setOutcome(5, {
+    harness.model.setOutcome(3, {
       kind: "accept",
       responseGate: releaseSecond.promise,
       onReceipt: () => secondStarted.resolve(),
@@ -1025,23 +1071,23 @@ const assertNonDocumentSchedulerBoundary = async (
       operations: [],
       schedulerObservation: schedulerObservationFor("action:second"),
     });
-    harness.model.setOutcome(4, {
+    harness.model.setOutcome(1, {
       kind: "rejectConflict",
       message: "preceding observation rejected",
     });
 
-    await assertConflict(first, "preceding observation rejected");
-    await assertConflict(direct, "preceding observation rejected");
+    // A rejected batch DROPS its observations (droppable bookkeeping,
+    // flag-off semantics) instead of spreading the rejection into the
+    // semantic commit ordering behind them — the pre-CT-1910 envelope
+    // shape rejected `first` and `direct` here.
+    await assertResultOk(first);
+    await assertResultOk(direct);
     await assertResultOk(second);
-    assertEquals(harness.model.transactLocalSeqs, [4, 5]);
-    assertEquals(
-      harness.model.rejected.get(4)?.commit.schedulerObservationBatch?.map(
-        (entry) =>
-          (entry.schedulerObservation as { actionId: string }).actionId,
-      ),
+    assertEquals(harness.model.transactLocalSeqs, [1, 2, 3]);
+    assertEquals(schedulerBatchActionIds(harness), [
       ["action:first"],
-    );
-    assertEquals(schedulerBatchActionIds(harness), [["action:second"]]);
+      ["action:second"],
+    ]);
   } finally {
     await harness.close();
     resetPersistentSchedulerStateConfig();
@@ -2855,62 +2901,6 @@ Deno.test("memory v2 stacked commits: a server without pendingReadStacks receive
   }
 });
 
-Deno.test("memory v2 stacked commits: old-server flush drops multi-layer observations client-side and sends the rest", async () => {
-  setPersistentSchedulerStateConfig(true);
-  const harness = await createHarness({
-    transport: (model) => new PreStackTransport(model),
-  });
-  const g1 = Promise.withResolvers<void>();
-  const g2 = Promise.withResolvers<void>();
-  try {
-    // Two pending layers on A: an observation reading A carries the array
-    // [t1, t2], which a pre-`pendingReadStacks` server cannot receive
-    // soundly (the scalar wire would omit t1 — if t1 drops, the old server
-    // would persist an observation that observed a dropped write).
-    const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
-    harness.model.setOutcome(t1.localSeq, {
-      kind: "accept",
-      responseGate: g1.promise,
-    });
-    const t2 = beginSet(harness, DOCS.A, valueFor("t2"));
-    harness.model.setOutcome(t2.localSeq, {
-      kind: "accept",
-      responseGate: g2.promise,
-    });
-    const multiLayer = harness.replica.commitNative({
-      operations: [],
-      schedulerObservation: schedulerObservationFor("action:multi-layer"),
-    }, sourceFromReads([{ id: DOCS.A }]));
-    const zeroRead = harness.replica.commitNative({
-      operations: [],
-      schedulerObservation: schedulerObservationFor("action:zero-read"),
-    });
-
-    // The multi-layer entry resolves {ok} from the client-side drop alone —
-    // BEFORE t1/t2 settle (their gates are still held): flag-off semantics
-    // for that observation, not a wait.
-    assertEquals(await multiLayer, { ok: {} });
-    assertEquals(await zeroRead, { ok: {} });
-
-    // The wire batch carried only the expressible entry.
-    const batches = [...harness.model.applied.values()].filter((record) =>
-      record.commit.schedulerObservationBatch !== undefined
-    );
-    assertEquals(batches.length, 1);
-    assertEquals(
-      batches[0].commit.schedulerObservationBatch?.map((entry) =>
-        (entry.schedulerObservation as { actionId: string }).actionId
-      ),
-      ["action:zero-read"],
-    );
-  } finally {
-    g1.resolve();
-    g2.resolve();
-    await harness.close();
-    resetPersistentSchedulerStateConfig();
-  }
-});
-
 Deno.test("memory v2 stacked commits: old-server hold — a dropped omitted dependency dooms the commit before it is ever sent", async () => {
   const harness = await createHarness({
     transport: (model) => new PreStackTransport(model),
@@ -3512,13 +3502,13 @@ Deno.test("memory v2 stacked commits: a dependency dropped during the scheduler-
     );
 
     // The observation commit enters the scheduler batch (consuming localSeq
-    // 2); t2 takes 3; the flush then MINTS its own commit as localSeq 4.
-    // Gating 4 deterministically parks t2 on the flush await.
+    // 2); t2 takes 3. The batch request carries entry 2's number — gating
+    // it deterministically parks t2 on the flush await.
     const observation = harness.replica.commitNative({
       operations: [],
       schedulerObservation: schedulerObservationFor("action:doomed-window"),
     });
-    harness.model.setOutcome(4, {
+    harness.model.setOutcome(2, {
       kind: "accept",
       responseGate: gObs.promise,
     });
@@ -3538,7 +3528,7 @@ Deno.test("memory v2 stacked commits: a dependency dropped during the scheduler-
 
     // Release the flush: t2 resumes at the pre-send checkpoint, sees its
     // provable doom, and finalizes WITHOUT ever sending its own transact —
-    // only t1 (1) and the batch flush commit (4) ever reached the wire.
+    // only t1 (1) and the batch (entry 2) ever reached the wire.
     gObs.resolve();
     await assertConflict(
       t2,
@@ -3546,7 +3536,7 @@ Deno.test("memory v2 stacked commits: a dependency dropped during the scheduler-
     );
     await assertResultOk(observation);
     assertEquals(harness.model.transactLocalSeqs.includes(3), false);
-    assertEquals(harness.model.transactLocalSeqs.includes(4), true);
+    assertEquals(harness.model.transactLocalSeqs.includes(2), true);
   } finally {
     g1.resolve();
     gObs.resolve();
@@ -3555,22 +3545,24 @@ Deno.test("memory v2 stacked commits: a dependency dropped during the scheduler-
   }
 });
 
-Deno.test("memory v2 stacked commits: a rejected scheduler-batch flush rejects the waiting write pre-send", async () => {
+Deno.test("memory v2 stacked commits: a rejected scheduler-batch flush drops its observations and releases the waiting write", async () => {
   setPersistentSchedulerStateConfig(true);
   const harness = await createHarness();
   try {
-    // The observation entry consumes localSeq 1 and the write takes 2, but
-    // the batch flush MINTS its own commit as localSeq 3 — scripting THAT to
-    // reject makes the semantic write waiting on the flush surface the
-    // rejection without ever sending its own commit.
+    // The observation entry consumes localSeq 1 and the write takes 2; the
+    // batch request carries entry 1's number, and rejecting it DROPS the
+    // observation (droppable bookkeeping) instead of spreading the
+    // rejection into the write ordering behind it — the retired envelope
+    // shape rejected the write pre-send here.
     const observation = harness.replica.commitNative({
       operations: [],
       schedulerObservation: schedulerObservationFor("action:rejected-batch"),
     });
-    harness.model.setOutcome(3, {
+    harness.model.setOutcome(1, {
       kind: "rejectConflict",
       message: "observation batch rejected",
     });
+    harness.model.setOutcome(2, { kind: "accept" });
     const write = harness.replica.commitNative({
       operations: [{
         op: "set",
@@ -3579,16 +3571,16 @@ Deno.test("memory v2 stacked commits: a rejected scheduler-batch flush rejects t
         value: { value: valueFor("write") },
       }],
     });
-    await assertConflict(write, "observation batch rejected");
-    await assertConflict(observation, "observation batch rejected");
-    assertEquals(harness.model.transactLocalSeqs, [3]);
+    await assertResultOk(observation);
+    await assertResultOk(write);
+    assertEquals(harness.model.transactLocalSeqs, [1, 2]);
   } finally {
     await harness.close();
     resetPersistentSchedulerStateConfig();
   }
 });
 
-Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait for an unsent write sequence", async () => {
+Deno.test("memory v2 stacked commits: a scheduler-batch conflict drops the batch without touching retry machinery", async () => {
   setPersistentSchedulerStateConfig(true);
   setConflictAdmissionMode("preempt");
   const harness = await createHarness();
@@ -3599,7 +3591,7 @@ Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait f
       operations: [],
       schedulerObservation: schedulerObservationFor("action:retryable-batch"),
     });
-    harness.model.setOutcome(2, {
+    harness.model.setOutcome(1, {
       kind: "rejectConflict",
       message: "retryable observation batch rejected",
       retryAfterSeq: 0,
@@ -3608,17 +3600,11 @@ Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait f
     });
     await batchStarted.promise;
 
-    const retryReplica = harness.replica as unknown as {
-      waitForCaughtUpLocalSeq(localSeq: number): Promise<void>;
-    };
-    const waitedLocalSeqs: number[] = [];
-    retryReplica.waitForCaughtUpLocalSeq = (localSeq) => {
-      waitedLocalSeqs.push(localSeq);
-      return localSeq <= 2 ? Promise.resolve() : Promise.reject(
-        new Error(`waited for unsent localSeq=${localSeq}`),
-      );
-    };
-
+    // The retired envelope shape threaded a batch conflict into the
+    // conflict-retry machinery here, where its flush-time number could
+    // gate a retry on a localSeq nothing ever sent. The batch request has
+    // no number to gate on and its conflict simply DROPS the observations:
+    // no error surfaces, and semantic traffic proceeds untouched.
     const write = harness.replica.commitNative({
       operations: [{
         op: "set",
@@ -3627,23 +3613,12 @@ Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait f
         value: { value: valueFor("write") },
       }],
     });
+    harness.model.setOutcome(2, { kind: "accept" });
     releaseBatch.resolve();
     await harness.transport.drainVerdicts();
-    harness.pushSync({ caughtUpLocalSeq: 2 });
 
-    const [observationResult, writeResult] = await Promise.all([
-      observation,
-      write,
-    ]);
-    assertExists(observationResult.error);
-    assertExists(writeResult.error);
-    assertEquals(writeResult.error.message, observationResult.error.message);
-    const readyToRetry = (writeResult.error as {
-      readyToRetry?: () => Promise<void>;
-    }).readyToRetry;
-    assertExists(readyToRetry);
-    await readyToRetry();
-    assertEquals(waitedLocalSeqs.includes(3), false);
+    await assertResultOk(observation);
+    await assertResultOk(write);
 
     const nextWrite = harness.replica.commitNative({
       operations: [{
@@ -3653,8 +3628,12 @@ Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait f
         value: { value: valueFor("next-write") },
       }],
     }, sourceFromReads([{ id: DOCS.A }]));
+    harness.model.setOutcome(3, {
+      kind: "accept",
+      skipReadValidation: true,
+    });
     await assertResultOk(nextWrite);
-    assertEquals(harness.model.transactLocalSeqs, [2, 4]);
+    assertEquals(harness.model.transactLocalSeqs, [1, 2, 3]);
   } finally {
     releaseBatch.resolve();
     setConflictAdmissionMode(undefined);
@@ -3662,7 +3641,6 @@ Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait f
     resetPersistentSchedulerStateConfig();
   }
 });
-
 // The admission-control override reaches into the replica the same way the
 // subscription tests do (recordStaleFloor/noteCaughtUpLocalSeq are private).
 type AdmissionReplica = {
@@ -4984,6 +4962,117 @@ Deno.test("memory v2 stacked commits: the client cascade still runs on internal 
     assertEquals(hasPendingOverlay(harness, DOCS.A), false);
   } finally {
     gate.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a scheduler-held stacked commit keeps its inferred shape and monotonic delivery", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = await createHarness({
+    transport: (model) => new InferredDependencyTransport(model),
+  });
+  const releaseC1 = Promise.withResolvers<void>();
+  const batchStarted = Promise.withResolvers<void>();
+  const releaseBatch = Promise.withResolvers<void>();
+  try {
+    // localSeq 1: the dependency. Its verdict is HELD, so its optimistic
+    // write stays a pending layer for the stacked commit below to sit on —
+    // issued (on the wire) but not yet decided client-side.
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "accept",
+      responseGate: releaseC1.promise,
+    });
+
+    // Entry localSeq 2 rides a batch request whose response is held.
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:hold"),
+    });
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: releaseBatch.promise,
+      onReceipt: () => batchStarted.resolve(),
+    });
+    await batchStarted.promise;
+
+    // localSeq 3, stacked on c1's pending layer: held behind the batch
+    // entry, and — with the batch request carrying no number of its own —
+    // delivery stays monotonic in localSeq. Its dependency is issued, so
+    // inferred emission stays sound even though the verdict is still
+    // outstanding.
+    const stacked = harness.replica.commitNative(
+      {
+        operations: [{
+          op: "set",
+          id: DOCS.A,
+          type: DOCUMENT_MIME,
+          value: { value: valueFor("stacked") },
+        }],
+      },
+      sourceFromReads([{ id: DOCS.A }]),
+      { resolveAt: "verdict" },
+    );
+    harness.model.setOutcome(3, {
+      kind: "accept",
+      skipReadValidation: true,
+    });
+    await Promise.resolve();
+    assertEquals(harness.model.transactLocalSeqs, [c1.localSeq, 2]);
+
+    releaseBatch.resolve();
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(3),
+      "the stacked commit reaching the wire behind the batch",
+    );
+    assertEquals(harness.model.transactLocalSeqs, [c1.localSeq, 2, 3]);
+    releaseC1.resolve();
+    await assertResultOk(c1.promise);
+    await assertResultOk(observation);
+    await assertResultOk(stacked);
+
+    // Inferred wire shape: no dependency array, and the build-time
+    // watermark capped below the still-undecided dependency (c1 and entry
+    // 2 were both unsettled at build).
+    const sent = harness.model.applied.get(3);
+    assertExists(sent);
+    assertEquals(sent.commit.reads.pending.length, 1);
+    assertEquals(sent.commit.reads.pending[0].localSeq, undefined);
+    assertEquals(sent.commit.verdictsThrough, c1.localSeq - 1);
+  } finally {
+    releaseC1.resolve();
+    releaseBatch.resolve();
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a build-time failure settles its fate so the verdict watermark keeps advancing", async () => {
+  const harness = await createHarness({
+    transport: (model) => new InferredDependencyTransport(model),
+  });
+  try {
+    const bad = beginSet(harness, DOCS.A, valueFor("bad"), {
+      getReadActivities() {
+        throw new Error("read-activity provider failure");
+      },
+    });
+    const outcome = await bad.promise.then(
+      (result: unknown) => result as { error?: unknown },
+      (error: unknown) => ({ error }),
+    );
+    assertExists(outcome.error);
+
+    // The failed commit's fate settled at the throw; the next commit's
+    // watermark passes it instead of freezing below it forever — and the
+    // issue-order gate opens for the next send instead of wedging.
+    const c2 = beginSet(harness, DOCS.B, valueFor("after"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+    await assertResultOk(c2.promise);
+    const sent = harness.model.applied.get(c2.localSeq);
+    assertExists(sent);
+    assertEquals(sent.commit.verdictsThrough, c2.localSeq - 1);
+  } finally {
     await harness.close();
   }
 });

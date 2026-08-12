@@ -833,7 +833,7 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
     const space = `did:key:z6Mk-sync-schema-table-${mode}`;
     const clientFlags = mode === "v2" ? flags : {
       modernCellRep: flags.modernCellRep,
-      persistentSchedulerState: flags.persistentSchedulerState,
+      observationBatchRequests: flags.observationBatchRequests,
       commitPreconditions: flags.commitPreconditions,
       ...(mode === "legacy" ? { syncSchemaTable: true } : {}),
     };

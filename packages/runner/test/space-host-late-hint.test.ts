@@ -1373,14 +1373,17 @@ describe("late space host hints", () => {
       ).toBe(true);
       await manager.crossSpaceSettled();
 
-      expect((await observation).error).toBeDefined();
+      // Droppable bookkeeping: the observation waiting on the replaced
+      // route SETTLES by dropping (flag-off semantics), not by surfacing
+      // the route error — the retired envelope shape rejected it here.
+      expect((await observation).error).toBeUndefined();
     } finally {
       await manager.close();
       resetPersistentSchedulerStateConfig();
     }
   });
 
-  it("drains observations after a rejected batch without releasing a waiting write", async () => {
+  it("drains observations after a rejected batch and releases the waiting write", async () => {
     setPersistentSchedulerStateConfig(true);
     const signer = await Identity.fromPassphrase(
       "late-hint-scheduler-queued-after-rejection",
@@ -1400,25 +1403,25 @@ describe("late space host hints", () => {
           mountOptions,
           signal,
         );
-        const transact = connection.session.transact.bind(connection.session);
-        connection.session.transact = async (commit, beforeIssue) => {
-          if (commit.schedulerObservationBatch !== undefined) {
-            schedulerBatchCount++;
-            if (schedulerBatchCount === 1) {
-              firstBatchStarted.resolve();
-              await releaseFirstBatch.promise;
-              throw new Error("first scheduler batch rejected");
-            }
-            if (
-              commit.schedulerObservationBatch.some((entry) =>
-                (entry.schedulerObservation as { actionId?: string })
-                  .actionId === "action:queued-after-rejection"
-              )
-            ) {
-              secondBatchIssued.resolve();
-            }
+        const observationBatch = connection.session.observationBatch.bind(
+          connection.session,
+        );
+        connection.session.observationBatch = async (entries, branch) => {
+          schedulerBatchCount++;
+          if (schedulerBatchCount === 1) {
+            firstBatchStarted.resolve();
+            await releaseFirstBatch.promise;
+            throw new Error("first scheduler batch rejected");
           }
-          return await transact(commit, beforeIssue);
+          if (
+            entries.some((entry) =>
+              (entry.schedulerObservation as { actionId?: string })
+                .actionId === "action:queued-after-rejection"
+            )
+          ) {
+            secondBatchIssued.resolve();
+          }
+          return await observationBatch(entries, branch);
         };
         return connection;
       },
@@ -1458,14 +1461,16 @@ describe("late space host hints", () => {
       });
       releaseFirstBatch.resolve();
 
-      expect((await first).error).toBeDefined();
+      // A rejected batch DROPS its observations (droppable bookkeeping)
+      // instead of spreading the rejection: the observation callers see
+      // {ok}, and the semantic write ordering behind the batch proceeds
+      // and lands — the pre-CT-1910 envelope shape held it hostage here.
+      expect((await first).error).toBeUndefined();
       expect((await second).error).toBeUndefined();
-      expect((await waitingWrite).error?.message).toContain(
-        "first scheduler batch rejected",
-      );
+      expect((await waitingWrite).error).toBeUndefined();
       await secondBatchIssued.promise;
       expect(schedulerBatchCount).toBe(2);
-      expect(await server.readDocument(signer.did(), resultId)).toBeNull();
+      expect(await server.readDocument(signer.did(), resultId)).not.toBeNull();
     } finally {
       releaseFirstBatch.resolve();
       await manager.close();
@@ -1502,18 +1507,16 @@ describe("late space host hints", () => {
             signal,
           );
         if (space === signer.did()) {
-          const transact = connection.session.transact.bind(
+          const observationBatch = connection.session.observationBatch.bind(
             connection.session,
           );
-          connection.session.transact = async (commit, beforeIssue) => {
-            if (commit.schedulerObservationBatch !== undefined) {
-              issuedBatches.push(
-                commit.schedulerObservationBatch.map((entry) =>
-                  (entry.schedulerObservation as { actionId: string }).actionId
-                ),
-              );
-            }
-            return await transact(commit, beforeIssue);
+          connection.session.observationBatch = async (entries, branch) => {
+            issuedBatches.push(
+              entries.map((entry) =>
+                (entry.schedulerObservation as { actionId: string }).actionId
+              ),
+            );
+            return await observationBatch(entries, branch);
           };
         }
         return connection;
@@ -1621,13 +1624,13 @@ describe("late space host hints", () => {
       actual: { intended: true },
       space: signer.did(),
     });
-    let validations = 0;
+    // The batch flush validates replica routes exactly once, at issue time
+    // (the retired envelope shape validated a second time inside its
+    // pushCommit); an inconsistency there must surface with its structured
+    // details — a route-integrity failure is NOT droppable bookkeeping.
     const source = {
       getReadActivities: () => [],
-      validateReplicaRoutes: () => {
-        validations++;
-        return validations === 1 ? { ok: {} } : { error: inconsistency };
-      },
+      validateReplicaRoutes: () => ({ error: inconsistency }),
     } as unknown as IStorageTransaction;
 
     try {

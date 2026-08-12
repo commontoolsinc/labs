@@ -409,13 +409,25 @@ Server obligations and premises:
   entry. A watermark at or past its own commit's `localSeq` is a protocol
   error. Lying corrupts only the session's own data — the same trust model
   as a fabricated read.
-- Inference is complete only under in-order submission (§3.9): by the time
-  N is decided, every same-session commit below it is decided too, so
-  "decided and retained-rejected" is the whole candidate set. The server
-  therefore rejects an inferred-shape commit at or below the session's
-  highest decided localSeq as a protocol error — unless it re-sends a
-  RETAINED rejection's localSeq, the lost-verdict replay, which is
-  revalidated afresh (and, if it now lands, retires its retention entry).
+- Inference is complete only under in-order delivery — the same-session
+  ordering this section and INV-5 state: by the time N is decided, every
+  same-session commit below it is decided too, so "decided and
+  retained-rejected" is the whole candidate set. The client supplies the
+  premise structurally: requests carrying localSeqs are issued in
+  allocation order (the runner's issue-order gate), and scheduler-
+  observation batches travel as the unnumbered `observation.batch`
+  request, so no flush-time envelope number ever leapfrogs a held commit.
+  The server enforces the premise defensively: an inferred-shape commit at
+  or below the session's highest decided localSeq is a protocol error —
+  unless it re-sends a RETAINED rejection's localSeq, the lost-verdict
+  replay, which is revalidated afresh (and, if it now lands, retires its
+  retention entry).
+- Judgment uses the session's MONOTONIC watermark: the rule evaluates at
+  the max of the commit's own attestation and the highest watermark the
+  session has ever attested (the same bound retention prunes at). Sound
+  because delivery is monotonic: a commit whose attestation raised the
+  high-water was built and issued before this one, so this one's
+  composite also postdates the processing that attestation proved.
 - Layers that never reached the wire are invisible to inference and safe
   by the client cascade (§3.5): a composite that included a never-sent
   layer was dropped client-side with it and never sent.

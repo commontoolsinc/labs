@@ -146,7 +146,7 @@ Stable read/write topology is the common case, and the later observation must
 ride the later document-change window. Only an identical observation-only
 refresh at the same semantic head preserves the existing delivery slot.
 
-- **Server:** retain the client's `persistentSchedulerState` handshake flag
+- **Server:** retain the client's `observationBatchRequests` handshake flag
   per connection (mirroring the existing `#syncSchemaTable` negotiation —
   the precedent that push payloads may be flag-conditioned per connection).
   When building any advancing `SessionSync` and both the connection flag and

@@ -2,6 +2,7 @@ import { toFileUrl } from "@std/path";
 import type { URI } from "../interface.ts";
 import {
   applyCommit,
+  applyObservationBatch,
   close,
   type Engine,
   open,
@@ -204,28 +205,23 @@ function applyObservationOnlyBatch(
   pathCount: number,
   pathOffset: (localSeq: number) => number = () => 0,
 ): void {
-  applyCommit(engine, {
+  applyObservationBatch(engine, {
     sessionId: "session:scheduler-observation-noop",
     space,
-    commit: {
-      branch,
-      localSeq: batchLocalSeq,
-      reads: { confirmed: [], pending: [] },
-      operations: [],
-      schedulerObservationBatch: Array.from({ length: count }, (_, index) => {
-        const localSeq = startLocalSeq + index;
-        return {
+    branch,
+    batch: Array.from({ length: count }, (_, index) => {
+      const localSeq = startLocalSeq + index;
+      return {
+        localSeq,
+        reads: { confirmed: [], pending: [] },
+        schedulerObservation: observationFor(
           localSeq,
-          reads: { confirmed: [], pending: [] },
-          schedulerObservation: observationFor(
-            localSeq,
-            pathCount,
-            [],
-            pathOffset(localSeq),
-          ),
-        };
-      }),
-    },
+          pathCount,
+          [],
+          pathOffset(localSeq),
+        ),
+      };
+    }),
   });
 }
 

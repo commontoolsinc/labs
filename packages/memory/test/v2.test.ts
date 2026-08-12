@@ -140,12 +140,14 @@ describe("memory v2 flags", () => {
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: false,
-      persistentSchedulerState: false,
       commitPreconditions: false,
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
       inferredPendingDependencies: true,
+      // The persistent-scheduler-state capability: advertised only while
+      // the ambient config is on.
+      observationBatchRequests: false,
       verdictCatchUpMarkers: true,
       entityIdListing: true,
       entityIdPagination: true,
@@ -160,11 +162,11 @@ describe("memory v2 flags", () => {
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
-      persistentSchedulerState: true,
       commitPreconditions: true,
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
       inferredPendingDependencies: true,
+      observationBatchRequests: true,
       verdictCatchUpMarkers: true,
       entityIdListing: true,
       entityIdPagination: true,
@@ -182,12 +184,12 @@ describe("memory v2 flags", () => {
     assert(compatibleMemoryProtocolFlags(
       {
         modernCellRep: true,
-        persistentSchedulerState: true,
         commitPreconditions: true,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: true,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: true,
         entityIdPagination: true,
@@ -195,7 +197,6 @@ describe("memory v2 flags", () => {
       },
       {
         modernCellRep: true,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         // A peer without commit-time sqlite row-label evaluation stays
@@ -204,6 +205,7 @@ describe("memory v2 flags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -217,12 +219,12 @@ describe("parseMemoryProtocolFlags", () => {
   it("accepts the modernCellRep key", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: true }), {
       modernCellRep: true,
-      persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       inferredPendingDependencies: false,
+      observationBatchRequests: false,
       verdictCatchUpMarkers: false,
       entityIdListing: false,
       entityIdPagination: false,
@@ -230,12 +232,12 @@ describe("parseMemoryProtocolFlags", () => {
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
-      persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       inferredPendingDependencies: false,
+      observationBatchRequests: false,
       verdictCatchUpMarkers: false,
       entityIdListing: false,
       entityIdPagination: false,
@@ -243,19 +245,22 @@ describe("parseMemoryProtocolFlags", () => {
     });
   });
 
-  it("accepts the canonical persistentSchedulerState key", () => {
+  it("ignores the retired persistentSchedulerState key", () => {
+    // An older peer still advertising the retired flag parses as if the
+    // key were unknown: the capability it named (the zero-op envelope
+    // shape) is neither emitted nor accepted by this build.
     assertEquals(
       parseMemoryProtocolFlags({
         persistentSchedulerState: true,
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: true,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -271,12 +276,12 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: true,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -292,12 +297,12 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -313,12 +318,12 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: false,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -350,18 +355,32 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         inferredPendingDependencies: true,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
       },
     );
+  });
+
+  it("round-trips observationBatchRequests through the wire flags shape", () => {
+    setPersistentSchedulerStateConfig(true);
+    try {
+      const flags = getMemoryProtocolFlags();
+      assertEquals(flags.observationBatchRequests, true);
+      const wire = wireMemoryProtocolFlags(flags);
+      assertEquals(wire.observationBatchRequests, true);
+      assertEquals(parseMemoryProtocolFlags(wire), flags);
+    } finally {
+      resetPersistentSchedulerStateConfig();
+    }
+    assertEquals(getMemoryProtocolFlags().observationBatchRequests, false);
   });
 
   it("stops advertising inferredPendingDependencies when the config is off", () => {
@@ -384,12 +403,12 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: true,
         entityIdListing: false,
         entityIdPagination: false,
@@ -403,16 +422,17 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({
         pendingReadStacks: true,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: true,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -426,12 +446,12 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({ entityIdListing: true }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: true,
         entityIdPagination: false,
@@ -448,12 +468,12 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         inferredPendingDependencies: false,
+        observationBatchRequests: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: true,
@@ -490,7 +510,7 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,
-        persistentSchedulerState: "true",
+        observationBatchRequests: "true",
       }),
       null,
     );
