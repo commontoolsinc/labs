@@ -1183,6 +1183,20 @@ interface ObjectProjectionMask extends ObjectMask<ProjectionMask> {}
  * Which positions a selection reads. `false` is the rejecting one: the
  * position contributes nothing to the read, and the runner never loads what
  * is behind it.
+ *
+ * **A rejecting position is always a marked one.**
+ * {@link normalizeProjectionSchema} refuses a bare `false` in a projection
+ * schema, so `false` enters a mask only where a `$link` marker took the whole
+ * selection at that position, and only ever spreads upward from there. A mask
+ * that rejects therefore always has markers to answer with, and a selection
+ * whose root mask is `false` selects no value anywhere.
+ *
+ * Two things rest on that. {@link deriveSelectedValue}'s whole-selection
+ * short-circuit answers from the stored links alone, which is a wrong answer
+ * rather than an empty one if a rejection ever arrives without a marker. And
+ * the item masks it dereferences beside a `--filter` are reachable only
+ * because a marker and a filter are refused together. Admitting `false` by
+ * any other route breaks both, silently.
  */
 type ProjectionMask =
   | true
@@ -1326,16 +1340,14 @@ function alignConciseProjectionMask(
 
   if (schemaMayBeArray(source, flag)) {
     const sourceItem = schemaAtArrayItem(source);
-    return {
-      type: "array",
-      items: alignConciseProjectionMask(sourceItem, mask, flag),
-    };
+    return arrayProjectionMask(
+      alignConciseProjectionMask(sourceItem, mask, flag),
+    );
   }
 
   const objectMask = mask as ObjectProjectionMask;
-  return {
-    ...objectMask,
-    properties: Object.fromEntries(
+  return objectProjectionMask(
+    Object.fromEntries(
       Object.entries(objectMask.properties).map(([key, childMask]) => {
         const child = ContextualFlowControl.schemaAtPath(source, [key]);
         return [
@@ -1348,7 +1360,7 @@ function alignConciseProjectionMask(
         ];
       }),
     ),
-  };
+  );
 }
 
 /**
@@ -1473,10 +1485,7 @@ export function mergeMasks(
   // predicate observes it.
   if (right === false) return left;
   if (right.type === "array") {
-    return {
-      type: "array",
-      items: mergeMasks(left, right.items),
-    };
+    return arrayProjectionMask(mergeMasks(left, right.items));
   }
   const properties: Record<string, ProjectionMask> = {};
   for (
@@ -1493,7 +1502,7 @@ export function mergeMasks(
       ? leftChild
       : mergeMasks(leftChild, rightChild);
   }
-  return { type: "object", properties, additionalProperties: false };
+  return objectProjectionMask(properties);
 }
 
 /** @internal Exported for focused source-schema selection tests. */
@@ -1916,6 +1925,18 @@ async function composeLinkAddresses(
     : address;
 }
 
+/**
+ * The refusal a projection over array items earns when the value it meets is
+ * not an array. Both roads to that mismatch answer with it: the pattern graph
+ * reaches it through the map builtin, and a selection that is entirely
+ * addresses reaches it through the walk, which never runs one.
+ */
+function arrayItemProjectionError(flag: ProjectionFlag): CellSelectionError {
+  return new CellSelectionError(
+    `${flag} can only project array items from an array value`,
+  );
+}
+
 /** Optional hooks into {@link deriveSelectedValue}'s internals. */
 export interface DeriveSelectedValueDependencies {
   /** Called with the cell the returned value was read from. */
@@ -2002,9 +2023,27 @@ export async function deriveSelectedValue(
     // The whole selection was addresses. There is no value to compute, so the
     // pattern graph would run over the rejecting selector and produce nothing
     // for the composition to join. Read the stored links and answer.
-    await sourceValueCell.asSchema(false).pull();
+    //
+    // One cell reads and is walked: a sync is recorded on the cell it was
+    // asked of, so walking any other instance of the same position kicks a
+    // second sync of the document just loaded. The rejecting schema is what
+    // holds that load to the one document, because a sync selector carries
+    // the cell's schema.
+    const walked = sourceValueCell.asSchema(false);
+    await walked.pull();
+    const position = sourcePosition(walked);
+    // The graph path refuses a projection over array items that meets a value
+    // which is not an array, and the answer to a marked one is the same
+    // refusal: a walk over a non-array simply finds no elements to address,
+    // which renders as an absent value rather than as the mismatch it is.
+    if (
+      projection.projectsArrayItems &&
+      !Array.isArray(await storedContainer(position))
+    ) {
+      throw arrayItemProjectionError(selection.projection!.flag);
+    }
     return await composeLinkAddresses(
-      sourcePosition(sourceValueCell),
+      position,
       markers,
       undefined,
       implicitArrayTraversal,
@@ -2242,10 +2281,7 @@ export async function deriveSelectedValue(
           error.message === "map currently only supports arrays"
         )
       ) {
-        throw new CellSelectionError(
-          `${selection.projection!.flag} can only project array items from ` +
-            "an array value",
-        );
+        throw arrayItemProjectionError(selection.projection!.flag);
       }
       const lastError = recorded.at(-1)!;
       throw new CellSelectionError(

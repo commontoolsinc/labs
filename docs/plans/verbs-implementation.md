@@ -172,10 +172,12 @@ keyword is accepted and ignored. A command that ran only because a key was
 silently dropped now fails loudly, which is the point rather than a regression.
 
 **3. A rejection propagates up through what holds it.** *(S)* The projection
-mask reduces an array whose items reject to `false`, but leaves an object whose
-every property rejects as a live selector. So marking a field below a link loads
-every element document — measured at four reads where one would do. The fix is
-the symmetric reduction, which then cascades to the array above it.
+mask reduces either container whose whole selection rejects — an array whose
+items reject, and an object whose every named property rejects — to `false`. A
+rejection below a link therefore cascades up to the position holding that link,
+which is where a rejecting selector suppresses the fetch, so marking a field
+below a link costs the read that document already needed rather than one per
+element.
 
 *Exit:* a marked collection is one document read whether the marker sits on the
 link or below it.

@@ -1932,6 +1932,22 @@ describe("cf piece get transforms", () => {
     })).rejects.toThrow(
       /^--schema can only project array items from an array value$/,
     );
+    // A selection that is entirely addresses meets the mismatch on the walk
+    // rather than through the map builtin, and answers with the same refusal:
+    // a walk over a value that is not an array finds no elements to address,
+    // which would otherwise render as an absent value.
+    await expect(deriveSelectedValue(runtime, space, objectSource, {
+      projection: await parseSelectionProjection(
+        '{"type":"array","items":{"properties":{"id":{"$link":true}}}}',
+      ),
+    })).rejects.toThrow(
+      /^--schema can only project array items from an array value$/,
+    );
+    await expect(deriveSelectedValue(runtime, space, objectSource, {
+      projection: parseSelectProjection("id@"),
+    })).rejects.toThrow(
+      /^--select can only project array items from an array value$/,
+    );
   });
 
   it("reports runtime predicate failures as transform errors", async () => {
@@ -2200,11 +2216,16 @@ describe("cf piece get transforms", () => {
      *
      * Only the documents named are counted: a read of the transform's own
      * session documents says nothing about which of the source's data the
-     * selection reached. Each is counted once, because a document consulted
-     * twice is still one document read, and the syncs run concurrently, so a
-     * caller comparing more than one sorts.
+     * selection reached. Each is counted once — a document consulted twice is
+     * still one document read — so this bounds the documents a selection
+     * reaches rather than the syncs it issues, and the syncs run
+     * concurrently, so a caller comparing more than one sorts.
+     *
+     * A document already resident is reached without a sync, so absence from
+     * this list is evidence only for a document the fixture left unwritten.
+     * Name those, rather than asserting over documents the fixture wrote.
      */
-    async function documentsRead(
+    async function distinctDocumentsRead(
       cells: Cell<unknown>[],
       read: () => Promise<unknown>,
     ): Promise<string[]> {
@@ -2222,6 +2243,34 @@ describe("cf piece get transforms", () => {
         provider.sync = originalSync;
       }
       return reached;
+    }
+
+    /**
+     * How many times `read` syncs `cell`'s document.
+     * {@link distinctDocumentsRead} bounds which documents a selection
+     * reaches; this bounds how often it asks for one, which is what asking
+     * twice costs a caller across a real link. A sync is requested
+     * synchronously even where its result is not awaited, so a second request
+     * lands inside the window rather than racing it.
+     */
+    async function documentSyncs(
+      cell: Cell<unknown>,
+      read: () => Promise<unknown>,
+    ): Promise<number> {
+      const provider = storageManager.open(space);
+      const originalSync = provider.sync.bind(provider);
+      const uri = uriOf(cell);
+      let syncs = 0;
+      provider.sync = ((requested, selector, scope) => {
+        if (requested === uri) syncs++;
+        return originalSync(requested, selector, scope);
+      }) as typeof provider.sync;
+      try {
+        await read();
+      } finally {
+        provider.sync = originalSync;
+      }
+      return syncs;
     }
 
     it("returns a marked position's address instead of its contents", async () => {
@@ -2391,7 +2440,7 @@ describe("cf piece get transforms", () => {
       );
 
       expect(
-        await documentsRead(
+        await distinctDocumentsRead(
           documents,
           () =>
             deriveSelectedValue(runtime, space, board, {
@@ -2400,7 +2449,7 @@ describe("cf piece get transforms", () => {
         ),
       ).toEqual([uriOf(board)]);
       expect(
-        await documentsRead(
+        await distinctDocumentsRead(
           documents,
           () =>
             deriveSelectedValue(runtime, space, reopened(), {
@@ -2411,18 +2460,45 @@ describe("cf piece get transforms", () => {
 
       // The control: the same collection asked for its contents does load
       // every element, which is what makes the two reads above evidence of a
-      // suppressed fetch rather than of a harness that observes nothing. The
-      // board itself is already loaded by here, so this read has no reason to
-      // reach for it again.
+      // suppressed fetch rather than of a harness that observes nothing. It
+      // counts the element documents alone, so what it asserts does not depend
+      // on the reads above having warmed the board.
       expect(
-        (await documentsRead(
-          documents,
+        (await distinctDocumentsRead(
+          notes,
           () =>
             deriveSelectedValue(runtime, space, reopened(), {
               projection: unmarked,
             }),
         )).toSorted(),
       ).toEqual(notes.map(uriOf).toSorted());
+    });
+
+    it("loads the source document once for a selection that is entirely addresses", async () => {
+      const { board } = await seedBoard("link-marker-source-syncs", false);
+      const reopened = () =>
+        runtime.getCell(space, "link-marker-source-syncs-board", boardSchema);
+
+      // The read and the walk that composes the addresses are one cell, so
+      // the walk does not ask for the document the read just loaded.
+      expect(
+        await documentSyncs(
+          board,
+          () =>
+            deriveSelectedValue(runtime, space, board, {
+              projection: parseSelectProjection("notes@"),
+            }),
+        ),
+      ).toBe(1);
+      expect(
+        await documentSyncs(
+          board,
+          () =>
+            deriveSelectedValue(runtime, space, reopened(), {
+              projection: parseSelectProjection("notes.title@"),
+            }),
+        ),
+      ).toBe(1);
     });
 
     it("reads one document for a marker below a link, not the document the link names", async () => {
@@ -2435,7 +2511,7 @@ describe("cf piece get transforms", () => {
       );
 
       expect(
-        await documentsRead(
+        await distinctDocumentsRead(
           [board, ...notes],
           () =>
             deriveSelectedValue(runtime, space, board, {
@@ -2487,8 +2563,8 @@ describe("cf piece get transforms", () => {
       };
     }
 
-    it("reads the document holding a linked collection, and none of its elements", async () => {
-      const { board, holder, notes } = await seedLinkedCollection(
+    it("reads no element document for a marker below a linked collection", async () => {
+      const { board, notes } = await seedLinkedCollection(
         "link-marker-linked-collection",
       );
       const titleAddresses = notes.map((note) => ({
@@ -2496,18 +2572,18 @@ describe("cf piece get transforms", () => {
       }));
       let value: unknown;
 
-      // The element documents are the fact here: the holder is written by the
-      // fixture, so enumerating the collection out of it reaches no storage
-      // and says nothing either way. What the read must not reach is the
-      // document each element links to, since every position asked for below
-      // there is an address the element's own slot already holds.
+      // The element documents are what this asserts over. Enumerating the
+      // collection reaches the document holding it — which a reader that did
+      // not write it fetches, and this one already holds — while the document
+      // each element links to is never reached, because every position asked
+      // for below there is an address the element's own slot already holds.
       expect(
-        await documentsRead([board, holder, ...notes], async () => {
+        await distinctDocumentsRead(notes, async () => {
           value = await deriveSelectedValue(runtime, space, board, {
             projection: parseSelectProjection("notes.title@"),
           });
         }),
-      ).toEqual([uriOf(board)]);
+      ).toEqual([]);
       expect(value).toEqual({ notes: titleAddresses });
     });
 
@@ -2879,7 +2955,7 @@ describe("cf piece get transforms", () => {
           runtime.getCell(space, "at-suffix-reads-board", boardSchema);
 
         expect(
-          await documentsRead(
+          await distinctDocumentsRead(
             documents,
             () =>
               deriveSelectedValue(runtime, space, board, {
@@ -2888,7 +2964,7 @@ describe("cf piece get transforms", () => {
           ),
         ).toEqual([uriOf(board)]);
         expect(
-          await documentsRead(
+          await distinctDocumentsRead(
             documents,
             () =>
               deriveSelectedValue(runtime, space, reopened(), {
@@ -2898,10 +2974,11 @@ describe("cf piece get transforms", () => {
         ).toEqual([uriOf(board)]);
 
         // The control, as in the JSON spelling above: the unmarked field list
-        // loads every element.
+        // loads every element, counted over the element documents alone so
+        // the board's residency does not decide it.
         expect(
-          (await documentsRead(
-            documents,
+          (await distinctDocumentsRead(
+            notes,
             () =>
               deriveSelectedValue(runtime, space, reopened(), {
                 projection: parseSelectProjection("notes.title"),
@@ -2914,7 +2991,7 @@ describe("cf piece get transforms", () => {
         const { board, notes } = await seedBoard("at-suffix-root-reads", false);
 
         expect(
-          await documentsRead(
+          await distinctDocumentsRead(
             [board, ...notes],
             () =>
               deriveSelectedValue(runtime, space, board.key("notes"), {
