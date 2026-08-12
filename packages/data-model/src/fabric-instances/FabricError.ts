@@ -1,3 +1,18 @@
+/**
+ * `Error` as a fabric value: the wrapper class, and the shape it is built
+ * from.
+ *
+ * A native error is the wild west -- any property, any prototype -- while the
+ * fabric layer needs a value whose observable state is entirely typed. The
+ * useful parts therefore become fixed slots and everything else goes to an
+ * extras bag reached by map-like methods, with the slot names reserved so that
+ * an extra cannot shadow one. The native form is not retained at all; it is
+ * rebuilt on demand.
+ *
+ * Mutability follows the usual instance rule: writable until the instance is
+ * frozen, and every mutator refuses from then on.
+ */
+
 import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,

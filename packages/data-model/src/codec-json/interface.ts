@@ -1,3 +1,14 @@
+/**
+ * The JSON wire format's declarations: the tag its encoded text carries, the
+ * intermediate tree type built while walking a value, and the format value a
+ * `CodecRegistry` is constructed over.
+ *
+ * The tree type is not the serialized form -- that is a string -- and the two
+ * are easy to conflate. Which of those trees are deep-frozen is a real
+ * distinction rather than an incidental one, and it is recorded on the type
+ * itself rather than restated here.
+ */
+
 import type { WireFormat } from "@/codec-common/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
 

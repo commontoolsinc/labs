@@ -1,3 +1,16 @@
+/**
+ * The codec layer's contracts, written without naming any wire format: what a
+ * codec is, the two things its state can mean to a walker, and the context
+ * objects carried through an encode or a decode.
+ *
+ * The distinction running through all of it is that a codec's type does not
+ * say what its state is for. Every codec has the same members whatever domain
+ * it works in, and the domains overlap, so which kind a codec is has to be
+ * declared by the base class it extends rather than inferred from its
+ * signature. Everything downstream -- what a registry will accept, how a
+ * walker dispatches -- reads that declaration.
+ */
+
 import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricInstance, FabricValue } from "@/interface.ts";

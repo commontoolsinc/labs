@@ -1,3 +1,17 @@
+/**
+ * The registry a wire format's walker consults: tag to codec on the way in,
+ * value to codec on the way out. On the encode side the match is by class
+ * where a value has a useful one and by primitive type otherwise, with a value
+ * that is already its own wire form answering to neither and getting a
+ * sentinel in place of a codec.
+ *
+ * A registry is mutable while it is being assembled and immutable once frozen,
+ * and that is a safety property rather than a convenience. A codec holds the
+ * registry it was constructed with, so one handed out unfrozen could gain a
+ * registration underneath a codec already relying on it. Building further on a
+ * frozen registry means extending it into a new one.
+ */
+
 import type { FabricValue } from "@/interface.ts";
 import { CODEC, type CodecForFormat, type WireFormat } from "./interface.ts";
 import { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";

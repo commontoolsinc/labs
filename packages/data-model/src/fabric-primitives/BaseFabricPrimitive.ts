@@ -1,3 +1,15 @@
+/**
+ * The implementation side of the primitive hierarchy: the base class that
+ * concrete primitives extend, the interface by which one advertises a JSON
+ * codec, and the symbol seeding its plumbing members.
+ *
+ * `FabricPrimitive` is the contract external code is written against, and this
+ * is where the shared implementation behind it lives. The split is held by
+ * convention rather than by the type system -- nothing stops a subclass from
+ * extending the contract directly -- so the invariant is enforced at runtime
+ * instead of being assumed.
+ */
+
 import type { CodecForFormat } from "@/codec-common/interface.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { FabricPrimitive, JSON_CODEC } from "@/interface.ts";

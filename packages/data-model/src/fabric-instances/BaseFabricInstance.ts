@@ -1,3 +1,20 @@
+/**
+ * The implementation side of the instance hierarchy: the base class that
+ * concrete fabric instances extend, and the symbol-keyed protocol members by
+ * which the generic freeze and clone utilities reach an instance's interior.
+ *
+ * An instance holds its contents in private fields, so no walker can descend
+ * into one by enumerating properties. The protocols invert that: the utility
+ * calls the member and hands recursion back in as a callback, so its cycle
+ * tracking and its cache carry across the boundary rather than restarting
+ * inside it. Dispatch is generic in the base class, so nothing here enumerates
+ * concrete subclasses.
+ *
+ * This module and the freeze utility import each other. The cycle is
+ * deliberate, and is safe only because each side reaches the other from inside
+ * a function body; a dereference during module evaluation would break it.
+ */
+
 import { FabricInstance, type FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 // Used only inside method bodies: this import participates in a module cycle
