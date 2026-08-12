@@ -88,6 +88,9 @@ jobs:
         timeout-minutes: *work-timeout
         run: deno task check-docs
 
+      - name: 🔎 Check the historical-documentation index
+        run: deno task check-docs-history-index
+
       - name: 🚧 Guard against new polling waitFor in integration tests
         timeout-minutes: *work-timeout
         run: deno task check-no-waitfor
