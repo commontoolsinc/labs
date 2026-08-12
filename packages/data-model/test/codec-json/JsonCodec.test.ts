@@ -694,6 +694,34 @@ describe("JsonCodec", () => {
       });
     }
 
+    it("returns a `ProblematicValue` given a count past the array maximum", () => {
+      // A safe integer can still be more elements than an array can hold, in
+      // which case setting the length is what would fail.
+      const result = decodeArray(["a", { "/hole": 2 ** 40 }, "b"]);
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).error).toContain(
+        "past the",
+      );
+    });
+
+    it("returns a `ProblematicValue` when later entries carry the total past it", () => {
+      // The run alone is exactly what an array can hold; the two entries
+      // placed after it are what make the total too large.
+      const result = decodeArray([{ "/hole": 2 ** 32 - 1 }, "a", "b"]);
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).error).toContain(
+        "past the",
+      );
+    });
+
+    it("decodes a run reaching exactly the array maximum", () => {
+      const result = decodeArray([{ "/hole": 2 ** 32 - 1 }]) as FabricValue[];
+
+      expect(result.length).toBe(2 ** 32 - 1);
+    });
+
     it("decodes a run of one, the smallest a count may be", () => {
       const result = decodeArray(["a", { "/hole": 1 }, "b"]) as FabricValue[];
 

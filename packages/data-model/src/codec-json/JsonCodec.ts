@@ -445,6 +445,20 @@ export class JsonCodec implements SerializationContext<string> {
           targetIndex++;
         }
       }
+      // The total is bounded here rather than each advance being bounded as
+      // it happens, because both a single run and the running total can pass
+      // what an array may hold, and one check at the end covers both. Beyond
+      // that, the assignment below throws `RangeError` from the array
+      // machinery, which says nothing about the wire that caused it.
+      if (targetIndex > JsonCodec.#MAX_ARRAY_LENGTH) {
+        return new ProblematicValue(
+          CODEC_META_TAGS.hole,
+          data,
+          `hole: runs total ${targetIndex} elements, past the ` +
+            `${JsonCodec.#MAX_ARRAY_LENGTH} an array can hold`,
+        );
+      }
+
       result.length = targetIndex;
       return Object.freeze(result);
     }
@@ -481,6 +495,9 @@ export class JsonCodec implements SerializationContext<string> {
   //
   // Static members
   //
+
+  /** Largest length a JavaScript array can have. */
+  static readonly #MAX_ARRAY_LENGTH = 0xffff_ffff;
 
   /** Shared text encoder, created once. */
   static readonly #textEncoder = new TextEncoder();
@@ -533,7 +550,7 @@ export class JsonCodec implements SerializationContext<string> {
   static #isHoleCount(count: JsonCodecValue): count is number {
     // `isSafeInteger()` returns `false` for a non-number, but it cannot be a
     // TypeScript type predicate on `number` since it also returns `false` for
-    // plenty of numbers. So, the susequent cast `as number` is safe by
+    // plenty of numbers. So, the subsequent cast `as number` is safe by
     // construction but is nonetheless required.
     return Number.isSafeInteger(count) && ((count as number) >= 1);
   }
