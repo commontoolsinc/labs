@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  labelForToken,
   MENTION_REF_KEY_SOURCE,
   MentionRefMapSchema,
   MentionRefSchema,
@@ -54,6 +55,21 @@ describe("mention-refs", () => {
       expect(() => mintRefKey(taken)).toThrow(
         /no free mention reference key/,
       );
+    });
+  });
+
+  describe("labelForToken()", () => {
+    it("returns an ordinary name unchanged", () => {
+      expect(labelForToken("My Note")).toBe("My Note");
+    });
+
+    it("returns a name with no `]`, which the parser cannot read past", () => {
+      expect(labelForToken("A]B")).toBe("A)B");
+    });
+
+    it("returns a name on one line", () => {
+      expect(labelForToken("Two\nLines")).toBe("Two Lines");
+      expect(labelForToken("Two\r\nLines")).toBe("Two Lines");
     });
   });
 

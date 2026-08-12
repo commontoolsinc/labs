@@ -80,6 +80,7 @@ import {
   MentionableSchema,
 } from "../../core/mentionable.ts";
 import {
+  labelForToken,
   type MentionRef,
   type MentionRefMap,
   MentionRefMapSchema,
@@ -102,6 +103,25 @@ import {
   setKnownRefKeys,
 } from "./features/mention-refs.ts";
 import { createProseMarkdownPlugin } from "./features/prose-markdown.ts";
+
+/**
+ * One entry per destination, keeping the first of each. Identity is the cell's
+ * own id, which is what makes a piece reached through two different keys — or
+ * through both mention forms — a single mention of one piece.
+ */
+function dedupeByDestination(pieces: Mentionable[]): Mentionable[] {
+  const seen = new Set<string>();
+  const result: Mentionable[] = [];
+  for (const piece of pieces) {
+    const id = isCellHandle(piece) ? piece.id() : undefined;
+    if (id !== undefined) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    result.push(piece);
+  }
+  return result;
+}
 
 /** A unique noteId, so notes created from a mention do not collide. */
 function generateNoteId(): string {
@@ -641,12 +661,13 @@ export class CFCodeEditor extends BaseElement {
     label: string,
     key: string,
   ): void {
-    const token = `[${label}][${key}]`;
+    const safe = labelForToken(label);
+    const token = `[${safe}][${key}]`;
     view.dispatch({
       changes: { from, to, insert: token },
       selection: { anchor: from + token.length },
     });
-    this._previousRefLabels.set(key, label);
+    this._previousRefLabels.set(key, safe);
   }
 
   /**
@@ -2101,10 +2122,15 @@ export class CFCodeEditor extends BaseElement {
       new Set(refs.map((ref) => ref.key)).size;
     this._lastMentionedSignature = resolvedEverything ? signature : null;
 
-    this.mentioned?.set([
-      ...this._extractMentionedPieces(content),
-      ...destinations,
-    ]);
+    // One entry per destination, however many mentions name it. The backlinks
+    // index pushes a backlink per entry, so a piece mentioned twice — or once
+    // in each form — would otherwise be linked back twice.
+    this.mentioned?.set(
+      dedupeByDestination([
+        ...this._extractMentionedPieces(content),
+        ...destinations,
+      ]),
+    );
     this._setupPieceNameSubscriptions();
     this._setupRefDestinationSubscriptions();
   }
@@ -2437,14 +2463,15 @@ export class CFCodeEditor extends BaseElement {
     if (this._refMap()[key]?.modifiedTitle) return;
 
     const ref = this._documentRefs().find((candidate) => candidate.key === key);
-    if (!ref || ref.label === name) return;
+    if (!ref || ref.label === labelForToken(name)) return;
 
     // Update tracking BEFORE the dispatch, so the label-change detector does
     // not read this rewrite as the user's own edit and flip the flag.
-    this._previousRefLabels.set(key, name);
+    const safe = labelForToken(name);
+    this._previousRefLabels.set(key, safe);
 
     this._editorView.dispatch({
-      changes: { from: ref.labelFrom, to: ref.labelTo, insert: name },
+      changes: { from: ref.labelFrom, to: ref.labelTo, insert: safe },
       annotations: CFCodeEditor._cellSyncAnnotation.of(true),
     });
 

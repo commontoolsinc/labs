@@ -56,6 +56,18 @@ export const MENTION_REF_KEY_SOURCE =
   `[0-9a-z]{${KEY_LENGTH},${MAX_KEY_LENGTH}}`;
 
 /**
+ * A label the parser will read back.
+ *
+ * The token's label may hold anything but `]` and a newline, and a piece is
+ * free to be named with either. Left verbatim, such a name mints a token no
+ * parse recognizes: unprotected text, no pill, and absent from `$mentioned`
+ * while its map entry sits there naming a destination nothing reaches.
+ */
+export function labelForToken(name: string): string {
+  return name.replace(/\r?\n/g, " ").replace(/\]/g, ")");
+}
+
+/**
  * Mint a reference key that nothing in `taken` holds.
  *
  * Six characters over a 36-symbol alphabet is 2.2 billion keys against a map

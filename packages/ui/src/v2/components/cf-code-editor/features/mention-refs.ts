@@ -135,6 +135,29 @@ export const atomicMentionRefRanges = EditorView.atomicRanges.of((view) => {
   return Decoration.set(decorations);
 });
 
+/** An edit that begins inside `][key]` — dropped, since it edits identity. */
+function startsInsideKey(ref: MentionRefInfo, fromA: number): boolean {
+  return fromA > ref.labelTo && fromA < ref.to;
+}
+
+/**
+ * An edit that begins at or before the label's end and runs into the key.
+ *
+ * A change covering the mention from before its start to at or past its end
+ * is exempt: that is how a mention is deleted, and truncating it would leave
+ * the key behind. Anything else is truncated at the label's end — including a
+ * change that ends exactly at the token's edge, which would otherwise take
+ * `][key]` with it and leave `[Label` behind as malformed text.
+ */
+function reachesIntoKey(
+  ref: MentionRefInfo,
+  fromA: number,
+  toA: number,
+): boolean {
+  if (fromA <= ref.from && toA >= ref.to) return false;
+  return fromA <= ref.labelTo && toA > ref.labelTo;
+}
+
 /**
  * Keep edits out of the `][key]` that carries a mention's identity: an edit
  * starting inside it is dropped, and one running into it from the label is
@@ -151,11 +174,7 @@ export const mentionRefEditFilter = EditorState.transactionFilter.of((tr) => {
 
   tr.changes.iterChanges((fromA, toA) => {
     for (const ref of refs) {
-      if (fromA > ref.labelTo && fromA < ref.to) {
-        needsModification = true;
-        return;
-      }
-      if (fromA <= ref.labelTo && toA > ref.labelTo && toA < ref.to) {
+      if (startsInsideKey(ref, fromA) || reachesIntoKey(ref, fromA, toA)) {
         needsModification = true;
         return;
       }
@@ -171,13 +190,11 @@ export const mentionRefEditFilter = EditorState.transactionFilter.of((tr) => {
     let shouldInclude = true;
 
     for (const ref of refs) {
-      if (fromA > ref.labelTo && fromA < ref.to) {
+      if (startsInsideKey(ref, fromA)) {
         shouldInclude = false;
         break;
       }
-      if (fromA <= ref.labelTo && toA > ref.labelTo && toA < ref.to) {
-        adjustedTo = ref.labelTo;
-      }
+      if (reachesIntoKey(ref, fromA, toA)) adjustedTo = ref.labelTo;
     }
 
     if (shouldInclude) {

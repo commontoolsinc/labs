@@ -215,6 +215,26 @@ describe("mention-refs", () => {
       expect(caret <= ref.labelTo || caret >= ref.to).toBe(true);
     });
 
+    it("truncates an edit running from the label to the token's edge", () => {
+      // The edge case a `toA < ref.to` bound misses: this deletes `][key]`
+      // and leaves `[Note` behind.
+      const state = createState(`[Note][${KEY}]`);
+      const ref = mentionRefs(state)[0];
+      const edited = state.update({
+        changes: { from: 3, to: ref.to, insert: "" },
+      });
+      expect(edited.state.doc.toString()).toBe(`[No][${KEY}]`);
+    });
+
+    it("applies an edit covering the whole token", () => {
+      const state = createState(`x [Note][${KEY}] y`);
+      const ref = mentionRefs(state)[0];
+      const edited = state.update({
+        changes: { from: ref.from, to: ref.to, insert: "" },
+      });
+      expect(edited.state.doc.toString()).toBe("x  y");
+    });
+
     it("keeps an outside change while dropping a key edit in the same transaction", () => {
       const state = createState(`prefix [A][${KEY}] suffix`);
       const ref = mentionRefs(state)[0];
