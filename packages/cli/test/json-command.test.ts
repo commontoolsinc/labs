@@ -41,6 +41,10 @@ describe("JSON command contracts", () => {
     ).toBe(true);
     expect(reservesStdoutForCommandOutput(["piece", "get", "path"]))
       .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "get-label", "path"]))
+      .toBe(true);
+    expect(reservesStdoutForCommandOutput(["piece", "set-label", "path"]))
+      .toBe(true);
     expect(
       reservesStdoutForCommandOutput([
         "piece",
@@ -106,6 +110,8 @@ describe("JSON command contracts", () => {
       const command of [
         "check --pattern-json --bogus fixtures/pow-5.tsx",
         "piece get --bogus",
+        "piece get-label --bogus",
+        "piece set-label --bogus",
         "piece --bogus get",
         "piece --bogus call",
         "wish --bogus #profile",

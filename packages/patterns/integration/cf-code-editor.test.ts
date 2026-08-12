@@ -45,6 +45,7 @@ const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 // Debounce delay configured in cf-code-editor (default timingDelay)
 const DEBOUNCE_DELAY = 500;
 const DEBOUNCE_BUFFER = 100; // Extra time for processing
+const HELD_DEBOUNCE_DELAY = 2_147_483_647;
 
 // In-page predicate for waitForCondition: the editor document text equals
 // `expected`. `probe.collect` pierces shadow roots to find the editor host.
@@ -811,63 +812,71 @@ describe("cf-code-editor cursor stability", () => {
     );
   });
 
-  it("ADVERSARIAL: Multiple Cell updates while user is continuously typing", async () => {
-    // User types continuously (letters every 50ms) while external updates
-    // bombard the Cell. The editor should not corrupt or crash.
-    //
-    // CORRECT BEHAVIOR: the pending local edit wins over the bombarding
-    // deliveries for as long as its write has not settled, so the typed
-    // characters accumulate and commit as one debounced write.
+  it("keeps one debounced edit over multiple interleaved Cell updates", async () => {
+    // Hold the debounce callback until blur so each external delivery can be
+    // observed before the local edit commits.
     const page = shell.page();
 
     await resetEditorState(page);
+    await configureTiming(page, {
+      strategy: "debounce",
+      delay: HELD_DEBOUNCE_DELAY,
+    });
     await focusEditor(page);
 
-    // Interleave keystrokes and external updates on their own clocks; the
-    // pauses shape the interleaving.
-    const typingPromise = (async () => {
+    try {
+      let typed = "";
       for (let i = 0; i < 10; i++) {
-        await page.keyboard.type(String.fromCharCode(65 + i)); // A, B, C...
-        await new Promise((r) => setTimeout(r, 50));
+        const character = String.fromCharCode(65 + i); // A, B, C...
+        typed += character;
+        await page.keyboard.type(character);
+        if (i % 2 === 1) {
+          await piece.result.set(`Bombard-${(i - 1) / 2}`, ["content"]);
+          await waitForRuntimeSynced(page);
+          await awaitViewSettled(page);
+          assertEquals(
+            await getEditorContent(page),
+            typed,
+            "Pending local edit should remain visible after an external update",
+          );
+        }
       }
-    })();
 
-    const cellBombardPromise = (async () => {
-      for (let i = 0; i < 5; i++) {
-        await new Promise((r) => setTimeout(r, 80));
-        await piece.result.set(`Bombard-${i}`, ["content"]);
-      }
-    })();
+      // Blurring commits the complete local edit after every external update.
+      await blurEditor(page);
+      await awaitCellContent("ABCDEFGHIJ");
+      await awaitEchoDelivered(page);
 
-    await Promise.all([typingPromise, cellBombardPromise]);
+      // Final state should be consistent
+      const content = await getEditorContent(page);
+      const cursor = await getCursorPosition(page);
+      const cellValue = await piece.result.get(["content"]) as string;
 
-    // The typed characters commit as one debounced write over the bombards.
-    await awaitCellContent("ABCDEFGHIJ");
-    await awaitEchoDelivered(page);
+      // Cursor must be valid
+      assert(
+        cursor >= 0 && cursor <= content.length,
+        `Cursor ${cursor} should be valid for content length ${content.length}`,
+      );
 
-    // Final state should be consistent
-    const content = await getEditorContent(page);
-    const cursor = await getCursorPosition(page);
-    const cellValue = await piece.result.get(["content"]) as string;
+      // Editor and Cell should be in sync
+      assertEquals(
+        content,
+        cellValue,
+        "Editor and Cell should match after the local edit commits",
+      );
 
-    // Cursor must be valid
-    assert(
-      cursor >= 0 && cursor <= content.length,
-      `Cursor ${cursor} should be valid for content length ${content.length}`,
-    );
-
-    // Editor and Cell should be in sync
-    assertEquals(
-      content,
-      cellValue,
-      "Editor and Cell should be in sync after chaos",
-    );
-
-    assertEquals(
-      content,
-      "ABCDEFGHIJ",
-      "Typed content should win over the bombarding external updates",
-    );
+      assertEquals(
+        content,
+        "ABCDEFGHIJ",
+        "Pending local edit should survive all external updates",
+      );
+    } finally {
+      await cancelPendingEditorEdit(page);
+      await configureTiming(page, {
+        strategy: "debounce",
+        delay: DEBOUNCE_DELAY,
+      });
+    }
   });
 
   it("ADVERSARIAL: Empty string Cell update during typing", async () => {
@@ -1482,6 +1491,31 @@ async function focusEditor(page: Page): Promise<void> {
       if (cfEditor && cfEditor._editorView) {
         cfEditor._editorView.focus();
       }
+    })()
+  `);
+}
+
+/** Abandon the editor's pending local edit and scheduled write. */
+async function cancelPendingEditorEdit(page: Page): Promise<void> {
+  await page.evaluate(`
+    (() => {
+      function findCfCodeEditor(root) {
+        if (!root) return null;
+        const editor = root.querySelector?.('cf-code-editor');
+        if (editor) return editor;
+        const allElements = root.querySelectorAll?.('*') || [];
+        for (const el of allElements) {
+          if (el.shadowRoot) {
+            const found = findCfCodeEditor(el.shadowRoot);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+
+      const cfEditor = findCfCodeEditor(document);
+      if (!cfEditor) throw new Error('cf-code-editor not found');
+      cfEditor._cellController.cancel();
     })()
   `);
 }
