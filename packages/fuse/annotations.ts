@@ -377,7 +377,13 @@ function canonicalLabelForGeneration(label: CfcLabel): CfcLabel {
   return canonical;
 }
 
-export function joinLabels(...labels: Array<CfcLabel | undefined>): CfcLabel {
+/**
+ * `joinLabels` over a list. Takes the labels as an array so that a join over
+ * as many labels as a value has nodes stays within the argument limit.
+ */
+export function joinLabelList(
+  labels: ReadonlyArray<CfcLabel | undefined>,
+): CfcLabel {
   const joined: CfcLabel = {};
   for (const key of labelKeys()) {
     const seen = new Set<string>();
@@ -397,6 +403,10 @@ export function joinLabels(...labels: Array<CfcLabel | undefined>): CfcLabel {
     }
   }
   return joined;
+}
+
+export function joinLabels(...labels: Array<CfcLabel | undefined>): CfcLabel {
+  return joinLabelList(labels);
 }
 
 function failClosedLabel(): CfcLabel {
@@ -533,42 +543,79 @@ export class CfcProjectionAnnotator {
     return joinLabels(...labels);
   }
 
+  /**
+   * The label covering `value` and everything under it: the labels of its
+   * leaves, joined. A value already met along the way contributes the
+   * fail-closed label instead of being walked again.
+   *
+   * The walk holds its own stack of nodes still to visit rather than
+   * recursing, so a value nests as deeply as it likes without reaching the
+   * call stack's limit. Nodes come off that stack in the order a depth-first
+   * walk reaches them, which is the order `joinLabelList` keeps.
+   */
   subtreeLabel(
     value: unknown,
     path: readonly CfcPathSegment[],
     seen = new WeakSet<object>(),
   ): CfcLabel {
-    if (isLeafValue(value)) {
-      return this.labelAt(path);
+    interface PendingNode {
+      value: unknown;
+      path: readonly CfcPathSegment[];
     }
+    const contributions: CfcLabel[] = [];
+    const pending: PendingNode[] = [{ value, path }];
 
-    if (typeof value === "object" && value !== null) {
-      if (seen.has(value)) {
-        return labelWithFailClosed(this.labelAt(path));
+    while (pending.length > 0) {
+      const node = pending.pop()!;
+
+      if (isLeafValue(node.value)) {
+        contributions.push(this.labelAt(node.path));
+        continue;
       }
-      seen.add(value);
+
+      if (typeof node.value === "object" && node.value !== null) {
+        if (seen.has(node.value)) {
+          contributions.push(labelWithFailClosed(this.labelAt(node.path)));
+          continue;
+        }
+        seen.add(node.value);
+      }
+
+      // Children go on in reverse so the last one pushed — the first child —
+      // is the next one taken.
+      if (Array.isArray(node.value)) {
+        if (node.value.length === 0) {
+          contributions.push(this.labelAt(node.path));
+          continue;
+        }
+        for (let index = node.value.length - 1; index >= 0; index--) {
+          pending.push({
+            value: node.value[index],
+            path: [...node.path, index],
+          });
+        }
+        continue;
+      }
+
+      if (isRecord(node.value)) {
+        const entries = Object.entries(node.value);
+        if (entries.length === 0) {
+          contributions.push(this.labelAt(node.path));
+          continue;
+        }
+        for (let index = entries.length - 1; index >= 0; index--) {
+          const [key, entry] = entries[index];
+          pending.push({ value: entry, path: [...node.path, key] });
+        }
+        continue;
+      }
+
+      contributions.push(this.labelAt(node.path));
     }
 
-    if (Array.isArray(value)) {
-      if (value.length === 0) return this.labelAt(path);
-      return joinLabels(
-        ...value.map((entry, index) =>
-          this.subtreeLabel(entry, [...path, index], seen)
-        ),
-      );
-    }
-
-    if (isRecord(value)) {
-      const entries = Object.entries(value);
-      if (entries.length === 0) return this.labelAt(path);
-      return joinLabels(
-        ...entries.map(([key, entry]) =>
-          this.subtreeLabel(entry, [...path, key], seen)
-        ),
-      );
-    }
-
-    return this.labelAt(path);
+    return contributions.length === 1
+      ? contributions[0]
+      : joinLabelList(contributions);
   }
 
   namespaceLabel(value: unknown, path: readonly CfcPathSegment[]): CfcLabel {

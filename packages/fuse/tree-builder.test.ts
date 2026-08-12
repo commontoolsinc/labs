@@ -1,5 +1,5 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
@@ -13,7 +13,10 @@ import {
   isHandlerCell,
   isSigilLink,
   isStreamValue,
+  MAX_DEPTH_MARKER,
+  MAX_JSON_DEPTH,
   safeStringify,
+  stringifyEntryValue,
   transformStreamValues,
 } from "./tree-builder.ts";
 import { CellBridge } from "./cell-bridge.ts";
@@ -395,6 +398,98 @@ Deno.test("safeStringify - preserves shared DAG objects", () => {
     a: { leaf: "same" },
     b: { leaf: "same" },
   });
+});
+
+/** A chain of `depth` nested objects, each under the key `next`. */
+function nestedChain(depth: number): Record<string, unknown> {
+  let value: Record<string, unknown> = { leaf: "bottom" };
+  for (let i = 0; i < depth; i++) value = { next: value };
+  return value;
+}
+
+/** How many levels of `next` the parsed chain spells out, and what ends it. */
+function chainDepth(value: unknown): { depth: number; tail: unknown } {
+  let depth = 0;
+  let cursor = value;
+  while (cursor !== null && typeof cursor === "object") {
+    const next = (cursor as Record<string, unknown>).next;
+    if (next === undefined) break;
+    depth++;
+    cursor = next;
+  }
+  return { depth, tail: cursor };
+}
+
+Deno.test("safeStringify - spells out nesting up to the depth bound", () => {
+  const shallow = JSON.parse(safeStringify(nestedChain(MAX_JSON_DEPTH - 2)));
+  assertEquals(chainDepth(shallow), {
+    depth: MAX_JSON_DEPTH - 2,
+    tail: { leaf: "bottom" },
+  });
+});
+
+Deno.test("safeStringify - marks values nested below the depth bound", () => {
+  const deep = JSON.parse(safeStringify(nestedChain(MAX_JSON_DEPTH * 4)));
+  assertEquals(chainDepth(deep), {
+    depth: MAX_JSON_DEPTH,
+    tail: MAX_DEPTH_MARKER,
+  });
+});
+
+Deno.test("safeStringify - survives nesting deeper than the call stack", () => {
+  // A serializer that recurses per level overflows well before this depth.
+  const result = JSON.parse(safeStringify(nestedChain(100_000)));
+  assertEquals(chainDepth(result).tail, MAX_DEPTH_MARKER);
+});
+
+Deno.test("safeStringify - bounds depth per value, not across siblings", () => {
+  const wide = { a: nestedChain(4), b: nestedChain(4) };
+  const result = JSON.parse(safeStringify(wide)) as Record<string, unknown>;
+  assertEquals(chainDepth(result.a).tail, { leaf: "bottom" });
+  assertEquals(chainDepth(result.b).tail, { leaf: "bottom" });
+});
+
+Deno.test("buildJsonTree - projects nesting deeper than the call stack", () => {
+  const depth = MAX_JSON_DEPTH * 8;
+  const tree = new FsTree();
+  buildJsonTree(tree, tree.rootIno, "deep", nestedChain(depth));
+
+  // Every level keeps its directory entry, so the leaf the root's `.json`
+  // sibling elides is still reachable through the directory tree.
+  let ino = tree.lookup(tree.rootIno, "deep")!;
+  for (let level = 0; level < depth; level++) {
+    const next = tree.lookup(ino, "next");
+    assertEquals(next !== undefined, true, `level ${level} is missing`);
+    ino = next!;
+  }
+  assertEquals(getFileContent(tree, ino, "leaf"), "bottom");
+
+  // A `.json` sibling far enough down the chain spells out what the root's
+  // elided, so the bound hides no data.
+  assertEquals(
+    chainDepth(JSON.parse(getFileContent(tree, tree.rootIno, "deep.json")))
+      .tail,
+    MAX_DEPTH_MARKER,
+  );
+  const parentIno = tree.parents.get(ino)!;
+  assertEquals(
+    JSON.parse(getFileContent(tree, parentIno, "next.json")),
+    { leaf: "bottom" },
+  );
+});
+
+Deno.test("stringifyEntryValue - names the failing entry's mounted path", () => {
+  const tree = new FsTree();
+  const space = tree.addDir(tree.rootIno, "did:key:zSpace");
+  const pieces = tree.addDir(space, "pieces");
+  const piece = tree.addDir(pieces, "todo-app");
+
+  const error = assertThrows(
+    () => stringifyEntryValue(tree, piece, "result.json", { count: 1n }),
+    Error,
+    "/did:key:zSpace/pieces/todo-app/result.json",
+  );
+  assertEquals((error as Error).cause instanceof TypeError, true);
 });
 
 Deno.test("FsTree - addSymlink", () => {

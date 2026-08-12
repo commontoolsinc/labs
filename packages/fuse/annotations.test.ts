@@ -638,3 +638,45 @@ Deno.test("CFC generation changes on value or label metadata changes without ino
   assertNotEquals(original.generation, valueChanged.generation);
   assertNotEquals(original.generation, labelChanged.generation);
 });
+
+Deno.test("subtree labels cover nesting deeper than the call stack", () => {
+  // A label walk that recurses per level overflows well before this depth.
+  const depth = 20_000;
+  let chain: Record<string, unknown> = { title: "bottom" };
+  const titlePath: string[] = ["chain"];
+  for (let level = 0; level < depth; level++) chain = { next: chain };
+  for (let level = 0; level < depth; level++) titlePath.push("next");
+  titlePath.push("title");
+
+  const tree = new FsTree();
+  const annotator = makeAnnotator(tree, [
+    { path: titlePath, label: TITLE_LABEL },
+    { path: ["tag"], label: BODY_LABEL },
+  ]);
+
+  // The label of a leaf buried below the stack's depth reaches the root, and
+  // joins with the labels of the leaves the walk reaches on its way.
+  assertEquals(
+    annotator.subtreeLabel({ chain, tag: "shallow" }, []).confidentiality,
+    [...TITLE_LABEL.confidentiality, ...BODY_LABEL.confidentiality],
+  );
+});
+
+Deno.test("an unlabeled leaf fails a deep subtree label closed", () => {
+  const depth = 20_000;
+  let chain: Record<string, unknown> = { title: "bottom" };
+  for (let level = 0; level < depth; level++) chain = { next: chain };
+
+  const tree = new FsTree();
+  const annotator = makeAnnotator(tree, [{ path: ["tag"], label: BODY_LABEL }]);
+  const label = annotator.subtreeLabel({ chain, tag: "shallow" }, []);
+
+  assert(
+    JSON.stringify(label).includes(CFC_FAIL_CLOSED_ATOM_CLASS),
+    "an unlabeled leaf below the stack's depth must fail the join closed",
+  );
+  assertEquals(
+    label.confidentiality?.slice(-1),
+    BODY_LABEL.confidentiality,
+  );
+});
