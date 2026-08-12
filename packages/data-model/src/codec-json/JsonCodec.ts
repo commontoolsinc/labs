@@ -88,7 +88,7 @@ export class JsonCodec implements SerializationContext<string> {
 
   /** Serializes a fabric value to UTF-8 JSON bytes. */
   encodeToBytes(value: FabricValue): Uint8Array {
-    return this.toBytes(this.#encodeValue(value));
+    return this.#toBytes(this.#encodeValue(value));
   }
 
   /** Deserializes UTF-8 JSON bytes back into a fabric value. */
@@ -96,7 +96,7 @@ export class JsonCodec implements SerializationContext<string> {
     bytes: Uint8Array,
     context: ReconstructionContext,
   ): FabricValue {
-    const tree = this.fromBytes(bytes);
+    const tree = this.#fromBytes(bytes);
     return this.#decodeValue(tree, context);
   }
 
@@ -104,7 +104,7 @@ export class JsonCodec implements SerializationContext<string> {
    * Wraps a tag and state into the `/<tag>` wire format. Prepends `/` to the
    * tag to produce the JSON key. See Section 5.2 of the formal spec.
    */
-  private wrapTag(tag: string, state: JsonCodecValue): JsonCodecValue {
+  #wrapTag(tag: string, state: JsonCodecValue): JsonCodecValue {
     return Object.freeze({ [`/${tag}`]: state } as JsonCodecValue);
   }
 
@@ -116,7 +116,7 @@ export class JsonCodec implements SerializationContext<string> {
    *
    * See Section 5.4 of the formal spec.
    */
-  private unwrapTag(
+  #unwrapTag(
     data: JsonCodecValue,
   ): { tag: string; state: JsonCodecValue } | null {
     if (!isPlainObject(data)) {
@@ -134,12 +134,12 @@ export class JsonCodec implements SerializationContext<string> {
   }
 
   /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
-  private toBytes(data: JsonCodecValue): Uint8Array {
+  #toBytes(data: JsonCodecValue): Uint8Array {
     return JsonCodec.#textEncoder.encode(JSON.stringify(data));
   }
 
   /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
-  private fromBytes(bytes: Uint8Array): JsonCodecValue {
+  #fromBytes(bytes: Uint8Array): JsonCodecValue {
     const json = JsonCodec.#textDecoder.decode(bytes);
     return JsonCodec.#parseWireText(json);
   }
@@ -220,7 +220,7 @@ export class JsonCodec implements SerializationContext<string> {
             count++;
             i++;
           }
-          result.push(this.wrapTag(CODEC_META_TAGS.hole, count));
+          result.push(this.#wrapTag(CODEC_META_TAGS.hole, count));
         } else {
           result.push(
             this.#encodeValue(value[i], seen),
@@ -279,9 +279,9 @@ export class JsonCodec implements SerializationContext<string> {
             Object.entries(result).map(([k, v]) => [k, JsonCodec.#unquote(v)]),
           ),
         );
-        return this.wrapTag(CODEC_META_TAGS.quote, unquoted) as JsonCodecValue;
+        return this.#wrapTag(CODEC_META_TAGS.quote, unquoted) as JsonCodecValue;
       }
-      return this.wrapTag(CODEC_META_TAGS.object, result) as JsonCodecValue;
+      return this.#wrapTag(CODEC_META_TAGS.object, result) as JsonCodecValue;
     }
 
     return result as JsonCodecValue;
@@ -300,7 +300,7 @@ export class JsonCodec implements SerializationContext<string> {
     data: JsonCodecValue,
     context: ReconstructionContext,
   ): FabricValue {
-    const decoded = this.unwrapTag(data);
+    const decoded = this.#unwrapTag(data);
     if (decoded !== null) {
       const { tag, state: rawState } = decoded;
 
@@ -425,7 +425,7 @@ export class JsonCodec implements SerializationContext<string> {
       const result: FabricValue[] = new Array(data.length);
       let targetIndex = 0;
       for (const entry of data) {
-        const entryDecoded = this.unwrapTag(entry);
+        const entryDecoded = this.#unwrapTag(entry);
         if (
           entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
         ) {
