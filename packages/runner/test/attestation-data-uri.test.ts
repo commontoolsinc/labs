@@ -1,3 +1,10 @@
+/**
+ * `load()` is the storage-transaction-side reader of `data:` URI documents,
+ * separate from `data-uri.ts`'s `valueFromDataUri()`. Both route payload
+ * text through `valueFromDataUriPayloadText()`, so the two readers cannot
+ * silently diverge on what a payload means.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonCodec } from "@commonfabric/data-model/codec-json";
@@ -13,10 +20,6 @@ const uriOf = (payload: string): URI =>
     toUnpaddedBase64url(new TextEncoder().encode(payload))
   }` as URI;
 
-// `load()` is the storage-transaction-side reader of `data:` URI documents,
-// separate from `data-uri.ts`'s `valueFromDataUri()`. Both route payload
-// text through `valueFromDataUriPayloadText()`, so the two readers cannot
-// silently diverge on what a payload means.
 describe("attestation `load()` of `data:` URIs", () => {
   it("errors on a historical bare-JSON payload", () => {
     const { ok, error } = load({ id: uriOf('{"value":{"x":1}}') });

@@ -1,3 +1,9 @@
+/**
+ * Tests for the `ExperimentalOptions` feature-flag system: verifies that
+ * `Runtime` construction/disposal correctly resolves flags and propagates the
+ * flags whose consumers are ambient.
+ */
+
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -16,11 +22,6 @@ import {
 
 const signer = await Identity.fromPassphrase("test experimental");
 
-/**
- * Tests for the `ExperimentalOptions` feature-flag system: verifies that
- * `Runtime` construction/disposal correctly resolves flags and propagates the
- * flags whose consumers are ambient.
- */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetModernCellRepConfig();
