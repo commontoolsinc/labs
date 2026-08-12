@@ -77,6 +77,13 @@ import {
   parseSubagentReturnSchema,
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
+import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+import {
+  createHarnessHandleTable,
+  mintAddressHandle,
+  swapLinksForTokens,
+  swapTokensForRefs,
+} from "./handle-table.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 import {
   cwdMarkerForOutput,
@@ -816,17 +823,104 @@ const summarizeSubagentRunState = (
   };
 };
 
+/**
+ * Helper for `createStructuredSubagentReturn()`, which tells whether `value`
+ * is a sealed opaque-link object — the single-key `@link` object the
+ * sanitizer substitutes for a position it seals.
+ */
+const isSealedOpaqueLinkObject = (value: unknown): boolean => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const target = record["@link"];
+  return Object.keys(record).length === 1 &&
+    typeof target === "string" &&
+    target.startsWith("opaque:");
+};
+
+/**
+ * Helper for `createStructuredSubagentReturn()`, which walks a sanitized
+ * structured return and the raw value it was sanitized from in tandem,
+ * replacing each sealed opaque-link object whose raw counterpart is a string
+ * naming an entity address with a minted handle token. A sealed position
+ * whose raw counterpart is anything else — free-form prose, a whole record —
+ * keeps its opaque `@link` object. Returns the updated table, the reworked
+ * value, and the number of sealed string positions that became tokens, which
+ * the caller subtracts from the sanitizer's `linkedStringCount`.
+ */
+const swapSealedAddressStringsForTokens = async (
+  table: HarnessHandleTable,
+  sanitized: unknown,
+  raw: unknown,
+): Promise<{ table: HarnessHandleTable; value: unknown; replaced: number }> => {
+  if (isSealedOpaqueLinkObject(sanitized)) {
+    if (typeof raw !== "string") {
+      return { table, value: sanitized, replaced: 0 };
+    }
+    try {
+      const minted = await mintAddressHandle(table, raw);
+      return { table: minted.table, value: minted.token, replaced: 1 };
+    } catch {
+      // Not an entity address — the position stays sealed.
+      return { table, value: sanitized, replaced: 0 };
+    }
+  }
+  if (Array.isArray(sanitized) && Array.isArray(raw)) {
+    let replaced = 0;
+    const items: unknown[] = [];
+    for (let index = 0; index < sanitized.length; index += 1) {
+      const result = await swapSealedAddressStringsForTokens(
+        table,
+        sanitized[index],
+        raw[index],
+      );
+      table = result.table;
+      replaced += result.replaced;
+      items.push(result.value);
+    }
+    return { table, value: items, replaced };
+  }
+  if (
+    typeof sanitized === "object" && sanitized !== null &&
+    !Array.isArray(sanitized) &&
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+  ) {
+    let replaced = 0;
+    const entries: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(sanitized)) {
+      const result = await swapSealedAddressStringsForTokens(
+        table,
+        child,
+        (raw as Record<string, unknown>)[key],
+      );
+      table = result.table;
+      replaced += result.replaced;
+      entries[key] = result.value;
+    }
+    return { table, value: entries, replaced };
+  }
+  return { table, value: sanitized, replaced: 0 };
+};
+
 const createStructuredSubagentReturn = async (
   options: {
     childEngine: CfHarnessEngine;
     childRunId: string;
     rawFinalAssistantText: string;
     schema: NonNullable<DelegateTaskToolInput["returnSchema"]>;
+    /**
+     * When present, sealed positions whose raw string is an entity address
+     * become handle tokens minted into this table; the updated table comes
+     * back as `handleTable` when minting added an entry.
+     */
+    handleTable?: HarnessHandleTable;
   },
 ): Promise<{
   structuredReturn: HarnessSubagentStructuredReturn;
   summary: string;
   valid: boolean;
+  handleTable?: HarnessHandleTable;
 }> => {
   const schemaDigest = await digestJsonValue(options.schema);
   const rawOutputId = `${options.childRunId}:subagent_return:1` as ToolOutputId;
@@ -885,6 +979,23 @@ const createStructuredSubagentReturn = async (
       value: parsedValue,
       validationStatus: "valid",
     });
+    let returnValue = sanitized.value;
+    // `linkedStringCount` counts the positions still sealed as opaque, so a
+    // sealed string that becomes a token leaves the count.
+    let linkedStringCount = sanitized.linkedStringCount;
+    let updatedHandleTable: HarnessHandleTable | undefined;
+    if (options.handleTable !== undefined) {
+      const swapped = await swapSealedAddressStringsForTokens(
+        options.handleTable,
+        sanitized.value,
+        parsedValue,
+      );
+      returnValue = swapped.value;
+      linkedStringCount -= swapped.replaced;
+      if (swapped.table !== options.handleTable) {
+        updatedHandleTable = swapped.table;
+      }
+    }
     return {
       valid: true,
       summary:
@@ -895,9 +1006,12 @@ const createStructuredSubagentReturn = async (
         schemaDigest,
         rawOutputId,
         ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
-        value: sanitized.value,
-        linkedStringCount: sanitized.linkedStringCount,
+        value: returnValue,
+        linkedStringCount,
       },
+      ...(updatedHandleTable !== undefined
+        ? { handleTable: updatedHandleTable }
+        : {}),
     };
   } catch (error) {
     const rawValidationError = error instanceof Error
@@ -2110,6 +2224,30 @@ export class CfHarnessPromptLoop {
     throw turnLimitError;
   }
 
+  /**
+   * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
+   * tool input with their canonical address strings. Applies only in
+   * `session` handle mode with a recorded table, and never to
+   * `delegate_task`, whose input reaches the child as the model wrote it.
+   * Returns `input` itself when no substitution applies.
+   */
+  #resolveHandleTokensInToolInput(
+    toolId: string,
+    input: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (
+      this.engine.config.handleMode !== "session" ||
+      toolId === "delegate_task"
+    ) {
+      return input;
+    }
+    const table = this.engine.handleTable;
+    if (table === undefined || table.entries.length === 0) {
+      return input;
+    }
+    return swapTokensForRefs(table, input) as Record<string, unknown>;
+  }
+
   async #invokeToolCall(
     toolCall: HarnessToolCall,
     model: string,
@@ -2220,10 +2358,21 @@ export class CfHarnessPromptLoop {
         },
       };
     }
-    const input = parsedInputForDeniedTool ??
+    const parsedAllowedInput = parsedInputForDeniedTool ??
       stripTrustedOnlyToolInputFields(parseToolArguments(toolCall));
-    const toolInputSummary = deniedToolInputSummary ??
-      await summarizeToolInput(toolCall.function.name, input);
+    // Handle tokens resolve to their referents here, so policy evaluation,
+    // summarization, and the tool itself all see the real addresses. Denial
+    // summaries recorded above keep the tokens the model wrote. A
+    // `delegate_task` input is exempt: tokens in its goal and context reach
+    // the child verbatim as inert text.
+    const input = this.#resolveHandleTokensInToolInput(
+      toolCall.function.name,
+      parsedAllowedInput,
+    );
+    const toolInputSummary = input === parsedAllowedInput
+      ? deniedToolInputSummary ??
+        await summarizeToolInput(toolCall.function.name, input)
+      : await summarizeToolInput(toolCall.function.name, input);
     const decision = evaluateToolPolicy(
       this.engine.getRunState().cfcEnforcementMode,
       tool.descriptor,
@@ -2445,7 +2594,19 @@ export class CfHarnessPromptLoop {
       toolCall.id,
       recordPolicyEvent,
     );
-    const modelOutput = modelOutputResult.output;
+    let modelOutput = modelOutputResult.output;
+    if (this.engine.config.handleMode === "session") {
+      // The raw output is already persisted by the tool invocation above, so
+      // artifacts keep the raw addresses; only this model-bound rendering
+      // carries tokens.
+      const table = this.engine.handleTable ??
+        createHarnessHandleTable(this.engine.getRunState().runId);
+      const swapped = await swapLinksForTokens(table, modelOutput);
+      modelOutput = swapped.value;
+      if (swapped.table !== table) {
+        await this.engine.recordHandleTable(swapped.table);
+      }
+    }
     const policyEvents = this.engine.getRunState().policyEvents;
     let activityPolicyDecision: HarnessToolPolicyDecision = policyDecision;
     for (const index of policyEventIndexes) {
@@ -2910,14 +3071,22 @@ export class CfHarnessPromptLoop {
         delegateInput.returnSchema !== undefined &&
         subagentStatus === "completed"
       ) {
+        const handleTable = this.engine.config.handleMode === "session"
+          ? this.engine.handleTable ??
+            createHarnessHandleTable(parentRunState.runId)
+          : undefined;
         const structured = await createStructuredSubagentReturn({
           childEngine,
           childRunId,
           rawFinalAssistantText: childResult.finalAssistantText,
           schema: delegateInput.returnSchema,
+          ...(handleTable !== undefined ? { handleTable } : {}),
         });
         summary = structured.summary;
         structuredReturn = structured.structuredReturn;
+        if (structured.handleTable !== undefined) {
+          await this.engine.recordHandleTable(structured.handleTable);
+        }
         if (!structured.valid) {
           subagentStatus = "failed";
         }

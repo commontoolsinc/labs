@@ -20,6 +20,7 @@ Deno.test("HarnessConfig preserves legacy gateway object literals", () => {
     skillScriptExecutionTarget: "sandbox",
     cfcEnforcementMode: "observe",
     cfcEnforcementModeSource: "default",
+    handleMode: "disabled",
   };
   assertEquals(legacy.modelProvider, undefined);
 });
@@ -200,6 +201,7 @@ Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex
     skillScriptExecutionTarget: "sandbox",
     cfcEnforcementMode: "enforce-explicit",
     cfcEnforcementModeSource: "default",
+    handleMode: "disabled",
   });
   assertThrows(
     () =>

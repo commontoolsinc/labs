@@ -115,12 +115,19 @@ network confinement model.
 - explicit `openai-codex` subscription provider with browser PKCE and headless
   device login, refresh-token rotation, live model discovery, resume, and
   owner-bound Loom integration
+- an opt-in session-local address handle table (`--handle-mode session`, default
+  `disabled`): deterministic short `cfh:a:` tokens for cell addresses, minted
+  per run, recorded in run state, and carried across `--resume-run`; see
+  [Session-local address handles](#session-local-address-handles)
 
 What is not done yet:
 
 - real runner-driven CFC feedback integration
+- session handle coverage beyond the wired seams: denial-path tool messages,
+  cross-agent handle semantics for `delegate_task` arguments, and value handles
+  (`cfh:v:`)
 - richer opaque-handle/pass-through behavior outside schema-validated subagent
-  returns
+  returns, including an explicit release/readback mechanism
 - first-class browser operation policy on top of the provisional browser
   subagent profile
 - dynamic/model-driven Agent Skills activation
@@ -135,6 +142,8 @@ What is not done yet:
   - harness config, CFC mode resolution, gateway auth mode
 - [src/engine.ts](src/engine.ts)
   - core execution engine, run state, tool execution
+- [src/handle-table.ts](src/handle-table.ts)
+  - session-local address handle table: token minting and both swap directions
 - [src/prompt-loop.ts](src/prompt-loop.ts)
   - bounded prompt/tool loop
 - [src/model/](src/model)
@@ -156,7 +165,7 @@ What is not done yet:
   - Agent Skills registry scanning, validation, and explicit preload context
 - [src/contracts/](src/contracts/)
   - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
-    transcript, and tool-result contracts
+    transcript, tool-result, and handle-table contracts
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
 - [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
@@ -464,6 +473,54 @@ export CF_HARNESS_CFC_ENFORCEMENT_MODE=observe
 
 Tool outputs are then exposed raw with policy warnings recorded in the run
 report instead of being denied for missing trusted mediation metadata.
+
+### Session-local address handles
+
+`--handle-mode session` (or `CF_HARNESS_HANDLE_MODE=session`; default
+`disabled`) gives the run a session-local handle table: short opaque tokens that
+stand in for cell addresses in model-visible text, so a transcript never has to
+carry a full LLM-friendly link. The flag accepts exactly `disabled` and
+`session`, the CLI flag takes precedence over the environment variable, and
+`--describe-capabilities` reports `handleMode` among its features.
+
+An address token is `cfh:a:<suffix>`, where the suffix is five or more
+characters drawn from a 30-character alphabet — the digits `2`–`9` and the
+lowercase letters minus `i`, `l`, `o`, and `u` — chosen so a token survives
+being retyped. The `cfh:v:` prefix is reserved for a future value-handle kind
+and is not implemented. Token derivation is deterministic: the suffix is
+computed from the table's salt (the run id) and the normalized address, so the
+same referent yields the same token within a run, two spellings of one address
+(an LLM-friendly link and the bare entity URI, say) share one token, and a
+suffix collision extends the token one character at a time.
+
+The table supports swapping in both directions:
+
+- Outbound, positively-marked address forms become tokens: LLM-friendly link
+  strings, standalone `of:`/`computed:`-schemed entity URIs, and whole
+  single-key `{"@link": "<address>"}` objects. A bare `fid1:` hash is never
+  treated as an address — schema hashes, blob ids, and slugs share that
+  encoding, so only the schemed forms are positively an address. Occurrences the
+  runner cannot parse, and `@link` strings that are not entity addresses
+  (`opaque:` handles among them), pass through unchanged.
+- Inbound, every token the table holds becomes its canonical LLM-friendly
+  reference string; a well-formed token the table does not hold is left
+  untouched.
+
+The table is per-run state: it is persisted in `run-state.json` alongside the
+transcript and policy evidence, and a resumed run (`--resume-run`) carries its
+table, so tokens stay stable across resume.
+
+In `session` mode the prompt/tool loop applies the swaps at three seams.
+Successful tool output bound for model context carries tokens, while the
+persisted tool-output artifact keeps the raw addresses. Model-authored tool
+arguments resolve tokens back to canonical references before policy evaluation,
+summarization, and dispatch — except for `delegate_task`, whose arguments reach
+the child verbatim, so a token there is inert text. And a sealed subagent
+structured-return string whose raw value names an address comes back as a token
+rather than an opaque `@link` object; the return's `linkedStringCount` counts
+only the positions still sealed. Denial-path tool messages are not swapped; that
+coverage, cross-agent handle semantics, value handles, and an explicit
+release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Interactive chat stdio transport:
 

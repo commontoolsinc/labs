@@ -14,6 +14,13 @@ import type { DockerRunscSandboxConfig } from "./sandbox/types.ts";
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
   "enforce-explicit" as const satisfies CfcEnforcementMode;
+/**
+ * Whether the run keeps a session-local handle table: `session` mints and
+ * swaps address handles for the run, `disabled` leaves values untouched.
+ */
+export type HarnessHandleMode = "disabled" | "session";
+export const DEFAULT_HARNESS_HANDLE_MODE =
+  "disabled" as const satisfies HarnessHandleMode;
 export type HarnessGatewayAuthMode = "bearer" | "none";
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"
@@ -30,6 +37,7 @@ interface HarnessCommonConfig {
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
+  handleMode: HarnessHandleMode;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -78,6 +86,7 @@ export interface ResolveHarnessConfigOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
+  handleMode?: HarnessHandleMode;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -92,6 +101,22 @@ export const parseCfcEnforcementMode = (
   input: string | null | undefined,
 ): CfcEnforcementMode | undefined =>
   isCfcEnforcementMode(input) ? input : undefined;
+
+const HARNESS_HANDLE_MODES: readonly HarnessHandleMode[] = [
+  "disabled",
+  "session",
+];
+
+export const isHarnessHandleMode = (
+  input: unknown,
+): input is HarnessHandleMode =>
+  typeof input === "string" &&
+  HARNESS_HANDLE_MODES.includes(input as HarnessHandleMode);
+
+export const parseHarnessHandleMode = (
+  input: string | null | undefined,
+): HarnessHandleMode | undefined =>
+  isHarnessHandleMode(input) ? input : undefined;
 
 export const isHarnessGatewayAuthMode = (
   input: unknown,
@@ -214,6 +239,7 @@ export const resolveHarnessConfig = (
       : {}),
     cfcEnforcementMode: resolveCfcEnforcementMode(options),
     cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
+    handleMode: options.handleMode ?? DEFAULT_HARNESS_HANDLE_MODE,
   };
   if (modelProvider === "openai-codex") {
     return {

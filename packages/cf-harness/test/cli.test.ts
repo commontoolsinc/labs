@@ -312,6 +312,63 @@ Deno.test("parseCfHarnessCliArgs accepts CFC mode from environment", async () =>
   assertEquals(parsed.cfcEnforcementModeOverride, "enforce-strict");
 });
 
+Deno.test("parseCfHarnessCliArgs parses --handle-mode and defaults it to absent", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--handle-mode", "session"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.handleMode, "session");
+
+  const unset = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+  if ("help" in unset) {
+    throw new Error("expected config result");
+  }
+  assertEquals(unset.handleMode, undefined);
+});
+
+Deno.test("parseCfHarnessCliArgs rejects unknown handle modes", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--handle-mode", "always"],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "handle mode must be one of disabled, session",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs accepts handle mode from environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_HANDLE_MODE: "session" },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.handleMode, "session");
+});
+
 Deno.test("parseCfHarnessCliArgs resolves run manifest paths", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--run-manifest", "loom-run.json"],

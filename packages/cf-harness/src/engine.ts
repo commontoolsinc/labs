@@ -41,6 +41,7 @@ import {
   summarizeCfcInvocationRunManifest,
 } from "./contracts/cfc-invocation-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
+import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import {
   createHarnessPolicyDecisionRecord,
   type HarnessPolicyDecisionRecord,
@@ -580,6 +581,26 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return this.getRunState();
+  }
+
+  /**
+   * The run's session-local handle table, or `undefined` while none has been
+   * recorded. A defensive copy, like `getRunState()`.
+   */
+  get handleTable(): HarnessHandleTable | undefined {
+    return this.#runState.handleTable === undefined
+      ? undefined
+      : structuredClone(this.#runState.handleTable);
+  }
+
+  /** Records `table` as the run's handle table and persists the run state. */
+  async recordHandleTable(table: HarnessHandleTable): Promise<void> {
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { handleTable: structuredClone(table) },
+      this.#now(),
+    );
+    await this.persistRunState();
   }
 
   async persistRunState(): Promise<string | undefined> {

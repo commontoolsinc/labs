@@ -96,8 +96,13 @@ for an in-flight external side effect.
    capability system. Retirement: network authority is represented and enforced
    as an explicit profile across sandbox and dedicated web tools.
 3. **Filesystem artifact references.** Operator reports may expose raw artifact
-   paths. Retirement: parent/model channels use opaque handles with an explicit
-   release/readback step while operator tooling retains resolvable provenance.
+   paths. The off-by-default session-local address handle table
+   (`--handle-mode session`) supplies deterministic per-run tokens for cell
+   addresses, persisted in run state and carried across resume, and the prompt
+   loop swaps model-bound tool output and model-authored tool arguments through
+   it, but no release/readback step exists. Retirement: parent/model channels
+   use opaque handles with an explicit release/readback step while operator
+   tooling retains resolvable provenance.
 
 ## Test evidence
 
