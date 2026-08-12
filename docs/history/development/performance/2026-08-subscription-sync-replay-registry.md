@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-08-07
-archived: 2026-08-07
+created: 2026-08-11
+archived: 2026-08-11
 reason: "Investigation of two storage benchmark steps: one traced to the sync replay registry and fixed, one that turned out not to be a step."
 ---
 
