@@ -11,6 +11,7 @@ import {
 import { faviconHref, faviconLink, type FaviconStatus } from "./favicon.ts";
 import { paintStatusFavicon } from "./favicon-client.ts";
 import { liveUpdateStream } from "./stream-client.ts";
+import { paintDashboardMessageInput } from "./dashboard-message-client.ts";
 import {
   DASHBOARD_MESSAGE_FADE_MS,
   DASHBOARD_MESSAGE_MAX_LENGTH,
@@ -35,6 +36,7 @@ const FAVICON_PNG_HREFS = JSON.stringify({
 const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
 const LIVE_UPDATE_STREAM = liveUpdateStream.toString();
 const DASHBOARD_MESSAGE_OPACITY = dashboardMessageOpacity.toString();
+const PAINT_DASHBOARD_MESSAGE_INPUT = paintDashboardMessageInput.toString();
 
 // How long past the refresh interval the freshness indicator stays orange before
 // it turns red. The page treats the same span of silence from the server as a
@@ -239,11 +241,12 @@ ${DASHBOARD_THEME_STYLES}
     statusLayer("good", 0.4)
   };border-radius:6px;padding:2px 8px;margin-left:8px}
   .top-actions{display:flex;align-items:center;gap:12px}.live{font-size:12px;color:var(--text-muted)}
-  .message-form{position:relative;width:min(100%,480px);min-width:0;margin:0;justify-self:center}
+  .message-form{position:relative;width:min(100%,480px);min-width:0;margin:0;justify-self:center;border-radius:8px}
+  .message-form:focus-within{background:var(--surface);box-shadow:0 0 0 1px var(--border-hover)}
   .message-input{box-sizing:border-box;width:100%;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text);font:500 16px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;padding:4px 9px;text-align:center;transition:border-color .12s,background-color .12s}
   .message-input::placeholder{color:var(--text-faint);font-weight:400}
   .message-input:hover{border-color:var(--border)}
-  .message-input:focus{background:var(--surface);border-color:var(--border-hover);outline:none}
+  .message-input:focus{outline:none}
   .message-input[aria-invalid="true"]{border-color:var(--status-bad)}
   .message-status{position:absolute;top:100%;left:9px;right:9px;color:var(--status-bad-text);font-size:11px;text-align:center}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}
@@ -344,6 +347,7 @@ ${DASHBOARD_THEME_CLIENT}
   const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS};
   const paintStatusFavicon = ${PAINT_STATUS_FAVICON};
   const dashboardMessageOpacity = ${DASHBOARD_MESSAGE_OPACITY};
+  const paintDashboardMessageInput = ${PAINT_DASHBOARD_MESSAGE_INPUT};
   const liveUpdateStream = ${LIVE_UPDATE_STREAM};
   const badge = document.getElementById('livebadge');
   const dot = document.getElementById('freshdot');
@@ -367,28 +371,20 @@ ${DASHBOARD_THEME_CLIENT}
   let messageSaveSequence = 0;
   let messageSavePending = false;
   function paintDashboardMessage(now) {
-    if (messageDirty || messageSavePending) {
-      messageInput.style.opacity = '1';
-      return;
-    }
-    if (messageUpdatedAt === null || savedMessageText === '') {
-      messageInput.style.opacity = '1';
-      return;
-    }
-    const opacity = dashboardMessageOpacity(
-      messageUpdatedAt,
+    const state = {
+      savedText: savedMessageText,
+      updatedAt: messageUpdatedAt,
+      draftProtected: messageDirty || messageSavePending,
+    };
+    paintDashboardMessageInput(
+      messageInput,
+      state,
       now,
       ${DASHBOARD_MESSAGE_VISIBLE_MS},
       ${DASHBOARD_MESSAGE_FADE_MS},
     );
-    if (opacity === 0) {
-      savedMessageText = '';
-      messageUpdatedAt = null;
-      messageInput.value = '';
-      messageInput.style.opacity = '1';
-      return;
-    }
-    messageInput.style.opacity = String(opacity);
+    savedMessageText = state.savedText;
+    messageUpdatedAt = state.updatedAt;
   }
   function applyDashboardMessage(next) {
     if (next.revision < messageRevision) return;
