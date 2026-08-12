@@ -140,10 +140,13 @@ Input reads are durable and do not need `--step`; use `--step` on result reads
 that must be current.
 
 A board too old to publish `index` publishes `crossrefs` instead — the removed
-reference-graph result. Its rows carry the same row-level `fid`, but no
-row-level `title`, so a title search goes through `.topic.title`. On such a
-board that read is the only address source, so reach for it there and nowhere
-else:
+reference-graph result. Its rows carry the same row-level `fid`, so it answers
+the same question. Search it by `.topic.title` rather than `.title`: the
+row-level `title` was added to `crossrefs` later than `index` was, so a board
+old enough to need this read is one whose rows do not have it, and
+`.topic.title` is the form that works on every generation that publishes
+`crossrefs` at all. On such a board this is the only address source, so reach
+for it there and nowhere else:
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \

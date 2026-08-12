@@ -32,6 +32,7 @@ import {
 } from "./pattern-vintage-lib.ts";
 import {
   isPresentRootValue,
+  isReduction,
   materializeOnCell,
   openFileBackedRuntime,
   readStateUnder,
@@ -47,6 +48,7 @@ import {
 } from "../packages/piece/test/state-continuity-harness.ts";
 import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
 import {
+  acceptedDropKey,
   acceptedDropsFor,
   withoutAcceptedDrops,
 } from "./pattern-vintage-accepted-drops.ts";
@@ -784,11 +786,13 @@ export async function replayVintage(
         // stripping. `applied` is counted from the vintage's side only, since
         // that is where "the vintage held it" is a fact.
         const drops = acceptedDropsFor(entry.main ?? "");
-        const fields = drops?.fields ?? new Set<string>();
-        const keptBefore = withoutAcceptedDrops(before, fields);
-        const keptAfter = withoutAcceptedDrops(after, fields);
-        if (drops !== undefined && keptBefore.applied) {
-          report.dropsApplied.add(drops.pattern);
+        const paths = drops?.paths ?? new Set<string>();
+        const keptBefore = withoutAcceptedDrops(before, paths, isReduction);
+        const keptAfter = withoutAcceptedDrops(after, paths, isReduction);
+        if (drops !== undefined) {
+          for (const path of keptBefore.applied) {
+            report.dropsApplied.add(acceptedDropKey(drops.pattern, path));
+          }
         }
         const findings = strandedKeys(
           keptBefore.value as Record<string, unknown>,

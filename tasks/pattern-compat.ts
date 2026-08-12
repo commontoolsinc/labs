@@ -257,6 +257,18 @@ async function main() {
         .map((baseline) => acceptedBreakKey(accepted.pattern, baseline))
         .filter((pair) => !breaksUsed.has(pair))
     );
+  // An entry whose pattern is not in the tree AT ALL is invisible to the check
+  // above: no shard examines it, so its pairs are never used and never stale.
+  // Retiring a pattern deletes its baselines with it, which is exactly when an
+  // acceptance stops meaning anything — and exactly when nothing would notice.
+  // A whole-tree question, so only an unfiltered shard 1 asks it, as retirement
+  // itself does above.
+  const knownPatterns = new Set(allFiles.map((file) => patternKey(file)));
+  const orphanedBreaks = only.length === 0 && shard.index === 0
+    ? ACCEPTED_CONTRACT_BREAKS
+      .map((accepted) => accepted.pattern)
+      .filter((pattern) => !knownPatterns.has(pattern))
+    : [];
 
   if (unavailable.size > 0) {
     console.log(
@@ -342,10 +354,19 @@ async function main() {
         `not name, so the exemption outlives its break — remove it.`,
     );
   }
+  if (orphanedBreaks.length > 0) {
+    console.error(
+      `\n${orphanedBreaks.length} accepted contract break(s) in ` +
+        `tasks/pattern-compat-accepted-breaks.ts name a pattern that no ` +
+        `longer exists: ${orphanedBreaks.join(", ")}. Retiring a pattern ` +
+        `takes its baselines with it, so the acceptance forgives nothing and ` +
+        `nothing will ever notice — remove it.`,
+    );
+  }
 
   if (
     findings.length > 0 || unexpectedFailures.length > 0 ||
-    recovered.length > 0 || staleBreaks.length > 0
+    recovered.length > 0 || staleBreaks.length > 0 || orphanedBreaks.length > 0
   ) Deno.exit(1);
   console.log(
     `\n${contracts.size} pattern(s) can be updated from every recorded contract.`,
