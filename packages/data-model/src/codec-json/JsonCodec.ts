@@ -416,13 +416,11 @@ export class JsonCodec implements SerializationContext<string> {
     // underestimate otherwise -- growing from there beats growing from empty,
     // and a short array of holes is common enough to be worth not pessimizing.
     //
-    // Nothing validates a `/hole` count. A negative one is not something an
-    // encoder emits -- a run is at least one -- so what it does here is
-    // unspecified rather than designed: it moves the write index backwards,
-    // and the decode then either truncates or throws `RangeError` out of the
-    // length assignment, according to whether the index ends up below zero.
-    // Neither outcome is reported as a `ProblematicValue`, this arm being the
-    // walker's own rather than a codec's.
+    // A run's count is validated, wire data being untrusted. Left unchecked it
+    // is added to the write index directly, so a string concatenates onto it
+    // and a negative or fractional one makes the length assignment throw --
+    // failures with no bearing on what went wrong. A run stands for at least
+    // one absent index, and anything else is reported instead.
     if (Array.isArray(data)) {
       const result: FabricValue[] = new Array(data.length);
       let targetIndex = 0;
@@ -431,7 +429,17 @@ export class JsonCodec implements SerializationContext<string> {
         if (
           entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
         ) {
-          targetIndex += entryDecoded.state as number;
+          const count = entryDecoded.state;
+          if (!JsonCodec.#isHoleCount(count)) {
+            return new ProblematicValue(
+              CODEC_META_TAGS.hole,
+              count,
+              `hole: expected a positive integer count, got ${
+                backtickQuote(toCompactDebugString(count, 30))
+              }`,
+            );
+          }
+          targetIndex += count;
         } else {
           result[targetIndex] = this.#decodeValue(entry, context);
           targetIndex++;
@@ -516,6 +524,16 @@ export class JsonCodec implements SerializationContext<string> {
       "no runtime context (validity check in a test-only helper).",
     ),
   );
+
+  /**
+   * Indicates whether `count` is usable as a `/hole` run length: a safe
+   * integer of at least one. A run always stands for at least one absent
+   * index, so zero is refused along with everything else that is not a count.
+   */
+  static #isHoleCount(count: JsonCodecValue): count is number {
+    return (typeof count === "number") && Number.isSafeInteger(count) &&
+      (count >= 1);
+  }
 
   /**
    * Returns true if `v` is a single-key object whose key starts with `/` --
