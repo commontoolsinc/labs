@@ -681,15 +681,20 @@ export class PatternUpdater {
         sourceSpace,
         `${ref.ref.scheme}:fid1:${ref.ref.hash}`,
       );
-      await abortable(() => sourceCell.sync().then(() => undefined), signal);
-      if (
-        signal.aborted ||
-        this.#stoppedFabricFollowers.has(this.#followerKey(resultCell))
-      ) return "current";
-      const current = getPatternIdentityRef(sourceCell);
+      const current = await abortable(async () => {
+        await sourceCell.sync();
+        if (
+          this.#disposed || signal.aborted ||
+          this.#stoppedFabricFollowers.has(this.#followerKey(resultCell))
+        ) return undefined;
+        const current = getPatternIdentityRef(sourceCell);
+        if (current !== undefined) {
+          this.#watchFabricSource(resultCell, sourceCell, source, current);
+        }
+        return current;
+      }, signal);
       if (current === undefined) return "current";
       targetRef = current;
-      this.#watchFabricSource(resultCell, sourceCell, source, targetRef);
     }
     if (
       targetRef.identity === runningRef.identity &&

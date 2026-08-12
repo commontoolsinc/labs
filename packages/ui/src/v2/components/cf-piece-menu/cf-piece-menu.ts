@@ -886,6 +886,8 @@ export class CFPieceMenu extends BaseElement {
 
   /** Identifies the read a late response belongs to, so a stale one is dropped. */
   private readToken = 0;
+
+  private sourceActionToken = 0;
   private sourceRead: Promise<void> | undefined;
   private accessRead: Promise<void> | undefined;
   private revisionReadToken = 0;
@@ -939,11 +941,22 @@ export class CFPieceMenu extends BaseElement {
   override connectedCallback() {
     super.connectedCallback();
     globalThis.addEventListener("keydown", this.#onKeyDown);
+    if (
+      this.cell && this.source === undefined && !this.clonePending &&
+      !this.sourceActionPending
+    ) {
+      void this.#readSource(this.cell);
+    }
   }
 
   override disconnectedCallback() {
     globalThis.removeEventListener("keydown", this.#onKeyDown);
-    this.close();
+    this.#setHighlightedPiece(undefined, undefined);
+    this.#resetPieceState();
+    this.#resetAccessState();
+    this.sourceRead = undefined;
+    this.sourceActionToken++;
+    this.readToken++;
     super.disconnectedCallback();
   }
 
@@ -986,6 +999,7 @@ export class CFPieceMenu extends BaseElement {
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
     this.#resetAccessState();
+    this.sourceActionToken++;
     this.readToken++;
     this.hidden = false;
     void this.#readSource(cell);
@@ -1013,6 +1027,7 @@ export class CFPieceMenu extends BaseElement {
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
     this.#resetAccessState();
+    this.sourceActionToken++;
     this.readToken++;
   }
 
@@ -1727,7 +1742,7 @@ export class CFPieceMenu extends BaseElement {
   ): Promise<void> {
     const cell = this.cell;
     if (!cell || this.sourceActionPending) return;
-    const token = this.readToken;
+    const actionToken = ++this.sourceActionToken;
     this.sourceActionPending = true;
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
@@ -1739,7 +1754,7 @@ export class CFPieceMenu extends BaseElement {
         action,
         confirmationToken === undefined ? {} : { confirmationToken },
       );
-      if (token !== this.readToken) return;
+      if (actionToken !== this.sourceActionToken) return;
       this.source = response.source;
       if (response.compatibilityWarning !== undefined) {
         if (response.confirmationToken === undefined) {
@@ -1758,13 +1773,17 @@ export class CFPieceMenu extends BaseElement {
         this.panel = "origin";
       }
     } catch (error) {
-      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      if (
+        actionToken !== this.sourceActionToken || cell.runtime().signal.aborted
+      ) return;
       this.sourceActionError = error instanceof Error
         ? error.message
         : String(error);
       this.panel = "origin";
     } finally {
-      if (token === this.readToken) this.sourceActionPending = false;
+      if (actionToken === this.sourceActionToken) {
+        this.sourceActionPending = false;
+      }
     }
   }
 
@@ -1785,7 +1804,6 @@ export class CFPieceMenu extends BaseElement {
   ): Promise<void> {
     const cell = this.cell;
     if (!cell || this.clonePending) return;
-    const token = this.readToken;
     this.cloneMode = copyData ? "copy-data" : "fresh";
     this.clonePending = true;
     this.cloneError = undefined;
@@ -1798,19 +1816,17 @@ export class CFPieceMenu extends BaseElement {
         destinationSpace,
         { copyData },
       );
-      if (token !== this.readToken) return;
       this.clonePending = false;
       this.close();
       navigate({ spaceName, pieceId: clone.id() });
     } catch (error) {
-      if (token !== this.readToken) return;
       this.cloneError = cell.runtime().signal.aborted
         ? "The clone was canceled because the runtime stopped."
         : error instanceof Error
         ? error.message
         : String(error);
     } finally {
-      if (token === this.readToken) this.clonePending = false;
+      this.clonePending = false;
     }
   }
 

@@ -10,7 +10,11 @@ import { getPatternProgram } from "../src/builder/pattern-metadata.ts";
 import {
   sourceCfcMetadataProhibitsCrossSpaceCopy,
 } from "../src/pattern-manager.ts";
-import { COMPILED_INTEGRITY_ATOM } from "../src/compilation-cache/cell-cache.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import {
+  COMPILED_INTEGRITY_ATOM,
+  sourceDocKey,
+} from "../src/compilation-cache/cell-cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -42,6 +46,20 @@ describe("PatternManager cross-space source policy", () => {
       ),
     )).toBe(false);
     expect(sourceCfcMetadataProhibitsCrossSpaceCopy(undefined)).toBe(false);
+  });
+
+  it("allows empty labels but rejects every other integrity shape", () => {
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      metadata(["code"], {}),
+    )).toBe(false);
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      metadata(["other"], { integrity: [COMPILED_INTEGRITY_ATOM] }),
+    )).toBe(true);
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      metadata(["delegatedModuleIdentities"], {
+        integrity: [COMPILED_INTEGRITY_ATOM, "additional-attestation"],
+      }),
+    )).toBe(true);
   });
 });
 
@@ -132,6 +150,82 @@ describe("PatternManager program persistence", () => {
     tx = runtime.edit();
     await result.pull();
     expect(result.getAsQueryResult()).toEqual({ result: 6 });
+  });
+
+  it("rejects cross-space recovery of confidential stored source", async () => {
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern } from 'commonfabric';",
+          "export default pattern(() => ({ value: 'private' }));",
+        ].join("\n"),
+      }],
+    }, { space });
+    await runtime.patternManager.flushCompileCacheWrites();
+
+    const entryIdentity = runtime.patternManager.getArtifactEntryRef(compiled)!
+      .identity;
+    const seed = runtime.edit();
+    const sourceCell = runtime.getCell(
+      space,
+      sourceDocKey(entryIdentity),
+      undefined,
+      seed,
+    );
+    seed.writeOrThrow({
+      space,
+      id: sourceCell.getAsNormalizedFullLink().id,
+      type: "application/json",
+      path: [],
+    }, {
+      value: sourceCell.get(),
+      cfc: {
+        version: 1,
+        schemaHash: "confidential-pattern-source",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["code"],
+            label: { confidentiality: ["private-source"] },
+          }],
+        },
+      },
+    });
+    expect((await seed.commit()).ok).toBeDefined();
+    await storageManager.synced();
+
+    const inspect = runtime.edit();
+    const storedMetadata = readStoredCfcMetadata(inspect, {
+      space,
+      id: sourceCell.getAsNormalizedFullLink().id,
+    });
+    expect(storedMetadata?.labelMap.entries).toHaveLength(1);
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(storedMetadata)).toBe(true);
+    await inspect.commit();
+
+    const destinationSpace = (await Identity.fromPassphrase(
+      "pattern source destination",
+    )).did();
+    expect(destinationSpace).not.toBe(space);
+    const recoveryRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      await expect(
+        recoveryRuntime.patternManager.getPatternSourceProgramByIdentity(
+          entryIdentity,
+          space,
+          destinationSpace,
+        ),
+      ).rejects.toThrow(
+        `pattern source ${entryIdentity} carries CFC provenance that cannot be copied`,
+      );
+    } finally {
+      await recoveryRuntime.dispose({ closeStorage: false });
+    }
   });
 });
 

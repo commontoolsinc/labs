@@ -2142,9 +2142,15 @@ export class PatternManager {
         destinationSpace !== space
       ) {
         for (const identity of sourceDocs.keys()) {
+          const sourceId = this.runtime.getCell(
+            space,
+            sourceDocKey(identity),
+            undefined,
+            readTx,
+          ).getAsNormalizedFullLink().id;
           const metadata = readStoredCfcMetadata(readTx, {
             space,
-            id: sourceDocKey(identity),
+            id: sourceId,
           });
           const prohibited = sourceCfcMetadataProhibitsCrossSpaceCopy(
             metadata,

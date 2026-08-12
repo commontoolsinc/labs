@@ -142,12 +142,115 @@ describe("lazy system-pattern auto-update", () => {
     return piece;
   }
 
+  async function compileMarkerPattern(marker: string) {
+    return await runtime.patternManager.compilePattern(
+      parentProgram(source(marker)),
+      { space: signer.did() },
+    );
+  }
+
+  async function stampSource(piece: Cell<unknown>, origin: string) {
+    const result = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, origin);
+    });
+    expect(result.error).toBeUndefined();
+  }
+
+  async function runScheduledCheck(piece: Cell<unknown>) {
+    runtime.patternUpdater.schedule(piece);
+    await runtime.patternUpdater.idle();
+    await runtime.idle();
+  }
+
+  async function waitForPatternIdentity(
+    piece: Cell<unknown>,
+    target: { identity: string; symbol: string },
+    trigger: () => Promise<unknown> | unknown,
+  ) {
+    const reached = defer<void>();
+    const cancel = piece.sinkMeta("patternIdentity", (value) => {
+      if (
+        typeof value === "object" && value !== null &&
+        !Array.isArray(value) &&
+        (value as Record<string, unknown>).identity === target.identity &&
+        (value as Record<string, unknown>).symbol === target.symbol
+      ) {
+        reached.resolve();
+      }
+    });
+    try {
+      await trigger();
+      await reached.promise;
+      await runtime.patternUpdater.idle();
+      await runtime.idle();
+    } finally {
+      cancel();
+    }
+  }
+
+  async function rejectFirstFabricCommit(
+    piece: Cell<unknown>,
+    error: Error & { readyToRetry?: () => Promise<unknown> | unknown },
+    expectedIdentity?: { identity: string; symbol: string },
+  ) {
+    const runningRef = getPatternIdentityRef(piece)!;
+    const originalLoad = runtime.patternManager.loadPatternByIdentity.bind(
+      runtime.patternManager,
+    );
+    const originalEdit = runtime.edit.bind(runtime);
+    let installed = false;
+
+    try {
+      runtime.patternManager.loadPatternByIdentity = (async (...args) => {
+        const loaded = await originalLoad(...args);
+        if (
+          !installed && args[0] === runningRef.identity &&
+          args[1] === runningRef.symbol
+        ) {
+          installed = true;
+          runtime.edit = ((...editArgs: Parameters<typeof originalEdit>) => {
+            runtime.edit = originalEdit;
+            const tx = originalEdit(...editArgs);
+            const commit = tx.commit.bind(tx);
+            tx.commit = (async () => {
+              tx.abort("simulated fabric source commit rejection");
+              await commit();
+              return { error } as Awaited<ReturnType<typeof commit>>;
+            }) as typeof tx.commit;
+            return tx;
+          }) as typeof runtime.edit;
+        }
+        return loaded;
+      }) as typeof runtime.patternManager.loadPatternByIdentity;
+      if (expectedIdentity === undefined) {
+        await runScheduledCheck(piece);
+      } else {
+        await waitForPatternIdentity(
+          piece,
+          expectedIdentity,
+          () => runtime.patternUpdater.schedule(piece),
+        );
+      }
+    } finally {
+      runtime.edit = originalEdit;
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+    expect(installed).toBe(true);
+  }
+
   it("honors disabled and disposed updater lifecycle gates", async () => {
+    let fetches = 0;
     createRuntime(
-      () => Promise.reject(new Error("disabled updater fetched source")),
+      () => {
+        fetches++;
+        return Promise.reject(new Error("disabled updater fetched source"));
+      },
       false,
     );
     const cell = runtime.getCell(signer.did(), crypto.randomUUID());
+    const initial = await compileMarkerPattern("v1");
+    await runtime.setup(undefined, initial, {}, cell);
+    await stampSource(cell, PARENT_SOURCE);
 
     expect(
       await runtime.patternUpdater.checkDefaultPattern(cell, PARENT_PATH),
@@ -158,6 +261,29 @@ describe("lazy system-pattern auto-update", () => {
     expect(
       await runtime.patternUpdater.checkDefaultPattern(cell, PARENT_PATH),
     ).toBe("current");
+    const originalLink = cell.getAsNormalizedFullLink.bind(cell);
+    const originalLoad = runtime.patternManager
+      .getPatternSourceProgramByIdentity.bind(runtime.patternManager);
+    let linkReads = 0;
+    let sourceLoads = 0;
+    try {
+      cell.getAsNormalizedFullLink = (() => {
+        linkReads++;
+        return originalLink();
+      }) as typeof cell.getAsNormalizedFullLink;
+      runtime.patternManager.getPatternSourceProgramByIdentity = ((...args) => {
+        sourceLoads++;
+        return originalLoad(...args);
+      }) as typeof runtime.patternManager.getPatternSourceProgramByIdentity;
+      runtime.patternUpdater.schedule(cell);
+      await runtime.patternUpdater.idle();
+    } finally {
+      cell.getAsNormalizedFullLink = originalLink;
+      runtime.patternManager.getPatternSourceProgramByIdentity = originalLoad;
+    }
+    expect(linkReads).toBe(0);
+    expect(sourceLoads).toBe(0);
+    expect(fetches).toBe(0);
   });
 
   it("contains synchronous and asynchronous scheduling failures", async () => {
@@ -393,6 +519,515 @@ describe("lazy system-pattern auto-update", () => {
 
     expect(fetches).toBe(0);
     expect(getPatternSource(piece)).toBe("cf:published-pattern");
+  });
+
+  it("updates from a pinned fabric pattern", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("fabric update fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+
+    await runScheduledCheck(piece);
+
+    expect(getPatternIdentityRef(piece)).toEqual(targetRef);
+    expect(getPieceSourceRevisions(piece).at(-1)?.operation).toBe(
+      "origin-update",
+    );
+  });
+
+  it("refuses fabric references that cannot name an update authority", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("invalid fabric source fetched web source"))
+    );
+    const originalRef = getPatternIdentityRef(piece);
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const sourcePiece = runtime.getCell(
+      piece.space,
+      `invalid-fabric-source-${crypto.randomUUID()}`,
+    );
+    await runtime.setup(undefined, target, {}, sourcePiece);
+    const sourceLink = sourcePiece.getAsNormalizedFullLink();
+    const invalidOrigins = [
+      `cf:pattern:${targetRef.identity}/nested.ts`,
+      `cf:/friendly-space/${sourceLink.id}`,
+      `cf://other.test/${piece.space}/${sourceLink.id}`,
+    ];
+    const originalLoad = runtime.patternManager
+      .getPatternSourceProgramByIdentity.bind(runtime.patternManager);
+    const originalLookup = runtime.getCellFromEntityId.bind(runtime);
+    let sourceLoads = 0;
+
+    try {
+      runtime.patternManager.getPatternSourceProgramByIdentity = ((...args) => {
+        sourceLoads++;
+        return originalLoad(...args);
+      }) as typeof runtime.patternManager.getPatternSourceProgramByIdentity;
+      runtime.getCellFromEntityId = ((
+        ...args: Parameters<Runtime["getCellFromEntityId"]>
+      ) =>
+        args[1] === sourceLink.id
+          ? sourcePiece
+          : originalLookup(...args)) as Runtime["getCellFromEntityId"];
+      for (const origin of invalidOrigins) {
+        await stampSource(piece, origin);
+        await runScheduledCheck(piece);
+        expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+        expect(getPatternSource(piece)).toBe(origin);
+      }
+    } finally {
+      runtime.patternManager.getPatternSourceProgramByIdentity = originalLoad;
+      runtime.getCellFromEntityId = originalLookup;
+    }
+    expect(targetRef).not.toEqual(originalRef);
+    expect(sourceLoads).toBe(0);
+  });
+
+  it("does not use a fabric source for the default-root update path", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("default fabric source fetched web source"))
+    );
+    const runningRef = getPatternIdentityRef(piece)!;
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+
+    expect(
+      await runtime.patternUpdater.checkDefaultPattern(piece, PARENT_PATH),
+    ).toBe("current");
+    expect(targetRef).not.toEqual(runningRef);
+    expect(getPatternIdentityRef(piece)).toEqual(runningRef);
+  });
+
+  it("keeps the current pattern when a pinned fabric target is unavailable", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("missing fabric source fetched web source"))
+    );
+    const originalRef = getPatternIdentityRef(piece);
+    await stampSource(
+      piece,
+      "cf:pattern:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    );
+
+    await runScheduledCheck(piece);
+
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+  });
+
+  it("rejects a pinned fabric update that changes the piece contract", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("incompatible fabric source fetched web source"))
+    );
+    const target = await runtime.patternManager.compilePattern(
+      parentProgram(sourceWithRequiredInput("v2")),
+      { space: piece.space },
+    );
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const originalRef = getPatternIdentityRef(piece);
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+
+    await runScheduledCheck(piece);
+
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+  });
+
+  it("rechecks a fabric source after conflict catch-up", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("fabric conflict fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    let readinessChecks = 0;
+    const conflict = Object.assign(new Error("source commit conflicted"), {
+      name: "ConflictError",
+      readyToRetry: () => {
+        readinessChecks++;
+      },
+    });
+
+    await rejectFirstFabricCommit(piece, conflict, targetRef);
+
+    expect(readinessChecks).toBe(1);
+    expect(getPatternIdentityRef(piece)).toEqual(targetRef);
+  });
+
+  it("rechecks a fabric source after a local stale-basis rejection", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("fabric stale basis fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    const inconsistent = Object.assign(
+      new Error("source commit read stale state"),
+      { name: "StorageTransactionInconsistent" },
+    );
+
+    await rejectFirstFabricCommit(piece, inconsistent, targetRef);
+
+    expect(getPatternIdentityRef(piece)).toEqual(targetRef);
+  });
+
+  it("leaves a fabric update pending when conflict catch-up ends", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("fabric conflict fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const originalRef = getPatternIdentityRef(piece);
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    let readinessChecks = 0;
+    const conflict = Object.assign(new Error("source commit conflicted"), {
+      name: "ConflictError",
+      readyToRetry: () => {
+        readinessChecks++;
+        return Promise.reject(new Error("source session ended"));
+      },
+    });
+
+    await rejectFirstFabricCommit(piece, conflict);
+
+    expect(readinessChecks).toBe(1);
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+  });
+
+  it("does not replace a default piece through its fabric origin", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("default fabric piece fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const originalRef = getPatternIdentityRef(piece);
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    const assigned = await runtime.editWithRetry((tx) => {
+      runtime.getSpaceCell(piece.space).withTx(tx).key("defaultPattern")
+        .set(piece.withTx(tx));
+    });
+    expect(assigned.error).toBeUndefined();
+
+    await runScheduledCheck(piece);
+
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+  });
+
+  it("does not apply a fabric update after the recorded origin changes", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("stale fabric piece fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const originalRef = getPatternIdentityRef(piece);
+    const originalLoad = runtime.patternManager.loadPatternByIdentity.bind(
+      runtime.patternManager,
+    );
+    const changedOrigin = `cf:pattern:${originalRef!.identity}`;
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    let changed = false;
+
+    try {
+      runtime.patternManager.loadPatternByIdentity = (async (...args) => {
+        const loaded = await originalLoad(...args);
+        if (!changed && args[0] === originalRef!.identity) {
+          changed = true;
+          await stampSource(piece, changedOrigin);
+        }
+        return loaded;
+      }) as typeof runtime.patternManager.loadPatternByIdentity;
+      await runScheduledCheck(piece);
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+
+    expect(changed).toBe(true);
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    expect(getPatternSource(piece)).toBe(changedOrigin);
+  });
+
+  it("stops a fabric update before opening its commit transaction", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("stopped fabric piece fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const originalRef = getPatternIdentityRef(piece);
+    const originalLoad = runtime.patternManager.loadPatternByIdentity.bind(
+      runtime.patternManager,
+    );
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    let stopped = false;
+
+    try {
+      runtime.patternManager.loadPatternByIdentity = (async (...args) => {
+        const loaded = await originalLoad(...args);
+        if (!stopped && args[0] === originalRef!.identity) {
+          stopped = true;
+          runtime.patternUpdater.unwatch(piece);
+        }
+        return loaded;
+      }) as typeof runtime.patternManager.loadPatternByIdentity;
+      await runScheduledCheck(piece);
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+
+    expect(stopped).toBe(true);
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+  });
+
+  it("aborts a fabric update when commit preparation fails", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("failed fabric commit fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const originalRef = getPatternIdentityRef(piece);
+    const originalPrepare = runtime.prepareTxForCommit.bind(runtime);
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    let prepareCalls = 0;
+    let swapTx: ReturnType<Runtime["edit"]> | undefined;
+
+    try {
+      runtime.prepareTxForCommit = (tx) => {
+        prepareCalls++;
+        swapTx = tx;
+        throw new Error("simulated fabric commit preparation failure");
+      };
+      await runScheduledCheck(piece);
+    } finally {
+      runtime.prepareTxForCommit = originalPrepare;
+    }
+
+    expect(prepareCalls).toBe(1);
+    expect(swapTx?.status()).toMatchObject({
+      status: "error",
+      error: {
+        name: "StorageTransactionAborted",
+        reason: "fabric source update failed",
+      },
+    });
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+  });
+
+  it("stops a fabric update after setup but before commit", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("stopped fabric setup fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const originalRef = getPatternIdentityRef(piece);
+    const originalSetup = runtime.setup.bind(runtime);
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    let stopped = false;
+
+    try {
+      runtime.setup = ((...args: Parameters<typeof originalSetup>) => {
+        const setup = originalSetup(...args);
+        if (!stopped && args[0] !== undefined) {
+          stopped = true;
+          runtime.patternUpdater.unwatch(piece);
+        }
+        return setup;
+      }) as typeof runtime.setup;
+      await runScheduledCheck(piece);
+    } finally {
+      runtime.setup = originalSetup;
+    }
+
+    expect(stopped).toBe(true);
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+  });
+
+  it("rejects a fabric compile whose artifact does not match its source", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("mismatched fabric source fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const originalRef = getPatternIdentityRef(piece);
+    const originalGetEntryRef = runtime.patternManager.getArtifactEntryRef.bind(
+      runtime.patternManager,
+    );
+    await stampSource(piece, `cf:pattern:${targetRef.identity}`);
+    let inspected = false;
+
+    try {
+      runtime.patternManager.getArtifactEntryRef = ((pattern) => {
+        inspected = true;
+        const entry = originalGetEntryRef(pattern);
+        return entry === undefined
+          ? undefined
+          : { ...entry, symbol: "DifferentExport" };
+      }) as typeof runtime.patternManager.getArtifactEntryRef;
+      await runScheduledCheck(piece);
+    } finally {
+      runtime.patternManager.getArtifactEntryRef = originalGetEntryRef;
+    }
+
+    expect(inspected).toBe(true);
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+  });
+
+  it("rechecks when a fabric follower changes its recorded origin", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("fabric follower fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const targetRef = runtime.patternManager.getArtifactEntryRef(target)!;
+    const sourcePiece = runtime.getCell(
+      piece.space,
+      `fabric-source-${crypto.randomUUID()}`,
+    );
+    await runtime.setup(undefined, target, {}, sourcePiece);
+    const sourceLink = sourcePiece.getAsNormalizedFullLink();
+    await stampSource(
+      piece,
+      `cf:/${sourceLink.space}/${sourceLink.id}`,
+    );
+    await runScheduledCheck(piece);
+    expect(getPatternIdentityRef(piece)).toEqual(targetRef);
+
+    const secondTarget = await compileMarkerPattern("v3");
+    const secondTargetRef = runtime.patternManager.getArtifactEntryRef(
+      secondTarget,
+    )!;
+    const secondSource = runtime.getCell(
+      piece.space,
+      `fabric-source-${crypto.randomUUID()}`,
+    );
+    await runtime.setup(undefined, secondTarget, {}, secondSource);
+    const secondSourceLink = secondSource.getAsNormalizedFullLink();
+    const secondOrigin = `cf:/${secondSourceLink.space}/${secondSourceLink.id}`;
+
+    // This metadata notification is the only trigger for the second check.
+    await waitForPatternIdentity(
+      piece,
+      secondTargetRef,
+      () => stampSource(piece, secondOrigin),
+    );
+
+    expect(secondTargetRef).not.toEqual(targetRef);
+    expect(getPatternSource(piece)).toBe(secondOrigin);
+    expect(getPatternIdentityRef(piece)).toEqual(secondTargetRef);
+  });
+
+  it("ignores a retained follower callback after updater disposal", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("disposed fabric follower fetched web source"))
+    );
+    const sourcePiece = runtime.getCell(
+      piece.space,
+      `disposed-fabric-source-${crypto.randomUUID()}`,
+    );
+    const initial = await compileMarkerPattern("v1");
+    await runtime.setup(undefined, initial, {}, sourcePiece);
+    const sourceLink = sourcePiece.getAsNormalizedFullLink();
+    const origin = `cf:/${sourceLink.space}/${sourceLink.id}`;
+    const originalSinkMeta = piece.sinkMeta.bind(piece);
+    let retainedCallback: Parameters<typeof piece.sinkMeta>[1] | undefined;
+
+    try {
+      piece.sinkMeta = ((field, callback, options) => {
+        if (field === "patternSource") retainedCallback = callback;
+        return originalSinkMeta(field, callback, options);
+      }) as typeof piece.sinkMeta;
+      await stampSource(piece, origin);
+      await runScheduledCheck(piece);
+      expect(retainedCallback).toBeDefined();
+      const originalRef = getPatternIdentityRef(piece);
+      const originalGetSource = runtime.patternManager
+        .getPatternSourceProgramByIdentity.bind(runtime.patternManager);
+      let sourceLoads = 0;
+
+      try {
+        runtime.patternManager.getPatternSourceProgramByIdentity =
+          ((...args) => {
+            sourceLoads++;
+            return originalGetSource(...args);
+          }) as typeof runtime.patternManager.getPatternSourceProgramByIdentity;
+        await runtime.patternUpdater.dispose();
+        retainedCallback!(
+          "cf:pattern:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        );
+        await runtime.patternUpdater.idle();
+      } finally {
+        runtime.patternManager.getPatternSourceProgramByIdentity =
+          originalGetSource;
+      }
+
+      expect(sourceLoads).toBe(0);
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+      expect(getPatternSource(piece)).toBe(origin);
+    } finally {
+      piece.sinkMeta = originalSinkMeta;
+    }
+  });
+
+  it("does not install a fabric watcher when disposed during source sync", async () => {
+    const piece = await preparePiece(() =>
+      Promise.reject(new Error("stopped fabric sync fetched web source"))
+    );
+    const target = await compileMarkerPattern("v2");
+    const sourcePiece = runtime.getCell(
+      piece.space,
+      `fabric-sync-source-${crypto.randomUUID()}`,
+    );
+    await runtime.setup(undefined, target, {}, sourcePiece);
+    const sourceLink = sourcePiece.getAsNormalizedFullLink();
+    const originalSync = sourcePiece.sync.bind(sourcePiece);
+    const originalSinkMeta = sourcePiece.sinkMeta.bind(sourcePiece);
+    const originalLookup = runtime.getCellFromEntityId.bind(runtime);
+    const originalRef = getPatternIdentityRef(piece);
+    const syncEntered = defer<void>();
+    const syncRelease = defer<void>();
+    let syncCompletion: ReturnType<typeof originalSync> | undefined;
+    let sourceSinks = 0;
+    await stampSource(
+      piece,
+      `cf:/${sourceLink.space}/${sourceLink.id}`,
+    );
+
+    try {
+      runtime.getCellFromEntityId =
+        ((...args: Parameters<Runtime["getCellFromEntityId"]>) =>
+          args[0] === sourceLink.space && args[1] === sourceLink.id
+            ? sourcePiece
+            : originalLookup(...args)) as Runtime[
+            "getCellFromEntityId"
+          ];
+      sourcePiece.sinkMeta = ((field, callback, options) => {
+        if (field === "patternIdentity") sourceSinks++;
+        return originalSinkMeta(field, callback, options);
+      }) as typeof sourcePiece.sinkMeta;
+      sourcePiece.sync = (() => {
+        syncCompletion = (async () => {
+          syncEntered.resolve();
+          await syncRelease.promise;
+          return await originalSync();
+        })();
+        return syncCompletion;
+      }) as typeof sourcePiece.sync;
+
+      runtime.patternUpdater.schedule(piece);
+      await syncEntered.promise;
+      const disposal = runtime.patternUpdater.dispose();
+      syncRelease.resolve();
+      // The updater registered its continuation on this same promise before
+      // the test did, so Promise reaction FIFO guarantees its in-operation
+      // lifecycle check has run when this await returns.
+      await syncCompletion!;
+      await disposal;
+    } finally {
+      syncRelease.resolve();
+      sourcePiece.sync = originalSync;
+      sourcePiece.sinkMeta = originalSinkMeta;
+      runtime.getCellFromEntityId = originalLookup;
+    }
+
+    expect(sourceSinks).toBe(0);
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
   });
 
   it("leaves repository-pinned patterns untouched when they have a source", async () => {
@@ -682,6 +1317,65 @@ describe("lazy system-pattern auto-update", () => {
     expect(getPatternIdentityRef(piece)).toEqual(originalRef);
     expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
     expect(sourceFetches).toBe(0);
+  });
+
+  it("does not retry provenance repair after the piece stops", async () => {
+    const v1Identity = await identityFor(source("v1"));
+    let repairAttempts = 0;
+    let retryHarnessInstalled = false;
+    const originalEditWithRetry = {
+      current: undefined as Runtime["editWithRetry"] | undefined,
+    };
+    const piece = await preparePiece((input) => {
+      const href = input instanceof Request
+        ? input.url
+        : input instanceof URL
+        ? input.href
+        : input;
+      const url = new URL(href);
+      if (url.pathname !== PARENT_PATH) {
+        return Promise.resolve(new Response("not found", { status: 404 }));
+      }
+      if (url.searchParams.has("identity")) {
+        originalEditWithRetry.current = runtime.editWithRetry.bind(runtime);
+        runtime.editWithRetry = ((fn) => {
+          retryHarnessInstalled = true;
+          const first = runtime.edit();
+          fn(first);
+          repairAttempts++;
+          first.abort("simulated provenance repair rejection");
+          runtime.patternUpdater.unwatch(piece);
+          const retry = runtime.edit();
+          try {
+            fn(retry);
+          } catch (error) {
+            repairAttempts++;
+            retry.abort(error);
+          }
+          return Promise.resolve({
+            error: {
+              name: "StorageTransactionAborted",
+              message: "stopped provenance repair",
+            },
+          });
+        }) as typeof runtime.editWithRetry;
+        return Promise.resolve(new Response(v1Identity));
+      }
+      return Promise.resolve(new Response(parentSource));
+    });
+
+    try {
+      runtime.patternUpdater.schedule(piece);
+      await runtime.patternUpdater.idle();
+    } finally {
+      if (originalEditWithRetry.current !== undefined) {
+        runtime.editWithRetry = originalEditWithRetry.current;
+      }
+    }
+
+    expect(retryHarnessInstalled).toBe(true);
+    expect(repairAttempts).toBe(2);
+    expect(getPatternSource(piece)).toBeUndefined();
   });
 
   it("does not fetch an entry filename that names no route", async () => {

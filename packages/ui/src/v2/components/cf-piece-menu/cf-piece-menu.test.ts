@@ -704,6 +704,111 @@ describe("the menu a right-click opens", () => {
     }]);
   });
 
+  it("ignores new openings and duplicate clone requests while cloning", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let cloneCalls = 0;
+    const cell = pieceCell();
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = async () => {
+      cloneCalls++;
+      entered.resolve();
+      await release.promise;
+      throw new Error("expected test failure");
+    };
+    const menu = openMenu(cell);
+    const startClone = clickHandlerForTestId(menu, "piece-menu-clone-fresh");
+
+    const cloning = startClone() as Promise<void>;
+    await entered.promise;
+    expect(shows(menu)).toContain("Cloning piece into a new space…");
+
+    menu.open({
+      cell: {
+        ...pieceCell(),
+        id: () => "of:fid1:other-piece",
+      } as CellHandle,
+      x: 10,
+      y: 20,
+    });
+    expect(shows(menu)).toContain("Cloning piece into a new space…");
+
+    await startClone();
+    await menu.cloneIntoNewSpace({ spaceName: "duplicate-copy" });
+    expect(cloneCalls).toBe(1);
+
+    release.resolve();
+    await cloning;
+  });
+
+  it("completes a clone that finishes after disconnection", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const navigations: unknown[] = [];
+    const onNavigate = (event: Event) => {
+      navigations.push((event as CustomEvent).detail);
+    };
+    const cell = pieceCell();
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = async () => {
+      entered.resolve();
+      await release.promise;
+      return { id: () => "fid1:clone" };
+    };
+    const menu = openMenu(cell);
+    globalThis.addEventListener("cf-navigate", onNavigate);
+    try {
+      const cloning = menu.cloneIntoNewSpace({ spaceName: "copied-piece" });
+      await entered.promise;
+
+      menu.disconnectedCallback();
+      release.resolve();
+      await cloning;
+
+      expect(navigations).toEqual([{
+        spaceName: "copied-piece",
+        pieceId: "fid1:clone",
+      }]);
+    } finally {
+      release.resolve();
+      globalThis.removeEventListener("cf-navigate", onNavigate);
+    }
+  });
+
+  it("retains a clone failure that arrives after disconnection", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const cell = pieceCell();
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = async () => {
+      entered.resolve();
+      await release.promise;
+      throw new Error("clone failed after disconnection");
+    };
+    const menu = openMenu(cell);
+    const cloning = menu.cloneIntoNewSpace({ spaceName: "copied-piece" });
+    await entered.promise;
+
+    menu.disconnectedCallback();
+    release.resolve();
+    await cloning;
+
+    expect(shows(menu)).toContain("clone failed after disconnection");
+    expect(shows(menu)).toContain("piece-clone-dialog");
+  });
+
   it("shows clone progress and failures in a dialog", async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -1124,6 +1229,35 @@ describe("the source panel", () => {
 
     expect(shows(menu)).not.toContain("Stale");
   });
+
+  it("drops a source read that resolves after disconnection", async () => {
+    let resolveRead!: (source: PieceSourceView) => void;
+    let reads = 0;
+    const menu = openMenu(
+      pieceCell(() => {
+        reads++;
+        return reads === 1
+          ? new Promise<PieceSourceView>((resolve) => {
+            resolveRead = resolve;
+          })
+          : Promise.resolve(SOURCE);
+      }),
+    );
+    const pending = menu.showPanel("source");
+
+    menu.disconnectedCallback();
+    resolveRead({ ...SOURCE, name: "Disconnected source" });
+    await pending;
+
+    expect(shows(menu)).toContain("Reading source…");
+    expect(shows(menu)).not.toContain("Disconnected source");
+
+    menu.connectedCallback();
+    await menu.showPanel("source");
+
+    expect(reads).toBe(2);
+    expect(shows(menu)).toContain("the main file");
+  });
 });
 
 describe("the origin and history panel", () => {
@@ -1501,6 +1635,47 @@ describe("the origin and history panel", () => {
     }]);
     expect(shows(menu)).toContain("Detached");
     expect(shows(menu)).toContain("Stopped following source · Current");
+  });
+
+  it("re-enables source actions after a disconnected action settles", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const sourceRead = Promise.withResolvers<PieceSourceView>();
+    let updates = 0;
+    let reads = 0;
+    const updated = { ...SOURCE, name: "Updated after reconnect" };
+    const menu = openMenu(pieceCell(
+      () => {
+        reads++;
+        return sourceRead.promise;
+      },
+      {
+        update: async () => {
+          updates++;
+          if (updates === 1) {
+            entered.resolve();
+            await release.promise;
+          }
+          return { source: updates === 1 ? updated : SOURCE };
+        },
+      },
+    ));
+    const staleRead = menu.showPanel("origin");
+
+    const first = menu.changeSource({ kind: "detach" });
+    await entered.promise;
+    menu.disconnectedCallback();
+    menu.connectedCallback();
+    release.resolve();
+    await first;
+    expect(shows(menu)).toContain("Updated after reconnect");
+    sourceRead.resolve(SOURCE);
+    await staleRead;
+    expect(shows(menu)).toContain("Updated after reconnect");
+    expect(reads).toBe(1);
+    await menu.changeSource({ kind: "detach" });
+
+    expect(updates).toBe(2);
   });
 
   it("runs detach from both menu affordances", async () => {
