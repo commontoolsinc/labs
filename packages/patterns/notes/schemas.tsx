@@ -112,6 +112,26 @@ export interface NotebookInput {
   parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
 }
 
+/**
+ * One mention in reference form: where it points, and whether the label
+ * carrying it in the text is the user's own wording rather than the
+ * destination's name.
+ *
+ * `destination` is typed `unknown` because a mention may address any piece,
+ * and a read of it comes back undefined for that reason. An address is taken
+ * from the path to it instead, which survives where the value does not.
+ */
+export interface MentionRef {
+  destination: unknown;
+  modifiedTitle: boolean;
+}
+
+/**
+ * A note's mentions, keyed by the token that appears in its text. The keys are
+ * local to one note and mean nothing anywhere else.
+ */
+export type MentionRefMap = Record<string, MentionRef>;
+
 export interface NoteMdInput {
   /** Cell reference to note data (title + content + backlinks) */
   note?: NotePiece | Default<{ title: ""; content: ""; backlinks: [] }>;
@@ -119,6 +139,8 @@ export interface NoteMdInput {
   sourceNoteRef?: NotePiece;
   /** Writable content cell for checkbox updates */
   content?: Writable<string>;
+  /** The note's mentions, for resolving `[Label][key]` in its content */
+  references?: Writable<MentionRefMap>;
 }
 
 // ===== Utility Functions =====

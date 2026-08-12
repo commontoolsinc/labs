@@ -15,6 +15,22 @@
 import { action, assert, NAME, pattern, TESTS, Writable } from "commonfabric";
 import NoteMd from "./note-md.tsx";
 import Note from "./note.tsx";
+import { type MentionRefMap } from "./schemas.tsx";
+
+/**
+ * The address the renderer should produce for a reference, read back the way
+ * the renderer reads it. A destination's address is a content hash, so it
+ * cannot be spelled out in an expectation. Module scope is required: an
+ * assertion callback may not capture a callable from an enclosing function.
+ */
+const referenceAddress = (
+  references: Writable<MentionRefMap>,
+  key: string,
+): string => {
+  const uri = ((references as any).key(key).key("destination"))
+    ?.resolveAsCell?.()?.sourceURI;
+  return uri ? `/${uri}` : "";
+};
 
 export default pattern(() => {
   // Writable content cell for basic testing
@@ -145,6 +161,54 @@ export default pattern(() => {
     content: whitespaceContent,
   });
 
+  // === Instance with mentions in reference form ===
+  // `[Label][key]` resolves through the note's reference map. The destination
+  // is a live piece, so its address is content-derived and cannot be spelled
+  // out here; the assertions read it back the way the renderer does.
+  const alice = Note({ title: "Alice", content: "", isHidden: false });
+
+  // Seeded by an action rather than inline: a Writable initializer takes
+  // static data, and a destination is a live piece.
+  const references = new Writable<MentionRefMap>({});
+
+  const refContent = new Writable("See [Alice][a3f9zz] for details");
+
+  const mdRefs = NoteMd({
+    note: { title: "Ref Note", content: "Fallback", backlinks: [] },
+    content: refContent,
+    references,
+  });
+
+  // A key the map does not hold, and a hand-written reference link that
+  // happens to fit the key shape. Neither is a mention.
+  const unknownRefContent = new Writable(
+    "See [Bob][zzzz99] and [the docs][readme] here",
+  );
+
+  const mdUnknownRefs = NoteMd({
+    note: { title: "Unknown Ref Note", content: "Fallback", backlinks: [] },
+    content: unknownRefContent,
+    references,
+  });
+
+  // Reference-form content reaching a viewer given no map at all.
+  const mdRefsNoMap = NoteMd({
+    note: { title: "No Map Note", content: "Fallback", backlinks: [] },
+    content: new Writable("See [Alice][a3f9zz] for details"),
+  });
+
+  // Both mention forms in one document, which is what a note part-way through
+  // a migration looks like.
+  const mixedFormsContent = new Writable(
+    "Old [[Bob (def456)]] and new [Alice][a3f9zz]",
+  );
+
+  const mdMixedForms = NoteMd({
+    note: { title: "Mixed Forms Note", content: "Fallback", backlinks: [] },
+    content: mixedFormsContent,
+    references,
+  });
+
   // === Instance with sourceNoteRef for Edit navigation ===
   const sourceNote = Note({
     title: "Source Note",
@@ -191,6 +255,18 @@ export default pattern(() => {
   // Toggle third checkbox (index 2) to checked
   const action_check_third = action(() => {
     mdCheckbox.checkboxToggle.send({ detail: { index: 2, checked: true } });
+  });
+
+  const action_seed_reference = action(() => {
+    references.key("a3f9zz").set({ destination: alice, modifiedTitle: false });
+  });
+
+  // Add an entry for a key already sitting in a document, which is the order
+  // a mention pasted before its map arrives comes in.
+  const bob = Note({ title: "Bob", content: "", isHidden: false });
+
+  const action_add_reference = action(() => {
+    references.key("zzzz99").set({ destination: bob, modifiedTitle: false });
   });
 
   // Update wiki content to have multiple links
@@ -262,6 +338,57 @@ export default pattern(() => {
   // Content without wiki-links passes through unchanged
   const assert_plain_passthrough = assert(
     () => mdPlain.processedContent === "No links here, just plain text.",
+  );
+
+  // ==========================================================================
+  // Assertions - Reference-form mentions
+  // ==========================================================================
+
+  const assert_reference_before_entry_untouched = assert(
+    () => mdRefs.processedContent === "See [Alice][a3f9zz] for details",
+  );
+
+  const assert_reference_converted = assert(
+    () =>
+      mdRefs.processedContent ===
+        `See [Alice](${referenceAddress(references, "a3f9zz")}) for details`,
+  );
+
+  // The address carries the destination's own scheme rather than a prepended
+  // one, which for a piece is `of:`.
+  const assert_reference_address_schemed = assert(
+    () => referenceAddress(references, "a3f9zz").startsWith("/of:"),
+  );
+
+  // A key with no entry, and a hand-written reference link, both stay as
+  // written — the label survives and nothing points at nothing.
+  const assert_unknown_reference_untouched = assert(
+    () =>
+      mdUnknownRefs.processedContent ===
+        "See [Bob][zzzz99] and [the docs][readme] here",
+  );
+
+  // With no map, reference-form text is text.
+  const assert_reference_without_map_untouched = assert(
+    () => mdRefsNoMap.processedContent === "See [Alice][a3f9zz] for details",
+  );
+
+  // A note holding both forms converts both.
+  const assert_mixed_forms_converted = assert(
+    () =>
+      mdMixedForms.processedContent ===
+        `Old [Bob](/of:def456) and new [Alice](${
+          referenceAddress(references, "a3f9zz")
+        })`,
+  );
+
+  // An entry added after the fact resolves the token that was waiting for it.
+  const assert_late_reference_converted = assert(
+    () =>
+      mdUnknownRefs.processedContent ===
+        `See [Bob](${
+          referenceAddress(references, "zzzz99")
+        }) and [the docs][readme] here`,
   );
 
   // After updating wiki content, new links should be converted
@@ -411,6 +538,21 @@ export default pattern(() => {
       // === Wiki-link conversion ===
       { assertion: assert_wiki_links_converted },
       { assertion: assert_plain_passthrough },
+
+      // === Reference-form mentions ===
+      // Before its entry exists, a token is text — which is also what a
+      // document whose map has not arrived yet looks like.
+      { assertion: assert_reference_before_entry_untouched },
+      { action: action_seed_reference },
+      { assertion: assert_reference_converted },
+      { assertion: assert_reference_address_schemed },
+      { assertion: assert_unknown_reference_untouched },
+      { assertion: assert_reference_without_map_untouched },
+      { assertion: assert_mixed_forms_converted },
+
+      // === An entry arriving after the token ===
+      { action: action_add_reference },
+      { assertion: assert_late_reference_converted },
 
       // === Update wiki content and verify ===
       { action: action_set_multi_wiki },
