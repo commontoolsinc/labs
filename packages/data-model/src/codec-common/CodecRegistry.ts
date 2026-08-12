@@ -1,12 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import {
-  CODEC,
-  type MatchedCodec,
-  type NonterminalCodec,
-  type RegistrableCodec,
-  type TerminalCodec,
-  type WireFormat,
-} from "./interface.ts";
+import { CODEC, type RegistrableCodec, type WireFormat } from "./interface.ts";
 import { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 import type { Constructor } from "@commonfabric/utils/types";
@@ -75,15 +68,15 @@ export class CodecRegistry<Encoded> {
   readonly #format: WireFormat<Encoded>;
 
   /** Tag -> codec map for O(1) decode dispatch. */
-  readonly #tagMap = new Map<string, MatchedCodec<Encoded>>();
+  readonly #tagMap = new Map<string, RegistrableCodec<Encoded>>();
 
   /** Class -> codec map for O(1) encode dispatch on object values. */
-  readonly #classMap = new Map<Constructor, MatchedCodec<Encoded>>();
+  readonly #classMap = new Map<Constructor, RegistrableCodec<Encoded>>();
 
   /** Primitive `type` -> codec map for O(1) encode dispatch on primitives. */
   readonly #primitiveCodecs = new Map<
     PrimitiveTypeName,
-    MatchedCodec<Encoded>
+    RegistrableCodec<Encoded>
   >();
 
   /** Primitive `type`s that are self-representing (encoded as-is). */
@@ -156,18 +149,17 @@ export class CodecRegistry<Encoded> {
   register(codec: RegistrableCodec<Encoded>): void {
     this.#assertNotFrozen();
 
-    const matched = CodecRegistry.#matched<Encoded>(codec);
-
+    CodecRegistry.#assertClassified<Encoded>(codec);
     CodecRegistry.#assertTagRegistrable(codec.recognizedTypeTag);
 
     const uniqueClass = codec.uniqueHandledClass;
     if (uniqueClass !== undefined) {
-      this.#classMap.set(uniqueClass, matched);
+      this.#classMap.set(uniqueClass, codec);
     }
 
     const tag = codec.recognizedTypeTag;
     if (tag !== undefined) {
-      this.#tagMap.set(tag, matched);
+      this.#tagMap.set(tag, codec);
     }
   }
 
@@ -182,15 +174,14 @@ export class CodecRegistry<Encoded> {
   ): void {
     this.#assertNotFrozen();
 
-    const matched = CodecRegistry.#matched<Encoded>(codec);
-
+    CodecRegistry.#assertClassified<Encoded>(codec);
     CodecRegistry.#assertTagRegistrable(codec.recognizedTypeTag);
 
-    this.#primitiveCodecs.set(type, matched);
+    this.#primitiveCodecs.set(type, codec);
 
     const tag = codec.recognizedTypeTag;
     if (tag !== undefined) {
-      this.#tagMap.set(tag, matched);
+      this.#tagMap.set(tag, codec);
     }
   }
 
@@ -300,7 +291,7 @@ export class CodecRegistry<Encoded> {
    */
   codecFromValue(
     value: FabricValue,
-  ): MatchedCodec<Encoded> | typeof SELF_REP | undefined {
+  ): RegistrableCodec<Encoded> | typeof SELF_REP | undefined {
     // Primitive dispatch on the value's primitive `type` key (its `typeof`, or
     // `"null"`). The type's codec is tried first, then self-representation.
     let type: PrimitiveTypeName | undefined;
@@ -331,7 +322,7 @@ export class CodecRegistry<Encoded> {
 
     if (type !== undefined) {
       const matched = this.#primitiveCodecs.get(type);
-      if (matched && CodecRegistry.#codecOfMatch(matched).canEncode(value)) {
+      if (matched && matched.canEncode(value)) {
         return matched;
       }
       if (this.#selfRepTypes.has(type)) {
@@ -344,7 +335,7 @@ export class CodecRegistry<Encoded> {
     const constructorFn = constructorOf(value);
     if (constructorFn) {
       const matched = this.#classMap.get(constructorFn);
-      if (matched && CodecRegistry.#codecOfMatch(matched).canEncode(value)) {
+      if (matched && matched.canEncode(value)) {
         return matched;
       }
     }
@@ -353,7 +344,7 @@ export class CodecRegistry<Encoded> {
   }
 
   /** Looks up a codec by tag for decoding. */
-  codecFromTag(typeTag: string): MatchedCodec<Encoded> | undefined {
+  codecFromTag(typeTag: string): RegistrableCodec<Encoded> | undefined {
     return this.#tagMap.get(typeTag);
   }
 
@@ -380,39 +371,30 @@ export class CodecRegistry<Encoded> {
   }
 
   /**
-   * Pairs a codec with its kind. The kind comes from which base class the
-   * codec extends, which is the same declaration that fixed its `encode()` and
-   * `decode()` signatures, so the two cannot disagree.
+   * Checks that a codec declares a kind, by extending one of the two base
+   * classes. Nothing is stored: each walker reads the kind again with its own
+   * `instanceof` when it dispatches.
    *
    * That makes extending one of the two bases a requirement, which the
    * parameter type does not express: it names the interfaces, and an object
    * satisfying one of those without extending anything has no kind to read.
-   * Uses "death before confusion" on that case rather than picking a default,
-   * because a codec silently taken for the kind it is not would have its state
-   * expanded, or left unexpanded, in whole-value encodings far from here.
+   * Uses "death before confusion" on that case rather than letting a walker
+   * pick a default, because a codec silently taken for the kind it is not
+   * would have its state expanded, or left unexpanded, in whole-value
+   * encodings far from here.
    *
    * @throws If `codec` extends neither base class.
    */
-  static #matched<Encoded>(
-    codec: RegistrableCodec<Encoded>,
-  ): MatchedCodec<Encoded> {
-    if (codec instanceof BaseTerminalCodec) {
-      return { terminal: codec as TerminalCodec<Encoded> };
-    } else if (codec instanceof BaseNonterminalCodec) {
-      return { nonterminal: codec as NonterminalCodec };
+  static #assertClassified<Encoded>(codec: RegistrableCodec<Encoded>): void {
+    if (
+      !(codec instanceof BaseTerminalCodec) &&
+      !(codec instanceof BaseNonterminalCodec)
+    ) {
+      throw new Error(
+        "Shouldn't happen: codec extends neither `BaseNonterminalCodec` nor " +
+          "`BaseTerminalCodec`, so it declares no kind: " +
+          `\`${codec.constructor.name}\``,
+      );
     }
-
-    throw new Error(
-      "Shouldn't happen: codec extends neither `BaseNonterminalCodec` nor " +
-        "`BaseTerminalCodec`, so it declares no kind: " +
-        `\`${codec.constructor.name}\``,
-    );
-  }
-
-  /** Gets the codec out of a match, for the parts that need only dispatch. */
-  static #codecOfMatch<Encoded>(
-    matched: MatchedCodec<Encoded>,
-  ): RegistrableCodec<Encoded> {
-    return ("terminal" in matched) ? matched.terminal : matched.nonterminal;
   }
 }

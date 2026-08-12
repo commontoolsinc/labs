@@ -23,8 +23,9 @@ export const CODEC: unique symbol = Symbol("data-model.codec");
  * The domain does not by itself say what the codec system should do with a
  * state, and it cannot: the domains overlap, in that an all-string record
  * satisfies `FabricValue` and JSON's value type alike. That is settled instead
- * by which base class a codec extends, recorded once by
- * {@link CodecRegistry#register} and handed back as a {@link MatchedCodec}.
+ * by which base class a codec extends, which is where it stays: a registry
+ * refuses a codec extending neither and otherwise stores it unaltered, and a
+ * walker reads the class when it dispatches.
  */
 export interface FabricCodec<Encoded> {
   /**
@@ -121,8 +122,8 @@ export type NonterminalCodec = FabricCodec<FabricValue>;
  *
  * The difference between the two kinds is not in the shape of a codec -- both
  * have the same members -- but in what its state means to the walker. A class
- * declares which it is by the base class it extends; see
- * {@link MatchedCodec}.
+ * declares which it is by the base class it extends, and that declaration is
+ * the only record of it.
  */
 export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
 
@@ -161,21 +162,6 @@ export interface WireFormat<Encoded> {
    */
   readonly codecSymbol: symbol;
 }
-
-/**
- * A codec paired with its kind, as {@link CodecRegistry} hands one back. The
- * key names the kind, so a holder narrows with `in` and gets `encode()` /
- * `decode()` signatures that match.
- *
- * This is what lets a walker keep a state and the codec it belongs to in
- * agreement. The two are correlated -- wire-form state goes to a terminal
- * codec, decoded state to a nonterminal one -- and a correlation spread across
- * two separate values is not something TypeScript can check. Narrowing one
- * object settles both at once.
- */
-export type MatchedCodec<Encoded> =
-  | { readonly terminal: TerminalCodec<Encoded> }
-  | { readonly nonterminal: NonterminalCodec };
 
 /**
  * Interface for classes that provide a `NonterminalCodec` which is guaranteed

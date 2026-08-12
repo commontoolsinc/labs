@@ -6,9 +6,12 @@ import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
   CODEC,
+  type NonterminalCodec,
   type ReconstructionContext,
   type SerializationContext,
+  type TerminalCodec,
 } from "@/codec-common/interface.ts";
+import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
@@ -174,15 +177,10 @@ export class JsonCodec implements SerializationContext<string> {
       // A terminal codec's state is already in this format's domain, so it is
       // final; a nonterminal codec's is made of fabric values, which this
       // walker has yet to expand.
-      let tag: string;
-      let finalState: JsonCodecValue;
-      if ("terminal" in matched) {
-        tag = matched.terminal.tagForValue(value);
-        finalState = matched.terminal.encode(value);
-      } else {
-        tag = matched.nonterminal.tagForValue(value);
-        finalState = this.#encodeValue(matched.nonterminal.encode(value), seen);
-      }
+      const tag = matched.tagForValue(value);
+      const finalState = (matched instanceof BaseTerminalCodec)
+        ? matched.encode(value) as JsonCodecValue
+        : this.#encodeValue(matched.encode(value) as FabricValue, seen);
       const result: JsonCodecValue = { [`/${tag}`]: finalState };
 
       if (addedToSeen) {
@@ -351,11 +349,13 @@ export class JsonCodec implements SerializationContext<string> {
           : new UnknownValue(tag, state);
       }
 
-      if ("terminal" in matched) {
+      if (matched instanceof BaseTerminalCodec) {
         return this.#decodeChecked(
           tag,
           rawState,
-          () => matched.terminal.decode(tag, rawState, context),
+          () =>
+            (matched as TerminalCodec<JsonCodecValue>)
+              .decode(tag, rawState, context),
         );
       }
 
@@ -363,7 +363,7 @@ export class JsonCodec implements SerializationContext<string> {
       return this.#decodeChecked(
         tag,
         state,
-        () => matched.nonterminal.decode(tag, state, context),
+        () => (matched as NonterminalCodec).decode(tag, state, context),
       );
     }
 

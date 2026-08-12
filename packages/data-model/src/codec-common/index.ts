@@ -12,7 +12,6 @@ export {
   CODEC,
   type FabricClassWithNonterminalCodec,
   type FabricCodec,
-  type MatchedCodec,
   type NonterminalCodec,
   type ReconstructionContext,
   type RegistrableCodec,

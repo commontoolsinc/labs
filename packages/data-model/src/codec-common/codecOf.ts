@@ -31,7 +31,7 @@ export function codecOf(value: FabricSpecialObject): NonterminalCodec;
  * The result is of either kind, since `[CODEC]` still wins when a class
  * happens to bind both, and nothing here distinguishes them. That suits the
  * callers, which want a tag: `tagForValue()` is common to both kinds. A caller
- * that means to encode wants a `MatchedCodec` from a registry instead.
+ * that means to encode has to read the kind off the codec's class first.
  *
  * @param value The value whose class's codec is wanted.
  * @param altCodec Symbol to try when `[CODEC]` is absent.
