@@ -93,12 +93,16 @@ export function gatewayProvenanceHeaders(
  * Which headers those are follows what `fetch` itself would use. An `init`
  * that names headers replaces whatever a `Request` argument carried, so the
  * headers on the request are read only where the caller passed a `Request` and
- * left `init` silent about them.
+ * left `init` silent about them. Silent means absent: an `init` naming
+ * something that is no header list, `null` among them, reaches `Headers` and
+ * is refused there, which is what `fetch` does with it too.
  */
 export function withGatewayProvenance(inner: typeof fetch): typeof fetch {
   return (input, init) => {
     const headers = new Headers(
-      init?.headers ?? (input instanceof Request ? input.headers : undefined),
+      init?.headers !== undefined
+        ? init.headers
+        : (input instanceof Request ? input.headers : undefined),
     );
     for (const [name, value] of Object.entries(gatewayProvenanceHeaders())) {
       headers.set(name, value);

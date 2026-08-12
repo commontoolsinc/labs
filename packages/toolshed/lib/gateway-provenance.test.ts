@@ -119,6 +119,18 @@ describe("gateway-provenance", () => {
       expect(recorder.headers().get("authorization")).toBe("Bearer from-init");
     });
 
+    it("refuses an init whose headers are no header list", () => {
+      const recorder = recordingFetch();
+      expect(() =>
+        withGatewayProvenance(recorder.fetch)(
+          new Request("https://gateway.invalid/", {
+            headers: { authorization: "Bearer gateway-internal" },
+          }),
+          { headers: null as unknown as HeadersInit },
+        )
+      ).toThrow(TypeError);
+    });
+
     it("reports the operation in hand when the request was made", async () => {
       const recorder = recordingFetch();
       const send = withGatewayProvenance(recorder.fetch);

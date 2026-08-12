@@ -65,7 +65,12 @@ export type ModelConfig = {
 
 export type ModelList = Record<string, ModelConfig>;
 
-export const MODELS: ModelList = {};
+// A registry with no prototype, so a name is registered here or it is not a
+// model. A plain object answers a lookup for `constructor` or `toString` with
+// something off `Object.prototype`, and a request naming one of those would be
+// taken for a model and then fail on reading its capabilities, rather than
+// being turned away as the unknown model it is.
+export const MODELS: ModelList = Object.create(null);
 export const ALIAS_NAMES: string[] = [];
 export const PROVIDER_NAMES: Set<string> = new Set();
 
