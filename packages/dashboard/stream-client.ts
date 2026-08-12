@@ -1,6 +1,8 @@
-// Keeps the page's live-update stream connected. Runs in the browser: the shell
-// injects it into the page and drives it from the same one-second tick that
-// paints the freshness indicator.
+/**
+ * Keeps the page's live-update stream connected. This runs in the browser: the
+ * shell injects it into the page and drives it from the same one-second tick
+ * that paints the freshness indicator.
+ */
 
 /** The parts of `EventSource` the reconnection logic reads. */
 export interface UpdateStream {

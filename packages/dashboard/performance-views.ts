@@ -1,3 +1,11 @@
+/**
+ * Holds what the three performance views behind /bench — the runtime
+ * benchmarks, the CI durations, and the Gantt chart — have in common: the
+ * state their query string carries, the navigation that moves between them
+ * while keeping that state, the styles their rows and progress bars share, and
+ * the bounds on how a history is scaled to a chart.
+ */
+
 import { escapeHtml } from "./lib.ts";
 import {
   STATUS_EDGE,

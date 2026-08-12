@@ -1,3 +1,10 @@
+/**
+ * Paints the dashboard message into its input as the message fades. This runs
+ * in the browser, on the same tick that refreshes the rest of the page, and
+ * yields to whoever is at the keyboard: a draft being typed or a save still in
+ * flight is left exactly as it stands.
+ */
+
 import { dashboardMessageOpacity } from "./dashboard-message.ts";
 
 export interface DashboardMessagePaintState {

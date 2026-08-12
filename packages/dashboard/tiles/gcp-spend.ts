@@ -1,39 +1,44 @@
-// cloud spend: month-to-date GCP cost from a BigQuery billing export, projected
-// to a full-month total. Every figure is money the account actually pays: the
-// cost of its usage after the credits that come off it. The daily series covers
-// up to 45 finished UTC days. The rate window is highlighted. Early in the month
-// it reaches into available prior-month history, up to a 14-day total. Cost from
-// a day the export is still writing contributes only to the month-to-date total.
-//
-// The export lands a day's usage in batches spread over the day or two after it
-// ends, and works on several days at once, so a day it has not finished holds
-// only part of that day's cost and would drag down any rate measured over it.
-// Nothing in the export marks a day as complete, so the tile establishes it two
-// ways at once, each covering where the other is blind.
-//
-// The first is how much of the day the export has accounted for. Alongside cost,
-// the query totals the billable time on a day's usage — the seconds of instance,
-// disk, and other metered life the export has recorded. A running fleet books
-// close to the same amount every day, and unlike cost it does not move when a
-// promotion or a price change lands, so a day holding a small fraction of the
-// day before it is one the export is still filling in.
-//
-// The second is how long the export has had. It reports when it last added a
-// material batch to each day, which the tile turns into how long the export
-// currently takes to finish with a day. That measurement comes from the export's
-// own record over the window rather than a figure assumed here, so it tracks an
-// export that speeds up or slows down. A day is finished once the export has had
-// that long since the day ended.
-//
-// Billable time alone would accept a day the export happens to be most of the way
-// through, and elapsed time alone would accept a day the export has fallen behind
-// on. A day has to satisfy both. The chart and the rate window end at the newest
-// day that does, and an export that has finished no day in several days grays the
-// tile rather than projecting from stale history.
-//
-// The tile uses the BigQuery REST API, without bq or gcloud. It authenticates as
-// the workload's service account in GKE, or with GCP_SA_KEY locally. That account
-// needs BigQuery Job User on the query project and Data Viewer on the dataset.
+/**
+ * Reports month-to-date Google Cloud cost from a BigQuery billing export, and
+ * projects it to a full-month total. Every figure is money the account
+ * actually pays: the cost of its usage after the credits that come off it. The
+ * daily series covers up to 45 finished UTC days, with the rate window
+ * highlighted. Early in the month that window reaches into whatever
+ * prior-month history is available, up to a 14-day total. Cost from a day the
+ * export is still writing contributes only to the month-to-date total.
+ *
+ * The export lands a day's usage in batches spread over the day or two after
+ * it ends, and works on several days at once, so a day it has not finished
+ * holds only part of that day's cost and would drag down any rate measured
+ * over it. Nothing in the export marks a day as complete, so the tile
+ * establishes it two ways at once, each covering where the other is blind.
+ *
+ * The first is how much of the day the export has accounted for. Alongside
+ * cost, the query totals the billable time on a day's usage — the seconds of
+ * instance, disk, and other metered life the export has recorded. A running
+ * fleet books close to the same amount every day, and unlike cost it does not
+ * move when a promotion or a price change lands, so a day holding a small
+ * fraction of the day before it is one the export is still filling in.
+ *
+ * The second is how long the export has had. It reports when it last added a
+ * material batch to each day, which the tile turns into how long the export
+ * currently takes to finish with a day. That measurement comes from the
+ * export's own record over the window rather than a figure assumed here, so it
+ * tracks an export that speeds up or slows down. A day is finished once the
+ * export has had that long since the day ended.
+ *
+ * Billable time alone would accept a day the export happens to be most of the
+ * way through, and elapsed time alone would accept a day the export has fallen
+ * behind on. A day has to satisfy both. The chart and the rate window end at
+ * the newest day that does, and an export that has finished no day in several
+ * days grays the tile rather than projecting from stale history.
+ *
+ * The tile uses the BigQuery REST API, without the bq or gcloud command-line
+ * tools. It authenticates as the workload's service account in GKE, or with
+ * GCP_SA_KEY locally. That account needs BigQuery Job User on the query
+ * project and Data Viewer on the dataset.
+ */
+
 import type { Tile, TileView } from "../types.ts";
 import { bigQuery } from "../gcp.ts";
 import { budgetStatus, daysLabel, readBudget, usd } from "../lib.ts";

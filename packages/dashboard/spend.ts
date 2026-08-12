@@ -1,10 +1,14 @@
-// Shared daily-spend projection and charting for the dashboard's spend tiles.
-// A monthly estimate uses every settled day in the current month. Until that
-// supplies two weeks, it fills the rate window from the end of the prior month.
-// A chart line ends on the day its source is known through — its last
-// reported day, or the newest day its reporting lag has settled — even when
-// another source's line runs further. A line skips the days its source has no
-// report to draw on, breaking across the hole rather than charting zeros.
+/**
+ * Projects and charts daily spend for every one of the dashboard's spend
+ * tiles. A monthly estimate uses every settled day in the current month, and
+ * until that supplies two weeks it fills the rate window from the end of the
+ * prior month. A chart line ends on the day its source is known through — its
+ * last reported day, or the newest day its reporting lag has settled — even
+ * when another source's line runs further. A line skips the days its source
+ * has no report to draw on, breaking across the hole rather than charting
+ * zeros.
+ */
+
 import type { Status } from "./types.ts";
 import { multiSparkline, SPARK_FADE } from "./lib.ts";
 import { themedChartSeries } from "./theme.ts";
