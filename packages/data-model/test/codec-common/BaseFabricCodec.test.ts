@@ -7,7 +7,8 @@ import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 /**
- * Minimal concrete `BaseFabricCodec` for exercising the base class's own behavior.
+ * Minimal concrete `BaseFabricCodec` for exercising the base class's own
+ * behavior.
  * `encode` / `decode` are not under test here, so they throw.
  */
 class TestCodec extends BaseFabricCodec<FabricValue> {

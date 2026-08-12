@@ -158,6 +158,8 @@ export class CodecRegistry<Encoded> {
 
     const matched = CodecRegistry.#matched<Encoded>(codec);
 
+    CodecRegistry.#assertTagRegistrable(codec.recognizedTypeTag);
+
     const uniqueClass = codec.uniqueHandledClass;
     if (uniqueClass !== undefined) {
       this.#classMap.set(uniqueClass, matched);
@@ -181,6 +183,8 @@ export class CodecRegistry<Encoded> {
     this.#assertNotFrozen();
 
     const matched = CodecRegistry.#matched<Encoded>(codec);
+
+    CodecRegistry.#assertTagRegistrable(codec.recognizedTypeTag);
 
     this.#primitiveCodecs.set(type, matched);
 
@@ -216,9 +220,9 @@ export class CodecRegistry<Encoded> {
    *
    * An argument may be a class, in which case its codec for this registry's
    * format is found as {@link #registerClass} finds one. That is what a
-   * curated roster holds. A bare codec is also accepted, for the codecs that
-   * have no class to be bound to -- those handling JavaScript's own primitive
-   * types.
+   * curated roster holds. A bare codec is also accepted, for a caller holding
+   * one it did not get from a class -- a codec built for a single registry,
+   * say, or one already read out from under a symbol.
    *
    * Arguments are taken as `Array.concat()` takes them -- any number, each
    * either a single entry or a list of them -- so that a caller combining
@@ -356,6 +360,24 @@ export class CodecRegistry<Encoded> {
   //
   // Static members
   //
+
+  /**
+   * Guards against registering a codec under the empty tag. A bare `"/"` key
+   * on the wire is an encoding error whatever follows it, per Section 9 of the
+   * formal spec, and a decoder reports it as such -- but only by finding no
+   * codec for the empty tag. A codec registered under one would intercept the
+   * very payload that rule exists to reject.
+   *
+   * @throws If `tag` is the empty string.
+   */
+  static #assertTagRegistrable(tag: string | undefined): void {
+    if (tag === "") {
+      throw new Error(
+        "Cannot register a codec under the empty tag: a bare `/` key is an " +
+          "encoding error, not a type.",
+      );
+    }
+  }
 
   /**
    * Pairs a codec with its kind. The kind comes from which base class the

@@ -4,15 +4,16 @@ import type { FabricCodec, ReconstructionContext } from "./interface.ts";
 
 /**
  * Base class for `FabricCodec` which provides commonly-needed functionality:
- * the matching members, and a `tagForValue()` that answers with the codec's
- * one recognized tag.
+ * the matching members, and a `tagForValue()` that answers with the codec's one
+ * recognized tag.
  *
  * It is abstract in `encode()` and `decode()` and, deliberately, in identity:
- * extend {@link BaseNonterminalCodec} or {@link BaseTerminalCodec} rather than this
- * directly. Those two are what tell the codec system whether a state is more
- * work for the walker or the walker's final answer, a difference no signature
- * can carry -- and extending one of them fixes the `Encoded` domain in the
- * same stroke, so the declaration and its consequence cannot drift apart.
+ * extend {@link BaseNonterminalCodec} or {@link BaseTerminalCodec} rather than
+ * this directly. Those two are what tell the codec system whether a state is
+ * more work for the walker or the walker's final answer, a difference no
+ * signature can carry -- and extending one of them fixes the `Encoded` domain
+ * in the same stroke, so the declaration and its consequence cannot drift
+ * apart.
  */
 export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
   #recognizedTypeTag: string | undefined;

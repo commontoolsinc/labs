@@ -7,8 +7,8 @@ import type { NonterminalCodec } from "./interface.ts";
  * fabric values, which the walker encodes in turn. One instance serves every
  * wire format.
  *
- * It adds nothing to {@link BaseFabricCodec} but the `FabricValue` domain and its
- * own identity, and the identity is the point: `CodecRegistry` reads it to
+ * It adds nothing to {@link BaseFabricCodec} but the `FabricValue` domain and
+ * its own identity, and the identity is the point: `CodecRegistry` reads it to
  * know that a state coming out of here is more work rather than an answer.
  */
 export abstract class BaseNonterminalCodec extends BaseFabricCodec<FabricValue>

@@ -278,6 +278,29 @@ describe("JsonCodec", () => {
       expect(probe.received).toEqual({ "/Bytes@1": "AQID" });
     });
 
+    it("lets a terminal codec judge a state that names a tag", () => {
+      // A terminal codec's state is its own business, so a tag appearing
+      // inside one is just data. `BigInt@1` sees a non-string and reports by
+      // returning a `ProblematicValue` -- which the spec sanctions alongside
+      // throwing, `3-json-encoding.md` Section 7 letting a codec do either.
+      // Non-lenient, so nothing here is wrapping a throw.
+      const jsonCodec = newDefaultJsonCodec();
+
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(
+          JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
+          true, // Undecodable on purpose; that is what this test is about.
+        ),
+        new TestReconstructionContext(),
+      );
+
+      expect(jsonCodec.lenient).toBe(false);
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
+        "BigInt@1",
+      );
+    });
+
     it("hands a nonterminal codec state that has been expanded", () => {
       const probe = new ProbeNonterminalCodec();
 

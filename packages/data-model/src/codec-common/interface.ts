@@ -2,7 +2,10 @@ import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricInstance, FabricValue } from "@/interface.ts";
 
-/** Well-known symbol for binding the getter `FabricClassWithNonterminalCodec[CODEC]`. */
+/**
+ * Well-known symbol for binding the getter
+ * `FabricClassWithNonterminalCodec[CODEC]`.
+ */
 export const CODEC: unique symbol = Symbol("data-model.codec");
 
 /**

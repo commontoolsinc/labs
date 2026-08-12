@@ -330,8 +330,8 @@ export class JsonCodec implements SerializationContext<string> {
       // Registry-based (tag lookup) dispatch. The lookup comes first because
       // it decides what form the state is wanted in: a terminal codec takes
       // the state exactly as it arrived, and everything else takes state this
-      // walker has decoded. (`/quote` and `/object` returned above, being the
-      // two forms whose contents are never decoded.)
+      // walker has decoded. (`/quote` and `/object` returned above; no codec
+      // ever sees their state, and `/quote` contents alone go undecoded.)
       const matched = this.#registry.codecFromTag(tag);
 
       if (matched === undefined) {
