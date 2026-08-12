@@ -137,11 +137,24 @@ resolves the same address from the reference itself. Prefer either to the
 intermediate wrapper link stored in the board's topics array. Read the existing
 topic's input before changing it, especially its full body, comments, and links.
 Input reads are durable and do not need `--step`; use `--step` on result reads
-that must be current. If `topics --input` is non-empty but `index --step` is
-empty or fails, do not infer that the board is empty. The non-null rows from a
-compact `topics --input` search remain valid evidence, but the search does not
-expose a canonical Topic fid, so report the index materialization blocker rather
-than guessing an address.
+that must be current.
+
+A board too old to publish `index` publishes `crossrefs` instead — the removed
+reference-graph result. Its rows carry the same row-level `fid`, but no
+row-level `title`, so a title search goes through `.topic.title`. On such a
+board that read is the only address source, so reach for it there and nowhere
+else:
+
+```bash
+deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
+  --filter '.topic.title == "<exact title>"' --select fid,topic.title
+```
+
+If `topics --input` is non-empty while neither computed read materializes, do
+not infer that the board is empty. The non-null rows from a compact
+`topics --input` search remain valid evidence, but the search does not expose a
+canonical Topic fid, so report the materialization blocker rather than guessing
+an address.
 
 ## Creating and updating
 
@@ -156,13 +169,14 @@ deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
 ```
 
 `addTopic` returns the topic it created, so a board running this source hands
-back the new topic on the call itself. The board's deployed pattern can be older
-than this source, and an older `addTopic` returns nothing; the `index` read
-above remains the path that works either way, and `cf piece verbs` reports the
-deployed pattern's source identity when you need to know which you are talking
-to. Find the new topic's canonical fid before applying further changes. All
-handler arguments are JSON; encode multiline Markdown rather than passing an
-unescaped string.
+back the new topic on the call itself, and the follow-up read is only a
+convenience. An older deployed `addTopic` returns nothing, and a board that old
+may also predate `index` — in which case the `crossrefs --step` lookup under
+"Reading Topics" is what works there. Establish which board you are talking to
+BEFORE creating anything: `cf piece verbs` reports the deployed pattern's source
+identity, and a create whose fid you then cannot find leaves a topic you cannot
+address. All handler arguments are JSON; encode multiline Markdown rather than
+passing an unescaped string.
 
 ```bash
 deno task cf piece call --url "$TOPIC_URL" setBody \
@@ -232,8 +246,9 @@ verification succeeded.
   the write may still have committed. Do not re-send it blind: re-invoke with
   the same `--invocation` id under the same session — it deduplicates against a
   committed outcome and executes fresh only if nothing landed.
-- If `topics --input` is non-empty while `index --step` is empty or fails, do
-  not call the board empty. Preserve the input evidence and report the
+- If `topics --input` is non-empty while the board's fid index — `index --step`,
+  or `crossrefs --step` on a board that predates it — is empty or fails, do not
+  call the board empty. Preserve the input evidence and report the
   result-materialization failure.
 - A compact transformed read of a present source exits nonzero when its value
   cannot materialize and explicitly says the failure is not JSON `null`. A
@@ -242,4 +257,5 @@ verification succeeded.
   Topic rows are irrelevant.
 - Do not substitute `piece ls` for the board's topic list. Pieces created inside
   handlers can be absent from that listing; `index --step` is the canonical fid
-  index, with `topics --input` as the durable fallback.
+  index — `crossrefs --step` on a board that predates it — with `topics --input`
+  as the durable fallback for everything except the fid.

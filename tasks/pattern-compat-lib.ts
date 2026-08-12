@@ -399,6 +399,30 @@ export const acceptedBreakKey = (pattern: string, baseline: string): string =>
   `${pattern} ${baseline}`;
 
 /**
+ * The schema paths an incompatibility finding blames.
+ *
+ * `assertPatternSchemasBackwardCompatible` throws one error listing its issues
+ * as `- <path>: <reason>` lines, so a finding's `detail` names which paths
+ * failed rather than only that something did. That is what lets an acceptance
+ * be scoped to the removal it was granted for.
+ *
+ * A line that does not parse comes back whole, deliberately. It matches no
+ * accepted path, so an unrecognised message shape fails closed — the finding
+ * stands — rather than being forgiven on the strength of a format assumption.
+ */
+export function incompatibilityPaths(detail: string): string[] {
+  const paths: string[] = [];
+  for (const line of detail.split("\n")) {
+    const issue = line.trimStart();
+    if (!issue.startsWith("- ")) continue;
+    const body = issue.slice(2);
+    const cut = body.indexOf(": ");
+    paths.push(cut === -1 ? body : body.slice(0, cut));
+  }
+  return paths;
+}
+
+/**
  * Split findings into the ones that stand and the accepted breaks among them.
  *
  * Only an `incompatible` finding can be accepted. Everything else — a contract
@@ -406,19 +430,34 @@ export const acceptedBreakKey = (pattern: string, baseline: string): string =>
  * that outlived their source — describes work still to do, and an accepted
  * break says nothing about any of them.
  *
- * The accepted ones come back rather than being dropped, because an exemption
+ * A finding is forgiven only when EVERY path it blames is one the entry named.
+ * The pair alone is not enough: one finding carries every issue the proof found
+ * against that baseline, so forgiving by pair would also suppress an unintended
+ * break that landed in the same change — and `--update` would then record the
+ * broken contract as the new baseline. A finding whose paths cannot be read
+ * yields none, which is not a match either.
+ *
+ * The forgiven ones come back rather than being dropped, because an exemption
  * nobody sees is an exemption nobody reviews: the run prints what it forgave,
  * and uses the same list to fail on a pair that no longer needs forgiving.
  */
 export function partitionAcceptedBreaks(
   findings: readonly Finding[],
-  accepted: ReadonlySet<string>,
+  accepted: ReadonlyMap<string, ReadonlySet<string>>,
 ): { standing: Finding[]; forgiven: Finding[] } {
   const standing: Finding[] = [];
   const forgiven: Finding[] = [];
   for (const finding of findings) {
-    const isAccepted = finding.kind === "incompatible" &&
-      accepted.has(acceptedBreakKey(finding.pattern, finding.baseline));
+    if (finding.kind !== "incompatible") {
+      standing.push(finding);
+      continue;
+    }
+    const paths = accepted.get(
+      acceptedBreakKey(finding.pattern, finding.baseline),
+    );
+    const blamed = incompatibilityPaths(finding.detail);
+    const isAccepted = paths !== undefined && blamed.length > 0 &&
+      blamed.every((path) => paths.has(path));
     (isAccepted ? forgiven : standing).push(finding);
   }
   return { standing, forgiven };

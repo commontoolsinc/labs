@@ -987,9 +987,8 @@ run_three_topic_fixture() {
      .references == [$u]' > /dev/null ||
     error "Child B's returned reference should open the dropped create's canonical child, got: $CHILD_B_FINAL"
 
-  # The reciprocal derived references (this fixture's crossrefs analogue):
-  # children point up at the umbrella, the revised umbrella points down at
-  # both children, derived — never persisted.
+  # The reciprocal derived references: children point up at the umbrella, the
+  # revised umbrella points down at both children, derived — never persisted.
   RECIPROCAL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" referencedBy)
   echo "$RECIPROCAL" | jq -e \
     --arg u "$UMBRELLA_ID" --arg a "$CHILD_A_ID" --arg b "$CHILD_B_ID" \

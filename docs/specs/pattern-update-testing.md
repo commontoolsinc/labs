@@ -60,12 +60,27 @@ decides to ship is declared instead, in `tasks/pattern-compat-accepted-breaks.ts
   check then, because the check is measuring the decision. That case is written
   down in `tasks/pattern-compat-accepted-breaks.ts`, and only there — deleting
   the offending baselines is the laundering the append-only gate exists to
-  stop. An entry forgives specific `(pattern, baseline)` pairs, so the contract
-  recorded once the break ships is a baseline no entry names and the next
-  change to that pattern is gated again. The run prints every pair it forgave,
-  and fails on one that applies cleanly now, so the list can only shrink.
-  Reaching for it is a decision to strand data on running pieces; a break that
-  also strands state needs the Tier 2 entry below.
+  stop.
+
+  An entry is bounded twice. It forgives specific `(pattern, baseline)` pairs,
+  so the contract recorded once the break ships is a baseline no entry names
+  and the next change to that pattern is gated again. Within a pair it forgives
+  only the schema paths it names: one finding carries every issue the proof
+  found against that baseline, so accepting by pair alone would suppress an
+  unintended break landing beside the decided one — and `--update` would then
+  record that contract. A finding blaming any unnamed path stands, and so does
+  one whose paths cannot be parsed. What the proof reports is at most one issue
+  per role, so a second problem in a role whose issue is an accepted path can
+  still hide behind it; name as few paths as the removal needs.
+
+  The run prints every pair it forgave, and fails on one that no longer needs
+  forgiving, so the list can only shrink. That audit is asked per pattern rather
+  than of the whole list, because the CI job always sets `PATTERN_COMPAT_SHARD`
+  — the shard that examined a pattern is the one that can judge its entries,
+  and the shards between them cover all of them.
+
+  Reaching for any of this is a decision to strand data on running pieces; a
+  break that also strands state needs the Tier 2 entry below.
 - **`<role> schema is not valid on its own terms`** — the schema fails
   definition validation independently of any baseline.
 - **`has N baseline(s) but yields no contract now`** — a file that used to be

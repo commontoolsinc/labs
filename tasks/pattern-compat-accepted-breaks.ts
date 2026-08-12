@@ -16,12 +16,22 @@
  * that would catch a LATER break against the same contract. So the decision
  * gets written down here instead, where review sees it as a diff.
  *
- * An entry forgives specific `(pattern, baseline)` pairs and nothing else. That
- * bound is what keeps the exemption from becoming an off switch: the contract
- * recorded once the break ships is a new baseline that no entry names, so the
- * very next change to that pattern is gated again, against the shape the break
- * left behind. Only the pre-break contracts are forgiven, and only for the
- * pattern that broke them.
+ * An entry forgives specific `(pattern, baseline)` pairs, and within a pair
+ * only the schema paths it names. Both bounds matter. The pair bound keeps the
+ * exemption from becoming an off switch over time: the contract recorded once
+ * the break ships is a new baseline that no entry names, so the very next
+ * change to that pattern is gated again, against the shape the break left
+ * behind. The path bound keeps it from becoming one within a single change: the
+ * compatibility proof reports every issue it found against a baseline as ONE
+ * finding, so forgiving by pair alone would suppress an unintended break that
+ * happened to land beside the accepted one — and `--update` would then record
+ * that broken contract as the new baseline.
+ *
+ * Paths are written exactly as the proof names them (`result.crossrefs`,
+ * `argument.topics[]`). One limitation is worth knowing: the proof reports at
+ * most one issue per role, so where an accepted path is the reported issue for
+ * its role, a second problem in that same role can be hidden behind it. Keep
+ * accepted paths as few as the removal actually needs.
  *
  * The list can only shrink. A listed pair that no longer produces a finding —
  * because the pattern grew the surface back, or the baseline is gone — fails
@@ -32,6 +42,11 @@ export interface AcceptedContractBreak {
   pattern: string;
   /** Baseline labels (filename stems) this pattern may fail to apply over. */
   baselines: readonly string[];
+  /**
+   * Schema paths this break may blame, spelled as the compatibility proof
+   * spells them. A finding blaming anything else stands.
+   */
+  paths: readonly string[];
   /** Why the break was accepted. */
   reason: string;
 }
@@ -51,6 +66,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260807T190842Z-SD0Ii3eK0ZnJnIhs",
       "20260810T212206Z-cIIz70jbLbbPc-F3",
     ],
+    // `argument.topics[]` is the same removal seen from the board's list: each
+    // stored topic carried a `crossrefs` default, and dropping it moves the
+    // defaults below a constraint the proof cannot show is stable.
+    paths: ["argument.topics[]", "result.crossrefs"],
     reason:
       "Cross-reference links removed from Topics. The board's `crossrefs` " +
       "result and the `crossrefs` default on each topic in `topics` go with " +
@@ -70,6 +89,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260808T001558Z-H7ntBZnGU80t30LL",
       "20260810T212206Z-FQasUmU3p-SDapLo",
     ],
+    paths: ["argument.boardCrossrefs", "result.crossrefs"],
     reason:
       "Cross-reference links removed from Topics. A topic no longer derives " +
       "its own edge row, so the `crossrefs` result and the `boardCrossrefs` " +
