@@ -531,10 +531,10 @@ export class JsonCodec implements SerializationContext<string> {
    * index, so zero is refused along with everything else that is not a count.
    */
   static #isHoleCount(count: JsonCodecValue): count is number {
-    // The cast is established by the call preceding it: `isSafeInteger()`
-    // answers `false` for a non-number. It is required because that holds
-    // only at runtime -- the function is declared to take `unknown` and
-    // return a plain `boolean`, and so narrows nothing.
+    // `isSafeInteger()` returns `false` for a non-number, but cannot be a
+    // TypeScript type predicate on `number`, since it also returns `false`
+    // for plenty of numbers. So the cast is safe on the strength of that
+    // call, though TypeScript cannot derive as much.
     return Number.isSafeInteger(count) && ((count as number) >= 1);
   }
 
