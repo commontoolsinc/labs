@@ -1,23 +1,3 @@
-/**
- * Guards a value against the one lossy step between the runner and an external
- * LLM provider: the request is sent as ordinary JSON (`JSON.stringify`), so any
- * value it carries that plain JSON cannot represent faithfully reaches the
- * provider altered, dropped, or not at all -- or crashes the serialization.
- *
- * The Common Fabric value model is a superset of JSON, so a generated schema
- * (a `generateObject` schema, or a tool's `inputSchema`) may legitimately hold
- * values JSON cannot carry. Those are fine internally. Crossing to a provider,
- * they are not.
- *
- * The generic detection of JSON-unfaithful values lives in
- * `@commonfabric/pure-json`; this module adds only the provider-framed
- * assertion that refuses such a value at the transport boundary.
- *
- * A minor diagnostic point: the thrown message renders the root pointer as `/`.
- * Under RFC 6901 the root is `""` and `/` names a property whose key is the
- * empty string; the message trades that strict accuracy for legibility.
- */
-
 import { findJsonUnfaithfulValues } from "@commonfabric/pure-json";
 
 /**
@@ -26,6 +6,21 @@ import { findJsonUnfaithfulValues } from "@commonfabric/pure-json";
  * schema`), and the message lists each offending value by JSON Pointer and
  * reason, so the author can see what to change rather than discovering a
  * mangled value downstream in the provider's behavior.
+ *
+ * This guards the one lossy step between the runner and an external LLM
+ * provider: the request is sent as ordinary JSON (`JSON.stringify`), so any
+ * value it carries that plain JSON cannot represent faithfully reaches the
+ * provider altered, dropped, or not at all -- or crashes the serialization.
+ * The Common Fabric value model is a superset of JSON, so a generated schema
+ * (a `generateObject` schema, or a tool's `inputSchema`) may legitimately hold
+ * values JSON cannot carry. Those are fine internally. Crossing to a provider,
+ * they are not. The generic detection of JSON-unfaithful values lives in
+ * `@commonfabric/pure-json`; what is added here is only the provider-framed
+ * assertion that refuses such a value at the transport boundary.
+ *
+ * A minor diagnostic point: the thrown message renders the root pointer as
+ * `/`. Under RFC 6901 the root is `""` and `/` names a property whose key is
+ * the empty string; the message trades that strict accuracy for legibility.
  */
 export function assertJsonTransportSafe(value: unknown, label: string): void {
   const problems = findJsonUnfaithfulValues(value);

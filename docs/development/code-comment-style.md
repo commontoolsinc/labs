@@ -404,7 +404,7 @@ a `//` block; see [Section markers](#section-markers) above.
 
 ### What gets one
 
-- Every file with logic or type declarations in it, as a header; see
+- Every file, as a header, except for the kinds listed under
   [File headers](#file-headers) below.
 - Every exported symbol: variable, function, class, type.
 - Every class and every public member of one, including the constructor,
@@ -502,8 +502,46 @@ nothing else. The blank line is load-bearing for that same reason: it is what
 keeps the header from being read as the doc comment of the first declaration
 under it.
 
-Every file with logic or type declarations in it gets one. A re-export barrel
-and a test fixture whose content is the point are the exceptions.
+Every file gets one, except for the three kinds below.
+
+**A file that defines a single thing.** Where the whole content of a file is
+one declaration — one class, one function, one type — along with the imports
+and the private helpers serving it, that declaration's own doc comment is the
+file's documentation, and a header above it can only duplicate it or drift
+from it.
+
+What would otherwise have felt file-scoped goes into that doc comment, so long
+as it is contract: why the thing exists at all, what a caller has to know that
+the signature does not carry. Keeping it there is what puts it in front of a
+reader who arrives at the declaration, and in front of one reading rendered
+documentation, which never shows a file header at all — the same reason two
+doc comments in a row lose one of themselves.
+
+The fold is bounded by [Where one goes](#where-one-goes), which is not relaxed
+here. Mechanics still do not belong in a contract, and a single-declaration
+file always has a body to put them in.
+
+Comparison against a neighboring module is bounded too. A header could get
+away with "unlike the other one, this buffers", because a header answers to
+nobody; a doc comment saying it is making a claim about a file that can change
+without anyone coming back here, which is what
+[the rule against surveying][survey] the rest of the system exists to stop.
+State the difference as a property of this declaration instead, in
+the `Like <baseline>, except <difference>.` form that
+[How one starts](#how-one-starts) gives.
+
+Where the single declaration is a type that reaches the schema generator, the
+fold does not happen at all: that doc comment is program output, as
+[When one is also data](#when-one-is-also-data) explains, and module rationale
+shipped as a schema `description` is worse than a file header. Such a file
+keeps its header.
+
+The exception ends where the file does. A second exported declaration, or
+module-level machinery that is not simply in service of the one, and the file
+has something to say about itself again.
+
+**A re-export barrel**, and **a test fixture whose content is the point**, are
+the other two.
 
 Two placements look close enough to pass and are not. A `//` block is not an
 alternative form of a header: it reads as a note about the line beneath it,
@@ -563,3 +601,5 @@ export function checkFlavor(flavor: string): void {
   }
 }
 ```
+
+[survey]: #not-a-survey-of-the-rest-of-the-system

@@ -1,15 +1,17 @@
+/**
+ * These pin the distinctions the schema formatters need but that their previous
+ * `JSON.stringify` / `Set` comparisons could not make. The formatter call sites
+ * take their values from the type system, which cannot express `-0` / `NaN` /
+ * `±Infinity`, so the conflations are unreachable through a real pattern today.
+ * `dedupeByValueEqual` is exercised directly here instead, the same way
+ * `valueEqual` itself is pinned against `Object.is`: feed it the edge values and
+ * assert the honest result, so the guarantee holds if the schema system ever
+ * does route such values through these paths.
+ */
+
 import { assertEquals } from "@std/assert";
 
 import { dedupeByValueEqual } from "../src/value-equality.ts";
-
-// These pin the distinctions the schema formatters need but that their previous
-// `JSON.stringify` / `Set` comparisons could not make. The formatter call sites
-// take their values from the type system, which cannot express `-0` / `NaN` /
-// `±Infinity`, so the conflations are unreachable through a real pattern today.
-// `dedupeByValueEqual` is exercised directly here instead, the same way
-// `valueEqual` itself is pinned against `Object.is`: feed it the edge values and
-// assert the honest result, so the guarantee holds if the schema system ever
-// does route such values through these paths.
 
 Deno.test("dedupeByValueEqual: keeps -0 and 0 as distinct values", () => {
   // A `Set` (SameValueZero) or a `JSON.stringify` key ("0" for both) would
