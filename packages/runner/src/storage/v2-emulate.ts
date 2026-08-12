@@ -78,9 +78,9 @@ export class EmulatedStorageManager extends StorageManager {
         memoryHost: new URL("memory://"),
       },
       // Single-manager emulation wants prompt fan-out: a zero-delay flush
-      // timer keeps marker delivery in the same scheduling class as the
-      // request round trips that stage it (each is a zero-delay timer
-      // turn), so awaited commits settle without wall-clock coalescing.
+      // keeps marker delivery in the same scheduling class as the request
+      // round trips that stage it (each is one turn of the event loop), so
+      // awaited commits settle without wall-clock coalescing.
       // Harnesses that share one server across managers use connectTo()
       // and pick their own cadence — "manual" for controlled-staleness
       // premises that depend on frames NOT spreading until the test says.
