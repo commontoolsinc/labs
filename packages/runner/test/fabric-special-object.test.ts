@@ -9,10 +9,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import {
   FabricError,
   FabricMap,
-  UnknownValue,
 } from "@commonfabric/data-model/fabric-instances";
 
 import type { FabricInstance } from "@commonfabric/data-model/fabric-value";

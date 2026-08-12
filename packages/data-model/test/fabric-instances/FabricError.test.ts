@@ -26,10 +26,10 @@ import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/fabric-instances/BaseFabricInstance.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {

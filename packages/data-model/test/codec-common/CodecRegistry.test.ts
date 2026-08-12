@@ -30,15 +30,15 @@ import {
   CODEC,
   type NonterminalCodec,
   type TerminalCodec,
-} from "@/codec-common/interface.ts";
-import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
-import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
   FabricCodec,
   ReconstructionContext,
   WireFormat,
-} from "@/codec-common/interface.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+} from "@/codec-interface/interface.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { type FabricValue } from "@/interface.ts";
 

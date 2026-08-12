@@ -36,8 +36,8 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
 
 describe("cloneIfNecessary()", () => {

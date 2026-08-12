@@ -24,8 +24,8 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
-import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
+import { BaseFabricInstance } from "./codec-common/BaseFabricInstance.ts";
+import { BaseFabricPrimitive } from "./codec-common/BaseFabricPrimitive.ts";
 
 /**
  * Indicates whether the value is a fabric value, accepting

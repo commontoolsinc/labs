@@ -19,8 +19,8 @@ import {
 } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@/interface.ts";
+import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import {
-  BaseFabricPrimitive,
   codecClasses,
   FabricBytes,
   FabricEpochDays,

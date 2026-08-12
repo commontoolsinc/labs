@@ -3,14 +3,14 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import {
   CODEC,
   type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 

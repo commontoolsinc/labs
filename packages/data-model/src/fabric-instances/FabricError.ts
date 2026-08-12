@@ -24,17 +24,17 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import {
   CODEC,
   type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
-import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
+import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 import { errorClassFromType } from "@/native-conversion.ts";
 import { isUnsafeObjectKey } from "@commonfabric/utils/types";

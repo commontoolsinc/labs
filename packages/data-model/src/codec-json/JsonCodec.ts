@@ -10,16 +10,16 @@ import {
   type ReconstructionContext,
   type SerializationContext,
   type TerminalCodec,
-} from "@/codec-common/interface.ts";
-import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+} from "@/codec-interface/interface.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
-import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
 import { createBaseJsonRegistry } from "./createBaseJsonRegistry.ts";
 import { type CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
-import { CODEC_META_TAGS } from "@/codec-common/codec-meta-tags.ts";
+import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
 
 /**
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from

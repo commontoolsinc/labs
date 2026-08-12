@@ -9,8 +9,8 @@ import {
   CODEC,
   type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 

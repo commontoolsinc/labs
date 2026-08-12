@@ -16,13 +16,13 @@ import { expect } from "@std/expect";
 import {
   EMPTY_RECONSTRUCTION_CONTEXT,
   EmptyReconstructionContext,
-} from "@/codec-common/EmptyReconstructionContext.ts";
+} from "@/codec-interface/EmptyReconstructionContext.ts";
 
 describe("EmptyReconstructionContext", () => {
   describe("EMPTY_RECONSTRUCTION_CONTEXT", () => {
     it("is a singleton (re-import yields the same instance)", async () => {
       const reimported =
-        (await import("@/codec-common/EmptyReconstructionContext.ts"))
+        (await import("@/codec-interface/EmptyReconstructionContext.ts"))
           .EMPTY_RECONSTRUCTION_CONTEXT;
       expect(reimported).toBe(EMPTY_RECONSTRUCTION_CONTEXT);
     });

@@ -75,7 +75,7 @@ round-trip correctly.
 
 ```typescript
 // Illustrative tag-to-format map. The canonical tag-string constants live
-// in `packages/data-model/codec-common/codec-type-tags.ts`
+// in `packages/data-model/src/codec-interface/codec-type-tags.ts`
 // (`CODEC_TYPE_TAGS`) and `codec-meta-tags.ts` (`CODEC_META_TAGS`).
 
 /**
