@@ -768,7 +768,8 @@ describe("the menu a right-click opens", () => {
       throw new Error("expected test failure");
     };
     const menu = openMenu(cell);
-    const startClone = clickHandlerForTestId(menu, "piece-menu-clone-fresh");
+    const cloneHandler = clickHandler(menu, "piece-menu-clone-fresh");
+    const startClone = () => cloneHandler(testMouseEvent());
 
     const cloning = startClone() as Promise<void>;
     await entered.promise;
