@@ -1641,18 +1641,7 @@ declared, derived, and link-carried labels. Omit path to inspect the root.`,
     "Select JSON output explicitly. This command always outputs JSON.",
   )
   .arguments("[path:string]")
-  .action(async (options, pathString) => {
-    setQuietMode(!!options.quiet);
-    const pieceConfig = {
-      ...parsePieceOptions(options),
-      jsonOutput: true,
-    };
-    const pathSegments = pathString ? parseCellPath(pathString) : [];
-    const label = await getCellCfcLabel(pieceConfig, pathSegments, {
-      input: options.input,
-    });
-    render(label, { json: true });
-  })
+  .action(getCellCfcLabelFromCommand)
   /* piece set-label */
   .command(
     "set-label",
@@ -1687,22 +1676,7 @@ is returned.`),
     "Select JSON output explicitly. This command always outputs JSON.",
   )
   .arguments("[path:string]")
-  .action(async (options, pathString) => {
-    setQuietMode(!!options.quiet);
-    const pieceConfig = {
-      ...parsePieceOptions(options),
-      jsonOutput: true,
-    };
-    const pathSegments = pathString ? parseCellPath(pathString) : [];
-    const update = await drainStdin();
-    const label = await setCellCfcLabel(
-      pieceConfig,
-      pathSegments,
-      update,
-      { input: options.input },
-    );
-    render(label, { json: true });
-  })
+  .action(setCellCfcLabelFromCommand)
   /* piece set */
   .command(
     "set",
@@ -2227,6 +2201,58 @@ export interface PieceCLIOptions {
 
 export interface PieceSummaryCLIOptions extends PieceCLIOptions {
   json?: boolean;
+}
+
+export interface PieceLabelCLIOptions extends PieceCLIOptions {
+  input?: boolean;
+  quiet?: boolean;
+}
+
+export interface PieceLabelCommandDependencies {
+  getCellCfcLabel?: typeof getCellCfcLabel;
+  setCellCfcLabel?: typeof setCellCfcLabel;
+  drainStdin?: typeof drainStdin;
+  render?: typeof render;
+}
+
+export async function getCellCfcLabelFromCommand(
+  options: PieceLabelCLIOptions,
+  pathString?: string,
+  deps: PieceLabelCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = {
+    ...parsePieceOptions(options),
+    jsonOutput: true,
+  };
+  const pathSegments = pathString ? parseCellPath(pathString) : [];
+  const label = await (deps.getCellCfcLabel ?? getCellCfcLabel)(
+    pieceConfig,
+    pathSegments,
+    { input: options.input },
+  );
+  (deps.render ?? render)(label, { json: true });
+}
+
+export async function setCellCfcLabelFromCommand(
+  options: PieceLabelCLIOptions,
+  pathString?: string,
+  deps: PieceLabelCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = {
+    ...parsePieceOptions(options),
+    jsonOutput: true,
+  };
+  const pathSegments = pathString ? parseCellPath(pathString) : [];
+  const update = await (deps.drainStdin ?? drainStdin)();
+  const label = await (deps.setCellCfcLabel ?? setCellCfcLabel)(
+    pieceConfig,
+    pathSegments,
+    update,
+    { input: options.input },
+  );
+  (deps.render ?? render)(label, { json: true });
 }
 
 export interface PieceListCommandDependencies {

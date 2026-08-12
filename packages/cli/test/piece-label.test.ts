@@ -15,6 +15,12 @@ import {
   parseCellCfcLabelUpdate,
   setCellCfcLabel,
 } from "../lib/piece.ts";
+import {
+  getCellCfcLabelFromCommand,
+  piece,
+  setCellCfcLabelFromCommand,
+  setQuietMode,
+} from "../commands/piece.ts";
 import { cf, stripAnsi } from "./utils.ts";
 
 const signer = await Identity.fromPassphrase("cf-piece-label");
@@ -72,6 +78,7 @@ describe("cf piece CFC labels", () => {
   });
 
   afterEach(async () => {
+    setQuietMode(false);
     await runtime.dispose();
     await storageManager.close();
   });
@@ -95,11 +102,77 @@ describe("cf piece CFC labels", () => {
     expect(() => parseCellCfcLabelUpdate({ confidentiality: "team" })).toThrow(
       "confidentiality must be a JSON array",
     );
+    expect(() => parseCellCfcLabelUpdate({ integrity: "reviewed" })).toThrow(
+      "integrity must be a JSON array",
+    );
     expect(() => parseCellCfcLabelUpdate({ integrity: [], extra: true }))
       .toThrow("Unknown CFC label field: extra");
     expect(() =>
       parseCellCfcLabelUpdate({ integrity: [], observes: "content" })
     ).toThrow("value, shape, enumerate, or followRef");
+  });
+
+  it("routes both command actions through their JSON boundaries", async () => {
+    const actionHandler = (name: string): unknown =>
+      (piece.getCommand(name) as unknown as
+        | { actionHandler?: unknown }
+        | undefined)?.actionHandler;
+    expect(actionHandler("get-label")).toBe(getCellCfcLabelFromCommand);
+    expect(actionHandler("set-label")).toBe(setCellCfcLabelFromCommand);
+
+    const options = {
+      apiUrl: "https://example.com",
+      identity: "/identity.key",
+      space: signer.did(),
+      piece: "piece",
+      input: true,
+      quiet: true,
+    };
+    const rendered: Array<{ value: unknown; json: boolean | undefined }> = [];
+    const getCalls: unknown[][] = [];
+    const setCalls: unknown[][] = [];
+    const label = { version: 1 as const, entries: [] };
+    const renderOutput = (value: unknown, config?: { json?: boolean }) => {
+      rendered.push({ value, json: config?.json });
+    };
+
+    await getCellCfcLabelFromCommand(options, "messages/0/body", {
+      getCellCfcLabel: ((...args: unknown[]) => {
+        getCalls.push(args);
+        return Promise.resolve(label);
+      }) as never,
+      render: renderOutput,
+    });
+    await setCellCfcLabelFromCommand(options, undefined, {
+      drainStdin: () => Promise.resolve({ integrity: [] }),
+      setCellCfcLabel: ((...args: unknown[]) => {
+        setCalls.push(args);
+        return Promise.resolve(null);
+      }) as never,
+      render: renderOutput,
+    });
+
+    expect(getCalls[0]?.[0]).toEqual({
+      apiUrl: "https://example.com",
+      identity: "/identity.key",
+      space: signer.did(),
+      piece: "piece",
+      jsonOutput: true,
+    });
+    expect(getCalls[0]?.slice(1)).toEqual([
+      ["messages", 0, "body"],
+      { input: true },
+    ]);
+    expect(setCalls[0]?.[0]).toEqual(getCalls[0]?.[0]);
+    expect(setCalls[0]?.slice(1)).toEqual([
+      [],
+      { integrity: [] },
+      { input: true },
+    ]);
+    expect(rendered).toEqual([
+      { value: label, json: true },
+      { value: null, json: true },
+    ]);
   });
 
   it("sets a declared label and returns its effective view", async () => {
@@ -373,6 +446,111 @@ describe("cf piece CFC labels", () => {
         observes: "value",
       }],
     });
+  });
+
+  it("preserves an observation class declared by the stored schema", async () => {
+    const schemaRoot = runtime.getCell<{ body: string }>(
+      signer.did(),
+      "cf-piece-label-schema-observes",
+      {
+        type: "object",
+        properties: {
+          body: {
+            type: "string",
+            ifc: {
+              confidentiality: ["team"],
+              observes: "value",
+            },
+          },
+        },
+        required: ["body"],
+      },
+    );
+    const tx = runtime.edit();
+    schemaRoot.withTx(tx).set({ body: "hello" });
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const schemaDeps = {
+      ...deps,
+      loadPieces: () =>
+        Promise.resolve({
+          runtime,
+          get: () =>
+            Promise.resolve({
+              input: { getCell: () => Promise.resolve(schemaRoot) },
+              result: { getCell: () => Promise.resolve(schemaRoot) },
+            }),
+          synced: () => Promise.resolve(),
+        }),
+    };
+    const updated = await setCellCfcLabel(
+      pieceConfig,
+      ["body"],
+      { confidentiality: ["team", "legal"] },
+      {},
+      schemaDeps as never,
+    );
+
+    expect(updated).toEqual({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["team", "legal"] },
+        observes: "value",
+      }],
+    });
+  });
+
+  it("rejects an ambiguous observation class instead of choosing one", async () => {
+    const labelSymbol = Object.getOwnPropertySymbols(
+      Object.getPrototypeOf(root),
+    ).find((symbol) => symbol.description === "cfcLabelView");
+    expect(labelSymbol).toBeDefined();
+    if (labelSymbol === undefined) throw new Error("Missing CFC label carrier");
+
+    const ambiguousCell = {
+      key: () => ambiguousCell,
+      pull: () => Promise.resolve(),
+      getRaw: () => "hello",
+      schema: {},
+      [labelSymbol]: () => ({
+        version: 1,
+        entries: [
+          {
+            path: [],
+            label: { confidentiality: ["team"] },
+            observes: "value",
+          },
+          {
+            path: [],
+            label: { integrity: ["reviewed"] },
+            observes: "shape",
+          },
+        ],
+      }),
+    };
+    const ambiguousDeps = {
+      ...deps,
+      loadPieces: () =>
+        Promise.resolve({
+          runtime,
+          get: () =>
+            Promise.resolve({
+              input: { getCell: () => Promise.resolve(ambiguousCell) },
+              result: { getCell: () => Promise.resolve(ambiguousCell) },
+            }),
+          synced: () => Promise.resolve(),
+        }),
+    };
+
+    await expect(setCellCfcLabel(
+      pieceConfig,
+      [],
+      { confidentiality: ["team", "legal"] },
+      {},
+      ambiguousDeps as never,
+    )).rejects.toThrow("effective label uses multiple observation classes");
   });
 
   it("redacts caveat sources from command-facing label views", async () => {
