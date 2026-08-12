@@ -10,11 +10,18 @@
  * invoice is the month-to-date source of truth and the runner history supplies
  * the chart. A configured source that cannot be read shows "$???" and makes
  * the combined projection a lower bound.
+ *
+ * Both sources report a day or two after it ends, and a settled day either
+ * source has no row for is a day it spent nothing. That reading holds only
+ * while the source is still writing rows, so each is read only as far as its
+ * own rows reach: a feed whose newest row is further back than its lag allows
+ * counts as a source that cannot be read, rather than as days of $0.
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
 import {
   budgetStatus,
+  daysLabel,
   friendlyError,
   github,
   readBudget,
@@ -25,6 +32,7 @@ import { BlacksmithClient, blacksmithRoutes } from "../blacksmith.ts";
 import {
   calendarMonth,
   DAY_MS,
+  reportLagDays,
   settled,
   SPEND_HISTORY_DAYS,
   spendChart,
@@ -99,6 +107,12 @@ const monthKey = (year: number, month0: number) =>
 
 export const GITHUB_LAG_DAYS = 2;
 const BLACKSMITH_LAG_DAYS = 1;
+// How far back a source's newest row may sit before the tile stops reading the
+// source. Both feeds report within a day or two of a day ending, so four days
+// without a row is a feed that has stopped rather than one running late. A
+// stretch where the org bills nothing at all leaves the same gap, and a
+// weekend of it stays inside this.
+const MAX_REPORT_LAG_DAYS = 4;
 const GITHUB_COLOR = "#58a6ff";
 const BLACKSMITH_COLOR = "#f59e0b";
 
@@ -140,6 +154,30 @@ function addGitHubDays(
 
 class GitHubUsageShapeError extends Error {}
 
+/**
+ * The error a source raises when its newest row is too far back to read the
+ * days after it. The message names the source and how far behind it has
+ * fallen.
+ */
+class StalledReportError extends Error {}
+
+/**
+ * Throws when the source's newest row sits further back than a source that is
+ * still reporting would leave it. A source with no row at all dates nothing and
+ * charts nothing, so there is no reading of it to protect.
+ */
+function requireCurrentReport(
+  source: string,
+  reportedThrough: string | undefined,
+  now: Date,
+): void {
+  if (reportedThrough === undefined) return;
+  const lag = reportLagDays(reportedThrough, now);
+  if (lag > MAX_REPORT_LAG_DAYS) {
+    throw new StalledReportError(`${source} ${daysLabel(lag)} behind`);
+  }
+}
+
 async function githubDollarSpend(
   token: string,
   org: string,
@@ -155,6 +193,22 @@ async function githubDollarSpend(
   if (!Array.isArray(report.usageItems)) {
     throw new GitHubUsageShapeError("billing usage unavailable");
   }
+
+  // One billing pipeline writes the report, a row at a time, for every product
+  // the org used on a day. Its newest row, whatever product that row belongs
+  // to, is how far the pipeline has been written. Actions alone would say less:
+  // it can be quiet for days while the rest of the org keeps billing, and a
+  // quiet week and a stopped report look the same in its rows.
+  let reportedThrough: string | undefined;
+  const noteReport = (items: UsageItem[] | undefined): void => {
+    for (const entry of items ?? []) {
+      const day = dayKey(entry.date);
+      if (day && (reportedThrough === undefined || day > reportedThrough)) {
+        reportedThrough = day;
+      }
+    }
+  };
+  noteReport(report.usageItems);
 
   const current = actionsOf(report);
   const mtd = current.reduce(
@@ -181,6 +235,7 @@ async function githubDollarSpend(
         token,
       );
       if (Array.isArray(previous.usageItems)) {
+        noteReport(previous.usageItems);
         const previousItems = actionsOf(previous);
         addGitHubDays(byDay, previousItems);
         months.add(monthKey(previousYear, previousMonth));
@@ -205,6 +260,7 @@ async function githubDollarSpend(
     ).getUTCDate();
     immediatePrior = false;
   }
+  requireCurrentReport("GitHub billing report", reportedThrough, now);
 
   let budget = NaN;
   try {
@@ -247,7 +303,15 @@ async function githubSpend(
   try {
     return await githubDollarSpend(token, org, now);
   } catch (error) {
-    if (error instanceof GitHubUsageShapeError) throw error;
+    // The classic endpoint answers for an org without the enhanced billing
+    // platform. A report that is there but unreadable, or there but no longer
+    // being written, is not that org.
+    if (
+      error instanceof GitHubUsageShapeError ||
+      error instanceof StalledReportError
+    ) {
+      throw error;
+    }
     const billing = await github<ActionsBilling>(
       `orgs/${org}/settings/billing/actions`,
       token,
@@ -261,13 +325,23 @@ async function githubSpend(
   }
 }
 
+interface BlacksmithDaily {
+  byDay: Map<string, number>;
+  /**
+   * The newest day the daily endpoint has a record for, whatever that day
+   * cost, which is how far the feed is known to reach.
+   */
+  reportedThrough?: string;
+}
+
 function parseBlacksmithDaily(
   response: BlacksmithDailyResponse,
-): Map<string, number> {
+): BlacksmithDaily {
   if (!Array.isArray(response.daily_metrics)) {
     throw new Error("Blacksmith daily costs have an unexpected shape");
   }
   const byDay = new Map<string, number>();
+  let reportedThrough: string | undefined;
   for (const entry of response.daily_metrics) {
     const day = dayKey(entry.date);
     const cost = finiteNumber(entry.cost);
@@ -275,8 +349,11 @@ function parseBlacksmithDaily(
       throw new Error("Blacksmith daily costs have an unexpected shape");
     }
     addDaily(byDay, day, cost);
+    if (reportedThrough === undefined || day > reportedThrough) {
+      reportedThrough = day;
+    }
   }
-  return byDay;
+  return { byDay, reportedThrough };
 }
 
 function parseBlacksmithInvoice(response: unknown): number {
@@ -339,7 +416,14 @@ async function blacksmithSpend(
       ? client.get<unknown>(blacksmithRoutes.spendingThreshold(org))
       : Promise.resolve(undefined),
   ]);
-  const byDay = parseBlacksmithDaily(daily);
+  // The daily endpoint answers for a range of days, a record per day it has
+  // runner cost to report. Past its newest record a quiet day and an unwritten
+  // day read the same, so the tile stops there rather than charging the days
+  // after it at $0. The invoice is left out of that judgement: it is a running
+  // total with no date on it, so it cannot show that Blacksmith's billing is
+  // still moving.
+  const { byDay, reportedThrough } = parseBlacksmithDaily(daily);
+  requireCurrentReport("Blacksmith daily costs", reportedThrough, now);
   const measuredMtd = parseBlacksmithInvoice(invoice);
   return {
     byDay,
@@ -377,6 +461,7 @@ function minutesView(
 
 function unavailableMessage(error: unknown): string {
   if (error instanceof GitHubUsageShapeError) return error.message;
+  if (error instanceof StalledReportError) return error.message;
   if (!(error instanceof Error)) return "CI spend unavailable";
   if (error.message === "Blacksmith API token rejected") {
     return "check BLACKSMITH_API_TOKEN";

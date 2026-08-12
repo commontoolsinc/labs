@@ -17,14 +17,24 @@
  * aside, and the span the chart covers goes to the tile's duration slot.
  *
  * Any provider we cannot read shows "$???" and drops the tile to gray, but the
- * rest still chart and total. All traffic to these models routes through the
- * AI gateway, and the gateway exposes tokens rather than dollars, so these
- * provider APIs are the authoritative source of spend.
+ * rest still chart and total. A provider whose cost report has stopped being
+ * written is one of those: a day past the end of its report has no figure, and
+ * charting it at $0 would claim a quiet day the provider never reported. All
+ * traffic to these models routes through the AI gateway, and the gateway
+ * exposes tokens rather than dollars, so these provider APIs are the
+ * authoritative source of spend.
  */
 
 import type { Status, Tile, TileView } from "../types.ts";
 import { budgetStatus, readBudget, usd } from "../lib.ts";
-import { DAY_MS, SPEND_HISTORY_DAYS, spendChart, summarizeDailySpend } from "../spend.ts";
+import {
+  DAY_MS,
+  newestReportedDay,
+  reportLagDays,
+  SPEND_HISTORY_DAYS,
+  spendChart,
+  summarizeDailySpend,
+} from "../spend.ts";
 import { themedChartSeries } from "../theme.ts";
 
 // The provider billing APIs are slow — OpenAI's costs endpoint alone takes ~12-16s
@@ -33,8 +43,24 @@ import { themedChartSeries } from "../theme.ts";
 // returned shouldn't be cut off, stranding the whole provider as "$???".
 const TIMEOUT = 30000;
 const PROVIDER_LAG_DAYS = 1;
+// How far back a provider's newest bucket may sit before the tile stops reading
+// the provider. Both cost endpoints answer a date range with a bucket per day,
+// carrying a day the org spent nothing as a bucket with no figures in it, so a
+// day the provider is still reporting on has a bucket whether or not it cost
+// anything. A report that ends further back than a few days has stopped, and
+// the days after it are unreported rather than quiet.
+const MAX_REPORT_LAG_DAYS = 4;
 const OPENAI_COLOR = "#10a37f";
 const ANTHROPIC_COLOR = "#d97757";
+
+// The provider's days, or null when its report ends too far back to read the
+// days after it. A provider with no bucket at all reported nothing to date and
+// charts nothing, so there is no reading of it to protect.
+function stillReporting(byDay: Map<string, number> | null, now: Date): Map<string, number> | null {
+  const newest = byDay === null ? undefined : newestReportedDay(byDay);
+  if (newest !== undefined && reportLagDays(newest, now) > MAX_REPORT_LAG_DAYS) return null;
+  return byDay;
+}
 
 // Daily billable USD, keyed by "YYYY-MM-DD", from OpenAI's org cost buckets.
 async function openaiDaily(key: string, startSec: number): Promise<Map<string, number>> {
@@ -134,12 +160,15 @@ export const modelSpend: Tile = {
     const startSec = Math.floor(startMs / 1000);
     const startISO = `${new Date(startMs).toISOString().slice(0, 10)}T00:00:00Z`;
 
-    // Read each provider concurrently. null = key absent or the billing API errored.
-    const [oaMap, anMap, orMonthly] = await Promise.all([
+    // Read each provider concurrently. null = key absent, the billing API
+    // errored, or the report it returned has stopped being written.
+    const [oaRead, anRead, orMonthly] = await Promise.all([
       oaKey ? openaiDaily(oaKey, startSec).catch(() => null) : Promise.resolve(null),
       anKey ? anthropicDaily(anKey, startISO).catch(() => null) : Promise.resolve(null),
       orKey ? openrouterMonthly(orKey).catch(() => null) : Promise.resolve(null),
     ]);
+    const oaMap = stillReporting(oaRead, now);
+    const anMap = stillReporting(anRead, now);
 
     const oa = oaMap
       ? summarizeDailySpend(oaMap, now, { lagDays: PROVIDER_LAG_DAYS })

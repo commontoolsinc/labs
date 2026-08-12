@@ -169,6 +169,40 @@ Deno.test("model spend: a provider that errors -> $??? and gray, the rest still 
   );
 });
 
+// OpenAI's cost report stops six days back: the days after it have no bucket,
+// so the provider has written nothing about them.
+const openaiStalled: Handler = () =>
+  json({ data: WINDOW.slice(0, WINDOW.length - 6).map((d) => oaBucket(d, 1)), has_more: false, next_page: null });
+// A bucket for a day the org spent nothing. The endpoint carries one for every
+// day in the range it covers, so a day with no figures is a reported $0.
+const oaEmptyBucket = (day: string) => ({ start_time: Date.parse(`${day}T00:00:00Z`) / 1000, results: [] });
+// $1/day until the last ten days, which are reported and empty.
+const openaiQuiet: Handler = () =>
+  json({
+    data: WINDOW.map((d, i) => i < WINDOW.length - 10 ? oaBucket(d, 1) : oaEmptyBucket(d)),
+    has_more: false,
+    next_page: null,
+  });
+
+Deno.test("model spend: a provider whose report stopped -> $??? and gray, never days of $0", async () => {
+  await withFetch({ "api.openai.com": openaiStalled, "openrouter.ai": openrouterFive }, async () => {
+    const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa", OPENROUTER_KEY: "or" }));
+    assertEquals(v.status, "unknown"); // OpenAI's recent days are unknown, not quiet
+    assert(v.value?.startsWith("≥"), `the total is a lower bound, got ${v.value}`);
+    assertEquals(v.extra, `<p class="sub">OpenAI $??? • OR $5</p>`); // no line, no total
+  });
+});
+
+Deno.test("model spend: a provider reporting empty days is quiet, and still reads", async () => {
+  await withFetch({ "api.openai.com": openaiQuiet }, async () => {
+    const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa" }));
+    assertEquals(v.status, "good");
+    assert(v.value?.startsWith("~"), `nothing configured is missing, got ${v.value}`);
+    assertEquals((v.extra ?? "").includes("OpenAI $???"), false);
+    assertStringIncludes(v.extra ?? "", `${themedSwatch("#10a37f")} OpenAI`);
+  });
+});
+
 Deno.test("model spend: a one-key deployment still turns green (an unset key doesn't gate the budget)", async () => {
   await withFetch({ "openrouter.ai": openrouterFive }, async () => {
     const v = await modelSpend.collect(ctx({ OPENROUTER_KEY: "or" }));
