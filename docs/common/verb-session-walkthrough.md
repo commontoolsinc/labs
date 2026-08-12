@@ -229,7 +229,7 @@ The renderer is ready for two of the three: `specificFlagLines` reads a
 were given one, and a listing row would carry one as soon as it were supplied.
 The verb's *purpose* needs a second change on top, because
 `renderPieceCallHelp` has nowhere to put it — the page runs Usage, JSON input,
-Flags, Output, with no summary line.
+Flags, with no summary line.
 
 So the help page shows `--title <string>  Required.` and stops.
 
