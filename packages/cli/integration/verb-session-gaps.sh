@@ -3,7 +3,7 @@
 # not work yet. Its companion `verb-session-demo.sh` shows the session as it is
 # meant to read; this one is the thing that keeps that honest.
 #
-# Three steps assert a GAP rather than a capability. Each fails loudly the day
+# Four steps assert a GAP rather than a capability. Each fails loudly the day
 # the gap closes, so this script is how we find out that a capability arrived
 # rather than discovering it months later in a stale document.
 #
@@ -76,6 +76,11 @@ VERBS=$($CF piece verbs --piece board $ARGS --json 2>/dev/null)
 echo "$VERBS" | jq -r '.verbs[]? | "    " + .name + "  (" + .kind + ")"' 2>/dev/null
 echo "$VERBS" | jq -e '[.verbs[]?.name] | index("addItem")' >/dev/null 2>&1 &&
   ok "addItem is listed" || bad "addItem missing from the listing"
+# The other half of a discovery surface, and the half that has no natural
+# witness: what it does NOT name. The board's `items` and `$NAME` are data, and
+# a listing that offers them hands a client operations that do not exist.
+check "addItem" "$(echo "$VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')" \
+  "the listing names the verb and nothing else"
 
 step "3. Ask what a verb wants — flags and prose, both derived"
 HELP=$($CF piece call --piece board $ARGS addItem -- --help 2>/dev/null)
@@ -128,6 +133,16 @@ ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
 check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link") and (.title|length>0)] | all')" \
   "a marker beside a projection returns the address AND the fields"
 KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"].id')
+# GAP: the very same read, run a second time. A (source cell, schema) pair
+# serves exactly once — the second read reports success and returns null for
+# every projected field, while the addresses survive (#5633). The check above
+# is what makes this comparison mean anything: were the first read already
+# empty, the two would agree and this would misreport the gap as closed.
+AGAIN=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
+  --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
+  2>/dev/null)
+[ "$ADDR" = "$AGAIN" ]
+gap "$?" "a second read of one (source, schema) pair returning what the first did"
 
 step "6. Two mechanisms name the piece, and they do not agree"
 # MEASURED, and not what you would guess: the address a call hands back

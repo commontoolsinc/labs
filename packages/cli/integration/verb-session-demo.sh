@@ -12,6 +12,15 @@
 # deliberately visible: a demo that quietly omits what does not work teaches a
 # surface that does not exist.
 #
+# Two more are marked BROKEN, for the same reason: they are commands a person
+# driving this at a prompt runs and watches fail. Their errors are printed as
+# they arrive rather than hidden behind a redirect.
+#
+# One constraint on anyone editing this file: while #5633 is open, no two reads
+# may share a (source cell, schema) pair — the second one silently returns null
+# for every projected field. Act 6 is that failure, on purpose. Every other read
+# here uses a pair no other read uses, which is the only reason they pass.
+#
 #   API_URL=http://localhost:8000 packages/cli/integration/verb-session-demo.sh
 set -uo pipefail
 
@@ -34,6 +43,12 @@ pending() {
   printf '\n%s   $ %s%s\n' "$Y" "$1" "$N"
   printf '%s     PENDING — %s%s\n' "$Y" "$2" "$N"
   printf '%s     will print:%s\n' "$D" "$N"
+  printf '%s\n' "$3" | sed 's/^/       /'
+}
+# Show a command that runs today and fails, with the error it really printed.
+broken() {
+  printf '\n%s   $ %s%s\n' "$Y" "$1" "$N"
+  printf '%s     BROKEN — %s%s\n' "$Y" "$2" "$N"
   printf '%s\n' "$3" | sed 's/^/       /'
 }
 
@@ -75,33 +90,55 @@ EPIC=$(echo "$R" | jq -r '.links["/item"].id' | sed 's/^of://')
 printf '\n%s   $ cf piece call --piece board addItem --show-links -- --title "Login rewrite"%s\n' "$C" "$N"
 echo "$R" | jq -c '{status, result: {item: {"$NAME": .result.item["$NAME"]}}}' | sed 's/^/     /'
 printf '     %saddress: %s%s\n' "$D" "$EPIC" "$N"
+CHILD_ERR=""
 for t in "Session cookies" "CSRF tokens"; do
-  $CF piece call --quiet --piece "$EPIC" $ARGS addChild "{\"title\":\"$t\"}" >/dev/null 2>&1
+  OUT=$($CF piece call --quiet --piece "$EPIC" $ARGS \
+    addChild "{\"title\":\"$t\"}" 2>&1)
+  if [ -z "$CHILD_ERR" ]; then
+    CHILD_ERR=$(printf '%s\n' "$OUT" | grep -v '^invocation:' | grep -v '^session:')
+  fi
 done
-printf '\n%s   $ cf piece call --piece <that address> addChild -- --title "Session cookies"%s\n' "$C" "$N"
-printf '     %s(and one more)%s\n' "$D" "$N"
+broken 'cf piece call --piece <that address> addChild -- --title "Session cookies"' \
+  "the item it hands back points at its parent, and rendering a cycle fails (#5577)" \
+  "$CHILD_ERR"
+say "The write landed regardless — the failure is the readback, not the mutation."
+LANDED=$($CF piece get --quiet --piece "$EPIC" $ARGS children 2>/dev/null |
+  jq -r 'length')
+printf '\n%s   $ cf piece get --piece <epic> children | jq length%s\n' "$C" "$N"
+printf '     %s\n' "$LANDED"
 
 act "5 · Read addresses instead of contents"
 say "An unshaped read follows every link. A \$link marker stops at the address."
+SHAPED='{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}'
 run "cf piece get --piece <epic> children --schema '{...\"\$link\":true...}'" \
-  $CF piece get --quiet --piece "$EPIC" children $ARGS \
-  --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}'
+  $CF piece get --quiet --piece "$EPIC" children $ARGS --schema "$SHAPED"
 
-act "6 · A verb returns what only the pattern could compute"
+act "6 · Ask the same question twice — BROKEN"
+say "The first thing anyone watching says is 'show me that again'."
+AGAIN=$($CF piece get --quiet --piece "$EPIC" children $ARGS --schema "$SHAPED" 2>&1)
+broken "cf piece get --piece <epic> children --schema '{...}'   (the same command again)" \
+  "a second read of one (source, schema) pair drops every projected field (#5633)" \
+  "$AGAIN"
+say "The addresses survive; the titles do not. The read reports success while"
+say "returning less than it did a moment ago, which is the part worth knowing."
+
+act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
 run "cf piece call --piece <epic> recordNote -- --body 'blocked on the cookie spec'" \
   $CF piece call --quiet --piece "$EPIC" $ARGS \
   recordNote '{"body":"blocked on the cookie spec"}'
 
-act "7 · Finishing reports what the caller could not know"
+act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
+say "A grandchild is filed first, by the same addChild that failed its readback"
+say "in act 4 and wrote anyway."
 KID=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null | jq -r '.[0]["$link"].id' | sed 's/^of://')
 $CF piece call --quiet --piece "$KID" $ARGS addChild '{"title":"Rotate signing key"}' >/dev/null 2>&1
 run "cf piece call --piece <epic> finish -- --body 'shipping behind a flag'" \
   $CF piece call --quiet --piece "$EPIC" $ARGS finish '{"body":"shipping behind a flag"}'
 
-act "8 · Relate two items — PENDING"
+act "9 · Relate two items — PENDING"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
 pending "cf piece call --piece <cookies> blockOn -- --on <csrf-address>" \
   "an address cannot yet be a verb argument (verbs plan item 11)" \
@@ -114,17 +151,18 @@ pending "cf piece call --piece <cookies> blockOn -- --on <csrf-address>" \
   }
 }'
 
-act "9 · One item, two paths, one address — PENDING"
+act "10 · One item, two paths, one address — PENDING"
 say "This is what addresses are for: the same item under a parent AND as a blocker,"
 say "and a caller can tell it is one item rather than two copies."
 pending "cf piece get --piece board items --select 'title,children@,blockedOn@'" \
-  "needs the edge from act 8" \
+  "needs the edge from act 9" \
   'the same of:fid1:… appears under one item'"'"'s children and another'"'"'s blockedOn'
 
 printf '\n%s━━ %s %s\n' "$B" "What just happened" "$N"
 say "No tool was written for this tracker. Every flag, type and listing above"
 say "was derived from the pattern's own TypeScript by cf."
 say ""
-say "Acts 8 and 9 are the graph half, and they are sequenced as verbs plan"
-say "item 11. verb-session-gaps.sh asserts they do NOT work, and fails the"
-say "day they do — so this demo cannot quietly go stale."
+say "Acts 9 and 10 are the graph half, and they are sequenced as verbs plan"
+say "item 11. Acts 4 and 6 are defects, with issues open against them: #5577"
+say "and #5633. verb-session-gaps.sh asserts each of the three, and fails the"
+say "day any one changes — so this demo cannot quietly go stale."
