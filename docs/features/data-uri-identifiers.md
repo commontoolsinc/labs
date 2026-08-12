@@ -74,6 +74,13 @@ throws if `data` contains a reference cycle. It lives in the runner rather than
 in the codec because it needs the cell and link machinery, which `data-model`
 does not have.
 
+The walk rebuilds a container only when a link under it was rewritten;
+everything else it hands back by identity, so a value carrying no link at all
+reaches `dataUriFromValue` as the objects the caller passed in. A value that
+has no fabric representation, such as a `Date` or a `Cell`, therefore reaches
+the encoder intact and is refused there, instead of arriving as a plain object
+with none of its content.
+
 Because the standard encoding canonicalizes plain-object key order, two
 runtimes holding the same value mint the same identifier regardless of the
 order in which the keys were inserted. That is the property that makes this

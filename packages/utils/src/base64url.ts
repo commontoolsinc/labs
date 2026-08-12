@@ -16,6 +16,37 @@ export function toUnpaddedBase64url(bytes: Uint8Array): string {
     : bytes.toBase64({ alphabet: "base64url", omitPadding: true });
 }
 
+/** Shared text encoder, created once. */
+const textEncoder = new TextEncoder();
+
+/**
+ * Scratch buffer for {@link toUnpaddedBase64urlFromText}, sized in characters
+ * rather than in worst-case bytes. Text that is entirely ASCII occupies one
+ * byte per character, so a string of at most this many characters fits.
+ */
+const textScratch = new Uint8Array(4096);
+
+/**
+ * Encodes the UTF-8 form of `text` as an unpadded base64url string. The
+ * result is what {@link toUnpaddedBase64url} gives for the bytes
+ * `TextEncoder.encode()` produces from `text`.
+ */
+export function toUnpaddedBase64urlFromText(text: string): string {
+  // Encoding into a buffer that is already there costs no byte array, which
+  // `encode()` allocates and hands back on every call. `encodeInto()` reports
+  // how many characters it consumed, which is how the whole string is known
+  // to have fit; text that did not fit -- longer than the buffer, or with
+  // multi-byte characters that overran it -- goes through `encode()` instead.
+  if (text.length <= textScratch.length) {
+    const { read, written } = textEncoder.encodeInto(text, textScratch);
+    if (read === text.length) {
+      return toUnpaddedBase64url(textScratch.subarray(0, written));
+    }
+  }
+
+  return toUnpaddedBase64url(textEncoder.encode(text));
+}
+
 /**
  * Decodes a base64url string to `Uint8Array`. This accepts both unpadded and
  * padded (trailing `=` characters) in the `encoded` input. Uses the base64url

@@ -61,12 +61,45 @@ describe("data-uri-codec", () => {
       expect(seemsLikeJsonEncodedFabricValue(payload)).toBe(true);
     });
 
+    // The payload is base64url of the UTF-8 form of the encoded text. The id
+    // is that payload, so however the bytes are arrived at, the answer has to
+    // be the one this spells out. The cases cover text that is entirely
+    // ASCII, text that is not, and text too long to take any short cut.
+    it("mints a payload that is base64url of the encoded text", () => {
+      const textEncoder = new TextEncoder();
+      const values = [
+        { x: 1 },
+        { text: "Ñoño 🚀 你好" },
+        { long: "y".repeat(8000) },
+      ];
+
+      for (const value of values) {
+        const uri = dataUriFromValue(value);
+        expect(uri.slice(uri.indexOf(",") + 1)).toBe(
+          toUnpaddedBase64url(textEncoder.encode(jsonFromValue(value))),
+        );
+      }
+    });
+
     // The standard encoding canonicalizes key order, so the minted id is a
     // function of content alone.
     it("mints the same URI regardless of key insertion order", () => {
       const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
       const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
       expect(dataUriFromValue(scrambled)).toBe(dataUriFromValue(inOrder));
+    });
+
+    // Canonical order is UTF-8 byte order, which differs from the order a
+    // plain JavaScript string comparison gives whenever a key carries a
+    // surrogate pair.
+    it("mints the same URI for keys that a UTF-16 sort would order differently", () => {
+      const oneWay = { "￿": 1, "\u{10000}": 2 };
+      const other = { "\u{10000}": 2, "￿": 1 };
+      expect(dataUriFromValue(other)).toBe(dataUriFromValue(oneWay));
+      expect(Object.keys(valueFromDataUri(dataUriFromValue(other)))).toEqual([
+        "￿",
+        "\u{10000}",
+      ]);
     });
 
     it("round-trips an `undefined` value", () => {

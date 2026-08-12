@@ -322,6 +322,11 @@ One line per archived document; each document's header carries the fuller
   — why the schemaless whole-array read benchmarks stepped by two to three
   times: the storage read path re-derived, per read, that what the replica
   holds is a `FabricValue`, August 2026.
+- [2026-08-immutable-cell-data-uri-mint.md](development/performance/2026-08-immutable-cell-data-uri-mint.md)
+  — the two July 2026 steps in the create-data-URI benchmark: a byte array
+  allocated per mint on the way to the base64url payload, which is fixed, and
+  the canonical `FabricValue` encoding, whose cost is the price of content
+  addressing and stays.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`
