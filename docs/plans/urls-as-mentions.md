@@ -37,8 +37,14 @@ with an explicit edit verb makes the round trip ordinary pattern code.
 
 `extractFidPayloads` (`packages/patterns/topics/topic.tsx`) is a hand-rolled
 regex over pasted text that returns bare payload strings for callers to
-re-address. Retiring it onto the builtin is part of this work, not a model for
-it.
+re-address. It is not a model for this — but retiring it is also not a
+one-for-one swap, and the difference matters. **Scanning prose for something
+that looks like a cell and deciding what a URL names are two operations**, and
+the scanner cannot do the second: it discards host, space, scheme, and path,
+so a payload it lifts out of an external URL, or out of a link into another
+space, resolves in the caller's space and names the wrong cell. A corpus
+scanner stays a corpus scanner; what it hands to `cellFromUrl` has to be a
+whole address, and `cellFromUrl` has to preserve every part of it.
 
 ## `cellFromUrl`
 
