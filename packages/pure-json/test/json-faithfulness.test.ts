@@ -14,8 +14,8 @@
  * acyclic) reference are all faithful. Pointers are checked for nesting and
  * for `~` and `/` escaping, since an unactionable pointer makes a correct
  * report useless. `isPureJson` delegates to `findJsonUnfaithfulValues`, so the
- * two cannot disagree by construction; the cases here pin its boolean surface
- * directly, and one spot-checks the delegation.
+ * two cannot disagree by construction; two of the cases here pin its boolean
+ * surface directly, and the third spot-checks the delegation.
  */
 
 import { describe, it } from "@std/testing/bdd";
