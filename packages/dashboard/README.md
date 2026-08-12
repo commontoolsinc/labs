@@ -295,7 +295,7 @@ surveillance tool.
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
-| production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard without direct tailnet access can route this check through `PROD_PROXY` or point `PROD_URL` at another truthful health source | `PROD_URL`, `PROD_PROXY` (optional) |
+| production | synthetic HTTP checks of `/_health` on estuary and rapids, plus A and AAAA DNS checks for estuary, rapids, the bastion, the production and staging shells, the LLM gateway, and the sandbox service. The healthy headline reports every tracked host up; otherwise it reports the worst observed condition, such as a response time, HTTP status, or DNS failure. The tile keeps healthy estuary and rapids response times beside orange conditions for context, but hides every green host when any condition is red. It always hides other hostnames that resolve. It turns red when a hostname has no A or AAAA record, for a non-200 response, or for a health response over 500 ms. It turns orange for a health response over 275 ms or a check that cannot yet confirm the host is up, including resolver failures. The tailnet health requests can use `PROD_PROXY`; DNS always reports what the dashboard host resolves itself | optional `ESTUARY_URL`, `RAPIDS_URL`, `BASTION_HOST`, `PROD_PROXY`; `PROD_URL` remains an alias for `ESTUARY_URL` |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, after credits, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
@@ -562,8 +562,10 @@ it.
 | `MODEL_MONTHLY_BUDGET` | model spend | combined monthly USD budget across providers. |
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
-| `PROD_URL` | production | the production **server**, as an origin — the tile checks `/_health` on it and links to it. Defaults to estuary, the production toolshed. Note `production.commontools.dev` is the shell, a static site in a GCS bucket: it has no health endpoint, and its index page answers 200 whether or not the server behind it is serving, so it cannot see an outage. |
-| `PROD_PROXY` | production | optional proxy used only for the production health check. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy so the tailnet hostname resolves through it. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. |
+| `ESTUARY_URL` | production | the estuary server as an origin. The tile checks `/_health` on it and links to it. Defaults to `https://estuary.saga-castor.ts.net`. `PROD_URL` remains an alias when `ESTUARY_URL` is unset. |
+| `RAPIDS_URL` | production | the rapids server as an origin. The tile checks `/_health` on it and links to it. Defaults to `https://rapids.saga-castor.ts.net`. |
+| `BASTION_HOST` | production | the hostname whose A and AAAA records represent the deployment bastion. A URL is also accepted; only its hostname is resolved. Defaults to `bastion.saga-castor.ts.net`. |
+| `PROD_PROXY` | production | optional proxy used for the estuary and rapids health checks. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. DNS checks always use the dashboard host's resolver. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
 | `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory). |
@@ -889,8 +891,11 @@ Env knobs for the dev loop:
 - `DASHBOARD_PORT` — run several instances at once (e.g. one per branch) without clashing.
 - `DASHBOARD_REPO` — point the CI tiles at any repo. Its owner selects the
   organization for GitHub users.
-- `PROD_URL` — point the production tile at a local server (`http://localhost:8000/`) instead of prod. It checks `/_health` on that origin.
-- `PROD_PROXY` — route only the production health check through a proxy, for
+- `ESTUARY_URL` and `RAPIDS_URL` — point either production-tile health check at
+  a local server. `PROD_URL` remains an alias for `ESTUARY_URL`.
+- `BASTION_HOST` — replace the default bastion hostname in the production
+  tile's DNS checks.
+- `PROD_PROXY` — route the estuary and rapids health checks through a proxy, for
   example `socks5h://127.0.0.1:1055` with a local Tailscale userspace proxy.
 - The other credential envs (see **Credentials** above — `SIGNOZ_*`, `GCP_*`,
   `OPENAI_ADMIN_KEY`/`ANTHROPIC_ADMIN_KEY`/`OPENROUTER_KEY`, `DISCORD_*`) — set
@@ -925,9 +930,11 @@ gray-out contract. These ordinary unit tests are hermetic and need only
 `--allow-env` for module-load configuration reads. The full `test` task also
 verifies that Resvg reproduces the embedded PNGs and runs the favicon
 behavior in the local browser test runner. The package tasks grant the additional
-permissions those two checks need. The one live tile, `production`, is exercised
-by running the board rather than in the unit suite. This is a workspace package,
-so its ordinary unit tests also run as part of the repo-wide `deno task test`.
+permissions those two checks need. `tiles/prod-uptime.test.ts` exercises the
+production tile with canned HTTP responses, an injected DNS resolver, and an
+injected proxy client factory, so its unit tests never reach the network. This is
+a workspace package, so its ordinary unit tests also run as part of the repo-wide
+`deno task test`.
 
 ## Deploying (stage GKE, tailnet-only)
 
