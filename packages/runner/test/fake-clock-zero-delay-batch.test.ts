@@ -19,7 +19,7 @@ import { expect } from "@std/expect";
 
 // The harness installs its replacements around each test, so these read the
 // global when they are called rather than when this module loads.
-const host = globalThis as {
+const host = globalThis as unknown as {
   setImmediate: (handler: () => void) => unknown;
   clearImmediate: (handle: unknown) => void;
 };
@@ -41,12 +41,14 @@ describe("fake-clock zero-delay batch", () => {
 
   it("does not run a zero-delay timer cleared by an earlier one in the batch", async () => {
     const fired: string[] = [];
-    let second = 0;
+    // The first timer is armed first so it fires first; the one it clears is
+    // still ahead of it in the same batch.
+    const armed: { handle?: ReturnType<typeof setTimeout> } = {};
     setTimeout(() => {
       fired.push("first");
-      clearTimeout(second);
+      clearTimeout(armed.handle);
     }, 0);
-    second = setTimeout(() => fired.push("second"), 0);
+    armed.handle = setTimeout(() => fired.push("second"), 0);
 
     await clock.settle();
 
