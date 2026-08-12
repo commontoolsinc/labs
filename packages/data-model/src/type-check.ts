@@ -1,3 +1,19 @@
+/**
+ * The predicates deciding whether a value belongs to the `FabricValue` type,
+ * and the narrowings that ask a shape question about one that already does.
+ *
+ * Membership turns on inertness: a fabric value is data, so anything that is
+ * live code is refused -- a function, an accessor-backed property, the
+ * prototype of an `Array` subclass, a symbol that was never registry-interned.
+ * Frozen-ness is a separate question and deliberately not asked here, so a
+ * structurally-valid unfrozen value is a member.
+ *
+ * The narrowings are looser than membership on purpose. They are asked of a
+ * value whose type already claims to be a `FabricValue`, and answer only
+ * whether it may be read by name; where one accepts something membership
+ * refuses, the difference is stated on that narrowing rather than here.
+ */
+
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";

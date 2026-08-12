@@ -1,3 +1,16 @@
+/**
+ * The primitive classes' entry point, and the two answers that have to be kept
+ * in step with the set of them: which classes travel over the wire, and what
+ * each one is called in the schema dialect.
+ *
+ * Both lists are written out by hand rather than derived, because neither can
+ * be discovered by reflection. A class binds its codec under a wire format's
+ * own symbol, so nothing here can name the symbol to look for without naming a
+ * format; and the constructor name a lookup would otherwise key on does not
+ * survive a minified build. Adding a primitive therefore means editing this
+ * file, and both lists are built to fail loudly when it has not been.
+ */
+
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";

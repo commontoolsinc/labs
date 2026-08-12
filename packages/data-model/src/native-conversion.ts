@@ -1,3 +1,21 @@
+/**
+ * The boundary between native JS values and fabric values, in both
+ * directions, along with the predicate saying in advance whether a value can
+ * cross it.
+ *
+ * Inbound, anything not representable is refused rather than approximated: a
+ * `Map`, a class instance, an unrecognized type all throw, on the principle
+ * that a wrong value is worse than none. A value that is already a deep-frozen
+ * fabric value crosses by identity instead of being rebuilt, and a cycle is
+ * detected rather than followed.
+ *
+ * Outbound, a wrapper is unwrapped to the native type it stands for, while a
+ * fabric instance with no native counterpart passes through untouched. Both
+ * directions take the result's freeze state as an argument; on the way out, a
+ * class defined to be always frozen comes back frozen regardless of what was
+ * asked for.
+ */
+
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isInstance,
