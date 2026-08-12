@@ -74,7 +74,15 @@ Editing the label ends that. `_detectRefLabelChanges` compares the edited label
 against the destination's current name, and sets `modifiedTitle` when they
 differ — the user has chosen a wording, and a later rename leaves it alone.
 Editing the label back into agreement clears the flag, so it tracks divergence
-rather than accumulating a history of edits.
+rather than accumulating a history of edits. Only the map write is conditional
+on the flag changing: `mention-ref-label-changed` fires on every label edit,
+including one custom wording replacing another.
+
+A key whose destination is repointed at a different piece gets a new
+subscription. `_setupRefDestinationSubscriptions` records the identity each
+subscription was opened against, because a key-only check would keep listening
+to the piece the mention used to name — rewriting this label on ITS rename, and
+never hearing the new one's.
 
 The destination is never renamed from here. In the wiki-link form editing a pill
 writes `destination.title`, which makes every local wording a rename; in the
@@ -83,10 +91,21 @@ reference form the label is local and the destination is untouched.
 ## Collection
 
 An entry whose token has left the document is removed by
-`_collectUnreferencedRefEntries`. Removing a key means writing the whole map
-back, so only keys this editor saw when the document loaded, or minted itself,
-are eligible: a key another client added since is one this editor cannot tell
-apart from a key it deleted, and the conservative reading keeps it.
+`_collectUnreferencedRefEntries`. Only keys this editor saw when the document
+loaded, or minted itself, are eligible: a key another client added while this
+one was open is one this editor has no reason to think was ever in its document,
+and the conservative reading keeps it.
+
+Entries go **one key at a time**, not by writing back a filtered copy of the
+map. A blind write of a snapshot takes any entry that arrived between the read
+and the write down with it.
+
+Collection also **flushes the content write first**, inverting the ordering an
+insertion uses. The deletion that made an entry collectable is still sitting in
+the content cell's debounce, or waiting on blur; dropping the entry now and then
+losing that write to a disconnect leaves the durable document holding a token
+whose destination is gone. Flushed first, the worst interruption leaves an
+unreferenced entry, which the next collection takes.
 
 The collector will not run against an empty document. A document that has not
 loaded names nothing, which is not the same as a document that names nothing.
@@ -102,10 +121,27 @@ destination until the create resolves. The token goes in first with a key the
 map does not hold, so it reads as ordinary text for as long as the create takes,
 and is unwound to the bare label if the create fails.
 
+That window belongs to the user: an unresolved token is unprotected, so it can
+be edited or deleted before the create returns. Both ends of the create
+therefore find the token by its KEY (`_findRefToken`) rather than by the text
+that was inserted, so an edited label still matches — and a token that has gone
+means the mention was abandoned, so no entry is written for it.
+
+A completion whose destination has not been resolved yet mints a **wiki-link
+instead**. `mentionable.key(index)` addresses a position in a list rather than a
+piece, and a mention persisted against that path would later name whatever moved
+into the slot; the older form's id comes from the same resolution, so falling
+back to it costs the form and not the target.
+
 ## What the form gives up
 
 `[[Name (id)]]` survives being copied anywhere. `[Label][a3f9zz]` means nothing
-without the map, so text pasted into another document arrives as a label with no
-destination, and a consumer reading raw content sees the same. Emitting the map
-as a markdown reference-definition block is what makes an exported document
-whole; a paste between two live documents is not recovered.
+without the map, so text pasted into another document reads as ordinary text
+there, and a consumer reading raw content sees a label with no destination.
+
+Neither is recovered. Emitting the map as the markdown reference-definition
+block it resembles would make an exported document whole, but not through
+`[FS]`: `writeFsFile` (`packages/fuse/cell-bridge.ts`) writes the entire edited
+body back to `$FS.content`, so emitted definitions would return as note text on
+the first edit through the filesystem. That needs a read-only projection
+surface, or an `[FS]` write-back that strips a generated section.

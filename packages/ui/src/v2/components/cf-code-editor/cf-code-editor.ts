@@ -309,8 +309,13 @@ export class CFCodeEditor extends BaseElement {
   private _referencesUnsub: (() => void) | null = null;
   // Label text last seen for each reference key, to detect a user's edit.
   private _previousRefLabels = new Map<string, string>();
-  // Subscriptions to each referenced destination.
-  private _refDestinationSubscriptions = new Map<string, () => void>();
+  // Subscriptions to each referenced destination, carrying the identity they
+  // were opened against so a key repointed at a different piece resubscribes
+  // rather than keeping the old one alive.
+  private _refDestinationSubscriptions = new Map<
+    string,
+    { id: string; unsub: () => void }
+  >();
   // Each referenced destination's name, as its subscription last delivered it.
   private _refNames = new Map<string, string>();
   // Keys the document held when it loaded, plus those this editor minted.
@@ -607,10 +612,18 @@ export class CFCodeEditor extends BaseElement {
     return key;
   }
 
-  /** Record the mentionable item at `index` as a destination. */
+  /**
+   * Record the mentionable item at `index` as a destination, or refuse.
+   *
+   * Only a RESOLVED cell will do. `mentionable.key(index)` addresses a
+   * position in a list rather than a piece: the list recomputes, and a mention
+   * persisted against that path would later name whatever had moved into the
+   * slot. `_resolvePieceIds` follows the indirection; until it has, this
+   * returns null and the caller mints a wiki-link instead — the older form,
+   * but one whose id comes from the same resolution.
+   */
   private _createRefEntry(index: number): string | null {
-    const destination = this._resolvedPieceCells.get(index) ??
-      this.mentionable?.key(index);
+    const destination = this._resolvedPieceCells.get(index);
     if (!destination) return null;
     return this._writeRefEntry(destination as CellHandle<unknown>);
   }
@@ -663,8 +676,11 @@ export class CFCodeEditor extends BaseElement {
    * Create a piece for a mention that matched nothing, and reference it.
    *
    * The token goes in first, with a key the map does not hold yet, so it reads
-   * as ordinary text for as long as the create takes. If the create fails the
-   * token is unwound to the bare label, which is what the user typed.
+   * as ordinary text for as long as the create takes. That window belongs to
+   * the user: the token is unprotected, so it can be edited or deleted before
+   * the create returns. Both ends therefore find the token by its KEY rather
+   * than by the text that was inserted — an edited label still matches — and
+   * treat its absence as the user having removed the mention.
    */
   private async _createMentionRefFromPattern(
     view: EditorView,
@@ -703,39 +719,71 @@ export class CFCodeEditor extends BaseElement {
       );
       if (!page) throw new Error("Could not create piece.");
 
-      const destination = page.cell() as unknown as CellHandle<unknown>;
-      this.references?.key(key).set(
-        { destination, modifiedTitle: false } as unknown as MentionRef,
-      );
-      this._refKeysAtLoad?.add(key);
-
+      // The piece exists whether or not its token survived, so the host hears
+      // about it either way and can register it.
       this.emit("backlink-create", {
         text: label,
         pieceId: page.id(),
         piece: page.cell(),
         navigate: false,
       });
+
+      // Its token is gone, so an entry would name nothing. Skipping the write
+      // is what keeps a mention the user abandoned from persisting as a map
+      // entry no key in the document reaches.
+      if (!this._findRefToken(key)) return;
+
+      const destination = page.cell() as unknown as CellHandle<unknown>;
+      this.references?.key(key).set(
+        { destination, modifiedTitle: false } as unknown as MentionRef,
+      );
+      this._refKeysAtLoad?.add(key);
     } catch (error) {
       // A disposal race (logout, runtime swap) cancels the create; that is
       // cancellation, not a failure to surface.
       if (rt.signal.aborted) return;
       console.error("Error creating mention reference:", error);
-      this._removeRefToken(key, label);
+      this._removeRefToken(key);
     }
   }
 
-  /** Unwind a reference token to its bare label. */
-  private _removeRefToken(key: string, label: string): void {
+  /**
+   * Locate a reference token by its key, whatever its label now reads.
+   *
+   * The label is ordinary editable text, so the only durable handle on a token
+   * is the key inside it. Finding it by the string that was inserted would
+   * miss a token the user has since retyped.
+   */
+  private _findRefToken(
+    key: string,
+  ): { from: number; to: number; label: string } | null {
     const view = this._editorView;
-    if (!view) return;
+    if (!view) return null;
 
-    const token = `[${label}][${key}]`;
-    const index = view.state.doc.toString().indexOf(token);
+    const match = new RegExp(`\\[([^\\]\\n]*)\\]\\[${key}\\]`).exec(
+      view.state.doc.toString(),
+    );
+    if (!match) return null;
+
+    return {
+      from: match.index,
+      to: match.index + match[0].length,
+      label: match[1],
+    };
+  }
+
+  /**
+   * Unwind a reference token to its bare label, leaving the words the user
+   * typed. A token the user has already removed leaves nothing to unwind.
+   */
+  private _removeRefToken(key: string): void {
     this._previousRefLabels.delete(key);
-    if (index === -1) return;
 
-    view.dispatch({
-      changes: { from: index, to: index + token.length, insert: label },
+    const token = this._findRefToken(key);
+    if (!token || !this._editorView) return;
+
+    this._editorView.dispatch({
+      changes: { from: token.from, to: token.to, insert: token.label },
     });
   }
 
@@ -825,6 +873,15 @@ export class CFCodeEditor extends BaseElement {
     const destination = this._refMap()[key]?.destination;
     if (!isCellHandle(destination)) return null;
     return destination.asSchema<Mentionable>(MentionableSchema);
+  }
+
+  /**
+   * Which piece a key currently names, as a string that changes when the
+   * destination does. Empty when the map holds no destination for it.
+   */
+  private _refDestinationId(key: string): string {
+    const destination = this._refMap()[key]?.destination;
+    return isCellHandle(destination) ? destination.id() : "";
   }
 
   /**
@@ -1263,7 +1320,7 @@ export class CFCodeEditor extends BaseElement {
   }
 
   private _cleanupRefDestinationSubscriptions(): void {
-    for (const unsub of this._refDestinationSubscriptions.values()) unsub();
+    for (const { unsub } of this._refDestinationSubscriptions.values()) unsub();
     this._refDestinationSubscriptions.clear();
     this._refNames.clear();
   }
@@ -2017,8 +2074,14 @@ export class CFCodeEditor extends BaseElement {
   private _updateMentionedWithRefs(content: string): void {
     const refs = this._documentRefs();
     const wikiIds = this._extractMentionedIds(content);
+    // The signature carries each key's DESTINATION, not just the key. A host
+    // that repoints a key at another piece changes nothing about the document,
+    // so a key-only signature would match and leave `$mentioned` — and every
+    // consumer indexing off it — attached to the piece that is no longer named.
     const signature = `${[...wikiIds].join(",")}|${
-      refs.map((ref) => ref.key).join(",")
+      refs.map((ref) => `${ref.key}=${this._refDestinationId(ref.key)}`).join(
+        ",",
+      )
     }`;
     if (signature === this._lastMentionedSignature) return;
 
@@ -2236,9 +2299,15 @@ export class CFCodeEditor extends BaseElement {
       // With no name to compare against, an edit is taken as divergence: the
       // reading that keeps the user's wording is the safe one.
       const modifiedTitle = name === undefined ? true : ref.label !== name;
-      if (!!entry.modifiedTitle === modifiedTitle) continue;
 
-      map.key(ref.key).key("modifiedTitle").set(modifiedTitle);
+      // Only the WRITE is conditional. Every label edit is an edit, including
+      // one custom wording replacing another, and a listener told the event
+      // fires on a label change would otherwise stop hearing about a mention
+      // after the first time the user renamed it.
+      if (!!entry.modifiedTitle !== modifiedTitle) {
+        map.key(ref.key).key("modifiedTitle").set(modifiedTitle);
+      }
+
       this.emit("mention-ref-label-changed", {
         key: ref.key,
         label: ref.label,
@@ -2253,10 +2322,10 @@ export class CFCodeEditor extends BaseElement {
   /**
    * Drop map entries whose token has left the document.
    *
-   * Only keys this editor saw at load or minted itself are eligible, because
-   * removing a key means writing the whole map back: a key another client
-   * added since is one this editor cannot distinguish from a key it deleted,
-   * and the conservative reading keeps it.
+   * Only keys this editor saw at load or minted itself are eligible. A key
+   * another client added while this one was open is one this editor has no
+   * reason to believe was ever in its document, and the conservative reading
+   * keeps it.
    */
   private _collectUnreferencedRefEntries(): void {
     const map = this.references;
@@ -2269,20 +2338,27 @@ export class CFCodeEditor extends BaseElement {
 
     const present = scanRefKeys(doc);
     const entries = this._refMap();
-    const removable = new Set(
-      [...this._refKeysAtLoad].filter((key) =>
-        !present.has(key) && key in entries
-      ),
+    const removable = [...this._refKeysAtLoad].filter((key) =>
+      !present.has(key) && key in entries
     );
-    if (removable.size === 0) return;
+    if (removable.length === 0) return;
 
-    const remaining: MentionRefMap = {};
-    for (const [key, entry] of Object.entries(entries)) {
-      if (!removable.has(key)) remaining[key] = entry;
+    // Removal inverts the map-first ordering that inserting a mention uses.
+    // The deletion that made these entries collectable is sitting in the
+    // content cell's debounce, or waiting on blur; dropping the entries now
+    // and then losing that write to a disconnect would leave the durable
+    // document holding a token whose destination this just deleted. Flushing
+    // first means the worst interruption leaves an unreferenced entry, which
+    // the next collection removes.
+    this._cellController.flush();
+
+    for (const key of removable) {
+      // Per key, rather than writing the whole map back. A blind write of a
+      // snapshot would take an entry another client added between the read
+      // and the write down with it.
+      map.key(key).set(undefined as unknown as MentionRef);
+      this._refKeysAtLoad.delete(key);
     }
-
-    map.set(remaining);
-    for (const key of removable) this._refKeysAtLoad.delete(key);
   }
 
   /**
@@ -2304,26 +2380,37 @@ export class CFCodeEditor extends BaseElement {
 
     for (const ref of this._documentRefs()) {
       activeKeys.add(ref.key);
-      if (this._refDestinationSubscriptions.has(ref.key)) continue;
+
+      const id = this._refDestinationId(ref.key);
+      const existing = this._refDestinationSubscriptions.get(ref.key);
+      // A key whose destination has been repointed keeps its subscription to
+      // the piece it used to name: renames of the old piece would rewrite this
+      // label, and renames of the new one would never arrive.
+      if (existing) {
+        if (existing.id === id) continue;
+        existing.unsub();
+        this._refDestinationSubscriptions.delete(ref.key);
+        this._refNames.delete(ref.key);
+      }
 
       const destination = this._refDestination(ref.key);
       if (!destination) continue;
 
       const key = ref.key;
-      this._refDestinationSubscriptions.set(
-        key,
-        destination.subscribe((value) => {
+      this._refDestinationSubscriptions.set(key, {
+        id,
+        unsub: destination.subscribe((value) => {
           const name = (value as Mentionable | undefined)?.[NAME];
           if (typeof name !== "string" || name.length === 0) return;
           this._refNames.set(key, name);
           this._handleExternalRefTitleChange(key, name);
         }),
-      );
+      });
     }
 
-    for (const [key, unsub] of this._refDestinationSubscriptions) {
+    for (const [key, subscription] of this._refDestinationSubscriptions) {
       if (!activeKeys.has(key)) {
-        unsub();
+        subscription.unsub();
         this._refDestinationSubscriptions.delete(key);
         this._refNames.delete(key);
       }

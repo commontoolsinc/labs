@@ -202,6 +202,19 @@ describe("mention-refs", () => {
       expect(edited.state.doc.toString()).toBe("[the docs][rXadme]");
     });
 
+    it("leaves the caret outside the key when an edit into it is dropped", () => {
+      const state = createState(`[Note][${KEY}]`);
+      const ref = mentionRefs(state)[0];
+      // What typing inside the hidden key looks like: a change plus the
+      // selection it would have produced.
+      const edited = state.update({
+        changes: { from: ref.labelTo + 2, to: ref.labelTo + 2, insert: "X" },
+        selection: { anchor: ref.labelTo + 3 },
+      });
+      const caret = edited.state.selection.main.head;
+      expect(caret <= ref.labelTo || caret >= ref.to).toBe(true);
+    });
+
     it("keeps an outside change while dropping a key edit in the same transaction", () => {
       const state = createState(`prefix [A][${KEY}] suffix`);
       const ref = mentionRefs(state)[0];

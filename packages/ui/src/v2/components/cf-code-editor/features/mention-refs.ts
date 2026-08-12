@@ -185,7 +185,12 @@ export const mentionRefEditFilter = EditorState.transactionFilter.of((tr) => {
     }
   });
 
-  return { changes: specs, selection: tr.selection, effects: tr.effects };
+  // No selection is carried over. The original one was computed for changes
+  // that are no longer being applied, so reusing it puts the caret where the
+  // rejected edit would have left it — inside the hidden `][key]`, for a
+  // keystroke that never landed. Omitting it lets CodeMirror map the previous
+  // selection through the changes that did survive.
+  return { changes: specs, effects: tr.effects };
 });
 
 /**

@@ -61,12 +61,20 @@ cannot represent.
 
 ## Link Formats
 
-The system uses two link formats for mentions, depending on context:
+The system uses three link formats for mentions, depending on context:
 
-| Format        | Example                   | Used by                                      |
-| ------------- | ------------------------- | -------------------------------------------- |
-| Markdown link | `[Note](/of:fid1:abc123)` | `cf-prompt-input`, LLM dialog, `cf-markdown` |
-| Wiki-link     | `[[Note (fid1:abc123)]]`  | `cf-code-editor`, `note-md.tsx`              |
+| Format         | Example                   | Used by                                             |
+| -------------- | ------------------------- | --------------------------------------------------- |
+| Markdown link  | `[Note](/of:fid1:abc123)` | `cf-prompt-input`, LLM dialog, `cf-markdown`        |
+| Wiki-link      | `[[Note (fid1:abc123)]]`  | `cf-code-editor`, `note-md.tsx`                     |
+| Reference link | `[Note][a3f9zz]`          | `cf-code-editor` given `$references`, `note-md.tsx` |
+
+Which of the latter two `cf-code-editor` **mints** depends on whether it was
+given a `$references` cell; it **reads** both either way, so a document holding
+a mixture works. The reference form's key is local to one document and resolves
+through that cell, which is what lets a destination be any cell rather than
+something a bare id can name — see
+[`../src/v2/components/cf-code-editor/docs/mention-refs.md`](../src/v2/components/cf-code-editor/docs/mention-refs.md).
 
 ### Markdown links (`/of:...`)
 
@@ -112,11 +120,12 @@ wish("#mentionable")  ──►  $mentionable prop    ──►  @link array
                     │             │
                     ▼             ▼
              @-mention        [[-mention
-             [Name](/of:id)   [[Name (id)]]
-                    │             │
+             [Name](/of:id)   [[Name (id)]]   ← no $references
+                    │         [Name][a3f9zz]  ← given $references,
+                    │             │              destination in that cell
                     ▼             ▼
              LLM sees links   note-md.tsx converts
-             in user message  to [Name](/of:id)
+             in user message  either form to [Name](/of:id)
                                   │
                                   ▼
                               cf-markdown renders
