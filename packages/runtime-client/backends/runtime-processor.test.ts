@@ -637,6 +637,81 @@ describe("space ACL state", () => {
     expect(response.access.canEdit).toBe(false);
   });
 
+  it("routes valid ACL mutations and returns each committed ACL", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const space = "did:key:z6Mk-runtime-processor-acl-mutations" as MemorySpace;
+    const owner = cfcSigner.did();
+    const writer = "did:key:z6Mk-runtime-processor-added-writer" as const;
+    try {
+      const tx = runtime.edit();
+      tx.writeOrThrow({
+        space,
+        id: `of:${space}` as URI,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { [owner]: "OWNER", "*": "READ" },
+      });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
+
+      const processor = {
+        runtime,
+        getSpaceCtx: () => ({ getSpace: () => space }),
+        handleSpaceGetAcl: RuntimeProcessor.prototype.handleSpaceGetAcl,
+        handleSpaceSetAclEntry:
+          RuntimeProcessor.prototype.handleSpaceSetAclEntry,
+        handleSpaceRemoveAclEntry:
+          RuntimeProcessor.prototype.handleSpaceRemoveAclEntry,
+      } as unknown as RuntimeProcessor;
+
+      const added = await RuntimeProcessor.prototype.handleRequest.call(
+        processor,
+        {
+          type: RequestType.SpaceSetAclEntry,
+          space,
+          user: writer,
+          capability: "WRITE",
+        },
+      );
+      expect(added).toEqual({
+        access: {
+          space,
+          principal: owner,
+          acl: { [owner]: "OWNER", "*": "READ", [writer]: "WRITE" },
+          canEdit: true,
+        },
+      });
+
+      const read = await RuntimeProcessor.prototype.handleRequest.call(
+        processor,
+        { type: RequestType.SpaceGetAcl, space },
+      );
+      expect(read).toEqual(added);
+
+      const removed = await RuntimeProcessor.prototype.handleRequest.call(
+        processor,
+        {
+          type: RequestType.SpaceRemoveAclEntry,
+          space,
+          user: writer,
+        },
+      );
+      expect(removed).toEqual({
+        access: {
+          space,
+          principal: owner,
+          acl: { [owner]: "OWNER", "*": "READ" },
+          canEdit: true,
+        },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects malformed ACL mutations before opening the space", async () => {
     const processor = {
       getSpaceCtx: () => {
@@ -666,6 +741,16 @@ describe("space ACL state", () => {
         },
       ),
     ).rejects.toThrow("capability must be `READ`, `WRITE`, or `OWNER`");
+    await expect(
+      (RuntimeProcessor.prototype as any).handleSpaceRemoveAclEntry.call(
+        processor,
+        {
+          type: RequestType.SpaceRemoveAclEntry,
+          space: "did:key:z6Mk-runtime-processor-acl",
+          user: "not-a-did",
+        },
+      ),
+    ).rejects.toThrow("user must be `*` or a valid DID");
   });
 });
 
