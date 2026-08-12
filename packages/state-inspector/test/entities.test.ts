@@ -1,7 +1,9 @@
-// Hermetic test for the unified entity model + encoded commit decoding. Seeds a
-// modern piece (patternIdentity → module, argument, internal manifest), an
-// owned cell, a stream, and a free cell, then checks classification + lineage.
-// Side-effect free.
+/**
+ * Hermetic test for the unified entity model + encoded commit decoding. Seeds a
+ * modern piece (patternIdentity → module, argument, internal manifest), an
+ * owned cell, a stream, and a free cell, then checks classification + lineage.
+ * Side-effect free.
+ */
 
 import { assert, assertEquals } from "@std/assert";
 import { Database } from "@db/sqlite";
