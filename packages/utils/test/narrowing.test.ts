@@ -1,3 +1,14 @@
+/**
+ * These assert at the type level, not the value level: what the predicates
+ * narrow to in each branch, for callers that start from `unknown`, from
+ * `object`, and from a type they already know.
+ *
+ * The `false` branch is the half worth the effort. A predicate written as a
+ * lone signature strips `readonly` and other detail from the caller's original
+ * type when the check fails, which costs a caller that already knew the shape
+ * more than the narrowing gains them.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {

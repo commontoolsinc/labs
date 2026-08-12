@@ -1,3 +1,14 @@
+/**
+ * `deepEqual()` over 1000-element arrays, in the two arrangements that bound
+ * its cost: a pair that is equal, so every element is visited, and a pair
+ * differing only at the last element, so the walk runs to the end before it
+ * can say no.
+ *
+ * Number arrays and object arrays are run separately because the per-element
+ * work differs between them, and the fixtures are built once outside the
+ * measured region so that array construction is not part of what is timed.
+ */
+
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 // Create test fixtures once, outside the benchmarks
