@@ -12,12 +12,10 @@ the code's author, which is the only reason it is safe to run a program a
 model wrote thirty seconds ago. Policies stop being something an
 application enforces and become something the data carries.
 
-Put together, those are different physics of trust from the ones all
-networked software runs on today, and they produce a property worth
-stating plainly: how your data may be used becomes structurally aligned
-with your interests. Structurally, in the specific sense that it does not
-rest on the program behaving well, on its author having meant well, or on
-anyone reading the terms.
+Those are different physics of trust from the ones networked software
+runs on today: how your data may be used becomes structurally aligned
+with your interests. Structurally, meaning it does not rest on the
+program behaving well or on its author having meant well.
 
 This document is the runtime that does that. Every path below is in this
 repository, every command was run to produce the output shown, and the
@@ -195,12 +193,11 @@ Twenty atom types are runtime-minted; an author-declared one survives
 only when the writer's identity is a builtin
 (`packages/runner/src/cfc/prepare.ts`).
 
-The runtime does not trust its own compiler either. The classification
+The runtime does not trust its own compiler either: the classification
 the transformer emitted is re-derived from the emitted bytes by a
-separately written parser, and that parser has an adversarial corpus of
-59 hand-built attack fixtures — ASI statement-merge desync, tokenizer
-confusion, U+2028 statement merge, unicode-escaped callees, registration
-hoisting (`packages/runner/test/esm-verifier-adversarial.test.ts`):
+separately written parser, which has an adversarial corpus of 59
+hand-built attack fixtures
+(`packages/runner/test/esm-verifier-adversarial.test.ts`):
 
 ```ts
 // Each fixture is a compiled-CommonJS body an attacker might hand-craft to defeat
@@ -215,16 +212,51 @@ Enforcement is also a ratchet. Any code holding a `Cell` can reach
 rather than succeeding
 (`packages/runner/src/storage/extended-storage-transaction.ts`).
 
-The obvious objection to all of this is that none of it is new. Flow
-control has been understood for decades and has mostly stayed in
-research systems, because the labels multiply and writing policies that
-compose takes expertise. That cost is real and it has not gone away.
-What changed is who pays it, and how often. A model will grind against
-the compiler with more patience than a person has, and what it produces
-is a file: once a pattern satisfies the checker it satisfies it for
-everyone who runs it. The labor becomes machine time spent once rather
-than expertise spent per team, which is the difference between a
-technique that stays in the lab and one that ships.
+The obvious objection is that none of this is new. Flow control has been
+understood for decades and has mostly stayed in research systems,
+because the labels multiply and writing policies that compose takes
+expertise. That cost is real and has not gone away; what changed is who
+pays it, and how often. A model will grind against the compiler with
+more patience than a person has, and what it produces is a file — once a
+pattern satisfies the checker it satisfies it for everyone who runs it.
+The labor becomes machine time spent once rather than expertise spent
+per team, which is the difference between a technique that stays in the
+lab and one that ships.
+
+## Authorizing a write, when the code asking is untrusted
+
+Which raises the obvious question: if no code is trusted, how does
+anything you authorize ever happen? A field can require that its write
+came from a named function, invoked through a named surface. From
+`packages/patterns/cfc-authorized-save/main.tsx`, two buttons — the
+second wired to the same stream as the reviewed one:
+
+```tsx
+<cf-label>
+  This plain host button reuses the same stream but is not the
+  reviewed trusted surface.
+</cf-label>
+<cf-button id="legacy-save-button" onClick={trustedSave.save}>
+  Save title
+</cf-button>
+```
+
+A real Chrome click on that button is a genuine user gesture —
+`isTrusted` is true. It does not save. What fails is surface identity and
+writer identity, checked independently: the renderer's own unforgeable
+mark on the event, and a write attributed to the content-addressed
+identity and binding path of the reviewed handler. The browser test
+clicks both (`packages/patterns/integration/cfc-authorized-save.test.ts`):
+
+```ts
+it("accepts the trusted surface and rejects a lookalike host button", ...)
+  await legacyButton.click();
+  assertEquals((await savedTitleBeforeTrustedClick.innerText())?.trim(), "");
+```
+
+It then clicks the reviewed surface and the title appears. What this
+attests is surface origin, not human intent — the repo's own test file
+says so, since a synthesized DOM event also carries `isTrusted`.
 
 ## Across machines: carry the reference, not the bytes
 
@@ -254,13 +286,13 @@ The boundary is the interesting part, and the file states it plainly:
 ## The exits
 
 A pattern runs in a compartment whose globals are installed deliberately
-(`packages/runner/src/sandbox/compartment-globals.ts`). The withheld list
-carries a threat model per entry — `Float32Array` and `Float64Array` are
-absent because a NaN's spare mantissa bits carry a payload through a
-float typed-array store, which unlike `DataView.setFloat*` is not a
-method and cannot be repaired. A test performs that smuggling attempt
-inside a real compartment and asserts the payload does not come back
-(`packages/runner/test/sandbox-global-contract.test.ts`).
+(`packages/runner/src/sandbox/compartment-globals.ts`). Covert channels
+that do not leave through a named exit are handled elsewhere and this
+document does not cover them: `packages/utils/src/sandbox-contract.ts`
+withholds globals with the channel each one closes recorded beside it,
+and `docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md` tables every
+real-time-correlated signal a pattern can reach with its status, its
+mitigation, and the test pinning it.
 
 Reactive egress leaves through a named sink, and the sinks are one
 enumerable list (`packages/runner/src/cfc/sink-inventory.ts`):
@@ -307,22 +339,17 @@ silently swallowed.
 That test drives a recorded model fixture rather than a live endpoint,
 and it isolates the integrity axis; confidentiality is out of its scope.
 
-What that closes is narrower than "injection is solved" and more useful
-than a prompt that asks the model to be careful. The attack has to cross
-a boundary the runtime checks — a field declared to require integrity
-the model's output does not carry — and at that boundary the check reads
-where the value came from, not what it says. An attack that stays inside
-what a pattern is already permitted to do is not addressed by any of
-this. What is gone is the dependence on the model's judgment.
+That is narrower than "injection is solved." The attack has to cross a
+boundary the runtime checks, where the test is provenance rather than
+content; an attack staying inside what a pattern may already do is not
+addressed. What is gone is the dependence on the model's judgment.
 
-That generalizes because injection was never really about models.
-Software today asks you to trust the author of everything you run, which
-makes the trusted computing base the entire program; injection is what a
-trusted base that large looks like once the thing inside it can be
-talked to. The runtime's answer is the same one it gives everywhere
-else: check the flow, not the author. A pattern is untrusted whether its
-hostile input arrived in a document, a tool result, or a model's own
-output.
+It generalizes because injection was never really about models. Software
+today asks you to trust the author of everything you run, which makes the
+trusted computing base the entire program — and injection is what a
+trusted base that large looks like once the thing inside it can be talked
+to. The answer here is the same one the runtime gives everywhere else:
+check the flow, not the author.
 
 ## What runs this
 
@@ -332,69 +359,31 @@ CI shards (`deno task cfcheck`). A second gate replays each pattern
 against 112 recorded contract baselines, because the updater performs no
 structural check before swapping a pattern onto a running piece. Pattern
 tests run at `enforce-explicit`, the same mode the servers run, rather
-than in an observe mode that would let violations pass.
+than in an observe mode that would let violations pass. That is the
+runtime's default and both server hosts are pinned to it
+(`packages/runner/src/runtime.ts`, `runtime-presets.ts`). A grep will
+also turn up `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in
+`cfc/types.ts`, which is the transaction-level default, not this one.
 
 ## What is not here yet
 
-The enforcement mode defaults to `enforce-explicit`, which rejects a
-commit carrying a recorded boundary reason
-(`packages/runner/src/runtime.ts`, pinned for both server hosts in
-`runtime-presets.ts`). A grep will also find
-`DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in `cfc/types.ts`; that is
-the transaction-level default, not the runtime's.
-
-Three defaults compose into one honest statement, so here it is in one
-place: the default sink ceiling map is empty, a sink absent from the map
-is ungated, and `cfcFlowLabels` — the propagation shown above — defaults
-to `off`. Today the label machinery is exercised by tests and by the
-patterns that opt in; it is not yet gating egress in a default
-deployment. The ceiling stays empty until the default label transition
-closes value-copy laundering, because a ceiling now would gate the few
-correctly-labeled flows and miss the rest.
-
-The render ceiling resolves a label but does not enforce; enforcement
-lives in the reconciler behind `cfcRenderCeiling`, a browser toggle that
-is off by default and dogfood-only. With it off, a pattern's own
-declassification of its render boundary is honored. Separately, the
-protection this runtime offers at the render boundary is the label and
-contract layer, not DOM sanitization: `cf-markdown` carries an open
-sanitization gap.
-
-The imperative `fetch` a handler can call is settled on a one-second grid
-derived from the issue instant, so it is closed as a clock, but it is not
-label-gated, and shipped patterns use it today. Bringing it under the
-same ceiling machinery as the reactive sinks is unfinished.
-
-`enforce-strict`, which additionally rejects flow-derived paths, is not
-on. `docs/development/EXPERIMENTAL_OPTIONS.md` lists every dial with its
-current value and intended end state.
-
-The shape of the remaining work is visible in the test suite rather than
-only in a roadmap. Unimplemented annotations are pinned to fail closed
-rather than left to behave arbitrarily:
-
-```ts
-it("scenario 3a [GAP] — the passThrough ifc annotation fails closed (unimplemented)", ...)
-```
-
-The trusted base is also larger than the microkernel it should shrink to
-— `packages/runner/src/cfc/` is forty files.
+The semantics are built; most of the dials are not on. Label propagation
+defaults to `off` and the default sink ceiling is empty, so the machinery
+above is exercised by tests and by patterns that opt in rather than
+gating egress in a default deployment. The render ceiling is off too, and
+that boundary is held by the label and contract layer rather than by DOM
+sanitization, which has an open gap.
+`docs/development/EXPERIMENTAL_OPTIONS.md` carries every dial and where
+it is headed. Turning them on without wedging the patterns already
+running on them is the work.
 
 Attestation — what would let a machine prove which runtime it is running
-before your data arrives — is specified rather than built here.
-`docs/specs/verifiable-execution/` carries the commit model, receipts,
-the append-only log and its authorization rules, and the trust profiles
-a verifier uses to say how much of a claim it will take on evidence. The
-hardware pipeline lives outside this repository.
-
-That spec describes a larger shape than this document covers: receipts
-that leave the fabric as claims other systems can check, and, further
-out, a way to price the uncertainty that remains instead of pretending it
-can be eliminated. Neither is in the runtime today. Both are written
-down.
-
-The mechanism is built and the semantics hold. What remains is turning
-the dials on without wedging the patterns already running on them.
+before your data arrives — is specified rather than built.
+`docs/specs/verifiable-execution/` has the commit model, receipts, the
+append-only log, and the trust profiles a verifier uses to say how much
+of a claim it will take on evidence. That is a larger shape than this
+document covers, including receipts that leave the fabric as claims other
+systems can check. The hardware pipeline lives outside this repository.
 
 [Why](./why.md) is the argument in prose;
 [the overview](./inverting-the-physics-of-trust.md) is the long form.
