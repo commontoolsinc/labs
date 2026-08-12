@@ -50,8 +50,14 @@ import {
   getTransactionWriteDetails,
 } from "./transaction-inspection.ts";
 import {
+  clearSchemaRefusalTx,
   isInternalVerifierRead,
+  isLazyMaterializationTx,
+  markLazyMaterializationTx,
+  noteSchemaRefusalTx,
   reactivityLogFromActivities,
+  takeSchemaRefusalTx,
+  unmarkLazyMaterializationTx,
 } from "./reactivity-log.ts";
 
 import {
@@ -873,6 +879,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.narrowestReadScope = scope;
   }
 
+  markLazyMaterialize(enabled = true): void {
+    if (enabled) markLazyMaterializationTx(this);
+    else unmarkLazyMaterializationTx(this);
+  }
+
+  isLazyMaterialize(): boolean {
+    return isLazyMaterializationTx(this);
+  }
+
+  noteSchemaRefusal(refusal: unknown): void {
+    noteSchemaRefusalTx(this, refusal);
+  }
+
+  takeSchemaRefusal(): unknown {
+    return takeSchemaRefusalTx(this);
+  }
+
+  clearSchemaRefusal(refusal: unknown): void {
+    clearSchemaRefusalTx(this, refusal);
+  }
+
   private recordReadScope(address: Pick<IMemorySpaceAddress, "scope">): void {
     const scope = normalizeCellScope(address.scope);
     if (scopeRank(scope) > scopeRank(this.narrowestReadScope)) {
@@ -930,6 +957,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       sets: this.readResultCacheSets,
       entries,
     };
+  }
+
+  hasWrites(): boolean {
+    return this.#hasWrites;
+  }
+
+  #hasWrites = false;
+
+  /**
+   * Record that this transaction has written.
+   *
+   * Called from every write path rather than inferred from one of their side
+   * effects: a mergeable op and a folded SQLite write are both writes, and
+   * neither drops the read-result cache — the value write a mergeable op
+   * annotates has already done that, and a SQLite op changes no cell value
+   * locally. Deriving "has written" from cache invalidation would miss both.
+   */
+  private noteWrite(): void {
+    this.#hasWrites = true;
   }
 
   private invalidateReadResultCache(): void {
@@ -1526,6 +1572,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
     this.assertWritable("recordMergeableOp");
+    this.noteWrite();
     const address = toMemorySpaceAddress(link);
     // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
     // write. The ["cfc"]-path arm is structurally unreachable here (a
@@ -1552,6 +1599,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // A folded SQLite write is a write — honor the wrapper's read-only mode the
     // same way cell writes do, instead of silently recording it.
     this.assertWritable("recordSqliteWrite");
+    this.noteWrite();
     if (!this.tx.recordSqliteWrite) {
       throw new Error(
         "storage transaction does not support recordSqliteWrite()",
@@ -1650,6 +1698,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
+    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1665,6 +1714,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.assertWritable("writeOrThrow()");
+    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1783,15 +1833,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
       const noteSystemWrite = (address: IMemorySpaceAddress) =>
         this.noteSystemWrite(address);
-      // Note the write identity per yielded write (not once up front): an
-      // empty batch must not mark the tx as written-to.
+      // Note the write per yielded write (not once up front): an empty batch
+      // must not mark the tx as written-to, for the identity or for the
+      // has-written flag lazy materialization reads.
       const noteWriteIdentity = () => this.noteWriteIdentity();
+      const noteWrite = () => this.noteWrite();
       const result = this.tx.writeBatch(
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
             noteWriteIdentity();
+            noteWrite();
             yield { address, value: write.value, delete: write.delete };
           }
         })(),
@@ -2208,6 +2261,36 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T {
     return this.wrapped.runWithAmbientReadMeta(meta, fn);
+  }
+
+  markLazyMaterialize(enabled = true): void {
+    // Mark this layer as well as what it wraps: a reader holding the wrapper
+    // asks the wrapper, and a reader holding the inner transaction asks that.
+    if (enabled) markLazyMaterializationTx(this);
+    else unmarkLazyMaterializationTx(this);
+    this.wrapped.markLazyMaterialize(enabled);
+  }
+
+  isLazyMaterialize(): boolean {
+    return isLazyMaterializationTx(this) || this.wrapped.isLazyMaterialize();
+  }
+
+  hasWrites(): boolean {
+    return this.wrapped.hasWrites();
+  }
+
+  noteSchemaRefusal(refusal: unknown): void {
+    noteSchemaRefusalTx(this, refusal);
+    this.wrapped.noteSchemaRefusal(refusal);
+  }
+
+  takeSchemaRefusal(): unknown {
+    return takeSchemaRefusalTx(this) ?? this.wrapped.takeSchemaRefusal();
+  }
+
+  clearSchemaRefusal(refusal: unknown): void {
+    clearSchemaRefusalTx(this, refusal);
+    this.wrapped.clearSchemaRefusal(refusal);
   }
 
   markCfcRelevant(reason?: string): void {

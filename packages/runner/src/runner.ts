@@ -94,6 +94,7 @@ import type {
   URI,
 } from "./storage/interface.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
+import { isSchemaMismatchError } from "./schema-view.ts";
 import {
   isConflictRejection,
   isStorageTransactionInconsistent,
@@ -6165,9 +6166,20 @@ export class Runner {
       };
 
       let popFrameAfterReturn = true;
+      // Assigned inside the try, and reachable from the catch: a refusal that
+      // escaped the body is disposed of through the same result path as one
+      // the body swallowed.
+      let postRun: ((result: any) => any) | undefined;
       try {
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
+        // A lift reads its argument, and reads through it while it runs. Both
+        // go lazily: the body materializes the paths it touches and nothing
+        // else. Turned off again before the result is written, so diffing and
+        // the scheduler's own reads keep eager semantics.
+        if (this.runtime.experimental.lazyMaterialization) {
+          tx.markLazyMaterialize(true);
+        }
         const { argument, isValidArgument } = (() => {
           try {
             return this.readJavaScriptArgument(
@@ -6232,9 +6244,29 @@ export class Runner {
             throw error;
           }
         }
-        const postRun = (result: any) => {
+        postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
+            tx.markLazyMaterialize(false);
+            // A refusal is recorded on the transaction as well as thrown, so a
+            // body that caught it — its own `try`/`catch`, a discarded
+            // rejection — does not get to hand back a result built on data the
+            // schema does not describe. Either way the run is disposed of as an
+            // argument that did not resolve: an undefined result through the
+            // ordinary path, not an error. The reads it took are registered,
+            // including the one that failed, so it runs again when the data
+            // changes and may then find it valid.
+            const refusal = tx.takeSchemaRefusal();
+            if (refusal !== undefined) {
+              logger.info(
+                "action",
+                () => [
+                  "action argument stopped matching its schema -- not running",
+                  refusal instanceof Error ? refusal.message : refusal,
+                ],
+              );
+              result = undefined;
+            }
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
               return this.resolvePendingSpaceNamesAndRetry(frame);
             }
@@ -6258,7 +6290,18 @@ export class Runner {
         };
 
         const postRunResult = result instanceof Promise
-          ? result.then(postRun).catch(handleErrorOutput)
+          // An async body reaches mismatching data after an `await`, so its
+          // refusal arrives as a rejection the synchronous catch below never
+          // sees. Route it to the same disposition a synchronous one gets —
+          // an undefined result through the ordinary path — before the generic
+          // error handler turns it into a reported action failure.
+          ? result
+            .then(postRun)
+            .catch((error: unknown) =>
+              isSchemaMismatchError(error)
+                ? postRun!(undefined)
+                : handleErrorOutput(error)
+            )
           : postRun(result);
         if (postRunResult instanceof Promise) {
           popFrameAfterReturn = false;
@@ -6277,6 +6320,10 @@ export class Runner {
           return this.resolvePendingSpaceNamesAndRetry(frame)
             .finally(() => popFrame(frame));
         }
+        // A refusal that escaped the body takes the same disposition as one it
+        // swallowed: the run could not proceed on the data available, which is
+        // a non-event rather than a fault.
+        if (isSchemaMismatchError(error)) return postRun?.(undefined);
         handleErrorOutput(error);
       } finally {
         if (popFrameAfterReturn) popFrame(frame);

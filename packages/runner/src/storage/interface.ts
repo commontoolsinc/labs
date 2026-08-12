@@ -1204,6 +1204,56 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   getNarrowestReadScope(): CellScope;
   resetNarrowestReadScope(scope?: CellScope): void;
 
+  /**
+   * Turn lazy materialization on (or off) for this transaction.
+   *
+   * A marked transaction hands a reader views that resolve each path as it is
+   * touched, rather than a value built in one pass before the reader looks at
+   * any of it. A view also keeps the transaction it was created with, so the
+   * value it describes stays the value that was there when it was taken, and
+   * reading after the transaction finishes throws rather than quietly
+   * answering from committed state.
+   *
+   * Unmarked, every read behaves exactly as it did before lazy materialization
+   * existed — including the standing-handle semantics that long-lived
+   * consumers rely on, where a query-result proxy keeps tracking current state
+   * after the transaction it was made against has finished.
+   */
+  markLazyMaterialize(enabled?: boolean): void;
+  isLazyMaterialize(): boolean;
+
+  /**
+   * Whether this transaction has written anything yet.
+   *
+   * Lazy materialization reads it to decide whether a view can still describe
+   * one instant: a view resolves each path when it is touched, so once the
+   * transaction has written, a view taken earlier would report the new value
+   * where an eager read hands back a detached one taken before the write.
+   */
+  hasWrites(): boolean;
+
+  /**
+   * Record that a reader touched data its schema does not describe.
+   *
+   * Recorded on the transaction rather than left to the throw alone, because a
+   * reader can catch a `SchemaMismatchError` and carry on. Whoever dispatched
+   * the read checks `takeSchemaRefusal()` after the body returns and disposes
+   * of the run the same way either way.
+   */
+  noteSchemaRefusal(refusal: unknown): void;
+  takeSchemaRefusal(): unknown;
+
+  /**
+   * Withdraw a refusal that never reached the reader.
+   *
+   * A view refuses at the property it is reading and decides at the property
+   * above whether that refusal escapes: one the schema does not require reads
+   * as `undefined` instead, which is what an eager read leaves behind. The
+   * record has to go with the throw it belonged to. Clears only if this exact
+   * refusal is the one held.
+   */
+  clearSchemaRefusal(refusal: unknown): void;
+
   //
   // CFC recording / ownership-transfer API
   //

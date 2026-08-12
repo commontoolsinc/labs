@@ -233,6 +233,14 @@ export interface ExperimentalOptions {
    */
   computedCellIds?: boolean | undefined;
   /**
+   * Materialize a lift's argument lazily: the body reads the paths it touches
+   * and nothing else, instead of the whole of what its schema selects. A
+   * reader that touches data the schema no longer describes refuses, and the
+   * run is disposed of as an argument that did not resolve. Off by default
+   * while it soaks; see `docs/plans/lazy-cell-materialization.md`.
+   */
+  lazyMaterialization?: boolean | undefined;
+  /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
    * default: the resolution (a stack capture + source-map walk per primitive)
@@ -957,6 +965,7 @@ export class Runtime {
       commitPreconditions: undefined,
       plainResultReceipts: undefined,
       computedCellIds: undefined,
+      lazyMaterialization: undefined,
       eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
@@ -986,6 +995,7 @@ export class Runtime {
     // `true` override.
     this.experimental.computedCellIds ??= true;
     this.experimental.plainResultReceipts ??= true;
+    this.experimental.lazyMaterialization ??= false;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in

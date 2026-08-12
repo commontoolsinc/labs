@@ -42,8 +42,10 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
+import { materializeSchemaView } from "./schema-view.ts";
 import {
   canBranchMatch,
+  combineOptionalSchema,
   combineSchema,
   createDefaultTraversalContext,
   IObjectCreator,
@@ -405,6 +407,19 @@ export function resolveSchema(
   let resolvedSchema = schema;
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+    if (resolved === undefined) {
+      // The ref names a definition this schema does not carry. That is not the
+      // same as no schema, which lets every value through untouched — it is a
+      // schema the runtime cannot read, and a value cannot be shown to match
+      // one of those. `false` selects nothing, which is the answer traversal
+      // already gives a top-level ref it fails to resolve; returning
+      // `undefined` here instead handed the reader the raw value.
+      logger.warn(
+        "unresolvable $ref in a schema; nothing matches it",
+        schema.$ref,
+      );
+      return false;
+    }
     if (!isRecord(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
@@ -1006,11 +1021,93 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+/**
+ * Derive the label view for the dereferences made since `traceStart`.
+ *
+ * The derivation reads each involved document's `cfc` path. Those are
+ * runtime-internal verifier reads — the runtime made them to check a label, not
+ * the reader on its own behalf — and an eager read makes them once, for the
+ * document it was handed, never for the documents its traversal reaches.
+ *
+ * A view re-enters here per property, so the same reads would land once per
+ * child. They are kept out of the scheduler's view of what the ACTION read:
+ * addresses the declared scope summary does not cover drop the action's
+ * execution-context floor to `session`, which stops its observations being
+ * adopted across users. The labels themselves are still derived and still
+ * applied — CFC's own prepare pass reads the raw activity list and skips
+ * internal verifier reads there regardless.
+ */
+function deriveDereferenceLabelView(
+  tx: IExtendedStorageTransaction,
+  traceStart: number,
+  viewChild: boolean,
+): CfcLabelView | undefined {
+  const derive = () =>
+    cfcLabelViewForDereferenceTraces(
+      tx,
+      tx.getCfcState().dereferenceTraces.slice(traceStart),
+    );
+  return viewChild
+    ? tx.runWithAmbientReadMeta(ignoreReadForScheduling, derive)
+    : derive();
+}
+
+/**
+ * The value a resolved link points at, including the one address that is
+ * computed rather than stored.
+ *
+ * A string's `length` is not a path the store holds. Traversal answers it from
+ * the string it sits on (`getAtPath` in `traverse.ts`), so a link ending there
+ * — `subject.key("label", "length")` where `label` is a string — resolves to
+ * an address the store cannot serve, and a bare read of it yields `undefined`.
+ * Answering it from the string applies traversal's rule where a link is
+ * followed rather than where a value is walked, so both routes agree on what
+ * `<string>/length` is worth. An array's `length` needs none of this; the store
+ * reads that segment itself.
+ *
+ * The read of the string is the dependency: a string's length changes only when
+ * the string is replaced, and it is replaced at the parent's own path.
+ */
+function readValueAtResolvedLink(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  address: IMemorySpaceValueAddress,
+): FabricValue | undefined {
+  // Read without telling the scheduler. Whatever materializes this value —
+  // the traverser or a view — registers its own reads as it walks.
+  const meta = {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  };
+  const value = tx.readOrThrow(address, meta);
+  if (value !== undefined || link.path.at(-1) !== "length") return value;
+  const parentLink = { ...link, path: link.path.slice(0, -1) };
+  const parent = tx.readOrThrow(toMemorySpaceAddress(parentLink), meta);
+  // Register the parent read whichever way it turns out. A string's length
+  // changes only when the string is replaced, which happens at the parent's own
+  // path; and a parent that is not there yet — a computed that has not produced
+  // — has to bring the reader back when it arrives. Non-recursive: nothing
+  // below the parent decides this.
+  tx.readValueOrThrow(parentLink, { nonRecursive: true });
+  return typeof parent === "string" ? parent.length : value;
+}
+
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
+  /**
+   * Set by a schema view reading one of its children: a mismatch there is a
+   * refusal the reader must be told about, not the `undefined` a root read
+   * yields, which a reader cannot tell from an absent value.
+   */
+  mismatchThrows?: boolean;
+  /**
+   * Set by a schema view reading one of its children: this is a step inside a
+   * read the entry point already began, so the entry-point-only work — the
+   * stored CFC metadata probe — does not run again per property.
+   */
+  viewChild?: boolean;
 }
 
 export function validateAndTransform(
@@ -1023,7 +1120,12 @@ export function validateAndTransform(
   // If the transaction is no longer open, read through the runtime's ambient
   // read path instead. Open transactions still take precedence so reads can see
   // their own uncommitted state.
-  tx = runtime.readTx(tx);
+  //
+  // A transaction marked for lazy materialization is kept whatever its state:
+  // a view reads the state ITS transaction saw, and swapping a finished one for
+  // a fresh read would answer from newer state where the view's contract is to
+  // refuse. The refusal comes from the marked transaction's own guard below.
+  if (tx?.isLazyMaterialize() !== true) tx = runtime.readTx(tx);
 
   // Reconstruct doc, path, schema from link and runtime
   let link = isCellViewRef(sourceRef) ? sourceRef.link : sourceRef;
@@ -1058,9 +1160,10 @@ export function validateAndTransform(
   const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
-    cfcLabelViewForDereferenceTraces(
+    deriveDereferenceLabelView(
       tx,
-      tx.getCfcState().dereferenceTraces.slice(writeRedirectTraceStart),
+      writeRedirectTraceStart,
+      options?.viewChild === true,
     ),
   ]);
 
@@ -1071,9 +1174,18 @@ export function validateAndTransform(
       : resolvedSchema
     : resolvedLinkSchema;
   const filteredSchema = filterAsCell(effectiveSchema);
+  // The stored-metadata probe reads `<doc>/cfc`, and it belongs to the entry
+  // point: an eager read runs it once for the document it was handed and never
+  // for the documents its traversal reaches through links. A view re-enters
+  // here for every property it resolves, so without this gate it probes every
+  // linked document too — reads outside any declared scope envelope, which
+  // drops the action's execution-context floor to `session` and stops its
+  // observations being adopted across users. The schema check costs no read
+  // and stays.
   if (
     schemaHasIfc(effectiveSchema) ||
-    storedCfcMetadataAppliesToPath(tx, resolvedLink)
+    (options?.viewChild !== true &&
+      storedCfcMetadataAppliesToPath(tx, resolvedLink))
   ) {
     tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
   }
@@ -1109,9 +1221,10 @@ export function validateAndTransform(
   const resolvedValueLink = resolveLink(runtime, tx, link);
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
-    cfcLabelViewForDereferenceTraces(
+    deriveDereferenceLabelView(
       tx,
-      tx.getCfcState().dereferenceTraces.slice(valueTraceStart),
+      valueTraceStart,
+      options?.viewChild === true,
     ),
   ]);
   objectCreator.setBase(resolvedValueLink, cfcLabelView);
@@ -1165,9 +1278,7 @@ export function validateAndTransform(
   );
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
-  const value = tx.readOrThrow(address, {
-    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-  });
+  const value = readValueAtResolvedLink(tx, resolvedValueLink, address);
   const doc = { address, value: value };
   const valueSelectedSchema = isRecord(effectiveSchema)
     ? asCellCompoundSchemaForValue(effectiveSchema, value)
@@ -1177,6 +1288,41 @@ export function validateAndTransform(
     path: doc.address.path,
     schema: valueSelectedSchema ?? resolvedValueLink.schema ?? link.schema!,
   };
+  // A marked transaction takes the lazy route from here. Everything above has
+  // run either way — link resolution, the `asCell` dispatch, schema
+  // combination — so a view and an eager read start from the same link and the
+  // same schema; only the materialization differs.
+  //
+  // Not once the transaction has written, though. A view resolves each path
+  // when the reader touches it, so a view taken before a write reports the
+  // value after it, where an eager read hands back a value detached at the
+  // moment it was taken. Falling back keeps every read describing one instant,
+  // which is what a reader iterating a list while writing into it depends on.
+  // Nothing is lost where the win is: a lift reads its argument before it
+  // writes anything, so that read is still lazy.
+  if (tx.isLazyMaterialize() && !tx.hasWrites()) {
+    // Crossing the last link is a hop the eager traverser combines schemas
+    // across (`linkHopSelector`), because a link's own schema describes the
+    // value at its target while the reader's schema describes what the reader
+    // asked for, and both apply. A view re-enters here for that hop instead of
+    // walking through it, so it has to do the same combining: the selector
+    // alone is the link's schema, and a reader asking for a property the link's
+    // schema does not name — `title` off a piece typed by its own
+    // registration — would read as a property the schema does not select.
+    const viewSchema = valueSelectedSchema ??
+      combineOptionalSchema(effectiveSchema, resolvedValueLink.schema) ??
+      selector.schema;
+    return materializeSchemaView(
+      runtime,
+      tx,
+      { ...resolvedValueLink, schema: viewSchema },
+      value,
+      cfcLabelView,
+      options?.synced ?? false,
+      options?.mismatchThrows !== true,
+    );
+  }
+
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
   const traverser = new SchemaObjectTraverser<any>(

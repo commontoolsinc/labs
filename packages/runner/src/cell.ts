@@ -1203,16 +1203,14 @@ export class CellImpl<T extends FabricValue>
       ContextualFlowControl.isTrueSchema(schema);
 
     return new Promise((resolve) => {
-      let result: Readonly<T>;
-
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        result = validateAndTransform(this.runtime, tx, this.viewRef);
+        const value = validateAndTransform(this.runtime, tx, this.viewRef);
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
-        if (needsTraversal && result !== undefined && result !== null) {
-          deepTraverse(result);
+        if (needsTraversal && value !== undefined && value !== null) {
+          deepTraverse(value);
         }
       };
       // Name the action for debugging
@@ -1256,7 +1254,18 @@ export class CellImpl<T extends FabricValue>
           ]);
         }
         cancel?.();
-        resolve(result);
+        // The effect above exists to drive the scheduler: it reads inside its
+        // own transaction so the dependencies get registered and the
+        // computations they gate run. That transaction has committed by the
+        // time this resolves, so the value the caller keeps is read here
+        // instead — a schemaless cell materializes as a view, and a view
+        // pinned to a finished transaction refuses every access.
+        //
+        // Read against a fresh transaction rather than this cell's. A caller
+        // holding a long-lived open transaction has snapshots in it from
+        // before the computations this pull just drove, so reading through it
+        // would hand back exactly the stale values pull() exists to avoid.
+        resolve(validateAndTransform(this.runtime, undefined, this.viewRef));
       });
     });
   }

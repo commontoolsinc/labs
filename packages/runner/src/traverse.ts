@@ -2430,7 +2430,7 @@ export function loadMetaLinkedDocs(
 // to combine the resulting objects into one.
 // NOTE: I forgot about https://github.com/commontoolsinc/labs/pull/1868,
 // which is a more sophisticated approach.
-function combineOptionalSchema(
+export function combineOptionalSchema(
   parentSchema: JSONSchema | undefined,
   linkSchema: JSONSchema | undefined,
 ): JSONSchema | undefined {
@@ -2526,7 +2526,7 @@ function schemaTypesAreDisjoint(
   );
 }
 
-function schemaTypeMatchesValueType(
+export function schemaTypeMatchesValueType(
   schemaType: JSONSchemaTypes,
   valueType: JSONSchemaTypes,
 ): boolean {
@@ -4769,7 +4769,7 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * would only ever act on hand-written schemas; until that is worth the
  * accessor walk, shape errors of this kind pass validation.
  */
-function opaqueLeafMissesRequired(
+export function opaqueLeafMissesRequired(
   schema: JSONSchemaObj,
   value: FabricPrimitive,
 ): boolean {
