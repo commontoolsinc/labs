@@ -3,6 +3,7 @@ import {
   computed,
   multiUserTest,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 import { lateVDOMBranch } from "./subject.tsx";
@@ -22,7 +23,7 @@ const alice = pattern(() => {
   const isLate = computed(() => phase.get() === "late");
 
   return {
-    tests: [
+    [TESTS]: [
       { action: advance },
       { render: view },
       { assertion: isLate },

@@ -34,7 +34,7 @@
  *
  * Run: deno task cf test packages/patterns/record-trash-restore.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, UI, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import { findElementByText, propsOf } from "./test/vnode-helpers.ts";
 import RecordPattern from "./record.tsx";
 
@@ -141,7 +141,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_add_email },
       { assertion: assert_email_added },
       { render: subject[UI] },

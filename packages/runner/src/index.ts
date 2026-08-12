@@ -220,6 +220,7 @@ export {
   schema,
   type SchemaWithoutCell,
   type StreamValue,
+  TESTS,
   TILE_UI,
   type toJSON,
   TYPE,

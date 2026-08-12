@@ -1,4 +1,4 @@
-import { action, assert, pattern, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import {
   findElementByExactText,
   findElementByText,
@@ -43,7 +43,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_empty },
       { action: action_register_pieces },
       { assertion: assert_add_piece_registers_both },

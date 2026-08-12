@@ -1,4 +1,4 @@
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, TESTS, Writable } from "commonfabric";
 import { lateVDOMBranch } from "./subject.tsx";
 
 export default pattern(() => {
@@ -17,7 +17,7 @@ export default pattern(() => {
   void view;
 
   return {
-    tests: [
+    [TESTS]: [
       { action: advance },
       { assertion: isLate },
     ],

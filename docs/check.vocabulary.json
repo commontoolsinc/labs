@@ -12,6 +12,7 @@
     "FabricSpecialObject",
     "NAME",
     "Stream",
+    "TESTS",
     "UI",
     "UiAction",
     "Writable",

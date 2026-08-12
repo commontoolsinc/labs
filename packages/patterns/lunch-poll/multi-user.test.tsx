@@ -18,7 +18,7 @@
  * loop-variable indexing, and helper calls over another runtime's arrays do
  * not resolve before a local write (see scrabble/multi-user.test.tsx).
  */
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, computed, multiUserTest, pattern, TESTS } from "commonfabric";
 import LunchPoll, { type CozyPollOutput } from "./main.tsx";
 
 interface Setup {
@@ -76,7 +76,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join },
       { assertion: assert_joined_as_host },
       { action: action_add_sushi },
@@ -145,7 +145,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-set-up" },
       { assertion: assert_sees_alice_setup },
       { assertion: assert_not_joined_yet },

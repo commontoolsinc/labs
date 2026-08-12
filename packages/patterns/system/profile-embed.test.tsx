@@ -1,4 +1,4 @@
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import ProfileEmbed from "./profile-embed.tsx";
 import ProfileHome from "./profile-home.tsx";
 
@@ -78,7 +78,7 @@ export default pattern(() => {
   const assert_bio_cleared = assert(() => profile.bio === "");
 
   return {
-    tests: [
+    [TESTS]: [
       // (1) Fallback branch — no profile resolves in the harness.
       { assertion: assert_no_profile_in_harness },
       { assertion: assert_not_editing_by_default },

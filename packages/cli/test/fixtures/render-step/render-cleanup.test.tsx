@@ -1,4 +1,4 @@
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, TESTS, Writable } from "commonfabric";
 import { afterRenderBranch, lateVDOMBranch } from "./subject.tsx";
 
 export default pattern(() => {
@@ -21,7 +21,7 @@ export default pattern(() => {
   const isAfterRender = computed(() => phase.get() === "after-render");
 
   return {
-    tests: [
+    [TESTS]: [
       { action: reachLate },
       { render: view },
       { action: advanceAfterRender },

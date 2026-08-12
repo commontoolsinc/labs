@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/gmail-agentic-search.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern, Writable } from "commonfabric";
+import { assert, pattern, TESTS, Writable } from "commonfabric";
 import GmailAgenticSearch, { type Auth } from "./gmail-agentic-search.tsx";
 
 const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
@@ -132,7 +132,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state checks ===
       { assertion: assert_not_scanning },
       { assertion: assert_progress_idle },

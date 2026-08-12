@@ -6,7 +6,7 @@
  * ```tsx
  * export const setup = pattern(() => ({ chat: GroupChatDemo({}) }));
  * export const alice = pattern<{ setup: Setup }>(({ setup }) => ({
- *   tests: [
+ *   [TESTS]: [
  *     { action: action_save_alice },
  *     { label: "alice-saved" },
  *     { await: "bob-saved" },
@@ -14,7 +14,7 @@
  *   ],
  * }));
  * export const bob = pattern<{ setup: Setup }>(({ setup }) => ({
- *   tests: [
+ *   [TESTS]: [
  *     { await: "alice-saved" },
  *     { assertion: assert_sees_alice },
  *     { action: action_save_bob },

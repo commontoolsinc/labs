@@ -1,4 +1,12 @@
-import { action, assert, Default, pattern, UI, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  Default,
+  pattern,
+  TESTS,
+  UI,
+  Writable,
+} from "commonfabric";
 import {
   findNodeById,
   findNodeByProp,
@@ -327,7 +335,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initially_empty },
       { assertion: assert_admin_view_waits_for_profile },
       { action: action_set_profile_alice },

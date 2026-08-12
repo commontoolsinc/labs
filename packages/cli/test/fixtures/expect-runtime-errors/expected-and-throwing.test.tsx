@@ -2,7 +2,7 @@
  * Fixture: a throwing action with expectRuntimeErrors: 1.
  * The runner must treat the error as required-and-satisfied — no failure.
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const untouched = new Writable(true);
@@ -13,7 +13,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { action: throwingAction },
       { assertion: stillUntouched },
     ],

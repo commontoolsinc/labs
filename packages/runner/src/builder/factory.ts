@@ -18,6 +18,7 @@ import {
   NAME,
   schema as schemaIdentity,
   SELF,
+  TESTS,
   TILE_UI,
   TYPE,
   UI,
@@ -278,6 +279,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     TILE_UI,
     CHIP_UI,
     FS,
+    TESTS,
 
     // Schema utilities
     schema: runtimeSchema,

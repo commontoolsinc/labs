@@ -2,7 +2,7 @@
  * Fixture: console.warn with allowConsoleWarnings: true.
  * The test runner must NOT fail this despite the warning.
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const triggered = new Writable(false);
@@ -14,7 +14,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { action: triggerWarn },
       { assertion: didTrigger },
     ],

@@ -1,4 +1,4 @@
-import { assert, pattern } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 import AuthorshipChat from "./main.tsx";
 
 export default pattern(() => {
@@ -15,7 +15,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_verified_fixture_names_alice },
       { assertion: assert_forged_fixture_names_bob },
       { assertion: assert_unsigned_fixture_names_casey },

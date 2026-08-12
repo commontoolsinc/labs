@@ -18,6 +18,7 @@ import {
   equals,
   handler,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 import ProjectList, { toggleItem } from "./main.tsx";
@@ -125,7 +126,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       { action: action_seed },
       { assertion: assert_seeded },
 

@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/system/default-app.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import { findElementByExactText, propsOf } from "../test/vnode-helpers.ts";
 import DefaultApp from "./default-app.tsx";
 import Note from "../notes/note.tsx";
@@ -71,7 +71,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_empty },
 
       { action: action_register_note },

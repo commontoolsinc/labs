@@ -3,7 +3,7 @@
  * The expectation asserts the loudness FIRES — zero errors must fail the run,
  * so a rejection quietly reverting to a silent return cannot pass.
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const fine = new Writable(true);
@@ -14,7 +14,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { action: silentAction },
       { assertion: stillFine },
     ],

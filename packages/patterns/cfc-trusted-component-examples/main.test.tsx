@@ -1,4 +1,4 @@
-import { assert, pattern } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 import TrustedComponentExamples from "./main.tsx";
 
 export default pattern(() => {
@@ -6,7 +6,7 @@ export default pattern(() => {
   const assert_total_examples = assert(() => gallery.totalExamples === 52);
 
   return {
-    tests: [{ assertion: assert_total_examples }],
+    [TESTS]: [{ assertion: assert_total_examples }],
     gallery,
   };
 });
