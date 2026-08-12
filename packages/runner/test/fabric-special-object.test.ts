@@ -1,8 +1,10 @@
-// The refusal a `FabricInstance` gets from a walk that cannot descend one.
-// Several walks share it so that they refuse in one wording; these pin that
-// wording, since a caller asserting on the message has no other guarantee of
-// it -- and pin that reaching for it throws, rather than handing back
-// something a caller could drop.
+/**
+ * The refusal a `FabricInstance` gets from a walk that cannot descend one.
+ * Several walks share it so that they refuse in one wording; these pin that
+ * wording, since a caller asserting on the message has no other guarantee of
+ * it -- and pin that reaching for it throws, rather than handing back
+ * something a caller could drop.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

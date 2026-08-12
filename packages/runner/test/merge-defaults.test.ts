@@ -1,5 +1,7 @@
-// Unit tests for mergeDefaults — the internal helper that builds a schema with
-// a merged `.default` property for use by processDefaultValue/createCell.
+/**
+ * Unit tests for mergeDefaults — the internal helper that builds a schema with
+ * a merged `.default` property for use by processDefaultValue/createCell.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
