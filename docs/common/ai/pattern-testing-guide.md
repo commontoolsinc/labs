@@ -95,10 +95,9 @@ export default pattern(() => {
 
 ## Key Points
 
-- write new assertions with `assert()` rather than `computed()`; a step accepts
-  either, and most test patterns in the repository use `assert()` for their
-  assertions, but a failed `assert()` reports its operands and a failed
-  `computed()` cannot
+- write assertions with `assert()`; a step's `assertion` accepts only the
+  record `assert()` produces, so a bare `computed()` boolean is a compile
+  error, and a failed `assert()` reports its operands while a bare value cannot
 - trigger actions with `.send()` when the output exposes streams
 - use direct property access for assertions rather than `.get()` unless the API
   truly requires writable access
@@ -120,8 +119,9 @@ An `assert()` failure names the operands and the values they held:
 
 Read it before reaching for other tools. It tells you which side was wrong and
 by how much, which is usually enough to locate the bug — no deploy, no
-inspection of the running piece. A `computed()` assertion cannot report this,
-because its comparison ran inside the closure and only the boolean survived:
+inspection of the running piece. Without the operands the record carries, only
+the verdict survives — the comparison ran inside the closure and the boolean is
+all that is left:
 
 ```
 ✗ assertion_2 (after action_1)
@@ -252,7 +252,7 @@ against one shared space on an in-process storage server.
 
 ```tsx
 // Shown for illustration only.
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, assert, multiUserTest, pattern } from "commonfabric";
 import Chat, { type ChatOutput } from "./pattern.tsx";
 
 interface Setup {
@@ -266,7 +266,7 @@ export const setup = pattern(() => ({ chat: Chat({}) }));
 
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const save = action(() => setup.chat.saveProfile.send());
-  const sees_bob = computed(() => /* ... */);
+  const sees_bob = assert(() => /* ... */);
   return {
     [TESTS]: [
       { action: save },

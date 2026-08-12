@@ -50,8 +50,7 @@ import type {
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
-import type { AssertRecord, Reactive } from "@commonfabric/api";
-import { asAssertRecord, formatAssertRecord } from "./assert-record.ts";
+import { assertionOutcome } from "./assert-record.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -61,10 +60,7 @@ import {
   appendLoggerDeltaMessages,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
-import {
-  buildActionEvent,
-  type TrustedUiDescriptor,
-} from "./trusted-test-event.ts";
+import { buildActionEvent } from "./trusted-test-event.ts";
 import {
   multiUserDescriptorMeta,
   runMultiUserTestPattern,
@@ -135,34 +131,11 @@ function indentLines(text: string, indent: string): string {
 }
 
 /**
- * A test step is an object with an 'assertion', 'action', 'render', or 'settle'
- * property.
- * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
- * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
- *
- * Action steps may carry an `event` payload (sent instead of `undefined`) and
- * a `trustedUi` descriptor. With `trustedUi`, the runner sends the event with
- * renderer-trusted DOM provenance for that surface/action — the headless
- * equivalent of the user clicking the trusted surface — which CFC
- * `TrustedActionWrite` policies require under enforcement.
- *
- * A `{ settle: true }` step waits for FULL settlement (the scheduler, storage,
- * and every in-flight async builtin operation — a `db.query` RPC + writeback, a
- * fetch / llm call) via `runtime.settled()`. The light per-action settle returns
- * before that I/O lands, so insert `{ settle: true }` before an assertion that
- * reads an async-builtin result to keep the read deterministic under load.
+ * The loose shape the runner reads a step cell as, to classify it by which
+ * field is present. The authored `TestStep` union (in the api) is already
+ * type-checked at the pattern's return; here the fields arrive from storage as
+ * `unknown`, so this is deliberately permissive.
  */
-export type TestStep =
-  | { assertion: Reactive<boolean> | Reactive<AssertRecord>; skip?: boolean }
-  | {
-    action: Stream<unknown>;
-    event?: unknown;
-    trustedUi?: TrustedUiDescriptor;
-    skip?: boolean;
-  }
-  | { render: unknown; skip?: boolean }
-  | { settle: true; skip?: boolean };
-
 type HarnessTestStepMeta = {
   action?: unknown;
   assertion?: unknown;
@@ -1665,21 +1638,9 @@ export async function runTestPattern(
           try {
             const assertCell = stepCell.key("assertion") as Cell<unknown>;
             const value = await assertCell.pull();
-            if (value === true) {
-              return { passed: true };
-            }
-            // An `assert(...)` assertion carries the operands recorded by the
-            // evaluation that produced this value, so report them.
-            const record = asAssertRecord(value);
-            if (record) {
-              return record.ok
-                ? { passed: true }
-                : { passed: false, error: formatAssertRecord(record) };
-            }
-            return {
-              passed: false,
-              error: `Expected true, got ${toCompactDebugString(value)}`,
-            };
+            // An `assert(...)` assertion carries the operands recorded while
+            // the condition ran, so a failure names them and their values.
+            return assertionOutcome(value);
           } catch (err) {
             return {
               passed: false,

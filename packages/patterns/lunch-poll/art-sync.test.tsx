@@ -16,7 +16,7 @@
  * the sub-pattern level in generated-art.test.tsx.
  */
 
-import { action, computed, pattern, TESTS, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import {
   findElement,
   findNodeByProp,
@@ -53,7 +53,7 @@ export default pattern(() => {
     poll.addOption.send({ title: "Sushi Palace" });
   });
 
-  const assert_option_added = computed(() =>
+  const assert_option_added = assert(() =>
     poll.options.length === 1 && poll.options[0]?.title === "Sushi Palace"
   );
 
@@ -61,7 +61,7 @@ export default pattern(() => {
   // (generated, not yet stored) is in the rendered tree — the fetch-derived
   // read chain through both sub-pattern boundaries works. (Until CT-1836's
   // traversal fix this file carried a canary pinning the opposite.)
-  const assert_generated_overlay_renders = computed(() =>
+  const assert_generated_overlay_renders = assert(() =>
     findElement(poll[UI], "cf-image") !== undefined
   );
 
@@ -76,11 +76,11 @@ export default pattern(() => {
     });
   });
 
-  const assert_image_persisted = computed(() =>
+  const assert_image_persisted = assert(() =>
     readValue(poll.options[0]?.imageUrl) === EXPECTED_DATA_URL
   );
 
-  const assert_stored_img_renders = computed(() =>
+  const assert_stored_img_renders = assert(() =>
     findNodeByProp(poll[UI], "src", EXPECTED_DATA_URL) !== undefined
   );
 

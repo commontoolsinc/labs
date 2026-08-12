@@ -88,8 +88,8 @@ export default pattern(() => {
     authState.set("loading");
   });
 
-  const assert_auth_unavailable = authReady ? false : true;
-  const assert_auth_available = authReady ? true : false;
+  const assert_auth_unavailable = assert(() => !authReady);
+  const assert_auth_available = assert(() => authReady);
   const assert_ready_reads_current_token = assert(() =>
     availability.state === "ready" &&
     availability.auth?.get?.()?.token === "initial"

@@ -7,6 +7,7 @@
  */
 
 import type { AssertPart, AssertRecord } from "@commonfabric/api";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 /**
  * Recognizes the record an `assert(...)` assertion carries. A `computed(...)`
@@ -56,4 +57,27 @@ export function formatAssertRecord(record: AssertRecord): string {
     `  ${part.src.padEnd(width)} = ${part.rendered}`
   );
   return [record.source, ...lines].join("\n");
+}
+
+/**
+ * The pass/fail outcome both runners report for an assertion step, from the
+ * value they read for it. A well-formed `assert(...)` value is a record: it
+ * passes when the record's `ok` holds, and fails with the recorded operands
+ * otherwise. A value that is not a record — an assertion that did not
+ * materialize, read back as `undefined` — fails and reports what arrived
+ * rather than crashing.
+ */
+export function assertionOutcome(
+  value: unknown,
+): { passed: boolean; error?: string } {
+  const record = asAssertRecord(value);
+  if (record) {
+    return record.ok
+      ? { passed: true }
+      : { passed: false, error: formatAssertRecord(record) };
+  }
+  return {
+    passed: false,
+    error: `Expected true, got ${toCompactDebugString(value)}`,
+  };
 }

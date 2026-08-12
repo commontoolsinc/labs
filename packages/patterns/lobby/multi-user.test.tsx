@@ -1,11 +1,5 @@
 /// <cts-enable />
-import {
-  computed,
-  multiUserTest,
-  pattern,
-  TESTS,
-  Writable,
-} from "commonfabric";
+import { assert, multiUserTest, pattern, TESTS, Writable } from "commonfabric";
 import {
   addSelfToLobby,
   commitTrustedLobbyAction,
@@ -66,19 +60,19 @@ export const alice = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
     targetProfile: setup.bobProfile,
   });
 
-  const assert_sees_both = computed(() => {
+  const assert_sees_both = assert(() => {
     const roster = setup.roster.get() as LobbyRoster | undefined;
     return roster?.participants?.[0]?.name === "Alice" &&
       roster?.participants?.[1]?.name === "Bob";
   });
-  const assert_alice_is_bootstrap_admin = computed(() =>
+  const assert_alice_is_bootstrap_admin = assert(() =>
     currentLobbyUserIsAdmin(
       setup.aliceProfile,
       setup.roster,
       setup.adminRegistry,
     )
   );
-  const assert_only_bob_remains = computed(() => {
+  const assert_only_bob_remains = assert(() => {
     const roster = setup.roster.get() as LobbyRoster | undefined;
     return roster?.participants?.length === 1 &&
       roster?.participants?.[0]?.name === "Bob";
@@ -121,26 +115,26 @@ export const bob = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
     targetProfile: setup.aliceProfile,
   });
 
-  const assert_bob_is_not_admin = computed(() =>
+  const assert_bob_is_not_admin = assert(() =>
     !currentLobbyUserIsAdmin(
       setup.bobProfile,
       setup.roster,
       setup.adminRegistry,
     )
   );
-  const assert_remove_was_blocked = computed(() => {
+  const assert_remove_was_blocked = assert(() => {
     const roster = setup.roster.get() as LobbyRoster | undefined;
     return roster?.participants?.[0]?.name === "Alice" &&
       roster?.participants?.[1]?.name === "Bob";
   });
-  const assert_bob_is_admin = computed(() =>
+  const assert_bob_is_admin = assert(() =>
     currentLobbyUserIsAdmin(
       setup.bobProfile,
       setup.roster,
       setup.adminRegistry,
     )
   );
-  const assert_only_bob_remains = computed(() => {
+  const assert_only_bob_remains = assert(() => {
     const roster = setup.roster.get() as LobbyRoster | undefined;
     return roster?.participants?.length === 1 &&
       roster?.participants?.[0]?.name === "Bob";

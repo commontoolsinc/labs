@@ -90,12 +90,14 @@ Tests use a **discriminated union** format:
 return {
   [TESTS]: [
     { action: action_do_something },     // Runner calls .send()
-    { assertion: assert_something },     // Runner checks === true
+    { assertion: assert_something },     // Runner reads the assert() record
   ],
 };
 ```
 
-Each step is either `{ action: Stream<void> }` or `{ assertion: boolean }`.
+Each step is either `{ action: Stream<void> }` or `{ assertion }`, where the
+assertion is the record `assert()` produces — see
+[Write assertions with `assert()`](#write-assertions-with-assert) below.
 
 ## Walking the Rendered Tree
 
@@ -213,21 +215,21 @@ const assert_game_ready = assert(() => {
 });
 ```
 
-### Prefer `assert()` over `computed()`
+### Write assertions with `assert()`
 
-Write new assertions with `assert()`. Most test patterns in the repository
-use `assert()` for their assertions; a step also accepts a `computed()` boolean,
-but a failing `computed()` assertion can only ever report the boolean it
-produced:
+A test step's `assertion` is the record `assert()` produces; a bare
+`Reactive<boolean>` — a `computed()` or a plain cell — is a compile error.
+This is what `assert()` buys. A bare boolean could only ever report the value
+it produced, because the comparison ran inside a closure and its operands were
+gone before the runner saw anything:
 
 ```
 ✗ assertion_1
     Expected true, got false
 ```
 
-The comparison ran inside your own closure, so its operands were gone before
-the runner saw anything. `assert()` records them as the assertion runs and
-reports them on failure:
+`assert()` records those operands as the assertion runs and reports them on
+failure:
 
 ```
 ✗ assertion_1

@@ -343,6 +343,18 @@ export async function runMultiUserTestPattern(
             }
             continue;
           }
+          if (step.kind === "settle") {
+            const stepStart = performance.now();
+            await participant.worker.call("settleStep", {}, stepTimeout);
+            if (options.verbose) {
+              console.log(
+                `  [${participant.spec.name}] ⋯ settle (${
+                  Math.round(performance.now() - stepStart)
+                }ms)`,
+              );
+            }
+            continue;
+          }
           // Assertion: read once. The step that preceded it settled this
           // participant's own work, and a marker it crossed carried the other
           // participants' work with it, so a false value here is a failure.

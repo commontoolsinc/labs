@@ -85,21 +85,20 @@ avoids the declaration-emit errors TypeScript raises for such a mix:
 import type { AssertRecord } from "commonfabric";
 
 type TestStep =
-  // from assert(() => condition), or computed(() => condition)
-  | { assertion: Reactive<boolean> | Reactive<AssertRecord> }
+  | { assertion: Reactive<AssertRecord> }  // from assert(() => condition)
   | { action: Stream<void> }           // from action(() => handler.send())
   | { render: VNode }                  // one headless VDOM demand window
   | { settle: true };                  // wait for full async settlement
 ```
 
-An `assert(...)` assertion carries an `AssertRecord` — `{ ok, source, parts }` —
-rather than a bare boolean. The transformer rewrites its body to record each
-operand as it is computed, so a failure can report the operands and their
-values instead of only `false`. A `computed(...)` assertion carries the boolean
-and reports `Expected true, got false`. See
+An assertion is an `AssertRecord` — `{ ok, source, parts }` — which `assert()`
+is the only way to write; a bare `Reactive<boolean>` is a compile error. The
+transformer rewrites the `assert` body to record each operand as it is
+computed, so a failure can report the operands and their values instead of
+only `false`. See
 [Assertion diagnostics](../../packages/ts-transformers/README.md#assertion-diagnostics)
 for the rewrite, and
-[Pattern Testing](../common/workflows/pattern-testing.md#prefer-assert-over-computed)
+[Pattern Testing](../common/workflows/pattern-testing.md#write-assertions-with-assert)
 for the authoring side.
 
 `cf test` does not mount a renderer by default. Under the pull scheduler, a
