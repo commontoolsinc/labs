@@ -240,9 +240,12 @@ happens.
 two consecutive rendering frames. It measures the marked control again just
 before dispatch. If that final measurement finds that the control moved or was
 replaced, the helper settles and marks the current control before dispatching
-one trusted click. A page that moves the control after even that last
-measurement is caught as well: the helper stops an interaction that misses
-before the page sees it, and aims again.
+one trusted click. It aims at the middle of the part of the control's box that
+lies inside the page, so a control the edge of the page cuts off is clicked
+inside the page rather than at a point past the edge, and a control with no part
+of it inside the page is reported rather than clicked. A page that moves the
+control after even that last measurement is caught as well: the helper stops an
+interaction that misses before the page sees it, and aims again.
 `docs/development/waiting-in-tests.md` describes how.
 
 **Use `awaitViewSettled(page)`** from `@commonfabric/integration` as the

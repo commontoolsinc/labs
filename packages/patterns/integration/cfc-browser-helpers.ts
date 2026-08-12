@@ -1028,7 +1028,12 @@ export async function clickNthCfButton(
 // not be aimed at.
 type ClickAim =
   | { x: number; y: number; targetId: number }
-  | { missing: true; sawTarget: boolean };
+  | { missing: true; sawTarget: boolean }
+  | {
+    offPage: true;
+    box: { x: number; y: number; width: number; height: number };
+    page: { width: number; height: number };
+  };
 
 /**
  * What became of the trusted click the aim armed for.
@@ -1064,6 +1069,13 @@ type ClickLanding = {
 // just declared settled, so the measurement found no box and the click reported
 // "Unable to get stable box model to click on". Deciding and measuring in the
 // same turn leaves nothing between them.
+//
+// The point is the middle of the part of the control's box that lies inside
+// the page, which for a control the page has room for is the middle of the
+// whole box. A control with no part of it inside the page is reported: the
+// browser accepts a click dispatched outside the page, delivers it to nothing,
+// and reports no error for having done so, so aiming there would leave a caller
+// told the control was pressed.
 //
 // A mark that is absent from the start is reported rather than waited on: the
 // caller placed it a moment ago, so its absence means the control it names was
@@ -1268,6 +1280,36 @@ const aimAtMarkedTarget = async (
     return { x, y, width, height };
   };
 
+  // The area a click can land in, in the same coordinates a bounding rect is
+  // reported in. The root element's client box rather than the window, because
+  // a classic scrollbar takes columns the window counts and a click cannot
+  // reach.
+  const pageBox = (): { width: number; height: number } => ({
+    width: document.documentElement.clientWidth,
+    height: document.documentElement.clientHeight,
+  });
+
+  // The point to aim a click at on a control's box: the middle of the part of
+  // the box that lies inside the page. A control can reach past the edge of the
+  // page, and the middle of the whole box is then further out than the middle
+  // of the part inside it, far enough out to be a point the page does not have.
+  // The browser accepts a click dispatched there and delivers it to nothing.
+  //
+  // What the page shows of a control is a wider question than this: an
+  // ancestor's overflow can clip it, and anything painted over it can cover it.
+  // Neither moves this point.
+  const pointOnPage = (
+    rect: { x: number; y: number; width: number; height: number },
+  ): { x: number; y: number } | null => {
+    const page = pageBox();
+    const left = Math.max(rect.x, 0);
+    const right = Math.min(rect.x + rect.width, page.width);
+    const top = Math.max(rect.y, 0);
+    const bottom = Math.min(rect.y + rect.height, page.height);
+    if (right <= left || bottom <= top) return null;
+    return { x: (left + right) / 2, y: (top + bottom) / 2 };
+  };
+
   for (;;) {
     if (find() === undefined) {
       if (remark === null) {
@@ -1325,17 +1367,34 @@ const aimAtMarkedTarget = async (
       behavior: "instant",
     });
     const rect = target.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      // Collapsed between the settle and this measurement. A control with no
+      // box is one the settle holds for, so hold for this one too.
+      diag.phase = "no-box-before-aim";
+      await nextFrame();
+      continue;
+    }
+    const point = pointOnPage(rect);
+    if (point === null) {
+      return {
+        offPage: true,
+        box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        page: pageBox(),
+      };
+    }
+    // After the point, so a click that is never dispatched leaves no
+    // interceptor on the page.
     arm();
     diag.phase = "aimed";
     return {
-      x: rect.x + rect.width / 2,
-      y: rect.y + rect.height / 2,
+      x: point.x,
+      y: point.y,
       targetId: identify(target),
     };
   }
 };
 
-// Read the marked control's current center in one page turn for a coordinate
+// Read the marked control's current point in one page turn for a coordinate
 // refresh after any interaction observer has finished.
 const readMarkedClickPoint = async (
   page: Page,
@@ -1380,9 +1439,19 @@ const readMarkedClickPoint = async (
     ) {
       return undefined;
     }
+    // The middle of the part of the box inside the page, the same point the aim
+    // answers, so a control that has not moved reads back as unchanged and the
+    // click keeps the point it settled on.
+    const pageWidth = document.documentElement.clientWidth;
+    const pageHeight = document.documentElement.clientHeight;
+    const left = Math.max(rect.x, 0);
+    const right = Math.min(rect.x + rect.width, pageWidth);
+    const top = Math.max(rect.y, 0);
+    const bottom = Math.min(rect.y + rect.height, pageHeight);
+    if (right <= left || bottom <= top) return undefined;
     return {
-      x: rect.x + rect.width / 2,
-      y: rect.y + rect.height / 2,
+      x: (left + right) / 2,
+      y: (top + bottom) / 2,
       targetId,
     };
   }, { args: [selector, identityKey] });
@@ -1484,6 +1553,18 @@ export async function clickMarked(
             `Aim reached: ${toIndentedDebugString(progress)}. ` +
             `Last probe: ${toIndentedDebugString(probe)}`,
           { cause },
+        );
+      }
+      if (aim !== undefined && "offPage" in aim) {
+        const probe = await readTextProbe(page, markSelector).catch(() =>
+          undefined
+        );
+        throw new Error(
+          `The control marked for click lies outside the page, so there is ` +
+            `no point on it a click can reach. Its box is ` +
+            `${toIndentedDebugString(aim.box)} and the page is ` +
+            `${toIndentedDebugString(aim.page)}. ` +
+            `Last probe: ${toIndentedDebugString(probe)}`,
         );
       }
       if (aim === undefined || "missing" in aim) {

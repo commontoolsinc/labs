@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { launch } from "@astral/astral";
 import { closeAstralBrowser } from "../astral-adapter.ts";
 import { Browser } from "../browser.ts";
@@ -1423,6 +1428,123 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       "beforeType",
       "afterType",
     ]);
+  } finally {
+    await closeTestBrowser(page, browser);
+  }
+});
+
+Deno.test("Page clicks the part of an element that lies inside the page", async () => {
+  // An element can reach past the edge of the page it is drawn on: a surface
+  // positioned towards the right of a narrow viewport, a control wider than the
+  // column it sits in. The middle of such an element's box is a point the page
+  // does not have, and a trusted click dispatched there is delivered to the
+  // browser, lands outside the page, and reaches nothing at all.
+  const observed: { x: number; y: number }[] = [];
+  const browser = await launch({ headless: true });
+  const astralPage = await browser.newPage();
+  const page = new Page(astralPage, { timeout: 10_000 });
+  page.setInteractionObserver({
+    afterClick: (_element, point) =>
+      void observed.push({ x: point.x, y: point.y }),
+  });
+
+  try {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.evaluate(() => {
+      // Fixed, so the element cannot be brought into the page by scrolling to
+      // it: the part of it inside the page is the whole of what a click has to
+      // work with. It spans 700 to 1100 in a page 800 wide, so the middle of
+      // the whole box is at 900, a hundred columns past the last column the
+      // page has.
+      const button = document.createElement("button");
+      button.id = "clipped-target";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "700px",
+        top: "300px",
+        width: "400px",
+        height: "40px",
+      });
+      let clicked = 0;
+      button.addEventListener("click", () => {
+        clicked++;
+      });
+      document.body.append(button);
+      (globalThis as typeof globalThis & {
+        __clippedClicks: () => number;
+      }).__clippedClicks = () => clicked;
+    });
+
+    const target = await page.waitForSelector("#clipped-target");
+    await target.click();
+
+    assertEquals(
+      await page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __clippedClicks: () => number;
+        }).__clippedClicks()
+      ),
+      1,
+      "the click never landed on the part of the element inside the page",
+    );
+    // The part of the box inside the page spans 700 to 800 across and 300 to
+    // 340 down, so the point to click is 750,320.
+    assertEquals(observed, [{ x: 750, y: 320 }]);
+  } finally {
+    await closeTestBrowser(page, browser);
+  }
+});
+
+Deno.test("Page reports an element with no part of it inside the page", async () => {
+  // Every point on the element is outside the page, so there is nowhere to aim
+  // that a click can reach. Saying so is the only honest answer: a click
+  // dispatched past the edge of the page reaches nothing, and returning from
+  // that tells the caller the element was pressed.
+  const browser = await launch({ headless: true });
+  const astralPage = await browser.newPage();
+  const page = new Page(astralPage, { timeout: 10_000 });
+
+  try {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.evaluate(() => {
+      const button = document.createElement("button");
+      button.id = "off-page-target";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "900px",
+        top: "300px",
+        width: "200px",
+        height: "40px",
+      });
+      let clicked = 0;
+      button.addEventListener("click", () => {
+        clicked++;
+      });
+      document.body.append(button);
+      (globalThis as typeof globalThis & {
+        __offPageClicks: () => number;
+      }).__offPageClicks = () => clicked;
+    });
+
+    const target = await page.waitForSelector("#off-page-target");
+    const error = await assertRejects(() => target.click(), Error);
+    assertStringIncludes(error.message, "outside the page");
+    assertStringIncludes(error.message, "button#off-page-target");
+    // The size of the page, so a message that names some other 800 cannot
+    // satisfy this.
+    assertStringIncludes(error.message, 'page {"width":800,"height":600}');
+
+    assertEquals(
+      await page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __offPageClicks: () => number;
+        }).__offPageClicks()
+      ),
+      0,
+      "a click reached an element with no part of it inside the page",
+    );
   } finally {
     await closeTestBrowser(page, browser);
   }

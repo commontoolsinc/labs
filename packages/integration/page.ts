@@ -637,7 +637,7 @@ export class Page extends EventTarget {
 export type AimResult =
   | { x: number; y: number }
   | {
-    unclickable: "detached" | "not-rendered" | "unresolvable";
+    unclickable: "detached" | "not-rendered" | "off-page" | "unresolvable";
     tag?: string;
     id?: string;
     rootHost?: string;
@@ -658,8 +658,18 @@ export type AimResult =
  * Doing both in the page means the coordinates describe the element as it was
  * at one instant, and the only remaining gap is the one dispatch that follows.
  *
- * An element with no layout box yields `unclickable` naming what is wrong with
- * it, rather than an empty measurement the caller has to guess at.
+ * The point is the middle of the part of the element's box that lies inside the
+ * page, which for an element the page has room for is the middle of the whole
+ * box. An element reaching past the edge of the page can have its middle
+ * outside the page, and the browser accepts a trusted click dispatched there,
+ * delivers it to nothing, and reports no error for having done so. What the
+ * page shows of an element is a wider question than this: an ancestor's
+ * overflow can clip it, and anything painted over it can cover it. Neither
+ * moves this point.
+ *
+ * An element with no layout box, and one with no part of it inside the page,
+ * yield `unclickable` naming what is wrong with it, rather than an empty
+ * measurement the caller has to guess at.
  */
 async function aimAtElement(
   element: AstralElementHandle,
@@ -703,9 +713,39 @@ async function aimAtElement(
             height: rect.height,
           };
         }
-        return offsetX === null || offsetY === null
-          ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+        // The area a click can land in, in the same coordinates the rect is
+        // reported in. The root element's client box rather than the window,
+        // because a classic scrollbar takes columns the window counts and a
+        // click cannot reach.
+        const pageWidth = document.documentElement.clientWidth;
+        const pageHeight = document.documentElement.clientHeight;
+        const left = Math.max(rect.x, 0);
+        const right = Math.min(rect.x + rect.width, pageWidth);
+        const top = Math.max(rect.y, 0);
+        const bottom = Math.min(rect.y + rect.height, pageHeight);
+        // A caller's offset names a point on the element, so it is used as
+        // given; what it names still has to be a point the page has.
+        const point = offsetX === null || offsetY === null
+          ? { x: (left + right) / 2, y: (top + bottom) / 2 }
           : { x: rect.x + offsetX, y: rect.y + offsetY };
+        if (
+          right <= left || bottom <= top ||
+          point.x < 0 || point.x >= pageWidth ||
+          point.y < 0 || point.y >= pageHeight
+        ) {
+          return {
+            unclickable: "off-page",
+            ...describe(),
+            width: rect.width,
+            height: rect.height,
+            detail: `box ${JSON.stringify(rect)}, ` +
+              `point ${JSON.stringify(point)}, ` +
+              `page ${
+                JSON.stringify({ width: pageWidth, height: pageHeight })
+              }`,
+          };
+        }
+        return point;
       },
       { args: [offset?.x ?? null, offset?.y ?? null] },
     );
@@ -729,6 +769,9 @@ function describeAimTarget(aim: Extract<AimResult, { unclickable: string }>) {
       return `${named}${inside}: it has no layout box ` +
         `(display: ${aim.display}, visibility: ${aim.visibility}, ` +
         `${aim.width}x${aim.height})`;
+    case "off-page":
+      return `${named}${inside}: the point to click lies outside the page, ` +
+        `so a click there would reach nothing (${aim.detail})`;
     default:
       return `the element: its handle no longer resolves to a node ` +
         `(${aim.detail})`;
