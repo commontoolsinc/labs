@@ -91,6 +91,9 @@ export enum RequestType {
   PageSynced = "page:synced",
   PieceGetSource = "piece:getSource",
   PieceUpdateSource = "piece:updateSource",
+  SpaceGetAcl = "space:getAcl",
+  SpaceSetAclEntry = "space:setAclEntry",
+  SpaceRemoveAclEntry = "space:removeAclEntry",
 
   // VDOM operations (main -> worker)
   VDomMount = "vdom:mount",
@@ -765,6 +768,43 @@ export interface PieceUpdateSourceResponse extends PieceSourceResponse {
   executionWarning?: string;
 }
 
+/** One access level in a space ACL. */
+export type SpaceAclCapability = "READ" | "WRITE" | "OWNER";
+
+/** The space ACL and the current principal's ability to administer it. */
+export interface SpaceAclView {
+  space: DID;
+  principal: DID;
+  acl: Record<string, SpaceAclCapability>;
+  canEdit: boolean;
+}
+
+/** Response carrying a space's access-control view. */
+export interface SpaceAclResponse {
+  access: SpaceAclView;
+}
+
+/** Reads the ACL for one space. */
+export interface SpaceGetAclRequest extends BaseRequest {
+  type: RequestType.SpaceGetAcl;
+  space: DID;
+}
+
+/** Adds or replaces one explicit ACL entry in a space. */
+export interface SpaceSetAclEntryRequest extends BaseRequest {
+  type: RequestType.SpaceSetAclEntry;
+  space: DID;
+  user: string;
+  capability: SpaceAclCapability;
+}
+
+/** Removes one explicit ACL entry from a space. */
+export interface SpaceRemoveAclEntryRequest extends BaseRequest {
+  type: RequestType.SpaceRemoveAclEntry;
+  space: DID;
+  user: string;
+}
+
 /** Common shape for one-way main -> worker notifications. */
 export interface BaseClientNotification {
   type: ClientNotificationType;
@@ -917,6 +957,9 @@ export type IPCClientRequest =
   | PageSyncedRequest
   | PieceGetSourceRequest
   | PieceUpdateSourceRequest
+  | SpaceGetAclRequest
+  | SpaceSetAclEntryRequest
+  | SpaceRemoveAclEntryRequest
   | RuntimeSyncedRequest
   | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
@@ -1083,6 +1126,7 @@ export type RemoteResponse =
   | PageResponse
   | PieceSourceResponse
   | PieceUpdateSourceResponse
+  | SpaceAclResponse
   | SlugResponse
   | SpaceResponse
   | VDomMountResponse
@@ -1281,6 +1325,18 @@ export type Commands = {
   [RequestType.PieceUpdateSource]: {
     request: PieceUpdateSourceRequest;
     response: PieceUpdateSourceResponse;
+  };
+  [RequestType.SpaceGetAcl]: {
+    request: SpaceGetAclRequest;
+    response: SpaceAclResponse;
+  };
+  [RequestType.SpaceSetAclEntry]: {
+    request: SpaceSetAclEntryRequest;
+    response: SpaceAclResponse;
+  };
+  [RequestType.SpaceRemoveAclEntry]: {
+    request: SpaceRemoveAclEntryRequest;
+    response: SpaceAclResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;

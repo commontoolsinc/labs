@@ -466,6 +466,12 @@ from the menu are accepted-for-delivery acknowledgements (the commit is
 asynchronous) and are not renderer-trusted, so a handler gated on UI
 provenance will refuse them.
 
+The piece-specific entries are followed by a divider and **Space access
+rights...**. That dialog lists the space ACL for every reader. A principal with
+`OWNER` access can add identities, change their `READ`, `WRITE`, or `OWNER`
+capability, and remove entries. The memory server validates every change and
+requires the ACL to retain at least one concrete owner.
+
 The menu comes with `cf-render`. Importing the component registers it. It mounts
 itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
 it. While the menu or one of its panels is open, the addressed piece carries an

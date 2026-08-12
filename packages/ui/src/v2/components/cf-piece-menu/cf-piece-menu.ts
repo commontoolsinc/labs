@@ -1,5 +1,6 @@
 import { css, html, nothing, type TemplateResult } from "lit";
 import { state } from "lit/decorators.js";
+import { live } from "lit/directives/live.js";
 import { BaseElement } from "../../core/base-element.ts";
 import {
   $conn,
@@ -12,6 +13,8 @@ import type {
   PieceSourceAction,
   PieceSourceRevisionView,
   PieceSourceView,
+  SpaceAclCapability,
+  SpaceAclView,
 } from "@commonfabric/runtime-client";
 import {
   getPieceBoundary,
@@ -27,7 +30,7 @@ import {
 export const PIECE_MENU_OPEN_ATTRIBUTE = "data-cf-piece-menu-open";
 
 /** Which panel is showing, if any. */
-export type Panel = "source" | "origin" | "data" | "actions";
+export type Panel = "source" | "origin" | "data" | "actions" | "access";
 
 /** One entry in the menu, and the panel it opens. */
 interface MenuEntry {
@@ -53,6 +56,13 @@ const PANEL_TITLES: Record<Panel, string> = {
   origin: "Origin and history",
   data: "Data",
   actions: "Actions",
+  access: "Space access rights",
+};
+
+const SPACE_ACCESS_ENTRY: MenuEntry = {
+  label: "Space access rights...",
+  testId: "piece-menu-space-access",
+  panel: "access",
 };
 
 const DETACH_ENTRY = {
@@ -190,7 +200,8 @@ export function payloadHint(action: PieceAction): string | undefined {
  * CFPieceMenu — the menu a right-click on a piece opens, with the panels for
  * what it can show and do about that piece: its authored source, the origin
  * and history it records, its live argument and result data, and the handler
- * streams an event can be dispatched to.
+ * streams an event can be dispatched to. It also shows the containing space's
+ * access rights and lets space owners change them.
  *
  * @element cf-piece-menu
  *
@@ -265,6 +276,11 @@ export class CFPieceMenu extends BaseElement {
       max-width: 18rem;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+
+    .menu-divider {
+      margin: 0.25rem 0.5rem;
+      border-top: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.1));
     }
 
     .panel {
@@ -608,6 +624,82 @@ export class CFPieceMenu extends BaseElement {
       margin: 0 0 0.625rem;
       white-space: pre-wrap;
     }
+
+    .access-summary {
+      margin: 0 0 1rem;
+      font-size: 0.8125rem;
+    }
+
+    .access-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+    }
+
+    .access-table th,
+    .access-table td {
+      padding: 0.5rem;
+      border-bottom: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.1));
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .access-table th {
+      color: var(--cf-theme-color-text-muted, #6b7280);
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .access-user {
+      overflow-wrap: anywhere;
+      font-family: var(--cf-theme-font-mono, "SF Mono", monospace);
+    }
+
+    .access-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+
+    .access-select,
+    .access-input,
+    .access-remove,
+    .access-add {
+      padding: 0.375rem 0.5rem;
+      border: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.15));
+      border-radius: 6px;
+      background: var(--cf-theme-color-surface, #ffffff);
+      color: inherit;
+      font: inherit;
+      font-size: 0.75rem;
+    }
+
+    .access-remove,
+    .access-add {
+      cursor: pointer;
+    }
+
+    .access-remove:disabled,
+    .access-add:disabled,
+    .access-select:disabled,
+    .access-input:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    .access-add-form {
+      display: grid;
+      grid-template-columns: minmax(12rem, 1fr) auto auto;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    .access-input {
+      min-width: 0;
+      font-family: var(--cf-theme-font-mono, "SF Mono", monospace);
+    }
   `;
 
   /** The piece the menu addresses. */
@@ -673,9 +765,25 @@ export class CFPieceMenu extends BaseElement {
     }
     | undefined = undefined;
 
+  @state()
+  private accessor spaceAccess: SpaceAclView | undefined = undefined;
+
+  @state()
+  private accessor accessError: string | undefined = undefined;
+
+  @state()
+  private accessor accessActionPending = false;
+
+  @state()
+  private accessor newAccessUser = "";
+
+  @state()
+  private accessor newAccessCapability: SpaceAclCapability = "READ";
+
   /** Identifies the read a late response belongs to, so a stale one is dropped. */
   private readToken = 0;
   private sourceRead: Promise<void> | undefined;
+  private accessRead: Promise<void> | undefined;
 
   /** Set once a data/actions panel has started its piece-state read. */
   #dataRequested = false;
@@ -730,8 +838,7 @@ export class CFPieceMenu extends BaseElement {
 
   override disconnectedCallback() {
     globalThis.removeEventListener("keydown", this.#onKeyDown);
-    this.#setHighlightedPiece(undefined, undefined);
-    this.#resetPieceState();
+    this.close();
     super.disconnectedCallback();
   }
 
@@ -768,6 +875,7 @@ export class CFPieceMenu extends BaseElement {
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
+    this.#resetAccessState();
     this.readToken++;
     this.hidden = false;
     void this.#readSource(cell);
@@ -786,6 +894,7 @@ export class CFPieceMenu extends BaseElement {
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
+    this.#resetAccessState();
     this.readToken++;
   }
 
@@ -1023,6 +1132,15 @@ export class CFPieceMenu extends BaseElement {
     });
   }
 
+  #resetAccessState(): void {
+    this.spaceAccess = undefined;
+    this.accessError = undefined;
+    this.accessActionPending = false;
+    this.newAccessUser = "";
+    this.newAccessCapability = "READ";
+    this.accessRead = undefined;
+  }
+
   /** Drop everything the data/actions panels read, and their subscriptions. */
   #resetPieceState(): void {
     // Invalidate first: an in-flight read must see the new generation before
@@ -1082,9 +1200,101 @@ export class CFPieceMenu extends BaseElement {
       await this.#readPieceState(cell);
       return;
     }
+    if (panel === "access") {
+      await this.#readSpaceAccess(cell);
+      return;
+    }
     if (this.source !== undefined) return;
     await this.#readSource(cell);
   }
+
+  #readSpaceAccess(cell: CellHandle): Promise<void> {
+    this.accessRead ??= this.#performSpaceAccessRead(cell);
+    return this.accessRead;
+  }
+
+  async #performSpaceAccessRead(cell: CellHandle): Promise<void> {
+    const token = this.readToken;
+    try {
+      const access = await cell.runtime().getSpaceAcl(cell.space());
+      if (token !== this.readToken) return;
+      this.spaceAccess = access;
+    } catch (error) {
+      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      this.accessError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /** Add or replace one explicit entry in the current space's ACL. */
+  async setSpaceAccessEntry(
+    user: string,
+    capability: SpaceAclCapability,
+  ): Promise<void> {
+    const cell = this.cell;
+    const normalizedUser = user.trim();
+    if (!cell || this.accessActionPending || normalizedUser.length === 0) {
+      return;
+    }
+    const token = this.readToken;
+    this.accessActionPending = true;
+    this.accessError = undefined;
+    try {
+      const access = await cell.runtime().setSpaceAclEntry(
+        cell.space(),
+        normalizedUser,
+        capability,
+      );
+      if (token !== this.readToken) return;
+      this.spaceAccess = access;
+      if (this.newAccessUser.trim() === normalizedUser) {
+        this.newAccessUser = "";
+      }
+    } catch (error) {
+      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      this.accessError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (token === this.readToken) this.accessActionPending = false;
+    }
+  }
+
+  /** Remove one explicit entry from the current space's ACL. */
+  async removeSpaceAccessEntry(user: string): Promise<void> {
+    const cell = this.cell;
+    if (!cell || this.accessActionPending) return;
+    const token = this.readToken;
+    this.accessActionPending = true;
+    this.accessError = undefined;
+    try {
+      const access = await cell.runtime().removeSpaceAclEntry(
+        cell.space(),
+        user,
+      );
+      if (token !== this.readToken) return;
+      this.spaceAccess = access;
+    } catch (error) {
+      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      this.accessError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (token === this.readToken) this.accessActionPending = false;
+    }
+  }
+
+  #onNewAccessUser = (event: Event): void => {
+    this.newAccessUser = (event.currentTarget as HTMLInputElement).value;
+  };
+
+  #onNewAccessCapability = (event: Event): void => {
+    this.newAccessCapability = (event.currentTarget as HTMLSelectElement)
+      .value as SpaceAclCapability;
+  };
+
+  #addSpaceAccessEntry = (event: SubmitEvent): void => {
+    event.preventDefault();
+    void this.setSpaceAccessEntry(
+      this.newAccessUser,
+      this.newAccessCapability,
+    );
+  };
 
   #readSource(cell: CellHandle): Promise<void> {
     this.sourceRead ??= this.#performSourceRead(cell);
@@ -1403,7 +1613,7 @@ export class CFPieceMenu extends BaseElement {
     // clamps it back into view.
     const entries = pieceMenuEntries(this.source?.origin !== undefined);
     const width = 240;
-    const height = 40 + entries.length * 34;
+    const height = 49 + (entries.length + 1) * 34;
     const left = Math.max(
       4,
       Math.min(this.x, globalThis.innerWidth - width - 4),
@@ -1436,13 +1646,24 @@ export class CFPieceMenu extends BaseElement {
             </button>
           `
         )}
+        <div class="menu-divider" role="separator"></div>
+        <button
+          class="menu-item"
+          role="menuitem"
+          test-id="${SPACE_ACCESS_ENTRY.testId}"
+          @click="${() => this.showPanel(SPACE_ACCESS_ENTRY.panel)}"
+        >
+          ${SPACE_ACCESS_ENTRY.label}
+        </button>
       </div>
     `;
   }
 
   #renderPanel(panel: Panel): TemplateResult {
     const title = PANEL_TITLES[panel];
-    const subject = this.source?.name ?? this.cell?.id() ?? "";
+    const subject = panel === "access"
+      ? this.cell?.space() ?? ""
+      : this.source?.name ?? this.cell?.id() ?? "";
     return html`
       <div class="backdrop dimmed" @click="${() => this.close()}"></div>
       <div
@@ -1460,7 +1681,9 @@ export class CFPieceMenu extends BaseElement {
         </div>
         ${panel === "source" ? this.#renderSourceTabs() : nothing}
         <div class="panel-body">
-          ${panel === "data"
+          ${panel === "access"
+            ? this.#renderSpaceAccess()
+            : panel === "data"
             ? this.#renderData()
             : panel === "actions"
             ? this.#renderActions()
@@ -1479,6 +1702,169 @@ export class CFPieceMenu extends BaseElement {
             : this.#renderOrigin(this.source)}
         </div>
       </div>
+    `;
+  }
+
+  #renderSpaceAccess(): TemplateResult {
+    if (this.spaceAccess === undefined) {
+      return this.accessError
+        ? html`
+          <p class="error">
+            Could not read this space's access rights: ${this.accessError}
+          </p>
+        `
+        : html`
+          <p>Reading access rights…</p>
+        `;
+    }
+    const access = this.spaceAccess;
+    const entries = Object.entries(access.acl).sort(([left], [right]) => {
+      if (left === "*") return -1;
+      if (right === "*") return 1;
+      return left.localeCompare(right);
+    });
+    return html`
+      <p class="access-summary">
+        ${access.canEdit
+          ? "You can change these rights because you have OWNER access."
+          : "You can view these rights. Only a space owner can change them."}
+      </p>
+      <table class="access-table">
+        <thead>
+          <tr>
+            <th scope="col">Identity</th>
+            <th scope="col">Access</th>
+            ${access.canEdit
+              ? html`
+                <th scope="col">Actions</th>
+              `
+              : nothing}
+          </tr>
+        </thead>
+        <tbody>
+          ${entries.length === 0
+            ? html`
+              <tr>
+                <td colspan="${access.canEdit ? 3 : 2}">No ACL entries.</td>
+              </tr>
+            `
+            : entries.map(([user, capability]) =>
+              this.#renderSpaceAccessEntry(access, user, capability)
+            )}
+        </tbody>
+      </table>
+      ${this.accessError
+        ? html`
+          <p class="error">Could not change access rights: ${this
+            .accessError}</p>
+        `
+        : nothing} ${access.canEdit
+        ? html`
+          <form
+            class="access-add-form"
+            test-id="space-access-add-form"
+            @submit="${this.#addSpaceAccessEntry}"
+          >
+            <input
+              class="access-input"
+              aria-label="Identity DID or wildcard"
+              placeholder="did:key:... or *"
+              .value="${this.newAccessUser}"
+              ?disabled="${this.accessActionPending}"
+              @input="${this.#onNewAccessUser}"
+            />
+            <select
+              class="access-select"
+              aria-label="Access level for new entry"
+              ?disabled="${this.accessActionPending}"
+              @change="${this.#onNewAccessCapability}"
+            >
+              ${this.#renderCapabilityOptions(this.newAccessCapability)}
+            </select>
+            <button
+              class="access-add"
+              type="submit"
+              test-id="space-access-add"
+              ?disabled="${this.accessActionPending ||
+                this.newAccessUser.trim().length === 0}"
+            >
+              Add
+            </button>
+          </form>
+        `
+        : nothing}
+      <p class="note">
+        READ can view the space. WRITE can also change its pieces. OWNER can also
+        change these access rights. The <code>*</code> entry applies to every
+        authenticated identity without a more specific entry.
+      </p>
+    `;
+  }
+
+  #renderSpaceAccessEntry(
+    access: SpaceAclView,
+    user: string,
+    capability: SpaceAclCapability,
+  ): TemplateResult {
+    return html`
+      <tr>
+        <td class="access-user">
+          ${user === "*" ? "Anyone (*)" : user}${user === access.principal
+            ? " (you)"
+            : ""}
+        </td>
+        <td>
+          ${access.canEdit
+            ? html`
+              <select
+                class="access-select"
+                aria-label="Access level for ${user}"
+                ?disabled="${this.accessActionPending}"
+                @change="${(event: Event) =>
+                  this.setSpaceAccessEntry(
+                    user,
+                    (event.currentTarget as HTMLSelectElement)
+                      .value as SpaceAclCapability,
+                  )}"
+              >
+                ${this.#renderCapabilityOptions(capability)}
+              </select>
+            `
+            : capability}
+        </td>
+        ${access.canEdit
+          ? html`
+            <td>
+              <div class="access-controls">
+                <button
+                  class="access-remove"
+                  type="button"
+                  aria-label="Remove ${user}"
+                  test-id="space-access-remove"
+                  ?disabled="${this.accessActionPending}"
+                  @click="${() => this.removeSpaceAccessEntry(user)}"
+                >
+                  Remove
+                </button>
+              </div>
+            </td>
+          `
+          : nothing}
+      </tr>
+    `;
+  }
+
+  #renderCapabilityOptions(selected: SpaceAclCapability): TemplateResult {
+    return html`
+      <option value="READ" .selected="${live(
+        selected === "READ",
+      )}">READ</option>
+      <option value="WRITE" .selected="${live(
+        selected === "WRITE",
+      )}">WRITE</option>
+      <option value="OWNER" .selected="${live(
+        selected === "OWNER",
+      )}">OWNER</option>
     `;
   }
 

@@ -5,6 +5,7 @@ import type {
   CellRef,
   PieceSourceView,
   RuntimeClient,
+  SpaceAclView,
 } from "@commonfabric/runtime-client";
 import {
   CFPieceMenu,
@@ -93,7 +94,58 @@ function clickTestId(menu: CFPieceMenu, testId: string): unknown {
   return handler();
 }
 
+/** Find a rendered event handler on the element identified by `marker`. */
+function eventHandler(
+  menu: CFPieceMenu,
+  marker: string,
+  eventName: string,
+): (event: Event) => unknown {
+  let handler: ((event: Event) => unknown) | undefined;
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    const template = node as {
+      strings?: readonly string[];
+      values?: unknown[];
+    };
+    if (!template.strings || !template.values) return;
+    const index = template.strings.findIndex((part) =>
+      part.includes(`@${eventName}="`)
+    );
+    if (
+      template.strings.join("").includes(marker) && index >= 0 &&
+      typeof template.values[index] === "function"
+    ) {
+      handler = template.values[index] as (event: Event) => unknown;
+    }
+    for (const child of template.values) visit(child);
+  };
+  visit((menu as unknown as { render(): unknown }).render());
+  if (!handler) {
+    throw new Error(`no ${eventName} handler found for ${marker}`);
+  }
+  return handler;
+}
+
 const SPACE = "did:key:z6Mk-piece-menu" as const;
+const OWNER = "did:key:z6Mk-piece-menu-owner" as const;
+const VIEWER = "did:key:z6Mk-piece-menu-viewer" as const;
+
+const OWNER_ACCESS: SpaceAclView = {
+  space: SPACE,
+  principal: OWNER,
+  acl: { [OWNER]: "OWNER", "*": "WRITE" },
+  canEdit: true,
+};
+
+const VIEWER_ACCESS: SpaceAclView = {
+  ...OWNER_ACCESS,
+  principal: VIEWER,
+  canEdit: false,
+};
 
 const SOURCE: PieceSourceView = {
   space: SPACE,
@@ -118,6 +170,9 @@ function pieceCell(
   {
     aborted = false,
     update = () => Promise.resolve({ source: SOURCE }),
+    getAccess = () => Promise.resolve(OWNER_ACCESS),
+    setAccess = () => Promise.resolve(OWNER_ACCESS),
+    removeAccess = () => Promise.resolve(OWNER_ACCESS),
   }: {
     aborted?: boolean | (() => boolean);
     update?: (
@@ -131,6 +186,16 @@ function pieceCell(
       confirmationToken?: string;
       executionWarning?: string;
     }>;
+    getAccess?: () => Promise<SpaceAclView>;
+    setAccess?: (
+      space: typeof SPACE,
+      user: string,
+      capability: "READ" | "WRITE" | "OWNER",
+    ) => Promise<SpaceAclView>;
+    removeAccess?: (
+      space: typeof SPACE,
+      user: string,
+    ) => Promise<SpaceAclView>;
   } = {},
 ): CellHandle {
   return {
@@ -139,6 +204,9 @@ function pieceCell(
     runtime: () => ({
       getPieceSource: read,
       updatePieceSource: update,
+      getSpaceAcl: getAccess,
+      setSpaceAclEntry: setAccess,
+      removeSpaceAclEntry: removeAccess,
       signal: {
         aborted: typeof aborted === "function" ? aborted() : aborted,
       },
@@ -233,6 +301,19 @@ describe("the menu a right-click opens", () => {
       expect(rendered).toContain(entry.label);
       expect(rendered).toContain(entry.testId);
     }
+    expect(rendered).toContain("menu-divider");
+    expect(rendered).toContain("Space access rights...");
+    expect(rendered).toContain("piece-menu-space-access");
+  });
+
+  it("places space access after the piece actions and divider", () => {
+    const rendered = shows(openMenu());
+    expect(rendered.indexOf("Actions")).toBeLessThan(
+      rendered.indexOf("menu-divider"),
+    );
+    expect(rendered.indexOf("menu-divider")).toBeLessThan(
+      rendered.indexOf("Space access rights..."),
+    );
   });
 
   it("shows nothing until it is opened, or once closed", () => {
@@ -299,7 +380,7 @@ describe("the menu a right-click opens", () => {
     expect(piece.has("data-cf-piece-menu-open")).toBe(false);
   });
 
-  it("removes the highlight when its overlay disconnects", () => {
+  it("closes and removes the highlight when its overlay disconnects", () => {
     const menu = newMenu();
     const piece = highlightProbe();
     menu.open({
@@ -312,6 +393,29 @@ describe("the menu a right-click opens", () => {
     menu.disconnectedCallback();
 
     expect(piece.has("data-cf-piece-menu-open")).toBe(false);
+    expect(shows(menu)).toBe("");
+  });
+
+  it("drops an access read that resolves after disconnect", async () => {
+    let resolveAccess!: (access: SpaceAclView) => void;
+    const menu = openMenu(pieceCell(undefined, {
+      getAccess: () =>
+        new Promise((resolve) => {
+          resolveAccess = resolve;
+        }),
+    }));
+    const read = menu.showPanel("access");
+    expect(shows(menu)).toContain("Reading access rights");
+
+    menu.disconnectedCallback();
+    resolveAccess(OWNER_ACCESS);
+    await read;
+
+    expect(shows(menu)).toBe("");
+    expect(
+      (menu as unknown as { spaceAccess: SpaceAclView | undefined })
+        .spaceAccess,
+    ).toBeUndefined();
   });
 
   it("draws a clipped fixed highlight over a nested pattern root", () => {
@@ -388,6 +492,237 @@ describe("the menu a right-click opens", () => {
     const rendered = shows(menu);
     expect(rendered).toContain("Stop following source");
     expect(rendered).toContain("piece-menu-detach-source");
+  });
+});
+
+describe("the space access panel", () => {
+  it("shows the ACL without editing controls to a non-owner", async () => {
+    const menu = openMenu(pieceCell(undefined, {
+      getAccess: () => Promise.resolve(VIEWER_ACCESS),
+    }));
+
+    await menu.showPanel("access");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Space access rights");
+    expect(rendered).toContain(OWNER);
+    expect(rendered).toContain("Anyone (*)");
+    expect(rendered).toContain("Only a space owner can change them");
+    expect(rendered).not.toContain("space-access-add-form");
+    expect(rendered).not.toContain("space-access-remove");
+  });
+
+  it("shows ACL editing controls to an owner", async () => {
+    const menu = openMenu();
+
+    await menu.showPanel("access");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("you have OWNER access");
+    expect(rendered).toContain("space-access-add-form");
+    expect(rendered).toContain("space-access-remove");
+    expect(rendered).toContain(`${OWNER} (you)`);
+  });
+
+  it("updates the rendered ACL after setting and removing entries", async () => {
+    const reader = "did:key:z6Mk-piece-menu-reader";
+    const mutations: unknown[] = [];
+    const withReader: SpaceAclView = {
+      ...OWNER_ACCESS,
+      acl: { ...OWNER_ACCESS.acl, [reader]: "READ" },
+    };
+    const menu = openMenu(pieceCell(undefined, {
+      setAccess: (space, user, capability) => {
+        mutations.push({ kind: "set", space, user, capability });
+        return Promise.resolve(withReader);
+      },
+      removeAccess: (space, user) => {
+        mutations.push({ kind: "remove", space, user });
+        return Promise.resolve(OWNER_ACCESS);
+      },
+    }));
+    await menu.showPanel("access");
+
+    await menu.setSpaceAccessEntry(reader, "READ");
+    expect(shows(menu)).toContain(reader);
+    await menu.removeSpaceAccessEntry(reader);
+    expect(shows(menu)).not.toContain(reader);
+    expect(mutations).toEqual([
+      { kind: "set", space: SPACE, user: reader, capability: "READ" },
+      { kind: "remove", space: SPACE, user: reader },
+    ]);
+  });
+
+  it("submits a new ACL entry from the rendered form", async () => {
+    const reader = "did:key:z6Mk-piece-menu-form-reader";
+    const mutations: unknown[] = [];
+    const menu = openMenu(pieceCell(undefined, {
+      setAccess: (space, user, capability) => {
+        mutations.push({ space, user, capability });
+        return Promise.resolve({
+          ...OWNER_ACCESS,
+          acl: { ...OWNER_ACCESS.acl, [user]: capability },
+        });
+      },
+    }));
+    await menu.showPanel("access");
+
+    eventHandler(menu, "Identity DID or wildcard", "input")({
+      currentTarget: { value: ` ${reader} ` },
+    } as unknown as Event);
+    eventHandler(menu, "Access level for new entry", "change")({
+      currentTarget: { value: "WRITE" },
+    } as unknown as Event);
+    let prevented = false;
+    eventHandler(menu, 'test-id="space-access-add-form"', "submit")({
+      preventDefault: () => {
+        prevented = true;
+      },
+    } as unknown as Event);
+    await Promise.resolve();
+
+    expect(prevented).toBe(true);
+    expect(mutations).toEqual([
+      { space: SPACE, user: reader, capability: "WRITE" },
+    ]);
+    expect(shows(menu)).toContain(reader);
+    expect(
+      (menu as unknown as { newAccessUser: string }).newAccessUser,
+    ).toBe("");
+  });
+
+  it("reports access reads and mutations that fail", async () => {
+    const readFailure = openMenu(pieceCell(undefined, {
+      getAccess: () => Promise.reject(new Error("ACL read denied")),
+    }));
+    await readFailure.showPanel("access");
+    expect(shows(readFailure)).toContain("ACL read denied");
+
+    const mutationFailure = openMenu(pieceCell(undefined, {
+      setAccess: () => Promise.reject(new Error("ACL write denied")),
+      removeAccess: () => Promise.reject("ACL removal denied"),
+    }));
+    await mutationFailure.showPanel("access");
+    await mutationFailure.setSpaceAccessEntry("did:key:reader", "READ");
+    expect(shows(mutationFailure)).toContain("ACL write denied");
+    await mutationFailure.removeSpaceAccessEntry("did:key:reader");
+    expect(shows(mutationFailure)).toContain("ACL removal denied");
+  });
+
+  it("ignores cancelled ACL reads and mutations", async () => {
+    const menu = openMenu(pieceCell(undefined, {
+      aborted: true,
+      getAccess: () => Promise.reject(new Error("cancelled read")),
+      setAccess: () => Promise.reject(new Error("cancelled set")),
+      removeAccess: () => Promise.reject(new Error("cancelled removal")),
+    }));
+
+    await menu.showPanel("access");
+    await menu.setSpaceAccessEntry("did:key:reader", "READ");
+    await menu.removeSpaceAccessEntry("did:key:reader");
+
+    expect(shows(menu)).not.toContain("cancelled");
+  });
+
+  it("drops ACL mutation results after another piece opens", async () => {
+    let resolveSet!: (access: SpaceAclView) => void;
+    let resolveRemoval!: (access: SpaceAclView) => void;
+    const menu = openMenu(pieceCell(undefined, {
+      setAccess: () =>
+        new Promise((resolve) => {
+          resolveSet = resolve;
+        }),
+    }));
+    await menu.showPanel("access");
+
+    const staleSet = menu.setSpaceAccessEntry("did:key:stale", "READ");
+    menu.open({ cell: pieceCell(), x: 0, y: 0 });
+    resolveSet({
+      ...OWNER_ACCESS,
+      acl: { ...OWNER_ACCESS.acl, "did:key:stale": "READ" },
+    });
+    await staleSet;
+    expect(
+      (menu as unknown as { spaceAccess: SpaceAclView | undefined })
+        .spaceAccess,
+    ).toBeUndefined();
+
+    const removalMenu = openMenu(pieceCell(undefined, {
+      removeAccess: () =>
+        new Promise((resolve) => {
+          resolveRemoval = resolve;
+        }),
+    }));
+    await removalMenu.showPanel("access");
+    const staleRemoval = removalMenu.removeSpaceAccessEntry(OWNER);
+    removalMenu.open({ cell: pieceCell(), x: 0, y: 0 });
+    resolveRemoval({ ...OWNER_ACCESS, acl: {} });
+    await staleRemoval;
+    expect(
+      (removalMenu as unknown as {
+        spaceAccess: SpaceAclView | undefined;
+      }).spaceAccess,
+    ).toBeUndefined();
+  });
+
+  it("does not overlap ACL mutations or accept an empty identity", async () => {
+    let resolveSet!: (access: SpaceAclView) => void;
+    let sets = 0;
+    let removals = 0;
+    const menu = openMenu(pieceCell(undefined, {
+      setAccess: () => {
+        sets++;
+        return new Promise((resolve) => {
+          resolveSet = resolve;
+        });
+      },
+      removeAccess: () => {
+        removals++;
+        return Promise.resolve(OWNER_ACCESS);
+      },
+    }));
+    await menu.showPanel("access");
+
+    await menu.setSpaceAccessEntry("   ", "READ");
+    const pending = menu.setSpaceAccessEntry("did:key:first", "READ");
+    await menu.setSpaceAccessEntry("did:key:second", "WRITE");
+    await menu.removeSpaceAccessEntry(OWNER);
+    expect(sets).toBe(1);
+    expect(removals).toBe(0);
+
+    resolveSet(OWNER_ACCESS);
+    await pending;
+    await menu.removeSpaceAccessEntry(OWNER);
+    expect(removals).toBe(1);
+
+    menu.close();
+    await menu.setSpaceAccessEntry("did:key:no-piece", "READ");
+    await menu.removeSpaceAccessEntry(OWNER);
+    expect(sets).toBe(1);
+    expect(removals).toBe(1);
+  });
+
+  it("shows an empty ACL and consistently orders the wildcard", async () => {
+    const empty = openMenu(pieceCell(undefined, {
+      getAccess: () => Promise.resolve({ ...OWNER_ACCESS, acl: {} }),
+    }));
+    await empty.showPanel("access");
+    expect(shows(empty)).toContain("No ACL entries");
+
+    const wildcardFirst = openMenu(pieceCell(undefined, {
+      getAccess: () =>
+        Promise.resolve({
+          ...OWNER_ACCESS,
+          acl: { [OWNER]: "OWNER", "*": "WRITE" },
+        }),
+    }));
+    await wildcardFirst.showPanel("access");
+    const rendered = shows(wildcardFirst);
+    expect(rendered).toContain("Anyone (*)");
+    expect(rendered).toContain(OWNER);
+    expect(rendered.indexOf("Anyone (*)")).toBeLessThan(
+      rendered.indexOf(OWNER),
+    );
   });
 });
 

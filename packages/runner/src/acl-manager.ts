@@ -48,21 +48,24 @@ export class ACLManager {
     return cloneIfNecessary(aclData) as ACL;
   }
 
-  async set(user: ACLUser, capability: Capability): Promise<void> {
+  async set(user: ACLUser, capability: Capability): Promise<ACL> {
     await this.get();
     // Initialization authority is enforced by the memory server. This lets a
     // space identity or service DID create the first concrete OWNER through
     // the management API while an ordinary public-compatibility principal is
     // still rejected server-side.
-    await this.#write((acl) => ({ ...(acl ?? {}), [user]: capability }));
+    return await this.#write((acl) => ({
+      ...(acl ?? {}),
+      [user]: capability,
+    }));
   }
 
-  async remove(user: ACLUser): Promise<void> {
+  async remove(user: ACLUser): Promise<ACL> {
     const acl = await this.get();
     if (acl === null) {
       throw new Error("No ACL initialized for space.");
     }
-    await this.#write((current) => {
+    return await this.#write((current) => {
       if (current === null) {
         throw new Error("No ACL initialized for space.");
       }
@@ -71,7 +74,7 @@ export class ACLManager {
     });
   }
 
-  async #write(mutate: (current: ACL | null) => ACL): Promise<void> {
+  async #write(mutate: (current: ACL | null) => ACL): Promise<ACL> {
     // The memory server requires an ACL mutation to be a single whole-document
     // `set` on `of:<space>`, rejecting anything else with "ACL mutations must
     // replace the space-scoped ACL document". Writing through the value
@@ -99,6 +102,7 @@ export class ACLManager {
         | { readonly value?: unknown }
         | undefined;
       const current = this.#validateStoredACL(envelope?.value);
+      const next = mutate(current);
       // Spread the stored envelope rather than writing a bare `{ value }`: a
       // whole-document write replaces every sibling field, so constructing the
       // envelope from scratch would silently drop `["cfc"]` (the persisted
@@ -107,8 +111,9 @@ export class ACLManager {
       // way to erase a label on every grant.
       tx.writeOrThrow(address, {
         ...(envelope ?? {}),
-        value: mutate(current),
+        value: next,
       } as FabricValue);
+      return next;
     });
     if (result.error) {
       const error = new Error(result.error.message, { cause: result.error });
@@ -117,6 +122,7 @@ export class ACLManager {
     }
     await this.#runtime.idle();
     await this.#runtime.storageManager.synced();
+    return result.ok;
   }
 
   #getCell(): Cell<unknown> {

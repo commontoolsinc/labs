@@ -159,6 +159,14 @@ menu. The menu reads and changes the piece through
 `RuntimeClient.getPieceSource()` and `RuntimeClient.updatePieceSource()` on the
 runtime the piece already runs in.
 
+After the piece-specific entries, a divider separates **Space access rights...**.
+The dialog reads the target space's ACL through `RuntimeClient.getSpaceAcl()`.
+Every principal that can read the space sees the entries. A principal whose
+effective ACL capability is `OWNER` also gets controls backed by
+`RuntimeClient.setSpaceAclEntry()` and `RuntimeClient.removeSpaceAclEntry()`.
+The runtime uses `ACLManager` for these mutations, so the memory server remains
+the authority that accepts owner changes and preserves a concrete owner.
+
 Calling `RuntimeClient.createPage()` with an HTTP or HTTPS `URL` creates a
 followed piece. The runtime records the canonical URL and retained initial
 source in one creation transaction. Calling it with a source string or
