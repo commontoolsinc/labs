@@ -1267,6 +1267,87 @@ Deno.test("benchmark: a red run's measurements still reach the trend", async () 
   );
 });
 
+Deno.test("benchmark: a regression above the floor moves the trend", async () => {
+  // Twenty-four daily runs of one benchmark whose fastest sample never moves
+  // while its 75th percentile steps up by 45% halfway through: the shape of a
+  // change that leaves the best case alone and makes some fraction of the runs
+  // slower, such as a path that starts missing a cache. The trend reads the
+  // rise. Comparing fastest samples would read it as flat, because the floor is
+  // exactly where it was.
+  const at = (d: number) => SAMPLED_BASE - (23 - d) * DAY;
+  const artifacts: Api["artifacts"] = {};
+  const zips: Api["zips"] = {};
+  const runs: GhRun[] = [];
+  for (let d = 0; d <= 23; d++) {
+    const id = 9_040 + d;
+    runs.push(ghRun(id, at(d)));
+    artifacts[id] = [{ id: id * 10, name: "bench-results", expired: false }];
+    const slow = d >= 12;
+    zips[id * 10] = await benchZip(
+      report([
+        bench("packages/a/x.bench.ts", null, "b", {
+          min: 1e6,
+          avg: slow ? 1.3e6 : 1.05e6,
+          max: slow ? 2.2e6 : 1.3e6,
+          p75: slow ? 1.6e6 : 1.1e6,
+          p99: slow ? 2e6 : 1.2e6,
+          p995: slow ? 2.1e6 : 1.25e6,
+          p999: slow ? 2.15e6 : 1.28e6,
+        } as Timings),
+      ]),
+    );
+  }
+  await withApi(
+    { pages: { 1: [...runs].reverse() }, artifacts, zips },
+    async () => {
+      const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      assertEquals(v.status, "warn");
+      assertStringIncludes(v.value ?? "", "▲45%"); // the whole of the p75 step
+    },
+  );
+});
+
+Deno.test("benchmark: a stalled sample does not move the trend", async () => {
+  // Twenty-four daily runs of one benchmark whose 75th percentile never moves,
+  // so nothing about the code being measured changed over the window. From the
+  // halfway point each run also carries one stalled sample, which shows up as a
+  // far larger maximum and drags the reported average up by 40% — the shape a
+  // stalled runner leaves in an artifact. A handful of stalled samples cannot
+  // reach the 75th percentile, so the trend reads flat. Comparing averages
+  // would read a 40% step that no commit caused.
+  const at = (d: number) => SAMPLED_BASE - (23 - d) * DAY;
+  const artifacts: Api["artifacts"] = {};
+  const zips: Api["zips"] = {};
+  const runs: GhRun[] = [];
+  for (let d = 0; d <= 23; d++) {
+    const id = 9_000 + d;
+    runs.push(ghRun(id, at(d)));
+    artifacts[id] = [{ id: id * 10, name: "bench-results", expired: false }];
+    const stalled = d >= 12;
+    zips[id * 10] = await benchZip(
+      report([
+        bench("packages/a/x.bench.ts", null, "b", {
+          min: 1e6,
+          avg: stalled ? 1.4e6 : 1e6,
+          max: stalled ? 40e6 : 1.2e6,
+          p75: 1.1e6,
+          p99: 1.15e6,
+          p995: 1.18e6,
+          p999: 1.19e6,
+        } as Timings),
+      ]),
+    );
+  }
+  await withApi(
+    { pages: { 1: [...runs].reverse() }, artifacts, zips },
+    async () => {
+      const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      assertEquals(v.status, "good");
+      assertStringIncludes(v.value ?? "", "flat");
+    },
+  );
+});
+
 Deno.test("benchmark: a run still in flight is not sampled", async () => {
   // A conclusion of null is not a colour, it is an absence: the run has not
   // finished and has no artifact to read. Only completed runs are sampled.
@@ -2822,17 +2903,23 @@ Deno.test("benchmark collection retains enough runs for the shortest history win
 });
 
 Deno.test("/bench: the measurement selector changes what is plotted", async () => {
-  const p50 = rows(await page("?stat=p50"));
-  assertEquals(p50.find((r) => r.name === "hot/steep")?.value, "10ms"); // the mean, half the p99
-  // A benchmark that reported only an average reads the same at every percentile.
-  assertEquals(p50.find((r) => r.name === "flat")?.value, "2.5ms");
+  const mean = rows(await page("?stat=mean"));
+  assertEquals(mean.find((r) => r.name === "hot/steep")?.value, "10ms"); // the mean, half the p99
+  // A benchmark that reported only an average reads the same at every measurement.
+  assertEquals(mean.find((r) => r.name === "flat")?.value, "2.5ms");
   assertEquals(
     rows(await page("?stat=p0")).find((r) => r.name === "flat")?.value,
     "2.5ms",
   );
   assertStringIncludes(
-    await page("?stat=p50"),
-    "<title>Benchmarks — p50</title>",
+    await page("?stat=mean"),
+    "<title>Benchmarks — mean</title>",
+  );
+  // The mean column was once labelled p50, so a link saved under that name still
+  // opens it rather than falling back to the default.
+  assertEquals(
+    rows(await page("?stat=p50")).find((r) => r.name === "hot/steep")?.value,
+    "10ms",
   );
   // An unknown measurement falls back to the default rather than blanking the page.
   assertStringIncludes(
