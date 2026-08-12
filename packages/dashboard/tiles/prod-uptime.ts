@@ -1,15 +1,19 @@
 /**
  * Checks that production is up, with a synthetic round trip to the estuary and
- * rapids servers and a DNS lookup for the company hosts they depend on or run
- * beside. Each health request goes to /_health on the configured origin.
- * Successful health-check times stay visible in the healthy and warning
- * states, a red state shows only the hosts that are not good, and a DNS-only
- * host that resolves stays out of the body.
+ * rapids servers and a name or reachability check for the company hosts they
+ * depend on or run beside. Each health request goes to /_health on the
+ * configured origin. Successful health-check times stay visible in the healthy
+ * and warning states, a red state shows only the hosts that are not good, and
+ * a host that answers stays out of the body.
  *
  * Both servers are on the tailnet. PROD_PROXY routes the health requests
- * through a proxy when the dashboard cannot reach the tailnet directly. The
- * DNS result reports whether the dashboard host resolves an A or AAAA record
- * itself.
+ * through a proxy when the dashboard cannot reach the tailnet directly.
+ * Tailnet names live in Tailscale's MagicDNS, which the resolver of a
+ * dashboard behind such a proxy does not see, so tailnet hosts are checked
+ * through the proxy instead: a host with a health endpoint by its /_health
+ * request, and a host without one by a SOCKS5 connect that leaves the name for
+ * the proxy to resolve. Every other host is checked with an A and AAAA lookup
+ * from the dashboard itself.
  */
 
 import { escapeHtml } from "../lib.ts";
@@ -18,6 +22,17 @@ import type { Status, Tile, TileView } from "../types.ts";
 const HEALTH_PATH = "/_health";
 const WARN_LATENCY_MS = 275;
 const BAD_LATENCY_MS = 500;
+const TAILNET_SUFFIX = ".ts.net";
+// Each connect probe opens and closes a connection the far host records in its
+// own logs, so a probed host is revisited far less often than the tile refreshes
+// and keeps its last answer in between.
+const PROBE_INTERVAL_MS = 3_600_000;
+const SOCKS5_VERSION = 5;
+const SOCKS5_NO_AUTHENTICATION = 0;
+const SOCKS5_CONNECT = 1;
+const SOCKS5_DOMAIN_NAME = 3;
+const SOCKS5_SUCCEEDED = 0;
+const SOCKS5_DEFAULT_PORT = 1080;
 const STATUS_DOT: Record<Status, string> = {
   good: "green",
   warn: "amber",
@@ -40,11 +55,22 @@ type ResolveDns = (
   recordType: "A" | "AAAA",
 ) => Promise<readonly string[]>;
 
+/** The part of a TCP connection the SOCKS5 exchange below uses. */
+export interface ProxyStream {
+  read(buffer: Uint8Array): Promise<number | null>;
+  write(buffer: Uint8Array): Promise<number>;
+  close(): void;
+}
+type OpenProxyStream = (
+  options: Deno.ConnectOptions,
+) => Promise<ProxyStream>;
+
 interface Target {
   name: string;
   origin?: string;
   href?: string;
   hostname: string;
+  port: number;
   health: HealthTargetName | null;
 }
 
@@ -61,13 +87,15 @@ interface Check {
 interface TargetResult {
   target: Target;
   http: Check;
-  dns: Check;
+  reach: Check;
   status: Status;
 }
 
 let createHttpClient: CreateHttpClient = Deno.createHttpClient;
 let resolveDns: ResolveDns = (query, recordType) =>
   Deno.resolveDns(query, recordType);
+let openProxyStream: OpenProxyStream = Deno.connect;
+const probed = new Map<string, { at: number; check: Check }>();
 
 export function setProdUptimeHttpClientFactoryForTest(
   factory: CreateHttpClient,
@@ -89,7 +117,19 @@ export function setProdUptimeDnsResolverForTest(
   };
 }
 
-function optionsForProxy(proxy: string): HttpClientOptions {
+export function setProdUptimeProxyStreamOpenerForTest(
+  opener: OpenProxyStream,
+): () => void {
+  const previous = openProxyStream;
+  openProxyStream = opener;
+  probed.clear();
+  return () => {
+    openProxyStream = previous;
+    probed.clear();
+  };
+}
+
+function proxyUrl(proxy: string): URL {
   let url: URL;
   try {
     url = new URL(proxy);
@@ -100,14 +140,29 @@ function optionsForProxy(proxy: string): HttpClientOptions {
   if (url.username !== "" || url.password !== "") {
     throw new TypeError("PROD_PROXY URL must not contain credentials");
   }
-  if (url.protocol === "socks5:" || url.protocol === "socks5h:") {
-    return { proxy: { transport: "socks5", url: proxy } };
+  if (!isSocks5(url) && url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new TypeError(`unsupported PROD_PROXY URL scheme: ${url.protocol}`);
   }
-  if (url.protocol === "http:" || url.protocol === "https:") {
-    return { proxy: { url: proxy } };
-  }
+  return url;
+}
 
-  throw new TypeError(`unsupported PROD_PROXY URL scheme: ${url.protocol}`);
+function optionsForProxy(url: URL, proxy: string): HttpClientOptions {
+  return isSocks5(url)
+    ? { proxy: { transport: "socks5", url: proxy } }
+    : { proxy: { url: proxy } };
+}
+
+function isSocks5(url: URL): boolean {
+  return url.protocol === "socks5:" || url.protocol === "socks5h:";
+}
+
+function isTailnetName(hostname: string): boolean {
+  return hostname.endsWith(TAILNET_SUFFIX);
+}
+
+function portOf(url: URL): number {
+  if (url.port !== "") return Number(url.port);
+  return url.protocol === "http:" ? 80 : 443;
 }
 
 function healthTarget(name: HealthTargetName, value: string): Target {
@@ -117,13 +172,25 @@ function healthTarget(name: HealthTargetName, value: string): Target {
     origin: url.origin,
     href: url.origin,
     hostname: url.hostname,
+    port: portOf(url),
     health: name,
   };
 }
 
-function dnsTarget(name: string, value: string, href?: string): Target {
+function hostTarget(
+  name: string,
+  value: string,
+  port: number,
+  href?: string,
+): Target {
   const url = new URL(value.includes("://") ? value : `https://${value}`);
-  return { name, hostname: url.hostname, href, health: null };
+  return {
+    name,
+    hostname: url.hostname,
+    port: url.port === "" ? port : Number(url.port),
+    href,
+    health: null,
+  };
 }
 
 function worstStatus(statuses: readonly Status[]): Status {
@@ -135,7 +202,7 @@ function worstStatus(statuses: readonly Status[]): Status {
 }
 
 function worstHeadline(results: readonly TargetResult[]): string | undefined {
-  const candidates = results.flatMap((result) => [result.http, result.dns])
+  const candidates = results.flatMap((result) => [result.http, result.reach])
     .filter((check) => check.headline !== undefined);
   candidates.sort((a, b) =>
     STATUS_RANK[b.status] - STATUS_RANK[a.status] ||
@@ -143,6 +210,117 @@ function worstHeadline(results: readonly TargetResult[]): string | undefined {
     (b.headline?.magnitude ?? 0) - (a.headline?.magnitude ?? 0)
   );
   return candidates[0]?.headline?.text;
+}
+
+async function writeAll(
+  stream: ProxyStream,
+  bytes: Uint8Array,
+): Promise<void> {
+  let written = 0;
+  while (written < bytes.length) {
+    written += await stream.write(bytes.subarray(written));
+  }
+}
+
+async function readExactly(
+  stream: ProxyStream,
+  count: number,
+): Promise<Uint8Array> {
+  const bytes = new Uint8Array(count);
+  let filled = 0;
+  while (filled < count) {
+    const read = await stream.read(bytes.subarray(filled));
+    if (read === null) throw new Error("the proxy closed the connection");
+    filled += read;
+  }
+  return bytes;
+}
+
+// Ask a SOCKS5 proxy to open a connection to a host by name, which leaves both
+// the lookup and the dial to the proxy. Tailscale answers with one failure code
+// for a name it cannot resolve and for a host it cannot reach, so this reports
+// the pair of them together.
+async function reachesThroughSocks5(
+  proxy: URL,
+  hostname: string,
+  port: number,
+): Promise<boolean> {
+  const name = new TextEncoder().encode(hostname);
+  if (name.length > 255) return false;
+  const stream = await openProxyStream({
+    hostname: proxy.hostname,
+    port: proxy.port === "" ? SOCKS5_DEFAULT_PORT : Number(proxy.port),
+  });
+  try {
+    await writeAll(
+      stream,
+      new Uint8Array([SOCKS5_VERSION, 1, SOCKS5_NO_AUTHENTICATION]),
+    );
+    const greeting = await readExactly(stream, 2);
+    if (
+      greeting[0] !== SOCKS5_VERSION ||
+      greeting[1] !== SOCKS5_NO_AUTHENTICATION
+    ) {
+      return false;
+    }
+
+    const request = new Uint8Array(7 + name.length);
+    request.set([
+      SOCKS5_VERSION,
+      SOCKS5_CONNECT,
+      0,
+      SOCKS5_DOMAIN_NAME,
+      name.length,
+    ]);
+    request.set(name, 5);
+    request[5 + name.length] = port >> 8;
+    request[6 + name.length] = port & 0xff;
+    await writeAll(stream, request);
+
+    const reply = await readExactly(stream, 2);
+    return reply[0] === SOCKS5_VERSION && reply[1] === SOCKS5_SUCCEEDED;
+  } finally {
+    stream.close();
+  }
+}
+
+async function checkReach(
+  target: Target,
+  proxy: URL | undefined,
+): Promise<Check> {
+  if (proxy === undefined || !isTailnetName(target.hostname)) {
+    return checkDns(target.hostname);
+  }
+  // The health request travels the same proxy and covers the same ground.
+  if (target.health !== null) return { status: "good", detail: "" };
+  if (!isSocks5(proxy)) {
+    return {
+      status: "unknown",
+      detail: "no proxy route",
+      headline: { text: "no proxy route", priority: 3, magnitude: 0 },
+    };
+  }
+
+  const key = `${proxy.protocol}//${proxy.host}|${target.hostname}:${target.port}`;
+  const now = Date.now();
+  const previous = probed.get(key);
+  if (previous !== undefined && now - previous.at < PROBE_INTERVAL_MS) {
+    return previous.check;
+  }
+
+  let reached = false;
+  try {
+    reached = await reachesThroughSocks5(proxy, target.hostname, target.port);
+  } catch {
+    // An exchange that breaks down reads the same as a connection refused.
+  }
+  const check: Check = reached ? { status: "good", detail: "" } : {
+    status: "bad",
+    detail: "unreachable",
+    headline: { text: "unreachable", priority: 3, magnitude: 0 },
+  };
+  probed.set(key, { at: now, check });
+  return check;
 }
 
 async function checkDns(hostname: string): Promise<Check> {
@@ -225,9 +403,8 @@ async function checkHttp(
 
 function resultRow(result: TargetResult): string {
   const target = result.target;
-  const details = [result.http.detail, result.dns.detail].filter(Boolean).join(
-    " · ",
-  );
+  const details = [result.http.detail, result.reach.detail].filter(Boolean)
+    .join(" · ");
   const content =
     `<span style="display:inline-flex;align-items:center;gap:6px;font-weight:600"><span class="dot ${
       STATUS_DOT[result.status]
@@ -276,53 +453,61 @@ export const prodUptime: Tile = {
         "rapids",
         ctx.env("RAPIDS_URL") ?? "https://rapids.saga-castor.ts.net",
       ),
-      dnsTarget(
+      hostTarget(
         "bastion",
         ctx.env("BASTION_HOST") ?? "bastion.saga-castor.ts.net",
+        22,
       ),
-      dnsTarget(
+      hostTarget(
         "prod shell",
         "production.commontools.dev",
+        443,
         "https://production.commontools.dev",
       ),
-      dnsTarget(
+      hostTarget(
         "stage shell",
         "staging.commontools.dev",
+        443,
         "https://staging.commontools.dev",
       ),
-      dnsTarget(
+      hostTarget(
         "LLM",
         "llm.stage.commontools.dev",
+        443,
         "https://llm.stage.commontools.dev",
       ),
-      dnsTarget(
+      hostTarget(
         "sandbox",
         "sandbox.stage.commontools.dev",
+        443,
         "https://sandbox.stage.commontools.dev",
       ),
     ];
     const proxy = ctx.env("PROD_PROXY");
+    let parsedProxy: URL | undefined;
     let client: Deno.HttpClient | undefined;
     let invalidProxy = false;
     try {
-      client = proxy === undefined
-        ? undefined
-        : createHttpClient(optionsForProxy(proxy));
+      if (proxy !== undefined) {
+        parsedProxy = proxyUrl(proxy);
+        client = createHttpClient(optionsForProxy(parsedProxy, proxy));
+      }
     } catch {
+      parsedProxy = undefined;
       invalidProxy = true;
     }
 
     try {
       const results = await Promise.all(targets.map(async (target) => {
-        const [http, dns] = await Promise.all([
+        const [http, reach] = await Promise.all([
           checkHttp(target, client, invalidProxy),
-          checkDns(target.hostname),
+          checkReach(target, parsedProxy),
         ]);
         return {
           target,
           http,
-          dns,
-          status: worstStatus([http.status, dns.status]),
+          reach,
+          status: worstStatus([http.status, reach.status]),
         };
       }));
       return view(results);

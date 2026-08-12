@@ -1,5 +1,5 @@
-// prod-uptime tests use canned HTTP and DNS replies. No test reaches the
-// network.
+// prod-uptime tests use canned HTTP, DNS and SOCKS5 replies. No test reaches
+// the network.
 import {
   assert,
   assertEquals,
@@ -7,10 +7,12 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
+import type { ProxyStream } from "./prod-uptime.ts";
 import {
   prodUptime,
   setProdUptimeDnsResolverForTest,
   setProdUptimeHttpClientFactoryForTest,
+  setProdUptimeProxyStreamOpenerForTest,
 } from "./prod-uptime.ts";
 
 type ProxyFetchInit = RequestInit & { client?: Deno.HttpClient };
@@ -25,6 +27,62 @@ const DEFAULT_HOSTS = [
   "llm.stage.commontools.dev",
   "sandbox.stage.commontools.dev",
 ];
+const PUBLIC_HOSTS = DEFAULT_HOSTS.filter((host) => !host.endsWith(".ts.net"));
+
+// What a fake SOCKS5 proxy was asked for, so a test can check the exchange.
+interface Socks5Log {
+  opened: string[];
+  commands: number[];
+  addressTypes: number[];
+  connects: string[];
+  closed: number;
+}
+
+function socks5Log(): Socks5Log {
+  return {
+    opened: [],
+    commands: [],
+    addressTypes: [],
+    connects: [],
+    closed: 0,
+  };
+}
+
+// A proxy that greets with "no authentication" and answers every CONNECT with
+// one reply code.
+function fakeSocks5(reply: number, log: Socks5Log) {
+  return (options: Deno.ConnectOptions): Promise<ProxyStream> => {
+    log.opened.push(`${options.hostname}:${options.port}`);
+    const pending: number[] = [];
+    return Promise.resolve({
+      write(bytes: Uint8Array) {
+        if (bytes.length === 3) {
+          pending.push(5, 0);
+        } else {
+          const nameLength = bytes[4];
+          const name = new TextDecoder().decode(
+            bytes.subarray(5, 5 + nameLength),
+          );
+          const target = (bytes[5 + nameLength] << 8) | bytes[6 + nameLength];
+          log.commands.push(bytes[1]);
+          log.addressTypes.push(bytes[3]);
+          log.connects.push(`${name}:${target}`);
+          pending.push(5, reply, 0, 1, 0, 0, 0, 0, 0, 0);
+        }
+        return Promise.resolve(bytes.length);
+      },
+      read(buffer: Uint8Array) {
+        if (pending.length === 0) return Promise.resolve(null);
+        const count = Math.min(buffer.length, pending.length);
+        buffer.set(pending.splice(0, count));
+        return Promise.resolve(count);
+      },
+      close() {
+        log.closed++;
+      },
+    });
+  };
+}
 
 function ctx(env: Record<string, string> = {}): Ctx {
   return {
@@ -32,6 +90,12 @@ function ctx(env: Record<string, string> = {}): Ctx {
     runsFor: () => Promise.resolve([]),
     env: (key) => env[key],
   };
+}
+
+// Building a real proxied client asks for network permission the unit tests do
+// not grant, so tests that set PROD_PROXY hand back a stand-in.
+function stubProxyClient(): () => void {
+  return setProdUptimeHttpClientFactoryForTest(() => fakeClient());
 }
 
 function fakeClient(onClose: () => void = () => {}): Deno.HttpClient {
@@ -51,7 +115,9 @@ function stub(
   dns: (hostname: string, recordType: "A" | "AAAA") => DnsReply = () => [
     "100.64.0.1",
   ],
+  opener = fakeSocks5(0, socks5Log()),
 ) {
+  const restoreOpener = setProdUptimeProxyStreamOpenerForTest(opener);
   const realFetch = globalThis.fetch;
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     try {
@@ -71,6 +137,7 @@ function stub(
   return () => {
     globalThis.fetch = realFetch;
     restoreDns();
+    restoreOpener();
   };
 }
 
@@ -340,6 +407,7 @@ Deno.test("prod uptime: one proxy client serves both health checks and closes af
     return client;
   });
   let fetched = 0;
+  const log = socks5Log();
   const restore = stub((_url, init) => {
     fetched++;
     assertEquals(init?.client, client);
@@ -351,7 +419,7 @@ Deno.test("prod uptime: one proxy client serves both health checks and closes af
       }),
       { status: 200 },
     );
-  });
+  }, undefined, fakeSocks5(0, log));
   try {
     const view = await prodUptime.collect(
       ctx({ PROD_PROXY: "socks5h://127.0.0.1:1055" }),
@@ -366,6 +434,272 @@ Deno.test("prod uptime: one proxy client serves both health checks and closes af
     assertEquals(fetched, 2);
     assertEquals(cancelled, 2);
     assertEquals(closed, 1);
+    assertEquals(log.opened, ["127.0.0.1:1055"]);
+    assertEquals(log.connects, ["bastion.saga-castor.ts.net:22"]);
+    assertEquals(log.closed, 1);
+  } finally {
+    restore();
+    restoreClient();
+  }
+});
+
+Deno.test("prod uptime: a proxy replaces the local resolver for tailnet names", async () => {
+  const resolved: string[] = [];
+  const log = socks5Log();
+  const restoreClient = stubProxyClient();
+  const restore = stub(undefined, (hostname) => {
+    resolved.push(hostname);
+    return ["34.54.221.196"];
+  }, fakeSocks5(0, log));
+  try {
+    const view = await prodUptime.collect(
+      ctx({ PROD_PROXY: "socks5h://127.0.0.1:1055" }),
+    );
+    assertEquals([...new Set(resolved)].sort(), [...PUBLIC_HOSTS].sort());
+    assertEquals(log.commands, [1]);
+    assertEquals(log.addressTypes, [3]);
+    assertEquals(log.connects, ["bastion.saga-castor.ts.net:22"]);
+    assertEquals(view.status, "good");
+    assertEquals(view.value, "7/7 hosts up");
+    assert(!(view.extra ?? "").includes("bastion"));
+  } finally {
+    restore();
+    restoreClient();
+  }
+});
+
+Deno.test("prod uptime: a tailnet host the proxy cannot reach is a red exception", async () => {
+  for (const reply of [1, 2, 4, 5]) {
+    const restoreClient = stubProxyClient();
+    const restore = stub(undefined, undefined, fakeSocks5(reply, socks5Log()));
+    try {
+      const view = await prodUptime.collect(
+        ctx({ PROD_PROXY: "socks5h://127.0.0.1:1055" }),
+      );
+      assertEquals(view.status, "bad");
+      assertEquals(view.value, "unreachable");
+      assertStringIncludes(view.extra ?? "", "bastion");
+      assertStringIncludes(view.extra ?? "", "unreachable");
+      assert(!(view.extra ?? "").includes("DNS"));
+    } finally {
+      restore();
+      restoreClient();
+    }
+  }
+});
+
+Deno.test("prod uptime: a proxy that will not talk leaves the host unreachable", async () => {
+  for (
+    const opener of [
+      () => Promise.reject(new Deno.errors.ConnectionRefused("refused")),
+      // A proxy that hangs up before the greeting.
+      () =>
+        Promise.resolve<ProxyStream>({
+          read: () => Promise.resolve(null),
+          write: (bytes: Uint8Array) => Promise.resolve(bytes.length),
+          close: () => {},
+        }),
+      // A proxy that demands a login this client cannot offer.
+      () => {
+        const pending = [5, 2];
+        return Promise.resolve<ProxyStream>({
+          read: (buffer: Uint8Array) => {
+            const count = Math.min(buffer.length, pending.length);
+            buffer.set(pending.splice(0, count));
+            return Promise.resolve(count);
+          },
+          write: (bytes: Uint8Array) => Promise.resolve(bytes.length),
+          close: () => {},
+        });
+      },
+    ]
+  ) {
+    const restoreClient = stubProxyClient();
+    const restore = stub(undefined, undefined, opener);
+    try {
+      const view = await prodUptime.collect(
+        ctx({ PROD_PROXY: "socks5h://127.0.0.1:1055" }),
+      );
+      assertEquals(view.status, "bad");
+      assertEquals(view.value, "unreachable");
+      assertStringIncludes(view.extra ?? "", "bastion");
+    } finally {
+      restore();
+      restoreClient();
+    }
+  }
+});
+
+Deno.test("prod uptime: the SOCKS5 exchange survives short reads and writes", async () => {
+  const connects: string[] = [];
+  const restoreClient = stubProxyClient();
+  // A proxy that accepts and returns exactly one byte at a time.
+  const restore = stub(undefined, undefined, () => {
+    const pending: number[] = [];
+    const received: number[] = [];
+    let greeted = false;
+    return Promise.resolve<ProxyStream>({
+      write(bytes: Uint8Array) {
+        received.push(bytes[0]);
+        if (!greeted) {
+          if (received.length === 3) {
+            pending.push(5, 0);
+            received.length = 0;
+            greeted = true;
+          }
+        } else if (
+          received.length >= 5 && received.length === 7 + received[4]
+        ) {
+          const nameLength = received[4];
+          const name = new TextDecoder().decode(
+            new Uint8Array(received.slice(5, 5 + nameLength)),
+          );
+          const port = (received[5 + nameLength] << 8) |
+            received[6 + nameLength];
+          connects.push(`${name}:${port}`);
+          pending.push(5, 0, 0, 1, 0, 0, 0, 0, 0, 0);
+        }
+        return Promise.resolve(1);
+      },
+      read(buffer: Uint8Array) {
+        const next = pending.shift();
+        if (next === undefined) return Promise.resolve(null);
+        buffer[0] = next;
+        return Promise.resolve(1);
+      },
+      close() {},
+    });
+  });
+  try {
+    const view = await prodUptime.collect(
+      ctx({ PROD_PROXY: "socks5h://127.0.0.1:1055" }),
+    );
+    assertEquals(connects, ["bastion.saga-castor.ts.net:22"]);
+    assertEquals(view.status, "good");
+    assertEquals(view.value, "7/7 hosts up");
+  } finally {
+    restore();
+    restoreClient();
+  }
+});
+
+Deno.test("prod uptime: a probed host is revisited hourly, not every collection", async () => {
+  const log = socks5Log();
+  const restoreClient = stubProxyClient();
+  const restore = stub(undefined, undefined, fakeSocks5(0, log));
+  const realNow = Date.now;
+  let clock = 0;
+  Date.now = () => clock;
+  try {
+    const proxied = ctx({ PROD_PROXY: "socks5h://127.0.0.1:1055" });
+    await prodUptime.collect(proxied);
+    assertEquals(log.connects.length, 1);
+
+    await prodUptime.collect(proxied);
+    clock = 3_599_999;
+    await prodUptime.collect(proxied);
+    assertEquals(log.connects.length, 1);
+
+    clock = 3_600_000;
+    const view = await prodUptime.collect(proxied);
+    assertEquals(log.connects.length, 2);
+    assertEquals(view.status, "good");
+  } finally {
+    Date.now = realNow;
+    restore();
+    restoreClient();
+  }
+});
+
+Deno.test("prod uptime: a remembered probe keeps its verdict between visits", async () => {
+  const log = socks5Log();
+  const restoreClient = stubProxyClient();
+  const restore = stub(undefined, undefined, fakeSocks5(1, log));
+  try {
+    const proxied = ctx({ PROD_PROXY: "socks5h://127.0.0.1:1055" });
+    const first = await prodUptime.collect(proxied);
+    const second = await prodUptime.collect(proxied);
+    assertEquals(log.connects.length, 1);
+    assertEquals(second.status, "bad");
+    assertEquals(second.value, "unreachable");
+    assertEquals(second.extra, first.extra);
+  } finally {
+    restore();
+    restoreClient();
+  }
+});
+
+Deno.test("prod uptime: a name too long for the protocol is unreachable", async () => {
+  const log = socks5Log();
+  const restoreClient = stubProxyClient();
+  const restore = stub(undefined, undefined, fakeSocks5(0, log));
+  try {
+    const view = await prodUptime.collect(ctx({
+      PROD_PROXY: "socks5h://127.0.0.1:1055",
+      BASTION_HOST: `${"jump.".repeat(52)}saga-castor.ts.net`,
+    }));
+    assertEquals(log.opened, []);
+    assertEquals(view.status, "bad");
+    assertEquals(view.value, "unreachable");
+    assertStringIncludes(view.extra ?? "", "bastion");
+  } finally {
+    restore();
+    restoreClient();
+  }
+});
+
+Deno.test("prod uptime: a health URL carrying a port keeps it", async () => {
+  const fetched: string[] = [];
+  const restore = stub((url) => {
+    fetched.push(url);
+    return new Response(null, { status: 200 });
+  });
+  try {
+    const view = await prodUptime.collect(ctx({
+      ESTUARY_URL: "https://prod.example.test:8443",
+      RAPIDS_URL: "http://stage.example.test",
+    }));
+    assertEquals(fetched.sort(), [
+      "http://stage.example.test/_health",
+      "https://prod.example.test:8443/_health",
+    ]);
+    assertEquals(view.status, "good");
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("prod uptime: BASTION_HOST names the port the proxy connects to", async () => {
+  const log = socks5Log();
+  const restoreClient = stubProxyClient();
+  const restore = stub(undefined, undefined, fakeSocks5(0, log));
+  try {
+    const view = await prodUptime.collect(ctx({
+      PROD_PROXY: "socks5://proxy.example.test",
+      BASTION_HOST: "ssh://jump.saga-castor.ts.net:2222",
+    }));
+    assertEquals(log.opened, ["proxy.example.test:1080"]);
+    assertEquals(log.connects, ["jump.saga-castor.ts.net:2222"]);
+    assertEquals(view.status, "good");
+  } finally {
+    restore();
+    restoreClient();
+  }
+});
+
+Deno.test("prod uptime: an HTTP proxy leaves a tailnet-only host gray", async () => {
+  const log = socks5Log();
+  const restoreClient = stubProxyClient();
+  const restore = stub(undefined, undefined, fakeSocks5(0, log));
+  try {
+    const view = await prodUptime.collect(
+      ctx({ PROD_PROXY: "http://127.0.0.1:8080" }),
+    );
+    assertEquals(log.opened, []);
+    assertEquals(view.status, "unknown");
+    assertEquals(view.value, "no proxy route");
+    assertStringIncludes(view.extra ?? "", "bastion");
+    assertStringIncludes(view.extra ?? "", "no proxy route");
   } finally {
     restore();
     restoreClient();
@@ -374,14 +708,16 @@ Deno.test("prod uptime: one proxy client serves both health checks and closes af
 
 Deno.test("prod uptime: accepted proxy schemes configure one shared client", async () => {
   for (
-    const [proxy, expected] of [
+    const [proxy, expected, expectedStatus] of [
       [
         "http://127.0.0.1:8080",
         { proxy: { url: "http://127.0.0.1:8080" } },
+        "unknown",
       ],
       [
         "https://127.0.0.1:8080",
         { proxy: { url: "https://127.0.0.1:8080" } },
+        "unknown",
       ],
       [
         "socks5://127.0.0.1:1055",
@@ -391,6 +727,7 @@ Deno.test("prod uptime: accepted proxy schemes configure one shared client", asy
             url: "socks5://127.0.0.1:1055",
           },
         },
+        "good",
       ],
     ] as const
   ) {
@@ -407,7 +744,7 @@ Deno.test("prod uptime: accepted proxy schemes configure one shared client", asy
     });
     try {
       const view = await prodUptime.collect(ctx({ PROD_PROXY: proxy }));
-      assertEquals(view.status, "good");
+      assertEquals(view.status, expectedStatus);
       assertEquals(options, expected);
       assertEquals(closed, 1);
     } finally {
