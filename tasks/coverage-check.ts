@@ -1282,7 +1282,7 @@ function coverageProfileArtifacts(artifacts: Artifact[]): Artifact[] {
  * uploads its own LCOV; the profile-file branch reads the raw V8 profiles a
  * run predating that upload carries.
  */
-async function combinedLcovFromArtifacts(
+export async function combinedLcovFromArtifacts(
   coverageArtifacts: Artifact[],
   coverageArtifactsDir?: string,
 ): Promise<{ lcov: string; sourceDescription: string }> {

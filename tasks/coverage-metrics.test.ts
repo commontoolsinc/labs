@@ -373,6 +373,7 @@ Deno.test("collectRegressedLines names lines the baseline covered and this run d
   try {
     const flakyPath = path.join(rootDir, "packages/example/src/flaky.ts");
     const steadyPath = path.join(rootDir, "packages/example/src/steady.ts");
+    const debtPath = path.join(rootDir, "packages/example/src/debt.ts");
     await Deno.mkdir(path.dirname(flakyPath), { recursive: true });
     await Deno.writeTextFile(
       flakyPath,
@@ -383,6 +384,8 @@ Deno.test("collectRegressedLines names lines the baseline covered and this run d
       ].join("\n"),
     );
     await Deno.writeTextFile(steadyPath, "export const steady = 1;\n");
+    // Uncovered in both runs: existing debt, not something this run lost.
+    await Deno.writeTextFile(debtPath, "export const owed = 1;\n");
 
     const report = (flakyHits: string[]) =>
       [
@@ -391,6 +394,9 @@ Deno.test("collectRegressedLines names lines the baseline covered and this run d
         "end_of_record",
         `SF:${steadyPath}`,
         "DA:1,1",
+        "end_of_record",
+        `SF:${debtPath}`,
+        "DA:1,0",
         "end_of_record",
       ].join("\n");
 
@@ -403,6 +409,8 @@ Deno.test("collectRegressedLines names lines the baseline covered and this run d
       changedFiles: new Set(),
     });
 
+    // Only the line that moved: the file uncovered in both runs is not one
+    // this run regressed, and the file covered in both has nothing to report.
     assertEquals(regressed, [{
       relativePath: "packages/example/src/flaky.ts",
       metricGroup: "packages/example",

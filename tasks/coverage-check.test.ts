@@ -22,6 +22,7 @@ import {
   buildCoverageRows,
   buildUnattributedRegressionBody,
   collectCurrentCacheStates,
+  combinedLcovFromArtifacts,
   copyCoverageArtifactFiles,
   currentWorkflowRunFromEvent,
   fetchAncestorRanks,
@@ -2279,4 +2280,48 @@ Deno.test("baselineLcovForRun gives up when the artifact listing fails", async (
   });
 
   assertEquals(lcov, null);
+});
+
+Deno.test("combinedLcovFromArtifacts joins every artifact's uploaded report", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "coverage-artifacts-" });
+  try {
+    const artifacts = [
+      { id: 11, name: "coverage-profile-runner-1" },
+      { id: 12, name: "coverage-profile-workspace-7" },
+    ].map((artifact) => ({ ...artifact, size_in_bytes: 64, expired: false }));
+
+    for (const [index, artifact] of artifacts.entries()) {
+      const artifactDir = path.join(dir, artifact.name);
+      await Deno.mkdir(artifactDir, { recursive: true });
+      await Deno.writeTextFile(
+        path.join(artifactDir, `${artifact.name}.lcov`),
+        [
+          `SF:/home/runner/work/labs/labs/packages/example/src/mod-${index}.ts`,
+          "DA:1,1",
+          "end_of_record",
+        ].join("\n"),
+      );
+    }
+
+    const { lcov, sourceDescription } = await combinedLcovFromArtifacts(
+      artifacts,
+      dir,
+    );
+
+    assertStringIncludes(lcov, "packages/example/src/mod-0.ts");
+    assertStringIncludes(lcov, "packages/example/src/mod-1.ts");
+    assertEquals(sourceDescription, "2 LCOV report files");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("combinedLcovFromArtifacts refuses to report on no artifacts at all", async () => {
+  // An empty set is not an empty report: it means the run uploaded nothing,
+  // which must be an error rather than a workspace scored as uncovered.
+  await assertRejects(
+    () => combinedLcovFromArtifacts([]),
+    Error,
+    "contained no profile or LCOV files",
+  );
 });
