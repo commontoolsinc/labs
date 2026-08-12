@@ -50,13 +50,17 @@ five weeks before anyone noticed.
 
 The `cf-bench/no-lost-diagnostics` lint rule (`tasks/lint-bench-console.ts`,
 registered in the root `deno.jsonc`) holds both halves of that in place, so a
-plain `deno lint` catches either mistake. In a `*.bench.ts` file it rejects a
-`console` method that writes to stdout wherever it appears, and any `console`
-call at all that runs in a benchmark body — written there, or in a helper of
-the same file that a body calls, however many hops away. A helper in another
-module is past what one file's syntax tree shows, so write those with
-`Deno.stderr` too. The runner's benchmarks do that through `benchDiagnostic()`
-in `packages/runner/test/bench-diagnostics.ts`.
+plain `deno lint` catches either mistake. In a `*.bench.ts` file, outside a
+benchmark body, the four `console` methods that write to stderr — `error`,
+`warn`, `trace`, `assert` — are the whole of what it allows, and every other one
+is rejected. Naming the permitted four rather than enumerating the ones that
+write to stdout is what makes that safe: a method nobody thought of, `dirxml`
+say, is rejected rather than let through. Inside a benchmark body it rejects any
+`console` call at all, written there or in a helper of the same file that a body
+calls, however many hops away. A helper in another module is past what one
+file's syntax tree shows, so write those with `Deno.stderr` too. The runner's
+benchmarks do that through `benchDiagnostic()` in
+`packages/runner/test/bench-diagnostics.ts`.
 
 **Read a transaction's journal before it commits.** A benchmark that reports
 what it wrote reads `tx.journal.novelty(space)`, and a transaction holds that

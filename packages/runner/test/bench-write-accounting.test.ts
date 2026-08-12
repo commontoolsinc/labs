@@ -14,6 +14,7 @@ import type { IAttestation } from "../src/storage/interface.ts";
 import {
   accountNovelty,
   addAccounts,
+  jsonBytes,
   noveltyWrites,
 } from "./bench-write-accounting.ts";
 
@@ -100,6 +101,23 @@ describe("bench-write-accounting", () => {
     });
   });
 
+  describe("jsonBytes", () => {
+    it("counts an ASCII value at one byte per character", () => {
+      expect(jsonBytes({ a: 1 })).toBe('{"a":1}'.length);
+    });
+
+    it("counts a character that encodes wide at its encoded width", () => {
+      // "é" is one UTF-16 code unit and two UTF-8 bytes; "🍩" is two code
+      // units and four bytes. The quotes account for the other two.
+      expect(jsonBytes("é")).toBe(4);
+      expect(jsonBytes("🍩")).toBe(6);
+    });
+
+    it("returns zero for a value JSON does not represent", () => {
+      expect(jsonBytes(undefined)).toBe(0);
+    });
+  });
+
   describe("accountNovelty", () => {
     it("counts the JSON bytes of each top-level write", () => {
       expect(accountNovelty([
@@ -113,6 +131,11 @@ describe("bench-write-accounting", () => {
     it("counts a removed slot as no bytes", () => {
       expect(accountNovelty([attestation("a", ["value", "n"], undefined)]))
         .toEqual({ docs: 1, bytes: 0 });
+    });
+
+    it("counts a wide character at its encoded width", () => {
+      expect(accountNovelty([attestation("a", ["value", "s"], "é")]))
+        .toEqual({ docs: 1, bytes: 4 });
     });
 
     it("returns nothing for a transaction that wrote nothing", () => {
