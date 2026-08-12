@@ -6,6 +6,7 @@
  * though bob (also flagged) saw none.
  */
 import {
+  assert,
   computed,
   multiUserTest,
   pattern,
@@ -23,7 +24,7 @@ export const alice = pattern(() => {
     log.set([...current, `${value.get()} at run #${current.length + 1}`]);
   });
 
-  const hasEntries = computed(() => log.get().length > 0);
+  const hasEntries = assert(() => log.get().length > 0);
   return {
     [TESTS]: [{ assertion: hasEntries }],
     expectNonIdempotent: true,
@@ -32,7 +33,7 @@ export const alice = pattern(() => {
 
 export const bob = pattern(() => {
   const value = new Writable("bob");
-  const ok = computed(() => value.get() === "bob");
+  const ok = assert(() => value.get() === "bob");
   return {
     [TESTS]: [{ assertion: ok }],
     expectNonIdempotent: true,
