@@ -1242,8 +1242,9 @@ export async function runTestPattern(
     // Validate it's an array
     if (!Array.isArray(testSteps)) {
       throw new Error(
-        "Test pattern must return { [TESTS]: TestStep[] }. Got: " +
-          toCompactDebugString(typeof testSteps),
+        "Test pattern must return its steps under the reserved [TESTS] key " +
+          "(import TESTS from commonfabric); a plain `tests` field is no " +
+          "longer read. Got: " + toCompactDebugString(typeof testSteps),
       );
     }
 
