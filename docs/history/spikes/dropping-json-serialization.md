@@ -1,7 +1,7 @@
 ---
 status: historical
 created: 2026-08-01
-archived: 2026-08-04
+archived: 2026-08-01
 reason: "Research spike: findings from removing `toJSON()` and load-bearing `JSON.stringify` from the runtime."
 ---
 
