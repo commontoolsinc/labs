@@ -24,6 +24,7 @@ import {
 import NoteMd from "./note-md.tsx";
 import {
   type MentionablePiece,
+  type MentionRefMap,
   type MinimalPiece,
   type NotebookPiece,
   type NoteInput,
@@ -61,6 +62,10 @@ export interface NoteOutput extends NotePiece {
   summary: string;
   mentioned: MentionablePiece[] | Default<[]>;
   backlinks: MentionablePiece[];
+  /** Where this note's `[Label][key]` mentions point. */
+  references:
+    | Record<string, { modifiedTitle: boolean }>
+    | Default<Record<never, never>>;
   isHidden: boolean;
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
@@ -598,6 +603,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       summary,
       mentioned,
       backlinks,
+      references: references!,
       isHidden,
       parentNotebook,
       grep: patternTool(grepPattern, { content }),

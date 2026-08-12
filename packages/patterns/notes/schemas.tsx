@@ -105,8 +105,14 @@ export interface NoteInput {
    * The note's mentions in reference form. Stored beside `content` because it
    * has to stay in lockstep with it: the text carries keys, and this is what
    * says where they point.
+   *
+   * The `Default<{}>` has to match the one `NoteOutput` declares. A map
+   * published in the result under a different default than its input carries
+   * cannot be materialized, and a consumer that captures the note then gets
+   * `undefined` for the whole capture — which stops any action bound to it
+   * from running, rather than merely leaving this field empty.
    */
-  references?: Writable<MentionRefMap | Default<Record<never, never>>>;
+  references?: Writable<MentionRefMap | Default<{}>>;
 }
 
 export interface NotebookInput {
@@ -123,9 +129,13 @@ export interface NotebookInput {
  * carrying it in the text is the user's own wording rather than the
  * destination's name.
  *
- * `destination` is typed `unknown` because a mention may address any piece,
- * and a read of it comes back undefined for that reason. An address is taken
- * from the path to it instead, which survives where the value does not.
+ * `destination` is typed `unknown` because a mention may address any piece.
+ * A read of the VALUE comes back undefined for that reason, which is why an
+ * address is taken from the path to it instead — the path survives where the
+ * value does not. The editor writes the same field under a schema that reads
+ * it back as a cell (`asCell`,
+ * `packages/ui/src/v2/core/mention-refs.ts`): one stored link, read the way
+ * each side needs it.
  */
 export interface MentionRef {
   destination: unknown;

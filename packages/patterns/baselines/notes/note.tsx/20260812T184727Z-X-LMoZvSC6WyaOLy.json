@@ -253,7 +253,8 @@
         "asCell": [
           "cell"
         ],
-        "description": "The note's mentions in reference form. Stored beside `content` because it\nhas to stay in lockstep with it: the text carries keys, and this is what\nsays where they point."
+        "default": {},
+        "description": "The note's mentions in reference form. Stored beside `content` because it\nhas to stay in lockstep with it: the text carries keys, and this is what\nsays where they point.\n\nThe `Default<{}>` has to match the one `NoteOutput` declares. A map\npublished in the result under a different default than its input carries\ncannot be materialized, and a consumer that captures the note then gets\n`undefined` for the whole capture — which stops any action bound to it\nfrom running, rather than merely leaving this field empty."
       },
       "title": {
         "asCell": [
@@ -653,6 +654,22 @@
         "$ref": "#/$defs/AnonymousType_2",
         "description": "Parent notebook reference, null if not in a notebook"
       },
+      "references": {
+        "additionalProperties": {
+          "properties": {
+            "modifiedTitle": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "modifiedTitle"
+          ],
+          "type": "object"
+        },
+        "description": "Where this note's `[Label][key]` mentions point.",
+        "properties": {},
+        "type": "object"
+      },
       "setTitle": {
         "asCell": [
           "stream"
@@ -716,6 +733,7 @@
       "summary",
       "mentioned",
       "backlinks",
+      "references",
       "isHidden",
       "grep",
       "translate",

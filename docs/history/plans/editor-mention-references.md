@@ -189,12 +189,14 @@ reference form.
 - [x] `note.tsx` takes a `references` cell beside `content`, passes it to the
       editor, and threads it into `note-md`.
 
-**The map is note state, not part of `NoteOutput`.** Publishing it in the
-result breaks every consumer that captures a Note: `destination` is typed
-`unknown`, so a captured piece carrying the map materializes as undefined and
-an action bound to it stops running with `stream action argument is undefined`.
-Storing it beside `content` in the argument document gives it the same
-durability without putting an unknown-typed field in a public result.
+**The map is published in `NoteOutput`, and its default has to match the
+input's.** Declaring it in the result under a default the input does not carry
+— or under none — cannot be materialized, and a consumer that captures the
+note then gets `undefined` for the whole capture, which stops any action bound
+to it from running with `stream action argument is undefined`. The failure
+names a schema mismatch and looks like a problem with the unknown-typed
+`destination`; it is not, and typing that field does not fix it. Matching
+`Default<{}>` on both sides does.
 **`[FS]` is left alone, and that is a decision rather than an omission.** The
 appealing idea is to emit the map as the markdown reference-definition block it
 already resembles, so a projected note is self-contained standard markdown.
