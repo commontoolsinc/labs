@@ -113,6 +113,7 @@ cf piece call --piece <board> addTopic \
 {
   "invocation": "0f4c…",
   "status": "settled",
+  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" },
   "result": { "topic": { "$NAME": "Ship the thing", "…": "…" } }
 }
 ```
@@ -125,6 +126,19 @@ callers file concurrently.
 Anything the *pattern* resolved comes back too. A verb that stamps a write time
 or derives structured authorship from the event returns those in its record;
 the caller could not have computed them.
+
+The `receipt` is where that outcome lives: the address of the cell this
+handling wrote it to. Keep it and the result is re-readable without calling
+anything again —
+
+```bash
+cf piece get --piece <the receipt id>
+```
+
+— which is an ordinary read, so the verb's body does not run a second time.
+The address is known at commit rather than at readback, so it rides every
+envelope, including `--no-wait`'s. It is absent only where the runtime wrote no
+receipt to name.
 
 ### Asking for a smaller result
 
@@ -173,7 +187,8 @@ stranger, and a command's arguments are readable in a process listing where its
 environment is not. `--invocation-session <id>` overrides it for one call.
 
 The pair is what names an invocation. Replaying a settled id **from the session
-that chose it** returns the **original** result rather than re-executing:
+that chose it** hands back the **original** result, and nothing is written a
+second time:
 
 ```bash
 cf piece call --piece <topic> --invocation add-comment-1 \
@@ -187,6 +202,16 @@ cf piece call --piece <topic> --invocation add-comment-1 \
 
 That is the property an agent depends on when it retries a call whose response
 it never saw.
+
+**A receipt witnesses the commit, not the execution.** The replay above does run
+the handler body again; it then loses the race for the create-only receipt, so
+its commit is refused and no second comment is recorded. What it cannot undo is
+anything the body did *outside* that transaction: a verb that sends mail or
+spends a model call does it twice, and a write it made into another space
+commits before the receipt is contested and is not rolled back when the receipt
+is lost. So retry freely for a verb that only writes its own space, and prefer
+reading the `receipt` address for a verb that reaches beyond it — that collects
+the same outcome without running anything.
 
 That same id under a **different** session is a different invocation: it
 executes, and returns its own result. So two agents that pick the same word are
@@ -238,6 +263,25 @@ timing: readback → settled 72.8ms
 
 `--await` and `--no-wait` control whether the call waits for settlement and
 readback or exits once the commit is acknowledged.
+
+### Dispatching now, collecting later
+
+`--no-wait` returns at `"committed"`: the handler has run and its write is
+durable, and only the readback is skipped. The envelope still carries the
+`receipt`, so a detached call is a handle rather than a dead end —
+
+```json
+{
+  "invocation": "add-1",
+  "status": "committed",
+  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" }
+}
+```
+
+— and collecting the outcome later is `cf piece get --piece <the receipt id>`.
+Replaying the same id and session recovers it too, but that re-runs the handler
+body: a verb that sends mail or spends a model call does it again. Reading the
+address does not.
 
 ## Which results arrive, and when
 
@@ -333,6 +377,14 @@ one, so a chain of references annotates each hop exactly once. The walk stops at
 any non-plain object: a live runtime object reached through a result gets its
 own entry and nothing below it, because its properties belong to the runtime
 rather than to the result.
+
+`links` answers a different question from the envelope's `receipt`: `"/"` names
+whatever document backs the result **value**, which is the receipt only when the
+result is not itself a reference, while `receipt` always names the handling's
+own receipt and needs no flag to appear. Where the two describe the same thing
+they carry the same address — the receipt appears in `links` as `"/"`, or under
+the reserved bare `receipt` key when `"/"` had to name something else — so under
+`--show-links` the address is simply present twice.
 
 The links describe whatever result you were handed, so a projection composes
 with them: a path `--select` or `--schema` dropped simply gets no entry.

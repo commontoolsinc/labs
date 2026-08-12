@@ -386,7 +386,9 @@ Three cases follow from that:
 - **`--no-wait` refuses all three flags.** That mode exits once the commit is
   acknowledged and skips the receipt readback, so there is no result to shape.
   The refusal names the flags that need the readback, alongside `--show-links`
-  for the same reason.
+  for the same reason. What it still returns is the envelope's `receipt` — the
+  address of the cell holding the outcome, known at commit — so the shaping
+  flags apply to the `cf piece get` that collects it.
 - **`--show-links` composes with a projection, not with `--filter`.** Links are
   collected after the selection, over exactly the value the caller is holding: a
   projection leaves every surviving path where it was, so each address still

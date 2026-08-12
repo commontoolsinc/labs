@@ -341,8 +341,11 @@ export function exitPieceCallFailure(
   const exit = deps?.exit ?? Deno.exit;
   printError(error instanceof Error ? error.message : String(error));
   // Where the invocation stopped decides retry semantics: anything at or
-  // past "dispatched" retries SAFELY ONLY with this same id (same-id
-  // retries deduplicate; a fresh id would re-execute).
+  // past "dispatched" retries SAFELY ONLY with this same id. At-most-once
+  // is per COMMIT, not per execution: a same-id retry runs the handler
+  // body again and then loses the race for the receipt, so nothing
+  // commits twice but effects outside the transaction repeat. A fresh id
+  // loses nothing and commits a second time.
   printError(`invocation: ${invocationId} phase: ${phase}`);
   return exit(1);
 }
@@ -482,8 +485,10 @@ export function resolveInvocationIdentity(
  * Build the phase observer for a handler invocation. Its whole job is to put
  * the invocation id on stderr at the moment the event is about to dispatch —
  * BEFORE any network work — so a caller whose process dies past that line
- * still holds the exact id to retry with, and the retry deduplicates instead
- * of executing a second time. Announcing once matters: a caller scraping
+ * still holds the exact id to retry with. At-most-once is per COMMIT, not per
+ * execution: the retry runs the handler body again and loses the race for the
+ * receipt, so nothing commits twice while effects outside the transaction
+ * repeat. Announcing once matters: a caller scraping
  * stderr for its id should not have to decide which of several to trust.
  *
  * The id is half of what a retry names: it deduplicates only under the session
@@ -625,20 +630,35 @@ export function renderPieceCallOutcome(
     // Invocation JSON — settled, or stopped at "committed" under --no-wait —
     // prose stays on stderr via hint().
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
+    // The address the envelope published, when the runtime wrote a receipt.
+    // It leads the detached next steps because it collects the outcome
+    // without running the verb again.
+    const receiptId = result.invocation.receipt?.id;
     hintOut(
-      // The readback names its session through the environment rather than
-      // `--invocation-session`, because a session is what keeps an outcome's
-      // address out of reach of anyone who can guess a piece, a verb and an
-      // id — and an argument is readable in a process listing where an
-      // environment variable is not.
       opts.detached
-        ? cliText(`NEXT STEPS:
-  → Read the outcome: CF_INVOCATION_SESSION=${
-          opts.invocation?.session ?? "<session>"
-        } cf piece call --piece ${piece} --invocation ${
-          opts.invocation?.id ?? "<id>"
-        } ${callableName} ... (the commit is durable; a call naming this same pair deduplicates and returns the settled outcome)
-  → Verify state:     cf piece get --piece ${piece} <path> ...`)
+        ? cliText(
+          receiptId === undefined
+            // No receipt means receipts are not being written here, and that
+            // is exactly the configuration in which a same-id call does NOT
+            // deduplicate — it executes AND commits a second time. Offering
+            // the replay as a recovery would be offering a duplicate.
+            ? `NEXT STEPS:
+  → Nothing to collect: this handling wrote no receipt, so the outcome has no address and a call naming the same pair executes and commits AGAIN rather than deduplicating.
+  → Verify state:     cf piece get --piece ${piece} <path> ...`
+            // The replay names its session through the environment rather
+            // than `--invocation-session`, because a session is what keeps an
+            // outcome's address out of reach of anyone who can guess a piece,
+            // a verb and an id — and an argument is readable in a process
+            // listing where an environment variable is not.
+            : `NEXT STEPS:
+  → Read the outcome: cf piece get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
+  → Or replay it:     CF_INVOCATION_SESSION=${
+              opts.invocation?.session ?? "<session>"
+            } cf piece call --piece ${piece} --invocation ${
+              opts.invocation?.id ?? "<id>"
+            } ${callableName} ... (the commit is durable and the replay loses the race for the receipt, so nothing commits twice — but the handler body RUNS AGAIN, repeating effects outside its transaction, and any write it made into another space)
+  → Verify state:     cf piece get --piece ${piece} <path> ...`,
+        )
         : nextSteps,
     );
     return;
@@ -660,6 +680,11 @@ export function renderPieceCallOutcome(
  * `null`, which would be indistinguishable from a verb that returned null.
  * `links` appears only under --show-links: provenance beside the value,
  * never inline in it.
+ *
+ * `receipt` is the one key that does not depend on a readback or a flag: it
+ * is the address of the cell holding this outcome, known at commit, so it
+ * rides a `--no-wait` envelope as well as a settled one. It is absent only
+ * where the runtime wrote no receipt to address.
  */
 export function invocationJson(
   outcome: InvocationOutcome,
@@ -668,6 +693,7 @@ export function invocationJson(
     invocation: outcome.id,
     status: outcome.status,
     ...(outcome.deduplicated ? { deduplicated: true } : {}),
+    ...(outcome.receipt !== undefined ? { receipt: outcome.receipt } : {}),
     ...("result" in outcome && outcome.result !== undefined
       ? { result: outcome.result }
       : {}),
@@ -1838,17 +1864,20 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "Bound the settlement wait by a chosen patience, in seconds (before " +
       "the callable name). On expiry the exit is nonzero with the " +
       "invocation id and furthest phase on stderr; the invocation may not " +
-      "have executed or committed, and re-invoking under the same id and " +
-      "session is safe in every phase — it finishes the work or reads the " +
-      "outcome back.",
+      "have executed or committed. Re-invoking under the same id and " +
+      "session cannot commit twice — but it runs the handler body again, " +
+      "so effects outside the transaction repeat. An expiry is exactly the " +
+      "case where you cannot tell whether it committed.",
   )
   .option(
     "--no-wait",
     "Exit once this handling's commit is acknowledged (before the callable " +
       "name), skipping only the receipt readback: stdout reports status " +
-      '"committed", and a later call naming the same invocation session and ' +
-      "--invocation reads the outcome back. The handler still executes here " +
-      "and its commit is durable. Handler invocations only.",
+      '"committed" plus the receipt address, so `cf piece get --piece <that ' +
+      "id>` collects the outcome later without re-running the handler; a " +
+      "call naming the same session and --invocation recovers it too, but " +
+      "runs the handler body again. The handler still executes here and its " +
+      "commit is durable. Handler invocations only.",
   )
   .option(
     "--show-links",
@@ -1962,8 +1991,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
       console.error(message);
       observer.finish("failed");
       // Where the invocation stopped decides retry semantics: anything at or
-      // past "dispatched" retries SAFELY ONLY with this same id (same-id
-      // retries deduplicate; a fresh id would re-execute).
+      // past "dispatched" retries SAFELY ONLY with this same id. At-most-once
+      // is per COMMIT, not per execution: a same-id retry runs the handler
+      // body again and then loses the race for the receipt, so nothing
+      // commits twice but effects outside the transaction repeat. A fresh id
+      // loses nothing and commits a second time.
       console.error(`invocation: ${invocationId} phase: ${phase}`);
       if (error instanceof WaitBoundExpired) {
         // The caller's patience expired. The handler runs in this process,
