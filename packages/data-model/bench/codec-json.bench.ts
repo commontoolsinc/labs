@@ -213,7 +213,7 @@ const SPARSE = SPARSE_SIZES.map(
   (size) => [size, makeSparseArray(size)] as const,
 );
 const OBJECTS = SIZES.map((size) => [size, makeObject(size)] as const);
-const OMNIBUSES = [10, 1000].map((n) => [n, makeOmnibus(n)] as const);
+const OMNIBUSES = [10, 100, 1000].map((n) => [n, makeOmnibus(n)] as const);
 
 /** Encoded forms, for the decode direction. */
 const SINGLES_JSON = SINGLES.map(([n, v]) => [n, jsonFromValue(v)] as const);
