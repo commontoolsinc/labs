@@ -60,7 +60,8 @@ Every datum carries
 cryptographically verified provenance (who and what created it) and
 policies (where it may go, who may use it for what). Both travel with
 every copy, and anything derived from the datum inherits its policies.
-Viral policies are kind of like GPL on your data.
+The effect is that how your data may be used is structurally aligned
+with your interests, and stays aligned wherever the data travels.
 
 The inversion attaches policies to data rather than code for a reason:
 code is open-ended, inherently; a checker can only refuse what it cannot
