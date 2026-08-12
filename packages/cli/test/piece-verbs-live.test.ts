@@ -92,8 +92,9 @@ describe("listPieceCallables against a live piece", () => {
       );
 
       // The pattern declares exactly one verb. Every other name is data, and
-      // data is not callable — calling one is accepted and then dropped by the
-      // scheduler, which the caller never sees.
+      // data is not callable. Calling one does fail — `cf piece call` exits
+      // nonzero — but it fails UNDIAGNOSED, with no message naming the cause,
+      // which is #5689. What this test pins is the listing never offering it.
       expect(listing.verbs.map((verb) => verb.name)).toEqual(["add"]);
       expect(listing.verbs[0].kind).toBe("handler");
       // The verb's input schema is the event's, not the property's own.
