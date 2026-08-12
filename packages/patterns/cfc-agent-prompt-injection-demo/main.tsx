@@ -71,17 +71,19 @@ const USER_EMAIL_RECIPIENT = "john@example.org";
 const EVIL_EMAIL_RECIPIENT = "bob@evil.org";
 const HOSTILE_BRIEFING_TITLE = "Acme Atlas release briefing";
 const HOSTILE_BRIEFING_SOURCE = "https://partner.example.invalid/briefing";
-const DEFAULT_PARENT_MODEL = "gateway:z-ai/glm-5";
-const DEFAULT_SUB_AGENT_MODEL = "gateway:z-ai/glm-5";
+const DEFAULT_PARENT_MODEL = "gateway:z-ai/glm-5.2";
+const DEFAULT_SUB_AGENT_MODEL = "gateway:z-ai/glm-5.2";
+// The fallback list is shown when the model directory cannot be fetched, so
+// every entry here has to name a model the runtime registers.
 const FALLBACK_MODEL_ITEMS = [
   { label: DEFAULT_PARENT_MODEL, value: DEFAULT_PARENT_MODEL },
   {
-    label: "anthropic:claude-sonnet-4.6",
-    value: "anthropic:claude-sonnet-4.6",
+    label: "anthropic:claude-sonnet-4-6",
+    value: "anthropic:claude-sonnet-4-6",
   },
   {
-    label: "gateway:claude-sonnet-4-6",
-    value: "gateway:claude-sonnet-4-6",
+    label: "gateway:claude-sonnet-5",
+    value: "gateway:claude-sonnet-5",
   },
 ];
 const DEMO_PROMPT =
