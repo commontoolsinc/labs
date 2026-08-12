@@ -1,7 +1,8 @@
 # Lazy, schema-observing cell materialization
 
-Status: built end to end behind `lazyMaterialization`, off by default. Stage 6
-(graduation) is what remains.
+Status: built end to end and on by default behind `lazyMaterialization`. What
+remains is removing the flag and the eager path for lift arguments, plus the two
+pieces listed under Stages 3 and 5.
 
 `Cell.get()` materializes everything its schema selects, in one pass, before the
 reader touches any of it. A lift declaring a list of a thousand entries gets a
@@ -437,15 +438,14 @@ diffing and the scheduler's own reads keep eager semantics.
       reachable by `EXPERIMENTAL_LAZY_MATERIALIZATION` or
       `RuntimeOptions.experimental`.
 - [x] Landed default-off with both suites green.
-- [ ] Default-on. Every divergence that stood in the way is closed, and both
-      suites pass with the flag on; flipping the default is its own change.
-      Each divergence was a place a view answered from less than an eager read
-      had: the schema of the last link hop uncombined, a `default` read out of a
-      union branch an eager read never evaluates, an optional property refused
-      where an eager read drops it, and three reads that were answered without
-      being registered. None of them was the "argument refused for a missing
-      field" story the earlier note here guessed at — that disposition worked
-      from the start.
+- [x] Default-on, both suites green. Every divergence that stood in the way was
+      a place a view answered from less than an eager read had: the schema of
+      the last link hop uncombined, a `default` read out of a union branch an
+      eager read never evaluates, an optional property refused where an eager
+      read drops it, and three reads that were answered without being
+      registered. None of them was the "argument refused for a missing field"
+      story the earlier note here guessed at — that disposition worked from the
+      start.
 - [x] Read `.length` off a string. `.length` on a string output lowers to a link
       ending in that segment, and a string's `length` is not a stored path, so
       the store cannot serve the address the link resolves to. Eager traversal
