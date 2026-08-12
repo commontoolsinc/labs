@@ -24,10 +24,12 @@ const source = (
   entries: Array<[string, number]>,
   lagDays: number,
   color: string,
+  knownMonths?: string[],
 ) => ({
   spend: { byDay: new Map(entries) },
   color,
   lagDays,
+  ...(knownMonths ? { knownMonths: new Set(knownMonths) } : {}),
 });
 
 // Every polyline in the chart, as [x, y] point lists in drawing order.
@@ -94,5 +96,76 @@ describe("spend", () => {
     expect(firstTint.length).toBe(5);
     expect(secondTint.length).toBe(4);
     expect(secondTint[0][0]).toBe(firstTint[0][0]);
+  });
+
+  // A 45-day window opened on 5 January reaches back to 20 November, so a
+  // December nobody could read sits between two months that were read. The
+  // grid is 45 columns 5px apart: 20-30 November at columns 0-10, December at
+  // columns 11-41, and 1-3 January at columns 42-44.
+  const GAP_NOW = new Date("2026-01-05T09:00:00Z");
+  const NOVEMBER = run("2025-11-20", 11, 1);
+  const JANUARY = run("2026-01-01", 3, 2);
+
+  it("breaks a line across a month its source has no report for", () => {
+    const github = source(
+      [...NOVEMBER, ...JANUARY],
+      2,
+      "#58a6ff",
+      ["2025-11", "2026-01"],
+    );
+    const { chart, duration } = spendChart([github], GAP_NOW, "good");
+    expect(duration).toBe(45 * DAY);
+    const lines = polylines(chart);
+    // Two pieces of base line, then the bright trailing slice.
+    expect(lines.length).toBe(3);
+    const [november, january] = lines;
+    expect(november.length).toBe(11);
+    expect(november[november.length - 1][0]).toBe(50);
+    expect(january.length).toBe(3);
+    expect(january[0][0]).toBe(210);
+    expect(january[2][0]).toBe(220);
+    // Nothing is drawn over December at all.
+    const drawn = lines.flat().map(([x]) => x);
+    expect(drawn.filter((x) => x > 50 && x < 210)).toEqual([]);
+  });
+
+  it("charts a month that was read but had no spend as real zeros", () => {
+    const github = source(
+      [...NOVEMBER, ...JANUARY],
+      2,
+      "#58a6ff",
+      ["2025-11", "2025-12", "2026-01"],
+    );
+    const { chart } = spendChart([github], GAP_NOW, "good");
+    const lines = polylines(chart);
+    // One unbroken base line, then the bright trailing slice.
+    expect(lines.length).toBe(2);
+    expect(lines[0].length).toBe(45);
+    const december = lines[0].slice(11, 42).map(([, y]) => y);
+    expect(new Set(december).size).toBe(1);
+    expect(december[0]).toBeGreaterThan(lines[0][10][1]);
+  });
+
+  it("holds a highlight to the days its source reports on", () => {
+    const github = source(
+      [...NOVEMBER, ...JANUARY],
+      2,
+      "#58a6ff",
+      ["2025-11", "2026-01"],
+    );
+    const blacksmith = source(run("2025-11-20", 45, 2), 2, "#f59e0b");
+    const { chart } = spendChart([github, blacksmith], GAP_NOW, "good", 20);
+    const lines = polylines(chart);
+    // Two pieces of the holed base line, one whole base line, then a slice of
+    // each.
+    expect(lines.length).toBe(5);
+    const [, , , githubTint, blacksmithTint] = lines;
+    // The window opens at column 25, inside the hole. The unbroken line's
+    // slice starts there; the holed one picks up at its first reported day.
+    expect(blacksmithTint.length).toBe(20);
+    expect(blacksmithTint[0][0]).toBe(125);
+    expect(githubTint.length).toBe(3);
+    expect(githubTint[0][0]).toBe(210);
+    expect(githubTint[2][0]).toBe(blacksmithTint[19][0]);
   });
 });

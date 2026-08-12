@@ -55,6 +55,11 @@ interface DailySpend {
 interface GitHubDollarSpend extends DailySpend {
   kind: "dollars";
   budget: number;
+  /**
+   * The calendar months whose usage report was read, as "YYYY-MM". A month
+   * that could not be read is absent, and its days are unknown rather than $0.
+   */
+  months: Set<string>;
 }
 
 interface BlacksmithSpend extends DailySpend {
@@ -84,6 +89,9 @@ const actionsOf = (report: { usageItems?: UsageItem[] }): UsageItem[] =>
 
 const usagePath = (org: string, year: number, month: number) =>
   `organizations/${org}/settings/billing/usage?year=${year}&month=${month}`;
+
+const monthKey = (year: number, month0: number) =>
+  `${year}-${String(month0 + 1).padStart(2, "0")}`;
 
 export const GITHUB_LAG_DAYS = 2;
 const BLACKSMITH_LAG_DAYS = 1;
@@ -151,6 +159,7 @@ async function githubDollarSpend(
   );
   const byDay = new Map<string, number>();
   addGitHubDays(byDay, current);
+  const months = new Set<string>([monthKey(year, month0)]);
   let priorMonthDaily: number[] = [];
   let immediatePrior = true;
   let remaining = SPEND_HISTORY_DAYS - dayOfMonth;
@@ -170,6 +179,7 @@ async function githubDollarSpend(
       if (Array.isArray(previous.usageItems)) {
         const previousItems = actionsOf(previous);
         addGitHubDays(byDay, previousItems);
+        months.add(monthKey(previousYear, previousMonth));
         if (immediatePrior) {
           const previousSeries = calendarMonth(
             byDay,
@@ -221,6 +231,7 @@ async function githubDollarSpend(
       },
     ),
     budget,
+    months,
   };
 }
 
@@ -514,6 +525,7 @@ export const githubCiSpend: Tile = {
           color: GITHUB_COLOR,
           label: githubDollars ? usd(githubDollars.mtd) : undefined,
           lagDays: GITHUB_LAG_DAYS,
+          knownMonths: githubDollars?.months,
         },
         {
           spend: blacksmithValue,
