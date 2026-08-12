@@ -2821,6 +2821,21 @@ export type FetchJsonFunction = <T>(
  * parsed body is returned as `any` and never verified. Prefer fetchJson with
  * an explicit type argument where a type exists.
  */
+/**
+ * The cell a URL names, if it names one.
+ *
+ * Resolves with no `cell` when the URL addresses no cell — most URLs are web
+ * pages, and being told no is an answer rather than a failure. `hosts` names
+ * the hosts whose page URLs address cells; a page URL from anywhere else is a
+ * link to a web page.
+ */
+export type CellFromUrlFunction = (
+  params: FactoryInput<{
+    url: string;
+    hosts?: string[];
+  }>,
+) => Reactive<{ pending: boolean; cell?: ReadonlyCell<{ [NAME]: string }> }>;
+
 export type FetchJsonUncheckedFunction = (
   params: FactoryInput<{
     url: string;
