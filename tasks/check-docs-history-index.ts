@@ -17,13 +17,13 @@
 // finds. An entry may point at a directory, which covers every document
 // beneath it.
 //
-// Usage: deno run --allow-read ./tasks/check-docs-history-index.ts
+// Usage: deno run --allow-read ./tasks/check-docs-history-index.ts [root]
+// The root defaults to this repository's docs/history.
 
-import { dirname, fromFileUrl, join } from "@std/path";
+import { dirname, fromFileUrl, join, relative, SEPARATOR } from "@std/path";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 const HISTORY_DIR = "docs/history";
-const INDEX_PATH = `${HISTORY_DIR}/INDEX.md`;
 
 /** A link target as written in an entry, and the entry it came from. */
 export interface IndexEntry {
@@ -171,17 +171,18 @@ export function checkIndex(
 
 /** The lines a run prints, so that reporting is decided without printing. */
 export function report(
+  indexPath: string,
   problems: readonly IndexProblem[],
   entryCount: number,
   documentCount: number,
 ): string[] {
   if (problems.length === 0) {
     return [
-      `${INDEX_PATH}: ${entryCount} entries covering ${documentCount} documents.`,
+      `${indexPath}: ${entryCount} entries covering ${documentCount} documents.`,
     ];
   }
   return [
-    `${INDEX_PATH} needs fixing:`,
+    `${indexPath} needs fixing:`,
     "",
     ...problems.map((problem) => {
       const where = problem.lineNumber === undefined
@@ -223,17 +224,25 @@ export async function readTree(root: string): Promise<HistoryTree> {
   return { documents, paths };
 }
 
-async function main() {
-  const text = await Deno.readTextFile(join(REPO_ROOT, INDEX_PATH));
-  const tree = await readTree(join(REPO_ROOT, HISTORY_DIR));
+/** Checks the tree under `root`, whose index is `root/INDEX.md`. */
+export async function run(
+  root: string,
+): Promise<{ lines: string[]; ok: boolean }> {
+  const indexPath = join(root, "INDEX.md");
+  const text = await Deno.readTextFile(indexPath);
+  const tree = await readTree(root);
   const { problems, entryCount } = checkIndex(text, tree);
-  const lines = report(problems, entryCount, tree.documents.length);
-  if (problems.length === 0) {
-    console.log(lines.join("\n"));
-    return;
-  }
-  console.error(lines.join("\n"));
-  Deno.exit(1);
+  const name = indexPath.startsWith(`${REPO_ROOT}${SEPARATOR}`)
+    ? relative(REPO_ROOT, indexPath)
+    : indexPath;
+  return {
+    lines: report(name, problems, entryCount, tree.documents.length),
+    ok: problems.length === 0,
+  };
 }
 
-if (import.meta.main) await main();
+if (import.meta.main) {
+  const { lines, ok } = await run(Deno.args[0] ?? join(REPO_ROOT, HISTORY_DIR));
+  console[ok ? "log" : "error"](lines.join("\n"));
+  if (!ok) Deno.exit(1);
+}

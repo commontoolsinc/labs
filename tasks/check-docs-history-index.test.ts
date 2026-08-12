@@ -1,5 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { dirname, fromFileUrl, join } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   checkIndex,
   checkShape,
@@ -7,7 +9,11 @@ import {
   type HistoryTree,
   readTree,
   report,
+  run,
 } from "./check-docs-history-index.ts";
+
+const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
+const SCRIPT = join(REPO_ROOT, "tasks/check-docs-history-index.ts");
 
 const TITLE = "# Index of historical documents";
 const PROSE = "One line per archived document; the rules are in `README.md`.";
@@ -246,13 +252,14 @@ describe("checkIndex", () => {
 
 describe("report", () => {
   it("states the counts when nothing is wrong", () => {
-    expect(report([], 111, 138)).toEqual([
+    expect(report("docs/history/INDEX.md", [], 111, 138)).toEqual([
       "docs/history/INDEX.md: 111 entries covering 138 documents.",
     ]);
   });
 
   it("gives a line number for a problem that has one, and none otherwise", () => {
     const lines = report(
+      "docs/history/INDEX.md",
       [
         { lineNumber: 7, message: "specs/gone.md does not exist" },
         { message: "docs/history/specs/a.md is missing from the index" },
@@ -266,6 +273,120 @@ describe("report", () => {
       "  docs/history/specs/a.md is missing from the index",
     );
     expect(lines[lines.length - 1]).toContain("README.md");
+  });
+});
+
+describe("run", () => {
+  it("reports a clean tree by its counts", async () => {
+    const root = await Deno.makeTempDir();
+    try {
+      await Deno.mkdir(`${root}/specs`);
+      await Deno.writeTextFile(`${root}/README.md`, "rules");
+      await Deno.writeTextFile(`${root}/specs/a.md`, "an audit");
+      await Deno.writeTextFile(
+        `${root}/INDEX.md`,
+        index(
+          "## Audits and reports",
+          "",
+          "- [a.md](specs/a.md) — an audit, July 2026.",
+        ),
+      );
+
+      const { lines, ok } = await run(root);
+
+      expect(ok).toBe(true);
+      // The report names the index it read, not the repository's own.
+      expect(lines).toEqual([
+        `${root}/INDEX.md: 1 entries covering 1 documents.`,
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reports a document the index leaves out", async () => {
+    const root = await Deno.makeTempDir();
+    try {
+      await Deno.mkdir(`${root}/specs`);
+      await Deno.writeTextFile(`${root}/specs/a.md`, "an audit");
+      await Deno.writeTextFile(`${root}/specs/forgotten.md`, "another");
+      await Deno.writeTextFile(
+        `${root}/INDEX.md`,
+        index(
+          "## Audits and reports",
+          "",
+          "- [a.md](specs/a.md) — an audit, July 2026.",
+        ),
+      );
+
+      const { lines, ok } = await run(root);
+
+      expect(ok).toBe(false);
+      expect(lines[0]).toContain("needs fixing");
+      expect(lines.join("\n")).toContain(
+        "docs/history/specs/forgotten.md is missing from the index",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});
+
+describe("the check as CI runs it", () => {
+  it("passes over this repository's own history tree", async () => {
+    // Runs the script the way `deno task` does, so the entry point that CI
+    // depends on — reading the repository's index, printing, choosing an exit
+    // code — is exercised rather than assumed.
+    const output = await runDenoCommandWithTemporaryLock({
+      root: REPO_ROOT,
+      args: (lockPath) => [
+        "run",
+        "--config",
+        join(REPO_ROOT, "deno.jsonc"),
+        "--lock",
+        lockPath,
+        "--allow-read",
+        SCRIPT,
+      ],
+    });
+    const stdout = new TextDecoder().decode(output.stdout);
+    expect(output.code).toBe(0);
+    expect(stdout).toContain("docs/history/INDEX.md:");
+    expect(stdout).toContain("entries covering");
+  });
+
+  it("exits non-zero over a tree whose index is wrong", async () => {
+    // The behavior the gate is: failing. A check that reported a problem and
+    // exited 0 would let every one of these through CI.
+    const root = await Deno.makeTempDir();
+    try {
+      await Deno.writeTextFile(`${root}/forgotten.md`, "an unindexed record");
+      await Deno.writeTextFile(
+        `${root}/INDEX.md`,
+        index("## Audits and reports", "", "- [gone.md](gone.md) — a record."),
+      );
+
+      const output = await runDenoCommandWithTemporaryLock({
+        root: REPO_ROOT,
+        args: (lockPath) => [
+          "run",
+          "--config",
+          join(REPO_ROOT, "deno.jsonc"),
+          "--lock",
+          lockPath,
+          "--allow-read",
+          SCRIPT,
+          root,
+        ],
+      });
+
+      expect(output.code).toBe(1);
+      const stderr = new TextDecoder().decode(output.stderr);
+      expect(stderr).toContain("gone.md does not exist");
+      expect(stderr).toContain("forgotten.md is missing from the index");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
   });
 });
 
