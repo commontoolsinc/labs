@@ -75,9 +75,17 @@ export function parseLcovReports(
         continue;
       } else if (line.startsWith("DA:")) {
         const [lineNumberText, hitsText] = line.slice(3).split(",");
-        const lineNumber = Number(lineNumberText);
-        const hits = Number(hitsText);
-        if (Number.isInteger(lineNumber) && Number.isFinite(hits)) {
+        // Both fields have to carry something. `Number("")` is 0, so a record
+        // missing its line number reads as line 0 and one missing its count
+        // reads as a line nobody ran.
+        const lineNumber = lineNumberText?.trim()
+          ? Number(lineNumberText)
+          : NaN;
+        const hits = hitsText?.trim() ? Number(hitsText) : NaN;
+        if (
+          Number.isInteger(lineNumber) && lineNumber > 0 &&
+          Number.isFinite(hits)
+        ) {
           current.lineHits.set(
             lineNumber,
             (current.lineHits.get(lineNumber) ?? 0) + hits,

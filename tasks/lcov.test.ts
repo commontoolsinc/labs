@@ -98,6 +98,37 @@ describe("lcov", () => {
       expect([...files.get("/repo/a.ts")!.lineHits]).toEqual([[3, 7]]);
     });
 
+    it("omits records with a blank line number or count", () => {
+      const files = parseLcovReports([
+        [
+          "SF:/repo/a.ts",
+          "DA:,0",
+          "DA:1,",
+          "DA:,",
+          "DA: , ",
+          "DA:3",
+          "DA:4,2",
+          "end_of_record",
+        ].join("\n"),
+      ]);
+
+      expect([...files.get("/repo/a.ts")!.lineHits]).toEqual([[4, 2]]);
+    });
+
+    it("omits records numbering a line at or below zero", () => {
+      const files = parseLcovReports([
+        [
+          "SF:/repo/a.ts",
+          "DA:0,5",
+          "DA:-1,5",
+          "DA:2,5",
+          "end_of_record",
+        ].join("\n"),
+      ]);
+
+      expect([...files.get("/repo/a.ts")!.lineHits]).toEqual([[2, 5]]);
+    });
+
     it("reads reports with carriage returns", () => {
       const files = parseLcovReports([
         "SF:/repo/a.ts\r\nDA:1,1\r\nend_of_record\r\n",
