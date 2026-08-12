@@ -15,6 +15,8 @@ decoding. Interactive binary views use a bounded preview, while redirected
 output streams the complete dump. Text saves use the encoder paired with the
 decoded source, including preservation of a UTF-8 byte order mark. Binary files
 remain outside diff editing and semantic source loading.
+Parser-backed Python, Go, shell, and HTML implementations use Tree-sitter
+through a shared, language-neutral adapter and official grammar packages.
 The order is provisional because recent activity was measured in six of the 24
 active organization repositories.
 
@@ -109,7 +111,105 @@ relative value. Record the reason in this plan.
 - [x] Run a parser-adapter spike on Python, Go, shell, and HTML. The
   [August 2026 report](../history/packages/cli/cf-view-parser-adapter-spike-2026-08.md)
   records the measurements and leaves the decision to the next item.
-- [ ] Record the parser decision before implementing Stage 2.
+- [x] Record the parser decision before the remaining Stage 2 work.
+- [ ] Before the first Tree-sitter-backed implementation, measure the lazy
+  selected-language path and record accepted maximums for 95th-percentile
+  initialization, full highlighting, and incremental editing; shipped parser
+  bytes; downloaded or unpacked dependency bytes; owned non-generated adapter
+  and workaround source lines; and parser-specific build and deployment steps.
+
+### Parser decision
+
+Use `web-tree-sitter` 0.26.12, with pinned official Tree-sitter grammar
+packages, for parser-backed Python, Go, shell, and HTML implementations. Put
+parser initialization, gapless range normalization, incomplete-input recovery,
+incremental edits, and structure extraction behind one adapter that accepts
+language-specific highlight-capture and structure mappings. Treat Tree-sitter
+as the default for later source languages only after checking their grammar
+coverage and integration cost.
+
+The current language selection and parsing interfaces are synchronous, while
+Tree-sitter initialization and grammar loading are asynchronous. Add and test an
+asynchronous initialization boundary before adopting the adapter. Load the
+runtime and only the grammars required by the selected language when a view
+needs them. The spike's startup measurement loaded all four host grammars, so it
+does not establish the cost of that lazy path.
+
+The measured four-grammar setup initialized in 37.2 milliseconds and highlighted
+about 100 kilobytes in 14.03 to 28.29 milliseconds at the 95th percentile. Its
+incremental parses took 0.13 to 1.60 milliseconds at the 95th percentile. Those
+costs leave enough room for an interactive view. Tree-sitter also preserved
+complete, incomplete, edited, and diff source exactly. The measured mappings
+exposed Python classes and functions; Go types, functions, and methods; shell
+functions; and HTML elements and style and script host ranges. Each language
+stage must extend and test that mapping for structures the spike did not cover,
+including decorated Python definitions and Go packages.
+
+Tree-sitter's official grammars cover Python, Go, Bash, and HTML. The Bash
+grammar accepted the complete generated Bash fixture and classified its heredoc
+body. The separately maintained Lezer Bash grammar marked that fixture as
+containing an error and left the heredoc body unclassified. Lezer's smaller
+runtime and built-in HTML nesting do not outweigh using two parser families or
+accepting weaker shell coverage. Focused scanners remain suitable for simple
+data formats, but the existing Python scanner's 862 lines and YAML scanner's 970
+lines make one custom scanner per measured source language the larger
+maintenance surface. They also require a second implementation for structure.
+
+Depend on the complete npm packages rather than checking selected WebAssembly
+artifacts into the repository. The measured packages occupy 35.66 MiB when
+unpacked, while the JavaScript and WebAssembly files used at runtime occupy 2.30
+MiB. Keeping the packages intact leaves grammar builds, licenses, and release
+synchronization with their publishers. The adapter must pin the observed
+JavaScript string-offset behavior with non-ASCII contract tests. HTML embedding
+must dispatch the grammar's injection ranges to the official Tree-sitter CSS and
+JavaScript grammars rather than treating the host grammar as if it parsed those
+regions. The Tree-sitter startup and dependency-size measurements exclude those
+two embedded grammars. The startup measurement does not describe the nested
+setup, while the dependency-size measurements are lower bounds for the
+cumulative parser packages. Measure and record the complete nested-HTML setup
+before implementing Stage 5.
+
+The focused Python scanner remains in place until the Stage 2 structure change
+replaces it through the shared adapter. Do not add another focused scanner for
+Python, Go, shell, or HTML.
+
+#### Reconsidering the dependency
+
+Reopen the parser decision for a language when any of these conditions becomes
+true:
+
+- the shared fixture contract or stage-specific tests cannot pass without a
+  grammar fork or local grammar patch;
+- measured initialization, full highlighting, incremental editing, shipped
+  bytes, downloaded or unpacked dependency bytes, owned adapter or workaround
+  source lines, or build and deployment work exceeds a recorded maximum;
+- the runtime or grammar is archived, or has no release compatible with the
+  supported Deno version or with a required security fix; or
+- an unresolved license or security problem prevents shipping the dependency.
+
+A trigger starts a new measured comparison; it does not select the replacement.
+Before switching, require the focused implementation to pass the shared fixture
+contract and every stage-specific selection, highlighting, structure, and
+embedded-language test. If the dependency cannot ship or cannot meet those
+contracts, switch when the focused implementation passes them and remains within
+the recorded operating maximums.
+
+Otherwise compare these dimensions separately: owned non-generated parser,
+adapter, and workaround source lines; local patches or forks; 95th-percentile
+initialization, full-highlight, and incremental-edit latency; shipped runtime
+bytes; downloaded or unpacked dependency bytes; and parser-specific build and
+deployment steps. Compare only the marginal costs that the proposed switch would
+remove. Count language-specific grammar bytes, capture and structure mappings,
+workarounds, and selected-language latency as marginal costs. Treat the common
+adapter core, runtime package bytes, and shared deployment steps as unchanged
+while another language still uses them; count them as removable only when the
+switch removes their final consumer. Switch automatically only when the focused
+implementation is no worse in every dimension and strictly better in at least
+one. When the dimensions trade off, record a new parser decision with the
+individual measurements and priorities instead of combining unlike units into a
+single cost score. Carrying a grammar fork is sufficient to start the comparison
+because it takes on grammar maintenance while retaining the external runtime and
+integration costs.
 
 The parser spike must compare available Deno-compatible parsers with focused
 scanners. Measure startup cost, dependency size, exact source preservation,
@@ -120,7 +220,8 @@ itself.
 
 Completion gate: unknown text and binary input are no longer presented as
 TypeScript. Exact names, compound names, shebangs, and explicit overrides use
-one tested selection path. The parser decision is recorded with measurements.
+one tested selection path. The parser decision and operating maximums are
+recorded with measurements.
 
 ## Stage 1: JSON aliases and line-oriented JSON
 
