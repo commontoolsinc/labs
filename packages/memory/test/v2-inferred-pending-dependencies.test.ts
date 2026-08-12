@@ -26,6 +26,7 @@ import {
   open,
   ProtocolError,
   read,
+  recordRejectedCommit,
 } from "../v2/engine.ts";
 import {
   type ClientCommit,
@@ -401,6 +402,47 @@ describe("v2 engine inferred pending dependencies", () => {
       expect(read(engine, { id: "entity:derived" })?.value).toEqual({
         observed: 1,
       });
+      // Watermarks are monotonic: a LATER commit attesting a stale value —
+      // built before the W=10 attestation was processed — is judged at the
+      // session's high-water, so the floor does not doom it either.
+      commitFor(engine, SESSION, {
+        localSeq: 1028,
+        verdictsThrough: 1,
+        reads: {
+          confirmed: [],
+          pending: [inferredRead("entity:untouched", 0)],
+        },
+        operations: [setOp("entity:derived2", { observed: 2 })],
+      });
+      expect(read(engine, { id: "entity:derived2" })?.value).toEqual({
+        observed: 2,
+      });
+    });
+  });
+
+  it("dooms an inferred reader by a rejection the engine never saw, recorded through the exported recorder", async () => {
+    await withEngine((engine) => {
+      acceptSet(engine, 1, "entity:A", { x: 1 });
+      // The SERVER records verdicts it produces without reaching the
+      // engine — an ACL or authorization denial, a SQLite attachment
+      // failure — through this export; the client's optimistic layer
+      // retires exactly like an engine rejection.
+      recordRejectedCommit(engine, {
+        sessionId: SESSION,
+        commit: {
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [setOp("entity:B", { denied: true })],
+        },
+      });
+      expect(() =>
+        commitFor(engine, SESSION, {
+          localSeq: 3,
+          verdictsThrough: 1,
+          reads: { confirmed: [], pending: [inferredRead("entity:B", 0)] },
+          operations: [setOp("entity:derived", { observed: "phantom" })],
+        })
+      ).toThrow("rejected pending dependency inferred");
     });
   });
 });

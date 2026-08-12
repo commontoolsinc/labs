@@ -2619,7 +2619,7 @@ export const applyCommit = (
     // in-memory maps are not covered by SQLite rollback, so mutating them
     // only after the commit's fate is final keeps them agreeing with the
     // durable log.
-    noteRejectedCommit(engine, options);
+    recordRejectedCommit(engine, options);
     throw error;
   }
 };
@@ -2701,9 +2701,23 @@ const noteAcceptedCommit = (
   pruneByWatermark(state, commit.verdictsThrough);
 };
 
-const noteRejectedCommit = (
+/**
+ * Records a REJECTED commit's write footprint in the session's inference
+ * retention (CT-1910). `applyCommit` calls this for every throw it
+ * classifies; the SERVER calls it for verdicts it produces WITHOUT
+ * reaching the engine — ACL and authorization denials, SQLite attachment
+ * failures — because those retire the client's optimistic layer exactly
+ * like an engine rejection and a later inferred reader must be doomed by
+ * them the same way. Idempotent: double-recording merges footprints, and a
+ * durably-accepted localSeq (a replay-mismatch throw) is never retained.
+ */
+export const recordRejectedCommit = (
   engine: Engine,
-  { sessionId, principal, commit }: ApplyCommitOptions,
+  { sessionId, principal, commit }: {
+    sessionId: SessionId;
+    principal?: string;
+    commit: ClientCommit;
+  },
 ): void => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
   // A replay mismatch (or any other throw) on a commit that is durably
@@ -5934,13 +5948,24 @@ const resolvePendingReads = (
     | { state: SessionInferenceState; watermark: number }
     | undefined;
   if (commit.reads.pending.some((read) => read.localSeq === undefined)) {
-    const watermark = commit.verdictsThrough;
-    if (watermark === undefined) {
+    if (commit.verdictsThrough === undefined) {
       throw new ProtocolError(
         `commit ${commit.localSeq} carries an inferred-shape pending read but no verdictsThrough`,
       );
     }
     const state = inferenceStateFor(engine, sessionKey);
+    // Watermarks are monotonic per session: judge at the max of this
+    // commit's attestation and the session's high-water, matching the
+    // pruning bound — a commit built before an already-delivered higher
+    // attestation must not be doomed by entries (or an overflow floor)
+    // that attestation already retired. Sound because WATERMARK-CARRYING
+    // commits (semantic commits) deliver in localSeq order among
+    // themselves: a commit whose attestation raised the high-water was
+    // built and submitted before this one, so this one's composite also
+    // postdates the processing that attestation proved. Observation
+    // envelopes can legitimately deliver out of order relative to held
+    // semantic commits, but they never attest a watermark.
+    const watermark = Math.max(commit.verdictsThrough, state.watermark);
     if (
       commit.localSeq <= state.maxDecidedLocalSeq &&
       !state.rejected.some((entry) => entry.localSeq === commit.localSeq)

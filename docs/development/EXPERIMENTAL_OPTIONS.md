@@ -675,7 +675,12 @@ the per-epic implementation notes).
   rejected commits. Off restores declared-array emission — the pre-CT-1910
   wire shape — for newly connecting clients.
 - **Current default and planned end state.** On by default. The switch exists
-  as a rollout lever while inferred emission field-soaks.
+  as a rollout lever while inferred emission field-soaks. Independently of
+  the advertisement, the client declares full arrays whenever persistent
+  scheduler state is enabled client-side: the observation batch envelope's
+  flush-time localSeq violates the in-order delivery premise inference
+  rests on (03-commit-model.md §3.6.3's known deviation); that fence
+  retires when observation batches move to their own unnumbered request.
 - **Status on 2026-08-10.** Implemented and on by default.
 - **Path to removal.** After inferred emission has soaked, delete the config
   trio and advertise unconditionally; separately, retire client array

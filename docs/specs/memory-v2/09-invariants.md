@@ -209,6 +209,18 @@ depends on it): every own-session layer below a reader resolves at or before
 the basis layer's seq, so the scan interval past the basis contains no
 own-session commits.
 
+It is also the completeness premise of inferred pending dependencies and
+of the monotonic-watermark judgment (03-commit-model.md §3.6.3). Known
+deviation: the scheduler-observation batch envelope allocates its wrapper
+localSeq at flush time, above semantic commits held behind it, so its
+delivery legitimately reorders while persistent scheduler state is
+enabled; write-class commits still resolve in increasing localSeq order
+among themselves, which the watermark judgment leans on. The client
+fences inference off entirely while the feature is on (declared arrays,
+pinned in `packages/runner/test/memory-v2-stacked-commit.test.ts`); the
+deviation and its fence retire when observation batches move to their
+own unnumbered request.
+
 It is also the completeness premise of inferred pending dependencies
 (03-commit-model.md §3.6.3): at an inferred-shape commit's decision, every
 lower same-session localSeq is decided, so the server's decided-commit

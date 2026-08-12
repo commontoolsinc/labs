@@ -3072,16 +3072,24 @@ class SpaceReplica implements ISpaceReplica {
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
     >();
-    const entry: SchedulerObservationBatchEntry = {
-      commit: {
-        localSeq,
-        reads: this.buildReads(source, localSeq),
-        schedulerObservation,
-      },
-      pending,
-      source,
-      batchGeneration: this.#schedulerObservationBatchGeneration,
-    };
+    let entry: SchedulerObservationBatchEntry;
+    try {
+      entry = {
+        commit: {
+          localSeq,
+          reads: this.buildReads(source, localSeq),
+          schedulerObservation,
+        },
+        pending,
+        source,
+        batchGeneration: this.#schedulerObservationBatchGeneration,
+      };
+    } catch (error) {
+      // A throw during build (the read-activity provider) would otherwise
+      // abandon this fate and freeze the verdict frontier below it.
+      this.settleFate(localSeq);
+      throw error;
+    }
     this.#schedulerObservationBatch.push(entry);
     this.#unsettledSchedulerObservations.add(entry);
     void pending.promise.then(() => {
@@ -3319,111 +3327,124 @@ class SpaceReplica implements ISpaceReplica {
     if (source !== undefined) {
       recordCommitLocalSeq(source, this.#space, localSeq);
     }
-    const commit = withCommitTiming(
-      ["commitOperations", "buildCommit"],
-      (): ClientCommit => ({
-        localSeq,
-        verdictsThrough: this.verdictFrontierBefore(localSeq),
-        reads: this.buildReads(source, localSeq),
-        // Cell ops first, folded SQLite ops last (applied in array order by the
-        // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: [
-          ...operations.map((operation) => {
-            switch (operation.op) {
-              case "delete":
-                return operation;
-              case "patch":
-                return {
-                  op: "patch" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  patches: operation.patches,
-                };
-              case "set":
-                return {
-                  op: "set" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  value: operation.value,
-                };
-            }
-          }),
-          ...sqliteOps,
-        ],
-        ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
-        ...(activePreconditions.length > 0
-          ? { preconditions: [...activePreconditions] }
-          : {}),
-      }),
-    );
-    const touched = operations.map((operation) => ({
-      id: operation.id,
-      scope: operation.scope,
-    }));
-    const hasSemanticOperations = operations.length > 0;
-    const shouldNotifySubscribers = hasSemanticOperations &&
-      this.hasNotificationSubscribers();
-    const shouldNotifySinks = hasSemanticOperations &&
-      this.hasSinkSubscribers(touched);
-    const before = withCommitTiming(
-      ["commitOperations", "snapshotBefore"],
-      () =>
-        shouldNotifySubscribers
-          ? Differential.checkout(
-            this,
-            touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-          )
-          : undefined,
-    );
-
-    withCommitTiming(["commitOperations", "applyPending"], () => {
-      for (const operation of operations) {
-        this.applyPending(operation, localSeq);
-      }
-    });
-
-    withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
-      if (before !== undefined) {
-        const optimistic = before.compare(this);
-        this.#subscription.next({
-          type: "commit",
-          space: this.#space,
-          changes: optimistic,
-          source,
-        });
-        if (shouldNotifySinks) {
-          this.notifySinks(optimistic);
-        }
-      } else if (shouldNotifySinks) {
-        this.notifySinksForIds(touched);
-      }
-    });
-
-    const promise = withCommitTiming(
-      ["commitOperations", "pushCommitStart"],
-      () =>
-        this.pushCommit(
+    // Any throw between the allocation above and pushCommit's own
+    // settlement paths (a read-activity provider throwing during build, a
+    // subscriber throwing during the optimistic notify) must still settle
+    // this fate: an abandoned entry freezes the verdict frontier below
+    // this localSeq forever, and every later retained rejection would
+    // become a permanent spurious-doom source.
+    try {
+      const commit = withCommitTiming(
+        ["commitOperations", "buildCommit"],
+        (): ClientCommit => ({
           localSeq,
-          operations,
-          commit,
-          source,
-          { waitForSchedulerObservations: true, commitOptions },
-        ),
-    );
-    this.#commitPromises.add(promise);
-    // Keyed registration for the old-server scalarization hold: a later
-    // stacked commit awaits its omitted lower dependencies' outcomes here.
-    // Removed on settlement (absent key = settled); the .catch keeps the
-    // tracking copy from surfacing as an unhandled rejection.
-    this.#commitOutcomeBySeq.set(
-      localSeq,
-      promise.catch(() => {}).finally(() => {
-        this.#commitOutcomeBySeq.delete(localSeq);
-      }),
-    );
-    const result = await promise;
-    this.#commitPromises.delete(promise);
-    return result;
+          verdictsThrough: this.verdictFrontierBefore(localSeq),
+          reads: this.buildReads(source, localSeq),
+          // Cell ops first, folded SQLite ops last (applied in array order by the
+          // engine; sqlite ops are not entity revisions and carry no id/scope).
+          operations: [
+            ...operations.map((operation) => {
+              switch (operation.op) {
+                case "delete":
+                  return operation;
+                case "patch":
+                  return {
+                    op: "patch" as const,
+                    id: operation.id,
+                    scope: operation.scope,
+                    patches: operation.patches,
+                  };
+                case "set":
+                  return {
+                    op: "set" as const,
+                    id: operation.id,
+                    scope: operation.scope,
+                    value: operation.value,
+                  };
+              }
+            }),
+            ...sqliteOps,
+          ],
+          ...(schedulerObservation !== undefined
+            ? { schedulerObservation }
+            : {}),
+          ...(activePreconditions.length > 0
+            ? { preconditions: [...activePreconditions] }
+            : {}),
+        }),
+      );
+      const touched = operations.map((operation) => ({
+        id: operation.id,
+        scope: operation.scope,
+      }));
+      const hasSemanticOperations = operations.length > 0;
+      const shouldNotifySubscribers = hasSemanticOperations &&
+        this.hasNotificationSubscribers();
+      const shouldNotifySinks = hasSemanticOperations &&
+        this.hasSinkSubscribers(touched);
+      const before = withCommitTiming(
+        ["commitOperations", "snapshotBefore"],
+        () =>
+          shouldNotifySubscribers
+            ? Differential.checkout(
+              this,
+              touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+            )
+            : undefined,
+      );
+
+      withCommitTiming(["commitOperations", "applyPending"], () => {
+        for (const operation of operations) {
+          this.applyPending(operation, localSeq);
+        }
+      });
+
+      withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
+        if (before !== undefined) {
+          const optimistic = before.compare(this);
+          this.#subscription.next({
+            type: "commit",
+            space: this.#space,
+            changes: optimistic,
+            source,
+          });
+          if (shouldNotifySinks) {
+            this.notifySinks(optimistic);
+          }
+        } else if (shouldNotifySinks) {
+          this.notifySinksForIds(touched);
+        }
+      });
+
+      const promise = withCommitTiming(
+        ["commitOperations", "pushCommitStart"],
+        () =>
+          this.pushCommit(
+            localSeq,
+            operations,
+            commit,
+            source,
+            { waitForSchedulerObservations: true, commitOptions },
+          ),
+      );
+      this.#commitPromises.add(promise);
+      // Keyed registration for the old-server scalarization hold: a later
+      // stacked commit awaits its omitted lower dependencies' outcomes here.
+      // Removed on settlement (absent key = settled); the .catch keeps the
+      // tracking copy from surfacing as an unhandled rejection.
+      this.#commitOutcomeBySeq.set(
+        localSeq,
+        promise.catch(() => {}).finally(() => {
+          this.#commitOutcomeBySeq.delete(localSeq);
+        }),
+      );
+      const result = await promise;
+      this.#commitPromises.delete(promise);
+      return result;
+    } catch (error) {
+      this.settleFate(localSeq);
+      throw error;
+    }
   }
 
   /**
@@ -3624,20 +3645,29 @@ class SpaceReplica implements ISpaceReplica {
         // Wire-shape ladder, newest capability first. Inferred dependencies
         // (CT-1910): the server reconstructs the dependency set itself, so
         // the arrays stay client-side and the commit's verdict watermark
-        // rides instead. Declared arrays: only a server advertising
+        // rides instead — but only while persistent scheduler state is OFF
+        // client-side. The scheduler-observation batch envelope allocates
+        // its wrapper localSeq at FLUSH time and can deliver ahead of a
+        // semantic commit held behind it, violating the in-order delivery
+        // premise the engine's inference guard rests on; while that
+        // machinery can run, this client declares full arrays instead
+        // (which carry their own resolution edges and are order-immune).
+        // The fence retires when observation batches move to their own
+        // unnumbered request. Declared arrays: only a server advertising
         // `pendingReadStacks` can resolve them — otherwise collapse each to
         // its top-of-stack element before sending. The two legacy shapes
         // strip the watermark to stay byte-identical to pre-CT-1910
         // clients.
-        const scalarized =
-          client.serverFlags?.inferredPendingDependencies !== true &&
+        const inferredCapable =
+          client.serverFlags?.inferredPendingDependencies === true &&
+          !getPersistentSchedulerStateConfig();
+        const scalarized = !inferredCapable &&
           client.serverFlags?.pendingReadStacks !== true;
-        const wireCommit =
-          client.serverFlags?.inferredPendingDependencies === true
-            ? inferPendingDependencyShape(commit)
-            : scalarized
-            ? scalarizePendingReadStacks(stripVerdictsThrough(commit))
-            : stripVerdictsThrough(commit);
+        const wireCommit = inferredCapable
+          ? inferPendingDependencyShape(commit)
+          : scalarized
+          ? scalarizePendingReadStacks(stripVerdictsThrough(commit))
+          : stripVerdictsThrough(commit);
         if (scalarized && inFlight !== undefined) {
           // Old-server hold (split-brain guard): the scalarized wire omits
           // the lower layers, so the server could durably ACCEPT a commit
