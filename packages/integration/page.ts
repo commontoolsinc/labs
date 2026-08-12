@@ -4,7 +4,6 @@ import {
   ElementHandle as AstralElementHandle,
   EvaluateFunction,
   EvaluateOptions,
-  GoToOptions,
   Keyboard,
   KeyboardTypeOptions,
   Page as AstralPage,
@@ -29,6 +28,11 @@ import { Mutable } from "@commonfabric/utils/types";
 import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { ConsoleMethod } from "./console.ts";
+
+export interface NavigationOptions {
+  waitUntil?: "load" | "none";
+  referrer?: string;
+}
 
 // To handle `console` events from `Page`, logging to outer context:
 //
@@ -71,6 +75,7 @@ export class Page extends EventTarget {
   private decoratedElements = new WeakSet<AstralElementHandle>();
   private patchedKeyboard?: Keyboard;
   private originalKeyboardType?: Keyboard["type"];
+  private navigationQueue: Promise<void> = Promise.resolve();
 
   constructor(page: AstralPage, options: { timeout: number }) {
     super();
@@ -326,18 +331,145 @@ export class Page extends EventTarget {
     return await this.page!.evaluate(evaluate, evaluateOptions);
   }
 
-  // Passthru of `@astral/astral`'s `Page#goto`
-  async goto(url: string, options?: GoToOptions): Promise<void> {
+  // Navigates through the browser protocol and waits for the requested
+  // lifecycle event.
+  async goto(url: string, options?: NavigationOptions): Promise<void> {
     this.checkIsOk();
-    await this.page!.goto(url, options);
+    await this.runNavigation(() => this.navigate(url, options));
+  }
+
+  private async runNavigation(operation: () => Promise<void>): Promise<void> {
+    const previousNavigation = this.navigationQueue;
+    let releaseNavigation!: () => void;
+    this.navigationQueue = new Promise((resolve) => {
+      releaseNavigation = resolve;
+    });
+    await previousNavigation;
+    try {
+      await operation();
+    } finally {
+      releaseNavigation();
+    }
+  }
+
+  private async navigate(
+    url: string,
+    options?: NavigationOptions,
+  ): Promise<void> {
+    const waitUntil = options?.waitUntil;
+    const navigateOptions = options?.referrer === undefined
+      ? { url }
+      : { url, referrer: options.referrer };
+
+    const celestial = this.page!.unsafelyGetCelestialBindings();
+    if (waitUntil === "none") {
+      const result = await celestial.Page.navigate(navigateOptions);
+      if (result.errorText) throw new Error(result.errorText);
+      await this.afterNavigation?.();
+      return;
+    }
+    const lifecycleNames = waitUntil === "load"
+      ? new Set(["load"])
+      : new Set(["DOMContentLoaded", "networkAlmostIdle"]);
+    const lifecycleEvents: Array<{ loaderId: string; name: string }> = [];
+    const detachedFrames: string[] = [];
+    let terminalError: Error | undefined;
+    let inspectorDetached = false;
+    let resolveLifecycle!: () => void;
+    const lifecycleReady = new Promise<void>((resolve) => {
+      resolveLifecycle = resolve;
+    });
+    let loaderId: string | undefined;
+    let frameId: string | undefined;
+    const lifecycleListener = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        loaderId: string;
+        name: string;
+      }>).detail;
+      lifecycleEvents.push(detail);
+      if (detail.loaderId === loaderId && lifecycleNames.has(detail.name)) {
+        resolveLifecycle();
+      }
+    };
+    const frameDetachedListener = (event: Event) => {
+      const detail = (event as CustomEvent<{ frameId: string }>).detail;
+      detachedFrames.push(detail.frameId);
+      if (detail.frameId === frameId) {
+        terminalError = new Error("Navigation frame was detached.");
+        resolveLifecycle();
+      }
+    };
+    const inspectorDetachedListener = (event: Event) => {
+      const detail = (event as CustomEvent<{ reason: string }>).detail;
+      inspectorDetached = true;
+      terminalError = new Error(
+        `Browser session detached during navigation: ${detail.reason}`,
+      );
+      resolveLifecycle();
+    };
+
+    await celestial.Page.setLifecycleEventsEnabled({ enabled: true });
+    celestial.addEventListener("Page.lifecycleEvent", lifecycleListener);
+    celestial.addEventListener("Page.frameDetached", frameDetachedListener);
+    celestial.addEventListener("Inspector.detached", inspectorDetachedListener);
+    let navigationFailed = false;
+    let navigationError: unknown;
+    try {
+      const result = await celestial.Page.navigate(navigateOptions);
+      if (result.errorText) throw new Error(result.errorText);
+      loaderId = result.loaderId;
+      frameId = result.frameId;
+      if (terminalError) throw terminalError;
+      if (frameId !== undefined && detachedFrames.includes(frameId)) {
+        throw new Error("Navigation frame was detached.");
+      }
+      if (loaderId !== undefined) {
+        if (
+          lifecycleEvents.some((event) =>
+            event.loaderId === loaderId && lifecycleNames.has(event.name)
+          )
+        ) {
+          resolveLifecycle();
+        }
+        await lifecycleReady;
+        if (terminalError) throw terminalError;
+      }
+    } catch (error) {
+      navigationFailed = true;
+      navigationError = error;
+    } finally {
+      celestial.removeEventListener("Page.lifecycleEvent", lifecycleListener);
+      celestial.removeEventListener(
+        "Page.frameDetached",
+        frameDetachedListener,
+      );
+      celestial.removeEventListener(
+        "Inspector.detached",
+        inspectorDetachedListener,
+      );
+    }
+    let cleanupFailed = false;
+    let cleanupError: unknown;
+    if (!inspectorDetached) {
+      try {
+        await celestial.Page.setLifecycleEventsEnabled({ enabled: false });
+      } catch (error) {
+        cleanupFailed = true;
+        cleanupError = error;
+      }
+    }
+    if (navigationFailed) throw navigationError;
+    if (cleanupFailed) throw cleanupError;
     await this.afterNavigation?.();
   }
 
   // Passthru of `@astral/astral`'s `Page#reload`
   async reload(options?: WaitForOptions): Promise<void> {
     this.checkIsOk();
-    await this.page!.reload(options);
-    await this.afterNavigation?.();
+    await this.runNavigation(async () => {
+      await this.page!.reload(options);
+      await this.afterNavigation?.();
+    });
   }
 
   // Passthru of `@astral/astral`'s `Page#waitForSelector`.
