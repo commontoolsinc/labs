@@ -157,12 +157,16 @@ async function main() {
 
   const recorded: string[] = [];
   // Every `(pattern, baseline)` pair a deliberate break is allowed to fail
-  // against, and the ones that turned out not to fail — a pair that needs no
-  // forgiving is an exemption outliving its break, so it fails the run.
-  const acceptedBreaks = new Set(
+  // against, mapped to the schema paths it may blame, and the ones that turned
+  // out not to fail — a pair that needs no forgiving is an exemption outliving
+  // its break, so it fails the run.
+  const acceptedBreaks = new Map<string, ReadonlySet<string>>(
     ACCEPTED_CONTRACT_BREAKS.flatMap((accepted) =>
       accepted.baselines.map((baseline) =>
-        acceptedBreakKey(accepted.pattern, baseline)
+        [
+          acceptedBreakKey(accepted.pattern, baseline),
+          new Set(accepted.paths),
+        ] as const
       )
     ),
   );
@@ -239,11 +243,20 @@ async function main() {
       );
     }
   }
-  // An acceptance is scoped to a shard's own patterns, so only an unfiltered
-  // full run has seen every pair and can tell a stale one from an absent one.
-  const staleBreaks = only.length === 0 && shard.count === 1
-    ? [...acceptedBreaks].filter((pair) => !breaksUsed.has(pair))
-    : [];
+  // Asked per PATTERN rather than of the whole list, because CI never runs the
+  // whole list in one process: the Pattern Update Compatibility job always sets
+  // `PATTERN_COMPAT_SHARD`, so a check gated on an unsharded run would never
+  // execute where it matters. A pattern belongs to exactly one shard, so the
+  // shard that examined it can say whether its pairs were needed, and the four
+  // shards between them cover every entry.
+  const examined = new Set(keys);
+  const staleBreaks = ACCEPTED_CONTRACT_BREAKS
+    .filter((accepted) => examined.has(accepted.pattern))
+    .flatMap((accepted) =>
+      accepted.baselines
+        .map((baseline) => acceptedBreakKey(accepted.pattern, baseline))
+        .filter((pair) => !breaksUsed.has(pair))
+    );
 
   if (unavailable.size > 0) {
     console.log(
@@ -325,8 +338,8 @@ async function main() {
         `tasks/pattern-compat-accepted-breaks.ts forgive nothing: ` +
         `${
           staleBreaks.join(", ")
-        }. The pair applies cleanly now, so the exemption outlives its break ` +
-        `— remove it.`,
+        }. The pair applies cleanly now, or blames only paths the entry does ` +
+        `not name, so the exemption outlives its break — remove it.`,
     );
   }
 
