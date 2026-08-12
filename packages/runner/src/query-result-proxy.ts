@@ -48,13 +48,31 @@ const proxyCacheByTx = new WeakMap<
   IExtendedStorageTransaction,
   ProxyCache
 >();
-// Default key if no tx is provided
-const defaultTx = {} as IExtendedStorageTransaction;
+// The index a read with no transaction of its own is cached under, one per
+// runtime. Two runtimes in a single process — every test that makes its own,
+// and any host running more than one — can name the same space and entity, so a
+// single process-wide index would hand one runtime's reader a proxy closed over
+// the other's runtime, reading through the wrong storage. Held weakly, so an
+// index and its cache go when the runtime does.
+const defaultTxByRuntime = new WeakMap<
+  Runtime,
+  IExtendedStorageTransaction
+>();
+
+const defaultTxFor = (runtime: Runtime): IExtendedStorageTransaction => {
+  let index = defaultTxByRuntime.get(runtime);
+  if (index === undefined) {
+    index = {} as IExtendedStorageTransaction;
+    defaultTxByRuntime.set(runtime, index);
+  }
+  return index;
+};
 
 const getProxyCache = (
   tx: IExtendedStorageTransaction | undefined,
+  runtime: Runtime,
 ): ProxyCache => {
-  const cacheIndex = tx ?? defaultTx;
+  const cacheIndex = tx ?? defaultTxFor(runtime);
   let txCache = proxyCacheByTx.get(cacheIndex);
   if (!txCache) {
     txCache = {
@@ -330,7 +348,7 @@ function createViewProxy<T>(
   // A pinned view has the marked transaction as its caller tx, so it still gets
   // one cache per transaction — which is right, because it describes the instant
   // that transaction saw.
-  const txCache = getProxyCache(tx);
+  const txCache = getProxyCache(tx, runtime);
   const cacheKey = proxyCacheKey(link, writable, cfcLabelView);
 
   // Check if we already have a proxy for this target in the cache.
