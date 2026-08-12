@@ -1,3 +1,15 @@
+/**
+ * The CFC label view carried on a cell link, and the four operations over it:
+ * reading one, setting one, and the two that strip or redact it on the way to
+ * a display.
+ *
+ * It is a side channel rather than part of the link. Producers write it and
+ * the flow-control machinery reads it back, but it takes no part in a link's
+ * addressing identity, so normalization and equality ignore it — which is why
+ * the type lives here, extending the base payload, rather than in the payload
+ * itself.
+ */
+
 import {
   isLinkRef,
   linkRefFrom,

@@ -1,3 +1,14 @@
+/**
+ * The `toEncodableForm` protocol: whether a value has one, what it yields, and
+ * the walk that replaces every artifact in a tree with the result.
+ *
+ * The encodable form is what a value becomes on the way to being encoded, and
+ * it reaches storage without ever being stringified — which is the property
+ * that makes this a protocol rather than a serializer. `replaceArtifacts()`
+ * takes hooks, so a caller that needs to know where each replacement came from
+ * can be told, since nothing in the replaced value records it.
+ */
+
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /**

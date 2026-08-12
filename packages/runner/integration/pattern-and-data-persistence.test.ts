@@ -1,8 +1,6 @@
 #!/usr/bin/env -S deno run -A
 
 /**
- * Integration test: Pattern and Data Persistence
- *
  * This test demonstrates the full layered persistence model:
  * 1. Pattern source code stored in `datum` table (content-addressed)
  * 2. Precious data stored in `datum` table
