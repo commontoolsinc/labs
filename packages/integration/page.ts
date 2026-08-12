@@ -371,46 +371,119 @@ export class Page extends EventTarget {
     const lifecycleNames = waitUntil === "load"
       ? new Set(["load"])
       : new Set(["DOMContentLoaded", "networkAlmostIdle"]);
-    const lifecycleEvents: Array<{ loaderId: string; name: string }> = [];
-    const detachedFrames: string[] = [];
+    type NavigationSignal =
+      | { type: "lifecycle"; loaderId: string; name: string }
+      | { type: "frame-detached"; frameId: string }
+      | { type: "frame-stopped"; frameId: string }
+      | {
+        type: "frame-navigated";
+        frameId: string;
+        loaderId: string;
+      }
+      | { type: "inspector-detached"; reason: string };
+    const navigationSignals: NavigationSignal[] = [];
     let terminalError: Error | undefined;
     let inspectorDetached = false;
+    let loaderEstablished = false;
+    let lifecycleAccepted = false;
     let resolveLifecycle!: () => void;
     const lifecycleReady = new Promise<void>((resolve) => {
       resolveLifecycle = resolve;
     });
     let loaderId: string | undefined;
     let frameId: string | undefined;
+    const handleNavigationSignal = (signal: NavigationSignal) => {
+      switch (signal.type) {
+        case "lifecycle":
+          if (signal.loaderId === loaderId) {
+            loaderEstablished = true;
+            if (
+              terminalError === undefined && lifecycleNames.has(signal.name)
+            ) {
+              lifecycleAccepted = true;
+              resolveLifecycle();
+            }
+          }
+          break;
+        case "frame-detached":
+          if (signal.frameId === frameId) {
+            terminalError = new Error("Navigation frame was detached.");
+            resolveLifecycle();
+          }
+          break;
+        case "frame-stopped":
+          if (
+            signal.frameId === frameId && loaderEstablished &&
+            !lifecycleAccepted
+          ) {
+            terminalError = new Error(
+              "Navigation frame stopped loading before it became ready.",
+            );
+            resolveLifecycle();
+          }
+          break;
+        case "frame-navigated":
+          if (signal.frameId !== frameId) break;
+          if (signal.loaderId === loaderId) {
+            loaderEstablished = true;
+          } else if (loaderEstablished && !lifecycleAccepted) {
+            terminalError = new Error(
+              "Navigation was superseded by another document.",
+            );
+            resolveLifecycle();
+          }
+          break;
+        case "inspector-detached":
+          inspectorDetached = true;
+          terminalError = new Error(
+            `Browser session detached during navigation: ${signal.reason}`,
+          );
+          resolveLifecycle();
+          break;
+      }
+    };
+    const recordNavigationSignal = (signal: NavigationSignal) => {
+      navigationSignals.push(signal);
+      handleNavigationSignal(signal);
+    };
     const lifecycleListener = (event: Event) => {
       const detail = (event as CustomEvent<{
         loaderId: string;
         name: string;
       }>).detail;
-      lifecycleEvents.push(detail);
-      if (detail.loaderId === loaderId && lifecycleNames.has(detail.name)) {
-        resolveLifecycle();
-      }
+      recordNavigationSignal({ type: "lifecycle", ...detail });
     };
     const frameDetachedListener = (event: Event) => {
       const detail = (event as CustomEvent<{ frameId: string }>).detail;
-      detachedFrames.push(detail.frameId);
-      if (detail.frameId === frameId) {
-        terminalError = new Error("Navigation frame was detached.");
-        resolveLifecycle();
-      }
+      recordNavigationSignal({ type: "frame-detached", ...detail });
+    };
+    const frameStoppedListener = (event: Event) => {
+      const detail = (event as CustomEvent<{ frameId: string }>).detail;
+      recordNavigationSignal({ type: "frame-stopped", ...detail });
+    };
+    const frameNavigatedListener = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        frame: { id: string; loaderId: string };
+      }>).detail;
+      recordNavigationSignal({
+        type: "frame-navigated",
+        frameId: detail.frame.id,
+        loaderId: detail.frame.loaderId,
+      });
     };
     const inspectorDetachedListener = (event: Event) => {
       const detail = (event as CustomEvent<{ reason: string }>).detail;
-      inspectorDetached = true;
-      terminalError = new Error(
-        `Browser session detached during navigation: ${detail.reason}`,
-      );
-      resolveLifecycle();
+      recordNavigationSignal({ type: "inspector-detached", ...detail });
     };
 
     await celestial.Page.setLifecycleEventsEnabled({ enabled: true });
     celestial.addEventListener("Page.lifecycleEvent", lifecycleListener);
     celestial.addEventListener("Page.frameDetached", frameDetachedListener);
+    celestial.addEventListener(
+      "Page.frameStoppedLoading",
+      frameStoppedListener,
+    );
+    celestial.addEventListener("Page.frameNavigated", frameNavigatedListener);
     celestial.addEventListener("Inspector.detached", inspectorDetachedListener);
     let navigationFailed = false;
     let navigationError: unknown;
@@ -419,18 +492,9 @@ export class Page extends EventTarget {
       if (result.errorText) throw new Error(result.errorText);
       loaderId = result.loaderId;
       frameId = result.frameId;
+      for (const signal of navigationSignals) handleNavigationSignal(signal);
       if (terminalError) throw terminalError;
-      if (frameId !== undefined && detachedFrames.includes(frameId)) {
-        throw new Error("Navigation frame was detached.");
-      }
       if (loaderId !== undefined) {
-        if (
-          lifecycleEvents.some((event) =>
-            event.loaderId === loaderId && lifecycleNames.has(event.name)
-          )
-        ) {
-          resolveLifecycle();
-        }
         await lifecycleReady;
         if (terminalError) throw terminalError;
       }
@@ -442,6 +506,14 @@ export class Page extends EventTarget {
       celestial.removeEventListener(
         "Page.frameDetached",
         frameDetachedListener,
+      );
+      celestial.removeEventListener(
+        "Page.frameStoppedLoading",
+        frameStoppedListener,
+      );
+      celestial.removeEventListener(
+        "Page.frameNavigated",
+        frameNavigatedListener,
       );
       celestial.removeEventListener(
         "Inspector.detached",

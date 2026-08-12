@@ -329,6 +329,8 @@ Deno.test("Page navigation cleans up after its frame detaches", async () => {
   assertEquals(removedListeners, [
     "Page.lifecycleEvent",
     "Page.frameDetached",
+    "Page.frameStoppedLoading",
+    "Page.frameNavigated",
     "Inspector.detached",
   ]);
 });
@@ -377,6 +379,11 @@ Deno.test("Page rejects when its frame stops before becoming ready", async () =>
     setLifecycleEventsEnabled: () => Promise.resolve({}),
     navigate: () => {
       celestial.dispatchEvent(
+        new CustomEvent("Page.lifecycleEvent", {
+          detail: { loaderId: "loader", name: "init" },
+        }),
+      );
+      celestial.dispatchEvent(
         new CustomEvent("Page.frameStoppedLoading", {
           detail: { frameId: "frame" },
         }),
@@ -414,6 +421,14 @@ Deno.test("Page rejects when another loader supersedes navigation", async () => 
   celestial.Page = {
     setLifecycleEventsEnabled: () => Promise.resolve({}),
     navigate: () => {
+      celestial.dispatchEvent(
+        new CustomEvent("Page.frameNavigated", {
+          detail: {
+            frame: { id: "frame", loaderId: "loader" },
+            type: "Navigation",
+          },
+        }),
+      );
       celestial.dispatchEvent(
         new CustomEvent("Page.frameNavigated", {
           detail: {
@@ -463,6 +478,53 @@ Deno.test("Page accepts readiness before its frame stops", async () => {
       celestial.dispatchEvent(
         new CustomEvent("Page.frameStoppedLoading", {
           detail: { frameId: "frame" },
+        }),
+      );
+      return Promise.resolve({ frameId: "frame", loaderId: "loader" });
+    },
+  };
+  const page = new Page(
+    {
+      timeout: 0,
+      unsafelyGetCelestialBindings: () => celestial,
+    } as unknown as ConstructorParameters<typeof Page>[0],
+    { timeout: 10 },
+  );
+
+  await page.goto("https://example.test/");
+});
+
+Deno.test("Page ignores terminal signals from the previous document", async () => {
+  const celestial = new EventTarget() as EventTarget & {
+    Page: {
+      setLifecycleEventsEnabled(): Promise<Record<string, never>>;
+      navigate(): Promise<{ frameId: string; loaderId: string }>;
+    };
+  };
+  celestial.Page = {
+    setLifecycleEventsEnabled: () => Promise.resolve({}),
+    navigate: () => {
+      celestial.dispatchEvent(
+        new CustomEvent("Page.frameStoppedLoading", {
+          detail: { frameId: "frame" },
+        }),
+      );
+      celestial.dispatchEvent(
+        new CustomEvent("Page.frameNavigated", {
+          detail: {
+            frame: { id: "frame", loaderId: "previous" },
+            type: "Navigation",
+          },
+        }),
+      );
+      celestial.dispatchEvent(
+        new CustomEvent("Page.lifecycleEvent", {
+          detail: { loaderId: "loader", name: "init" },
+        }),
+      );
+      celestial.dispatchEvent(
+        new CustomEvent("Page.lifecycleEvent", {
+          detail: { loaderId: "loader", name: "DOMContentLoaded" },
         }),
       );
       return Promise.resolve({ frameId: "frame", loaderId: "loader" });
