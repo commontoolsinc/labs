@@ -434,7 +434,10 @@ Diagnostics emitted in all modes:
   - a `.get()` read in restricted reactive context with no lowerable
     expression site to carry it: a statement-position read (`count.get();`),
     a read inside a reactive array-method callback
-    (`rows.map((row) => row.cell.get())`), or a read whose receiver is not a
+    (`rows.map((row) => row.cell.get())`), a read inside a plain
+    (non-reactive) array-method callback
+    (`["-", "+"].map((sep) => rows.get().join(sep))`, which is not an eligible
+    pattern-owned wrapper site), or a read whose receiver is not a
     `Cell`/`Writable`/`Stream` (`items.get()` on a plain pattern input, which
     also draws `opaque-get:invalid-call`)
   - a cell read that DOES sit at a lowerable site is not rejected: the site is
@@ -443,12 +446,16 @@ Diagnostics emitted in all modes:
     `input.key("count").get()` at a return site), a computation over it
     (`{ value: count.get() * 2 }`), and a call whose receiver chain reaches it
     (`rows.get().join(",")`, `rows.get().filter(...)`, which lowers through
-    `filterWithPattern`). Each lift's input schema shrinks to what its body
-    reads (`test/validation.test.ts:3179`; goldens
+    `filterWithPattern`). Parentheses around the site and the computed-key
+    spelling of the read (`layout["get"]()`) do not change the decision, and
+    neither does optionality — `layout?.get()` and `layout?.get?.()` on a cell
+    lower like their non-optional spellings, per the 2026-07-23
+    optionality-orthogonality resolution. Each lift's input schema shrinks to
+    what its body reads (`test/validation.test.ts:3179`; goldens
     `cell-get-binding-autowrap`, `cell-get-terminal-binding-autowrap`,
     `with-reactive`). This is an unratified delta from the target-language
-    matrix's unconditional "Unsupported" — see the design-deltas 2026-07-10
-    record
+    matrix's unconditional "Unsupported" and from the lowering contract's §3.9
+    eager-read bullet — see the design-deltas 2026-07-10 record
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks

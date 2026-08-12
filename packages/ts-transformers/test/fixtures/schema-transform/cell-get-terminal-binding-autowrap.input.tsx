@@ -15,12 +15,17 @@ interface Row {
 //   carry the full `Row`.
 // Context: `.filter` over the read array lowers through `filterWithPattern`, so
 //   the element schema of its own lift shrinks to the `sentAt` the callback
-//   reads.
-export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+//   reads. `label` pins the optional spelling: optionality rides through the
+//   lift rather than blocking the site, so the input schema carries `label` as
+//   an unrequired `anyOf` and the result widens to include `undefined`.
+export default pattern<{ rows: Writable<Row[]>; label?: Writable<string> }>((
+  { rows, label },
+) => {
   const count = rows.get().length;
   const all = rows.get();
   const first = rows.get()[0];
   const joined = rows.get().join(",");
   const recent = rows.get().filter((row) => row.sentAt > 0);
-  return { count, all, first, joined, recent };
+  const optional = label?.get();
+  return { count, all, first, joined, recent, optional };
 });

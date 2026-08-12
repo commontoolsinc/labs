@@ -114,13 +114,16 @@ each finding:
   lift-applied. The line is the site, not the shape of the read: a binding, a
   return, an object property, an array element, an argument, and a call whose
   receiver chain reaches the read are all accepted, terminal or not; a read
-  with no such site — statement position, or inside a reactive array-method
-  callback — still rejects, as does a read on a value that is not a cell.
-  Golden-pinned (`cell-get-binding-autowrap`,
-  `cell-get-terminal-binding-autowrap`, `with-reactive`;
-  `test/validation.test.ts:3179`). Matrix row still says Unsupported
-  unconditionally. Decision open: ratify a has-a-lowerable-site split in the
-  matrix, or revert (breaks three goldens + several tests).
+  with no such site — statement position, inside a reactive array-method
+  callback, or inside a plain (non-reactive) array-method callback — still
+  rejects, as does a read on a value that is not a cell. Golden-pinned
+  (`cell-get-binding-autowrap`, `cell-get-terminal-binding-autowrap`,
+  `with-reactive`; `test/validation.test.ts:3179`). Two normative records still
+  say otherwise: the matrix row says Unsupported unconditionally, and the
+  lowering contract's §3.9 lists a direct top-level eager read among the
+  constructs that must fail clearly. Decision open: ratify a
+  has-a-lowerable-site split in the matrix (and retire lowering-contract §3.9's
+  eager-read bullet), or revert (breaks three goldens + several tests).
 - **Optional-call accepted in JSX and compute callbacks — resolved 2026-07-23
   by making optionality orthogonal to call support.** The earlier location
   split was an implementation leak, and the proposed blanket rejection would

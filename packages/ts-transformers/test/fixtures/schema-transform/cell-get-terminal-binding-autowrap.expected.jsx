@@ -259,6 +259,23 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_7 = __cfHelpers.lift<{
+    label?: __cfHelpers.Writable<string> | undefined;
+}, string | undefined>(({ label }) => label?.get(), {
+    type: "object",
+    properties: {
+        label: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "undefined"
+                }],
+            asCell: ["readonly"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: ["string", "undefined"]
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: cell-get-terminal-binding-autowrap
 // Verifies: a cell read at a variable-initializer binding is auto-wrapped into a
 //   lift whether or not a computation sits on top of it — a bare `rows.get()`,
@@ -269,15 +286,19 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 //   carry the full `Row`.
 // Context: `.filter` over the read array lowers through `filterWithPattern`, so
 //   the element schema of its own lift shrinks to the `sentAt` the callback
-//   reads.
+//   reads. `label` pins the optional spelling: optionality rides through the
+//   lift rather than blocking the site, so the input schema carries `label` as
+//   an unrequired `anyOf` and the result widens to include `undefined`.
 export default pattern((__cf_pattern_input) => {
     const rows = __cf_pattern_input.key("rows");
+    const label = __cf_pattern_input.key("label");
     const count = __cfLift_1({ rows: rows }).for("count", true);
     const all = __cfLift_2({ rows: rows }).for("all", true);
     const first = __cfLift_3({ rows: rows }).for("first", true);
     const joined = __cfLift_4({ rows: rows }).for("joined", true);
     const recent = __cfLift_5({ rows: rows }).filterWithPattern(__cfPattern_1, {}).for("recent", true);
-    return { count, all, first, joined, recent };
+    const optional = __cfLift_7({ label: label }).for("optional", true);
+    return { count, all, first, joined, recent, optional };
 }, {
     type: "object",
     properties: {
@@ -286,6 +307,10 @@ export default pattern((__cf_pattern_input) => {
             items: {
                 $ref: "#/$defs/Row"
             },
+            asCell: ["cell"]
+        },
+        label: {
+            type: "string",
             asCell: ["cell"]
         }
     },
@@ -331,9 +356,12 @@ export default pattern((__cf_pattern_input) => {
             items: {
                 $ref: "#/$defs/Row"
             }
+        },
+        optional: {
+            type: ["string", "undefined"]
         }
     },
-    required: ["count", "all", "first", "joined", "recent"],
+    required: ["count", "all", "first", "joined", "recent", "optional"],
     $defs: {
         Row: {
             type: "object",
@@ -359,5 +387,6 @@ __cfReg({
     __cfLift_4,
     __cfLift_5,
     __cfLift_6,
-    __cfPattern_1
+    __cfPattern_1,
+    __cfLift_7
 });

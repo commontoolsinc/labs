@@ -335,9 +335,10 @@ function isSharedPostClosureCallRootKind(
  * lift for the value to stay reactive. `classifyCallRootPolicy` reports the read
  * as `restricted-get-call` and declines to classify a call over one, leaving
  * both shapes without a supported call root; the JSX router admits them anyway
- * as owned `jsx-root` sites. This is the same admission for the other container
- * kinds, so a binding, a return, an argument, or an object property holding a
- * cell read lowers into the lift its JSX spelling already gets.
+ * (a bare read as an owned `jsx-root` site, a call over one as a shared
+ * post-closure site). This is the same admission for the other container kinds,
+ * so a binding, a return, an argument, or an object property holding a cell read
+ * lowers into the lift its JSX spelling already gets.
  *
  * Receivers that are not cells are excluded by {@link isCellReadTerminalCall}:
  * a `.get()` on an opaque value is a mistake with its own diagnostic, not a
@@ -347,11 +348,11 @@ function isCellReadCallRootExpression(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {
-  if (!ts.isCallExpression(expression)) {
+  let current: ts.Expression = unwrapExpression(expression);
+  if (!ts.isCallExpression(current)) {
     return false;
   }
 
-  let current: ts.Expression = expression;
   while (true) {
     if (ts.isCallExpression(current)) {
       if (isCellReadTerminalCall(current, context)) {
@@ -1246,10 +1247,12 @@ export function classifyExpressionSiteHandling(
       "pattern-owned-receiver-method";
     if (
       !sharedPostClosureCallRoot &&
-      !patternOwnedReceiverMethod &&
-      !isCellReadCallRootExpression(expression, context)
+      !patternOwnedReceiverMethod
     ) {
-      if (!isPostClosureWrapperRewriteExpression(expression, context)) {
+      if (
+        !isPostClosureWrapperRewriteExpression(expression, context) &&
+        !isCellReadCallRootExpression(expression, context)
+      ) {
         return { kind: "skip", reason: "not-lowerable" };
       }
 

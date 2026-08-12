@@ -566,9 +566,11 @@ wherever the read has a lowerable expression site to carry it — a binding, a
 return, an object property, an array element, an argument, a computation over
 the read, or a call whose receiver chain reaches it — and auto-wraps that site
 into a lift-applied computation. A read with no such site (statement position,
-or inside a reactive array-method callback) still rejects, as does a read on an
-ordinary opaque value. That carve-out is an unratified delta recorded in
-`ts_transformers_design_deltas.md` (2026-07-10): either this matrix gains the
+inside a reactive array-method callback, or inside a plain array-method
+callback) still rejects, as does a read on an ordinary opaque value. That
+carve-out is an unratified delta recorded in
+`ts_transformers_design_deltas.md` (2026-07-10), which also tracks the parallel
+tension with the lowering contract's §3.9: either this matrix gains the
 carve-out or the implementation reverts; per §1, do not treat the accident of
 acceptance as language policy in the meantime.
 
