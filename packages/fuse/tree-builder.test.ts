@@ -7,9 +7,11 @@ import {
   isPatternToolValue,
 } from "./callables.ts";
 import {
+  buildFsProjection,
   buildJsonTree,
   buildJsonTreeAsync,
   buildPendingJsonTreeAsync,
+  type FsValue,
   isHandlerCell,
   isSigilLink,
   isStreamValue,
@@ -475,6 +477,70 @@ Deno.test("buildJsonTree - projects nesting deeper than the call stack", () => {
   assertEquals(
     JSON.parse(getFileContent(tree, parentIno, "next.json")),
     { leaf: "bottom" },
+  );
+});
+
+Deno.test("buildFsProjection - application/json writes index.json", () => {
+  const tree = new FsTree();
+  const fsValue: FsValue = {
+    type: "application/json",
+    content: { title: "My Todos", count: 3 },
+  };
+
+  const ino = buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(tree.lookup(tree.rootIno, "index.json"), ino);
+  const node = tree.getNode(ino);
+  assertEquals(node?.kind === "file" ? node.jsonType : undefined, "object");
+  // `entityId` leads, so a reader sees which entity the projection came from.
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.json")),
+    { entityId: "of:entity-1", title: "My Todos", count: 3 },
+  );
+});
+
+Deno.test("buildFsProjection - a pattern cannot overwrite entityId", () => {
+  const tree = new FsTree();
+  const fsValue = {
+    type: "application/json",
+    content: { entityId: "of:forged", title: "My Todos" },
+  } as FsValue;
+
+  buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.json")),
+    { entityId: "of:entity-1", title: "My Todos" },
+  );
+});
+
+Deno.test("buildFsProjection - an unknown type falls back to index.txt", () => {
+  const tree = new FsTree();
+  const fsValue = { type: "text/csv", content: "a,b" } as unknown as FsValue;
+
+  const ino = buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(tree.lookup(tree.rootIno, "index.txt"), ino);
+  assertEquals(tree.lookup(tree.rootIno, "index.json"), undefined);
+  assertEquals(tree.lookup(tree.rootIno, "index.md"), undefined);
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.txt")),
+    { type: "text/csv", content: "a,b" },
+  );
+});
+
+Deno.test("buildFsProjection - names the failing entry when a value cannot serialize", () => {
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.rootIno, "todo-app");
+  const fsValue = {
+    type: "application/json",
+    content: { count: 1n },
+  } as unknown as FsValue;
+
+  assertThrows(
+    () => buildFsProjection(tree, piece, fsValue, "of:entity-1"),
+    Error,
+    "/todo-app/index.json",
   );
 });
 

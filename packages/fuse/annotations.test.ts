@@ -680,3 +680,51 @@ Deno.test("an unlabeled leaf fails a deep subtree label closed", () => {
     BODY_LABEL.confidentiality,
   );
 });
+
+Deno.test("a value met twice fails its second subtree label closed", () => {
+  const tree = new FsTree();
+  const annotator = makeAnnotator(tree, [
+    { path: ["first", "text"], label: TITLE_LABEL },
+    { path: ["second", "text"], label: BODY_LABEL },
+  ]);
+  const shared = { text: "same" };
+
+  const label = annotator.subtreeLabel({ first: shared, second: shared }, []);
+
+  // The first visit walks into the object and picks up its leaf's label. The
+  // second meets an object already seen, so it labels the whole of `second`
+  // at once and fails closed rather than walking it again.
+  assertEquals(label.confidentiality?.[0], TITLE_LABEL.confidentiality[0]);
+  assert(
+    JSON.stringify(label).includes(CFC_FAIL_CLOSED_ATOM_CLASS),
+    "the repeated value must fail closed",
+  );
+  assertEquals(
+    JSON.stringify(label).includes(JSON.stringify(BODY_LABEL.confidentiality)),
+    false,
+    "the repeated value must not pick up the label of the path it repeats at",
+  );
+});
+
+Deno.test("an empty container takes the label of its own path", () => {
+  const tree = new FsTree();
+  const annotator = makeAnnotator(tree, [
+    { path: ["items"], label: TITLE_LABEL },
+    { path: ["meta"], label: BODY_LABEL },
+  ]);
+
+  // An empty array and an empty object have no leaves to contribute a label,
+  // so each stands for itself.
+  assertEquals(
+    annotator.subtreeLabel([], ["items"]).confidentiality,
+    TITLE_LABEL.confidentiality,
+  );
+  assertEquals(
+    annotator.subtreeLabel({}, ["meta"]).confidentiality,
+    BODY_LABEL.confidentiality,
+  );
+  assertEquals(
+    annotator.subtreeLabel({ items: [], meta: {} }, []).confidentiality,
+    [...TITLE_LABEL.confidentiality, ...BODY_LABEL.confidentiality],
+  );
+});

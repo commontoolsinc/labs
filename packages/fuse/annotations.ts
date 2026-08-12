@@ -597,20 +597,17 @@ export class CfcProjectionAnnotator {
         continue;
       }
 
-      if (isRecord(node.value)) {
-        const entries = Object.entries(node.value);
-        if (entries.length === 0) {
-          contributions.push(this.labelAt(node.path));
-          continue;
-        }
-        for (let index = entries.length - 1; index >= 0; index--) {
-          const [key, entry] = entries[index];
-          pending.push({ value: entry, path: [...node.path, key] });
-        }
+      // Everything left is a record: a leaf, a link ref and an array each
+      // took an arm above.
+      const entries = Object.entries(node.value as Record<string, unknown>);
+      if (entries.length === 0) {
+        contributions.push(this.labelAt(node.path));
         continue;
       }
-
-      contributions.push(this.labelAt(node.path));
+      for (let index = entries.length - 1; index >= 0; index--) {
+        const [key, entry] = entries[index];
+        pending.push({ value: entry, path: [...node.path, key] });
+      }
     }
 
     return contributions.length === 1
