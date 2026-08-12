@@ -318,8 +318,19 @@ function createViewProxy<T>(
     ? (Array.isArray(value) ? new Array(value.length) : {})
     : value;
 
-  // Get the appropriate cache index by log
-  const txCache = getProxyCache(viewTx);
+  // Index by the CALLER's transaction, not by the one reads resolve through.
+  // A standing handle is created without a transaction and resolves a fresh one
+  // per access, so indexing by the resolved transaction gives every read its own
+  // cache and hands back a different object each time — and a consumer that
+  // holds one and later meets it again (FUSE matching a callable against its own
+  // entry, a value whose element points back at the array containing it) sees
+  // two things where there is one. Tx-less reads share the default index, which
+  // is what makes them the same object.
+  //
+  // A pinned view has the marked transaction as its caller tx, so it still gets
+  // one cache per transaction — which is right, because it describes the instant
+  // that transaction saw.
+  const txCache = getProxyCache(tx);
   const cacheKey = proxyCacheKey(link, writable, cfcLabelView);
 
   // Check if we already have a proxy for this target in the cache.
