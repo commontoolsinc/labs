@@ -33,6 +33,7 @@ import { TILES } from "./registry.ts";
 import { labsCi } from "./tiles/main-build.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
 import { DASHBOARD_MESSAGE_LIFETIME_MS } from "./dashboard-message.ts";
+import { dashboardCacheFile } from "./history-files.ts";
 
 const req = (path: string) => new Request(`http://localhost${path}`);
 
@@ -1224,6 +1225,16 @@ Deno.test("message: an edit is saved and sent to every connected dashboard", asy
 });
 
 Deno.test("message: malformed edits are rejected without changing the message", async () => {
+  const malformedJson = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: "{",
+  }));
+  assertEquals(malformedJson.status, 400);
+  assertEquals(await malformedJson.json(), {
+    error: "Expected a JSON request body.",
+  });
+
   const missingText = await handle(new Request("http://localhost/message", {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -1240,9 +1251,68 @@ Deno.test("message: malformed edits are rejected without changing the message", 
     assertEquals(response.status, 400);
   }
 
+  const tooLong = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: "x".repeat(501) }),
+  }));
+  assertEquals(tooLong.status, 400);
+  assertEquals(await tooLong.json(), {
+    error: "Messages are limited to 500 characters.",
+  });
+
   const wrongMethod = await handle(req("/message"));
   assertEquals(wrongMethod.status, 405);
   assertEquals(wrongMethod.headers.get("allow"), "PUT");
+});
+
+Deno.test("message: a persistence failure returns an error", async () => {
+  const temporary = `${dashboardCacheFile("fabric-wall-message.json")}.tmp`;
+  await Deno.mkdir(temporary);
+  try {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Cannot persist" }),
+    }));
+    assertEquals(response.status, 500);
+    assertEquals(await response.json(), {
+      error: "Could not save the dashboard message.",
+    });
+  } finally {
+    await Deno.remove(temporary);
+  }
+});
+
+Deno.test("message: a failed expiry write retains the saved text", async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  const temporary = `${dashboardCacheFile("fabric-wall-message.json")}.tmp`;
+  try {
+    const saved = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Still visible" }),
+    }));
+    assertEquals(saved.status, 200);
+    await Deno.mkdir(temporary);
+    now += DASHBOARD_MESSAGE_LIFETIME_MS;
+
+    await serveTick(() => {});
+    assertStringIncludes(
+      await (await handle(req("/"))).text(),
+      `value="Still visible"`,
+    );
+  } finally {
+    Date.now = realNow;
+    await Deno.remove(temporary);
+    await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "" }),
+    }));
+  }
 });
 
 Deno.test("message: the serving clock clears text after its fade completes", async () => {

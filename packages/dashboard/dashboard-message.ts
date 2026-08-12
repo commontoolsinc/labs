@@ -36,7 +36,6 @@ interface DashboardMessageStoreOptions {
   readTextFile?: typeof Deno.readTextFile;
   writeTextFile?: typeof Deno.writeTextFile;
   rename?: typeof Deno.rename;
-  reportError?: (message: string) => void;
 }
 
 const emptyMessage = (revision = 0): DashboardMessage => ({
@@ -90,7 +89,6 @@ export class DashboardMessageStore {
   readonly #readTextFile: typeof Deno.readTextFile;
   readonly #writeTextFile: typeof Deno.writeTextFile;
   readonly #rename: typeof Deno.rename;
-  readonly #reportError: (message: string) => void;
   #message = emptyMessage();
   #loaded = false;
   #operation = Promise.resolve();
@@ -102,8 +100,6 @@ export class DashboardMessageStore {
     this.#readTextFile = options.readTextFile ?? Deno.readTextFile;
     this.#writeTextFile = options.writeTextFile ?? Deno.writeTextFile;
     this.#rename = options.rename ?? Deno.rename;
-    this.#reportError = options.reportError ??
-      ((message) => console.error(message));
   }
 
   async #run<T>(operation: () => Promise<T>): Promise<T> {
@@ -122,25 +118,30 @@ export class DashboardMessageStore {
 
   async #load(): Promise<void> {
     if (this.#loaded) return;
-    this.#loaded = true;
+    let stored: unknown;
     try {
-      const stored: unknown = JSON.parse(await this.#readTextFile(this.#file));
-      if (isStoredDashboardMessage(stored)) {
-        this.#message = {
-          text: stored.text,
-          updatedAt: stored.updatedAt,
-          revision: stored.revision ?? 0,
-        };
-      }
+      stored = JSON.parse(await this.#readTextFile(this.#file));
     } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        this.#reportError(
-          `dashboard message: could not load the stored message: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+      if (error instanceof Deno.errors.NotFound) {
+        this.#loaded = true;
+        return;
       }
+      throw new Error(
+        `Could not load the dashboard message: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
     }
+    if (!isStoredDashboardMessage(stored)) {
+      throw new Error("Could not load the dashboard message: invalid stored data.");
+    }
+    this.#message = {
+      text: stored.text,
+      updatedAt: stored.updatedAt,
+      revision: stored.revision ?? 0,
+    };
+    this.#loaded = true;
   }
 
   async #save(): Promise<void> {

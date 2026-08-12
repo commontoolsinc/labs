@@ -232,6 +232,15 @@ Deno.test("shell: the shared message is directly editable in the header center",
   );
   assertStringIncludes(html, `messageSavePending = true;`);
   assertStringIncludes(html, `messageSavePending = false;`);
+  assertStringIncludes(html, `if (messageDirty || messageSavePending) {`);
+  assert(
+    !html.includes(`document.activeElement === messageInput`),
+    "focus alone does not suspend message fading",
+  );
+  assert(
+    !html.includes(`outline:none;opacity:1!important`),
+    "focus does not override the faded opacity",
+  );
   assertStringIncludes(
     html,
     `if (!messageDirty) messageInput.value = savedMessageText;`,

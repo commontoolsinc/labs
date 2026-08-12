@@ -243,7 +243,7 @@ ${DASHBOARD_THEME_STYLES}
   .message-input{box-sizing:border-box;width:100%;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text);font:500 16px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;padding:4px 9px;text-align:center;transition:border-color .12s,background-color .12s}
   .message-input::placeholder{color:var(--text-faint);font-weight:400}
   .message-input:hover{border-color:var(--border)}
-  .message-input:focus{background:var(--surface);border-color:var(--border-hover);outline:none;opacity:1!important}
+  .message-input:focus{background:var(--surface);border-color:var(--border-hover);outline:none}
   .message-input[aria-invalid="true"]{border-color:var(--status-bad)}
   .message-status{position:absolute;top:100%;left:9px;right:9px;color:var(--status-bad-text);font-size:11px;text-align:center}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}
@@ -367,7 +367,7 @@ ${DASHBOARD_THEME_CLIENT}
   let messageSaveSequence = 0;
   let messageSavePending = false;
   function paintDashboardMessage(now) {
-    if (document.activeElement === messageInput || messageDirty || messageSavePending) {
+    if (messageDirty || messageSavePending) {
       messageInput.style.opacity = '1';
       return;
     }

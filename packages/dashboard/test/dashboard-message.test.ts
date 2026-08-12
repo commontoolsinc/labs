@@ -53,6 +53,12 @@ describe("dashboard-message", () => {
         "hello dashboard",
       );
     });
+
+    it("rejects text longer than the editor limit", () => {
+      expect(() => normalizeDashboardMessageText("x".repeat(501))).toThrow(
+        "Dashboard messages are limited to 500 characters.",
+      );
+    });
   });
 
   describe("DashboardMessageStore", () => {
@@ -128,7 +134,6 @@ describe("dashboard-message", () => {
     it("keeps the prior message when persistence fails", async () => {
       const store = new DashboardMessageStore({
         file: "/missing/dashboard-message.json",
-        reportError: () => {},
       });
 
       await expect(store.set("Not persisted")).rejects.toThrow(
@@ -138,6 +143,111 @@ describe("dashboard-message", () => {
         text: "",
         updatedAt: null,
         revision: 0,
+      });
+    });
+
+    it("retries a failed cache read before saving", async () => {
+      let reads = 0;
+      const writes: string[] = [];
+      const store = new DashboardMessageStore({
+        file: "/dashboard-message.json",
+        now: () => 12_345,
+        readTextFile: (() => {
+          reads++;
+          if (reads === 1) throw new Deno.errors.PermissionDenied("denied");
+          return Promise.resolve(JSON.stringify({
+            version: 1,
+            text: "Stored message",
+            updatedAt: 10_000,
+            revision: 4,
+          }));
+        }) as typeof Deno.readTextFile,
+        writeTextFile: ((_file: string | URL, data: string) => {
+          writes.push(data);
+          return Promise.resolve();
+        }) as typeof Deno.writeTextFile,
+        rename: (() => Promise.resolve()) as typeof Deno.rename,
+      });
+
+      await expect(store.refresh()).rejects.toThrow(
+        "Could not load the dashboard message: denied",
+      );
+      expect(await store.set("Replacement")).toEqual({
+        text: "Replacement",
+        updatedAt: 12_345,
+        revision: 5,
+      });
+      expect(reads).toBe(2);
+      expect(JSON.parse(writes[0])).toEqual({
+        version: 1,
+        text: "Replacement",
+        updatedAt: 12_345,
+        revision: 5,
+      });
+    });
+
+    it("retries invalid stored data instead of overwriting it", async () => {
+      let reads = 0;
+      const writes: string[] = [];
+      const store = new DashboardMessageStore({
+        file: "/dashboard-message.json",
+        now: () => 12_345,
+        readTextFile: (() => Promise.resolve([
+          "null",
+          JSON.stringify({ version: 2, text: "Unknown format" }),
+          JSON.stringify({
+            version: 1,
+            text: "Stored message",
+            updatedAt: 10_000,
+            revision: 8,
+          }),
+        ][reads++])) as typeof Deno.readTextFile,
+        writeTextFile: ((_file: string | URL, data: string) => {
+          writes.push(data);
+          return Promise.resolve();
+        }) as typeof Deno.writeTextFile,
+        rename: (() => Promise.resolve()) as typeof Deno.rename,
+      });
+
+      await expect(store.set("Replacement")).rejects.toThrow(
+        "Could not load the dashboard message: invalid stored data",
+      );
+      await expect(store.set("Replacement")).rejects.toThrow(
+        "Could not load the dashboard message: invalid stored data",
+      );
+      expect(writes).toEqual([]);
+      expect(await store.set("Replacement")).toEqual({
+        text: "Replacement",
+        updatedAt: 12_345,
+        revision: 9,
+      });
+      expect(reads).toBe(3);
+    });
+
+    it("keeps an expired message when clearing it cannot be saved", async () => {
+      let now = 12_345;
+      let failWrites = false;
+      const store = new DashboardMessageStore({
+        file: "/dashboard-message.json",
+        now: () => now,
+        readTextFile: (() => Promise.reject(new Deno.errors.NotFound())) as
+          typeof Deno.readTextFile,
+        writeTextFile: (() => failWrites
+          ? Promise.reject(new Deno.errors.PermissionDenied("denied"))
+          : Promise.resolve()) as typeof Deno.writeTextFile,
+        rename: (() => Promise.resolve()) as typeof Deno.rename,
+      });
+      await store.set("Still stored");
+      now += DASHBOARD_MESSAGE_LIFETIME_MS;
+      failWrites = true;
+
+      await expect(store.refresh()).rejects.toThrow(
+        "Could not save the dashboard message: denied",
+      );
+      failWrites = false;
+      expect(await store.refresh()).toEqual({
+        message: { text: "", updatedAt: null, revision: 2 },
+        expired: true,
       });
     });
   });

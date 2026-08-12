@@ -124,8 +124,12 @@ function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): D
 async function refreshDashboardMessage(): Promise<boolean> {
   try {
     const refreshed = await dashboardMessageStore.refresh();
+    const previous = dashboardMessage;
     dashboardMessage = refreshed.message;
-    return refreshed.expired;
+    return refreshed.expired ||
+      previous.text !== dashboardMessage.text ||
+      previous.updatedAt !== dashboardMessage.updatedAt ||
+      previous.revision !== dashboardMessage.revision;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     return false;
