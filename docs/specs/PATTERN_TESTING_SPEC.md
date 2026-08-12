@@ -75,7 +75,10 @@ A test pattern is a regular pattern file with `.test.tsx` extension that:
 
 ### Test Step Format (Discriminated Union)
 
-The `[TESTS]` array uses a discriminated union to avoid TypeScript declaration emit issues:
+The `[TESTS]` array is a discriminated union — each step is exactly one of the
+shapes below. Keeping an assertion's `Cell` and an action's `Stream` in
+separate members, rather than mixing the two in one array element, is what
+avoids the declaration-emit errors TypeScript raises for such a mix:
 
 ```typescript
 // Shown at module scope.
@@ -88,9 +91,6 @@ type TestStep =
   | { render: VNode }                  // one headless VDOM demand window
   | { settle: true };                  // wait for full async settlement
 ```
-
-This format keeps `action()` streams and assertion cells separate in the type
-system.
 
 An `assert(...)` assertion carries an `AssertRecord` — `{ ok, source, parts }` —
 rather than a bare boolean. The transformer rewrites its body to record each
