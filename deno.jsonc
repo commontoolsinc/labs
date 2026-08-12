@@ -116,7 +116,10 @@
         "no-explicit-any",
         "require-yield"
       ]
-    }
+    },
+    "plugins": [
+      "./tasks/lint-bench-console.ts"
+    ]
   },
   "fmt": {
     "indentWidth": 2,

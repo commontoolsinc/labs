@@ -48,6 +48,34 @@ stderr to `diagnostics.log` in the uploaded artifact and also shows it in the
 workflow log. A stray diagnostic once corrupted every benchmark artifact for
 five weeks before anyone noticed.
 
+The `cf-bench/no-lost-diagnostics` lint rule (`tasks/lint-bench-console.ts`,
+registered in the root `deno.jsonc`) holds both halves of that in place, so a
+plain `deno lint` catches either mistake. In a `*.bench.ts` file, outside a
+benchmark body, the four `console` methods that write to stderr — `error`,
+`warn`, `trace`, `assert` — are the whole of what it allows, and every other one
+is rejected. Naming the permitted four rather than enumerating the ones that
+write to stdout is what makes that safe: a method nobody thought of, `dirxml`
+say, is rejected rather than let through. Inside a benchmark body it rejects any
+`console` call at all, written there or in a helper of the same file that a body
+calls, however many hops away. A helper in another module is past what one
+file's syntax tree shows, so write those with `Deno.stderr` too. The runner's
+benchmarks do that through `benchDiagnostic()` in
+`packages/runner/test/bench-diagnostics.ts`.
+
+**Read a transaction's journal before it commits.** A benchmark that reports
+what it wrote reads `tx.journal.novelty(space)`, and a transaction holds that
+journal only while it is open: `commit()` releases it on the way to settling,
+and the same call afterwards reports nothing. A benchmark that times the commit
+cannot afford the read inside its timed window either.
+`packages/runner/test/cell-set-flat-index-list.bench.ts` shows the arrangement.
+Each of its write scenarios takes a callback and hands it the transaction just
+before committing; the benchmark itself passes no callback, and instead runs the
+same scenario once more, untimed, to fill in a report it writes once.
+`packages/runner/test/bench-write-accounting.ts` turns those attestations into a
+document count and a byte count — one attestation per written path is not one
+document and not one value, so adding them up directly counts some bytes twice
+and misses others.
+
 **Names identify chart series.** The dashboard tracks each benchmark by its
 origin file, group, and verbatim name. Renaming a bench or its group breaks
 the series: history stays under the old name and the renamed bench starts
