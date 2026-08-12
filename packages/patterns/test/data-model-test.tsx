@@ -6,8 +6,8 @@
  * storage can be inspected for values whose handling is hard to predict:
  * `undefined`, `null`, `NaN`, the infinities, a nested container.
  *
- * A signed zero is not among them, and the display is why rather than the
- * storage: everything the description does not special-case goes through
+ * A signed zero is not among them, and the display is why: everything the
+ * description does not special-case goes through
  * `JSON.stringify`, which renders `-0` as `0`. Reading this probe as evidence
  * about `-0` would therefore be reading the renderer, not the round trip.
  *
