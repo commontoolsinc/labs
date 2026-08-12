@@ -1148,12 +1148,15 @@ export function renderPieceCallHelp(
     lines.push(...specificFlags);
   }
 
-  if (spec.callableKind === "handler") {
+  // No write-through note here, unlike the mounted-file page above: this
+  // command takes its payload as an argument, and there is no file for a
+  // caller to write JSON to.
+  if (
+    spec.callableKind === "handler" &&
+    handlerAllowsInvokeWithoutInputs(spec.inputSchema)
+  ) {
     lines.push("");
-    lines.push("Alternatively, write JSON to this file to invoke the handler.");
-    if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {
-      lines.push("Invoke alone will call the handler without any inputs.");
-    }
+    lines.push("Invoke alone will call the handler without any inputs.");
   }
   lines.push(...outputSectionLines(spec));
 

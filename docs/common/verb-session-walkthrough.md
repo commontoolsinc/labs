@@ -155,18 +155,12 @@ cf piece verbs --piece board
 ```text
 PATTERN cf:module/ZPxyGdkkv-YmizdHdNx5DIlqlpc9JRSm5iXTl4Tb2T0#default
 NAME    KIND    ON     MARKS
-$NAME   handler result
 addItem handler result
-items   handler result
 ```
 
-**Two of those three rows are not verbs.** `items` is the board's array of root
-items and `$NAME` is its display name — data, not callables, and
-`cf piece call --piece board items` will not do anything useful. The listing
-over-reports: its forced-stream fallback answers the cast for values that are
-not streams
-([#5576](https://github.com/commontoolsinc/labs/issues/5576)). Only `addItem`
-is real here.
+**One row, because the board declares one verb.** `items` is the board's array
+of root items and `$NAME` is its display name; both are data, and data is not
+callable, so neither is offered to a caller as something to call.
 
 Slug resolution sits on the shared path (`resolvePieceConfigWithPieces`,
 `packages/cli/lib/piece.ts`), so every command below takes `board` too.
@@ -314,12 +308,14 @@ hands back, and not what either is for.
 
 ```bash
 cf piece call --piece board <TAB>
-addItem  items  $NAME
+addItem
 ```
 
 Verb names and piece addresses complete against the space
 (`shapeVerbCandidates` / `liveCandidates`,
-`packages/cli/lib/completion/providers.ts`), in bash and zsh.
+`packages/cli/lib/completion/providers.ts`), in bash and zsh. The candidates
+map one-for-one over the listing in step 1, so completion offers what that
+command names and nothing besides.
 
 What does not complete is a result field — `--select 'it<TAB>'` has nothing to
 offer. The knowledge exists now: the help page above enumerates `item`, off the

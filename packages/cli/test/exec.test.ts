@@ -1131,6 +1131,24 @@ describe("renderPieceCallHelp", () => {
     );
   });
 
+  it("mentions no file to write JSON to, there being none in this context", () => {
+    const help = renderPieceCallHelp(
+      "cf piece call ... onAddContact",
+      makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
+    );
+
+    // The write-through note belongs to the mounted-file page, which this
+    // renderer shares its body with. `cf piece call` takes its payload as an
+    // argument and mounts nothing, so the sentence would name a file the
+    // caller has no way to reach — and it is the last line of the page.
+    expect(help).not.toContain("write JSON to this file");
+    expect(help).not.toContain("Alternatively");
+    // The neighbouring note is about this command's own spelling, and stays.
+    expect(help).toContain(
+      "Invoke alone will call the handler without any inputs.",
+    );
+  });
+
   it("carries no Output section for a handler that declares no result", () => {
     const help = renderPieceCallHelp(
       "cf piece call ... archive",

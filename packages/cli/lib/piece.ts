@@ -1730,10 +1730,15 @@ async function resolvePieceCallable(
     );
   }
 
-  if (resolved.callableKind === "handler" && resolved !== onInputCell) {
+  if (
+    resolved.callableKind === "handler" && resolved !== onInputCell &&
+    typeof piece?.getPattern === "function"
+  ) {
     // The forced-stream fallback dispatches on the result cell too, so it
     // claims a declared result on the same terms the ordinary result-cell path
-    // does.
+    // does. A piece surface with no pattern to consult carries no thunk at all,
+    // which is the honest statement — the absence says this resolution cannot
+    // describe a result, rather than promising an answer that is always none.
     return {
       ...resolved,
       declaredResult: () => declaredVerbResult(piece, callableName),
@@ -1893,13 +1898,13 @@ function declaredVerbResults(
  *
  * The pattern is advisory exactly as it is in the listing: a piece whose
  * pattern will not resolve still calls its verbs, it just cannot say what one
- * hands back.
+ * hands back. `getPattern` throwing is the whole of that condition here —
+ * whether a piece HAS one is settled before the thunk is attached.
  */
 async function declaredVerbResult(
   piece: any,
   callableName: string,
 ): Promise<JSONSchema | undefined> {
-  if (typeof piece?.getPattern !== "function") return undefined;
   try {
     return declaredVerbResults(await piece.getPattern()).get(callableName);
   } catch {
@@ -2049,14 +2054,14 @@ export async function listPieceCallables(
 /** The command spec a help page is rendered from: the resolved one, plus the
  * verb's declared result where the resolution can supply one.
  *
- * A spec that already carries an `outputSchemaSummary` is a tool's, whose
- * result schema rides its callable cell — it is returned untouched rather than
- * re-derived, so `callableCommandSpec` keeps deciding what a tool publishes. */
+ * Only a handler's resolution carries the thunk, so a tool's spec passes
+ * through untouched and `callableCommandSpec` keeps deciding what a tool
+ * publishes — its result schema rides its callable cell and is already on the
+ * spec. */
 async function withDeclaredResult(
   spec: ExecCommandSpec,
   resolved: ResolvedPieceCallable,
 ): Promise<ExecCommandSpec> {
-  if (spec.outputSchemaSummary !== undefined) return spec;
   const declared = await resolved.declaredResult?.();
   return declared === undefined ? spec : {
     ...spec,

@@ -64,6 +64,7 @@ const CONFIG = {
 async function callVerb(
   verb: string,
   rawArgs: string[],
+  options: { patternError?: Error } = {},
 ): Promise<{ helpText?: string; patternLoads: number }> {
   const signer = await Identity.fromPassphrase("piece-call-help-live");
   const storageManager = StorageManager.emulate({ as: signer });
@@ -98,7 +99,9 @@ async function callVerb(
       getCell: () => root,
       getPattern: () => {
         patternLoads++;
-        return Promise.resolve(compiled);
+        return options.patternError
+          ? Promise.reject(options.patternError)
+          : Promise.resolve(compiled);
       },
     };
 
@@ -170,6 +173,21 @@ describe("cf piece call --help against a live piece", () => {
     expect(served.outputSchema).toMatchObject({
       properties: { title: { type: "string" }, total: { type: "number" } },
     });
+  });
+
+  it("serves the page without an output section when the pattern will not load", async () => {
+    // The message a piece with no reachable pattern identity fails with. The
+    // pattern is advisory on this path: losing it costs the page its `Output:`
+    // section and nothing else, where letting the failure out would cost a
+    // caller the whole help page for a verb they can still call.
+    const { helpText, patternLoads } = await callVerb("add", ["--help"], {
+      patternError: new Error("piece missing pattern identity"),
+    });
+
+    expect(patternLoads).toBe(1);
+    expect(outputSection(helpText)).toBeUndefined();
+    expect(helpText).toContain("cf piece call ... add --help");
+    expect(helpText).toContain("--title <string>");
   });
 
   it("loads the pattern for a help page and not for a dispatch", async () => {
