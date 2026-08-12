@@ -32,6 +32,7 @@ import {
 import { TILES } from "./registry.ts";
 import { labsCi } from "./tiles/main-build.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
+import { DASHBOARD_MESSAGE_LIFETIME_MS } from "./dashboard-message.ts";
 
 const req = (path: string) => new Request(`http://localhost${path}`);
 
@@ -101,6 +102,7 @@ interface TestUpdate {
   faviconStatus: "good" | "warn" | "bad";
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
+  message: { text: string; updatedAt: number | null; revision: number };
 }
 
 function updateFromEvent(event: string): TestUpdate {
@@ -1190,6 +1192,89 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(clients.size, 0, "a disconnected browser is not kept as a client");
 });
 
+Deno.test("message: an edit is saved and sent to every connected dashboard", async () => {
+  const events = await handle(req("/events"));
+  const reader = events.body!.getReader();
+  await chunk(reader);
+  await chunk(reader);
+  try {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "  Deploying <main>  " }),
+    }));
+    assertEquals(response.status, 200);
+    const saved = await response.json();
+    assertEquals(saved.text, "Deploying <main>");
+    assertEquals(typeof saved.updatedAt, "number");
+    assertEquals(typeof saved.revision, "number");
+
+    const update = updateFromEvent(await chunk(reader));
+    assertEquals(update.message, saved);
+    const html = await (await handle(req("/"))).text();
+    assertStringIncludes(html, `value="Deploying &lt;main&gt;"`);
+  } finally {
+    await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "" }),
+    }));
+    await reader.cancel();
+  }
+});
+
+Deno.test("message: malformed edits are rejected without changing the message", async () => {
+  const missingText = await handle(new Request("http://localhost/message", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "wrong field" }),
+  }));
+  assertEquals(missingText.status, 400);
+
+  for (const body of ["null", "42", "[]"]) {
+    const response = await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body,
+    }));
+    assertEquals(response.status, 400);
+  }
+
+  const wrongMethod = await handle(req("/message"));
+  assertEquals(wrongMethod.status, 405);
+  assertEquals(wrongMethod.headers.get("allow"), "PUT");
+});
+
+Deno.test("message: the serving clock clears text after its fade completes", async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  const events = await handle(req("/events"));
+  const reader = events.body!.getReader();
+  await chunk(reader);
+  await chunk(reader);
+  try {
+    const saved = await (await handle(new Request("http://localhost/message", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Fading announcement" }),
+    }))).json();
+    assertEquals(updateFromEvent(await chunk(reader)).message.text, "Fading announcement");
+
+    now += DASHBOARD_MESSAGE_LIFETIME_MS;
+    await serveTick(() => {});
+    assertStringIncludes(await chunk(reader), "event: ping\n");
+    assertEquals(updateFromEvent(await chunk(reader)).message, {
+      text: "",
+      updatedAt: null,
+      revision: saved.revision + 1,
+    });
+  } finally {
+    Date.now = realNow;
+    await reader.cancel();
+  }
+});
+
 Deno.test("sse: every serving tick sends a heartbeat, so silence means a broken stream", async () => {
   const res = await handle(req("/events"));
   const reader = res.body!.getReader();
@@ -1241,6 +1326,7 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
     faviconStatus: "good",
     faviconRedSince: null,
     faviconRedAgeMs: null,
+    message: { text: "", updatedAt: null, revision: 0 },
   });
   assertEquals(clients.size, 0);
 });

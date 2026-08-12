@@ -45,6 +45,7 @@ dashboard/
   favicon-png.generated.ts  generated runtime PNG favicon copies
   favicon-artwork.ts  build/test-only SVG source for those favicon copies
   version.ts    the browser/server compatibility version a page reloads on
+  dashboard-message.ts  shared message storage and fade timing
   render.ts     renderTile(view) + the page shell/CSS
   server.ts     generic runtime: scheduler, SSE, route mounting, page assembly
   registry.ts   THE ONE REGISTRATION POINT — the array of tiles
@@ -68,6 +69,13 @@ A tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps
 its last-known value and shows a short reason (e.g. "source unreachable"), with
 the full error in the server log — so one unreachable source never blanks or
 breaks the board.
+
+The text field centered between the dashboard identity and freshness indicator
+is a shared message. Editing the field and leaving it saves the text for every
+connected dashboard and persists it in the dashboard cache. The message remains
+fully visible for two hours. It then fades linearly for four hours, after which
+the server replaces it with the empty string. A new edit starts the timing
+again.
 
 GitHub CI tiles declare the workflow snapshots they read in `runSources`. The
 scheduler fetches each workflow independently. When a workflow fetch completes,

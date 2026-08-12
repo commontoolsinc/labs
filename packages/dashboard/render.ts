@@ -12,6 +12,13 @@ import { faviconHref, faviconLink, type FaviconStatus } from "./favicon.ts";
 import { paintStatusFavicon } from "./favicon-client.ts";
 import { liveUpdateStream } from "./stream-client.ts";
 import {
+  DASHBOARD_MESSAGE_FADE_MS,
+  DASHBOARD_MESSAGE_MAX_LENGTH,
+  DASHBOARD_MESSAGE_VISIBLE_MS,
+  dashboardMessageOpacity,
+  type DashboardMessage,
+} from "./dashboard-message.ts";
+import {
   DASHBOARD_THEME_CLIENT,
   DASHBOARD_THEME_HEAD,
   DASHBOARD_THEME_STYLES,
@@ -27,6 +34,7 @@ const FAVICON_PNG_HREFS = JSON.stringify({
 });
 const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
 const LIVE_UPDATE_STREAM = liveUpdateStream.toString();
+const DASHBOARD_MESSAGE_OPACITY = dashboardMessageOpacity.toString();
 
 // How long past the refresh interval the freshness indicator stays orange before
 // it turns red. The page treats the same span of silence from the server as a
@@ -217,6 +225,7 @@ function renderShell(
   status: FaviconStatus,
   serverRedSince: number | null = null,
   serverRedAgeMs: number | null = null,
+  message: DashboardMessage = { text: "", updatedAt: null, revision: 0 },
 ): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Fabric wall — LIVE</title>
 ${DASHBOARD_THEME_HEAD}
@@ -224,12 +233,19 @@ ${faviconLink(status)}
 <style>
 ${DASHBOARD_THEME_STYLES}
   body{margin:0;background:var(--page);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1100px;margin:0 auto}
-  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .top{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;align-items:center;gap:18px;margin-bottom:14px}
   .brand b{font-size:16px;font-weight:600}.brand span{font-size:12px;color:var(--text-faint);margin-left:8px}
   .badge{font-size:11px;color:var(--status-good-text);border:1px solid ${
     statusLayer("good", 0.4)
   };border-radius:6px;padding:2px 8px;margin-left:8px}
   .top-actions{display:flex;align-items:center;gap:12px}.live{font-size:12px;color:var(--text-muted)}
+  .message-form{position:relative;width:min(100%,480px);min-width:0;margin:0;justify-self:center}
+  .message-input{box-sizing:border-box;width:100%;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text);font:500 16px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;padding:4px 9px;text-align:center;transition:border-color .12s,background-color .12s}
+  .message-input::placeholder{color:var(--text-faint);font-weight:400}
+  .message-input:hover{border-color:var(--border)}
+  .message-input:focus{background:var(--surface);border-color:var(--border-hover);outline:none;opacity:1!important}
+  .message-input[aria-invalid="true"]{border-color:var(--status-bad)}
+  .message-status{position:absolute;top:100%;left:9px;right:9px;color:var(--status-bad-text);font-size:11px;text-align:center}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}
   .tile{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;position:relative;isolation:isolate;overflow:hidden}
   .tile.wide{margin-bottom:12px}
@@ -293,10 +309,13 @@ ${TILE_RULES}
   .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;vertical-align:middle}
   .note{font-size:11px;color:var(--text-faint);margin-top:14px}
   code{background:var(--surface-code);padding:1px 5px;border-radius:4px}
-  @media(max-width:560px){.top{align-items:flex-start;gap:10px}.brand span:last-child{display:none}.top-actions{gap:8px}}
+  @media(max-width:560px){.top{grid-template-columns:minmax(0,1fr) max-content;gap:8px 12px}.brand span:last-child{display:none}.top-actions{gap:8px}.message-form{grid-column:1/-1;grid-row:2;width:100%}.message-input{font-size:14px;padding-inline:5px}}
 </style></head><body>
   <div class="top">
     <div class="brand"><b>Fabric wall</b><span class="badge" id="livebadge">● LIVE</span><span>go/fabricwall</span></div>
+    <form class="message-form" id="dashboard-message-form"><input class="message-input" id="dashboard-message" aria-label="Shared dashboard message" aria-describedby="dashboard-message-status" maxlength="${DASHBOARD_MESSAGE_MAX_LENGTH}" value="${
+      escapeHtml(message.text)
+    }"><span class="message-status" id="dashboard-message-status" role="status" aria-live="polite"></span></form>
     <div class="top-actions"><div class="live"><span class="dot green" id="freshdot"></span> <span id="agotext">updated ${ago}s ago</span></div></div>
   </div>
   <div class="grid" id="dashboard-grid">${gridHtml}</div>
@@ -324,10 +343,14 @@ ${DASHBOARD_THEME_CLIENT}
   const FAVICONS = ${FAVICON_PNG_HREFS};
   const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS};
   const paintStatusFavicon = ${PAINT_STATUS_FAVICON};
+  const dashboardMessageOpacity = ${DASHBOARD_MESSAGE_OPACITY};
   const liveUpdateStream = ${LIVE_UPDATE_STREAM};
   const badge = document.getElementById('livebadge');
   const dot = document.getElementById('freshdot');
   const agotext = document.getElementById('agotext');
+  const messageForm = document.getElementById('dashboard-message-form');
+  const messageInput = document.getElementById('dashboard-message');
+  const messageStatus = document.getElementById('dashboard-message-status');
   ${formatViewerTimes.toString()}
   formatViewerTimes();
   const grid = document.getElementById('dashboard-grid');
@@ -337,6 +360,86 @@ ${DASHBOARD_THEME_CLIENT}
   let faviconServerRedSince = ${serverRedSince};
   let faviconServerRedAgeMs = ${serverRedAgeMs};
   let faviconStartedAt = performance.now();
+  let savedMessageText = messageInput.value;
+  let messageUpdatedAt = ${message.updatedAt};
+  let messageRevision = ${message.revision};
+  let messageDirty = false;
+  let messageSaveSequence = 0;
+  let messageSavePending = false;
+  function paintDashboardMessage(now) {
+    if (document.activeElement === messageInput || messageDirty || messageSavePending) {
+      messageInput.style.opacity = '1';
+      return;
+    }
+    if (messageUpdatedAt === null || savedMessageText === '') {
+      messageInput.style.opacity = '1';
+      return;
+    }
+    const opacity = dashboardMessageOpacity(
+      messageUpdatedAt,
+      now,
+      ${DASHBOARD_MESSAGE_VISIBLE_MS},
+      ${DASHBOARD_MESSAGE_FADE_MS},
+    );
+    if (opacity === 0) {
+      savedMessageText = '';
+      messageUpdatedAt = null;
+      messageInput.value = '';
+      messageInput.style.opacity = '1';
+      return;
+    }
+    messageInput.style.opacity = String(opacity);
+  }
+  function applyDashboardMessage(next) {
+    if (next.revision < messageRevision) return;
+    savedMessageText = next.text;
+    messageUpdatedAt = next.updatedAt;
+    messageRevision = next.revision;
+    if (!messageDirty && !messageSavePending) messageInput.value = next.text;
+    paintDashboardMessage(Date.now());
+  }
+  async function saveDashboardMessage() {
+    const saveSequence = ++messageSaveSequence;
+    const text = messageInput.value;
+    messageDirty = false;
+    messageSavePending = true;
+    messageStatus.textContent = 'Saving…';
+    messageInput.style.opacity = '1';
+    try {
+      const response = await fetch('/message', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!response.ok) throw new Error('Message save failed');
+      const saved = await response.json();
+      applyDashboardMessage(saved);
+      if (saveSequence !== messageSaveSequence) return;
+      messageSavePending = false;
+      if (!messageDirty) messageInput.value = savedMessageText;
+      messageInput.removeAttribute('aria-invalid');
+      messageStatus.textContent = '';
+    } catch {
+      if (saveSequence !== messageSaveSequence) return;
+      messageSavePending = false;
+      messageDirty = true;
+      messageInput.setAttribute('aria-invalid', 'true');
+      messageStatus.textContent = 'Message could not be saved.';
+    }
+  }
+  messageForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    messageInput.blur();
+  });
+  messageInput.addEventListener('input', () => {
+    messageDirty = true;
+    messageInput.style.opacity = '1';
+    messageInput.removeAttribute('aria-invalid');
+    messageStatus.textContent = '';
+  });
+  messageInput.addEventListener('blur', () => {
+    if (messageDirty) void saveDashboardMessage();
+  });
   function paint() {
     const now = Date.now();
     const ago = base + Math.floor((now - t0) / 1000);
@@ -361,6 +464,7 @@ ${DASHBOARD_THEME_CLIENT}
       faviconServerRedAgeMs,
       faviconStartedAt,
     );
+    paintDashboardMessage(now);
   }
   function reconcileTiles(container, html) {
     const template = document.createElement('template');
@@ -418,6 +522,7 @@ ${DASHBOARD_THEME_CLIENT}
       faviconServerRedSince = update.faviconRedSince;
       faviconServerRedAgeMs = update.faviconRedAgeMs;
       faviconStartedAt = performance.now();
+      applyDashboardMessage(update.message);
       paint();
     });
     return es;
@@ -441,6 +546,7 @@ export function shell(
   status: FaviconStatus,
   serverRedSince: number | null = null,
   serverRedAgeMs: number | null = null,
+  message: DashboardMessage = { text: "", updatedAt: null, revision: 0 },
 ): string {
   return renderShell(
     gridHtml,
@@ -451,5 +557,6 @@ export function shell(
     status,
     serverRedSince,
     serverRedAgeMs,
+    message,
   );
 }

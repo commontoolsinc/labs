@@ -199,6 +199,75 @@ Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
   assertStringIncludes(html, "</body></html>");
 });
 
+Deno.test("shell: the shared message is directly editable in the header center", () => {
+  const html = shell(
+    "",
+    "",
+    0,
+    45_000,
+    TEST_VERSION,
+    "good",
+    null,
+    null,
+    {
+      text: `Ship <today> & "celebrate"`,
+      updatedAt: 12_345,
+      revision: 7,
+    },
+  );
+  assertStringIncludes(html, `id="dashboard-message-form"`);
+  assertStringIncludes(html, `id="dashboard-message"`);
+  assert(!html.includes(`placeholder=`), "the empty editor has no hint text");
+  assertStringIncludes(
+    html,
+    `value="Ship &lt;today&gt; &amp; &quot;celebrate&quot;"`,
+  );
+  assertStringIncludes(html, `let messageUpdatedAt = 12345;`);
+  assertStringIncludes(html, `let messageRevision = 7;`);
+  assertStringIncludes(html, `if (next.revision < messageRevision) return;`);
+  assertStringIncludes(html, `const saveSequence = ++messageSaveSequence;`);
+  assertStringIncludes(
+    html,
+    `if (!messageDirty && !messageSavePending) messageInput.value = next.text;`,
+  );
+  assertStringIncludes(html, `messageSavePending = true;`);
+  assertStringIncludes(html, `messageSavePending = false;`);
+  assertStringIncludes(
+    html,
+    `if (!messageDirty) messageInput.value = savedMessageText;`,
+  );
+  assertStringIncludes(
+    html,
+    `if (saveSequence !== messageSaveSequence) return;`,
+  );
+  assertStringIncludes(html, `fetch('/message'`);
+  assertStringIncludes(html, `method: 'PUT'`);
+  assertStringIncludes(html, `aria-describedby="dashboard-message-status"`);
+  assertStringIncludes(html, `role="status" aria-live="polite"`);
+  assertStringIncludes(html, `Message could not be saved.`);
+  const brandAt = html.indexOf(`class="brand"`);
+  const messageAt = html.indexOf(`id="dashboard-message-form"`);
+  const freshnessAt = html.indexOf(`class="top-actions"`);
+  assert(
+    brandAt < messageAt && messageAt < freshnessAt,
+    "the shared message sits between the left and right header content",
+  );
+  assertStringIncludes(
+    html,
+    `.top{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content`,
+  );
+  assertStringIncludes(html, `.message-form{position:relative;width:min(100%,480px)`);
+  assertStringIncludes(html, `text-align:center`);
+  assertStringIncludes(
+    html,
+    `@media(max-width:560px){.top{grid-template-columns:minmax(0,1fr) max-content`,
+  );
+  assertStringIncludes(
+    html,
+    `.message-form{grid-column:1/-1;grid-row:2;width:100%}`,
+  );
+});
+
 Deno.test("shell: the freshness age and the refresh interval reach both the text and the script", () => {
   const html = shell("", "", 7, 45_000, TEST_VERSION, "good");
   assertStringIncludes(html, `<span id="agotext">updated 7s ago</span>`);
