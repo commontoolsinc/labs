@@ -1192,20 +1192,51 @@ type ProjectionMask =
 interface ObjectPredicateMask extends ObjectMask<PredicateMask> {}
 type PredicateMask = true | ObjectPredicateMask;
 
+/**
+ * The mask for an array whose elements `items` selects.
+ *
+ * An array whose elements are not read is not read. The rejecting selector has
+ * to sit at the array itself to suppress the fetch: array traversal follows
+ * each element's link before it consults the item schema, so a rejection one
+ * level down arrives after the load it was meant to prevent.
+ */
+function arrayProjectionMask(items: ProjectionMask): ProjectionMask {
+  return items === false ? false : { type: "array", items };
+}
+
+/**
+ * The mask for an object whose named positions `properties` selects.
+ *
+ * An object whose every named position rejects is not read, by the same rule
+ * {@link arrayProjectionMask} applies one level up: a rejection reaches the
+ * fetch it suppresses only from the position that holds the link. Reducing
+ * here is what carries a rejection below a link up to the array holding it, so
+ * a marker below a link costs the same one read as a marker on it.
+ *
+ * Callers filter out the object that admits keys it does not name, which
+ * cannot be narrowed and so is never all-rejecting. An object naming no
+ * positions rejects nothing and stays a selector for the empty object it
+ * describes.
+ */
+function objectProjectionMask(
+  properties: Record<string, ProjectionMask>,
+): ProjectionMask {
+  const children = Object.values(properties);
+  return children.length > 0 && children.every((child) => child === false)
+    ? false
+    : { type: "object", properties, additionalProperties: false };
+}
+
 function projectionMask(schema: JSONSchema): ProjectionMask {
   if (schema === true) return true;
   if (schema === false) return false;
   const objectSchema = schema as Exclude<JSONSchema, boolean>;
   if (objectSchema.type === "array" || objectSchema.items !== undefined) {
-    const items = objectSchema.items === undefined
-      ? true
-      : projectionMask(objectSchema.items);
-    // An array whose elements are not read is not read. The rejecting
-    // selector has to sit at the array itself to suppress the fetch: array
-    // traversal follows each element's link before it consults the item
-    // schema, so a rejection one level down arrives after the load it was
-    // meant to prevent.
-    return items === false ? false : { type: "array", items };
+    return arrayProjectionMask(
+      objectSchema.items === undefined
+        ? true
+        : projectionMask(objectSchema.items),
+    );
   }
   // An object that admits keys it does not name cannot be narrowed: the
   // selector has to read whatever is there. The array branch above takes a
@@ -1222,16 +1253,14 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
   if (
     objectSchema.type === "object" || objectSchema.properties !== undefined
   ) {
-    return {
-      type: "object",
-      properties: Object.fromEntries(
+    return objectProjectionMask(
+      Object.fromEntries(
         Object.entries(objectSchema.properties ?? {}).map(([key, child]) => [
           key,
           projectionMask(child),
         ]),
       ),
-      additionalProperties: false,
-    };
+    );
   }
   return true;
 }
@@ -1627,7 +1656,10 @@ function resolveProjection(
           type: "array",
           items: projectionSchema,
         },
-        mask: { type: "array", items: mask },
+        // A field list read element-wise selects the array through its
+        // elements, so an element the list rejects entirely rejects the array
+        // the same way an item schema does.
+        mask: arrayProjectionMask(mask),
         projectsArrayItems: true,
         itemOutputSchema: outputSchema,
         itemProjectionSchema: projectionSchema,
