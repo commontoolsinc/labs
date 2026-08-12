@@ -658,6 +658,93 @@ describe("JsonCodec", () => {
     });
   });
 
+  describe("malformed `/hole` runs", () => {
+    // A run's count reaches the write index directly, so an unchecked one has
+    // consequences unrelated to what was wrong with it: a string concatenates
+    // onto the index, and a negative or fractional count makes the length
+    // assignment throw. Wire data is untrusted, so each is reported instead.
+
+    /** Decodes a hand-built array, which is deliberately not encodable. */
+    function decodeArray(entries: JsonCodecValue[]): FabricValue {
+      const { jsonCodec, runtime } = makeTestCodec();
+      return jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(JSON.stringify(entries), true),
+        runtime,
+      );
+    }
+
+    const BAD_COUNTS: readonly (readonly [string, JsonCodecValue])[] = [
+      ["a string", "2"],
+      ["a negative number", -5],
+      ["zero", 0],
+      ["a fraction", 1.5],
+      ["an object", { x: 1 }],
+      ["`null`", null],
+    ];
+
+    for (const [label, count] of BAD_COUNTS) {
+      it(`returns a \`ProblematicValue\` given ${label} as a count`, () => {
+        const result = decodeArray(["a", { "/hole": count }, "b"]);
+
+        expect(result).toBeInstanceOf(ProblematicValue);
+        const prob = result as unknown as ProblematicValue;
+        expect(prob.wireTypeTag).toBe("hole");
+        expect(prob.state).toEqual(count);
+        expect(prob.error).toContain("expected a positive integer count");
+      });
+    }
+
+    it("returns a `ProblematicValue` given a count past the array maximum", () => {
+      // A safe integer can still be more elements than an array can hold, in
+      // which case setting the length is what would fail.
+      const result = decodeArray(["a", { "/hole": 2 ** 40 }, "b"]);
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).error).toContain(
+        "past the",
+      );
+    });
+
+    it("returns a `ProblematicValue` when later entries carry the total past it", () => {
+      // The run alone is exactly what an array can hold; the two entries
+      // placed after it are what make the total too large.
+      const result = decodeArray([{ "/hole": 2 ** 32 - 1 }, "a", "b"]);
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).error).toContain(
+        "past the",
+      );
+    });
+
+    it("places an entry at the last index a run can leave free", () => {
+      // The bound is on length, where the largest index is one less, so this
+      // is where an off-by-one would show: the entry lands at the last legal
+      // index and the array is exactly as long as one may be. A step further
+      // and the entry would become a plain property rather than an element,
+      // which the previous case is what catches.
+      const result = decodeArray(
+        [{ "/hole": (2 ** 32 - 1) - 1 }, "z"],
+      ) as FabricValue[];
+
+      expect(result.length).toBe(2 ** 32 - 1);
+      expect(result[(2 ** 32 - 1) - 1]).toBe("z");
+    });
+
+    it("decodes a run reaching exactly the array maximum", () => {
+      const result = decodeArray([{ "/hole": 2 ** 32 - 1 }]) as FabricValue[];
+
+      expect(result.length).toBe(2 ** 32 - 1);
+    });
+
+    it("decodes a run of one, the smallest a count may be", () => {
+      const result = decodeArray(["a", { "/hole": 1 }, "b"]) as FabricValue[];
+
+      expect(result.length).toBe(3);
+      expect(1 in result).toBe(false);
+      expect(result[2]).toBe("b");
+    });
+  });
+
   describe("sparse arrays", () => {
     it("serializes `[1,,3]` with `/hole`", () => {
       // deno-lint-ignore no-sparse-arrays
