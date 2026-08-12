@@ -1,3 +1,17 @@
+/**
+ * The Fabric value classes reach pattern code as `export declare const`s in
+ * `api/index.ts`, but the runtime values behind those declarations are bound
+ * separately, in `builder/factory.ts`. The two sides are maintained by hand, so
+ * a class can be declared without being bound -- which type-checks when the
+ * pattern is compiled and then fails once it actually runs. These tests pin the
+ * runtime half against the declared half.
+ *
+ * `types/commonfabric.d.ts` is a symlink to `api/index.ts`, and is the exact
+ * artifact the sandbox hands a pattern as its view of `commonfabric`. Deriving
+ * the expected names from it means this test tracks the real declarations
+ * rather than a hand-copied list that someone has to remember to extend.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { StaticCache } from "@commonfabric/static";
@@ -20,17 +34,6 @@ import {
 import { createBuilder } from "../src/builder/factory.ts";
 import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
 
-// The Fabric value classes reach pattern code as `export declare const`s in
-// `api/index.ts`, but the runtime values behind those declarations are bound
-// separately, in `builder/factory.ts`. The two sides are maintained by hand, so
-// a class can be declared without being bound -- which type-checks when the
-// pattern is compiled and then fails once it actually runs. These tests pin the
-// runtime half against the declared half.
-//
-// `types/commonfabric.d.ts` is a symlink to `api/index.ts`, and is the exact
-// artifact the sandbox hands a pattern as its view of `commonfabric`. Deriving
-// the expected names from it means this test tracks the real declarations
-// rather than a hand-copied list that someone has to remember to extend.
 const patternVisibleTypes = await StaticCache.fromFileSystem().getText(
   "types/commonfabric.d.ts",
 );
