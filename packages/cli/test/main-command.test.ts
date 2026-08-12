@@ -227,6 +227,9 @@ describe("main command", () => {
           command.getName()
         );
         expect(commandNames).toContain("view");
+        // A command that is not registered is invisible: `cf ingest` would
+        // simply not exist, with no error anywhere to say why.
+        expect(commandNames).toContain("ingest");
         expect(commandNames).toContain("fuse-daemon");
         expect(commandNames).toContain("fuse-supervisor");
         expect(commandNames).not.toContain("dev");
