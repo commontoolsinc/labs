@@ -74,6 +74,8 @@ jobs:
             packages/utils/test/deep-equal.bench.ts \
             packages/fuse/entity-projection.bench.ts \
             packages/memory/test/v2-entity-id-list.bench.ts \
+            packages/data-model/bench/hashing.bench.ts \
+            packages/data-model/bench/codec-json.bench.ts \
             packages/patterns/integration/topic-board-navigation.bench.ts \
             packages/patterns/integration/topic-board-scale.bench.ts \
             > bench-results/results.json \

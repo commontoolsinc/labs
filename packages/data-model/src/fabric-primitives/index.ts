@@ -1,10 +1,8 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
+import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@/interface.ts";
-import type { FabricCodec } from "@/codec-common/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
-import type { FabricClassWithJsonCodec } from "./BaseFabricPrimitive.ts";
 import { FabricBytes } from "./FabricBytes.ts";
 import { FabricEpochDays } from "./FabricEpochDays.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
@@ -24,34 +22,25 @@ export { FabricEpochDays } from "./FabricEpochDays.ts";
  * which primitive types participate in serialization: add a class here once it
  * gains a `[JSON_CODEC]`.
  *
- * Returned frozen so callers cannot mutate the shared list.
- */
-export function codecClasses(): readonly FabricClassWithJsonCodec[] {
-  return CODEC_CLASSES;
-}
-
-/**
- * The JSON codecs of {@link codecClasses}, in the same order. This is what a
- * registry wants: reading `[JSON_CODEC]` is the business of the module that
- * knows these classes bind it, not of every caller assembling a registry.
+ * Typed only as classes, which is weaker than it looks: a `FabricPrimitive`
+ * binds its codec under a wire format's own symbol, so a type saying which
+ * symbol would name a format, and this list is meant to serve all of them.
+ * A class here that binds no codec for the format in play is refused by
+ * `CodecRegistry.registerClass()` when a registry is built.
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function jsonCodecs(): readonly FabricCodec[] {
-  return JSON_CODECS;
+export function codecClasses(): readonly Constructor[] {
+  return CODEC_CLASSES;
 }
 
-const CODEC_CLASSES: readonly FabricClassWithJsonCodec[] = Object.freeze([
+const CODEC_CLASSES: readonly Constructor[] = Object.freeze([
   FabricBytes,
   FabricHash,
   FabricEpochNsec,
   FabricEpochDays,
   FabricRegExp,
 ]);
-
-const JSON_CODECS: readonly FabricCodec[] = Object.freeze(
-  CODEC_CLASSES.map((cls) => cls[JSON_CODEC]),
-);
 
 /**
  * The `type` name in this system's schema dialect for a `FabricPrimitive`

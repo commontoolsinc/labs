@@ -3,9 +3,19 @@ import type { FabricValue } from "@/interface.ts";
 import type { FabricCodec, ReconstructionContext } from "./interface.ts";
 
 /**
- * Base class for `FabricCodec` which provides commonly-needed functionality.
+ * Base class for `FabricCodec` which provides commonly-needed functionality:
+ * the matching members, and a `tagForValue()` that answers with the codec's one
+ * recognized tag.
+ *
+ * It is abstract in `encode()` and `decode()` and, deliberately, in identity:
+ * extend {@link BaseNonterminalCodec} or {@link BaseTerminalCodec} rather than
+ * this directly. Those two are what tell the codec system whether a state is
+ * more work for the walker or the walker's final answer, a difference no
+ * signature can carry -- and extending one of them fixes the `Encoded` domain
+ * in the same stroke, so the declaration and its consequence cannot drift
+ * apart.
  */
-export abstract class BaseFabricCodec implements FabricCodec {
+export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
   #recognizedTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
@@ -62,10 +72,10 @@ export abstract class BaseFabricCodec implements FabricCodec {
   /** @inheritDoc */
   abstract decode(
     typeTag: string,
-    state: FabricValue,
+    state: Encoded,
     context: ReconstructionContext,
   ): FabricValue;
 
   /** @inheritDoc */
-  abstract encode(value: FabricValue): FabricValue;
+  abstract encode(value: FabricValue): Encoded;
 }

@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import { JsonCodec } from "@/codec-json/JsonCodec.ts";
 import { createDefaultJsonRegistry, newDefaultJsonCodec } from "@/codecs.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
-import type { JsonCodecValue } from "@/codec-json/interface.ts";
+import { JSON_FORMAT, type JsonCodecValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import {
@@ -21,6 +21,9 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
+import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
 /**
  * Shared test `ReconstructionContext`: `getCell()` always throws (no test
@@ -121,7 +124,9 @@ describe("JsonCodec", () => {
     // the empty registry's behavior instead, in both directions.
 
     it("throws on encode for a class the supplied registry lacks", () => {
-      const jsonCodec = new JsonCodec({ registry: new CodecRegistry() });
+      const jsonCodec = new JsonCodec({
+        registry: new CodecRegistry(JSON_FORMAT),
+      });
       const value = FabricError.fromNativeError(new Error("boom"));
 
       expect(() => jsonCodec.encode(value)).toThrow(
@@ -133,12 +138,181 @@ describe("JsonCodec", () => {
       const wire = newDefaultJsonCodec().encode(
         FabricError.fromNativeError(new Error("boom")),
       );
-      const jsonCodec = new JsonCodec({ registry: new CodecRegistry() });
+      const jsonCodec = new JsonCodec({
+        registry: new CodecRegistry(JSON_FORMAT),
+      });
 
       const result = jsonCodec.decode(wire, new TestReconstructionContext());
 
       expect(result).toBeInstanceOf(UnknownValue);
       expect((result as UnknownValue).wireTypeTag).toBe("Error@1");
+    });
+  });
+
+  describe("terminal vs. nonterminal codecs", () => {
+    // The two kinds differ in exactly one respect: whether the walker
+    // processes the state a codec produces. Every codec this package registers
+    // for JSON hides that difference, because each of their states is a
+    // self-representing value -- one of `null`, `boolean`, `number`, `string`
+    // -- and the walker is the identity on those by definition.
+    //
+    // Nothing in the types requires that. `JsonCodecValue` admits structure,
+    // and a structured state is where the two kinds part company.
+    //
+    // These cases use a state that does not survive one: a plain object
+    // carrying a `/`-prefixed key. The walker escapes such an object with
+    // `/quote` on the way out, and decodes the tag it names on the way back,
+    // so which kind of codec produced it is legible in the wire form and in
+    // what `decode()` is handed.
+
+    const PROBE_TAG = "Probe@1";
+    const PROBE_STATE = Object.freeze({ "/Bytes@1": "AQID" });
+
+    /** Stateless instance, existing only to have a class to dispatch on. */
+    class ProbeInstance extends BaseFabricInstance {
+      get wireTypeTag(): string {
+        return PROBE_TAG;
+      }
+
+      protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
+        return new ProbeInstance();
+      }
+
+      protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
+        return new ProbeInstance();
+      }
+
+      [DEEP_FREEZE](
+        _subFreeze: (value: FabricValue) => FabricValue,
+      ): FabricValue {
+        return this;
+      }
+
+      [IS_DEEP_FROZEN](
+        _subIsDeepFrozen: (value: FabricValue) => boolean,
+      ): boolean {
+        return true;
+      }
+    }
+
+    class ProbeTerminalCodec extends BaseTerminalCodec<JsonCodecValue> {
+      /** State most recently handed to `decode()`. */
+      received: JsonCodecValue = null;
+
+      constructor() {
+        super(PROBE_TAG, ProbeInstance);
+      }
+
+      encode(_value: FabricValue): JsonCodecValue {
+        return PROBE_STATE;
+      }
+
+      decode(_typeTag: string, state: JsonCodecValue): FabricValue {
+        this.received = state;
+        return new ProbeInstance();
+      }
+    }
+
+    class ProbeNonterminalCodec extends BaseNonterminalCodec {
+      /** State most recently handed to `decode()`. */
+      received: FabricValue = null;
+
+      constructor() {
+        super(PROBE_TAG, ProbeInstance);
+      }
+
+      encode(_value: FabricValue): FabricValue {
+        return PROBE_STATE;
+      }
+
+      decode(_typeTag: string, state: FabricValue): FabricValue {
+        this.received = state;
+        return new ProbeInstance();
+      }
+    }
+
+    /** Builds a codec over the default registry plus the given probe. */
+    function codecWith(
+      probe: ProbeTerminalCodec | ProbeNonterminalCodec,
+    ): JsonCodec {
+      return new JsonCodec({
+        registry: createDefaultJsonRegistry().extend(probe),
+      });
+    }
+
+    /** The wire tree a probe produces for a `ProbeInstance`. */
+    function wireFormatFrom(
+      probe: ProbeTerminalCodec | ProbeNonterminalCodec,
+    ): JsonCodecValue {
+      const encoded = codecWith(probe).encode(new ProbeInstance());
+      return JSON.parse(
+        encoded.slice(ENCODING_PREFIX.length),
+      ) as JsonCodecValue;
+    }
+
+    it("writes a terminal codec's state to the wire untouched", () => {
+      expect(wireFormatFrom(new ProbeTerminalCodec())).toEqual({
+        [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" },
+      });
+    });
+
+    it("expands a nonterminal codec's state on the way to the wire", () => {
+      // The `/quote` wrapper is the walker's mark: it saw a plain object with
+      // a reserved key and escaped it.
+      expect(wireFormatFrom(new ProbeNonterminalCodec())).toEqual({
+        [`/${PROBE_TAG}`]: { "/quote": { "/Bytes@1": "AQID" } },
+      });
+    });
+
+    it("hands a terminal codec the wire state exactly as it arrived", () => {
+      const probe = new ProbeTerminalCodec();
+
+      codecWith(probe).decode(
+        JsonCodec.wrapEncodedValueForTesting(
+          JSON.stringify({ [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" } }),
+          true,
+        ),
+        new TestReconstructionContext(),
+      );
+
+      expect(probe.received).toEqual({ "/Bytes@1": "AQID" });
+    });
+
+    it("lets a terminal codec judge a state that names a tag", () => {
+      // A terminal codec's state is its own business, so a tag appearing
+      // inside one is just data. `BigInt@1` sees a non-string and reports by
+      // returning a `ProblematicValue` -- which the spec sanctions alongside
+      // throwing, `3-json-encoding.md` Section 7 letting a codec do either.
+      // Non-lenient, so nothing here is wrapping a throw.
+      const jsonCodec = newDefaultJsonCodec();
+
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(
+          JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
+          true, // Undecodable on purpose; that is what this test is about.
+        ),
+        new TestReconstructionContext(),
+      );
+
+      expect(jsonCodec.lenient).toBe(false);
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
+        "BigInt@1",
+      );
+    });
+
+    it("hands a nonterminal codec state that has been expanded", () => {
+      const probe = new ProbeNonterminalCodec();
+
+      codecWith(probe).decode(
+        JsonCodec.wrapEncodedValueForTesting(
+          JSON.stringify({ [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" } }),
+          true,
+        ),
+        new TestReconstructionContext(),
+      );
+
+      expect(probe.received).toBeInstanceOf(FabricBytes);
     });
   });
 
@@ -1149,6 +1323,31 @@ describe("JsonCodec", () => {
       expect(result).toBeInstanceOf(ProblematicValue);
       const prob = result as unknown as ProblematicValue;
       expect(prob.wireTypeTag).toBe("BigInt@1");
+    });
+
+    it("wraps a throw from a terminal codec, over the wire-form state", () => {
+      // `Undefined@1` is terminal and throws outright, so it reaches the
+      // lenient catch from the terminal arm. A codec that reports a bad state
+      // by returning a `ProblematicValue` never reaches that catch at all.
+      //
+      // What the state assertion pins is what the *report* carries, which is
+      // the wire form. That the *codec* is handed the wire form is a separate
+      // fact, pinned separately above.
+      const jsonCodec = newDefaultJsonCodec({ lenient: true });
+      const data = { "/Undefined@1": { "/Bytes@1": "AQID" } } as JsonCodecValue;
+
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(
+          JSON.stringify(data),
+          true, // Undecodable on purpose; that is what this test is about.
+        ),
+        new TestReconstructionContext(),
+      );
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      const prob = result as unknown as ProblematicValue;
+      expect(prob.wireTypeTag).toBe("Undefined@1");
+      expect(prob.state).toEqual({ "/Bytes@1": "AQID" });
     });
 
     it("lenient mode wraps failed class-registry reconstruction", () => {

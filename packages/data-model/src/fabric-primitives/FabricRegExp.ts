@@ -6,9 +6,9 @@ import type {
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
 import {
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
@@ -135,7 +135,7 @@ export class FabricRegExp extends BaseFabricPrimitive
   //
 
   static #codec = Object.freeze(
-    new (class RegExpCodec extends BaseFabricCodec {
+    new (class RegExpCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
@@ -186,7 +186,7 @@ export class FabricRegExp extends BaseFabricPrimitive
   );
 
   /** The codec for instances of this class. */
-  static get [JSON_CODEC](): FabricCodec {
+  static get [JSON_CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }

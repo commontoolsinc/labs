@@ -2,7 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricSpecialObject, JSON_CODEC } from "@/interface.ts";
-import { CODEC, codecOf, type FabricCodec } from "@/codec-common/index.ts";
+import {
+  CODEC,
+  codecOf,
+  type NonterminalCodec,
+  type TerminalCodec,
+} from "@/codec-common/index.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
@@ -37,11 +43,11 @@ describe("codecOf()", () => {
       // real class the two symbols cannot disagree, and the case would pass
       // whichever one the implementation preferred.
       class BothCodecs extends FabricSpecialObject {
-        static get [CODEC](): FabricCodec {
+        static get [CODEC](): NonterminalCodec {
           return FabricError[CODEC];
         }
 
-        static get [JSON_CODEC](): FabricCodec {
+        static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
           return FabricBytes[JSON_CODEC];
         }
       }

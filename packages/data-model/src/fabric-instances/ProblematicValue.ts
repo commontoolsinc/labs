@@ -7,10 +7,10 @@ import {
 } from "./BaseFabricInstance.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 
@@ -72,7 +72,7 @@ export class ProblematicValue extends ExplicitTagValue {
   }
 
   static #codec = Object.freeze(
-    new (class ProblematicValueCodec extends BaseFabricCodec {
+    new (class ProblematicValueCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         // No preferred wire tag: a `ProblematicValue` round-trips to its
@@ -105,7 +105,7 @@ export class ProblematicValue extends ExplicitTagValue {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }

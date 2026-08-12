@@ -1,8 +1,6 @@
-import {
-  CODEC,
-  type FabricClassWithCodec,
-  type FabricCodec,
-} from "@/codec-common/interface.ts";
+import type { Constructor } from "@commonfabric/utils/types";
+
+import type { FabricClassWithNonterminalCodec } from "@/codec-common/interface.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricLink } from "./FabricLink.ts";
 import { FabricMap } from "./FabricMap.ts";
@@ -21,6 +19,13 @@ export { FabricMap } from "./FabricMap.ts";
 export { FabricSet } from "./FabricSet.ts";
 
 /**
+ * A concrete instance class as this roster holds one: a class, and one binding
+ * a format-neutral `[CODEC]`. The second half is what a roster of primitives
+ * cannot claim, their codecs being bound per format.
+ */
+type InstanceCodecClass = Constructor & FabricClassWithNonterminalCodec;
+
+/**
  * The concrete instance classes whose instances are available over the wire,
  * each via its static `[CODEC]`. This is the curated source of truth for which
  * instance types participate in serialization.
@@ -33,22 +38,11 @@ export { FabricSet } from "./FabricSet.ts";
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function codecClasses(): readonly FabricClassWithCodec[] {
+export function codecClasses(): readonly InstanceCodecClass[] {
   return CODEC_CLASSES;
 }
 
-/**
- * The codecs of {@link codecClasses}, in the same order. This is what a
- * registry wants: reading `[CODEC]` is the business of the module that knows
- * these classes bind it, not of every caller assembling a registry.
- *
- * Returned frozen so callers cannot mutate the shared list.
- */
-export function codecs(): readonly FabricCodec[] {
-  return CODECS;
-}
-
-const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
+const CODEC_CLASSES: readonly InstanceCodecClass[] = Object.freeze([
   FabricError,
   FabricLink,
   FabricMap,
@@ -56,7 +50,3 @@ const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
   ProblematicValue,
   UnknownValue,
 ]);
-
-const CODECS: readonly FabricCodec[] = Object.freeze(
-  CODEC_CLASSES.map((cls) => cls[CODEC]),
-);

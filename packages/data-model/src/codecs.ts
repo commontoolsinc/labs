@@ -18,10 +18,11 @@ import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./codec-common/interface.ts";
 import { EmptyReconstructionContext } from "./codec-common/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
+import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodec } from "./codec-json/JsonCodec.ts";
 import { createBaseJsonRegistry } from "./codec-json/createBaseJsonRegistry.ts";
-import { jsonCodecs as primitiveJsonCodecs } from "./fabric-primitives/index.ts";
-import { codecs as instanceCodecs } from "./fabric-instances/index.ts";
+import { codecClasses as primitiveClasses } from "./fabric-primitives/index.ts";
+import { codecClasses as instanceClasses } from "./fabric-instances/index.ts";
 
 /**
  * Creates a registry pairing the JSON format with the fabric classes this
@@ -31,20 +32,19 @@ import { codecs as instanceCodecs } from "./fabric-instances/index.ts";
  *
  * The two curated `codecClasses()` lists are the source of truth for which
  * classes participate, so the wire-format surface is decided where those are
- * written rather than here. Each list is read through the symbol its classes
- * bind: a `FabricPrimitive` supplies a codec per wire format, so the JSON one
- * comes from its static `[JSON_CODEC]`; a `FabricInstance` supplies one that
- * serves every format, from its static `[CODEC]`.
+ * written rather than here. The registry reads each class's codec for itself,
+ * under `[CODEC]` where a class has one and under this format's own symbol
+ * otherwise, so the same two lists serve any format.
  *
  * `UnknownValue` and `ProblematicValue` are among them, but their codecs
  * recognize no single wire tag: the encode path resolves an instance's tag
  * with `tagForValue()`, and an unrecognized tag on decode is wrapped in an
  * `UnknownValue` by the encoding context rather than tag-routed.
  */
-export function createDefaultJsonRegistry(): CodecRegistry {
+export function createDefaultJsonRegistry(): CodecRegistry<JsonCodecValue> {
   return createBaseJsonRegistry().extend(
-    primitiveJsonCodecs(),
-    instanceCodecs(),
+    primitiveClasses(),
+    instanceClasses(),
   );
 }
 

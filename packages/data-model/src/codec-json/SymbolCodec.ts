@@ -1,7 +1,8 @@
 import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import type { JsonCodecValue } from "./interface.ts";
 import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -21,7 +22,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class SymbolCodec extends BaseFabricCodec {
+export class SymbolCodec extends BaseTerminalCodec<JsonCodecValue> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.Symbol, Symbol as unknown as Constructor);
@@ -33,7 +34,7 @@ export class SymbolCodec extends BaseFabricCodec {
   }
 
   /** @inheritDoc */
-  encode(value: symbol): FabricValue {
+  encode(value: symbol): JsonCodecValue {
     // `canEncode()` already verified the symbol has a registry key.
     return Symbol.keyFor(value)!;
   }
@@ -41,7 +42,7 @@ export class SymbolCodec extends BaseFabricCodec {
   /** @inheritDoc */
   decode(
     typeTag: string,
-    state: FabricValue,
+    state: JsonCodecValue,
     _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {

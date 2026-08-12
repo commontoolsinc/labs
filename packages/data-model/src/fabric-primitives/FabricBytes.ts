@@ -4,14 +4,14 @@ import {
 } from "@commonfabric/utils/base64url";
 import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
-import { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import {
-  FabricCodec,
   ReconstructionContext,
+  TerminalCodec,
 } from "@/codec-common/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
 
@@ -101,7 +101,7 @@ export class FabricBytes extends BaseFabricPrimitive {
   //
 
   static #codec = Object.freeze(
-    new (class BytesCodec extends BaseFabricCodec {
+    new (class BytesCodec extends BaseTerminalCodec<JsonCodecValue> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Bytes, FabricBytes);
@@ -110,7 +110,7 @@ export class FabricBytes extends BaseFabricPrimitive {
       /** @inheritDoc */
       decode(
         typeTag: string,
-        state: FabricValue,
+        state: JsonCodecValue,
         _context: ReconstructionContext,
       ): FabricBytes | ProblematicValue {
         if (typeof state !== "string") {
@@ -133,14 +133,14 @@ export class FabricBytes extends BaseFabricPrimitive {
       }
 
       /** @inheritDoc */
-      encode(value: FabricBytes): FabricValue {
+      encode(value: FabricBytes): JsonCodecValue {
         return toUnpaddedBase64url(value.#bytes);
       }
     })(),
   );
 
   /** The codec for instances of this class. */
-  static get [JSON_CODEC](): FabricCodec {
+  static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
     return this.#codec;
   }
 }

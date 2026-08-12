@@ -10,16 +10,21 @@
 
 export {
   CODEC,
-  type FabricClassWithCodec,
+  type CodecForFormat,
+  type FabricClassWithNonterminalCodec,
   type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
   type SerializationContext,
+  type TerminalCodec,
 } from "./interface.ts";
 
 export { codecOf } from "./codecOf.ts";
 export { CODEC_META_TAGS } from "./codec-meta-tags.ts";
 export { CODEC_TYPE_TAGS } from "./codec-type-tags.ts";
 export { BaseFabricCodec } from "./BaseFabricCodec.ts";
+export { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
+export { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
 export {
   EMPTY_RECONSTRUCTION_CONTEXT,

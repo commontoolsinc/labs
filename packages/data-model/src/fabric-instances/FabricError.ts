@@ -12,10 +12,10 @@ import {
 } from "./BaseFabricInstance.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
@@ -437,7 +437,7 @@ export class FabricError extends FabricNativeWrapper<Error>
   }
 
   static #codec = Object.freeze(
-    new (class FabricErrorCodec extends BaseFabricCodec {
+    new (class FabricErrorCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Error, FabricError);
@@ -500,7 +500,7 @@ export class FabricError extends FabricNativeWrapper<Error>
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }

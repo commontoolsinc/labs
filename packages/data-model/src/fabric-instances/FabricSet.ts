@@ -6,10 +6,10 @@ import {
 } from "./BaseFabricInstance.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -67,7 +67,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   }
 
   static #codec = Object.freeze(
-    new (class FabricSetCodec extends BaseFabricCodec {
+    new (class FabricSetCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Set, FabricSet);
@@ -98,7 +98,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
