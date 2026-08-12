@@ -414,6 +414,14 @@ Requests through the Codex path (`--model-provider openai-codex`) address a
 different endpoint and carry no provenance. Subagents share their parent's
 client, so their requests carry the parent's session.
 
+The harness is not the only sender. Toolshed imports these fields through
+`@commonfabric/cf-harness/provenance` for the gateway requests its LLM routes
+make, and opens its `User-Agent` with `toolshed` in place of `cf-harness`;
+[`packages/toolshed/README.md`](../toolshed/README.md#gateway-request-provenance)
+says what it reports. A field added here is a field both send, and the gateway
+removes these headers from the request by name, so adding one takes a matching
+change to the gateway manifests in the infra repository.
+
 A principal names a machine and nothing else, so putting a name to one means
 asking. Each person can read their own:
 

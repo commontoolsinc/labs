@@ -6,7 +6,13 @@ import type {
   GetModelsRoute,
 } from "./llm.routes.ts";
 import { httpStatusForError } from "./errors.ts";
-import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
+import {
+  ALIAS_NAMES,
+  ModelList,
+  MODELS,
+  TASK_MODELS,
+  whenModelsReady,
+} from "./models.ts";
 import { CacheItem, hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
@@ -91,7 +97,8 @@ function validateModelAndJsonMode(
  * Handler for GET /models endpoint
  * Returns filtered list of available LLM models based on search criteria
  */
-export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
+export const getModels: AppRouteHandler<GetModelsRoute> = async (c) => {
+  await whenModelsReady();
   const { search, capability, task } = c.req.query();
   const capabilities = capability?.split(",");
 
@@ -205,6 +212,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     }
   };
 
+  await whenModelsReady();
   const validationError = validateModelAndJsonMode(
     c,
     payload.model,

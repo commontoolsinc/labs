@@ -42,6 +42,41 @@ toolshed/
 └── index.ts      # Main hono entry point
 ```
 
+### Gateway request provenance
+
+The LLM gateway attributes its spend by what a caller says about itself, so the
+requests toolshed sends it carry the same `x-cf-harness-*` headers and
+`User-Agent` that `cf-harness` sends. The headers are built by
+`lib/gateway-provenance.ts` from
+[`@commonfabric/cf-harness/provenance`](../cf-harness/src/provenance.ts), and
+they go on requests to the gateway alone: the other providers in
+`routes/ai/llm/models.ts` address a model vendor's own API, which has nothing in
+front of it to remove an internal header.
+
+A request reports `service=toolshed`, a principal for the machine, a session for
+this toolshed process, and a `command` naming the route it came from —
+`generate-text`, `generate-object`, `list-models`, or `web-search`. The access
+log records the user agent of every request, so in Cloud Logging:
+
+```text
+resource.type="k8s_container"
+resource.labels.namespace_name="envoy-gateway-system"
+jsonPayload."user-agent"=~"^toolshed "
+```
+
+`jsonPayload.caller_command` splits that traffic by route, and
+`jsonPayload.caller_session` groups the requests of one toolshed process.
+
+The principal is kept in `$CF_HARNESS_HOME/principal`, or under `HOME` when that
+is unset, so a deployment whose filesystem does not survive a restart draws a
+new one each time. Setting `CF_HARNESS_PRINCIPAL` pins it to the deployment.
+
+What a value may contain is not a matter of taste:
+[`docs/features/gateway-request-provenance.md`](../../docs/features/gateway-request-provenance.md)
+states the invariants, and the gateway removes these headers from the request by
+name, so a field added here without the matching change to the gateway manifests
+reaches the model vendor.
+
 ## Getting Started
 
 Follow the repository

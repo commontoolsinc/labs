@@ -1,8 +1,7 @@
 # Gateway request provenance
 
-Every request `cf-harness` sends to the LLM gateway carries a description of
-what caused it: the kind of run, the machine it came from, and the session it
-belongs to.
+Every request sent to the LLM gateway carries a description of what caused it:
+the kind of run, the machine it came from, and the session it belongs to.
 
 The gateway authenticates upstream with one shared credential per provider and
 reaches it from one address, so a request arriving there says nothing about
@@ -13,6 +12,26 @@ records the gateway already keeps.
 The fields, and how each one is obtained, are in
 [`packages/cf-harness/README.md`](../../packages/cf-harness/README.md#request-provenance).
 This document holds the invariants behind them.
+
+## One vocabulary, two senders
+
+`cf-harness` sends provenance on every gateway request it makes. Toolshed sends
+it on the gateway requests its `/api/ai/llm` routes and its web search make;
+[`packages/toolshed/README.md`](../../packages/toolshed/README.md#gateway-request-provenance)
+says what it reports.
+
+Both build their headers from `packages/cf-harness/src/provenance.ts`, which
+toolshed imports as `@commonfabric/cf-harness/provenance`. One implementation
+means one sanitizer, and it means a field cannot exist for one sender and not
+the other. The `User-Agent` opens with the name of the sending program, so the
+two are told apart by user agent alone.
+
+The gateway names each header it handles. A Lua filter copies the names it
+knows into dynamic metadata, and a patch policy removes those names from the
+request; both lists are written out in the infra repository, under
+`k8s/manifests/envoy-gateway/`. Neither is a prefix match. A field added to
+`provenanceEntries` and not to those lists travels to the model vendor and
+appears in no log, so a new field is two changes across two repositories.
 
 ## Two channels, one set of values
 
@@ -31,15 +50,16 @@ follow.
 
 **A value carries no request content.** Nothing derived from a prompt, a
 message, a tool argument, or a command line appears in one. Three mechanisms
-hold this: the subcommand is mapped through a closed set, so an unrecognized
-argument reports `prompt`; every value passes through a sanitizer, at the one
-point where values leave, that bounds it to a short run of characters that
-cannot break a header or carry structure into one; and a Loom run manifest
+hold this: the `command` field is mapped through a closed set, so an
+unrecognized harness argument reports `prompt` and a toolshed request reports
+the name of the route it arrived on; every value passes through a sanitizer, at
+the one point where values leave, that bounds it to a short run of characters
+that cannot break a header or carry structure into one; and a Loom run manifest
 contributes only its dispatch class.
 
 The sanitizer bounds a value rather than inspecting it. What keeps request
-content out is the closed set the subcommand is drawn from: no other field is
-fed from a prompt, a message, or a command line.
+content out is the closed set `command` is drawn from: no other field is fed
+from a prompt, a message, or a command line.
 
 **A value identifies no person.** Where a signal is a unique identifier of a
 person or of their machine, only its presence is read: a coding agent's marker
@@ -88,9 +108,28 @@ a Loom-driven run carries labs as its remote.
 
 An absent field means the value was not there to read.
 
+## A server reports itself, not the caller behind it
+
+A field describes the process that sent the request. For `cf-harness` that
+process is the workload, so the two coincide. Toolshed is a server: one process
+serves many callers, and its session groups the requests of one toolshed
+process rather than the requests of one caller.
+
+Naming the caller behind a toolshed request means the caller naming itself.
+Nothing in a request to `/api/ai/llm` says which space or which piece it came
+from: the runner's LLM builtins send neither, and `packages/llm/src/client.ts`
+sends no provenance of its own. Until they do, toolshed has nothing to report,
+and reporting a guess would be worse than reporting nothing.
+
+Such a field is internal metadata. A space identifier names one of our spaces,
+which a model vendor has no use for, and a space is often one person's, so it
+carries the identification the fields here are built to avoid. It reaches the
+gateway only under a header the gateway removes by name, which is the change
+across two repositories described above.
+
 ## Coverage
 
-Two gaps are known.
+Four gaps are known.
 
 Subagents share their parent's gateway client, so their requests carry the
 parent's session. Separating them takes a per-turn mechanism; the client holds
@@ -98,7 +137,16 @@ one provenance for its lifetime.
 
 A principal covers one harness home. A person running the harness from a laptop
 and a dev box has a principal for each, and a home that is wiped starts a new
-one.
+one. A server's principal is the one its container holds, which a container
+that starts with an empty filesystem draws afresh; `CF_HARNESS_PRINCIPAL` pins
+it to the deployment instead.
+
+Toolshed reports the route a request came from as its command, and reports it
+for as long as the route's call is being awaited. A streaming response is read
+by its caller after that call returns, so the requests the model makes to
+continue a tool-calling conversation over that stream report no command.
+
+Toolshed reports no space and no piece, for the reason above.
 
 The Codex transport is out of scope: it addresses a different endpoint under a
 personal subscription, and sends its own originator and session headers.

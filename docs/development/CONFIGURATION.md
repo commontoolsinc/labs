@@ -59,7 +59,7 @@ for the registration logic.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CFTS_AI_GATEWAY_URL` | `https://llm.stage.commontools.dev` | OpenAI-compatible `/v1/models` endpoint. Toolshed probes it at startup; reachable models are registered and `gateway:claude-sonnet-4-6` becomes the default when present. **The default URL is Tailscale-only — external users will not be able to reach it.** That fallback path is supported: an unreachable gateway logs a warning, the startup probe times out in ~3s, and the direct-provider models continue to work. Set to `""` to opt out and skip the probe entirely. |
+| `CFTS_AI_GATEWAY_URL` | `https://llm.stage.commontools.dev` | OpenAI-compatible `/v1/models` endpoint. Toolshed probes it as it starts up, alongside binding its port rather than ahead of it; reachable models are registered and `gateway:claude-sonnet-4-6` becomes the default when present. **The default URL is Tailscale-only — external users will not be able to reach it.** That fallback path is supported: an unreachable gateway logs a warning and the direct-provider models continue to work. The server answers everything else meanwhile; a request that names a model waits for the probe to finish, which off Tailscale is however long the connection takes to fail. Set to `""` to opt out and skip the probe entirely. |
 
 **Default model resolution order** (defined in `models.ts` as
 `DEFAULT_MODEL_CANDIDATES`):
