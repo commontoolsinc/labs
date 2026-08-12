@@ -1650,11 +1650,12 @@ declared, derived, and link-carried labels. Omit path to inspect the root.`,
 INPUT: An object with confidentiality and/or integrity arrays, plus an optional
 observes value: value, shape, enumerate, or followRef.
 
-The update uses the stored schema and CFC transaction rules. Confidentiality
-can only become stricter, and integrity cannot be silently strengthened. Raw
-CFC metadata is never edited. Conflicting observation classes are rejected.
-Omitting observes preserves an existing class. The updated effective label view
-is returned.`),
+The command records the label through the same checked write operation used for
+piece data. It never changes raw CFC metadata. Confidentiality may only become
+more restrictive. An integrity update may keep or remove existing claims, but
+cannot add trust. Conflicting observation classes are rejected. If observes is
+omitted, an existing unambiguous class is preserved. The command returns the
+updated effective label view.`),
   )
   .usage(`${pieceUsage} [path]`)
   .example(

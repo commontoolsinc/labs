@@ -650,7 +650,9 @@ describe("cf piece CFC labels", () => {
     expect(setHelp.code).toBe(0);
     const text = stripAnsi(setHelp.stdout.join("\n"));
     expect(text).toContain("from JSON on stdin");
-    expect(text).toMatch(/Confidentiality\s+can only become stricter/);
+    expect(text).toMatch(
+      /Confidentiality\s+may only become\s+more restrictive/,
+    );
     expect(text).toContain("--json");
   });
 });
