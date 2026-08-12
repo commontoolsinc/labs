@@ -1,16 +1,3 @@
-/**
- * This directory declares what a codec is: the interfaces a codec and a
- * reconstruction context satisfy, the abstract bases that classify a codec as
- * terminal or nonterminal, and the tag vocabularies. Nothing here does any
- * codec work; the machinery that acts on these declarations lives in
- * `codec-common/`, alongside the registry that indexes them and the abstract
- * classes a participating value extends.
- *
- * No runtime value is imported from anywhere else in the package, which is
- * what makes this reachable from any module without regard to layering. A
- * module needing only to name a codec imports the file it wants from here and
- * pulls none of the machinery in behind it.
- */
 export {
   CODEC,
   type CodecForFormat,

@@ -22,6 +22,7 @@
  * codec claimed. A class a caller models data with belongs in
  * `fabric-instances/` or `fabric-primitives/` instead.
  */
+
 export * from "@/codec-interface/index.ts";
 
 export { codecOf } from "./codecOf.ts";
