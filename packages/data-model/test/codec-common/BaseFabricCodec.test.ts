@@ -1,3 +1,15 @@
+/**
+ * What the codec base class does on its own, before a concrete codec overrides
+ * anything.
+ *
+ * Two of its answers come straight from what it was constructed with, and both
+ * are optional: a codec naming no handled class cannot recognize a value by
+ * class, and one naming no tag cannot produce a tag. Each is covered in both
+ * the supplied and the omitted form, because the omitted form is where the
+ * base either answers `undefined` or insists on being overridden, and those
+ * are different promises.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

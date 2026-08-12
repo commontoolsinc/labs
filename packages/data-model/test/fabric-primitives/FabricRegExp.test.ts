@@ -1,3 +1,20 @@
+/**
+ * A regular expression stored as data -- source, flags, and the flavor saying
+ * whose dialect they are written in -- rather than as a live `RegExp`.
+ *
+ * The flavor is what makes this more than a wrapper. A pattern in the dialect
+ * this runtime understands is validated and can be handed back as a native
+ * `RegExp`; one in any other flavor is stored faithfully and not parsed at
+ * all, so a pattern JS would reject survives a round trip instead of becoming
+ * a `ProblematicValue`. What fails is asking such a value for a native form,
+ * and it fails at that point rather than when the value was stored.
+ *
+ * Nothing is aliased in either direction: the constructor does not keep the
+ * `RegExp` it was given, and each read builds a fresh one, so mutating what
+ * comes back cannot reach the stored value. The flavor counts toward identity
+ * as well -- two values differing only in it hash differently.
+ */
+
 import { JSON_CODEC } from "@/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

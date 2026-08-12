@@ -1,3 +1,24 @@
+/**
+ * The registry's two jobs -- accepting codecs and answering lookups -- and the
+ * line that freezing draws between them.
+ *
+ * Acceptance is where the refusals live. A codec has to be classifiable, the
+ * base class it extends being the only record of what its state means, and it
+ * has to carry a tag. Both conditions are checked on every route in rather
+ * than on one of them, since a registration that arrived by a side door is
+ * still one the walker will trust.
+ *
+ * Lookup answers from a value, from a tag, or with the sentinel meaning that
+ * no codec is needed. Which symbol a class's codec is read from is settled
+ * here too: the format-agnostic binding wins over the format's own when a
+ * class has both, and a binding belonging to some other format is not
+ * consulted at all.
+ *
+ * Freezing then separates the two jobs. Every mutator refuses afterward while
+ * every lookup still answers, and extending yields a new registry carrying the
+ * base's registrations without the base itself gaining anything.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

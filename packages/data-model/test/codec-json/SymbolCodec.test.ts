@@ -1,3 +1,14 @@
+/**
+ * Symbols on the wire, which is possible only because the registry makes some
+ * of them nameable.
+ *
+ * An interned symbol is fully described by its key, so encoding is writing
+ * that key down and decoding is asking the registry for the same symbol back
+ * -- the round trip returns the identical instance rather than an equal one.
+ * A unique symbol has no key, and is refused because nothing about it could be
+ * written down and recovered.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

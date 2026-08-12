@@ -1,3 +1,16 @@
+/**
+ * An immutable byte sequence, and the copying that immutability costs.
+ *
+ * The constructor cannot simply hold the array it was handed, since the caller
+ * still has a reference and could write through it, so the bytes are copied in
+ * -- with an opt-in transfer for a caller willing to give up its own access.
+ * Reads pay the same way round: a slice hands back a copy rather than a view.
+ *
+ * The cases that need stating are where a byte count meets an empty or
+ * exhausted range. Empty bytes encode to the empty string, and a copy whose
+ * offset is at or past the end copies nothing rather than failing.
+ */
+
 import { JSON_CODEC } from "@/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

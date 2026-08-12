@@ -1,3 +1,13 @@
+/**
+ * `undefined` on a wire whose nearest neighbor is `null`, and the care that
+ * distinction takes.
+ *
+ * The encoded state is itself `null`, so the codec's whole job is keeping the
+ * two apart: it claims `undefined` and refuses `null`, and on the way back a
+ * state that is not `null` is treated as a malformed encoding rather than as
+ * something to salvage.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

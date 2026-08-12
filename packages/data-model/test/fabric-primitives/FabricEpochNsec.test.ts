@@ -1,3 +1,16 @@
+/**
+ * A nanosecond timestamp as a fabric primitive: always frozen, wrapping a
+ * `bigint`, and encoded to a flat base64 string.
+ *
+ * Holding a `bigint` rather than a number is the reason the class exists, so
+ * the cases reach for magnitudes past where a double stops being exact -- a
+ * far-future timestamp as well as pre-epoch ones -- rather than staying near
+ * zero, where any representation would look correct.
+ *
+ * Malformed state decodes to a `ProblematicValue` rather than throwing, and
+ * conversion leaves an instance alone even when asked for something mutable.
+ */
+
 import { JSON_CODEC } from "@/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

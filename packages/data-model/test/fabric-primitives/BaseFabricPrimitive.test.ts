@@ -1,3 +1,17 @@
+/**
+ * The primitive base class's own behavior, which comes down to one invariant.
+ *
+ * Every concrete primitive is required to extend this class rather than the
+ * contract above it, and the type guard enforces that rather than merely
+ * reporting on it: a value that is a `FabricPrimitive` but not a
+ * `BaseFabricPrimitive` is a broken subclass, so the guard throws instead of
+ * quietly answering `false` and letting the mistake travel.
+ *
+ * The placeholder member is here in order to be a member at all -- an instance
+ * type with nothing in it would make an ordinary `value is` guard collapse --
+ * and its only observable behavior is refusing to be called.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
