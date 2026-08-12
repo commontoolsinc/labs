@@ -49,8 +49,9 @@ set or copy them into agent mutations.
 ## Reading Topics
 
 The current pattern exports `index` — a compact discovery result whose rows
-carry scalar summaries plus title-only sibling references, so one read surveys
-the whole board without expanding any topic:
+carry each Topic's canonical `fid`, a title-only reference to the Topic, and
+scalar summaries, so one read surveys the whole board without expanding any
+Topic:
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" index --step
@@ -59,7 +60,7 @@ deno task cf piece get --url "$TOPICS_BOARD_URL" index --step
 A deployed board can run an older pattern without `index` — the read above
 erroring on an unknown path is the tell. Survey such a board through the durable
 `topics` input instead, projected immediately: an unprojected row follows the
-linked Topic and can include its body, comments, handlers, and reference graph.
+linked Topic and can include its body, comments, and handlers.
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
@@ -98,13 +99,13 @@ exact known fields or numeric ranges to shrink the corpus, then inspect the
 small result. Always combine a Topic-list filter with `--select`; filter alone
 returns every property of each match.
 
-Address a selected Topic by the canonical fid published in the board's
-`crossrefs` result. Filter and project that computed index too:
+Address a selected Topic by the canonical fid published in the board's `index`
+result. Filter and project that computed index too:
 
 ```bash
-deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
-  --filter '.topic.title == "<exact title>"' \
-  --select fid,topic.title,topic.lastActivityAt,topic.commentCount
+deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
+  --filter '.title == "<exact title>"' \
+  --select fid,title,lastActivityAt,commentCount
 export TOPIC_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/<topic-fid>'
 deno task cf piece get --url "$TOPIC_URL" title --input
 deno task cf piece get --url "$TOPIC_URL" body --input
@@ -127,19 +128,20 @@ not compose with `--filter` — a filtered array's survivors no longer say which
 positions they came from — so ask for an address in its own unfiltered read:
 
 ```bash
-deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
+deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
   --select fid,topic@
 ```
 
-Each crossref row's `fid` is the canonical address for its `topic`. Prefer it to
-the intermediate wrapper link stored in the board's topics array. Read the
-existing topic's input before changing it, especially its full body, comments,
-and links. Input reads are durable and do not need `--step`; use `--step` on
-result reads that must be current. If `topics --input` is non-empty but
-`crossrefs --step` is empty or fails, do not infer that the board is empty. The
-non-null rows from a compact `topics --input` search remain valid evidence, but
-the search does not expose a canonical Topic fid, so report the crossref
-materialization blocker rather than guessing an address.
+Each index row's `fid` is the canonical address for its `topic`, and `topic@`
+resolves the same address from the reference itself. Prefer either to the
+intermediate wrapper link stored in the board's topics array. Read the existing
+topic's input before changing it, especially its full body, comments, and links.
+Input reads are durable and do not need `--step`; use `--step` on result reads
+that must be current. If `topics --input` is non-empty but `index --step` is
+empty or fails, do not infer that the board is empty. The non-null rows from a
+compact `topics --input` search remain valid evidence, but the search does not
+expose a canonical Topic fid, so report the index materialization blocker rather
+than guessing an address.
 
 ## Creating and updating
 
@@ -149,14 +151,14 @@ directly:
 ```bash
 deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic \
   '{"title":"<title>","agentName":"<agent name>"}'
-deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
-  --filter '.topic.title == "<exact title>"' --select fid,topic.title
+deno task cf piece get --url "$TOPICS_BOARD_URL" index --step \
+  --filter '.title == "<exact title>"' --select fid,title
 ```
 
 `addTopic` returns the topic it created, so a board running this source hands
 back the new topic on the call itself. The board's deployed pattern can be older
-than this source, and an older `addTopic` returns nothing; `crossrefs` above
-remains the path that works either way, and `cf piece verbs` reports the
+than this source, and an older `addTopic` returns nothing; the `index` read
+above remains the path that works either way, and `cf piece verbs` reports the
 deployed pattern's source identity when you need to know which you are talking
 to. Find the new topic's canonical fid before applying further changes. All
 handler arguments are JSON; encode multiline Markdown rather than passing an
@@ -201,15 +203,15 @@ and what comes next; use the body for the synthesized narrative rather than
 trying to revise earlier comments.
 
 Add every relevant pull request explicitly with `addLink` and `kind: "pr"`;
-mentioning it only in prose is not enough. Topic-to-topic connections are
-derived automatically from topic fids or page URLs mentioned in bodies,
-comments, and link URLs, so do not add manual `kind: "topic"` links.
+mentioning it only in prose is not enough. The same holds for a connection to
+another Topic: nothing derives one from a fid or page URL in prose, so record it
+with `addLink` and `kind: "topic"` when it should be navigable.
 
 ## Persistence and computed results
 
 Topics handlers commit source writes before result recomputation. Verify bodies,
 comments, links, titles, and the board's topic list with
-`piece get ... --input`. To read `topicCount`, `crossrefs`, `commentCount`,
+`piece get ... --input`. To read `topicCount`, `index`, `commentCount`,
 `lastActivityAt`, or other computed results, use `piece get ... --step`. This
 keeps start, pull, recomputation, synchronization, read, and stop in one CLI
 runtime; a separate `piece step` process cannot carry session-scoped
@@ -230,8 +232,8 @@ verification succeeded.
   the write may still have committed. Do not re-send it blind: re-invoke with
   the same `--invocation` id under the same session — it deduplicates against a
   committed outcome and executes fresh only if nothing landed.
-- If `topics --input` is non-empty while `crossrefs --step` is empty or fails,
-  do not call the board empty. Preserve the input evidence and report the
+- If `topics --input` is non-empty while `index --step` is empty or fails, do
+  not call the board empty. Preserve the input evidence and report the
   result-materialization failure.
 - A compact transformed read of a present source exits nonzero when its value
   cannot materialize and explicitly says the failure is not JSON `null`. A
@@ -239,5 +241,5 @@ verification succeeded.
   empty array or proof of no matches; use `--filter '.title != null'` when null
   Topic rows are irrelevant.
 - Do not substitute `piece ls` for the board's topic list. Pieces created inside
-  handlers can be absent from that listing; `crossrefs --step` is the canonical
-  fid index, with `topics --input` as the durable fallback.
+  handlers can be absent from that listing; `index --step` is the canonical fid
+  index, with `topics --input` as the durable fallback.

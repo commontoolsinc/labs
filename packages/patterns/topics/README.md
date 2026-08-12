@@ -6,18 +6,15 @@ up into the body; the thread holds the deliberation), a flat chronological
 comment thread, and typed links out to other core objects (PRs, agent sessions,
 other topics — URLs in v0).
 
-The board also surfaces the corpus's **prose reference graph**: any topic fid
-pasted in a body, comment, or link URL (bare, `of:`-prefixed, page URL, or
-percent-encoded share link) becomes a navigable "references →" / "← referenced
-by" chip on the topic's card, and the graph is exported as the `crossrefs`
-output for headless consumers. Each topic also derives its own row of the graph
-on its detail page (a **Connections** card) from the `mentionable` input — a
-reference to the board's own topics list, wired at creation and backfillable as
-a one-time link-bind on pre-existing pieces.
+The board publishes an **index**: one row per topic carrying the topic's
+canonical address, a reference to the topic itself, and the scalars a survey
+reads (`title`, `createdAt`, `createdBy`, `commentCount`, `lastActivityAt`). The
+same rows render the board's cards, so a headless survey and the rendered board
+read one derivation rather than two.
 
 Deliberately absent until reached for: statuses (not even open/closed), labels,
-assignees, attachments, nesting. What a topic grows next is part of the
-experiment.
+assignees, attachments, nesting, and a topic-to-topic reference graph. What a
+topic grows next is part of the experiment.
 
 This is the first wedge of Common Fabric's internal dogfooding program — the
 team's own issue-tracker replacement, built on the platform it tracks. The
@@ -55,10 +52,9 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   topic/comment calls use `myName` and the other streams preserve their prior
   behavior. New browser and agent callers never depend on them.
 - **`mentionable` is a structural reference, not derived data.** The board
-  passes its own topics list at creation; the topic derives its Connections
-  read-side from it (SELF + equals to find its own row). Requires the
-  path-scoped wildcard fix (#4714) — the derive combines a resolveAsCell chain
-  with an equals-only SELF capture in one lift.
+  passes its own topics list at creation; the topic's body editor autocompletes
+  `@`-mentions over it. Backfillable as a one-time link-bind on pieces created
+  before the input existed.
 - **A declared schema is the only thing that bounds a read.** The transformer
   shrinks a derivation's input schema to the paths it can see the body reach,
   and gives up when it cannot: `topics.get().length` declares `items: unknown`
@@ -66,38 +62,48 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   declares `items: true` and reads every topic whole — thread, verbs, and
   rendered UI included. That is how one derived value ends up reading the whole
   space. So every derivation here is a module-scope `lift`, because a `lift`'s
-  declared parameter type is a ceiling an opaque helper cannot widen, and the
-  bodies here call `topicCorpus` and `crossrefJoin`.
+  declared parameter type is a ceiling an opaque helper cannot widen.
+
+  `boardRows`, the one derivation that runs over the whole board, declares
+  `TopicSummary` — a title and four scalars. Building every row therefore
+  expands no topic's body, thread, verbs, or rendered UI.
 
   A lift's parameter and its result are one type in TypeScript, which looks like
-  it forces a choice: narrow the parameter to bound the read, and the published
-  `crossrefs` edge targets narrow with it, removing result fields consumers were
-  promised (`deno task pattern-compat` rejects exactly that). It is not a real
-  choice. A reference that passes through a lift is a link, and a link resolves
-  to the whole topic however little of it the lift declared — so `crossrefRows`
-  and `topicCrossrefView` read `TopicScan` and assert each republished reference
-  back to `TopicPiece`/`TopicReference`. The parameter bounds the read; the
-  assertion states what a consumer actually receives. Both carry a `HACK:` note:
-  the runtime already guarantees this, and a generic lift that carried the input
-  reference type through to the output would say it without a cast.
+  it forces a choice: narrow the parameter to bound the read, and the row's
+  `topic` narrows with it, so a card could no longer render a body snippet. It
+  is not a real choice. A reference that passes through a lift is a link, and a
+  link resolves to the whole topic however little of it the lift declared — so
+  `boardRows` reads `TopicSummary` and asserts each row's reference back to
+  `TopicPiece`. The parameter bounds the read; the assertion states what the row
+  actually holds. It carries a `HACK:` note: the runtime already guarantees
+  this, and a generic lift that carried the input reference type through to the
+  output would say it without a cast.
 
-  `TopicCard`/`TopicCardSource`, which the board's ordering and card rendering
-  are declared over, go further and carry no reference at all — nothing
-  published is shaped by them, which is what leaves them free to be that narrow.
+  What each reader of a row gets from that one link is then its own declared
+  schema's business. The published `index` declares it title-only, so a survey
+  cannot expand a topic at all; `TopicCard`, which the board's ordering and card
+  rendering are declared over, projects two display fields out of it. Neither
+  type is published, which is what leaves both free to be that narrow.
 
   The rule for new code stands regardless: prefer a scalar reduction
   (`topics.get().length`) over anything that hands the array to a helper.
+- **Row identity is a cell, not an array position.** Each row goes in a cell
+  caused by the topic it describes, and the rows array holds links to those
+  cells rather than the row values inline. The card list is a mapped
+  sub-pattern, and `map` keys its element runs by each element's normalized
+  link: a link resolves to the row's own entity and stays the same wherever the
+  row sits, while an inline value resolves to the array position. Because the
+  board sorts by activity, every append is a prepend — with inline rows, one new
+  topic re-keys every card and rebuilds its whole subtree.
 - **Authoring: cf-code-editor in the Edit→Save draft flow.** The editor binds
   the session-local `bodyDraft` (never live to the shared string — whole-value
-  conflict semantics hold) with `@`-mention autocomplete over `mentionable`;
-  inserted `[Name](/of:fid1:…)` links are matched by the same fid scan as pasted
-  URLs. The read view renders the body as markdown.
-- **Cross-references are derived at read time, never persisted.** The board
-  rescans the whole corpus per render (trivial at board scale) instead of
-  materializing backlinks into topics: an index pattern that writes derived
-  edges back can destroy real data when run from a partial-view replica, and a
-  retracted mention should simply stop being an edge. Any future persisted index
-  needs single-writer + full-view preconditions first.
+  conflict semantics hold) with `@`-mention autocomplete over `mentionable`. The
+  read view renders the body as markdown.
+- **Nothing derived is persisted.** The index is recomputed from the board on
+  read; no derived field is written back into a topic. A pattern that writes
+  derived data into its own children can destroy real data when it runs from a
+  partial-view replica, so any future persisted index needs single-writer +
+  full-view preconditions first.
 - Verified by `multi-user.test.tsx` (two isolated runtimes, one shared board).
 
 ## Headless / agent use
@@ -124,38 +130,38 @@ cf piece call --piece <topic> addLink \
   '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
 ```
 
-**A full-board survey is one bounded read of `index`.** Each row is the child
-reference plus scalar summaries (`title`, `createdAt`, `createdBy`,
-`commentCount`, `lastActivityAt`) and the prose reference edges as sibling
-references — every reference declared through a title-only schema, so the read
-cannot expand a topic's body, thread, or verbs no matter how it is projected.
-
-`index` and `crossrefs` are the same rows published under two declared types:
-`index` declares every reference title-only, so a survey through it cannot
-expand a topic at all; `crossrefs` keeps the deployed piece-valued references
-and adds the `fid`/`title` navigation snapshots the cards render, so a reader
-following one of its edges _can_ expand the sibling. Read `index` to survey the
-board; reach for `crossrefs` when you mean to follow an edge.
+**A full-board survey is one bounded read of `index`.** Each row is the topic's
+canonical `fid`, the child reference, and scalar summaries (`title`,
+`createdAt`, `createdBy`, `commentCount`, `lastActivityAt`). The reference is
+declared through a title-only schema, so the read cannot expand a topic's body,
+thread, or verbs no matter how it is projected.
 
 ```bash
 cf piece get --piece <board> index --step
 ```
 
-The board input links to complete Topic objects, including bodies, threads,
-handlers, and cross-reference data. Targeted headless discovery beyond the index
-should therefore combine an exact/range `--filter` with a concise `--select`
-instead of materializing the whole corpus:
+The `fid` on a row is the canonical address of the topic that row describes —
+the one to pass as `--piece` for that topic's own reads and verbs. A row's
+`topic` reference resolves to the same address through `--select topic@`, so
+this field is a convenience rather than the only way through. What it buys is
+composition with `--filter`, which `@` does not have: a filtered array's
+survivors no longer say which positions they came from, so finding one topic by
+title and learning where it lives is one read with this field and two without.
+It is derived from runtime-only cell surface and reads `""` for a topic whose
+own entity has not resolved yet.
+
+The board input links to complete Topic objects, including bodies, threads, and
+handlers. Targeted headless discovery beyond the index should therefore combine
+an exact/range `--filter` with a concise `--select` instead of materializing the
+whole corpus:
 
 ```bash
-cf piece get --piece <board> topics --input \
+cf piece get --piece <board> index --step \
   --filter '.title == "<exact title>"' \
-  --select title,lastActivityAt,commentCount
+  --select fid,title,lastActivityAt,commentCount
 cf piece get --piece <board> topics --input \
   --filter '.lastActivityAt >= <epoch-milliseconds>' \
   --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
-cf piece get --piece <board> crossrefs --step \
-  --filter '.topic.title == "<exact title>"' \
-  --select fid,topic.title,topic.lastActivityAt,topic.commentCount
 cf piece get --piece <topic> comments --input \
   --filter '.author.name == "Sol" or .authorName == "Sol"' \
   --select sentAt,author.kind,author.name,authorName,body
@@ -169,8 +175,8 @@ and parentheses; it does not provide substring search, regexes, sorting, or an
 arbitrary jq pipeline. These transforms execute as a session-scoped computed
 pattern expression, so their CFC metadata behavior matches authored
 filter/map/lift expressions. The durable `topics --input` list remains evidence
-when the computed `crossrefs --step` index cannot materialize, but only a
-successful crossref row supplies the canonical Topic fid.
+when the computed `index --step` read cannot materialize, but only a successful
+index row supplies the canonical Topic fid.
 
 Every agent-authored mutation carries `agentName`; there is no preceding “set
 current name” call. Fabric's operation history retains the authenticated human

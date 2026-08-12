@@ -35,7 +35,9 @@ There is no opt-in: a pattern is covered by existing.
 Baselines are **append-only**, enforced mechanically by
 `tasks/check-baselines-append-only.ts` (CI job: Pattern Baselines
 Append-Only). An author-run `--update` that could remove a baseline could
-remove the very one that would have caught a break.
+remove the very one that would have caught a break. A break the repository
+decides to ship is declared instead, in `tasks/pattern-compat-accepted-breaks.ts`
+— see the finding it answers below.
 
 ### Findings and their remedies
 
@@ -52,6 +54,18 @@ remove the very one that would have caught a break.
   ships; recording it would force a later corrected contract to prove itself
   against a version that only ever existed in a failed CI run, with no way to
   remove it.
+
+  The exception is a break the repository decides to ship: a surface removed on
+  purpose, its held state an accepted casualty. No pattern change satisfies the
+  check then, because the check is measuring the decision. That case is written
+  down in `tasks/pattern-compat-accepted-breaks.ts`, and only there — deleting
+  the offending baselines is the laundering the append-only gate exists to
+  stop. An entry forgives specific `(pattern, baseline)` pairs, so the contract
+  recorded once the break ships is a baseline no entry names and the next
+  change to that pattern is gated again. The run prints every pair it forgave,
+  and fails on one that applies cleanly now, so the list can only shrink.
+  Reaching for it is a decision to strand data on running pieces; a break that
+  also strands state needs the Tier 2 entry below.
 - **`<role> schema is not valid on its own terms`** — the schema fails
   definition validation independently of any baseline.
 - **`has N baseline(s) but yields no contract now`** — a file that used to be
@@ -145,6 +159,18 @@ sits.
 
 What a root holds at a cell or stream position is compared as the **document it
 points at**, so a field that moved to a different document is still a finding.
+
+A field a pattern **removed on purpose** is taken off both sides before the
+comparison, from the entry for that pattern in
+`tasks/pattern-vintage-accepted-drops.ts`. It is the Tier 2 half of an accepted
+break, and reaches here only after Tier 1 has accepted the contract change:
+where the surface is gone, no pattern change makes the vintage readable, so the
+comparison would otherwise measure the decision itself. An entry names fields,
+not fixtures, and they are removed wherever they sit — at the root, or nested
+under a list of children. Every other field on the same root is compared
+exactly as before, so a removal that also strands a body or a timestamp still
+fails. The run prints what it held back, and fails on an entry that removed
+nothing from any vintage, so this list can only shrink too.
 
 ### Findings are graded
 

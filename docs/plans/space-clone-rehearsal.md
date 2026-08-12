@@ -414,9 +414,9 @@ Gideon's runbook, made checkable:
 5. **≥20 s cold-load patience** before calling a health check failed. A first
    production attempt was rolled back on this false negative.
 6. **Post-run.** Counts match; content fingerprint of durable topic content
-   unchanged; a cold board read returns every child; a cold crossref read
-   resolves a linked child; churn returns to baseline and *stays* there — a
-   storm is a steady state, not a spike.
+   unchanged; a cold board read returns every child; a cold index read resolves
+   a linked child; churn returns to baseline and *stays* there — a storm is a
+   steady state, not a spike.
 7. **Rollback manifest.** The pristine snapshot path and the exact reset command,
    written down before the live attempt, not improvised during it.
 8. **Two consecutive clean passes** before the live `setsrc`. Reset between

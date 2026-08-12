@@ -46,6 +46,10 @@ import {
   writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
 import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
+import {
+  acceptedDropsFor,
+  withoutAcceptedDrops,
+} from "./pattern-vintage-accepted-drops.ts";
 
 export interface GateRoots {
   /** Repo root, used only to shorten paths in reports. */
@@ -265,6 +269,14 @@ export interface ReplayReport {
    * since `uncovered` is exactly the required keys ABSENT from `covered`.
    */
   recorded: Set<string>;
+  /**
+   * Accepted-drop entries that actually removed something from a vintage here.
+   *
+   * `tasks/pattern-vintage-accepted-drops.ts` can only shrink, and an entry
+   * that forgives nothing is indistinguishable from one quietly doing nothing
+   * unless the run counts where each was used. Keyed by the entry's pattern.
+   */
+  dropsApplied: Set<string>;
   failures: ReplayFailure[];
 }
 
@@ -302,6 +314,7 @@ export async function replayVintage(
     servedRoute: 0,
     covered: new Set<string>(),
     recorded,
+    dropsApplied: new Set<string>(),
     failures: [{ ...where, detail }],
   });
   /** Every pattern key a manifest names, for attributing a failed fixture. */
@@ -445,6 +458,7 @@ export async function replayVintage(
       // coverage means "X was replayed"; now it does.
       covered: new Set<string>(),
       recorded: new Set<string>(),
+      dropsApplied: new Set<string>(),
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -762,7 +776,24 @@ export async function replayVintage(
         outcome.resultSchema,
       );
       {
-        const findings = strandedKeys(before, after);
+        // A field the pattern REMOVED on purpose is not state this comparison
+        // holds it to — see `pattern-vintage-accepted-drops.ts`, and the Tier 1
+        // acceptance it is downstream of. Taken off both sides so the two are
+        // read the same way, for the same reason `after` is re-read through the
+        // schema `before` came from: an asymmetric strip would measure the
+        // stripping. `applied` is counted from the vintage's side only, since
+        // that is where "the vintage held it" is a fact.
+        const drops = acceptedDropsFor(entry.main ?? "");
+        const fields = drops?.fields ?? new Set<string>();
+        const keptBefore = withoutAcceptedDrops(before, fields);
+        const keptAfter = withoutAcceptedDrops(after, fields);
+        if (drops !== undefined && keptBefore.applied) {
+          report.dropsApplied.add(drops.pattern);
+        }
+        const findings = strandedKeys(
+          keptBefore.value as Record<string, unknown>,
+          keptAfter.value,
+        );
         const describe = (finding: typeof findings[number]) =>
           `${finding.key} (was ${snippet(finding.before)}, now ${
             snippet(finding.after)
@@ -880,6 +911,8 @@ export async function replayAll(
      * with the one that produced the verdict.
      */
     perVintage: VintageOutcome[];
+    /** Accepted-drop entries that forgave something somewhere in this run. */
+    dropsApplied: Set<string>;
     failures: ReplayFailure[];
   }
 > {
@@ -887,6 +920,7 @@ export async function replayAll(
   const perVintage: VintageOutcome[] = [];
   const covered = new Set<string>();
   const coveredBy = new Map<string, VintageAttribution>();
+  const dropsApplied = new Set<string>();
   let servedRoute = 0;
   let candidates = 0,
     targets = 0,
@@ -911,6 +945,7 @@ export async function replayAll(
     stranded += report.stranded;
     servedRoute += report.servedRoute;
     for (const key of report.covered) covered.add(key);
+    for (const key of report.dropsApplied) dropsApplied.add(key);
     for (const key of report.recorded) {
       // From `recorded`, NOT `covered`: a pattern that was credited needs no
       // attribution, because it never reaches an uncovered report. The one
@@ -943,6 +978,7 @@ export async function replayAll(
     covered,
     coveredBy,
     perVintage,
+    dropsApplied,
     failures,
   };
 }

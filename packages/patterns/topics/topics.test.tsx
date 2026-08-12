@@ -6,9 +6,8 @@
  * verbs — those runs expect runtime errors): this file drives the happy and
  * legacy paths in one runtime — atomic agent signatures, body-at-create,
  * legacy authorship fallback/shadow fields, label defaulting, body updates,
- * activity-based sorting, the derived crossref graph (edges from fids pasted
- * in bodies, comments, and link URLs; never persisted), and the exported pure
- * helpers. UI composer wrappers keep silent guards, exercised here.
+ * activity-based sorting, the board's bounded discovery index, and the exported
+ * pure helpers. UI composer wrappers keep silent guards, exercised here.
  */
 import {
   action,
@@ -21,17 +20,13 @@ import {
 } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, {
-  crossrefLinkRow,
   submitProfileTopic,
   topicCellLink,
   type TopicPiece,
-  type TopicReference,
 } from "./main.tsx";
 import Topic, {
   type AddCommentResult,
   type AddLinkResult,
-  crossrefJoin,
-  extractFidPayloads,
   fidPayload,
   isSafeLinkUrl,
   saveProfileBody,
@@ -42,8 +37,6 @@ import Topic, {
   type TopicAuthor,
   topicAuthorLabel,
   type TopicComment,
-  topicCorpus,
-  type TopicCrossrefs,
   type TopicLink,
   type TopicLinkKind,
   whenLabel,
@@ -138,19 +131,16 @@ export default pattern(() => {
   });
   // A retained mixed-version list link can project the absent optional
   // createdBy path as an explicit undefined. Keep that sibling in a live
-  // mentionable universe: the consumer must validate and derive crossrefs
-  // without weakening non-empty authorship away from TopicAuthor.
+  // mentionable universe: the consumer must validate it without weakening
+  // non-empty authorship away from TopicAuthor.
   const mixedMentionable = new Writable<
-    TopicReference[] | Default<[]>
+    TopicPiece[] | Default<[]>
   >([]);
   const mixedMentionConsumer = Topic({
     title: "Mixed mention consumer",
     mentionable: mixedMentionable,
   });
 
-  // Branch pin for the detail derive: a piece with no `mentionable` wired
-  // (the pre-rev corpus, until backfilled) derives empty connection sets.
-  const lone = Topic({ title: "Lone", createdAt: 1, createdByName: "t" });
   // Pre-migration fields remain accepted and readable.
   const legacy = Topic({
     title: "Legacy",
@@ -164,9 +154,6 @@ export default pattern(() => {
   // resolved snapshot values directly here rather than inventing a production
   // fallback identity.
   const profileTopics = new Writable<TopicPiece[] | Default<[]>>([]);
-  const profileBoardCrossrefs = new Writable<TopicCrossrefs[] | Default<[]>>(
-    [],
-  );
   const profileTitleDraft = new Writable("Profile topic");
   const profileLegacyName = new Writable<string | Default<"">>("");
   const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
@@ -197,11 +184,6 @@ export default pattern(() => {
   const profileSubmitTopic = submitProfileTopic({
     topics: profileTopics,
     mentionable: profileTopics,
-    // Standalone: no board built this, so there is no computed table to read
-    // and the topic it creates falls back to deriving its inbound edges
-    // locally. Required rather than optional so a real composer cannot forget
-    // it and silently take that fallback.
-    boardCrossrefs: profileBoardCrossrefs,
     newTitle: profileTitleDraft,
     myName: profileLegacyName,
     profileName: " Ada ",
@@ -251,7 +233,7 @@ export default pattern(() => {
   });
   const action_link_unsigned_mixed_version_sibling = action(() => {
     mixedMentionable.push(
-      LegacyUnsignedTopic({}) as TopicReference,
+      LegacyUnsignedTopic({}) as TopicPiece,
     );
   });
 
@@ -357,8 +339,9 @@ export default pattern(() => {
     mixedMentionable.get()[0]?.commentCount === 0 &&
     mixedMentionable.get()[0]?.lastActivityAt === 0 &&
     mixedMentionable.get()[0]?.[NAME] === "" &&
-    (mixedMentionConsumer.crossrefs?.refsOut ?? []).length === 0 &&
-    (mixedMentionConsumer.crossrefs?.referencedBy ?? []).length === 0
+    // The consumer holding that list materialized rather than failing argument
+    // validation on the mixed-version link.
+    mixedMentionConsumer[NAME] === "Mixed mention consumer"
   );
 
   const assert_first_topic = assert(() =>
@@ -543,50 +526,21 @@ export default pattern(() => {
       ) === "Legacy Person"
   );
 
-  // --- crossrefs: the derived prose reference graph ---
+  // --- index: the board's bounded discovery surface ---
 
-  // Fid-free corpus: rows exist (one per topic, self-describing via `topic`),
-  // every fid is a real tagged hash, and no edges are claimed. Pins the
-  // fid1-tag assumption the prose scan relies on — if entity ids ever stop
-  // being fid1-tagged, this fails loudly instead of edges silently vanishing.
-  // Runs at the two-topic point: the edge that follows must exist while the
-  // harness still evaluates the board's card-list computed, so the chip
-  // branches render (and count as covered), not just the data layer.
-  const assert_crossrefs_baseline = assert(() =>
-    (board.crossrefs ?? []).length === 2 &&
-    board.crossrefs?.[0]?.fid?.startsWith("fid1:") === true &&
-    (board.crossrefs?.[0]?.fid ?? "").length > 25 &&
-    board.crossrefs?.[0]?.topic?.title === "First topic" &&
-    board.crossrefs?.[1]?.topic?.title === "Second topic" &&
-    (board.crossrefs?.[0]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 0 &&
-    (board.crossrefs?.[1]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[1]?.referencedBy ?? []).length === 0
-  );
-
-  // A pasted page URL in a body creates the edge on both ends.
-  const action_body_ref_first = action(() => {
-    const fid = board.crossrefs?.[0]?.fid ?? "";
-    board.topics?.[1]?.setBody.send({
-      body: `relates to https://estuary.example/topics-dev/${fid} directly`,
-      agentName: "Sol",
-    });
-  });
-  const assert_body_edge = assert(() =>
-    (board.crossrefs?.[1]?.refsOut ?? []).length === 1 &&
-    board.crossrefs?.[1]?.refsOut?.[0]?.title === "First topic" &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 1 &&
-    board.crossrefs?.[0]?.referencedBy?.[0]?.title === "Second topic" &&
-    (board.crossrefs?.[0]?.refsOut ?? []).length === 0
-  );
-
-  // --- index: the compact discovery surface ---
-
-  // Reference-plus-summary rows mirror the board at the two-topic point: the
-  // summary scalars answer the survey questions directly, and no edges are
-  // claimed before any prose references exist.
+  // Address-plus-summary rows mirror the board at the two-topic point: every
+  // fid is a real tagged hash, and the summary scalars answer the survey
+  // questions directly. Pins the fid1-tag assumption addressing relies on — if
+  // entity ids ever stop being fid1-tagged, this fails loudly instead of every
+  // row's address silently going blank.
+  //
+  // Runs while the harness still evaluates the board's card-list computed, so
+  // the card branches render (and count as covered), not just the data layer.
   const assert_index_baseline = assert(() =>
     (board.index ?? []).length === 2 &&
+    board.index?.[0]?.fid?.startsWith("fid1:") === true &&
+    (board.index?.[0]?.fid ?? "").length > 25 &&
+    board.index?.[1]?.fid !== board.index?.[0]?.fid &&
     board.index?.[0]?.title === "First topic" &&
     board.index?.[0]?.topic?.title === "First topic" &&
     (board.index?.[0]?.createdAt ?? 0) > 0 &&
@@ -596,22 +550,13 @@ export default pattern(() => {
     (board.index?.[0]?.lastActivityAt ?? 0) >=
       (board.index?.[0]?.createdAt ?? 0) &&
     board.index?.[1]?.title === "Second topic" &&
-    (board.index?.[0]?.refsOut ?? []).length === 0 &&
-    (board.index?.[1]?.refsOut ?? []).length === 0
-  );
-
-  // The prose edge surfaces in the index as title-only sibling references.
-  const assert_index_edge = assert(() =>
-    (board.index?.[1]?.refsOut ?? []).length === 1 &&
-    board.index?.[1]?.refsOut?.[0]?.title === "First topic" &&
-    (board.index?.[0]?.referencedBy ?? []).length === 1 &&
-    board.index?.[0]?.referencedBy?.[0]?.title === "Second topic"
+    board.index?.[1]?.topic?.title === "Second topic"
   );
 
   // The bound itself: serializing the whole index carries no expanded piece
   // content (body/comments/links), no verb streams, and no runtime values —
-  // the declared schema, not reader discipline, is the guarantee. Every
-  // reference in a row exposes exactly the title-only projection.
+  // the declared schema, not reader discipline, is the guarantee. Each row's
+  // reference exposes exactly the title-only projection.
   const assert_index_bounded = assert(() => {
     const rows = board.index ?? [];
     if (rows.length < 2) return false;
@@ -624,176 +569,64 @@ export default pattern(() => {
       !serialized.includes('"addLink"') &&
       !serialized.includes("vnode") &&
       Object.keys(rows[0]?.topic ?? {}).join(",") === "title" &&
-      Object.keys(rows[1]?.refsOut?.[0] ?? {}).join(",") === "title";
+      Object.keys(rows[1]?.topic ?? {}).join(",") === "title";
   });
 
-  // Detail-page view of the same edge: each board-created topic derives its
-  // own row from the mentionable siblings wired at creation (piece-valued,
-  // resolved from `mentionable` = the board's own list), while a piece with no
-  // mentionable derives empty sets.
-  const assert_detail_edges = assert(() => {
-    return board.topics?.[1]?.crossrefs?.refsOut?.[0]?.title ===
-        "First topic" &&
-      (board.topics?.[1]?.crossrefs?.refsOut ?? []).length === 1 &&
-      (board.topics?.[1]?.crossrefs?.referencedBy ?? []).length === 0 &&
-      board.topics?.[0]?.crossrefs?.referencedBy?.[0]?.title ===
-        "Second topic" &&
-      (board.topics?.[0]?.crossrefs?.referencedBy ?? []).length === 1 &&
-      (board.topics?.[0]?.crossrefs?.refsOut ?? []).length === 0;
-  });
-
-  const assert_lone_edgeless = assert(() => {
-    return (lone.crossrefs?.refsOut ?? []).length === 0 &&
-      (lone.crossrefs?.referencedBy ?? []).length === 0;
-  });
+  // The index tracks the board rather than snapshotting it: a topic added
+  // later gets its own row, with its own address and its own scalars.
+  const assert_index_tracks_the_board = assert(() =>
+    (board.index ?? []).length === 3 &&
+    board.index?.[2]?.title === "Composed topic" &&
+    board.index?.[2]?.fid?.startsWith("fid1:") === true &&
+    board.index?.[2]?.fid !== board.index?.[0]?.fid &&
+    board.index?.[2]?.createdBy?.name === "Sol" &&
+    // The first topic took a second comment before this one was created, and
+    // its row carries the updated count rather than the one it was built with.
+    board.index?.[0]?.commentCount === 2
+  );
 
   // Pin the persisted navigation contract directly. A cold renderer must see
   // ordinary cf-cell-link destinations, never pattern-owned handler streams.
   const assert_cell_link_markup = assert(() => {
-    const rows = board.crossrefs ?? [];
-    if (rows.length < 2 || !rows[0]?.fid || !rows[1]?.fid) return false;
-    const row = crossrefLinkRow("references →", [
-      { fid: rows[0].fid, title: rows[0].topic.title },
-      { fid: rows[1].fid, title: rows[1].topic.title },
-    ]);
-    const open = topicCellLink(rows[0].fid, "Open");
-    const rowLinks = findAllByTag(row, "cf-cell-link");
+    const fid = board.index?.[0]?.fid ?? "";
+    if (!fid) return false;
+    const open = topicCellLink(fid, "Open");
     const openLinks = findAllByTag(open, "cf-cell-link");
-    return row !== null &&
-      open !== null &&
-      rowLinks.length === 2 &&
+    return open !== null &&
       openLinks.length === 1 &&
-      propValue(rowLinks[0].props.link) === `/of:${rows[0].fid}` &&
-      propValue(rowLinks[1].props.link) === `/of:${rows[1].fid}` &&
-      propValue(openLinks[0].props.link) === `/of:${rows[0].fid}` &&
+      propValue(openLinks[0].props.link) === `/of:${fid}` &&
       propValue(openLinks[0].props.label) === "Open" &&
       propValue(openLinks[0].props.static) === true &&
       openLinks[0].props.onClick === undefined &&
       openLinks[0].props["oncf-click"] === undefined &&
-      crossrefLinkRow("← referenced by", []) === null &&
+      // No fid yet (a topic mid-sync) renders nothing rather than a link to
+      // nowhere.
       topicCellLink("", "Open") === null;
   });
 
-  // A share link in a comment counts too — its colon is percent-encoded.
-  const action_comment_ref_encoded = action(() => {
-    const enc = (board.crossrefs?.[0]?.fid ?? "").replace(":", "%3A");
-    board.topics?.[2]?.addComment.send({
-      body: `shared as ?shared-pattern=estuary%2Ftopics-dev%2F${enc}`,
-      agentName: "Sol",
-    });
-  });
-  const assert_comment_edge = assert(() =>
-    (board.crossrefs?.[2]?.refsOut ?? []).length === 1 &&
-    board.crossrefs?.[2]?.refsOut?.[0]?.title === "First topic" &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 2
-  );
-
-  // A structured link's URL is part of the corpus (scan ∪ TopicLink).
-  const action_link_ref_second = action(() => {
-    board.topics?.[2]?.addLink.send({
-      kind: "topic",
-      url: `https://estuary.example/topics-dev/${
-        board.crossrefs?.[1]?.fid ?? ""
-      }`,
-      label: "the second topic",
-      agentName: "Sol",
-    });
-  });
-  const assert_link_edge = assert(() =>
-    (board.crossrefs?.[2]?.refsOut ?? []).length === 2 &&
-    board.crossrefs?.[2]?.refsOut?.[1]?.title === "Second topic" &&
-    (board.crossrefs?.[1]?.referencedBy ?? []).length === 1 &&
-    board.crossrefs?.[1]?.referencedBy?.[0]?.title === "Composed topic"
-  );
-
-  // Mentioning yourself or a fid nothing on the board owns adds no edges.
-  const action_self_and_unknown_ref = action(() => {
-    const own = board.crossrefs?.[0]?.fid ?? "";
-    board.topics?.[0]?.setBody.send({
-      body: `self ${own} and unknown fid1:${"Z".repeat(43)} stay edgeless`,
-      agentName: "Sol",
-    });
-  });
-  const assert_self_unknown_ignored = assert(() =>
-    (board.crossrefs?.[0]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 2 &&
-    // The topic's own Connections card derives its outbound edges from its
-    // prose, not from the board's join, so the two can disagree about a
-    // self-mention. Assert the topic-side view drops it as well.
-    (board.topics?.[0]?.crossrefs?.refsOut ?? []).length === 0
-  );
-
-  // Nothing is persisted: retract the prose and the edge is simply gone.
-  const action_remove_body_ref = action(() => {
-    board.topics?.[1]?.setBody.send({
-      body: "no references anymore",
-      agentName: "Sol",
-    });
-  });
-  const assert_edge_removed = assert(() =>
-    (board.crossrefs?.[1]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 1 &&
-    board.crossrefs?.[0]?.referencedBy?.[0]?.title === "Composed topic"
-  );
-
-  // The fid-scanning helpers, over every pasted shape (bare, of:-prefixed,
-  // percent-encoded) plus the non-matches (short payloads, non-fid hashes).
+  // The fid helper that turns a resolved entity id into a row's address, over
+  // the tagged form it accepts and the shapes it must reject (storage form,
+  // short payloads, a non-fid hash).
   const P1 = "A".repeat(43);
-  const P2 = "B".repeat(43);
-  const assert_crossref_helpers = assert(() =>
-    extractFidPayloads(
-        `a fid1:${P1} b of:fid1:${P2} c fid1%3A${P1}`,
-      ).join(",") === `${P1},${P2},${P1}` &&
-    extractFidPayloads("no fids here, not even fid1:tooshort").length === 0 &&
-    extractFidPayloads("").length === 0 &&
+  const assert_fid_payload = assert(() =>
     fidPayload(`fid1:${P1}`) === P1 &&
     fidPayload(` fid1:${P1} `) === P1 &&
     fidPayload("of:fid1:" + P1) === "" &&
+    fidPayload("fid1:tooshort") === "" &&
     fidPayload("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy") === "" &&
     fidPayload("") === ""
   );
 
-  // The shared join (the piece notes imports when backlinks-index's write
-  // path retires): one payload→entry map, one scan per corpus. First-mention
-  // order out, ascending referrers in; repeats, self-mentions, and payloads
-  // no entry owns all drop.
-  const assert_crossref_join = assert(() => {
-    const P3 = "C".repeat(43);
-    const joined = crossrefJoin(
-      [
-        `self fid1:${P1} then fid1:${P2}`,
-        "",
-        `fid1:${P2} twice fid1:${P2} then fid1:${P1} unknown fid1:${
-          "Z".repeat(43)
-        }`,
-      ],
-      [P1, P2, P3],
-    );
-    return joined.refsOut[0].join(",") === "1" &&
-      joined.refsOut[1].join(",") === "" &&
-      joined.refsOut[2].join(",") === "1,0" &&
-      joined.referencedBy[0].join(",") === "2" &&
-      joined.referencedBy[1].join(",") === "0,2" &&
-      joined.referencedBy[2].join(",") === "" &&
-      topicCorpus({
-          body: "b",
-          comments: [{ body: "c" }],
-          links: [{ url: "u" }],
-        }) === "b\nc\nu" &&
-      topicCorpus(undefined) === "";
-  });
-
   return {
-    // UI demand (#4715) over the board: its card list — including the in-card
-    // crossref chip rows — renders through the real reconciler while the suite
-    // runs. The cards bind navigation to crossref-row pieces (wrapper-nested),
-    // which need real reconcile cycles to settle, so the passive [UI] export is
-    // backed by explicit `{ render: board[UI] }` steps below. Those cover the
-    // card path in both coverage lanes AND guard the wrapper-bind mechanism: a
-    // silent non-render regression (blank board, no error) would leave those
-    // lines uncovered and trip the coverage gate. A board list element is the
-    // shared-safe TopicPiece projection and exposes no [UI]; the topic detail
-    // page is driven through its own render step.
+    // UI demand (#4715) over the board: its card list renders through the real
+    // reconciler while the suite runs. The cards bind navigation to index-row
+    // pieces (wrapper-nested), which need real reconcile cycles to settle, so
+    // the passive [UI] export is backed by explicit `{ render: board[UI] }`
+    // steps below. Those cover the card path in both coverage lanes AND guard
+    // the wrapper-bind mechanism: a silent non-render regression (blank board,
+    // no error) would leave those lines uncovered and trip the coverage gate. A
+    // board list element is the shared-safe TopicPiece projection and exposes no
+    // [UI]; the topic detail page is driven through its own render step.
     [UI]: board[UI],
     [TESTS]: [
       { assertion: assert_initial },
@@ -833,20 +666,15 @@ export default pattern(() => {
       { action: action_add_second_topic },
       { assertion: assert_second_topic },
       { render: board[UI] },
-      { assertion: assert_crossrefs_baseline },
       { assertion: assert_index_baseline },
-      { action: action_body_ref_first },
-      { assertion: assert_body_edge },
-      { assertion: assert_index_edge },
       { assertion: assert_index_bounded },
-      { render: board[UI] },
-      { assertion: assert_detail_edges },
-      { assertion: assert_lone_edgeless },
       { assertion: assert_cell_link_markup },
       { render: board[UI] },
       { action: action_comment_first_again },
       { action: action_add_third_topic },
       { assertion: assert_third_topic },
+      { render: board[UI] },
+      { assertion: assert_index_tracks_the_board },
       { action: action_submit_blank_comment_draft },
       { assertion: assert_blank_draft_rejected },
       { action: action_start_edit },
@@ -860,16 +688,7 @@ export default pattern(() => {
       { render: legacy[UI] },
       { assertion: assert_legacy_fields_load },
       { assertion: assert_pure_helpers },
-      { action: action_comment_ref_encoded },
-      { assertion: assert_comment_edge },
-      { action: action_link_ref_second },
-      { assertion: assert_link_edge },
-      { action: action_self_and_unknown_ref },
-      { assertion: assert_self_unknown_ignored },
-      { action: action_remove_body_ref },
-      { assertion: assert_edge_removed },
-      { assertion: assert_crossref_helpers },
-      { assertion: assert_crossref_join },
+      { assertion: assert_fid_payload },
     ],
   };
 });

@@ -70,7 +70,7 @@ Filing one topic headlessly takes six CLI invocations:
 | invocations | what | cause |
 | --- | --- | --- |
 | 1 | `addTopic {title, agentName}` | the create itself |
-| 1 | `get crossrefs --step` to learn the new fid | create returns no handle |
+| 1 | `get index --step` to learn the new fid | create returns no handle |
 | 3 | `setBody` / `addComment` / `addLink` | the body cannot ride the create; the comment and link are the real work |
 | 1 | a verification read (`get … --step`) | no result to inspect |
 
@@ -81,9 +81,9 @@ because the create cannot carry a body.
 Three consequences:
 
 - **Create returns no handle.** `addTopic` returns nothing, so the caller reads
-  `crossrefs` to learn which topic it made — and `TopicCrossref.fid` reads `""`
-  until known. (Sub-piece addressability by fid itself works — #4758; only the
-  return value is missing.)
+  the board's index to learn which topic it made — and `TopicIndexRow.fid` reads
+  `""` until known. (Sub-piece addressability by fid itself works — #4758; only
+  the return value is missing.)
 - **Semantic rejection is invisible.** Runtime failures surface; a verb
   declining on its own terms does not. `addTopic` early-returns on an empty
   title and on a blank `agentName`, both indistinguishable from success.
@@ -346,23 +346,26 @@ board one read. The pattern owns the reference and summary; the client, which
 can inspect the backing cells, owns rendering the reference as a fid or full
 path.
 
-`topics.crossrefs` already carries each `topic` reference, but it is the
-cross-reference graph, not a compact index: each row's `topic`, `refsOut`, and
-`referencedBy` expand to full pieces on read
-(the `TopicCrossref` interface, `packages/patterns/topics/main.tsx`), and a
-headless survey of the live
-board through it produced over 300k tokens of output. Its explicit `fid` field
-is not the general model either: it is derived indirectly from runtime-only
-cell surface, reads `""` while unresolved, and a pattern cannot reliably see
-its own runtime address. The index is therefore a separate result — one
-reference-plus-summary row per child, reference edges as sibling references,
-never expanded pieces — and generic clients render identity on top: a coarse
-exploration mode such as `--include-ids` can annotate every point where the
-backing identity changes, with a narrower path-selected form to follow if the
-broad form proves too noisy. Both are projections of existing references, not
-fields every pattern must maintain. Acceptance for an index: its serialization
+`topics.index` is the worked example: one reference-plus-summary row per child,
+the reference declared through a title-only schema so no row can expand a topic
+(the `TopicIndexRow` interface, `packages/patterns/topics/main.tsx`). A
+reference-bearing result that does not do this is not an index — a row whose
+reference expands to the full piece made a headless survey of the live board
+produce over 300k tokens of output. Acceptance for an index: its serialization
 contains no expanded piece, action, or runtime values, and a full-board read
 stays bounded.
+
+`topics.index` also carries an explicit `fid` per row, and that part is *not*
+the general model: it is derived indirectly from runtime-only cell surface,
+reads `""` while unresolved, and a pattern cannot reliably see its own runtime
+address. It is there because a row's reference alone cannot be turned into an
+address by any `piece get` flag today, so a survey could be read but not
+followed. The general answer is for generic clients to render identity on top: a
+coarse exploration mode such as `--include-ids` can annotate every point where
+the backing identity changes, with a narrower path-selected form to follow if
+the broad form proves too noisy. Both are projections of existing references,
+not fields every pattern must maintain — and landing one is what lets a
+pattern's index drop its authored `fid`.
 
 Discovery is the parent's job; the child's own verbs are the child's. A comment
 is addressed to the topic, not routed through the board — **but that depends on
@@ -536,8 +539,8 @@ This is not a new semantic — it is when the receipt commits today. But the CLI
 waits for far more than that: the handler branch awaits `runtime.idle()` and
 `manager.synced()` — the whole reactive graph quiescing, then full sync — so
 acknowledgement of an already-committed write is held hostage to every derived
-recomputation it triggered. On the live topics board that is `crossrefs`
-re-deriving over the whole board; mutations were observed taking 60–80 s. The
+recomputation it triggered. On the live topics board that is the board's own
+index re-deriving over every topic; mutations were observed taking 60–80 s. The
 work is exposure *and narrowing*: await this handling's commit, sync the
 receipt, return — never the graph going quiet. An acceptance test must prove a
 slow derived recomputation cannot delay acknowledgement (implementation plan,

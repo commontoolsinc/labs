@@ -1,17 +1,13 @@
 import {
   action,
-  type ComparableCell,
   computed,
   Default,
-  entityRefToString,
-  equals,
   handler,
   lift,
   NAME,
   pattern,
   type PerSession,
   type PerUser,
-  type ReadonlyCell,
   Stream,
   UI,
   type VNode,
@@ -123,52 +119,23 @@ export interface TopicInput {
     TopicAuthor | Default<{ kind: "person"; name: "" }>
   >;
   bodyUpdatedAt?: Writable<number | Default<0>>;
-  /** The board's own topics list — the sibling set for this topic's derived
-   * crossrefs and the mention universe for authoring. A reference to the
-   * tracker's array, wired at creation like `myName` (and backfillable as a
-   * one-time link-bind on pieces created before it existed). Absent, the
-   * detail page simply derives no connections.
-   *
-   * Declared at the deployed reference type: this is the pattern's accepted
-   * argument, not a read. What bounds the read is the parameter type of the
-   * derivation that consumes it (`outboundEdges` below takes `TopicMention`),
-   * which is where a narrow declaration actually costs a consumer nothing. */
-  mentionable?: Writable<TopicReference[] | Default<[]>>;
-  /** The board's own computed reference graph, one row per topic in the same
-   * order as `mentionable`. A topic reads its own row out of this instead of
-   * rebuilding the whole join for itself: the board already did that work, and
-   * a per-row read only re-triggers when that row changes.
-   *
-   * Optional, like `mentionable` before it. A topic wired before this input
-   * existed falls back to deriving its row locally. */
-  boardCrossrefs?: Writable<TopicCrossrefs[] | Default<[]>>;
+  /** The board's own topics list — the mention universe the body editor
+   * autocompletes over. A reference to the tracker's array, wired at creation
+   * like `myName` (and backfillable as a one-time link-bind on pieces created
+   * before it existed). Absent, the editor simply offers no completions. */
+  mentionable?: Writable<TopicPiece[] | Default<[]>>;
 }
 
 /**
- * The least a crossref join needs from a sibling: the prose it scans for pasted
- * fids, and the title it snapshots onto a rendered chip.
+ * The least a board row needs from a topic: its title, and the scalars a
+ * full-board survey summarises.
  *
- * This is the input type for any derivation over `mentionable`. That input is a
- * link to the whole board, so every field declared here is paid once per topic
- * on it — which is why this carries neither the summary scalars a board row
- * shows nor the display fields a rendered reference needs.
+ * An input projection, not a published type — every reference this pattern
+ * publishes is declared at `TopicPiece`. Keeping it out of the published
+ * surface is what leaves it free to shrink.
  */
-export interface TopicMention {
+export interface TopicSummary {
   title: string;
-  body: string;
-  comments: { body: string }[];
-  links: { url: string }[];
-}
-
-/**
- * `TopicMention` plus the scalars a board row summarises. The board's own
- * crossref derivation reads these; a single topic's does not.
- *
- * Both are input projections, not published types: every reference this pattern
- * publishes is declared at `TopicReference` or `TopicPiece`. Keeping them out of
- * the published surface is what leaves them free to shrink.
- */
-export interface TopicScan extends TopicMention {
   createdAt: number;
   createdBy?:
     | TopicAuthor
@@ -179,17 +146,27 @@ export interface TopicScan extends TopicMention {
 }
 
 /**
- * A sibling Topic as seen from another Topic: `TopicScan` plus the display
- * name and the mutation verbs, so a crossref chip can be rendered and acted on.
+ * A #topic — a durable unit of shared attention: a title, a living body
+ * document, a flat chronological comment thread, and typed links out to other
+ * core objects (PRs, agent sessions, other topics). Deliberately has no
+ * status, labels, or assignees; what a topic grows next is part of the
+ * experiment (CT-1878).
+ *
+ * This is the board-facing projection: the one stored in the tracker's list,
+ * and the one a topic's editor autocompletes over through `mentionable`.
+ * Session-local UI controls are intentionally excluded: a TopicPiece can be
+ * followed from a shared list even when the viewer has no matching
+ * session-local cells.
  */
-export interface TopicReference extends TopicScan {
+export interface TopicPiece extends TopicSummary {
   /** The topic's display name. Like the other derived display fields, a cold
-   * retained sibling may not have produced this path yet; its persisted title
+   * retained topic may not have produced this path yet; its persisted title
    * remains authoritative until it does. */
   [NAME]: string | Default<""> | undefined;
   /** @deprecated Compatibility shadow for consumers of the previous result
    * schema. New callers must use `createdBy`; the pattern mirrors this field. */
   createdByName: string;
+  body: string;
   comments: TopicComment[];
   links: TopicLink[];
   bodyUpdatedBy?: TopicAuthor | undefined;
@@ -197,53 +174,6 @@ export interface TopicReference extends TopicScan {
   addComment: Stream<AddCommentEvent, AddCommentResult>;
   addLink: Stream<AddLinkEvent, AddLinkResult>;
   setBody: Stream<SetBodyEvent, SetBodyResult>;
-}
-
-/**
- * A #topic — a durable unit of shared attention: a title, a living body
- * document, a flat chronological comment thread, and typed links out to other
- * core objects (PRs, agent sessions, other topics). Deliberately has no
- * status, labels, or assignees; what a topic grows next is part of the
- * experiment (CT-1878).
- *
- * This is the board-facing projection, and the one stored in the tracker's
- * list. Session-local UI controls are intentionally excluded: a TopicPiece can
- * be followed from a shared list even when the viewer has no matching
- * session-local cells. Crossref targets use the narrower `TopicScan` contract,
- * which is what stops a list read of topics from expanding, per topic, every
- * sibling that topic references.
- */
-export interface TopicPiece extends TopicReference {
-  /** This topic's own place in the board's prose graph, derived read-side
-   * from `mentionable` (the sibling pieces it links, resolved from the
-   * board's own list). Both sets stay empty until `mentionable` is wired.
-   * Optional (2026-07-21 deploy): pieces healed before their `mentionable`
-   * link exists carry a session-scoped crossrefs indirection that resolves
-   * undefined outside the minting session; the list projection must accept
-   * that rather than fail argument validation. */
-  crossrefs?:
-    | TopicEdges
-    | Default<{ refsOut: []; referencedBy: [] }>
-    | undefined;
-}
-
-/** One topic's row in the prose reference graph, as a sibling sees it. */
-export interface TopicEdges {
-  /** Sibling topics whose fids this topic's prose mentions. */
-  refsOut: TopicReference[];
-  /** Sibling topics whose prose mentions this topic's fid. */
-  referencedBy: TopicReference[];
-}
-
-/** The same row on the topic's own page, which additionally carries the two
- * edge sets as durable fid/title snapshots so rendered navigation survives a
- * cold load without resolving a sibling. The snapshots stay off `TopicEdges`
- * because a sibling never renders them, and widening the projection every
- * reader of a topics list resolves is what a narrow declared schema exists to
- * prevent. */
-export interface TopicCrossrefs extends TopicEdges {
-  refsOutLinks?: TopicNavigationLink[];
-  referencedByLinks?: TopicNavigationLink[];
 }
 
 /** The complete result available when a Topic is instantiated directly. */
@@ -265,14 +195,6 @@ export interface TopicOutput extends TopicPiece {
   saveBody: Stream<void>;
   cancelEditBody: Stream<void>;
   submitLink: Stream<void>;
-}
-
-/** The durable, non-reactive information a rendered link needs. Keeping this
- * separate from TopicReference avoids persisting a scheduler-backed click
- * stream in VDOM: the shell resolves the fid and owns navigation. */
-export interface TopicNavigationLink {
-  fid: string;
-  title: string;
 }
 
 // ===== Shared theme (calm editorial light) =====
@@ -378,78 +300,12 @@ export const topicAuthorLabel = (
 export const isSafeLinkUrl = (url: string): boolean =>
   /^https?:\/\//i.test((url ?? "").trim());
 
-/** Every fid payload referenced anywhere in `text`, in match order,
- * duplicates included (callers dedupe as needed).
- *
- * Matches a fid in every shape people paste: bare `fid1:X`, storage-form
- * `of:fid1:X`, page URLs `https://host/space/fid1:X`, and share links where
- * the colon is percent-encoded (`fid1%3AX`). The base64url payload alone is
- * the identity — hosts and prefixes around it vary, and base64url survives
- * percent-encoding untouched. The length floor keeps prose that merely
- * mentions "fid1" from matching (real payloads are 43 chars of hash). The
- * regex lives inside the function: a module-scope `/g` RegExp is stateful
- * and the closure verifier rejects it as captured data. */
-export const extractFidPayloads = (text: string): string[] => {
-  const fidInText = /fid1(?::|%3a)([A-Za-z0-9_-]{20,})/gi;
-  const out: string[] = [];
-  for (const m of (text ?? "").matchAll(fidInText)) out.push(m[1]);
-  return out;
-};
-
-/** The payload of a `fid1:…` tagged hash string; "" for anything else. */
+/** The payload of a `fid1:…` tagged hash string; "" for anything else. The
+ * length floor is what distinguishes a real address (43 chars of base64url
+ * hash) from a string that merely starts with the tag. */
 export const fidPayload = (fid: string): string => {
   const m = /^fid1:([A-Za-z0-9_-]{20,})$/.exec((fid ?? "").trim());
   return m ? m[1] : "";
-};
-
-/** The prose surfaces of one topic that count as reference edges: the body,
- * every comment body, and every link URL (the design's scan ∪ TopicLink).
- * Structurally typed so pure tests can drive it with literals. */
-export const topicCorpus = (
-  t:
-    | {
-      body?: string;
-      comments?: readonly { body?: string }[];
-      links?: readonly { url?: string }[];
-    }
-    | undefined
-    | null,
-): string => {
-  if (!t) return "";
-  const parts = [t.body ?? ""];
-  for (const c of t.comments ?? []) parts.push(c?.body ?? "");
-  for (const l of t.links ?? []) parts.push(l?.url ?? "");
-  return parts.join("\n");
-};
-
-/** Join each corpus against the set of entry payloads: one shared
- * payload→index map, one scan per text — the shape a second consumer (notes,
- * when backlinks-index's write path retires) imports rather than forks.
- * refsOut[i] lists, in first-mention order, the entries whose fids appear in
- * corpus i; referencedBy is the inverse view (ascending by referrer).
- * Self-references, repeat mentions, and payloads no entry owns all drop;
- * "" payloads (unresolved entries) own nothing. */
-export const crossrefJoin = (
-  corpora: string[],
-  payloads: string[],
-): { refsOut: number[][]; referencedBy: number[][] } => {
-  const byPayload = new Map<string, number>();
-  payloads.forEach((p, i) => {
-    if (p) byPayload.set(p, i);
-  });
-  const refsOut: number[][] = corpora.map(() => []);
-  const referencedBy: number[][] = corpora.map(() => []);
-  corpora.forEach((text, i) => {
-    const seen = new Set<number>();
-    for (const p of extractFidPayloads(text)) {
-      const j = byPayload.get(p);
-      if (j === undefined || j === i || seen.has(j)) continue;
-      seen.add(j);
-      refsOut[i].push(j);
-      referencedBy[j].push(i);
-    }
-  });
-  return { refsOut, referencedBy };
 };
 
 /** A Topic destination rendered as data, not as a pattern-owned handler.
@@ -466,27 +322,6 @@ export const topicCellLink = (fid: string, label: string) =>
       />
     )
     : null;
-
-/** One row of crossref links ("references →" / "← referenced by"). The view
- * carries only durable fid/title snapshots; the public crossref result keeps
- * its existing piece-valued contract. */
-export const crossrefLinkRow = (
-  caption: string,
-  links: TopicNavigationLink[] | undefined,
-) =>
-  (links ?? []).length === 0
-    ? null
-    : (
-      <cf-hstack gap="1" align="center" style="flex-wrap: wrap;">
-        <cf-text variant="caption" tone="muted">{caption}</cf-text>
-        {(links ?? []).map((link) =>
-          topicCellLink(
-            link.fid,
-            snippet(link.title || "(untitled topic)", 40),
-          )
-        )}
-      </cf-hstack>
-    );
 
 const LINK_KIND_ITEMS = [
   { label: "Web", value: "web" },
@@ -585,192 +420,10 @@ export const submitProfileLink = handler<void, {
 
 // ===== Derivations =====
 //
-// Each of these is a `lift` rather than a pattern-body derivation for one
-// reason: the declared parameter type is what bounds the read. Their bodies
-// call helpers (`topicCorpus`, `crossrefJoin`) that schema analysis cannot see
-// through, and an inferred input schema falls back to reading its input whole —
-// for anything reached through `mentionable`, that is the entire board.
-
-/** This topic's own place in the board's prose graph, derived read-side from
- * the mentionable siblings — the same join the board's cards use, reduced to
- * this piece's row. Nothing persisted; a topic without `mentionable` derives
- * empty sets.
- *
- * HACK: reads `TopicMention`, publishes `TopicReference`, via an `as` on each
- * sibling. A reference passed through a lift is a link and resolves to the
- * whole topic regardless of how little the lift declared, so the cast matches
- * what a consumer receives while the narrow parameter bounds what this reads.
- * See the same note on `crossrefRows` in main.tsx. */
-/**
- * Which entry of `mentionable` is this topic.
- *
- * Its own lift, declared over `unknown` items, because `.equals` compares cell
- * identity and never touches content: locating yourself among the siblings
- * reads nothing from any of them. A linear scan is fine at board scale — it is
- * a walk over cell identities, not a read — and keyed collections will give
- * this a direct lookup later.
- *
- * Deliberately not fid-based. An entry's fid is a resolution detail on its way
- * out; `.equals` against the title cell is the durable identity, and it is what
- * survives that removal.
- */
-const findSelfIndex = lift((
-  { siblings, title }: {
-    siblings: ReadonlyCell<unknown[] | Default<[]>>;
-    title: ComparableCell<unknown>;
-  },
-): number => {
-  const list = siblings.get();
-  const length = Array.isArray(list) ? list.length : 0;
-  for (let index = 0; index < length; index++) {
-    if (equals(siblings.key(index).key("title"), title)) return index;
-  }
-  return -1;
-});
-
-/**
- * This topic's OUTBOUND edges: the siblings its own prose mentions.
- *
- * Reactive on this topic's own prose and nothing else. The sibling list is
- * SAMPLED, not read, which is the whole point: prose written before a topic
- * existed cannot mention it, so an add re-running this for every topic already
- * on the board was pure waste — N full corpus scans per add, producing a result
- * that provably could not have changed. Sampling registers no dependency, so
- * this now runs when this topic's body, comments, or links change, and then
- * only for this topic.
- *
- * The cost of sampling: a sibling renamed after this ran keeps its old title in
- * the snapshot, and a sibling removed from the board keeps its chip, until this
- * topic's own prose changes. Both are display staleness on a derived, never
- * persisted view.
- */
-const outboundEdges = lift((
-  { siblings, body, comments, links, me }: {
-    siblings: Writable<TopicMention[] | Default<[]>>;
-    body: string | Default<"">;
-    comments: { body: string }[] | Default<[]>;
-    links: { url: string }[] | Default<[]>;
-    me: number;
-  },
-): { refsOut: TopicReference[]; refsOutLinks: TopicNavigationLink[] } => {
-  const sibs = siblings.sample();
-  if (!Array.isArray(sibs) || sibs.length === 0) {
-    return { refsOut: [], refsOutLinks: [] };
-  }
-  const mine = topicCorpus({ body, comments, links });
-  const mentioned = new Set(extractFidPayloads(mine));
-  if (mentioned.size === 0) return { refsOut: [], refsOutLinks: [] };
-
-  const hits: number[] = [];
-  const payloads: string[] = [];
-  for (let index = 0; index < sibs.length; index++) {
-    if (!sibs[index]) {
-      payloads.push("");
-      continue;
-    }
-    // deno-lint-ignore no-explicit-any
-    const ref = (siblings.key(index) as any).resolveAsCell?.()?.entityId;
-    const payload = ref ? fidPayload(entityRefToString(ref)) : "";
-    payloads.push(payload);
-    // `index !== me` is `crossrefJoin`'s `j === i`: a topic that pastes its own
-    // fid into its own prose is not referencing a sibling, and a self-link is
-    // not an edge. The board's join drops it, so this must too, or the same
-    // topic renders one graph on the board and another on its own page.
-    if (payload && index !== me && mentioned.has(payload)) hits.push(index);
-  }
-  return {
-    // HACK, as elsewhere: read the narrow projection, publish the deployed
-    // reference type. A reference through a lift is a link and resolves whole.
-    refsOut: hits.map((index) => sibs[index] as TopicReference),
-    refsOutLinks: hits.map((index) => ({
-      fid: payloads[index] ? `fid1:${payloads[index]}` : "",
-      title: sibs[index].title,
-    })),
-  };
-});
-
-/**
- * This topic's INBOUND edges, read out of the board's own computed graph.
- *
- * Who mentions me cannot be derived from my own prose, so this is the half that
- * genuinely needs the whole corpus — and the board already scanned it. Reading
- * one row rather than rebuilding the join means this re-triggers only when that
- * row changes: `normalizeAndDiff` writes the board's table per changed
- * location, and a read of one path is invalidated only by a write under it.
- */
-/** The two directions as the published row. */
-const joinEdges = lift((
-  { outbound, inbound }: {
-    outbound: {
-      refsOut: TopicReference[];
-      refsOutLinks: TopicNavigationLink[];
-    };
-    inbound: {
-      referencedBy: TopicReference[];
-      referencedByLinks: TopicNavigationLink[];
-    };
-  },
-): TopicCrossrefs => ({
-  refsOut: outbound.refsOut,
-  refsOutLinks: outbound.refsOutLinks,
-  referencedBy: inbound.referencedBy,
-  referencedByLinks: inbound.referencedByLinks,
-}));
-
-const inboundEdges = lift((
-  { boardCrossrefs, siblings, me }: {
-    boardCrossrefs: Writable<TopicCrossrefs[] | Default<[]>>;
-    siblings: Writable<TopicMention[] | Default<[]>>;
-    me: number;
-  },
-): {
-  referencedBy: TopicReference[];
-  referencedByLinks: TopicNavigationLink[];
-} => {
-  const none = { referencedBy: [], referencedByLinks: [] };
-  if (me < 0) return none;
-
-  const row = boardCrossrefs.key(me).get();
-  if (row) {
-    return {
-      referencedBy: row.referencedBy ?? [],
-      referencedByLinks: row.referencedByLinks ?? [],
-    };
-  }
-
-  // No board table: a topic wired before that input existed, which is every
-  // piece already deployed. Derive inbound edges the old way rather than
-  // publishing an empty set — `pattern-vintage` catches exactly that, and a
-  // silently emptied Connections card is a worse failure than a slow one.
-  // Backfilling `boardCrossrefs` as a link-bind (as `mentionable` was) retires
-  // this branch.
-  const sibs = siblings.get();
-  if (!Array.isArray(sibs) || me >= sibs.length) return none;
-  // deno-lint-ignore no-explicit-any
-  const myRef = (siblings.key(me) as any).resolveAsCell?.()?.entityId;
-  const myPayload = myRef ? fidPayload(entityRefToString(myRef)) : "";
-  if (!myPayload) return none;
-
-  const hits: number[] = [];
-  for (let index = 0; index < sibs.length; index++) {
-    if (index === me || !sibs[index]) continue;
-    if (extractFidPayloads(topicCorpus(sibs[index])).includes(myPayload)) {
-      hits.push(index);
-    }
-  }
-  return {
-    referencedBy: hits.map((index) => sibs[index] as TopicReference),
-    referencedByLinks: hits.map((index) => {
-      // deno-lint-ignore no-explicit-any
-      const ref = (siblings.key(index) as any).resolveAsCell?.()?.entityId;
-      const payload = ref ? fidPayload(entityRefToString(ref)) : "";
-      return {
-        fid: payload ? `fid1:${payload}` : "",
-        title: sibs[index].title,
-      };
-    }),
-  };
-});
+// Each of these is a module-scope `lift` rather than a pattern-body derivation
+// for one reason: the declared parameter type is what bounds the read. An
+// inferred input schema falls back to reading its input whole, while a `lift`'s
+// declared parameter is a ceiling that no opaque helper in its body can widen.
 
 /** Max of creation, the newest comment, the newest link, and the last body
  * save — declared over just those four timestamp surfaces. */
@@ -819,7 +472,6 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedBy,
       bodyUpdatedAt,
       mentionable,
-      boardCrossrefs,
     },
   ) => {
     // Session-local UI state (new-tab test: none of this should carry over).
@@ -973,36 +625,10 @@ export default pattern<TopicInput, TopicOutput>(
       comments.get().toSorted((a, b) => a.sentAt - b.sentAt)
     );
 
-    // Split by direction: outbound depends on this topic's prose, inbound on
-    // one row of the board's table. Neither depends on the sibling list, so an
-    // unrelated topic being added re-runs nothing here.
-    // Both directions need to know which sibling is this topic — inbound to
-    // read its row, outbound to skip itself — so find it once.
-    const me = findSelfIndex({ siblings: mentionable, title });
-    const outbound = outboundEdges({
-      siblings: mentionable,
-      body,
-      comments,
-      links,
-      me,
-    });
-    const inbound = inboundEdges({
-      boardCrossrefs,
-      siblings: mentionable,
-      me,
-    });
-    const crossrefs = joinEdges({ outbound, inbound });
-
     const linksView = computed(() => links.get());
     const hasLinks = linksView.length > 0;
     const hasComments = commentCount > 0;
     const hasBody = body.get().trim().length > 0;
-    // The snapshots are optional on the published sibling projection (a
-    // sibling's row never renders them, and adding required fields there would
-    // change the deployed `crossrefs` default). This topic's own row always
-    // carries them — the derivation above sets both on every path.
-    const hasConnections = (crossrefs.refsOutLinks ?? []).length +
-        (crossrefs.referencedByLinks ?? []).length > 0;
 
     const topicName = title.get().trim() || "(untitled topic)";
 
@@ -1173,25 +799,6 @@ export default pattern<TopicInput, TopicOutput>(
                 </cf-vstack>
               </cf-card>
 
-              {/* ── Connections (derived crossrefs; nothing persisted) ── */}
-              {hasConnections
-                ? (
-                  <cf-card>
-                    <cf-vstack gap="2">
-                      <cf-heading level={5}>Connections</cf-heading>
-                      {crossrefLinkRow(
-                        "references →",
-                        crossrefs.refsOutLinks,
-                      )}
-                      {crossrefLinkRow(
-                        "← referenced by",
-                        crossrefs.referencedByLinks,
-                      )}
-                    </cf-vstack>
-                  </cf-card>
-                )
-                : null}
-
               {/* ── The thread ── */}
               <cf-card>
                 <cf-vstack gap="2">
@@ -1275,7 +882,6 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedAt,
       commentCount,
       lastActivityAt,
-      crossrefs,
       addComment,
       addLink,
       setBody,

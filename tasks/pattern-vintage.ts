@@ -135,6 +135,7 @@ import {
   pinNewestGeneration,
   replayAll,
 } from "./pattern-vintage-run.ts";
+import { ACCEPTED_STATE_DROPS } from "./pattern-vintage-accepted-drops.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("..", import.meta.url)).replace(
   /\/$/,
@@ -271,12 +272,42 @@ async function main() {
     console.error(`\n${reportFailures(replay.failures)}`);
   }
 
+  if (replay.dropsApplied.size > 0) {
+    console.log(
+      `\nHeld ${replay.dropsApplied.size} pattern(s) to less than their ` +
+        `vintage, by accepted removal ` +
+        `(tasks/pattern-vintage-accepted-drops.ts):`,
+    );
+    for (const drop of ACCEPTED_STATE_DROPS) {
+      if (!replay.dropsApplied.has(drop.pattern)) continue;
+      console.log(`  ${drop.pattern}: ${drop.fields.join(", ")}`);
+    }
+  }
+  // An accepted removal that forgave nothing anywhere in the replay is an
+  // exemption outliving what it was granted for — the same rule Tier 1's
+  // accepted breaks carry. Safe to ask unconditionally: `replayAll` walks every
+  // fixture in the tree whatever else the invocation was for, so "no vintage
+  // holds this field" is a fact about the whole store, not about a subset.
+  const staleDrops = ACCEPTED_STATE_DROPS
+    .map((drop) => drop.pattern)
+    .filter((pattern) => !replay.dropsApplied.has(pattern));
+  if (staleDrops.length > 0) {
+    console.error(
+      `\n${staleDrops.length} accepted removal(s) in ` +
+        `tasks/pattern-vintage-accepted-drops.ts forgive nothing: ` +
+        `${staleDrops.join(", ")}. No vintage holds the named fields, so the ` +
+        `comparison would pass without them — remove the entry.`,
+    );
+  }
+
   // CANDIDATES and TARGETS are the soundness floor, not `updated`. A run where
   // nothing changed legitimately updates nothing — that is the common case, and
   // the auto-updater fires on the same condition. But a run with no candidates,
   // or none that today's source could be applied to, examined no update targets
   // at all — the shape that has read as success three separate times here.
-  if (!isClean(replay.failures, uncovered, replay)) Deno.exit(1);
+  if (!isClean(replay.failures, uncovered, replay) || staleDrops.length > 0) {
+    Deno.exit(1);
+  }
   console.log(reportReplaySummary(replay));
 }
 

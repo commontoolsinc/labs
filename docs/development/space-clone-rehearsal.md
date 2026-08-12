@@ -254,7 +254,7 @@ These are all failures that actually happened, not hypotheticals:
   this false negative. Wait before concluding the board is broken.
 - **An unstepped CLI read of a computed result looks empty.** Use `--input` for
   what durably committed and `--step` for computed results. An empty
-  `crossrefs --step` next to a non-empty `topics --input` is a
+  `index --step` next to a non-empty `topics --input` is a
   result-materialization problem, not an empty board.
 - **Never trust a fresh-replica read.** From the 2026-07-10 outage record:
   "every wrong turn in this investigation traces to trusting a fresh-replica

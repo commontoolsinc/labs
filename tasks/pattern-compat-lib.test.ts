@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema } from "@commonfabric/runner";
 import {
+  acceptedBreakKey,
   type Baseline,
   baselineFileName,
   checkPattern,
@@ -13,6 +14,7 @@ import {
   findRetired,
   parseArgs,
   parseShard,
+  partitionAcceptedBreaks,
   type PatternContract,
   readBaselines,
   shouldRecord,
@@ -369,6 +371,60 @@ describe("baseline store", () => {
       );
       expect(labels[0].startsWith("20260101")).toBe(true);
     });
+  });
+});
+
+describe("partitionAcceptedBreaks", () => {
+  const incompatible = (pattern: string, baseline: string): Finding => ({
+    kind: "incompatible",
+    pattern,
+    baseline,
+    detail: "result.x: existing result field was removed",
+  });
+  const accepted = new Set([acceptedBreakKey("a.tsx", "old")]);
+
+  it("forgives an incompatible finding whose pattern and baseline are listed", () => {
+    const { standing, forgiven } = partitionAcceptedBreaks(
+      [incompatible("a.tsx", "old")],
+      accepted,
+    );
+    expect(standing).toEqual([]);
+    expect(forgiven).toEqual([incompatible("a.tsx", "old")]);
+  });
+
+  it("keeps a finding against a baseline the entry does not name", () => {
+    // The bound that stops an acceptance becoming an off switch: the contract
+    // recorded once the break ships is a baseline no entry names, so the next
+    // change to the same pattern is gated against it.
+    const { standing, forgiven } = partitionAcceptedBreaks(
+      [incompatible("a.tsx", "recorded-after-the-break")],
+      accepted,
+    );
+    expect(standing).toEqual([
+      incompatible("a.tsx", "recorded-after-the-break"),
+    ]);
+    expect(forgiven).toEqual([]);
+  });
+
+  it("keeps a finding for a pattern the list does not name", () => {
+    const { standing } = partitionAcceptedBreaks(
+      [incompatible("b.tsx", "old")],
+      accepted,
+    );
+    expect(standing).toEqual([incompatible("b.tsx", "old")]);
+  });
+
+  it("keeps every finding that is not an incompatibility", () => {
+    // An acceptance says the break was decided; it says nothing about a
+    // contract that is unrecorded, invalid, or outlived by its baselines.
+    const others: Finding[] = [
+      { kind: "missing-baseline", pattern: "a.tsx", hash: "h" },
+      { kind: "invalid-schema", pattern: "a.tsx", role: "result", detail: "x" },
+      { kind: "retired", pattern: "a.tsx", baselines: ["old"] },
+    ];
+    const { standing, forgiven } = partitionAcceptedBreaks(others, accepted);
+    expect(standing).toEqual(others);
+    expect(forgiven).toEqual([]);
   });
 });
 
