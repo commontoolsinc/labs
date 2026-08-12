@@ -142,12 +142,17 @@ export interface InvocationOutcome {
    * callback carries, so the address is known BEFORE the outcome is read.
    * That is what makes it available under `--no-wait`: a caller that chose
    * not to wait still holds the address to collect from, and reads it back
-   * with `cf piece get --piece <id>` rather than re-invoking the verb — a
-   * same-id replay returns the original outcome but re-runs the handler
-   * body, so a verb with effects outside its transaction repeats them.
+   * with `cf piece get --piece <id>` rather than re-invoking the verb. The
+   * receipt is a COMMIT witness, not an execution witness — a same-id replay
+   * runs the handler body again and then loses the race, so effects outside
+   * the transaction repeat.
    *
    * On a create-only collision this addresses the ORIGINAL handling's
-   * receipt, which is the outcome a caller wants either way.
+   * receipt: the loser's commit callback carries the winner's address. That
+   * is the runner's guarantee, asserted where it is implemented
+   * (`packages/runner/test/scheduler-event-receipts.test.ts`, "cell.send
+   * carries a caller-supplied eventId and exposes the receipt link") — the
+   * CLI's own tests drive a single address and cannot witness it.
    *
    * Absent when the runtime published no link: with `commitPreconditions`
    * off nothing writes a receipt, and an address naming a cell that does not
@@ -742,7 +747,10 @@ export async function executeResolvedCallable(
 
     // Read the handling's outcome back off its receipt. On a receipt-exists
     // collision this is the ORIGINAL handling's receipt — same id, same
-    // outcome, no re-execution — so a retry settles as a success.
+    // outcome — so a retry settles as a success. The receipt is a COMMIT
+    // witness, not an execution witness: the redelivered event still ran the
+    // handler body and then lost the race, so nothing committed twice while
+    // effects outside the transaction repeated.
     deps.onPhase?.("readback");
     let result: unknown;
     let links: Record<string, InvocationResultLink> | undefined;

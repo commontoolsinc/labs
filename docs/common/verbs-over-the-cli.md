@@ -187,7 +187,8 @@ stranger, and a command's arguments are readable in a process listing where its
 environment is not. `--invocation-session <id>` overrides it for one call.
 
 The pair is what names an invocation. Replaying a settled id **from the session
-that chose it** returns the **original** result rather than re-executing:
+that chose it** hands back the **original** result, and nothing is written a
+second time:
 
 ```bash
 cf piece call --piece <topic> --invocation add-comment-1 \
@@ -201,6 +202,16 @@ cf piece call --piece <topic> --invocation add-comment-1 \
 
 That is the property an agent depends on when it retries a call whose response
 it never saw.
+
+**A receipt witnesses the commit, not the execution.** The replay above does run
+the handler body again; it then loses the race for the create-only receipt, so
+its commit is refused and no second comment is recorded. What it cannot undo is
+anything the body did *outside* that transaction: a verb that sends mail or
+spends a model call does it twice, and a write it made into another space
+commits before the receipt is contested and is not rolled back when the receipt
+is lost. So retry freely for a verb that only writes its own space, and prefer
+reading the `receipt` address for a verb that reaches beyond it — that collects
+the same outcome without running anything.
 
 That same id under a **different** session is a different invocation: it
 executes, and returns its own result. So two agents that pick the same word are
@@ -370,7 +381,10 @@ rather than to the result.
 `links` answers a different question from the envelope's `receipt`: `"/"` names
 whatever document backs the result **value**, which is the receipt only when the
 result is not itself a reference, while `receipt` always names the handling's
-own receipt and needs no flag to appear.
+own receipt and needs no flag to appear. Where the two describe the same thing
+they carry the same address — the receipt appears in `links` as `"/"`, or under
+the reserved bare `receipt` key when `"/"` had to name something else — so under
+`--show-links` the address is simply present twice.
 
 The links describe whatever result you were handed, so a projection composes
 with them: a path `--select` or `--schema` dropped simply gets no entry.

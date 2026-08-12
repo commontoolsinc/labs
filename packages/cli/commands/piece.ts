@@ -625,27 +625,33 @@ export function renderPieceCallOutcome(
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
     // The address the envelope published, when the runtime wrote a receipt.
     // It leads the detached next steps because it collects the outcome
-    // without running the verb again — a same-id replay returns the original
-    // outcome but re-executes the handler body, so a verb with effects
-    // outside its transaction repeats them.
+    // without running the verb again.
     const receiptId = result.invocation.receipt?.id;
     hintOut(
-      // The replay names its session through the environment rather than
-      // `--invocation-session`, because a session is what keeps an outcome's
-      // address out of reach of anyone who can guess a piece, a verb and an
-      // id — and an argument is readable in a process listing where an
-      // environment variable is not.
       opts.detached
-        ? cliText(`NEXT STEPS:${
-          receiptId === undefined ? "" : `
-  → Read the outcome: cf piece get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)`
-        }
+        ? cliText(
+          receiptId === undefined
+            // No receipt means receipts are not being written here, and that
+            // is exactly the configuration in which a same-id call does NOT
+            // deduplicate — it executes AND commits a second time. Offering
+            // the replay as a recovery would be offering a duplicate.
+            ? `NEXT STEPS:
+  → Nothing to collect: this handling wrote no receipt, so the outcome has no address and a call naming the same pair executes and commits AGAIN rather than deduplicating.
+  → Verify state:     cf piece get --piece ${piece} <path> ...`
+            // The replay names its session through the environment rather
+            // than `--invocation-session`, because a session is what keeps an
+            // outcome's address out of reach of anyone who can guess a piece,
+            // a verb and an id — and an argument is readable in a process
+            // listing where an environment variable is not.
+            : `NEXT STEPS:
+  → Read the outcome: cf piece get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
   → Or replay it:     CF_INVOCATION_SESSION=${
-          opts.invocation?.session ?? "<session>"
-        } cf piece call --piece ${piece} --invocation ${
-          opts.invocation?.id ?? "<id>"
-        } ${callableName} ... (the commit is durable; a call naming this same pair deduplicates and returns the settled outcome)
-  → Verify state:     cf piece get --piece ${piece} <path> ...`)
+              opts.invocation?.session ?? "<session>"
+            } cf piece call --piece ${piece} --invocation ${
+              opts.invocation?.id ?? "<id>"
+            } ${callableName} ... (the commit is durable and the replay loses the race for the receipt, so nothing commits twice — but the handler body RUNS AGAIN, repeating effects outside its transaction, and any write it made into another space)
+  → Verify state:     cf piece get --piece ${piece} <path> ...`,
+        )
         : nextSteps,
     );
     return;
@@ -1800,9 +1806,9 @@ after --. Handlers interpret piped input when no input argument is present.`,
       "name), skipping only the receipt readback: stdout reports status " +
       '"committed" plus the receipt address, so `cf piece get --piece <that ' +
       "id>` collects the outcome later without re-running the handler; a " +
-      "later call naming the same invocation session and --invocation " +
-      "recovers it too. The handler still executes here and its commit is " +
-      "durable. Handler invocations only.",
+      "call naming the same session and --invocation recovers it too, but " +
+      "runs the handler body again. The handler still executes here and its " +
+      "commit is durable. Handler invocations only.",
   )
   .option(
     "--show-links",

@@ -1088,6 +1088,11 @@ describe("executePieceCallable", () => {
       },
     );
 
+    // The `receipt` here says only that the address survives a collision.
+    // That it is the WINNER's address is the runner's guarantee and needs
+    // two competing handlings to witness, which this harness does not have —
+    // see "cell.send carries a caller-supplied eventId and exposes the
+    // receipt link" in packages/runner/test/scheduler-event-receipts.test.ts.
     expect(result.invocation).toEqual({
       id: "inv-dup",
       status: "settled",
@@ -2543,8 +2548,10 @@ describe("piece call wait control", () => {
     );
 
     // The collision is still a success — the ORIGINAL commit stands and is
-    // durable — but the original outcome is not fetched; a later same-id
-    // call reads it back.
+    // durable — but the original outcome is not fetched; the address it
+    // published is what reads it back. Which handling's address that is, on
+    // a real collision, is the runner's guarantee rather than this harness's
+    // (see the settled collision case above).
     expect(result.invocation).toEqual({
       id: "inv-dup-no-readback",
       status: "committed",
@@ -3859,9 +3866,11 @@ describe("piece call over a live runtime", () => {
       receipt: receiptAddress(),
     });
 
-    // Resolve it exactly as `cf piece get --piece <id>` does: the id through
-    // the entity-URI intake, then the cell it names (a piece's result cell
-    // IS that cell, `PiecesController.getResult`).
+    // Resolve the published id through the entity-URI intake `--piece` runs
+    // it through, and read the cell it names. This covers the address and
+    // the intake; it stops short of the whole `cf piece get` route, which
+    // also runs slug resolution (a pass-through for a token carrying a
+    // colon) and the read-path guards before reaching the same cell.
     const published = executed.invocation!.receipt!;
     const collected = runtime.getCellFromEntityId(
       published.space as MemorySpace,
@@ -4480,14 +4489,18 @@ describe("renderPieceCallOutcome", () => {
       observer,
       {
         ...base,
-        invocation: { id: "inv-1", status: "committed" },
+        invocation: {
+          id: "inv-1",
+          status: "committed",
+          receipt: { space: "did:key:s", id: "of:receipt-1", scope: "space" },
+        },
       } as unknown as ExecutedPieceCallable,
       "addTopic",
       "fid1:piece",
       deps,
       { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
     );
-    // The hint is a command the caller runs to collect the outcome it chose
+    // The replay is a command the caller runs against the outcome it chose
     // not to wait for, and an id reaches that outcome only within the
     // session it was chosen in — so the hint has to carry both. The session
     // travels in the environment because it is what makes that outcome's
@@ -4497,6 +4510,35 @@ describe("renderPieceCallOutcome", () => {
       "CF_INVOCATION_SESSION=ses-7 cf piece call",
     );
     assertStringIncludes(hinted[0], "--invocation inv-1");
+    // And it says what the replay costs: the receipt witnesses the commit,
+    // not the execution, so the body runs a second time.
+    assertStringIncludes(hinted[0], "RUNS AGAIN");
+  });
+
+  it("offers no replay in the detached step that published no address", () => {
+    // No receipt means receipts are not being written, and that is exactly
+    // when a same-pair call does NOT deduplicate: it executes and commits
+    // again ("allows redelivered events to commit twice while receipts are
+    // disabled", packages/runner/test/scheduler-event-receipts.test.ts).
+    // Offering the replay here would be offering a duplicate.
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: { id: "inv-1", status: "committed" },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+      { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
+    );
+    expect(hinted[0]).not.toContain("CF_INVOCATION_SESSION");
+    assertStringIncludes(hinted[0], "executes and commits AGAIN");
+    // And no dangling alternative: there is nothing for an "Or" to be or to.
+    expect(hinted[0]).not.toContain("Or replay");
+    assertStringIncludes(hinted[0], "cf piece get --piece fid1:piece");
   });
 
   it("leads the detached next steps with the address it published", () => {
@@ -4523,7 +4565,7 @@ describe("renderPieceCallOutcome", () => {
     );
     // Collecting the outcome is a read of the address this call published,
     // and it comes first because it does not run the verb again. The replay
-    // stays on offer below it — it is the recovery when the address is lost.
+    // stays on offer below it, for a caller that lost the address.
     assertStringIncludes(hinted[0], "cf piece get --piece of:receipt-1");
     assertStringIncludes(
       hinted[0],
