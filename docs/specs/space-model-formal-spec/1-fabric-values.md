@@ -2285,7 +2285,7 @@ encoding/decoding.
 
 ### 4.2 Codec Value Types
 
-`JsonCodec` uses an intermediate tree representation during serialization
+`JsonCodecEngine` uses an intermediate tree representation during serialization
 and deserialization. This type is internal to the JSON implementation — it
 is not part of the public boundary interface.
 
@@ -2353,7 +2353,7 @@ export interface SerializationContext<SerializedForm = unknown> {
 }
 ```
 
-`JsonCodec` implements `SerializationContext<string>`:
+`JsonCodecEngine` implements `SerializationContext<string>`:
 
 - `encode(value)` serializes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
@@ -2376,20 +2376,20 @@ Encode:  value -> codec.encode(value) -> serialized form (e.g., JSON string)
 Decode:  serialized form -> codec.decode(data, context) -> FabricValue
 ```
 
-Internally, `JsonCodec`'s `encode()` method calls a private encode walker
+Internally, `JsonCodecEngine`'s `encode()` method calls a private encode walker
 (`#encodeValue()`) to walk the `FabricValue` tree and produce a
 `JsonCodecValue` tree, then stringifies it. The `decode()` method parses
 the JSON string, then calls a private decode walker (`#decodeValue()`) to
 walk the `JsonCodecValue` tree and reconstruct modern runtime types. The
-recursive descent and codec dispatch are entirely internal to `JsonCodec`.
+recursive descent and codec dispatch are entirely internal to `JsonCodecEngine`.
 
 ### 4.5 Codecs, the Registry, and Internal Tree Walking
 
 The serialization and deserialization logic is implemented as private
-methods on `JsonCodec`. It dispatches per-type logic to the **codecs**
+methods on `JsonCodecEngine`. It dispatches per-type logic to the **codecs**
 (Section 2.4) held in a **`CodecRegistry`** — an index of which codec
 handles which class (for encoding) and which tag (for decoding). Codecs
-are shallow: `JsonCodec` owns recursion and tag-wrapping, and each codec
+are shallow: `JsonCodecEngine` owns recursion and tag-wrapping, and each codec
 translates exactly one layer.
 
 ```typescript
@@ -2506,7 +2506,7 @@ types) are handled by the walker itself after no codec matches.
 
 #### Private encode walker (`#encodeValue()`)
 
-`JsonCodec`'s private encode walker processes the `FabricValue` tree:
+`JsonCodecEngine`'s private encode walker processes the `FabricValue` tree:
 
 1. **Codec dispatch** — `codecFromValue()` finds how to encode the value.
    A `SELF_REP` result means the value is its own wire form (emitted
@@ -2531,7 +2531,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 
 #### Private decode walker (`#decodeValue()`)
 
-`JsonCodec`'s private decode walker processes the `JsonCodecValue` tree:
+`JsonCodecEngine`'s private decode walker processes the `JsonCodecValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed
    keys.
@@ -2543,7 +2543,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    bare `"/"` key) as an encoding error, producing a `ProblematicValue`
    (Section 3.5; see also Section 9 of `3-json-encoding.md`).
 4. **Codec dispatch** — `codecFromTag()` routes the tag to its registered
-   codec's `decode()`. When `JsonCodec` is in lenient mode, codec
+   codec's `decode()`. When `JsonCodecEngine` is in lenient mode, codec
    exceptions produce `ProblematicValue`. Values returned from this arm
    are guaranteed deep-frozen at the walker boundary (the contract holds
    for both the codec-produced value and the lenient-mode
@@ -2569,7 +2569,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > everything else; tag resolution checked a `wireTypeTag` property on each
 > instance. That made the wire-serializable surface implicit and smeared
 > the format mechanics across every handler. The codec model replaces all
-> of it: codecs are shallow (`JsonCodec` owns recursion and tag-wrapping),
+> of it: codecs are shallow (`JsonCodecEngine` owns recursion and tag-wrapping),
 > the surface is explicit and curated, the class registry is retired
 > (concrete types decode through their own codecs; unknown tags fall
 > straight to `UnknownValue`), and per-instance `wireTypeTag` survives
@@ -2578,7 +2578,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > **Previous design.** The earlier spec presented `serialize()` and
 > `deserialize()` as standalone top-level functions that received the
 > `SerializationContext` as a parameter. The current design moves these into
-> private methods on `JsonCodec`, keeping the public API clean
+> private methods on `JsonCodecEngine`, keeping the public API clean
 > (`encode()`/`decode()` only) and allowing the codec to encapsulate its
 > internal state (registry, codec view, lenient mode) without threading it
 > through every recursive call.
@@ -2666,7 +2666,7 @@ export function plainObjectFromJson<T extends object = object>(
 export function seemsLikeJsonEncodedFabricValue(value: string): boolean;
 ```
 
-`codecs.ts` creates a single stateless `JsonCodec` instance at module load
+`codecs.ts` creates a single stateless `JsonCodecEngine` instance at module load
 time and reuses it for all encode/decode operations.
 
 The `memory` package wraps these at its serialization boundary

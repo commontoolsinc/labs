@@ -11,4 +11,4 @@ export { SymbolCodec } from "./SymbolCodec.ts";
 export { UndefinedCodec } from "./UndefinedCodec.ts";
 
 // Whole-value codec for the wire format.
-export { JsonCodec } from "./JsonCodec.ts";
+export { JsonCodecEngine } from "./JsonCodecEngine.ts";

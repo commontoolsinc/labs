@@ -2,23 +2,20 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
-import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
+import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
   CODEC,
-  type NonterminalCodec,
   type ReconstructionContext,
-  type SerializationContext,
-  type TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { EmptyReconstructionContext } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
 import { createBaseJsonRegistry } from "./createBaseJsonRegistry.ts";
-import { type CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
+import type { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
 
 /**
@@ -33,48 +30,30 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
  * the `CodecRegistry`.
  */
-export class JsonCodec implements SerializationContext<string> {
-  /**
-   * Whether a failed reconstruction produces a `ProblematicValue` instead of
-   * throwing.
-   */
-  readonly lenient: boolean;
-
-  /** Registry consulted for per-type encoding and decoding. */
-  readonly #registry: CodecRegistry<JsonCodecValue>;
-
-  /**
-   * Constructs an instance. `options.registry` supplies the codecs this
-   * instance encodes and decodes with, and so decides which classes it can
-   * carry; there is no default, because which classes participate is a
-   * question this class has no standing to answer. `options.lenient` makes a
-   * failed reconstruction produce a `ProblematicValue` instead of throwing.
-   */
-  constructor(
-    options: { registry: CodecRegistry<JsonCodecValue>; lenient?: boolean },
-  ) {
-    this.lenient = options.lenient ?? false;
-    this.#registry = options.registry;
-  }
-
+export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   //
   // Instance members
   //
 
   /**
-   * Encodes a fabric value to a JSON string. Serializes fabric types into
-   * the `/<Type>@<Version>` tagged wire format, then stringifies.
+   * @inheritDoc
+   *
+   * Walks the value into the `/<Type>@<Version>` tagged tree, stringifies it,
+   * and prefixes the format tag.
    */
-  encode(value: FabricValue): string {
-    return ENCODING_PREFIX_TAG + JSON.stringify(this.#encodeValue(value));
+  override encode(value: FabricValue): string {
+    return ENCODING_PREFIX_TAG +
+      JSON.stringify(this.encodeValue(value));
   }
 
   /**
-   * Decodes a JSON string back into a fabric value. Parses the string,
-   * then deserializes tagged forms back into runtime types.
+   * @inheritDoc
+   *
+   * Checks the format tag, parses what follows it, and walks the resulting
+   * tree back into fabric values.
    */
-  decode(data: string, context: ReconstructionContext): FabricValue {
-    if (!JsonCodec.seemsLikeEncoded(data)) {
+  override decode(data: string, context: ReconstructionContext): FabricValue {
+    if (!JsonCodecEngine.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
         `Not a JSON-encoded \`FabricValue\` string: ${backtickQuote(excerpt)}`,
@@ -82,13 +61,13 @@ export class JsonCodec implements SerializationContext<string> {
     }
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
-    const parsed = JsonCodec.#parseWireText(json);
-    return this.#decodeValue(parsed, context);
+    const parsed = JsonCodecEngine.#parseWireText(json);
+    return this.decodeValue(parsed, context);
   }
 
   /** Serializes a fabric value to UTF-8 JSON bytes. */
   encodeToBytes(value: FabricValue): Uint8Array {
-    return this.toBytes(this.#encodeValue(value));
+    return this.toBytes(this.encodeValue(value));
   }
 
   /** Deserializes UTF-8 JSON bytes back into a fabric value. */
@@ -97,15 +76,27 @@ export class JsonCodec implements SerializationContext<string> {
     context: ReconstructionContext,
   ): FabricValue {
     const tree = this.fromBytes(bytes);
-    return this.#decodeValue(tree, context);
+    return this.decodeValue(tree, context);
   }
 
   /**
-   * Wraps a tag and state into the `/<tag>` wire format. Prepends `/` to the
-   * tag to produce the JSON key. See Section 5.2 of the formal spec.
+   * @inheritDoc
+   *
+   * Prepends `/` to the tag to produce the JSON key. See Section 5.2 of the
+   * formal spec.
+   *
+   * The result is not frozen. A serialize-side tree is stringified and
+   * discarded without ever reaching a caller, so the deep-frozen invariant
+   * `JsonCodecValue` states does not cover it, and freezing every tagged node
+   * on the way out is measurable on small values. The meta-tag call sites
+   * below freeze what they build, where the cost is already paid by the
+   * rebuild around it.
    */
-  private wrapTag(tag: string, state: JsonCodecValue): JsonCodecValue {
-    return Object.freeze({ [`/${tag}`]: state } as JsonCodecValue);
+  protected override wrapTag(
+    tag: string,
+    state: JsonCodecValue,
+  ): JsonCodecValue {
+    return { [`/${tag}`]: state } as JsonCodecValue;
   }
 
   /**
@@ -123,7 +114,7 @@ export class JsonCodec implements SerializationContext<string> {
       return null;
     }
 
-    if (!JsonCodec.#isEncodedInstance(data)) {
+    if (!JsonCodecEngine.#isEncodedInstance(data)) {
       return null;
     }
 
@@ -135,153 +126,89 @@ export class JsonCodec implements SerializationContext<string> {
 
   /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonCodecValue): Uint8Array {
-    return JsonCodec.#textEncoder.encode(JSON.stringify(data));
+    return JsonCodecEngine.#textEncoder.encode(JSON.stringify(data));
   }
 
   /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
   private fromBytes(bytes: Uint8Array): JsonCodecValue {
-    const json = JsonCodec.#textDecoder.decode(bytes);
-    return JsonCodec.#parseWireText(json);
+    const json = JsonCodecEngine.#textDecoder.decode(bytes);
+    return JsonCodecEngine.#parseWireText(json);
   }
 
   /**
-   * Encodes a fabric value into the codec-value tree. Recursively processes
-   * nested values. See Section 4.5 of the formal spec.
+   * @inheritDoc
+   *
+   * A run of holes is spelled as a `/hole` count, JSON having no way to write
+   * an absent index.
    */
-  #encodeValue(
-    value: FabricValue,
-    _seen?: Set<object>,
+  protected override encodeArray(
+    value: readonly FabricValue[],
+    seen: Set<object>,
   ): JsonCodecValue {
-    const matched = this.#registry.codecFromValue(value);
+    JsonCodecEngine.enterOrThrow(seen, value);
 
-    if (matched === SELF_REP) {
-      // A self-representing primitive is its own wire form.
-      return value as JsonCodecValue;
-    } else if (matched) {
-      const seen = _seen ?? new Set<object>();
-      let addedToSeen = false;
-
-      if (value !== null && typeof value === "object") {
-        if (seen.has(value as object)) {
-          throw new Error("Circular reference detected during serialization");
-        }
-        seen.add(value as object);
-        addedToSeen = true;
-      }
-
-      // We use `tagForValue()` here rather than relying on any direct property
-      // of `value`, because `value` might not actually know what codec is being
-      // used for it, and it is up to the _codec_ not the value per se to
-      // determine the correct tag.
-      //
-      // A terminal codec's state is already in this format's domain, so it is
-      // final; a nonterminal codec's is made of fabric values, which this
-      // walker has yet to expand.
-      const tag = matched.tagForValue(value);
-      const finalState = (matched instanceof BaseTerminalCodec)
-        ? matched.encode(value) as JsonCodecValue
-        : this.#encodeValue(matched.encode(value) as FabricValue, seen);
-      const result: JsonCodecValue = { [`/${tag}`]: finalState };
-
-      if (addedToSeen) {
-        seen.delete(value as object);
-      }
-
-      return result;
-    } else if (value instanceof FabricSpecialObject) {
-      // Every `FabricSpecialObject` (that is, all objects that are
-      // `FabricValue`s other than plain objects and plain arrays must be
-      // recognized by a registered codec. Complain here since we didn't find a
-      // `codec` above.
-      throw new Error(
-        `No codec registered for fabric object class: ${
-          backtickQuote(value.constructor.name)
-        }`,
-      );
-    }
-
-    // Self-representing primitives returned `SELF_REP` above. Past this point,
-    // `value` is an `object`.
-
-    // Arrays
-    if (Array.isArray(value)) {
-      const seen = _seen ?? new Set<object>();
-      if (seen.has(value)) {
-        throw new Error("Circular reference detected during serialization");
-      }
-      seen.add(value);
-
-      const result: JsonCodecValue[] = [];
-      let i = 0;
-      while (i < value.length) {
-        if (!(i in value)) {
-          let count = 0;
-          while (i < value.length && !(i in value)) {
-            count++;
-            i++;
-          }
-          result.push(this.wrapTag(CODEC_META_TAGS.hole, count));
-        } else {
-          result.push(
-            this.#encodeValue(value[i], seen),
-          );
+    const result: JsonCodecValue[] = [];
+    let i = 0;
+    while (i < value.length) {
+      if (!(i in value)) {
+        let count = 0;
+        while (i < value.length && !(i in value)) {
+          count++;
           i++;
         }
+        result.push(Object.freeze(this.wrapTag(CODEC_META_TAGS.hole, count)));
+      } else {
+        result.push(this.encodeValue(value[i]!, seen));
+        i++;
       }
-
-      seen.delete(value);
-      return result as JsonCodecValue;
     }
 
-    // The only legit object we can have at this point is a plain object. (The
-    // other `FabricValue` object cases were handled above. So, if we find
-    // ourselves looking at a non-plain object at this point, it's always an
-    // error (and probably a case that can be tracked down to a typesystem lie
-    // of some sort).
-    if (!isPlainObject(value)) {
-      throw new Error(
-        `Cannot encode ${
-          backtickQuote(toCompactDebugString(value, 50))
-        }: no applicable codec.`,
-      );
-    }
+    seen.delete(value);
+    return result as JsonCodecValue;
+  }
 
-    // Plain objects
-    const seen = _seen ?? new Set<object>();
-    if (seen.has(value as object)) {
-      throw new Error("Circular reference detected during serialization");
-    }
-    seen.add(value as object);
+  /**
+   * @inheritDoc
+   *
+   * Keys are visited in UTF-8 byte order, matching the canonical order
+   * `value-hash.ts` uses, so that this encoding is deterministic across
+   * implementations and across objects whose keys differ only in insertion
+   * order. See `3-json-encoding.md` Section 10.
+   *
+   * A `/`-prefixed key collides with the tag form, so an object bearing one is
+   * escaped per Section 5.6: all values are encoded first, and if every one is
+   * quote-safe the whole object is wrapped in `/quote` with any `/quote`
+   * children collapsed into it, and otherwise in `/object` so that the decoder
+   * walks the entries.
+   */
+  protected override encodePlainObject(
+    value: Record<string, FabricValue>,
+    seen: Set<object>,
+  ): JsonCodecValue {
+    JsonCodecEngine.enterOrThrow(seen, value);
 
-    // Iterate keys in UTF-8 byte order. This matches the canonical key order
-    // used by `value-hash.ts`, and makes JSON encoding deterministic across
-    // implementations and across objects whose keys differ only in insertion
-    // order. See `3-json-encoding.md` Section 10 for the spec.
     const result: Record<string, JsonCodecValue> = {};
-    const valueRec = value as Record<string, FabricValue>;
     let anySlashKey = false;
-    for (const key of utf8SortedKeysOf(valueRec)) {
+    for (const key of utf8SortedKeysOf(value)) {
       if (key.startsWith("/")) {
         anySlashKey = true;
       }
-      result[key] = this.#encodeValue(valueRec[key], seen);
+      result[key] = this.encodeValue(value[key]!, seen);
     }
-    seen.delete(value as object);
+    seen.delete(value);
 
-    // Apply escaping per Section 5.6 for plain objects with /-prefixed keys.
-    // Serialize all values first (post-pass), then check if all are quote-safe.
-    // If so, unwrap any /quote children and wrap the whole object with /quote.
-    // Otherwise wrap with /object so the decoder deserializes entries.
     if (anySlashKey) {
-      if (Object.values(result).every((v) => JsonCodec.#isQuoteSafe(v))) {
+      if (Object.values(result).every((v) => JsonCodecEngine.#isQuoteSafe(v))) {
         const unquoted = Object.freeze(
           Object.fromEntries(
-            Object.entries(result).map(([k, v]) => [k, JsonCodec.#unquote(v)]),
+            Object.entries(result).map((
+              [k, v],
+            ) => [k, JsonCodecEngine.#unquote(v)]),
           ),
         );
-        return this.wrapTag(CODEC_META_TAGS.quote, unquoted) as JsonCodecValue;
+        return Object.freeze(this.wrapTag(CODEC_META_TAGS.quote, unquoted));
       }
-      return this.wrapTag(CODEC_META_TAGS.object, result) as JsonCodecValue;
+      return Object.freeze(this.wrapTag(CODEC_META_TAGS.object, result));
     }
 
     return result as JsonCodecValue;
@@ -296,7 +223,7 @@ export class JsonCodec implements SerializationContext<string> {
    * freeze. The unknown-tag fallback (`UnknownValue`) is a separate arm and is
    * intentionally NOT covered by this contract.
    */
-  #decodeValue(
+  protected override decodeValue(
     data: JsonCodecValue,
     context: ReconstructionContext,
   ): FabricValue {
@@ -323,76 +250,14 @@ export class JsonCodec implements SerializationContext<string> {
               `object contains a key this runtime reserves: "${key}"`,
             );
           }
-          result[key] = this.#decodeValue(val, context);
+          result[key] = this.decodeValue(val, context);
         }
         return Object.freeze(result);
       }
 
-      // Registry-based (tag lookup) dispatch. The lookup comes first because
-      // it decides what form the state is wanted in: a terminal codec takes
-      // the state exactly as it arrived, and everything else takes state this
-      // walker has decoded. (`/quote` and `/object` returned above; no codec
-      // ever sees their state, and `/quote` contents alone go undecoded.)
-      const matched = this.#registry.codecFromTag(tag);
-
-      if (matched === undefined) {
-        const state = this.#decodeValue(rawState, context);
-
-        // A bare `"/"` key (empty tag after stripping the leading slash) is
-        // always an encoding error per spec §9 — no valid tag has an empty
-        // name. Produce a `ProblematicValue` rather than an `UnknownValue`
-        // with an empty tag.
-        //
-        // Otherwise the tag is simply one this registry does not carry, and
-        // the unknown form is preserved so that it round-trips. Neither of
-        // these is covered by the deep-frozen contract that the codec arm
-        // below states.
-        return (tag === "")
-          ? new ProblematicValue(tag, state, `object has bare "/" key`)
-          : new UnknownValue(tag, state);
-      }
-
-      // A terminal codec takes the state exactly as it arrived; a nonterminal
-      // one takes it expanded. The two casts restate what `instanceof` just
-      // established, which TypeScript drops on a generic class.
-      const terminal = matched instanceof BaseTerminalCodec;
-      const state = terminal ? rawState : this.#decodeValue(rawState, context);
-
-      try {
-        // A codec's `decode()` promises deep-frozen results rather than
-        // relying on every caller to freeze, so both returns here pass through
-        // `deepFreeze()`. That covers the codec's own product -- a
-        // `FabricPrimitive` is already frozen, making it an O(1) cache hit --
-        // and the lenient fallback alike. The two arms above are separate and
-        // deliberately not covered.
-        return deepFreeze(
-          terminal
-            ? (matched as TerminalCodec<JsonCodecValue>).decode(
-              tag,
-              rawState,
-              context,
-            )
-            : (matched as NonterminalCodec).decode(
-              tag,
-              state as FabricValue,
-              context,
-            ),
-        );
-      } catch (e: unknown) {
-        if (!this.lenient) {
-          throw e;
-        }
-
-        // Report over the state the codec was actually handed, so that it says
-        // what the codec choked on.
-        return deepFreeze(
-          new ProblematicValue(
-            tag,
-            state,
-            e instanceof Error ? e.message : String(e),
-          ),
-        );
-      }
+      // `/quote` and `/object` returned above, so no codec ever sees their
+      // state, and `/quote` contents alone go undecoded.
+      return this.decodeTagged(tag, rawState, context);
     }
 
     // Primitives pass through.
@@ -403,71 +268,94 @@ export class JsonCodec implements SerializationContext<string> {
       return data;
     }
 
-    // Arrays: recursively deserialize elements.
-    //
-    // One pass. A `/hole` run advances the write index past the indices it
-    // stands for, leaving them absent, and the final length is set from that
-    // index so that a run in the last position is preserved. Counting the
-    // logical length first would mean walking and unwrapping every entry a
-    // second time, for a number this pass arrives at anyway.
-    //
-    // The result is still sized up front, at the entry count. That is exact
-    // whenever the array has no holes, which is the ordinary case, and an
-    // underestimate otherwise -- growing from there beats growing from empty,
-    // and a short array of holes is common enough to be worth not pessimizing.
-    //
-    // A run's count is validated, wire data being untrusted. Left unchecked it
-    // is added to the write index directly, so a string concatenates onto it
-    // and a negative or fractional one makes the length assignment throw --
-    // failures with no bearing on what went wrong. A run stands for at least
-    // one absent index, and anything else is reported instead.
     if (Array.isArray(data)) {
-      const result: FabricValue[] = new Array(data.length);
-      let targetIndex = 0;
-      for (const entry of data) {
-        const entryDecoded = this.unwrapTag(entry);
-        if (
-          entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
-        ) {
-          const count = entryDecoded.state;
-          if (!JsonCodec.#isHoleCount(count)) {
-            return new ProblematicValue(
-              CODEC_META_TAGS.hole,
-              count,
-              `hole: expected a positive integer count, got ${
-                backtickQuote(toCompactDebugString(count, 30))
-              }`,
-            );
-          }
-          targetIndex += count;
-        } else {
-          result[targetIndex] = this.#decodeValue(entry, context);
-          targetIndex++;
-        }
-      }
-
-      // The total is bounded here rather than each advance being bounded as
-      // it happens, because both a single run and the running total can pass
-      // what an array may hold, and one check at the end covers both. Beyond
-      // that, the assignment below throws `RangeError` from the array
-      // machinery, which says nothing about the wire that caused it.
-      const MAX_ARRAY_LENGTH = 0xffff_ffff;
-      if (targetIndex > MAX_ARRAY_LENGTH) {
-        return new ProblematicValue(
-          CODEC_META_TAGS.hole,
-          data,
-          `hole: runs total ${targetIndex} elements, past the ` +
-            `${MAX_ARRAY_LENGTH} an array can hold`,
-        );
-      }
-
-      result.length = targetIndex;
-      return Object.freeze(result);
+      return this.#decodeArray(data, context);
     }
 
-    // Plain objects: recursively deserialize values and freeze. Any
-    // `/`-prefixed key is reserved per spec — return `ProblematicValue` on
-    // first occurrence rather than silently round-tripping the object.
+    // `Array.isArray()` above removed the array arm, but TypeScript keeps it
+    // in the union; the remaining member is the record.
+    return this.#decodePlainObject(
+      data as Record<string, JsonCodecValue>,
+      context,
+    );
+  }
+
+  /**
+   * Arrays: recursively deserialize elements.
+   *
+   * One pass. A `/hole` run advances the write index past the indices it
+   * stands for, leaving them absent, and the final length is set from that
+   * index so that a run in the last position is preserved. Counting the
+   * logical length first would mean walking and unwrapping every entry a
+   * second time, for a number this pass arrives at anyway.
+   *
+   * The result is still sized up front, at the entry count. That is exact
+   * whenever the array has no holes, which is the ordinary case, and an
+   * underestimate otherwise -- growing from there beats growing from empty,
+   * and a short array of holes is common enough to be worth not pessimizing.
+   *
+   * A run's count is validated, wire data being untrusted. Left unchecked it
+   * is added to the write index directly, so a string concatenates onto it
+   * and a negative or fractional one makes the length assignment throw --
+   * failures with no bearing on what went wrong. A run stands for at least
+   * one absent index, and anything else is reported instead.
+   */
+  #decodeArray(
+    data: readonly JsonCodecValue[],
+    context: ReconstructionContext,
+  ): FabricValue {
+    const result: FabricValue[] = new Array(data.length);
+    let targetIndex = 0;
+    for (const entry of data) {
+      const entryDecoded = this.unwrapTag(entry);
+      if (
+        entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
+      ) {
+        const count = entryDecoded.state;
+        if (!JsonCodecEngine.#isHoleCount(count)) {
+          return new ProblematicValue(
+            CODEC_META_TAGS.hole,
+            count,
+            `hole: expected a positive integer count, got ${
+              backtickQuote(toCompactDebugString(count, 30))
+            }`,
+          );
+        }
+        targetIndex += count;
+      } else {
+        result[targetIndex] = this.decodeValue(entry, context);
+        targetIndex++;
+      }
+    }
+
+    // The total is bounded here rather than each advance being bounded as
+    // it happens, because both a single run and the running total can pass
+    // what an array may hold, and one check at the end covers both. Beyond
+    // that, the assignment below throws `RangeError` from the array
+    // machinery, which says nothing about the wire that caused it.
+    const MAX_ARRAY_LENGTH = 0xffff_ffff;
+    if (targetIndex > MAX_ARRAY_LENGTH) {
+      return new ProblematicValue(
+        CODEC_META_TAGS.hole,
+        data,
+        `hole: runs total ${targetIndex} elements, past the ` +
+          `${MAX_ARRAY_LENGTH} an array can hold`,
+      );
+    }
+
+    result.length = targetIndex;
+    return Object.freeze(result);
+  }
+
+  /**
+   * Plain objects: recursively deserialize values and freeze. Any
+   * `/`-prefixed key is reserved per spec — return `ProblematicValue` on
+   * first occurrence rather than silently round-tripping the object.
+   */
+  #decodePlainObject(
+    data: Record<string, JsonCodecValue>,
+    context: ReconstructionContext,
+  ): FabricValue {
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
       if (key.startsWith("/")) {
@@ -489,7 +377,7 @@ export class JsonCodec implements SerializationContext<string> {
           `object contains a key this runtime reserves: "${key}"`,
         );
       }
-      result[key] = this.#decodeValue(val, context);
+      result[key] = this.decodeValue(val, context);
     }
     return Object.freeze(result);
   }
@@ -573,11 +461,11 @@ export class JsonCodec implements SerializationContext<string> {
   static #isQuoteSafe(v: JsonCodecValue): boolean {
     if (v === null || typeof v !== "object") return true;
     if (Array.isArray(v)) {
-      return v.every((item) => JsonCodec.#isQuoteSafe(item));
+      return v.every((item) => JsonCodecEngine.#isQuoteSafe(item));
     }
-    if (!JsonCodec.#isEncodedInstance(v)) {
+    if (!JsonCodecEngine.#isEncodedInstance(v)) {
       return Object.values(v).every((item) =>
-        JsonCodec.#isQuoteSafe(item as JsonCodecValue)
+        JsonCodecEngine.#isQuoteSafe(item as JsonCodecValue)
       );
     }
     return Object.keys(v)[0] === "/quote";
@@ -592,16 +480,16 @@ export class JsonCodec implements SerializationContext<string> {
     if (v === null || typeof v !== "object") {
       return v;
     } else if (Array.isArray(v)) {
-      const result = v.map(JsonCodec.#unquote) as JsonCodecValue;
+      const result = v.map(JsonCodecEngine.#unquote) as JsonCodecValue;
       return Object.freeze(result);
     } else if (
-      JsonCodec.#isEncodedInstance(v) && Object.keys(v)[0] === "/quote"
+      JsonCodecEngine.#isEncodedInstance(v) && Object.keys(v)[0] === "/quote"
     ) {
       return (v as Record<string, JsonCodecValue>)["/quote"]!;
     } else {
       const result = Object.fromEntries(
         Object.entries(v).map(
-          ([k, val]) => [k, JsonCodec.#unquote(val as JsonCodecValue)],
+          ([k, val]) => [k, JsonCodecEngine.#unquote(val as JsonCodecValue)],
         ),
       ) as JsonCodecValue;
       return Object.freeze(result);
@@ -653,10 +541,10 @@ export class JsonCodec implements SerializationContext<string> {
   static unwrapEncodedValueForTesting(
     encoded: string,
     isMalformed = false,
-    registry: CodecRegistry<JsonCodecValue> = JsonCodec.#testingRegistry,
+    registry: CodecRegistry<JsonCodecValue> = JsonCodecEngine.#testingRegistry,
   ): string {
     if (isMalformed) {
-      if (!JsonCodec.seemsLikeEncoded(encoded)) {
+      if (!JsonCodecEngine.seemsLikeEncoded(encoded)) {
         throw new Error(
           `Not a JSON-encoded \`FabricValue\` string: ${
             backtickQuote(encoded)
@@ -668,9 +556,9 @@ export class JsonCodec implements SerializationContext<string> {
       // establish that `encoded` really is one of ours, rather than a string
       // that happens to begin with the right few characters. (`decode()` checks
       // the tag first, so the malformed branch above loses nothing.)
-      new JsonCodec({ registry }).decode(
+      new JsonCodecEngine({ registry }).decode(
         encoded,
-        JsonCodec.#testingReconstructionContext,
+        JsonCodecEngine.#testingReconstructionContext,
       );
     }
 
@@ -709,17 +597,17 @@ export class JsonCodec implements SerializationContext<string> {
   static wrapEncodedValueForTesting(
     json: string,
     isMalformed = false,
-    registry: CodecRegistry<JsonCodecValue> = JsonCodec.#testingRegistry,
+    registry: CodecRegistry<JsonCodecValue> = JsonCodecEngine.#testingRegistry,
   ): string {
     const encoded = ENCODING_PREFIX_TAG + json;
 
     if (!isMalformed) {
       // Throwaway decode and re-encode; both results are discarded. See above.
-      const jsonCodec = new JsonCodec({ registry });
-      jsonCodec.encode(
-        jsonCodec.decode(
+      const jsonCodecEngine = new JsonCodecEngine({ registry });
+      jsonCodecEngine.encode(
+        jsonCodecEngine.decode(
           encoded,
-          JsonCodec.#testingReconstructionContext,
+          JsonCodecEngine.#testingReconstructionContext,
         ),
       );
     }

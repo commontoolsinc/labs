@@ -23,7 +23,7 @@ import {
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 import {
-  JsonCodec,
+  JsonCodecEngine,
   seemsLikeJsonEncodedFabricValue,
 } from "@/codec-json/index.ts";
 import { jsonFromValue } from "@/codecs.ts";
@@ -213,7 +213,7 @@ describe("data-uri-codec", () => {
     it("throws given invalid payload text past the codec tag", () => {
       expect(() =>
         valueFromDataUriPayloadText(
-          JsonCodec.wrapEncodedValueForTesting("{nope", true),
+          JsonCodecEngine.wrapEncodedValueForTesting("{nope", true),
         )
       ).toThrow();
     });
@@ -351,7 +351,7 @@ describe("data-uri-codec", () => {
         expect(() =>
           valueFromDataUri(
             uriOf(
-              JsonCodec.wrapEncodedValueForTesting("{nope", true),
+              JsonCodecEngine.wrapEncodedValueForTesting("{nope", true),
             ),
           )
         ).toThrow();

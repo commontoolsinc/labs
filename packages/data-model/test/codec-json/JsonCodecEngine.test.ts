@@ -25,8 +25,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { JsonCodec } from "@/codec-json/JsonCodec.ts";
-import { createDefaultJsonRegistry, newDefaultJsonCodec } from "@/codecs.ts";
+import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
+import {
+  createDefaultJsonRegistry,
+  newDefaultJsonCodecEngine,
+} from "@/codecs.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
 import { JSON_FORMAT, type JsonCodecValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
@@ -98,22 +101,22 @@ class UnregisteredInstance extends BaseFabricInstance {
  * The encoding prefix tag, named once for the assertions below that pin the
  * wire form or that feed the decoder deliberately broken input. Bridging
  * between encoded strings and codec-value trees does NOT go through this --
- * that is what `JsonCodec`'s wrap/unwrap helpers are for.
+ * that is what `JsonCodecEngine`'s wrap/unwrap helpers are for.
  */
 const ENCODING_PREFIX = "fvj1:";
 
 /** Creates a standard test codec (non-lenient) and a mock runtime. */
 function makeTestCodec() {
-  const jsonCodec = newDefaultJsonCodec();
+  const jsonCodecEngine = newDefaultJsonCodecEngine();
   const runtime = new TestReconstructionContext();
-  return { jsonCodec, runtime };
+  return { jsonCodecEngine, runtime };
 }
 
 /** Helper: encode then decode (round-trip) through the public API. */
 function roundTrip(value: FabricValue): FabricValue {
-  const { jsonCodec, runtime } = makeTestCodec();
-  const encoded = jsonCodec.encode(value);
-  return jsonCodec.decode(encoded, runtime);
+  const { jsonCodecEngine, runtime } = makeTestCodec();
+  const encoded = jsonCodecEngine.encode(value);
+  return jsonCodecEngine.decode(encoded, runtime);
 }
 
 /**
@@ -121,10 +124,10 @@ function roundTrip(value: FabricValue): FabricValue {
  * Used for assertions about the intermediate codec value.
  */
 function toWireFormat(value: FabricValue): JsonCodecValue {
-  const { jsonCodec } = makeTestCodec();
-  const encoded = jsonCodec.encode(value);
+  const { jsonCodecEngine } = makeTestCodec();
+  const encoded = jsonCodecEngine.encode(value);
   return JSON.parse(
-    JsonCodec.unwrapEncodedValueForTesting(encoded),
+    JsonCodecEngine.unwrapEncodedValueForTesting(encoded),
   ) as JsonCodecValue;
 }
 
@@ -133,14 +136,14 @@ function toWireFormat(value: FabricValue): JsonCodecValue {
  * an encoded value), then feeds through the public decode API.
  */
 function fromWireFormat(data: JsonCodecValue): FabricValue {
-  const { jsonCodec, runtime } = makeTestCodec();
-  return jsonCodec.decode(
-    JsonCodec.wrapEncodedValueForTesting(JSON.stringify(data)),
+  const { jsonCodecEngine, runtime } = makeTestCodec();
+  return jsonCodecEngine.decode(
+    JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(data)),
     runtime,
   );
 }
 
-describe("JsonCodec", () => {
+describe("JsonCodecEngine", () => {
   describe("`registry` constructor option", () => {
     // An empty registry recognizes no class and no tag, so it differs from the
     // built-in one on any fabric class. `FabricError` is the probe: the
@@ -148,25 +151,28 @@ describe("JsonCodec", () => {
     // the empty registry's behavior instead, in both directions.
 
     it("throws on encode for a class the supplied registry lacks", () => {
-      const jsonCodec = new JsonCodec({
+      const jsonCodecEngine = new JsonCodecEngine({
         registry: new CodecRegistry(JSON_FORMAT),
       });
       const value = FabricError.fromNativeError(new Error("boom"));
 
-      expect(() => jsonCodec.encode(value)).toThrow(
-        "No codec registered for fabric object class: `FabricError`",
+      expect(() => jsonCodecEngine.encode(value)).toThrow(
+        "No codec registered for `FabricSpecialObject` subclass `FabricError`.",
       );
     });
 
     it("returns an `UnknownValue` on decode for a tag the supplied registry lacks", () => {
-      const wire = newDefaultJsonCodec().encode(
+      const wire = newDefaultJsonCodecEngine().encode(
         FabricError.fromNativeError(new Error("boom")),
       );
-      const jsonCodec = new JsonCodec({
+      const jsonCodecEngine = new JsonCodecEngine({
         registry: new CodecRegistry(JSON_FORMAT),
       });
 
-      const result = jsonCodec.decode(wire, new TestReconstructionContext());
+      const result = jsonCodecEngine.decode(
+        wire,
+        new TestReconstructionContext(),
+      );
 
       expect(result).toBeInstanceOf(UnknownValue);
       expect((result as UnknownValue).wireTypeTag).toBe("Error@1");
@@ -258,8 +264,8 @@ describe("JsonCodec", () => {
     /** Builds a codec over the default registry plus the given probe. */
     function codecWith(
       probe: ProbeTerminalCodec | ProbeNonterminalCodec,
-    ): JsonCodec {
-      return new JsonCodec({
+    ): JsonCodecEngine {
+      return new JsonCodecEngine({
         registry: createDefaultJsonRegistry().extend(probe),
       });
     }
@@ -292,7 +298,7 @@ describe("JsonCodec", () => {
       const probe = new ProbeTerminalCodec();
 
       codecWith(probe).decode(
-        JsonCodec.wrapEncodedValueForTesting(
+        JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify({ [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" } }),
           true,
         ),
@@ -308,17 +314,17 @@ describe("JsonCodec", () => {
       // returning a `ProblematicValue` -- which the spec sanctions alongside
       // throwing, `3-json-encoding.md` Section 7 letting a codec do either.
       // Non-lenient, so nothing here is wrapping a throw.
-      const jsonCodec = newDefaultJsonCodec();
+      const jsonCodecEngine = newDefaultJsonCodecEngine();
 
-      const result = jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting(
+      const result = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
           true, // Undecodable on purpose; that is what this test is about.
         ),
         new TestReconstructionContext(),
       );
 
-      expect(jsonCodec.lenient).toBe(false);
+      expect(jsonCodecEngine.lenient).toBe(false);
       expect(result).toBeInstanceOf(ProblematicValue);
       expect((result as unknown as ProblematicValue).wireTypeTag).toBe(
         "BigInt@1",
@@ -329,7 +335,7 @@ describe("JsonCodec", () => {
       const probe = new ProbeNonterminalCodec();
 
       codecWith(probe).decode(
-        JsonCodec.wrapEncodedValueForTesting(
+        JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify({ [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" } }),
           true,
         ),
@@ -342,14 +348,14 @@ describe("JsonCodec", () => {
 
   describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
     it("returns `Uint8Array` from `encodeToBytes()`", () => {
-      const { jsonCodec } = makeTestCodec();
-      const result = jsonCodec.encodeToBytes(42);
+      const { jsonCodecEngine } = makeTestCodec();
+      const result = jsonCodecEngine.encodeToBytes(42);
       expect(result).toBeInstanceOf(Uint8Array);
     });
 
     it("produces valid JSON bytes from `encodeToBytes()`", () => {
-      const { jsonCodec } = makeTestCodec();
-      const bytes = jsonCodec.encodeToBytes(
+      const { jsonCodecEngine } = makeTestCodec();
+      const bytes = jsonCodecEngine.encodeToBytes(
         { a: 1 },
       );
       const json = new TextDecoder().decode(bytes);
@@ -357,9 +363,9 @@ describe("JsonCodec", () => {
     });
 
     it("decodes a `Uint8Array` through `decodeFromBytes()`", () => {
-      const { jsonCodec, runtime } = makeTestCodec();
+      const { jsonCodecEngine, runtime } = makeTestCodec();
       const bytes = new TextEncoder().encode(JSON.stringify({ a: 1 }));
-      const result = jsonCodec.decodeFromBytes(
+      const result = jsonCodecEngine.decodeFromBytes(
         bytes,
         runtime,
       ) as Record<string, FabricValue>;
@@ -367,13 +373,13 @@ describe("JsonCodec", () => {
     });
 
     it("round-trips through `Uint8Array`", () => {
-      const { jsonCodec, runtime } = makeTestCodec();
+      const { jsonCodecEngine, runtime } = makeTestCodec();
       const value = {
         name: "test",
         count: 42,
       };
-      const bytes = jsonCodec.encodeToBytes(value);
-      const result = jsonCodec.decodeFromBytes(
+      const bytes = jsonCodecEngine.encodeToBytes(value);
+      const result = jsonCodecEngine.decodeFromBytes(
         bytes,
         runtime,
       ) as Record<string, FabricValue>;
@@ -382,10 +388,10 @@ describe("JsonCodec", () => {
     });
 
     it("round-trips `FabricError` through `Uint8Array`", () => {
-      const { jsonCodec, runtime } = makeTestCodec();
+      const { jsonCodecEngine, runtime } = makeTestCodec();
       const err = FabricError.fromNativeError(new TypeError("oops"));
-      const bytes = jsonCodec.encodeToBytes(err);
-      const result = jsonCodec.decodeFromBytes(
+      const bytes = jsonCodecEngine.encodeToBytes(err);
+      const result = jsonCodecEngine.decodeFromBytes(
         bytes,
         runtime,
       );
@@ -396,21 +402,21 @@ describe("JsonCodec", () => {
     });
 
     it("round-trips `undefined` through `Uint8Array`", () => {
-      const { jsonCodec, runtime } = makeTestCodec();
-      const bytes = jsonCodec.encodeToBytes(undefined);
-      const result = jsonCodec.decodeFromBytes(bytes, runtime);
+      const { jsonCodecEngine, runtime } = makeTestCodec();
+      const bytes = jsonCodecEngine.encodeToBytes(undefined);
+      const result = jsonCodecEngine.decodeFromBytes(bytes, runtime);
       expect(result).toBe(undefined);
     });
 
     it("round-trips complex structure through `Uint8Array`", () => {
-      const { jsonCodec, runtime } = makeTestCodec();
+      const { jsonCodecEngine, runtime } = makeTestCodec();
       const value = {
         users: [{ name: "Alice" }, { name: "Bob" }],
         error: FabricError.fromNativeError(new Error("fail")),
         nothing: undefined,
       };
-      const bytes = jsonCodec.encodeToBytes(value);
-      const result = jsonCodec.decodeFromBytes(
+      const bytes = jsonCodecEngine.encodeToBytes(value);
+      const result = jsonCodecEngine.decodeFromBytes(
         bytes,
         runtime,
       ) as Record<string, FabricValue>;
@@ -568,10 +574,10 @@ describe("JsonCodec", () => {
     it("loudly fails to encode an unencodable value (unique / uninterned `Symbol`)", () => {
       // `SymbolCodec.canEncode()` returns false for unique symbols (no
       // registry key), so no codec claims them. A default-configured
-      // `JsonCodec` must then fail loudly rather than silently flatten the
+      // `JsonCodecEngine` must then fail loudly rather than silently flatten the
       // symbol to `{}`.
-      const { jsonCodec } = makeTestCodec();
-      expect(() => jsonCodec.encode(Symbol("nope"))).toThrow(
+      const { jsonCodecEngine } = makeTestCodec();
+      expect(() => jsonCodecEngine.encode(Symbol("nope"))).toThrow(
         "no applicable codec",
       );
     });
@@ -636,16 +642,16 @@ describe("JsonCodec", () => {
 
   describe("un-registered instance types", () => {
     it("throws when encoding a `FabricInstance` with no registered codec", () => {
-      const { jsonCodec } = makeTestCodec();
-      expect(() => jsonCodec.encode(new UnregisteredInstance()))
+      const { jsonCodecEngine } = makeTestCodec();
+      expect(() => jsonCodecEngine.encode(new UnregisteredInstance()))
         .toThrow("No codec registered");
     });
 
     it("throws on a non-plain object with no codec (e.g. a raw `Map`)", () => {
       // A non-plain object that is neither a FabricInstance nor codec-handled
       // must fail loudly, not be mis-encoded as a plain object.
-      const { jsonCodec } = makeTestCodec();
-      expect(() => jsonCodec.encode(new Map() as unknown as FabricValue))
+      const { jsonCodecEngine } = makeTestCodec();
+      expect(() => jsonCodecEngine.encode(new Map() as unknown as FabricValue))
         .toThrow("no applicable codec");
     });
   });
@@ -690,9 +696,12 @@ describe("JsonCodec", () => {
 
     /** Decodes a hand-built array, which is deliberately not encodable. */
     function decodeArray(entries: JsonCodecValue[]): FabricValue {
-      const { jsonCodec, runtime } = makeTestCodec();
-      return jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting(JSON.stringify(entries), true),
+      const { jsonCodecEngine, runtime } = makeTestCodec();
+      return jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(
+          JSON.stringify(entries),
+          true,
+        ),
         runtime,
       );
     }
@@ -908,9 +917,9 @@ describe("JsonCodec", () => {
         const obj1 = { x: 1, y: 2, z: 3 };
         const obj2 = { z: 3, x: 1, y: 2 };
         const obj3 = { y: 2, z: 3, x: 1 };
-        const jsonCodec = newDefaultJsonCodec();
-        expect(jsonCodec.encode(obj1)).toBe(jsonCodec.encode(obj2));
-        expect(jsonCodec.encode(obj1)).toBe(jsonCodec.encode(obj3));
+        const jsonCodecEngine = newDefaultJsonCodecEngine();
+        expect(jsonCodecEngine.encode(obj1)).toBe(jsonCodecEngine.encode(obj2));
+        expect(jsonCodecEngine.encode(obj1)).toBe(jsonCodecEngine.encode(obj3));
       });
 
       it("sorts keys in nested plain objects", () => {
@@ -1358,42 +1367,42 @@ describe("JsonCodec", () => {
 
   describe("circular reference detection", () => {
     it("throws on object referencing itself", () => {
-      const { jsonCodec } = makeTestCodec();
+      const { jsonCodecEngine } = makeTestCodec();
       const obj: Record<string, unknown> = {};
       obj.self = obj;
-      expect(() => jsonCodec.encode(obj as FabricValue)).toThrow(
+      expect(() => jsonCodecEngine.encode(obj as FabricValue)).toThrow(
         "Circular reference",
       );
     });
 
     it("throws on array referencing itself", () => {
-      const { jsonCodec } = makeTestCodec();
+      const { jsonCodecEngine } = makeTestCodec();
       const arr: unknown[] = [];
       arr.push(arr);
-      expect(() => jsonCodec.encode(arr as FabricValue)).toThrow(
+      expect(() => jsonCodecEngine.encode(arr as FabricValue)).toThrow(
         "Circular reference",
       );
     });
 
     it("throws on indirect circular reference (A -> B -> A)", () => {
-      const { jsonCodec } = makeTestCodec();
+      const { jsonCodecEngine } = makeTestCodec();
       const a: Record<string, unknown> = {};
       const b: Record<string, unknown> = {};
       a.ref = b;
       b.ref = a;
-      expect(() => jsonCodec.encode(a as FabricValue)).toThrow(
+      expect(() => jsonCodecEngine.encode(a as FabricValue)).toThrow(
         "Circular reference",
       );
     });
 
     it("throws on `FabricInstance` whose state references itself", () => {
-      const { jsonCodec } = makeTestCodec();
+      const { jsonCodecEngine } = makeTestCodec();
       // Create an instance with a circular reference in its state.
       const state = { eek: [] as FabricValue[] };
       state.eek.push(state);
 
       const us = new UnknownValue("Test@1", state);
-      expect(() => jsonCodec.encode(us))
+      expect(() => jsonCodecEngine.encode(us))
         .toThrow(
           "Circular reference",
         );
@@ -1421,14 +1430,14 @@ describe("JsonCodec", () => {
     });
 
     it("lenient mode wraps failed handler reconstruction", () => {
-      const jsonCodec = newDefaultJsonCodec({ lenient: true });
+      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestReconstructionContext();
 
       // BigInt@1 with a non-string state produces ProblematicValue
       // in lenient mode because the handler validates the state type.
       const data = { "/BigInt@1": 42 } as JsonCodecValue;
-      const result = jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting(JSON.stringify(data)),
+      const result = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(data)),
         runtime,
       );
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -1444,11 +1453,11 @@ describe("JsonCodec", () => {
       // What the state assertion pins is what the *report* carries, which is
       // the wire form. That the *codec* is handed the wire form is a separate
       // fact, pinned separately above.
-      const jsonCodec = newDefaultJsonCodec({ lenient: true });
+      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const data = { "/Undefined@1": { "/Bytes@1": "AQID" } } as JsonCodecValue;
 
-      const result = jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting(
+      const result = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify(data),
           true, // Undecodable on purpose; that is what this test is about.
         ),
@@ -1461,8 +1470,24 @@ describe("JsonCodec", () => {
       expect(prob.state).toEqual({ "/Bytes@1": "AQID" });
     });
 
+    it("deep-freezes the `ProblematicValue` it wraps a throw in", () => {
+      // A `ProblematicValue` is not frozen at construction, so this is what
+      // witnesses the deep-frozen contract on the lenient path. The codecs
+      // that report by RETURNING one are frozen by the arm above instead, so
+      // neither arm stands in for the other.
+      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
+      const data = { "/Undefined@1": { "/Bytes@1": "AQID" } } as JsonCodecValue;
+
+      const result = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(data), true),
+        new TestReconstructionContext(),
+      );
+
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
     it("lenient mode wraps failed class-registry reconstruction", () => {
-      const jsonCodec = newDefaultJsonCodec({ lenient: true });
+      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestReconstructionContext();
 
       // Map@1's codec always throws on decode ("not yet implemented"),
@@ -1470,8 +1495,8 @@ describe("JsonCodec", () => {
       const data = {
         "/Map@1": [["key", "value"]],
       } as JsonCodecValue;
-      const result = jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting(
+      const result = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify(data),
           true, // Undecodable on purpose; that is what this test is about.
         ),
@@ -1556,10 +1581,10 @@ describe("JsonCodec", () => {
       // lenient catch produces a ProblematicValue -- still a codec-arm return,
       // so the contract deep-freezes it (not a crash: it is the value
       // lenient mode produces precisely to avoid crashing).
-      const jsonCodec = newDefaultJsonCodec({ lenient: true });
+      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       const runtime = new TestReconstructionContext();
-      const result = jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting(
+      const result = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify({ "/BigInt@1": 42 }),
         ),
         runtime,
@@ -1597,13 +1622,13 @@ describe("JsonCodec", () => {
     function decodeBothPaths(
       data: JsonCodecValue,
     ): { viaString: FabricValue; viaBytes: FabricValue } {
-      const { jsonCodec, runtime } = makeTestCodec();
+      const { jsonCodecEngine, runtime } = makeTestCodec();
       const json = JSON.stringify(data);
-      const viaString = jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting(json),
+      const viaString = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(json),
         runtime,
       );
-      const viaBytes = jsonCodec.decodeFromBytes(
+      const viaBytes = jsonCodecEngine.decodeFromBytes(
         new TextEncoder().encode(json),
         runtime,
       );
@@ -1643,9 +1668,9 @@ describe("JsonCodec", () => {
       const wire = {
         "/quote": { outer: { inner: [1, 2] } },
       } as JsonCodecValue;
-      const { jsonCodec, runtime } = makeTestCodec();
-      const result = jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting(JSON.stringify(wire)),
+      const { jsonCodecEngine, runtime } = makeTestCodec();
+      const result = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(wire)),
         runtime,
       ) as Record<string, Record<string, FabricValue[]>>;
 
@@ -1664,8 +1689,8 @@ describe("JsonCodec", () => {
       const wire = {
         "/quote": { outer: { inner: [{ deep: 1 }] } },
       } as JsonCodecValue;
-      const { jsonCodec, runtime } = makeTestCodec();
-      const result = jsonCodec.decodeFromBytes(
+      const { jsonCodecEngine, runtime } = makeTestCodec();
+      const result = jsonCodecEngine.decodeFromBytes(
         new TextEncoder().encode(JSON.stringify(wire)),
         runtime,
       ) as Record<string, Record<string, Array<Record<string, FabricValue>>>>;
@@ -1691,47 +1716,47 @@ describe("JsonCodec", () => {
     });
   });
 
-  describe("JsonCodec", () => {
+  describe("JsonCodecEngine", () => {
     it("`encode()` returns a prefixed JSON string", () => {
-      const jsonCodec = newDefaultJsonCodec();
-      const result = jsonCodec.encode(42);
+      const jsonCodecEngine = newDefaultJsonCodecEngine();
+      const result = jsonCodecEngine.encode(42);
       expect(typeof result).toBe("string");
-      expect(JsonCodec.seemsLikeEncoded(result)).toBe(true);
+      expect(JsonCodecEngine.seemsLikeEncoded(result)).toBe(true);
       expect(
-        JSON.parse(JsonCodec.unwrapEncodedValueForTesting(result)),
+        JSON.parse(JsonCodecEngine.unwrapEncodedValueForTesting(result)),
       ).toBe(42);
     });
 
     it("`decode()` parses a prefixed JSON string back to a value", () => {
-      const jsonCodec = newDefaultJsonCodec();
+      const jsonCodecEngine = newDefaultJsonCodecEngine();
       const runtime = new TestReconstructionContext();
-      const result = jsonCodec.decode(
-        JsonCodec.wrapEncodedValueForTesting("42"),
+      const result = jsonCodecEngine.decode(
+        JsonCodecEngine.wrapEncodedValueForTesting("42"),
         runtime,
       );
       expect(result).toBe(42);
     });
 
     it("`encode()`/`decode()` round-trip for tagged types", () => {
-      const jsonCodec = newDefaultJsonCodec();
+      const jsonCodecEngine = newDefaultJsonCodecEngine();
       const runtime = new TestReconstructionContext();
       const se = FabricError.fromNativeError(new Error("test"));
-      const encoded = jsonCodec.encode(se);
-      const decoded = jsonCodec.decode(encoded, runtime);
+      const encoded = jsonCodecEngine.encode(se);
+      const decoded = jsonCodecEngine.decode(encoded, runtime);
       expect(decoded).toBeInstanceOf(FabricError);
       expect((decoded as unknown as FabricError).message).toBe("test");
     });
 
     it("`encodeToBytes()`/`decodeFromBytes()` round-trip", () => {
-      const jsonCodec = newDefaultJsonCodec();
+      const jsonCodecEngine = newDefaultJsonCodecEngine();
       const runtime = new TestReconstructionContext();
       const data = {
         name: "test",
         error: FabricError.fromNativeError(new Error("fail")),
       };
-      const bytes = jsonCodec.encodeToBytes(data);
+      const bytes = jsonCodecEngine.encodeToBytes(data);
       expect(bytes).toBeInstanceOf(Uint8Array);
-      const decoded = jsonCodec.decodeFromBytes(bytes, runtime) as Record<
+      const decoded = jsonCodecEngine.decodeFromBytes(bytes, runtime) as Record<
         string,
         FabricValue
       >;
@@ -1740,13 +1765,13 @@ describe("JsonCodec", () => {
     });
 
     it("`.lenient` defaults to `false`", () => {
-      const jsonCodec = newDefaultJsonCodec();
-      expect(jsonCodec.lenient).toBe(false);
+      const jsonCodecEngine = newDefaultJsonCodecEngine();
+      expect(jsonCodecEngine.lenient).toBe(false);
     });
 
     it("`.lenient` can be set to `true`", () => {
-      const jsonCodec = newDefaultJsonCodec({ lenient: true });
-      expect(jsonCodec.lenient).toBe(true);
+      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
+      expect(jsonCodecEngine.lenient).toBe(true);
     });
   });
 
@@ -1820,29 +1845,29 @@ describe("JsonCodec", () => {
   describe("test-only prefix helpers", () => {
     describe("`unwrapEncodedValueForTesting()`", () => {
       it("yields the JSON text under the tag", () => {
-        const encoded = newDefaultJsonCodec().encode(42);
-        expect(JsonCodec.unwrapEncodedValueForTesting(encoded))
+        const encoded = newDefaultJsonCodecEngine().encode(42);
+        expect(JsonCodecEngine.unwrapEncodedValueForTesting(encoded))
           .toBe("42");
       });
 
       it("round-trips with `wrapEncodedValueForTesting()`", () => {
-        const encoded = newDefaultJsonCodec().encode(
+        const encoded = newDefaultJsonCodecEngine().encode(
           { b: 1, a: [true, null] },
         );
-        const json = JsonCodec.unwrapEncodedValueForTesting(encoded);
-        expect(JsonCodec.wrapEncodedValueForTesting(json))
+        const json = JsonCodecEngine.unwrapEncodedValueForTesting(encoded);
+        expect(JsonCodecEngine.wrapEncodedValueForTesting(json))
           .toBe(encoded);
       });
 
       it("preserves a value plain JSON could not carry", () => {
         // The case that motivates having a golden format at all: these survive
         // the trip only as tagged forms.
-        const encoded = newDefaultJsonCodec().encode(
+        const encoded = newDefaultJsonCodecEngine().encode(
           { z: -0, n: NaN, i: -Infinity },
         );
-        const rebuilt = newDefaultJsonCodec().decode(
-          JsonCodec.wrapEncodedValueForTesting(
-            JsonCodec.unwrapEncodedValueForTesting(encoded),
+        const rebuilt = newDefaultJsonCodecEngine().decode(
+          JsonCodecEngine.wrapEncodedValueForTesting(
+            JsonCodecEngine.unwrapEncodedValueForTesting(encoded),
           ),
           new TestReconstructionContext(),
         ) as Record<string, number>;
@@ -1854,25 +1879,27 @@ describe("JsonCodec", () => {
       it("throws given a string carrying no tag", () => {
         // The whole point of the tag: untagged JSON is not one of ours, however
         // well-formed it happens to be.
-        expect(() => JsonCodec.unwrapEncodedValueForTesting("42"))
+        expect(() => JsonCodecEngine.unwrapEncodedValueForTesting("42"))
           .toThrow();
       });
 
       it("throws given an empty string", () => {
-        expect(() => JsonCodec.unwrapEncodedValueForTesting(""))
+        expect(() => JsonCodecEngine.unwrapEncodedValueForTesting(""))
           .toThrow();
       });
 
       it("throws given a tag with nothing after it", () => {
         // `seemsLikeEncoded()` accepts this, so only the throwaway decode
         // catches it.
-        expect(() => JsonCodec.unwrapEncodedValueForTesting(ENCODING_PREFIX))
+        expect(() =>
+          JsonCodecEngine.unwrapEncodedValueForTesting(ENCODING_PREFIX)
+        )
           .toThrow();
       });
 
       it("throws given a tag followed by text that will not parse", () => {
         expect(() =>
-          JsonCodec.unwrapEncodedValueForTesting(
+          JsonCodecEngine.unwrapEncodedValueForTesting(
             `${ENCODING_PREFIX}{nope`,
           )
         ).toThrow();
@@ -1882,17 +1909,17 @@ describe("JsonCodec", () => {
     describe("`wrapEncodedValueForTesting()`", () => {
       it("produces something the codec accepts", () => {
         const { runtime } = makeTestCodec();
-        const encoded = JsonCodec.wrapEncodedValueForTesting(
+        const encoded = JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify({ a: 1 }),
         );
-        expect(JsonCodec.seemsLikeEncoded(encoded)).toBe(true);
-        expect(newDefaultJsonCodec().decode(encoded, runtime))
+        expect(JsonCodecEngine.seemsLikeEncoded(encoded)).toBe(true);
+        expect(newDefaultJsonCodecEngine().decode(encoded, runtime))
           .toEqual({ a: 1 });
       });
 
       it("returns the body unaltered beneath the tag", () => {
         const body = JSON.stringify({ b: 2, a: 1 });
-        expect(JsonCodec.wrapEncodedValueForTesting(body))
+        expect(JsonCodecEngine.wrapEncodedValueForTesting(body))
           .toBe(`${ENCODING_PREFIX}${body}`);
       });
 
@@ -1900,27 +1927,27 @@ describe("JsonCodec", () => {
         // The re-encoded form is not compared against the input, so whitespace
         // is immaterial -- which is what lets a golden file be readable.
         const pretty = JSON.stringify({ a: 1, b: [2, 3] }, null, 2);
-        const encoded = JsonCodec.wrapEncodedValueForTesting(pretty);
+        const encoded = JsonCodecEngine.wrapEncodedValueForTesting(pretty);
         const { runtime } = makeTestCodec();
-        expect(newDefaultJsonCodec().decode(encoded, runtime))
+        expect(newDefaultJsonCodecEngine().decode(encoded, runtime))
           .toEqual({ a: 1, b: [2, 3] });
       });
 
       it("throws given text that will not parse", () => {
-        expect(() => JsonCodec.wrapEncodedValueForTesting("{nope"))
+        expect(() => JsonCodecEngine.wrapEncodedValueForTesting("{nope"))
           .toThrow();
       });
 
       it("throws given an empty body", () => {
-        expect(() => JsonCodec.wrapEncodedValueForTesting(""))
+        expect(() => JsonCodecEngine.wrapEncodedValueForTesting(""))
           .toThrow();
       });
 
       it("throws given an already-tagged string", () => {
         // Double-tagging is a mistake worth catching: the tag is not part of
         // the JSON, so the result would not parse.
-        const encoded = newDefaultJsonCodec().encode(42);
-        expect(() => JsonCodec.wrapEncodedValueForTesting(encoded))
+        const encoded = newDefaultJsonCodecEngine().encode(42);
+        expect(() => JsonCodecEngine.wrapEncodedValueForTesting(encoded))
           .toThrow();
       });
     });
@@ -1934,7 +1961,7 @@ describe("JsonCodec", () => {
 
       it("refuses a payload undecodable by the given registry's codecs", () => {
         expect(() =>
-          JsonCodec.wrapEncodedValueForTesting(
+          JsonCodecEngine.wrapEncodedValueForTesting(
             undecodable,
             false,
             createDefaultJsonRegistry(),
@@ -1943,19 +1970,19 @@ describe("JsonCodec", () => {
       });
 
       it("wraps a tag no registered codec claims", () => {
-        expect(JsonCodec.wrapEncodedValueForTesting(undecodable))
+        expect(JsonCodecEngine.wrapEncodedValueForTesting(undecodable))
           .toBe(`${ENCODING_PREFIX}${undecodable}`);
       });
 
       it("wraps an undecodable payload when told it is deliberate", () => {
         expect(
-          JsonCodec.wrapEncodedValueForTesting(undecodable, true),
+          JsonCodecEngine.wrapEncodedValueForTesting(undecodable, true),
         ).toBe(`${ENCODING_PREFIX}${undecodable}`);
       });
 
       it("unwraps an undecodable payload when told it is deliberate", () => {
         expect(
-          JsonCodec.unwrapEncodedValueForTesting(
+          JsonCodecEngine.unwrapEncodedValueForTesting(
             `${ENCODING_PREFIX}${undecodable}`,
             true,
           ),
@@ -1966,13 +1993,13 @@ describe("JsonCodec", () => {
         // Malformed means malformed: the flag is a caller saying the payload is
         // broken on purpose, so nothing is checked and the tag simply goes on
         // the front.
-        expect(JsonCodec.wrapEncodedValueForTesting("{nope", true))
+        expect(JsonCodecEngine.wrapEncodedValueForTesting("{nope", true))
           .toBe(`${ENCODING_PREFIX}{nope`);
       });
 
       it("unwraps text that will not parse at all", () => {
         expect(
-          JsonCodec.unwrapEncodedValueForTesting(
+          JsonCodecEngine.unwrapEncodedValueForTesting(
             `${ENCODING_PREFIX}{nope`,
             true,
           ),
@@ -1982,7 +2009,7 @@ describe("JsonCodec", () => {
       it("still requires the tag on unwrap, however deliberate", () => {
         // Not a judgment about the payload: stripping a prefix that is not
         // there yields nonsense, not the body.
-        expect(() => JsonCodec.unwrapEncodedValueForTesting("42", true))
+        expect(() => JsonCodecEngine.unwrapEncodedValueForTesting("42", true))
           .toThrow();
       });
     });

@@ -27,6 +27,7 @@ export * from "@/codec-interface/index.ts";
 
 export { codecOf } from "./codecOf.ts";
 export { CodecRegistry } from "./CodecRegistry.ts";
+export { BaseCodecEngine } from "./BaseCodecEngine.ts";
 
 export { BaseFabricInstance } from "./BaseFabricInstance.ts";
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
