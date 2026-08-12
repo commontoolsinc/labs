@@ -33,6 +33,27 @@ about one aspect of the runtime, are indexed in
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
 
+### Classes
+
+- Use JavaScript `#privateName` fields and methods rather than TypeScript's
+  `private` modifier. `protected` has no such counterpart, and stays a
+  TypeScript modifier.
+- The default order of items within a class is:
+  1. Private instance variables.
+  2. The constructor.
+  3. The abstract members, public and protected alike.
+  4. The remaining instance members, ordered from most to least access: public,
+     then protected, then private. Getters and setters come before methods.
+  5. Private static variables.
+  6. The remaining static members, ordered as the instance members are.
+- Three of those groups take a
+  [section marker](code-comment-style.md#section-markers), when the class has
+  meaningful sections to delineate or is large enough for one to earn its
+  keep: `Subclass contract` ahead of the abstract members, `Instance members`
+  ahead of the remaining instance members, and `Static members` ahead of the
+  private static variables.
+- Depart from that order when there is a compelling reason to, not by default.
+
 ### Comments
 
 - Comments explain **why**, not what, and describe the system as it stands.
@@ -156,12 +177,12 @@ validated types.
 
 ```ts
 class Data {
-  private inner: any;
+  #inner: any;
   constructor(inner: any) {
-    this.inner = inner;
+    this.#inner = inner;
   }
   process() {
-    // if (typeof this.inner === "object")
+    // if (typeof this.#inner === "object")
   }
 }
 
@@ -349,12 +370,12 @@ In both cases, we can maintain multiple caches, or instances of cache consumers.
 
 ```ts
 export class Cache {
-  private map: Map<string, string> = new Map();
+  #map: Map<string, string> = new Map();
   get(key: string): string | undefined {
-    return this.map.get(key);
+    return this.#map.get(key);
   }
   set(key: string, value: string) {
-    this.map.set(key, value);
+    this.#map.set(key, value);
   }
 }
 ```
