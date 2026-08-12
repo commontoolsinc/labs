@@ -2540,8 +2540,11 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    `3-json-encoding.md`.
 3. **State decode + bare-`/` check** — for any other tag, the walker first
    recursively decodes the wrapped state, then rejects an empty tag (a
-   bare `"/"` key) as an encoding error, producing a `ProblematicValue`
-   (Section 3.5; see also Section 9 of `3-json-encoding.md`).
+   bare `"/"` key) as an encoding error. That rejection, and every other
+   malformed-wire fault the walker finds for itself, is settled against
+   `lenient` exactly as a codec's is: a `ProblematicValue` leniently
+   (Section 3.5), a raise strictly (see also Section 9 of
+   `3-json-encoding.md`).
 4. **Codec dispatch** — `codecFromTag()` routes the tag to its registered
    codec's `decode()`, and settles the codec's verdict against `lenient`:
    leniently, a throw becomes a `ProblematicValue`; strictly, a

@@ -176,6 +176,36 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
     }
   }
 
+  /**
+   * Reports wire data this engine itself found malformed, settled against
+   * {@link #lenient}: strictly it raises, and leniently it becomes a
+   * `ProblematicValue` in the result.
+   *
+   * A codec rejecting a state it was handed goes through the same setting, in
+   * {@link #decodeTagged}. Which of the two noticed is an implementation
+   * detail of where a check happens to live, so it does not decide what a
+   * caller sees; `lenient` does.
+   *
+   * @param wireTypeTag The tag the malformed data arrived under, or the
+   *   meta-tag naming the structure at fault.
+   * @param state The data at fault, preserved so that a lenient result
+   *   round-trips.
+   * @param error What is wrong with it, phrased to stand on its own -- it is
+   *   the whole of the message when this raises.
+   * @throws If this engine is not lenient.
+   */
+  protected reportMalformed(
+    wireTypeTag: string,
+    state: FabricValue,
+    error: string,
+  ): FabricValue {
+    if (!this.lenient) {
+      throw new Error(error);
+    }
+
+    return deepFreeze(new ProblematicValue(wireTypeTag, state, error));
+  }
+
   /** Encodes one value through the codec the registry matched to it. */
   #encodeTagged(
     value: FabricValue,
@@ -233,7 +263,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // round-trips. Neither of these is covered by the deep-frozen contract
       // the codec arm below states.
       return (tag === "")
-        ? new ProblematicValue(tag, state, "tagged value has an empty tag")
+        ? this.reportMalformed(tag, state, "tagged value has an empty tag")
         : new UnknownValue(tag, state);
     }
 

@@ -67,7 +67,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
   /** Serializes a fabric value to UTF-8 JSON bytes. */
   encodeToBytes(value: FabricValue): Uint8Array {
-    return this.toBytes(this.encodeValue(value));
+    return JsonCodecEngine.#toBytes(this.encodeValue(value));
   }
 
   /** Deserializes UTF-8 JSON bytes back into a fabric value. */
@@ -75,7 +75,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     bytes: Uint8Array,
     context: ReconstructionContext,
   ): FabricValue {
-    const tree = this.fromBytes(bytes);
+    const tree = JsonCodecEngine.#fromBytes(bytes);
     return this.decodeValue(tree, context);
   }
 
@@ -97,42 +97,6 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     state: JsonCodecValue,
   ): JsonCodecValue {
     return { [`/${tag}`]: state } as JsonCodecValue;
-  }
-
-  /**
-   * Unwraps a wire representation. Detects single-key objects with `/`-prefixed
-   * keys. Returns `{ tag, state }` or `null` if not a tagged value. The
-   * returned `state` is extracted directly from `data`, so if `data` is
-   * deep-frozen (as it should be) then `state` will be too.
-   *
-   * See Section 5.4 of the formal spec.
-   */
-  private unwrapTag(
-    data: JsonCodecValue,
-  ): { tag: string; state: JsonCodecValue } | null {
-    if (!isPlainObject(data)) {
-      return null;
-    }
-
-    if (!JsonCodecEngine.#isEncodedInstance(data)) {
-      return null;
-    }
-
-    // `#isEncodedInstance()` guaranteed a single-property object, so this
-    // destructures that one entry.
-    const [key, value] = Object.entries(data)[0]!;
-    return { tag: key.slice(1), state: value };
-  }
-
-  /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
-  private toBytes(data: JsonCodecValue): Uint8Array {
-    return JsonCodecEngine.#textEncoder.encode(JSON.stringify(data));
-  }
-
-  /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
-  private fromBytes(bytes: Uint8Array): JsonCodecValue {
-    const json = JsonCodecEngine.#textDecoder.decode(bytes);
-    return JsonCodecEngine.#parseWireText(json);
   }
 
   /**
@@ -227,7 +191,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     data: JsonCodecValue,
     context: ReconstructionContext,
   ): FabricValue {
-    const decoded = this.unwrapTag(data);
+    const decoded = JsonCodecEngine.#unwrapTag(data);
     if (decoded !== null) {
       const { tag, state: rawState } = decoded;
 
@@ -244,7 +208,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           // Same reservation as the plain-object arm below: the assignment
           // cannot rebuild these names.
           if (isUnsafeObjectKey(key)) {
-            return new ProblematicValue(
+            return this.reportMalformed(
               key,
               inner,
               `object contains a key this runtime reserves: "${key}"`,
@@ -307,13 +271,13 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     const result: FabricValue[] = new Array(data.length);
     let targetIndex = 0;
     for (const entry of data) {
-      const entryDecoded = this.unwrapTag(entry);
+      const entryDecoded = JsonCodecEngine.#unwrapTag(entry);
       if (
         entryDecoded !== null && entryDecoded.tag === CODEC_META_TAGS.hole
       ) {
         const count = entryDecoded.state;
         if (!JsonCodecEngine.#isHoleCount(count)) {
-          return new ProblematicValue(
+          return this.reportMalformed(
             CODEC_META_TAGS.hole,
             count,
             `hole: expected a positive integer count, got ${
@@ -335,7 +299,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     // machinery, which says nothing about the wire that caused it.
     const MAX_ARRAY_LENGTH = 0xffff_ffff;
     if (targetIndex > MAX_ARRAY_LENGTH) {
-      return new ProblematicValue(
+      return this.reportMalformed(
         CODEC_META_TAGS.hole,
         data,
         `hole: runs total ${targetIndex} elements, past the ` +
@@ -359,7 +323,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
       if (key.startsWith("/")) {
-        return new ProblematicValue(
+        return this.reportMalformed(
           key.slice(1),
           data,
           `object contains reserved /-prefixed key: "${key}"`,
@@ -371,7 +335,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       // implementation, whose write path refuses it, so report it rather than
       // decoding something the bytes do not say.
       if (isUnsafeObjectKey(key)) {
-        return new ProblematicValue(
+        return this.reportMalformed(
           key,
           data,
           `object contains a key this runtime reserves: "${key}"`,
@@ -391,6 +355,42 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
 
   /** Shared text decoder, created once. */
   static readonly #textDecoder = new TextDecoder();
+
+  /**
+   * Unwraps a wire representation. Detects single-key objects with `/`-prefixed
+   * keys. Returns `{ tag, state }` or `null` if not a tagged value. The
+   * returned `state` is extracted directly from `data`, so if `data` is
+   * deep-frozen (as it should be) then `state` will be too.
+   *
+   * See Section 5.4 of the formal spec.
+   */
+  static #unwrapTag(
+    data: JsonCodecValue,
+  ): { tag: string; state: JsonCodecValue } | null {
+    if (!isPlainObject(data)) {
+      return null;
+    }
+
+    if (!JsonCodecEngine.#isEncodedInstance(data)) {
+      return null;
+    }
+
+    // `#isEncodedInstance()` guaranteed a single-property object, so this
+    // destructures that one entry.
+    const [key, value] = Object.entries(data)[0]!;
+    return { tag: key.slice(1), state: value };
+  }
+
+  /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
+  static #toBytes(data: JsonCodecValue): Uint8Array {
+    return JsonCodecEngine.#textEncoder.encode(JSON.stringify(data));
+  }
+
+  /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
+  static #fromBytes(bytes: Uint8Array): JsonCodecValue {
+    const json = JsonCodecEngine.#textDecoder.decode(bytes);
+    return JsonCodecEngine.#parseWireText(json);
+  }
 
   /**
    * Registry for the throwaway checks in the testing helpers below: this

@@ -135,10 +135,22 @@ function toWireFormat(value: FabricValue): JsonCodecValue {
  * Helper: decode from a codec-value tree. Stringifies to JSON first (tagged as
  * an encoded value), then feeds through the public decode API.
  */
-function fromWireFormat(data: JsonCodecValue): FabricValue {
-  const { jsonCodecEngine, runtime } = makeTestCodec();
+function fromWireFormat(
+  data: JsonCodecValue,
+  malformed = false,
+): FabricValue {
+  // Lenient, because much of what this decodes is malformed on purpose and
+  // the point is to inspect what the engine made of it; a strict engine
+  // raises instead, which the tests below pin separately. `malformed` goes on
+  // to the wrap helper, whose own validity check is a strict decode, and so
+  // rejects exactly the payloads these cases are made of.
+  const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
+  const runtime = new TestReconstructionContext();
   return jsonCodecEngine.decode(
-    JsonCodecEngine.wrapEncodedValueForTesting(JSON.stringify(data)),
+    JsonCodecEngine.wrapEncodedValueForTesting(
+      JSON.stringify(data),
+      malformed,
+    ),
     runtime,
   );
 }
@@ -713,7 +725,9 @@ describe("JsonCodecEngine", () => {
 
     /** Decodes a hand-built array, which is deliberately not encodable. */
     function decodeArray(entries: JsonCodecValue[]): FabricValue {
-      const { jsonCodecEngine, runtime } = makeTestCodec();
+      // Lenient; see `fromWireFormat()` above.
+      const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
+      const runtime = new TestReconstructionContext();
       return jsonCodecEngine.decode(
         JsonCodecEngine.wrapEncodedValueForTesting(
           JSON.stringify(entries),
@@ -1144,7 +1158,7 @@ describe("JsonCodecEngine", () => {
         // Wire data without a `/quote` or `/object` wrapper: the decoder must
         // not silently round-trip it as a plain object.
         const data = { a: 1, "/b": 2 } as JsonCodecValue;
-        const result = fromWireFormat(data);
+        const result = fromWireFormat(data, true);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
 
@@ -1154,7 +1168,7 @@ describe("JsonCodecEngine", () => {
         // must produce a `ProblematicValue`, not an `UnknownValue` with an
         // empty tag.
         const data = { "/": "x" } as JsonCodecValue;
-        const result = fromWireFormat(data);
+        const result = fromWireFormat(data, true);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
 
@@ -1229,22 +1243,22 @@ describe("JsonCodecEngine", () => {
         // property, so a literal cannot express this wire shape at all.
         // `JSON.parse()`, which is how such bytes actually arrive, does create
         // the own property.
-        expect(fromWireFormat({ ["__proto__"]: { hostile: true }, a: 1 }))
+        expect(fromWireFormat({ ["__proto__"]: { hostile: true }, a: 1 }, true))
           .toBeInstanceOf(ProblematicValue);
-        expect(fromWireFormat({ ["constructor"]: "c" }))
+        expect(fromWireFormat({ ["constructor"]: "c" }, true))
           .toBeInstanceOf(ProblematicValue);
       });
 
       it("produces a `ProblematicValue` for a reserved key nested in the graph", () => {
         const result = fromWireFormat({
           nested: { ["__proto__"]: 1 },
-        }) as Record<string, unknown>;
+        }, true) as Record<string, unknown>;
         expect(result.nested).toBeInstanceOf(ProblematicValue);
         expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
       });
 
       it("produces a `ProblematicValue` for a reserved key inside `/object`", () => {
-        expect(fromWireFormat({ "/object": { ["__proto__"]: 1 } }))
+        expect(fromWireFormat({ "/object": { ["__proto__"]: 1 } }, true))
           .toBeInstanceOf(ProblematicValue);
       });
 
@@ -1275,12 +1289,12 @@ describe("JsonCodecEngine", () => {
           });
 
           const hostile = { hostile: true };
-          expect(fromWireFormat({ ["__proto__"]: hostile, a: 1 }))
+          expect(fromWireFormat({ ["__proto__"]: hostile, a: 1 }, true))
             .toBeInstanceOf(ProblematicValue);
 
           const nested = fromWireFormat({
             deep: { ["__proto__"]: hostile },
-          }) as Record<string, unknown>;
+          }, true) as Record<string, unknown>;
           expect(nested.deep).toBeInstanceOf(ProblematicValue);
           expect(Object.getPrototypeOf(nested)).toBe(Object.prototype);
 
@@ -1794,6 +1808,44 @@ describe("JsonCodecEngine", () => {
       const jsonCodecEngine = newDefaultJsonCodecEngine({ lenient: true });
       expect(jsonCodecEngine.lenient).toBe(true);
     });
+  });
+
+  describe("malformed wire the engine itself detects", () => {
+    /** The wire shapes the engine rejects without any codec being consulted. */
+    const CASES: readonly (readonly [string, JsonCodecValue, RegExp])[] = [
+      ["a bare `/` key", { "/": "x" }, /empty tag/],
+      ["a `/`-prefixed key in a bare object", { a: 1, "/b": 2 }, /reserved/],
+      ["a key this runtime reserves", { ["__proto__"]: 1 }, /reserves/],
+      [
+        "a `/hole` count that is not one",
+        [{ "/hole": "2" }],
+        /positive integer/,
+      ],
+    ];
+
+    for (const [what, wire, message] of CASES) {
+      it(`throws given ${what}, when not lenient`, () => {
+        const jsonCodecEngine = newDefaultJsonCodecEngine();
+
+        expect(jsonCodecEngine.lenient).toBe(false);
+        expect(() =>
+          jsonCodecEngine.decode(
+            JsonCodecEngine.wrapEncodedValueForTesting(
+              JSON.stringify(wire),
+              true, // Malformed on purpose; that is what these are about.
+            ),
+            new TestReconstructionContext(),
+          )
+        ).toThrow(message);
+      });
+
+      it(`returns a \`ProblematicValue\` given ${what}, when lenient`, () => {
+        // The same detection, kept as a value. Which side of this a caller
+        // gets is `lenient` and nothing else -- notably not whether a codec
+        // or the walk noticed, which these cases are the walk noticing.
+        expect(fromWireFormat(wire, true)).toBeInstanceOf(ProblematicValue);
+      });
+    }
   });
 
   describe("complex round-trips", () => {

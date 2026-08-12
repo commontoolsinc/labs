@@ -416,11 +416,17 @@ Specifically:
   (`/object`, `/quote`), or an unrecognized tag. A syntactically well-formed
   but unrecognized tag (e.g. `{ "/Future@2": ... }`) must be treated as
   `UnknownValue` (see Section 8) to preserve it for round-tripping. Structural
-  violations — e.g. a tag name that cannot be a valid type identifier — should
-  produce `ProblematicValue`.
+  violations — e.g. a tag name that cannot be a valid type identifier — are
+  rejected.
 - **Multi-key objects** containing one or more `/`-prefixed keys are structural
-  encoding errors — produce `ProblematicValue`. They are not valid plain
-  objects.
+  encoding errors, and are rejected. They are not valid plain objects.
+
+A structural violation is malformed wire data the encoding context detects
+itself, rather than a state a codec refuses, and the two are settled the same
+way: against `lenient` (see `1-fabric-values.md` Section 4.5). A lenient
+context yields a `ProblematicValue`, and a strict one raises. Which of the two
+noticed the fault is an implementation detail of where a check lives, and does
+not reach a caller.
 
 The `/object` escape (Section 6) ensures that legitimate plain objects with
 `/`-prefixed keys are always wrapped before reaching the wire, so a conforming
