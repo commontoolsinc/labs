@@ -139,36 +139,41 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // A self-representing primitive is its own wire form.
       return value as Encoded;
     } else if (matched) {
+      // `value` matched from the registry as either a non-self-representing
+      // primitive or a `FabricSpecialObject`.
       return this.#encodeTagged(value, matched, seen ?? new Set());
-    }
-
-    // Self-representing primitives returned above, so `value` is an object
-    // from here on, and the two container arms are what an ordinary one takes.
-    // Neither can claim a `FabricSpecialObject`: `isPlainObject()` tests the
-    // prototype, and one of those has a class.
-
-    if (Array.isArray(value)) {
+    } else if (Array.isArray(value)) {
       return this.encodeArray(value, seen ?? new Set());
     } else if (isPlainObject(value)) {
+      // Note: `isPlainObject()` means what it says; notably, it returns `false`
+      // for `FabricSpecialObject`s.
       return this.encodePlainObject(value, seen ?? new Set());
-    } else if (value instanceof FabricSpecialObject) {
-      // Every `FabricSpecialObject` has to be recognized by a registered
-      // codec. Nothing matched above, so this one is not carried.
+    }
+
+    // At this point, we know `value` can't be encoded. We just need to figure
+    // out the right error message.
+
+    if (value instanceof FabricSpecialObject) {
       throw new Error(
         `No codec registered for \`FabricSpecialObject\` subclass ${
           backtickQuote(value.constructor.name)
         }.`,
       );
+    } else {
+      // `value` is a primitive, a function, or a non-`FabricSpecialObject`
+      // instance (non-plain object). Distinguish them in the error message. The
+      // notable primitive case here is uninterned symbols (which are forbidden
+      // by the data model but cannot be forbidden in the type system). The
+      // instance and function cases are all almost certainly due to something
+      // upstream lying about the type of `value`.
+      const typeName = typeof value;
+      const label = (typeName === "object") ? "instance" : typeName;
+      throw new Error(
+        `Cannot encode ${label} ${
+          backtickQuote(toCompactDebugString(value, 50))
+        }: no applicable codec.`,
+      );
     }
-
-    // Every `FabricValue` object case is handled above, so what is left is
-    // always an error -- generally traceable to a type-system lie somewhere
-    // upstream.
-    throw new Error(
-      `Cannot encode ${
-        backtickQuote(toCompactDebugString(value, 50))
-      }: no applicable codec.`,
-    );
   }
 
   /** Encodes one value through the codec the registry matched to it. */
