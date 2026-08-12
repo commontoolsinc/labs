@@ -1,5 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import { CODEC, type RegistrableCodec, type WireFormat } from "./interface.ts";
+import { CODEC, type CodecForFormat, type WireFormat } from "./interface.ts";
 import { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 import type { Constructor } from "@commonfabric/utils/types";
@@ -68,15 +68,15 @@ export class CodecRegistry<Encoded> {
   readonly #format: WireFormat<Encoded>;
 
   /** Tag -> codec map for O(1) decode dispatch. */
-  readonly #tagMap = new Map<string, RegistrableCodec<Encoded>>();
+  readonly #tagMap = new Map<string, CodecForFormat<Encoded>>();
 
   /** Class -> codec map for O(1) encode dispatch on object values. */
-  readonly #classMap = new Map<Constructor, RegistrableCodec<Encoded>>();
+  readonly #classMap = new Map<Constructor, CodecForFormat<Encoded>>();
 
   /** Primitive `type` -> codec map for O(1) encode dispatch on primitives. */
   readonly #primitiveCodecs = new Map<
     PrimitiveTypeName,
-    RegistrableCodec<Encoded>
+    CodecForFormat<Encoded>
   >();
 
   /** Primitive `type`s that are self-representing (encoded as-is). */
@@ -126,7 +126,7 @@ export class CodecRegistry<Encoded> {
     this.#assertNotFrozen();
 
     const bound = cls as unknown as Partial<
-      Record<symbol, RegistrableCodec<Encoded>>
+      Record<symbol, CodecForFormat<Encoded>>
     >;
     const codec = bound[CODEC] ?? bound[this.#format.codecSymbol];
 
@@ -146,7 +146,7 @@ export class CodecRegistry<Encoded> {
    * in which case the codec is left unindexed for the corresponding lookup;
    * note that a codec with no `uniqueHandledClass` is unreachable for encoding.
    */
-  register(codec: RegistrableCodec<Encoded>): void {
+  register(codec: CodecForFormat<Encoded>): void {
     this.#assertNotFrozen();
 
     CodecRegistry.#assertClassified<Encoded>(codec);
@@ -170,7 +170,7 @@ export class CodecRegistry<Encoded> {
    */
   registerPrimitive(
     type: PrimitiveTypeName,
-    codec: RegistrableCodec<Encoded>,
+    codec: CodecForFormat<Encoded>,
   ): void {
     this.#assertNotFrozen();
 
@@ -225,8 +225,8 @@ export class CodecRegistry<Encoded> {
   extend(
     ...entries: readonly (
       | Constructor
-      | RegistrableCodec<Encoded>
-      | readonly (Constructor | RegistrableCodec<Encoded>)[]
+      | CodecForFormat<Encoded>
+      | readonly (Constructor | CodecForFormat<Encoded>)[]
     )[]
   ): CodecRegistry<Encoded> {
     const result = new CodecRegistry<Encoded>(this.#format);
@@ -245,7 +245,7 @@ export class CodecRegistry<Encoded> {
         }
       } else {
         result.#registerEntry(
-          arg as Constructor | RegistrableCodec<Encoded>,
+          arg as Constructor | CodecForFormat<Encoded>,
         );
       }
     }
@@ -263,7 +263,7 @@ export class CodecRegistry<Encoded> {
    * the two cannot be confused.
    */
   #registerEntry(
-    entry: Constructor | RegistrableCodec<Encoded>,
+    entry: Constructor | CodecForFormat<Encoded>,
   ): void {
     if (typeof entry === "function") {
       this.registerClass(entry);
@@ -291,7 +291,7 @@ export class CodecRegistry<Encoded> {
    */
   codecFromValue(
     value: FabricValue,
-  ): RegistrableCodec<Encoded> | typeof SELF_REP | undefined {
+  ): CodecForFormat<Encoded> | typeof SELF_REP | undefined {
     // Primitive dispatch on the value's primitive `type` key (its `typeof`, or
     // `"null"`). The type's codec is tried first, then self-representation.
     let type: PrimitiveTypeName | undefined;
@@ -344,7 +344,7 @@ export class CodecRegistry<Encoded> {
   }
 
   /** Looks up a codec by tag for decoding. */
-  codecFromTag(typeTag: string): RegistrableCodec<Encoded> | undefined {
+  codecFromTag(typeTag: string): CodecForFormat<Encoded> | undefined {
     return this.#tagMap.get(typeTag);
   }
 
@@ -385,7 +385,7 @@ export class CodecRegistry<Encoded> {
    *
    * @throws If `codec` extends neither base class.
    */
-  static #assertClassified<Encoded>(codec: RegistrableCodec<Encoded>): void {
+  static #assertClassified<Encoded>(codec: CodecForFormat<Encoded>): void {
     if (
       !(codec instanceof BaseTerminalCodec) &&
       !(codec instanceof BaseNonterminalCodec)

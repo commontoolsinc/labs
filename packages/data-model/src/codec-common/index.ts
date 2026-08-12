@@ -10,11 +10,11 @@
 
 export {
   CODEC,
+  type CodecForFormat,
   type FabricClassWithNonterminalCodec,
   type FabricCodec,
   type NonterminalCodec,
   type ReconstructionContext,
-  type RegistrableCodec,
   type SerializationContext,
   type TerminalCodec,
 } from "./interface.ts";

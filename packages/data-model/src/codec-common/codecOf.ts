@@ -1,9 +1,9 @@
 import type { FabricSpecialObject } from "@/interface.ts";
 import {
   CODEC,
+  type CodecForFormat,
   type FabricClassWithNonterminalCodec,
   type NonterminalCodec,
-  type RegistrableCodec,
 } from "./interface.ts";
 
 /**
@@ -39,14 +39,14 @@ export function codecOf(value: FabricSpecialObject): NonterminalCodec;
 export function codecOf<Encoded>(
   value: FabricSpecialObject,
   altCodec: symbol,
-): RegistrableCodec<Encoded>;
+): CodecForFormat<Encoded>;
 export function codecOf<Encoded>(
   value: FabricSpecialObject,
   altCodec?: symbol,
-): RegistrableCodec<Encoded> {
+): CodecForFormat<Encoded> {
   const cls = value.constructor as unknown as
     & Partial<FabricClassWithNonterminalCodec>
-    & Partial<Record<symbol, RegistrableCodec<Encoded>>>;
+    & Partial<Record<symbol, CodecForFormat<Encoded>>>;
   const codec = cls[CODEC] ??
     ((altCodec === undefined) ? undefined : cls[altCodec]);
 

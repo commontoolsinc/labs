@@ -128,16 +128,17 @@ export type NonterminalCodec = FabricCodec<FabricValue>;
 export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
 
 /**
- * A codec of either kind, over the wire format whose value type is `Encoded`.
- * This is what a mixed roster holds and what {@link CodecRegistry#extend}
- * accepts.
+ * A codec usable for the wire format whose value type is `Encoded`: either
+ * kind serves. A terminal codec serves that format alone, a nonterminal one
+ * serves every format, and both are "for" this one. This is what a mixed
+ * roster holds, what {@link CodecRegistry} stores, and what it hands back.
  *
- * The union is needed because {@link FabricCodec} is invariant in `Encoded` --
- * the parameter appears in both an argument and a return position -- so a
- * `NonterminalCodec` is not assignable to `FabricCodec<Encoded>` for any
- * format's `Encoded`, and the two arms have to be named separately.
+ * Spelling the union out is unavoidable. {@link FabricCodec} is invariant in
+ * `Encoded` -- the parameter sits in both an argument and a return position --
+ * so a `NonterminalCodec` is assignable to no format's instantiation, and the
+ * two arms have to be named separately.
  */
-export type RegistrableCodec<Encoded> =
+export type CodecForFormat<Encoded> =
   | NonterminalCodec
   | TerminalCodec<Encoded>;
 
