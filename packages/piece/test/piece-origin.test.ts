@@ -104,6 +104,15 @@ const UNKNOWN_INPUT_SOURCE = [
   "",
 ].join("\n");
 
+const ARRAY_INPUT_SOURCE = [
+  "import { pattern } from 'commonfabric';",
+  "type Item = number | { nested: number[] };",
+  "export default pattern<{ value: Item[] }, { marker: number }>(() => ({",
+  "  marker: 1,",
+  "}));",
+  "",
+].join("\n");
+
 /**
  * Serve pattern source from memory, so the resolver and runtime.fetch need no
  * network. Mirrors the stub in pattern-source-provenance.test.ts.
@@ -696,6 +705,30 @@ describe("reading a piece's source state", () => {
     restoreFetch();
   });
 
+  async function cloneDestination(label: string): Promise<PiecesController> {
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `${label}-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+    return destination;
+  }
+
+  async function setRawMeta(
+    cell: Cell<unknown>,
+    key: Parameters<Cell<unknown>["setMetaRaw"]>[0],
+    value: unknown,
+  ): Promise<void> {
+    const tx = runtime.edit();
+    cell.withTx(tx).setMetaRaw(key, value as never);
+    runtime.prepareTxForCommit(tx);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+  }
+
   it("reports a directly-created piece as detached, with its source", async () => {
     const piece = await controller.create({
       main: "/main.tsx",
@@ -926,6 +959,147 @@ describe("reading a piece's source state", () => {
 
     await expect(source.cloneTo(destination)).rejects.toThrow("start failed");
     expect(cleanedUp).toBe(true);
+  });
+
+  it("rejects a piece whose pattern identity is missing", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const destination = await cloneDestination("source-clone-no-pattern");
+    await setRawMeta(source.getCell(), "patternIdentity", undefined);
+
+    await expect(source.cloneTo(destination)).rejects.toThrow(
+      "piece missing pattern identity",
+    );
+  });
+
+  it("rejects a detached piece whose cell id is not a fabric URI", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const destination = await cloneDestination("source-clone-no-uri");
+    const cell = source.getCell();
+    const originalLink = cell.getAsNormalizedFullLink.bind(cell);
+
+    try {
+      cell.getAsNormalizedFullLink = (() => ({
+        ...originalLink(),
+        id: "not-a-fabric-uri",
+      })) as unknown as typeof cell.getAsNormalizedFullLink;
+      await expect(source.cloneTo(destination)).rejects.toThrow(
+        "piece has no fabric URI",
+      );
+    } finally {
+      cell.getAsNormalizedFullLink = originalLink;
+    }
+  });
+
+  it("rejects a piece whose source program is unavailable", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const destination = await cloneDestination("source-clone-no-source");
+    const manager = runtime.patternManager;
+    const original = manager.getPatternSourceProgramByIdentity.bind(manager);
+
+    try {
+      manager.getPatternSourceProgramByIdentity = (() =>
+        Promise.resolve(undefined)) as typeof original;
+      await expect(source.cloneTo(destination)).rejects.toThrow(
+        "piece source is not available",
+      );
+    } finally {
+      manager.getPatternSourceProgramByIdentity = original;
+    }
+  });
+
+  it("rejects malformed internal data metadata", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { input: { label: "before" } });
+    const destination = await cloneDestination("source-clone-bad-internal");
+
+    await setRawMeta(source.getCell(), "internal", "not a manifest");
+    await expect(source.cloneTo(destination, { copyData: true })).rejects
+      .toThrow("piece has invalid internal data metadata");
+
+    await setRawMeta(source.getCell(), "internal", [null]);
+    await expect(source.cloneTo(destination, { copyData: true })).rejects
+      .toThrow("piece has invalid internal data metadata");
+  });
+
+  it("copies nested arrays when a piece has no stateful internals", async () => {
+    const input = { value: [1, { nested: [2, 3] }] };
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: ARRAY_INPUT_SOURCE }],
+    }, { input });
+    const destination = await cloneDestination("source-clone-array-input");
+
+    const clone = await source.cloneTo(destination, { copyData: true });
+
+    expect(await clone.input.get()).toEqual({
+      value: [1, { nested: [2, 3] }],
+    });
+  });
+
+  it("reports cleanup failures without hiding the clone failure", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const destination = await cloneDestination("source-clone-cleanup-errors");
+    destination.startPiece = () => Promise.reject(new Error("start failed"));
+    destination.stopPiece = () => Promise.reject(new Error("stop failed"));
+    destination.remove = () => Promise.reject(new Error("remove failed"));
+
+    let failure: unknown;
+    try {
+      await source.cloneTo(destination);
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors.map(String)).toEqual([
+      "Error: start failed",
+      "Error: stop failed",
+      "Error: remove failed",
+    ]);
+  });
+
+  it("reports a clone that cleanup leaves registered", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const destination = await cloneDestination("source-clone-still-registered");
+    const create = destination.create.bind(destination);
+    let created: Awaited<ReturnType<typeof create>> | undefined;
+    destination.create = (async (...args) => {
+      created = await create(...args);
+      return created;
+    }) as typeof destination.create;
+    destination.startPiece = () => Promise.reject(new Error("start failed"));
+    destination.remove = () => Promise.resolve(false);
+    destination.getRegisteredPieces = () => Promise.resolve([created!]);
+
+    let failure: unknown;
+    try {
+      await source.cloneTo(destination);
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors.map(String)).toEqual([
+      "Error: start failed",
+      "Error: the incomplete piece remained registered",
+    ]);
   });
 
   it("rejects data copying when the snapshot carries CFC labels", async () => {

@@ -15,7 +15,6 @@ import {
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
   getValueAtPath,
-  type IExtendedStorageTransaction,
   isCell,
   isCellResult,
   isLink,
@@ -40,7 +39,6 @@ import {
 } from "@commonfabric/runner";
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
-  cfcLabelViewForCellFailClosed,
   cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
   loadStoredCfcEnvelope,
@@ -64,10 +62,17 @@ import {
 } from "./piece-origin.ts";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import {
+  assertCloneDataUnlabeled,
+  assertNoCloneFabricInstance,
+  cloneCellKey,
+  cloneEntityKey,
+  cloneInternalManifest,
+  pinCloneSnapshotCells,
+} from "./clone-data-guards.ts";
+import {
   FabricInstance,
   FabricPrimitive,
 } from "@commonfabric/data-model/fabric-value";
-import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -79,75 +84,6 @@ interface CloneInternalSnapshot {
   partialCause: unknown;
   kind?: unknown;
   value: unknown;
-}
-
-function cloneCellKey(cell: Cell<unknown>): string {
-  const link = cell.getAsNormalizedFullLink();
-  return `${link.space}:${link.id}:${JSON.stringify(link.scope)}:${
-    JSON.stringify(link.path)
-  }`;
-}
-
-function cloneEntityKey(cell: Cell<unknown>): string {
-  const link = cell.getAsNormalizedFullLink();
-  return `${link.space}:${link.id}:${JSON.stringify(link.scope)}`;
-}
-
-/** Reject special values whose private state cannot be inspected for labels. */
-function assertNoCloneFabricInstance(
-  value: unknown,
-  seen = new WeakSet<object>(),
-): void {
-  if (value instanceof FabricInstance) {
-    throw new Error(
-      "piece data containing FabricInstance values cannot be copied",
-    );
-  }
-  if (
-    value === null || typeof value !== "object" ||
-    value instanceof FabricPrimitive || seen.has(value)
-  ) {
-    return;
-  }
-  seen.add(value);
-  for (const child of Array.isArray(value) ? value : Object.values(value)) {
-    assertNoCloneFabricInstance(child, seen);
-  }
-}
-
-/** Reject a value copy that would discard Common Fabric Control labels. */
-function assertCloneDataUnlabeled(carrier: unknown): void {
-  const view = cfcLabelViewForCellFailClosed(carrier);
-  const labeled = view?.entries.some((entry) =>
-    (entry.label.confidentiality?.length ?? 0) > 0 ||
-    (entry.label.integrity?.length ?? 0) > 0
-  );
-  if (labeled) {
-    throw new Error(
-      "piece data with confidentiality or integrity labels cannot be copied " +
-        "into another space",
-    );
-  }
-}
-
-/** The internal-cell manifest entries written during pattern setup. */
-function cloneInternalManifest(
-  piece: Cell<unknown>,
-): Record<string, unknown>[] {
-  const manifest = piece.getMetaRaw("internal");
-  if (manifest === undefined) return [];
-  if (!Array.isArray(manifest)) {
-    throw new Error("piece has invalid internal data metadata");
-  }
-  return manifest.map((entry) => {
-    if (
-      typeof entry !== "object" || entry === null ||
-      !("partialCause" in entry) || !("link" in entry)
-    ) {
-      throw new Error("piece has invalid internal data metadata");
-    }
-    return entry as Record<string, unknown>;
-  });
 }
 
 /** Copy materialized piece data into detached arrays and plain objects. */
@@ -300,45 +236,6 @@ async function preloadCloneValue(
       loadedEntities,
       seen,
     );
-  }
-}
-
-/** Require every source entity read by the snapshot to remain unchanged. */
-function pinCloneSnapshotCells(
-  tx: IExtendedStorageTransaction,
-  cells: Iterable<Cell<unknown>>,
-): void {
-  const linksByEntity = new Map<
-    string,
-    ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>
-  >();
-  for (const cell of cells) {
-    linksByEntity.set(cloneEntityKey(cell), cell.getAsNormalizedFullLink());
-  }
-  const links = [...linksByEntity.values()];
-  const spaces = [...new Set(links.map((link) => link.space))];
-  if (spaces.length > 1) {
-    throw new Error(
-      "piece data linked from another space cannot be copied consistently",
-    );
-  }
-  if (!tx.addCommitPrecondition) {
-    throw new Error("storage cannot validate a piece data snapshot");
-  }
-  for (const link of links) {
-    const raw = tx.readOrThrow({
-      space: link.space,
-      id: link.id,
-      scope: link.scope,
-      type: "application/json",
-      path: ["value"],
-    });
-    tx.addCommitPrecondition(link.space, {
-      kind: "entity-value-hash",
-      id: link.id,
-      scope: link.scope,
-      valueHash: raw === undefined ? null : commitPreconditionValueHash(raw),
-    });
   }
 }
 
