@@ -450,12 +450,13 @@ export class JsonCodec implements SerializationContext<string> {
       // what an array may hold, and one check at the end covers both. Beyond
       // that, the assignment below throws `RangeError` from the array
       // machinery, which says nothing about the wire that caused it.
-      if (targetIndex > JsonCodec.#MAX_ARRAY_LENGTH) {
+      const MAX_ARRAY_LENGTH = 0xffff_ffff;
+      if (targetIndex > MAX_ARRAY_LENGTH) {
         return new ProblematicValue(
           CODEC_META_TAGS.hole,
           data,
           `hole: runs total ${targetIndex} elements, past the ` +
-            `${JsonCodec.#MAX_ARRAY_LENGTH} an array can hold`,
+            `${MAX_ARRAY_LENGTH} an array can hold`,
         );
       }
 
@@ -495,9 +496,6 @@ export class JsonCodec implements SerializationContext<string> {
   //
   // Static members
   //
-
-  /** Largest length a JavaScript array can have. */
-  static readonly #MAX_ARRAY_LENGTH = 0xffff_ffff;
 
   /** Shared text encoder, created once. */
   static readonly #textEncoder = new TextEncoder();
