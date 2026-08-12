@@ -184,6 +184,82 @@ export async function collectUncoveredLinesForFiles(
   return result;
 }
 
+/** One file's lines that this run leaves uncovered and an earlier run covered. */
+export interface RegressedSourceLines {
+  relativePath: string;
+  metricGroup: string;
+  lines: number[];
+}
+
+export interface RegressedLinesOptions {
+  rootDir: string;
+  /** LCOV from the run being gated. */
+  lcov: string;
+  /** LCOV from the `main` run its ratchet baseline came from. */
+  baselineLcov: string;
+  /** Metric groups to inspect; every other group is left alone. */
+  groups: Set<string>;
+  /** Repository-relative POSIX paths the pull request changed. */
+  changedFiles: Set<string>;
+}
+
+/**
+ * Find the lines a run leaves uncovered that its baseline run covered, for
+ * source files the pull request did not touch.
+ *
+ * A group can end up over its baseline without the diff adding a single
+ * uncovered line, because the two counts come from two separate measurements of
+ * the same code. A line reached only on some runs — one whose branch depends on
+ * scheduling, on load, or on how test files were distributed — moves the count
+ * on its own. This says which lines moved, so the flapping line can be given a
+ * test that covers it every time.
+ *
+ * Files the pull request changed are skipped: their line numbers moved between
+ * the two checkouts, so a line number means something different in each report.
+ * An untouched file has identical content in both, since the baseline measures
+ * the base-branch commit this run merged.
+ */
+export async function collectRegressedLines(
+  options: RegressedLinesOptions,
+): Promise<RegressedSourceLines[]> {
+  const sourceFiles = await collectSourceFiles(options.rootDir);
+  const candidates = sourceFiles.filter((source) =>
+    options.groups.has(source.metricGroup) &&
+    !options.changedFiles.has(source.relativePath)
+  );
+  const groupByPath = new Map(
+    candidates.map((source) => [source.relativePath, source.metricGroup]),
+  );
+  const paths = candidates.map((source) => source.relativePath);
+
+  const [now, before] = await Promise.all([
+    collectUncoveredLinesForFiles({
+      rootDir: options.rootDir,
+      lcov: options.lcov,
+      files: paths,
+    }),
+    collectUncoveredLinesForFiles({
+      rootDir: options.rootDir,
+      lcov: options.baselineLcov,
+      files: paths,
+    }),
+  ]);
+
+  const regressed: RegressedSourceLines[] = [];
+  for (const [relativePath, uncoveredNow] of now) {
+    const uncoveredBefore = new Set(before.get(relativePath) ?? []);
+    const lines = uncoveredNow.filter((line) => !uncoveredBefore.has(line));
+    if (lines.length === 0) continue;
+    regressed.push({
+      relativePath,
+      metricGroup: groupByPath.get(relativePath) ??
+        metricGroupFor(relativePath),
+      lines,
+    });
+  }
+  return regressed.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+
 export async function collectSourceFiles(
   rootDir: string,
 ): Promise<SourceFile[]> {

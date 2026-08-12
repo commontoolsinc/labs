@@ -26,6 +26,7 @@ import {
   type BaselineOverrides,
   type BaselineSample,
   buildCoverageDebtSuggestionComment,
+  buildCoverageDebtUnattributedComment,
   CACHE_STATE_ARTIFACT_PREFIX,
   COMPILE_CACHE_FAMILIES,
   type CompileCacheStates,
@@ -39,6 +40,7 @@ import {
   type CoverageResolvedGroup,
   type CoverageSuggestionFileLines,
   type CoverageSuggestionGroup,
+  type CoverageUnattributedFile,
   downloadAndExtractArtifact,
   downloadAndParseCoverageBaseline,
   fetchArtifactsForRun,
@@ -69,6 +71,7 @@ import { walk } from "@std/fs/walk";
 import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
+  collectRegressedLines,
   collectUncoveredLinesForFiles,
   COVERAGE_PROFILE_ARTIFACT_PREFIX,
   lcovFromCoverageProfile,
@@ -1129,6 +1132,8 @@ export interface Row {
   baseline?: number;
   /** Head SHA of the run that baseline came from. */
   baselineSha?: string;
+  /** Id of the run that baseline came from. */
+  baselineRunId?: number;
   pctIncrease?: number;
 }
 
@@ -1222,6 +1227,7 @@ export function buildCoverageRows(
     const stats = {
       baseline: latestBaseline,
       baselineSha: baselineSample?.sha,
+      baselineRunId: baselineSample?.runId,
       pctIncrease,
     };
 
@@ -1262,33 +1268,26 @@ export function printMetricTable(rows: Row[], includeStatus = false): void {
   printTextTable(headers, metricTableRows(rows, includeStatus), align);
 }
 
-async function extractCoverageDebtSamples(
-  run: WorkflowRun,
-  artifacts: Artifact[],
-  coverageArtifactsDir?: string,
-): Promise<{ samples: Map<string, BaselineSample>; lcov: string }> {
-  const metrics = new Map<string, BaselineSample>();
-  const coverageArtifacts = newestArtifactsByName(artifacts.filter(
+/** The coverage-profile artifacts of one run, one per artifact name. */
+function coverageProfileArtifacts(artifacts: Artifact[]): Artifact[] {
+  return newestArtifactsByName(artifacts.filter(
     (artifact) =>
       artifact.name.startsWith(COVERAGE_PROFILE_ARTIFACT_PREFIX) &&
       !artifact.expired,
   ));
-  const coverageArtifactNames = new Set(
-    coverageArtifacts.map((artifact) => artifact.name),
-  );
-  const missingArtifacts = EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
-    !coverageArtifactNames.has(name)
-  );
+}
 
-  if (missingArtifacts.length > 0) {
-    throw new Error(
-      `Missing coverage profile artifact(s): ${missingArtifacts.join(", ")}`,
-    );
-  }
-
+/**
+ * Join one run's coverage-profile artifacts into a single LCOV report. A job
+ * uploads its own LCOV; the profile-file branch reads the raw V8 profiles a
+ * run predating that upload carries.
+ */
+export async function combinedLcovFromArtifacts(
+  coverageArtifacts: Artifact[],
+  coverageArtifactsDir?: string,
+): Promise<{ lcov: string; sourceDescription: string }> {
   const profileDir = await Deno.makeTempDir({ prefix: "coverage-profiles-" });
   const lcovDir = await Deno.makeTempDir({ prefix: "coverage-lcov-" });
-  let lcov = "";
   try {
     let profileFileCount = 0;
     let lcovFileCount = 0;
@@ -1309,30 +1308,14 @@ async function extractCoverageDebtSamples(
       );
     }
 
-    lcov = lcovFileCount > 0
-      ? await readCombinedLcov(lcovDir)
-      : await lcovFromCoverageProfile(profileDir);
-
-    // Every coverage stream feeds the gate: V8 runtime coverage, unit pattern
-    // coverage (TN:pattern-runtime), and integration pattern coverage
-    // (TN:pattern-runtime-integration) all join here, and a line covered by any
-    // of them counts covered. So a pattern line an end-to-end flow exercises
-    // that the unit suite does not lowers the gated debt.
-    const coverageMetrics = await collectCoverageDebtMetricsFromLcov({
-      rootDir: Deno.cwd(),
-      lcov,
-    });
-    for (const metric of coverageMetrics) {
-      metrics.set(metric.name, sampleForRun(run, metric.uncoveredLines));
-    }
-
-    console.log(
-      `Extracted ${coverageMetrics.length} coverage debt metrics from ${
-        lcovFileCount > 0
-          ? `${lcovFileCount} LCOV report files`
-          : `${profileFileCount} coverage profile files`
-      }.`,
-    );
+    return {
+      lcov: lcovFileCount > 0
+        ? await readCombinedLcov(lcovDir)
+        : await lcovFromCoverageProfile(profileDir),
+      sourceDescription: lcovFileCount > 0
+        ? `${lcovFileCount} LCOV report files`
+        : `${profileFileCount} coverage profile files`,
+    };
   } finally {
     try {
       await Deno.remove(profileDir, { recursive: true });
@@ -1341,8 +1324,78 @@ async function extractCoverageDebtSamples(
       await Deno.remove(lcovDir, { recursive: true });
     } catch { /* ignore cleanup errors */ }
   }
+}
+
+async function extractCoverageDebtSamples(
+  run: WorkflowRun,
+  artifacts: Artifact[],
+  coverageArtifactsDir?: string,
+): Promise<{ samples: Map<string, BaselineSample>; lcov: string }> {
+  const metrics = new Map<string, BaselineSample>();
+  const coverageArtifacts = coverageProfileArtifacts(artifacts);
+  const coverageArtifactNames = new Set(
+    coverageArtifacts.map((artifact) => artifact.name),
+  );
+  const missingArtifacts = EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
+    !coverageArtifactNames.has(name)
+  );
+
+  if (missingArtifacts.length > 0) {
+    throw new Error(
+      `Missing coverage profile artifact(s): ${missingArtifacts.join(", ")}`,
+    );
+  }
+
+  const { lcov, sourceDescription } = await combinedLcovFromArtifacts(
+    coverageArtifacts,
+    coverageArtifactsDir,
+  );
+
+  // Every coverage stream feeds the gate: V8 runtime coverage, unit pattern
+  // coverage (TN:pattern-runtime), and integration pattern coverage
+  // (TN:pattern-runtime-integration) all join here, and a line covered by any
+  // of them counts covered. So a pattern line an end-to-end flow exercises
+  // that the unit suite does not lowers the gated debt.
+  const coverageMetrics = await collectCoverageDebtMetricsFromLcov({
+    rootDir: Deno.cwd(),
+    lcov,
+  });
+  for (const metric of coverageMetrics) {
+    metrics.set(metric.name, sampleForRun(run, metric.uncoveredLines));
+  }
+
+  console.log(
+    `Extracted ${coverageMetrics.length} coverage debt metrics from ${sourceDescription}.`,
+  );
 
   return { samples: metrics, lcov };
+}
+
+/**
+ * Join the coverage-profile artifacts of a `main` run into one LCOV report.
+ * Returns null when the run has none, or when the download fails: the comment
+ * this feeds is best-effort, and a regression is reported either way.
+ */
+export async function baselineLcovForRun(
+  runId: number,
+  fetchArtifacts: (runId: number) => Promise<Artifact[]> = fetchArtifactsForRun,
+): Promise<string | null> {
+  try {
+    const artifacts = coverageProfileArtifacts(await fetchArtifacts(runId));
+    if (artifacts.length === 0) {
+      console.warn(
+        `  Warning: baseline run ${runId} has no coverage profile artifacts.`,
+      );
+      return null;
+    }
+    const { lcov } = await combinedLcovFromArtifacts(artifacts);
+    return lcov;
+  } catch (error) {
+    console.warn(
+      `  Warning: could not read coverage from baseline run ${runId}: ${error}`,
+    );
+    return null;
+  }
 }
 
 /** File the coverage-comment payload is written to; tests override via env. */
@@ -1377,6 +1430,77 @@ export async function writeCoverageComment(
 }
 
 /**
+ * Build the body naming the lines a regression the pull request did not cause
+ * is charged for: lines this run leaves uncovered in files the pull request
+ * never touched, which the baseline run covered.
+ *
+ * Returns null when there is nothing to say — no baseline run to compare
+ * against, its coverage cannot be read, or every affected line is in a file the
+ * pull request changed — and the caller falls back to the ordinary comment.
+ */
+export interface UnattributedRegressionOptions {
+  rootDir: string;
+  groups: CoverageSuggestionGroup[];
+  coverageFailures: Row[];
+  prFiles: PRFile[];
+  /** LCOV from this run. */
+  lcov: string;
+  readBaselineLcov: (runId: number) => Promise<string | null>;
+}
+
+export async function buildUnattributedRegressionBody(
+  options: UnattributedRegressionOptions,
+): Promise<string | null> {
+  // Each metric resolves its own ratchet baseline, so two regressed groups can
+  // be held against two different `main` runs. A group is compared against the
+  // run its own baseline came from and no other: another run measured a
+  // different commit, where the same line may legitimately have been covered.
+  const groupsByBaselineRun = new Map<number, Set<string>>();
+  for (const failure of options.coverageFailures) {
+    const runId = failure.baselineRunId;
+    if (runId === undefined) continue;
+    const group = coverageMetricGroupName(failure.metric);
+    if (group === null) continue;
+    const groups = groupsByBaselineRun.get(runId) ?? new Set<string>();
+    groups.add(group);
+    groupsByBaselineRun.set(runId, groups);
+  }
+  if (groupsByBaselineRun.size === 0) return null;
+
+  const changedFiles = new Set(
+    options.prFiles.map((prFile) => prFile.filename.replaceAll("\\", "/")),
+  );
+
+  const files: CoverageUnattributedFile[] = [];
+  for (const [runId, groups] of groupsByBaselineRun) {
+    const baselineLcov = await options.readBaselineLcov(runId);
+    if (baselineLcov === null) continue;
+    const regressed = await collectRegressedLines({
+      rootDir: options.rootDir,
+      lcov: options.lcov,
+      baselineLcov,
+      groups,
+      changedFiles,
+    });
+    for (const file of regressed) {
+      files.push({ relativePath: file.relativePath, lines: file.lines });
+    }
+  }
+
+  if (files.length === 0) return null;
+
+  const total = files.reduce((sum, file) => sum + file.lines.length, 0);
+  console.log(
+    `Regression not attributable to this PR's added lines: ${total} line(s) ` +
+      `across ${files.length} unchanged file(s) that the baseline run covered.`,
+  );
+  return buildCoverageDebtUnattributedComment({
+    groups: options.groups,
+    files,
+  });
+}
+
+/**
  * Write the coverage-debt regression comment to a file for a later workflow to
  * post. The gate runs on `pull_request`, where fork PRs get a read-only token
  * and cannot comment, so the `coverage-comment` workflow_run job posts this from
@@ -1388,6 +1512,8 @@ export async function writeCoverageDebtSuggestion(
   coverageFailures: Row[],
   prFiles: PRFile[],
   lcov: string,
+  readBaselineLcov: (runId: number) => Promise<string | null> =
+    baselineLcovForRun,
 ): Promise<void> {
   const groups = coverageFailures
     .map((failure) => ({
@@ -1434,7 +1560,21 @@ export async function writeCoverageDebtSuggestion(
   }
 
   try {
-    const body = buildCoverageDebtSuggestionComment({ groups, files });
+    // Nothing the pull request added accounts for the regression, so the lines
+    // it is charged for are somewhere it did not touch. Say which ones by
+    // comparing this run against the baseline run line by line.
+    const unattributed = files.length === 0
+      ? await buildUnattributedRegressionBody({
+        rootDir: Deno.cwd(),
+        groups,
+        coverageFailures,
+        prFiles,
+        lcov,
+        readBaselineLcov,
+      })
+      : null;
+    const body = unattributed ??
+      buildCoverageDebtSuggestionComment({ groups, files });
     const payload: CoverageCommentPayload = {
       prNumber,
       state: "regressed",
