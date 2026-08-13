@@ -88,14 +88,28 @@ describe("RealmCodecEngine", () => {
       expect(realmFromFabricValue(value)).toBe(value);
     });
 
-    it("encodes a `FabricBytes` to the bytes themselves", () => {
+    it("encodes a `FabricBytes` to a transferable `ArrayBuffer`", () => {
       const payload = realmFromFabricValue(
         new FabricBytes(new Uint8Array([1, 2, 250])),
       );
       const state = (payload as RealmTaggedValue).get("Bytes@1");
 
-      expect(state).toBeInstanceOf(Uint8Array);
-      expect([...(state as Uint8Array)]).toEqual([1, 2, 250]);
+      // An `ArrayBuffer` rather than a view onto one, that being the form
+      // `postMessage()` can transfer.
+      expect(state).toBeInstanceOf(ArrayBuffer);
+      expect([...new Uint8Array(state as ArrayBuffer)]).toEqual([1, 2, 250]);
+    });
+
+    it("encodes a `FabricBytes` to a buffer covering exactly its bytes", () => {
+      // A transfer hands over the whole buffer, so a state covering more than
+      // the value would cede bytes that are not part of it.
+      const payload = realmFromFabricValue(
+        new FabricBytes(new Uint8Array([1, 2, 250])),
+      );
+      const state = (payload as RealmTaggedValue)
+        .get("Bytes@1") as ArrayBuffer;
+
+      expect(state.byteLength).toBe(3);
     });
 
     it("encodes a `FabricEpochNsec` to a `bigint`", () => {
@@ -110,8 +124,10 @@ describe("RealmCodecEngine", () => {
 
     it("does not hand out the bytes an encoded `FabricBytes` holds", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      const state = ((realmFromFabricValue(bytes)) as RealmTaggedValue)
-        .get("Bytes@1") as Uint8Array;
+      const state = new Uint8Array(
+        ((realmFromFabricValue(bytes)) as RealmTaggedValue)
+          .get("Bytes@1") as ArrayBuffer,
+      );
 
       state[0] = 99;
       expect([...bytes.slice()]).toEqual([1, 2, 3]);

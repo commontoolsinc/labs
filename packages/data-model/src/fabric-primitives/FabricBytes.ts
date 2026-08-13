@@ -30,8 +30,13 @@ import {
  * (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the defense.)
  */
 export class FabricBytes extends BaseFabricPrimitive {
-  /** Private byte storage. Callers use `slice()` or `copyInto()`. */
-  readonly #bytes: Uint8Array;
+  /**
+   * Private byte storage. Callers use `slice()`, `sliceBuffer()` or
+   * `copyInto()`. Never backed by a `SharedArrayBuffer`, which is what
+   * `toOwnedUint8Array()` guarantees and what lets `sliceBuffer()` promise a
+   * transferable result.
+   */
+  readonly #bytes: Uint8Array<ArrayBuffer>;
 
   /**
    * Constructs an instance holding the given bytes, which it owns outright.
@@ -68,6 +73,28 @@ export class FabricBytes extends BaseFabricPrimitive {
    */
   slice(start?: number, end?: number): Uint8Array<ArrayBuffer> {
     return this.#bytes.slice(start, end);
+  }
+
+  /**
+   * Returns a copy of the bytes (or a sub-range) as a bare `ArrayBuffer`. The
+   * counterpart to {@link #slice} for a caller that wants the buffer rather
+   * than a view onto it, and which allocates no view to get there.
+   *
+   * An `ArrayBuffer` is what a caller needs in order to *transfer* the bytes
+   * across a realm boundary, `ArrayBuffer` being transferable where a typed
+   * array is not. The result is unshared and covers exactly the requested
+   * range, so it can be transferred outright rather than reasoned about
+   * through an offset and a length.
+   *
+   * @param start - Start index (inclusive, default 0).
+   * @param end - End index (exclusive, default `length`).
+   */
+  sliceBuffer(start?: number, end?: number): ArrayBuffer {
+    // `#bytes` covers the whole of its own buffer, so the buffer's indices are
+    // this value's indices and `ArrayBuffer.prototype.slice()` takes `start`
+    // and `end` unaltered -- negative values included, exactly as `slice()`
+    // resolves them.
+    return this.#bytes.buffer.slice(start ?? 0, end);
   }
 
   /**
@@ -153,13 +180,18 @@ export class FabricBytes extends BaseFabricPrimitive {
         super(CODEC_TYPE_TAGS.Bytes, FabricBytes);
       }
 
-      /** @inheritDoc */
+      /**
+       * @inheritDoc
+       *
+       * An `ArrayBuffer` rather than a view onto one, because that is the
+       * form `postMessage()` can *transfer*. The buffer is an unshared copy
+       * covering exactly these bytes, so a caller assembling a transfer list
+       * can hand it over outright: nothing else refers to it, and a caller
+       * mutating the encoded tree before it crosses cannot reach into this
+       * instance.
+       */
       encode(value: FabricBytes): RealmCodecValue {
-        // An unshared copy, so that a caller mutating the encoded tree before
-        // it crosses cannot reach into this instance. The transport copies
-        // again on its way out, which is the price of not being able to hand
-        // out an immutable view of the bytes.
-        return value.slice();
+        return value.sliceBuffer();
       }
 
       /**
@@ -176,15 +208,18 @@ export class FabricBytes extends BaseFabricPrimitive {
         state: RealmCodecValue,
         _context: ReconstructionContext,
       ): FabricBytes {
-        if (!(state instanceof Uint8Array)) {
+        if (!(state instanceof ArrayBuffer)) {
           throw new Error(
-            `\`${typeTag}\`: expected \`Uint8Array\` state, got ${typeof state}`,
+            `\`${typeTag}\`: expected \`ArrayBuffer\` state, got ${typeof state}`,
           );
         }
 
-        // Copied rather than taken over: the wire tree is the caller's
-        // argument, and nothing in this format's contract cedes its bytes.
-        return new FabricBytes(state);
+        // Taken over rather than copied. This buffer reached here either by
+        // being cloned -- in which case it is this realm's own and nobody
+        // else's -- or by being transferred, which detaches the sender's.
+        // Either way nothing on this side but the wire tree refers to it, and
+        // that tree is spent once decoding is done.
+        return new FabricBytes(new Uint8Array(state), true);
       }
     })(),
   );

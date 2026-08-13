@@ -16,9 +16,15 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
  *
  * * `bigint` and `undefined` appear directly, as do `-0`, `NaN` and
  *   `±Infinity` under `number`. Cloning carries each as itself.
- * * `Uint8Array` appears because bytes cross as bytes. This is the whole point
- *   of a second format: JSON has to spell a `FabricBytes` as base64url text,
- *   and a receiver that wants bytes back has to rebuild them.
+ * * `ArrayBuffer` and `Uint8Array` both appear, because bytes cross as bytes.
+ *   This is the whole point of a second format: JSON has to spell a
+ *   `FabricBytes` as base64url text, and a receiver that wants bytes back has
+ *   to rebuild them. The two forms are not interchangeable. A `FabricBytes`
+ *   encodes to a bare `ArrayBuffer`, that being what `postMessage()` can
+ *   *transfer*, so a caller assembling a transfer list finds the transferable
+ *   object in the tree rather than having to reach through a view and reason
+ *   about its offset. A `FabricHash` puts its bytes in a `Uint8Array` inside a
+ *   record, where transfer is not on offer.
  * * `RegExp` appears for the same reason, source and flags intact.
  * * `Map` is the tagged form (see {@link RealmTaggedValue}). An encoded value
  *   carries no envelope of its own: both ends of this format are the same
@@ -35,6 +41,7 @@ export type RealmCodecValue =
   | number
   | bigint
   | string
+  | ArrayBuffer
   | Uint8Array
   | RegExp
   | readonly RealmCodecValue[]

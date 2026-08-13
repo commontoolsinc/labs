@@ -45,7 +45,7 @@ export function isDetached(source: ArrayBufferLike | ArrayBufferView): boolean {
 export function toOwnedUint8Array(
   bytes: Uint8Array,
   transfer: boolean,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const buffer = bytes.buffer;
 
   if (
