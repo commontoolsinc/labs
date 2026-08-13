@@ -354,6 +354,28 @@
           }
         ]
       },
+      "MentionRef": {
+        "properties": {
+          "destination": {
+            "type": "unknown"
+          },
+          "modifiedTitle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destination",
+          "modifiedTitle"
+        ],
+        "type": "object"
+      },
+      "MentionRefMap": {
+        "additionalProperties": {
+          "$ref": "#/$defs/MentionRef"
+        },
+        "properties": {},
+        "type": "object"
+      },
       "MentionablePiece": {
         "properties": {
           "$NAME": {
@@ -670,20 +692,9 @@
         "description": "Parent notebook reference, null if not in a notebook"
       },
       "references": {
-        "additionalProperties": {
-          "properties": {
-            "modifiedTitle": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "modifiedTitle"
-          ],
-          "type": "object"
-        },
-        "description": "Where this note's `[Label][key]` mentions point.",
-        "properties": {},
-        "type": "object"
+        "$ref": "#/$defs/MentionRefMap",
+        "default": {},
+        "description": "Where this note's `[Label][key]` mentions point. The default matches the\ninput's; see `NoteInput.references` for why they have to."
       },
       "setTitle": {
         "asCell": [
