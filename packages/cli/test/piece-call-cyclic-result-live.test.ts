@@ -4,7 +4,11 @@ import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CyclicResultError } from "../lib/callable.ts";
-import { parseSelectProjection } from "../lib/cell-selection.ts";
+import {
+  parseSelectionFilter,
+  parseSelectionProjection,
+  parseSelectProjection,
+} from "../lib/cell-selection.ts";
 import { executePieceCallable } from "../lib/piece.ts";
 
 /**
@@ -22,15 +26,18 @@ import { executePieceCallable } from "../lib/piece.ts";
  * whose recursion is spelled with `$ref`/`$defs` that no hand-written schema
  * would predict.
  *
- * Three verbs, for the three answers a readback can give:
+ * Four verbs, for the answers a readback can give:
  *
  * - `addChild` returns the new item, and its declared result re-enters itself.
  * - `addChildSelf` returns the CONTAINER, so the circle closes through a
  *   collection rather than through a single field.
  * - `addChildLoose` returns the same container behind `unknown`, which
  *   declares a shape that bounds nothing.
+ * - `addChildren` returns an ARRAY of items, which is the one root a
+ *   `--filter` can be applied to and so the only way to reach a filtered
+ *   readback of a value that closes a circle.
  *
- * A fourth answer needs no fourth verb: `addChild` reached on the piece's
+ * One more answer needs no further verb: `addChild` reached on the piece's
  * INPUT cell, under the name `fileUnder`, is a resolution a declared result
  * cannot be keyed to at all. The harness wires that surface up for it.
  */
@@ -49,6 +56,7 @@ const PROGRAM = {
       "interface FinishResult { status: string; note: string; }",
       "",
       "export interface ItemOutput {",
+      "  addChildren: Stream<AddChildEvent, ItemOutput[]>;",
       "  addChild: Stream<AddChildEvent, AddChildResult>;",
       "  addChildSelf: Stream<AddChildEvent, ContainerResult>;",
       "  addChildLoose: Stream<AddChildEvent, LooseResult>;",
@@ -74,6 +82,11 @@ const PROGRAM = {
       "      children.push(item);",
       "      return { item };",
       "    });",
+      "    const addChildren = action<AddChildEvent, ItemOutput[]>((event) => {",
+      "      const item = Item({ title: event.title, parent: self });",
+      "      children.push(item);",
+      "      return [item];",
+      "    });",
       "    const addChildSelf = action<AddChildEvent, ContainerResult>((event) => {",
       "      children.push(Item({ title: event.title, parent: self }));",
       "      return { container: self };",
@@ -92,6 +105,7 @@ const PROGRAM = {
       "      status,",
       "      parent,",
       "      children,",
+      "      addChildren,",
       "      addChild,",
       "      addChildSelf,",
       "      addChildLoose,",
@@ -269,17 +283,130 @@ describe("cf piece call on a piece that points back at its container", () => {
     });
   });
 
+  // The pair below is one contrast, and it is the whole point of both halves:
+  // `item.title` narrows PAST the position where the declared type re-enters,
+  // so the value it produces holds no circle and nothing derived touches it;
+  // `item` names the re-entering subtree WHOLE, so the circle the caller
+  // selected is still in the value and the bound has to engage. Both spellings
+  // are a selection, and only one of them leaves a readback with nothing to do
+  // — a suite holding either alone tests half of that and reads like it tests
+  // all of it.
   it("leaves a caller's own selection in charge of the shape", async () => {
     await withTracker("cyclic-explicit-selection", async ({ call }) => {
       const result = await call("addChild", ["--title", "Selected"], {
         selection: { projection: parseSelectProjection("item.title") },
       }) as any;
 
-      // Exactly what was asked for: no derived address anywhere, because the
-      // caller's shape is applied to the receipt and leaves no circle behind
-      // for anything to bound.
+      // Exactly what was asked for, and only that: the caller's shape narrowed
+      // past the circle, so there is nothing for a bound to do and no derived
+      // address anywhere. An implementation that bounded every selected result
+      // would answer with the declaration's shape here — `status`, `parent`
+      // and `children` beside the one field asked for — and fail.
       expect(result).toEqual({ item: { title: "Selected" } });
     });
+  });
+
+  it("returns an address at the closing position for a `--select` that keeps the circle", async () => {
+    await withTracker("cyclic-selection-retains", async ({ call }) => {
+      const result = await call("addChild", ["--title", "Retained"], {
+        selection: { projection: parseSelectProjection("item") },
+      }) as any;
+
+      // `--select item` selects the whole re-entering subtree, so the value the
+      // caller's own shape produces closes the same circle the unshaped
+      // readback does. It reaches stdout as JSON either way.
+      expect(() => JSON.stringify(result)).not.toThrow();
+      expect(result.item.title).toBe("Retained");
+      // The closing position renders its address, exactly as it does with no
+      // selection at all: this is the declared bound answering.
+      expect(result.item.parent.$link.id.startsWith("of:")).toBe(true);
+      expect(result.item.parent.$link.path).toEqual(["parent"]);
+      // And the answer is the DECLARATION's shape, not the caller's: their
+      // shape had no rendering at all, so the one in reach that does answers in
+      // its place. A verb's streams are dropped by that derivation and are
+      // present in what `--select item` selects on its own, so this is what
+      // separates the bound engaging from the raw selection going out.
+      expect(Object.hasOwn(result.item, "addChild")).toBe(false);
+    });
+  });
+
+  it("returns the same address for a `--schema` projection that keeps the circle", async () => {
+    await withTracker("cyclic-schema-retains", async ({ call }) => {
+      // The same hole through the other projection spelling. It is a separate
+      // grammar rather than an alias — a JSON Schema states its own depth where
+      // a concise field list traverses arrays implicitly — so it is driven
+      // rather than assumed to follow.
+      const result = await call("addChild", ["--title", "Schema"], {
+        selection: {
+          projection: await parseSelectionProjection(
+            '{"properties":{"item":true}}',
+          ),
+        },
+      }) as any;
+
+      expect(() => JSON.stringify(result)).not.toThrow();
+      expect(result.item.title).toBe("Schema");
+      expect(result.item.parent.$link.path).toEqual(["parent"]);
+    });
+  });
+
+  // The `--filter` pair, and the same contrast: a predicate hands back the
+  // elements themselves, so it can only keep a circle, never narrow past one.
+  // What decides between the two is the projection written beside it.
+  it("returns the elements a `--filter` keeps where the projection beside it renders", async () => {
+    await withTracker("cyclic-filter-renders", async ({ call }) => {
+      const result = await call("addChildren", ["--title", "Kept"], {
+        selection: {
+          filter: parseSelectionFilter('.title == "Kept"'),
+          projection: parseSelectProjection("title"),
+        },
+      }) as any;
+
+      // The projection beside the predicate narrows past the circle, so the
+      // surviving element renders and nothing is derived. An implementation
+      // that refused every cyclic-verb `--filter` outright would fail here.
+      expect(result).toEqual([{ title: "Kept" }]);
+    });
+  });
+
+  it("refuses a `--filter` that keeps the circle, naming the committed write", async () => {
+    await withTracker(
+      "cyclic-filter-retains",
+      async ({ call, patternLoads, root }) => {
+        const error = await call("addChildren", ["--title", "Filtered"], {
+          selection: { filter: parseSelectionFilter('.title == "Filtered"') },
+        }).then(() => undefined, (thrown: unknown) => thrown);
+
+        // Without the projection above, the predicate's survivor is the item
+        // itself, circle and all. Nothing can bound it: the bound is written in
+        // addresses, and the selection step refuses an address beside a
+        // `--filter` because a filtered array's elements no longer say which
+        // positions they came from. So the answer here is a refusal rather than
+        // a bound — and a legible one, rather than the `JSON.stringify` throw
+        // an unrenderable result reaches the terminal as, which says nothing
+        // about the write.
+        expect(error).toBeInstanceOf(CyclicResultError);
+        const message = (error as Error).message;
+        expect(message).toContain('closes a circle at "/0/parent/children/0"');
+        expect(message).toContain(
+          "This call's --filter is answered with the elements themselves",
+        );
+        expect(message).toContain("COMMITTED");
+        // Neither of the other two wordings: the declaration is never consulted
+        // here, so a refusal claiming it bounds nothing would be a false
+        // statement about the verb.
+        expect(message).not.toContain("declares no result");
+        expect(message).not.toContain("leaves the closing position");
+        // And no compiled pattern was loaded to reach that declaration with. A
+        // derivation that cannot be applied is not worth a pattern load, which
+        // is why the `--filter` is decided before the declaration is reached
+        // for.
+        expect(patternLoads()).toBe(0);
+        // The handling landed, which is what the refusal says and what makes it
+        // a rendering failure rather than a failed call.
+        expect(childTitles(root)).toEqual(["Filtered"]);
+      },
+    );
   });
 
   it("refuses legibly, naming the committed write, where the declaration bounds nothing", async () => {

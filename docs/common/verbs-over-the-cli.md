@@ -223,15 +223,22 @@ cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
 ```
 
 That address is the one a `$link` marker would have produced by hand, so the
-derived answer and a written one agree. A shape you asked for wins outright:
-`--filter`, `--select` and `--schema` are applied to the receipt first and
-leave no circle behind for anything to bound.
+derived answer and a written one agree. A shape you asked for wins wherever it
+renders: `--filter`, `--select` and `--schema` are applied to the receipt first,
+and one that narrows past the circle — `--select item.title` — comes back
+exactly as written, with nothing derived added to it. One that keeps the circle
+— `--select item`, which names the re-entering subtree whole — is bounded on the
+way out like an unshaped readback, and answers in the declaration's shape: the
+shape asked for had no rendering at all.
 
-Where nothing bounds it — the verb declares no result, or the declaration
-leaves the closing position wide — the call names the position the circle
-closes at and the receipt to collect the outcome from, and exits nonzero. Read
-that as the result being unrenderable, never as the mutation having failed:
-**the write landed**, and the message says so.
+Where nothing bounds it — the verb declares no result, the declaration leaves
+the closing position wide, or a `--filter` is in play, whose surviving elements
+no longer say which positions they came from and so cannot carry an address —
+the call names the position the circle closes at and the receipt to collect the
+outcome from, and exits nonzero. Read that as the result being unrenderable,
+never as the mutation having failed: **the write landed**, and the message says
+so. A `--filter` reaches a renderable answer by naming a projection beside it
+that narrows past the circle.
 
 ### Retries are safe, and cheap to reason about
 

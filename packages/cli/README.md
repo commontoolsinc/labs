@@ -427,19 +427,30 @@ Three things follow:
 - **It is the same `$link` a caller writes by hand.** The derived bound is
   answered by the selection step above, so `--schema` over the same position
   produces the same address.
-- **A caller's own shape is never overruled.** `--filter`, `--select` and
-  `--schema` are applied to the receipt first, which leaves no circle for
-  anything to derive a bound for. Nothing derived can reach a call that asked
-  for a shape.
+- **A caller's own shape wins wherever it renders.** `--filter`, `--select` and
+  `--schema` are applied to the receipt first, and a projection that narrows
+  past the circle — `--select item.title` — is answered exactly as written, with
+  nothing derived added to it. A projection that names the re-entering subtree
+  whole — `--select item` — keeps the circle it selected, and is bounded on the
+  way out like an unshaped readback: the answer is then the declaration's shape,
+  because the one asked for had no rendering at all.
 - **Nothing else pays for it.** A result that renders is written out exactly as
   it was read, and the compiled pattern a declared result is matched through is
   loaded only where a readback cannot render.
 
-Where nothing bounds the circle — the verb declares no result, or the
-declaration it made leaves the closing position wide — the call reports the
-position the circle closes at, states that the handling committed, and names the
-receipt to collect the outcome from. It exits nonzero: the outcome could not be
-rendered. The write still landed, which is the property the message leads with.
+Where nothing bounds the circle — the verb declares no result, the declaration
+it made leaves the closing position wide, or a `--filter` is in play — the call
+reports the position the circle closes at, states that the handling committed,
+and names the receipt to collect the outcome from. It exits nonzero: the outcome
+could not be rendered. The write still landed, which is the property the message
+leads with.
+
+A `--filter` is the case with no bound to reach for rather than one that failed:
+the predicate hands back the elements themselves, which no longer say which
+positions they came from, and a bound is written in addresses, which name
+positions — the refusal `--filter --show-links` earns above, for the same
+reason. Narrowing past the circle with a projection beside the predicate —
+`--filter '.status == "open"' --select title` — renders.
 
 ## Built Binary
 

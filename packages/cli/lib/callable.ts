@@ -756,14 +756,20 @@ function circularResultPath(value: unknown): string | undefined {
  * the same selection step `--select`/`--schema` are answered by, so a derived
  * bound and a hand-written one produce the same vocabulary.
  *
- * A caller who named a selection never reaches here: their shape is applied to
- * the receipt first and there is no circle left to bound. Nothing derived can
- * therefore overrule what a caller asked for.
+ * A caller's own shape is applied to the receipt first and, where the value it
+ * produces renders, this is never reached: nothing derived narrows a result a
+ * caller already asked a renderable question of. A selection that keeps the
+ * circle does reach here — a projection can name the re-entering subtree whole,
+ * which selects the circle rather than cutting past it — and the bound answers
+ * in the caller's place. Their shape had no rendering at all, and the
+ * declaration's is the one in reach that does.
  *
- * Refuses where the declaration cannot bound it — no declaration at all, or one
- * whose recursion does not reach the closing position. A refusal names where
- * the circle closes and how to collect the outcome, which beats a stack trace
- * for a handling that already committed.
+ * Refuses where nothing in reach bounds it: no declaration at all, a
+ * declaration whose recursion does not reach the closing position, or a
+ * `--filter` beside it — a filtered array's elements no longer say which
+ * positions they came from, and the bound is written in addresses, which name
+ * positions. A refusal names where the circle closes and how to collect the
+ * outcome, which beats a stack trace for a handling that already committed.
  */
 async function boundCyclicResult(
   resolved: CallableResolution,
@@ -772,34 +778,45 @@ async function boundCyclicResult(
   receiptId: string | undefined,
   deps: CallableExecutionDeps,
 ): Promise<unknown> {
-  const declared = await resolved.declaredResult?.();
-  const projection = declaredResultProjection(declared);
-  if (projection !== undefined) {
-    const bounded = await (deps.deriveSelectedValue ?? deriveSelectedValue)(
-      resolved.pieces.runtime,
-      resolved.space,
-      receiptCell,
-      { projection },
-    );
-    // The bound is only as good as the declaration: a position the declaration
-    // left wide can still expand into the circle, and answering with a value
-    // that cannot be written would move the same failure one step later.
-    if (bounded !== undefined && circularResultPath(bounded) === undefined) {
-      return bounded;
-    }
-  }
   // Each wording is its own statement, so a reader of the coverage report can
   // tell which of them a test has ever produced. Inside one expression they
   // could not: a ternary is a single statement, and its untaken arm is
   // credited with the count of the statement holding it, so a wording nothing
   // has ever emitted reads exactly like one every call emits.
   let whyUnbounded: string;
-  if (declared === undefined) {
-    whyUnbounded = "This verb declares no result for `cf` to bound the " +
-      "readback with.";
+  if (deps.selection?.filter !== undefined) {
+    // Decided before the declaration is reached for, because reaching for it
+    // costs a pattern load and no derivation from it can be applied here: the
+    // selection step refuses a `$link` beside a `--filter` on the same grounds
+    // this refusal names, and every derived bound is `$link`s.
+    whyUnbounded = "This call's --filter is answered with the elements " +
+      "themselves, which no longer say which positions they came from, so " +
+      "the addresses a bound is written in cannot be composed beside it.";
   } else {
-    whyUnbounded = "This verb's declared result leaves the closing position " +
-      "unbounded.";
+    const declared = await resolved.declaredResult?.();
+    const projection = declaredResultProjection(declared);
+    if (projection !== undefined) {
+      const bounded = await (deps.deriveSelectedValue ?? deriveSelectedValue)(
+        resolved.pieces.runtime,
+        resolved.space,
+        receiptCell,
+        { projection },
+      );
+      // The bound is only as good as the declaration: a position the
+      // declaration left wide can still expand into the circle, and answering
+      // with a value that cannot be written would move the same failure one
+      // step later.
+      if (bounded !== undefined && circularResultPath(bounded) === undefined) {
+        return bounded;
+      }
+    }
+    if (declared === undefined) {
+      whyUnbounded = "This verb declares no result for `cf` to bound the " +
+        "readback with.";
+    } else {
+      whyUnbounded = "This verb's declared result leaves the closing " +
+        "position unbounded.";
+    }
   }
   throw new CyclicResultError(
     `Cannot render the result of "${resolved.cellKey}": it closes a circle at ` +
@@ -928,21 +945,26 @@ export async function executeResolvedCallable(
       ) {
         result = value;
       }
-      if (deps.selection !== undefined && result !== undefined) {
-        // Only where a result exists. Shaping the empty witness would report
-        // `{}` for a verb whose whole answer is that it returned nothing, and
-        // that omission is the distinction the empty receipt exists to draw.
-        result = await selectCallResult(
-          resolved,
-          receipt,
-          deps.selection,
-          deps,
-        );
-      } else if (result !== undefined) {
-        // Nobody asked for a shape, so the whole result is what goes out —
-        // unless it closes a circle, which has no JSON rendering at all. The
-        // check reads a value already in hand and touches no storage, so a
-        // result that renders reaches stdout exactly as it always has.
+      if (result !== undefined) {
+        // Both steps run only where a result exists. Shaping the empty witness
+        // would report `{}` for a verb whose whole answer is that it returned
+        // nothing, and that omission is the distinction the empty receipt
+        // exists to draw.
+        if (deps.selection !== undefined) {
+          result = await selectCallResult(
+            resolved,
+            receipt,
+            deps.selection,
+            deps,
+          );
+        }
+        // Whatever the value in hand came from — the whole receipt, or the
+        // caller's own shape over it — what goes out is written as JSON, and a
+        // circle has no JSON writing at all. A selection is no exemption: a
+        // projection that names the re-entering subtree whole keeps the circle
+        // it selected. The check reads a value already in hand and touches no
+        // storage, so a result that renders reaches stdout exactly as it always
+        // has, and the bound below engages only where one does not.
         const cycle = circularResultPath(result);
         if (cycle !== undefined) {
           result = await boundCyclicResult(
