@@ -3,6 +3,7 @@ export {
   type CodecForFormat,
   type FabricClassWithNonterminalCodec,
   type FabricCodec,
+  JSON_CODEC,
   type NonterminalCodec,
   type ReconstructionContext,
   type SerializationContext,

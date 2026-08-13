@@ -15,7 +15,7 @@ import {
 // that cycle fails with "Cannot access 'BaseFabricInstance' before
 // initialization". `codecOf.ts` itself is a leaf.
 import { codecOf } from "@/codec-common/codecOf.ts";
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the

@@ -11,7 +11,7 @@
  * conversion leaves an instance alone even when asked for something mutable.
  */
 
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

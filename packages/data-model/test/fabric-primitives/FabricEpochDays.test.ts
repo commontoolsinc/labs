@@ -11,7 +11,7 @@
  * Malformed state decodes to a `ProblematicValue` rather than throwing.
  */
 
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

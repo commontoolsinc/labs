@@ -22,6 +22,28 @@ import type { FabricInstance, FabricValue } from "@/interface.ts";
 export const CODEC: unique symbol = Symbol("data-model.codec");
 
 /**
+ * Well-known symbol for binding the static getter
+ * `FabricClassWithJsonCodec[JSON_CODEC]` on a `FabricPrimitive` class.
+ *
+ * A `FabricPrimitive`'s codec is bound per wire format, not once for all of
+ * them, because these classes are where the formats disagree. `FabricBytes`
+ * encodes to a base64url string, which is JSON's answer and nobody else's: a
+ * format that carries bytes natively wants a different codec, or none, and
+ * says so by looking up a different symbol.
+ *
+ * What differs can be the _kind_ of codec and not merely the state it
+ * produces, which is why the binding is per format rather than a property of
+ * the class. `FabricRegExp` expands into a record of strings under JSON,
+ * which has no pattern type of its own to terminate into.
+ *
+ * That is what separates these from a `FabricInstance`'s codec, bound to the
+ * generic `[CODEC]`: an instance's codec only expands an instance into other
+ * `FabricValue`s and leaves every terminal decision to whatever walks the
+ * result, so one binding serves every format.
+ */
+export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodecEngine");
+
+/**
  * Interface for codecs (encoder-decoder objects). These are objects which can
  * extract "essential state" out of values (objects per se or otherwise) and
  * also take such "essential state" and produce values that are equivalent (in
