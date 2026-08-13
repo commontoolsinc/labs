@@ -567,6 +567,22 @@ gate should learn that removal beneath a demand marker is narrowing rather
 than breakage — decides how much of this design applies to what is already
 running.
 
+One direction belongs in that conversation, recorded as intent rather than
+mechanism: **the provider tells holders how to move.** A pattern that
+breaks its interface knows what changed and what it expects holders to do
+about it, and it can ship that with the new generation — prose for a
+person, a recipe for a tool. Where it lives matters most: askable of the
+piece itself, so an agent watching a holding piece's errors can ask the
+held piece for upgrade instructions and decide whether to apply them. The
+shape already carries deprecation out of JSDoc and into listings; guidance
+addressed to machines is the same channel carrying more. The classical
+anchor is the deprecation that ships its own rewrite — Kotlin's
+`ReplaceWith`, a library's published codemods — applied by tooling the
+consumer chooses to run. Scoped acknowledgment is the natural place to
+demand it: a deliberate break proceeds when it says what those it breaks
+should do instead. A break stays a break, but no holder is left out in the
+cold.
+
 Three smaller calls belong to whoever does the work:
 
 - Whether the embedding rule warns, lints, or fails, and in what order those
