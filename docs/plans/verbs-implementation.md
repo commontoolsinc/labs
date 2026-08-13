@@ -367,9 +367,9 @@ its own track.
 | 5 | The help page stops claiming a verb returns nothing | **on main** (#5680) — #5558, first half | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
 | 5a | An author's prose reaches the caller | #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
 | 6 | Help enumerates what a verb returns | **on main** (#5717) — #5558, second half | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
-| 7 | A returned piece reads back through its own cycle | #5577 | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
+| 7 | A returned piece reads back through its own cycle | #5577 — **in review** (#5740) | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
 | 8 | `receipt` as a top-level envelope field | **on main** (#5694) — item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
-| 9 | A rejection propagates up through what holds it | item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
+| 9 | A rejection propagates up through what holds it | **on main** (#5701) — item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
 | 10 | Two identical projections stop colliding | #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
 | 11 | One piece, one address | #5632, #5498 | — | Trace where each id is minted; the outcome is a fix or a statement that they are aliases. Must precede step 13, which spreads the address vocabulary to two more commands |
 | 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step and the only one with design surface, since it couples the projection reader to the compatibility checker's annotation keys |
