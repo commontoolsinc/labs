@@ -212,10 +212,9 @@ shape its holder demands. What is new is that holder-side types are
 
 Two honest costs. An author now writes two kinds of type — a pattern's own
 full truth, and its demands on others — and a demand is a real contract that
-must stay as small as it claims. And shape carries no meaning: a demand can
-say "has a verb named `append` taking text," never "and `append` means what
-I think it does." Small demands keep that gap harmless; closing it properly
-is what names and versions are for.
+must stay as small as it claims. And shape carries no meaning; small demands
+keep that gap harmless, and closing it properly is what names and versions
+are for.
 
 ### Named, versioned interfaces are where this goes
 
@@ -229,9 +228,9 @@ about meaning. Declaring "Notes v2" says `append` does what Notes means by
 it, which no structural demand can say.
 
 Who defines one is worth pinning down, because it is the consumer who
-knows what it needs. A demand stays the consumer's tool — structural,
-anonymous, needing nothing from the provider — and stays the default. A
-named interface is not an enumeration of consumers' subsets; it is a
+knows what it needs — and that knowledge stays where it is: the structural
+demand remains the default. A named interface is not an enumeration of
+consumers' subsets; it is a
 promise the provider opts into: the contract it commits to keeping stable
 and meaningful. The definition itself can come from either side, because
 an interface is separate from any pattern — a consumer, a community, or a
@@ -251,19 +250,15 @@ against, and it maps to whichever spelling its generation carries: the
 suffix is bookkeeping inside the piece, the version is the contract outside
 it. Consumers reason in versions; pieces store names.
 
-This is what satisfies the across-authors requirement, and why it is
-scheduled rather than left in the distance: a name and a version are what
-let one author rely on another author's contract and know when it has moved.
-Without them, the honest advice to somebody building on a pattern they do
-not own is to fork it.
-
-It is also the most machinery of anything here — an identity, a registry,
-a place in the shape, and a compatibility rule of its own: what a version
-bump means, and how a declared minimum resolves against what a piece
-provides, are both still to be designed. Fabric-types is the natural
-vehicle. It is a design stream of its own (see
-[the longer arc](#the-longer-arc)), with everything else in this document
-standing as the interim until it lands.
+This is what satisfies the across-authors requirement: a name and a version
+are what let one author rely on another's contract and know when it has
+moved. It is also the most machinery of anything here — an identity, a
+registry, a place in the shape, and a compatibility rule of its own, where
+what a version bump means and how a declared minimum resolves against what
+a piece provides are both still to be designed. Fabric-types is the natural
+vehicle, the work is a design stream of its own (see
+[the longer arc](#the-longer-arc)), and everything else in this document
+stands as the interim until it lands.
 
 ### A maybe is resolved once, at binding
 
@@ -292,12 +287,10 @@ if (logEvent === undefined) {
 logEvent.send({ text: "started" });
 ```
 
-The first form is the tempting rewrite and the one to refuse: it does not
-resolve the maybe, it defers it to every call site, and it fails silently —
-no error, no log, no signal; in a test, a real failure becomes a pass. The
-second turns absence into something a person can act on. A real fallback —
-another way to get the work done — resolves it just as well; what is not
-acceptable is nothing.
+The first form defers the maybe to every call site and fails silently — in
+a test, a real failure becomes a pass. The second turns absence into
+something a person can act on; a real fallback resolves it just as well.
+What is not acceptable is nothing.
 
 And when a caller cannot proceed without the member at all, an optional is
 the wrong tool. The answer is an interface version the caller requires:
@@ -327,9 +320,8 @@ is our own check, with an all-or-nothing bypass
 the machinery that makes the break safe rather than nuclear: the scoped
 acknowledgment and blast-radius report under tooling, and the upgrade
 mechanisms of [the longer arc](#the-longer-arc). A migration still breaks
-callers whose expectations no longer hold — but because demands are
-recorded, that breakage is enumerable and answerable, migrated or adapted,
-rather than silent.
+callers whose expectations no longer hold; the blast-radius report is what
+makes that breakage enumerable and answerable rather than silent.
 
 The default is still to stay compatible. Most patterns are updated by models
 that will cheerfully jump through hoops to avoid a break, and a compatible
@@ -436,10 +428,9 @@ its own demand-ness — and an advisory warning when a contract embeds a
 foreign Output type, with self-reference still legal and `@sharedContract`
 opting a genuine protocol type out.
 
-Adopting narrow demands across already-deployed patterns is itself a break,
-on both sides: a deployed holder cannot drop the fields it stopped needing
-(the holder table above), so the migration needs the scoped acknowledgment
-below rather than a quiet edit.
+Adopting narrow demands across already-deployed patterns is itself a break
+— a deployed holder cannot drop what it stopped needing — so that migration
+rides the scoped acknowledgment below, not a quiet edit.
 
 ### Authoring time shows the blast radius
 
@@ -506,17 +497,14 @@ promise, versioned it, and built machinery for old and new to live side by
 side. Four mechanisms recur; this is an open design stream.
 
 **1. Interfaces carry versions, and consumers name the minimum they
-accept.** COM froze every published interface: you never changed `IFoo`, you
-published `IFoo2`, an object implemented both, and a caller asked once. OSGi
-imports at "version 1.2 or newer"; Kubernetes serves several API versions at
-once. Fabric-types is where a declared version would ride here.
+accept.** COM froze `IFoo` and published `IFoo2` beside it; OSGi imports at
+"version 1.2 or newer"; Kubernetes serves several API versions at once. The
+named-interfaces section above is this mechanism, scheduled.
 
 **2. Compatibility has declared boundaries, and breaking one is a
-decision.** Semantic versioning is the everyday form — a break is a major
-version, chosen on purpose, never a side effect of an edit. Avro checks
-compatibility pairwise, structurally what our update gate does; the
-difference is that Avro's rules are a published contract authors design
-against, while ours are discovered at refusal time.
+decision.** Semver's major version is a choice, never a side effect of an
+edit; Avro publishes rules authors design against, where ours are
+discovered at refusal time. Scoped acknowledgment is this mechanism's seed.
 
 **3. Upgrades are per-piece, and every piece has an upgrade policy.** Erlang
 runs at most two versions of a module and migrates each process
@@ -527,12 +515,12 @@ and new pattern versions writing to the same space, and the write storm
 measured 96% of all commits there. Coexistence without management is a
 failure mode we have met, not a hypothesis.
 
-**4. Upgrades can run code.** Sooner or later a new shape needs data the old
-shape did not store. Erlang gives every process a state-transform callback;
-Common Lisp's object system migrates each instance lazily, when next
-touched; Rails migrations and event-sourcing upcasters are the same idea for
-databases and logs. The recurring fork is eager against lazy, and systems
-with many small stateful things mostly chose lazy.
+**4. Upgrades can run code.** Sooner or later a new shape needs data the
+old shape did not store. Erlang's state-transform callbacks, Common Lisp's
+instances migrating when next touched, Rails migrations and event-sourcing
+upcasters are all this mechanism; systems with many small stateful things
+mostly chose lazy over eager — the fork the migration-in-place path
+inherits.
 
 Two of the rules above were derived by measurement against our own runtime
 and turned out to be classical results: "a published interface only grows"
@@ -582,11 +570,10 @@ about it, and it can ship that with the new generation — prose for a
 person, a recipe for a tool. Where it lives matters most: askable of the
 piece itself, so an agent watching a holding piece's errors can ask the
 held piece for upgrade instructions and decide whether to apply them. The
-shape already carries deprecation out of JSDoc and into listings; guidance
-addressed to machines is the same channel carrying more. The classical
-anchor is the deprecation that ships its own rewrite — Kotlin's
-`ReplaceWith`, a library's published codemods — applied by tooling the
-consumer chooses to run. Scoped acknowledgment is the natural place to
+channel exists — the shape already lifts deprecation out of JSDoc into
+listings — and the classical anchor is the deprecation that ships its own
+rewrite: Kotlin's `ReplaceWith`, a library's codemods, applied by tooling
+the consumer chooses to run. Scoped acknowledgment is the natural place to
 demand it: a deliberate break proceeds when it says what those it breaks
 should do instead. A break stays a break, but no holder is left out in the
 cold.
