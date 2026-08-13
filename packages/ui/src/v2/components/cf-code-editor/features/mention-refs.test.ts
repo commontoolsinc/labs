@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { EditorState } from "@codemirror/state";
 import {
+  findRefToken,
   mentionRefEditFilter,
   mentionRefField,
   type MentionRefInfo,
@@ -98,6 +99,36 @@ describe("mention-refs", () => {
 
     it("returns an empty set for text with no reference links", () => {
       expect(scanRefKeys("plain prose")).toEqual(new Set());
+    });
+  });
+
+  describe("findRefToken()", () => {
+    it("returns the token's range and label", () => {
+      const doc = `See [My Note][${KEY}] here`;
+      const found = findRefToken(doc, KEY);
+      expect(found).toEqual({ from: 4, to: 21, label: "My Note" });
+      expect(doc.slice(found!.from, found!.to)).toBe(`[My Note][${KEY}]`);
+    });
+
+    it("returns a token whose label has been retyped since", () => {
+      // The window an in-flight create leaves open: the label is editable, so
+      // the key is the only durable handle on the token.
+      expect(findRefToken(`[something else][${KEY}]`, KEY)?.label)
+        .toBe("something else");
+    });
+
+    it("returns a token whose label is empty", () => {
+      expect(findRefToken(`[][${KEY}]`, KEY)?.label).toBe("");
+    });
+
+    it("returns null when the key is not in the document", () => {
+      expect(findRefToken(`[A][${OTHER_KEY}]`, KEY)).toBeNull();
+      expect(findRefToken("no tokens here", KEY)).toBeNull();
+    });
+
+    it("returns the token for the key asked for, not another", () => {
+      const doc = `[One][${KEY}] and [Two][${OTHER_KEY}]`;
+      expect(findRefToken(doc, OTHER_KEY)?.label).toBe("Two");
     });
   });
 

@@ -87,6 +87,29 @@ export function parseMentionRefs(
   return refs;
 }
 
+/**
+ * Where a key's token sits in a document, whatever its label now reads.
+ *
+ * The label is ordinary editable text, so the only durable handle on a token
+ * is the key inside it. Finding one by the string that was inserted would miss
+ * a token the user has since retyped — which is exactly the window an
+ * in-flight create leaves open.
+ */
+export function findRefToken(
+  doc: string,
+  key: string,
+): { from: number; to: number; label: string } | null {
+  // The key comes from the mint, whose alphabet holds no metacharacters.
+  const match = new RegExp(`\\[([^\\]\\n]*)\\]\\[${key}\\]`).exec(doc);
+  if (!match) return null;
+
+  return {
+    from: match.index,
+    to: match.index + match[0].length,
+    label: match[1],
+  };
+}
+
 /** Announce the keys the document's reference map currently holds. */
 export const setKnownRefKeys = StateEffect.define<readonly string[]>();
 

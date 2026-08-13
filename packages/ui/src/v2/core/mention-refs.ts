@@ -56,6 +56,32 @@ export const MENTION_REF_KEY_SOURCE =
   `[0-9a-z]{${KEY_LENGTH},${MAX_KEY_LENGTH}}`;
 
 /**
+ * One entry per destination, keeping the first of each.
+ *
+ * What counts as the same destination is the caller's to say — here it is a
+ * cell's own id, which is what makes a piece reached through two different
+ * keys, or through both mention forms at once, a single mention of one piece.
+ * An entry `identityOf` cannot name is kept as it came: it has nothing to
+ * compare, and dropping it would lose a mention rather than deduplicate one.
+ */
+export function dedupeByDestination<T>(
+  pieces: T[],
+  identityOf: (piece: T) => string | undefined,
+): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const piece of pieces) {
+    const id = identityOf(piece);
+    if (id !== undefined) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    result.push(piece);
+  }
+  return result;
+}
+
+/**
  * A label the parser will read back.
  *
  * The token's label may hold anything but `]` and a newline, and a piece is

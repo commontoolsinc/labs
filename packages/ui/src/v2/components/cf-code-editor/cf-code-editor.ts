@@ -80,6 +80,7 @@ import {
   MentionableSchema,
 } from "../../core/mentionable.ts";
 import {
+  dedupeByDestination,
   labelForToken,
   type MentionRef,
   type MentionRefMap,
@@ -95,6 +96,7 @@ import {
 import {
   atomicMentionRefRanges,
   createMentionRefDecorationPlugin,
+  findRefToken,
   mentionRefEditFilter,
   mentionRefField,
   type MentionRefInfo,
@@ -103,25 +105,6 @@ import {
   setKnownRefKeys,
 } from "./features/mention-refs.ts";
 import { createProseMarkdownPlugin } from "./features/prose-markdown.ts";
-
-/**
- * One entry per destination, keeping the first of each. Identity is the cell's
- * own id, which is what makes a piece reached through two different keys — or
- * through both mention forms — a single mention of one piece.
- */
-function dedupeByDestination(pieces: Mentionable[]): Mentionable[] {
-  const seen = new Set<string>();
-  const result: Mentionable[] = [];
-  for (const piece of pieces) {
-    const id = isCellHandle(piece) ? piece.id() : undefined;
-    if (id !== undefined) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-    }
-    result.push(piece);
-  }
-  return result;
-}
 
 /** A unique noteId, so notes created from a mention do not collide. */
 function generateNoteId(): string {
@@ -784,18 +767,7 @@ export class CFCodeEditor extends BaseElement {
     key: string,
   ): { from: number; to: number; label: string } | null {
     const view = this._editorView;
-    if (!view) return null;
-
-    const match = new RegExp(`\\[([^\\]\\n]*)\\]\\[${key}\\]`).exec(
-      view.state.doc.toString(),
-    );
-    if (!match) return null;
-
-    return {
-      from: match.index,
-      to: match.index + match[0].length,
-      label: match[1],
-    };
+    return view ? findRefToken(view.state.doc.toString(), key) : null;
   }
 
   /**
@@ -2126,10 +2098,10 @@ export class CFCodeEditor extends BaseElement {
     // index pushes a backlink per entry, so a piece mentioned twice — or once
     // in each form — would otherwise be linked back twice.
     this.mentioned?.set(
-      dedupeByDestination([
-        ...this._extractMentionedPieces(content),
-        ...destinations,
-      ]),
+      dedupeByDestination(
+        [...this._extractMentionedPieces(content), ...destinations],
+        (piece) => isCellHandle(piece) ? piece.id() : undefined,
+      ),
     );
     this._setupPieceNameSubscriptions();
     this._setupRefDestinationSubscriptions();

@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  dedupeByDestination,
   labelForToken,
   MENTION_REF_KEY_SOURCE,
   MentionRefMapSchema,
@@ -70,6 +71,33 @@ describe("mention-refs", () => {
     it("returns a name on one line", () => {
       expect(labelForToken("Two\nLines")).toBe("Two Lines");
       expect(labelForToken("Two\r\nLines")).toBe("Two Lines");
+    });
+  });
+
+  describe("dedupeByDestination()", () => {
+    const idOf = (piece: { id?: string }) => piece.id;
+
+    it("returns a list with no duplicate destination", () => {
+      const a = { id: "of:fid1:aaa" };
+      expect(dedupeByDestination([a, { id: "of:fid1:bbb" }, a], idOf).length)
+        .toBe(2);
+    });
+
+    it("returns the first of each destination", () => {
+      const first = { id: "of:fid1:aaa", which: "first" };
+      const second = { id: "of:fid1:aaa", which: "second" };
+      expect(dedupeByDestination([first, second], idOf)[0].which).toBe("first");
+    });
+
+    it("returns everything the identity cannot name", () => {
+      // Dropping these would lose a mention rather than deduplicate one.
+      const plain = { name: "no identity" };
+      expect(dedupeByDestination([plain, plain], () => undefined).length)
+        .toBe(2);
+    });
+
+    it("returns an empty list unchanged", () => {
+      expect(dedupeByDestination([], idOf)).toEqual([]);
     });
   });
 
