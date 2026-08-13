@@ -492,13 +492,12 @@ these.
 - Q3: `authored`; envelope S1; the ack's instance RESOLVES from the
   authenticated session — the client names no key. [protocol §5, §1]
   (Phase-4 refresh, 2026-08-11: the ack WRITE is a per-nonce mark —
-  `acks[nonce] = true` on the instance — implementing §5's
-  "`{ ackedNonce }`" as one mark per nonce rather than a scalar
-  last-ack field, which would LOSE an earlier unretired ack whenever
-  two intents ack within one retirement interval; retirement prunes
-  acked entries and their marks together. Flagged for owner
-  ratification in the Phase-4 PR — verification-coverage.md's
-  Phase-4 delta.)
+  `acks[nonce] = true` on the instance — one mark per nonce rather
+  than a scalar last-ack field, which would LOSE an earlier
+  unretired ack whenever two intents ack within one retirement
+  interval; retirement prunes acked entries and their marks
+  together. RULED 2026-08-13: ratified — the per-nonce map is §5's
+  normative shape, the scalar `{ ackedNonce }` draft retired.)
 - Q4: SpaceServer's OWN write in the next wave's derived commit:
   addressing (`session:U1:S1`) but NO acting principal. [protocol §1, §5]
 - Q5: no — logical write = authored commit EXCLUDING effect-channel

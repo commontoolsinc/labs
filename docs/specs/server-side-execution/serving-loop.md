@@ -649,6 +649,29 @@ re-advanced; watermark forgery is an accepted authored intrusion —
 protocol.md §1's threat model). A fourth kind is a spec edit here
 first.
 
+**The flag-ON client's speculative-consequence deferred start
+(RULED 2026-08-13; the Phase-4 P1-5 flag).** A flag-ON CLIENT's
+deferred piece-start transaction minted as a SPECULATIVE
+CONSEQUENCE — the start a speculative handler echo's commit
+callback mints, carrying the create-only receipt + result wrapper
+of that echo — is SANCTIONED to stamp `event-handler` kind with
+the firing event's `eventId`, so the speculation overlay diverts
+it as the handler consequence it is. Committing it authored (or
+stamping it `bookkeeping`, which the overlay does not divert)
+would race the SERVING side's own deferred start for the
+create-only receipt; a client win suppresses the served navigateTo
+entirely — no intent is ever computed — where a handler fire's one
+authored act is the event (protocol.md §1's `authored` row; the
+MINOR-3 receipt-race pin fails that mutation deterministically).
+Scope, not exception: this section's refusal machinery and the
+sole-`bookkeeping` rule above govern internal writes at the WAVE
+SEAL destination, and the client's start tx never seals into a
+wave (no destination is installed client-side — the refusal
+paragraph above), so this sentence names the boundary rather than
+carving an exception. The serving side's and the OFF arm's
+deferred starts keep `bookkeeping`; the rule for wave-seal
+internal writes is unchanged.
+
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
   later action reads earlier ones' sealed writes; intra-wave ordering is

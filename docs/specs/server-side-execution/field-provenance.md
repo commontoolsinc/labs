@@ -241,6 +241,10 @@ FP1 and FP2 are the heavyweights.
   nonce field, yet three passages say "reconcile by nonce")? Is
   `ackedNonce` a scalar or a set, and what happens on a stale ack
   naming an already-retired entry (candidate: defined no-op)?
+  (Ack half CLOSED 2026-08-13, RULED: a per-nonce map —
+  `acks[nonce] = true` — and a stale ack IS the defined no-op,
+  pruned by retirement as hygiene; protocol §5. The
+  enacted-nonce-record home stays open.)
 - **FP12 — dead fields (E+F).** `issuedIn` (written, pushed, never
   read) and overlay `baseSeq` (recorded, never read): name the
   intended consumer of each, or drop them from the shapes.

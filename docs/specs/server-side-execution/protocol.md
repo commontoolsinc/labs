@@ -580,19 +580,30 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
   rule for both. One doc id constant, exported once; the instance
   comes from the key, never from the path.
 - **Write authority for the ack** is the owning session's own scope
-  instance: the session writes its `{ ackedNonce }` into the
-  instance its authenticated `scope_key` resolves to, so no session
-  can ack another's intents and no new ACL is needed. The
-  SpaceServer writes the intents into the same instance by naming
-  the `scope_key` explicitly (§1 addressing).
-- Shape: append-list of
-  `{ nonce, kind, args, issuedIn: <derived commit seq> }`;
-  v2 ships exactly one kind: `navigate` with
-  `args = { target: <entity link> }`.
+  instance: the session writes its ack marks into the instance its
+  authenticated `scope_key` resolves to, so no session can ack
+  another's intents and no new ACL is needed. The SpaceServer
+  writes the intents into the same instance by naming the
+  `scope_key` explicitly (§1 addressing).
+- Shape: the instance value is `{ entries, acks }` — `entries` an
+  append-list of `{ nonce, kind, args, issuedIn: <derived commit
+  seq> }`, `acks` a PER-NONCE map of the session's ack marks
+  (`acks[nonce] = true`). v2 ships exactly one kind: `navigate`
+  with `args = { target: <entity link> }`. The ack's map shape is
+  RULED (owner, 2026-08-13 — ratifying the implemented shape; the
+  earlier scalar `{ ackedNonce }` draft is REJECTED): a scalar
+  last-ack field loses an earlier un-retired ack whenever two
+  intents ack between retirement observations.
 - The SpaceServer writes intents as part of ordinary derived commits
   (navigateTo's output). The session's client subscribes to its own
-  effects doc, enacts, then commits an authored ack write
-  `{ ackedNonce }`; the next wave retires acked entries.
+  effects doc, enacts, then commits an authored ack write — its own
+  `acks[nonce] = true` mark; the next wave retires acked entries,
+  pruning each retired entry AND its mark together. A stale mark
+  (an ack naming no stored entry — a re-ack landing after
+  retirement) is pruned by the same scan as a defined no-op, so
+  re-acks are idempotent and marks never accumulate; map growth is
+  bounded by per-wave retirement, and the session-lifetime GC
+  (below) covers abandoned instances.
 - Exactly-once enactment per nonce is the CLIENT's duty (it may enact
   optimistically from speculation, then reconcile by nonce — navigation
   is reversible). Reload between intent and ack: on resubscribe the
@@ -601,6 +612,18 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
   a nonce — the enacted-nonce record lives in the reload-wiped
   overlay — and that is ACCEPTED for reversible effects, which
   every shipped kind is (LT8, RULED 2026-08-03).
+- **Failure postures (both RULED, owner 2026-08-13 — the Phase-4
+  P1-1 residuals).** A FAILED enactment is never acked: the entry
+  stays unacked in the store, and retry is DELIVERY-DRIVEN and
+  RELOAD-DRIVEN only — the next delivery of the instance (any
+  commit touching it) or the resubscribe re-read on reload
+  re-enacts. No client-side backoff timer exists or may be added:
+  the FORBIDDEN server-side retries below are not to be rebuilt as
+  client timers. A PERMANENTLY MALFORMED entry — an unknown kind,
+  an unstageable target — is never synthetically acked and never
+  tombstoned: it stays unacked and LOUD (a warning per delivery)
+  until the session-lifetime GC retires the instance with its
+  session.
 - Session lifecycle: `sessionId` is minted at client connect, persisted
   client-side across reloads, and retired explicitly on logout or by
   TTL. `sessionId` is CLIENT-GLOBAL (LT2, RULED 2026-08-03): one

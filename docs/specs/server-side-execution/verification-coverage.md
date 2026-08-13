@@ -12,7 +12,7 @@ mapping pass is due.
 
 ## 1. The map
 
-297 binding rules. Instruments: the scenario traces (T1–T12), the
+300 binding rules. Instruments: the scenario traces (T1–T12), the
 field-provenance chains, the executable model (C1–C10 property
 families), the Phase 1 dry-run, and the doc-review panels
 (weak — counted only where nothing else applies).
@@ -20,11 +20,11 @@ families), the Phase 1 dry-run, and the doc-review panels
 | doc | rules | instrument-covered | impl-gate | deferral | derivable | owed |
 | --- | --- | --- | --- | --- | --- | --- |
 | README | 31 | 17 | 9 | 1 | 2 | 2* |
-| protocol | 59 | 45 | 6 | 3 | 4 | 1* |
+| protocol | 61 | 47 | 6 | 3 | 4 | 1* |
 | events | 34 | 25 | 4 | 2 | 2 | 1 |
 | scopes | 25 | 17 | 3 | 1 | 2 | 2 |
 | builtins | 15 | 6 | 3 | 1 | 4 | 1 |
-| serving-loop | 77 | 45 | 20 | 1 | 5 | 6 |
+| serving-loop | 78 | 46 | 20 | 1 | 5 | 6 |
 | key-vocabulary | 9 | 5 | 3 | 0 | 0 | 1 |
 | speculation | 16 | 11 | 2 | 0 | 1 | 2 |
 | testing | 14 | 4 | 10 | 0 | 0 | 0 |
@@ -780,6 +780,15 @@ above carries the coverage):**
   producer of grant-scoped capabilities (protocol §2's anticipated
   grant-scoped checks) — no later than the outbox/provisioning
   producers going live (Phase 3 events; Phase 5 cross-space).
+  RULED 2026-08-13 (owner; the delegated-scoped-reads deferral): NO
+  refusal machinery lands in Phases 1–4 — no delegated-scoped-read
+  producer exists through Phase 4 (verified), so there is nothing
+  to refuse. Phase 5 MUST land the grant-scoped read design
+  (protocol §2's anticipated grant-scoped checks), or an explicit
+  fail-closed admission refusal, BEFORE any delegated-scoped-read
+  producer ships — a Phase-5 work-order PRECONDITION, and the
+  producer and its refusal/design land together as one stack, so no
+  interim exposure window exists.
 
 **Stage G pre-gate — LANDED with stage G (2026-08-06):**
 
@@ -1313,8 +1322,10 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   (i) the ACK MARK SHAPE — protocol §5's "`{ ackedNonce }`" is
   implemented as per-nonce marks (`acks[nonce] = true`) because a
   scalar last-ack field LOSES an earlier unretired ack whenever two
-  intents ack within one retirement interval; PENDING OWNER
-  RATIFICATION (the T2.Q3 refresh carries the same flag);
+  intents ack within one retirement interval; was PENDING OWNER
+  RATIFICATION, RULED 2026-08-13 — ratified, protocol §5 now
+  specifies the map (the T2.Q3 refresh carried the same flag, also
+  resolved; the 2026-08-13 delta below);
   (ii) the DETERMINISTIC NONCE constructor
   (`effectIntentNonce(eventId, instanceId)`, wire-shape module) —
   "minted server-side" implemented as a deterministic function both
@@ -1478,7 +1489,9 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   server-side retries and names no client timer; recorded, not
   filled), and a permanently-malformed entry (no stageable target)
   now stays unacked-loud instead of being silently consumed (the
-  session-lifetime GC is the backstop);
+  session-lifetime GC is the backstop) — both residual postures
+  RULED 2026-08-13 as the intended contract, now normative in
+  protocol §5's failure postures (the 2026-08-13 delta below);
   (P1-2) INTENT-SEAL FAILURE REQUEUES THE OWNING EVENT: an isolated
   seal failure of the served navigateTo's intent tx previously only
   logged — the handler contribution (carrying the entry's
@@ -1507,20 +1520,71 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   first deterministic thrower on a DEMANDED effect node, exposing
   the pre-existing OW26 scheduler wedge above;
   (P1-4) the ack WIRE SHAPE (`acks[nonce]` map vs protocol.md §5's
-  scalar `{ ackedNonce }`) is PENDING OWNER RATIFICATION — neither
+  scalar `{ ackedNonce }`) was PENDING OWNER RATIFICATION — neither
   the spec nor the implementation was touched; the plan doc's
-  passage now carries the pending marker;
+  passage carried the pending marker. RULED 2026-08-13: the map is
+  ratified — protocol §5 amended, the plan marker resolved (the
+  2026-08-13 delta below);
   (P1-5) the deferred-start stamping (serving-loop.md §3d's sole
   sanctioned internal `bookkeeping` stamp vs the flag-ON client's
-  event-handler-stamped navigate-deferred start) is FLAGGED as a
+  event-handler-stamped navigate-deferred start) was FLAGGED as a
   genuine spec-vs-design contradiction, evidence in the fixer
   report: conforming to §3d's letter (the bookkeeping mutation) is
   exactly the MINOR-3 neutralization and fails the receipt-race pin
-  deterministically — the spec edit is the owner's call, not the
-  fixer's;
+  deterministically — the spec edit was the owner's call, not the
+  fixer's. RULED 2026-08-13, resolution (a): §3d now carries the
+  sanction sentence (boundary named, not exception carved) and the
+  runner comments cite it (the 2026-08-13 delta below);
   (P1-6) the shared-manager observer clear was already
   identity-guarded in this batch (NOTE-a above; red-first:
   `effects-channel-dispose.test.ts` fails at d28276798).
+
+Delta 2026-08-13 — the owner ruling batch (P1-4, P1-5, the P1-1
+residual postures, and the delegated-scoped-reads deferral; protocol
+59 → 61, serving-loop 77 → 78 — the map edited with this delta):
+
+- protocol §5's ack wire shape RATIFIED as the per-nonce
+  `acks[nonce] = true` map (P1-4 resolved; the scalar
+  `{ ackedNonce }` draft is retired — rationale on the amended
+  sentence: a scalar loses an earlier un-retired ack whenever two
+  intents ack between retirement observations). CHANGED sentences,
+  same rows — the ack-write and next-wave-retirement rules already
+  existed; the stale-mark defined no-op and re-ack idempotence are
+  stated on the amended retirement sentence. Coverage already
+  landed with Phase 4: the engine retirement-scan arms
+  (`memory/test/v2-effects-doc.test.ts`: acked/unacked prune,
+  stale-mark hygiene, malformed-value skip) and the end-to-end ack
+  journeys (`executor-effect-channel.test.ts`). The Phase-4 delta's
+  (i) flag, the owner-review delta's P1-4 entry, the plan's ack
+  passage, T2.Q3's refresh flag, and FP11's ack-shape half all
+  carry the resolution.
+- serving-loop §3d's speculative-consequence deferred-start
+  sentence (+1 rule): the flag-ON client's `event-handler`-stamped
+  deferred piece-start is SANCTIONED (P1-5 resolution (a) —
+  boundary named, not exception carved: §3d's refusal machinery
+  governs the wave seal destination, which the client's start tx
+  never reaches). → COVERED by the landed MINOR-3 receipt-race pin
+  (`executor-effect-channel.test.ts`: the bookkeeping-stamp
+  mutation fails deterministically — eventEchoSealCount 1 ≠ 2 —
+  and zero authored-class commits touch the served navigation's
+  target doc). The runner.ts comments now cite the sentence
+  instead of claiming an informal "Phase-4 exception".
+- protocol §5's failure postures (+2 rules, both RULED): (a)
+  failed-enactment retry is DELIVERY-driven and RELOAD-driven only
+  — no client-side backoff timers; → COVERED by the P1-1 red-first
+  pair (the retry is witnessed arriving with the next delivery;
+  the no-timer half is the sanctioned absence, structural in
+  `effects-channel.ts`). (b) permanently malformed entries stay
+  unacked and LOUD until session GC — no synthesized acks, no
+  tombstones; → COVERED by the leave-unacked discipline pins (the
+  P1-1 arms; the engine's stale-mark/malformed scan arms) — the
+  unknown-kind arm shares the same reconcile skip-without-ack
+  path (code-comment-cited); its dedicated client pin rides the
+  session-data GC design (scopes §8 item 2), which owns the
+  abandoned-instance end state.
+- OW13 updated in place with the delegated-scoped-reads deferral
+  ruling (no count move — the register row carries the Phase-5
+  work-order precondition; see the row).
 
 ## 4. Standing rule
 

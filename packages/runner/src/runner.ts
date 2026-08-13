@@ -3234,15 +3234,18 @@ export class Runner {
       const startTx = this.runtime.edit();
       // Minted inside a commit callback — by definition outside any
       // scheduler run; the deferred start's node wiring is piece
-      // machinery, stamped bookkeeping per serving-loop.md §3d. The
-      // Phase-4 exception: a flag-ON CLIENT's navigate-deferred start
-      // is a handler CONSEQUENCE (the receipt + result wrapper of a
-      // speculative echo), so it stamps event-handler-kind and the
-      // overlay diverts it — committing it authored would race the
-      // SERVING side's own deferred start for the create-only receipt,
-      // and a client win would suppress the served navigateTo (no
-      // intent would ever be computed). The serving side and the OFF
-      // arm keep bookkeeping.
+      // machinery, stamped bookkeeping per serving-loop.md §3d. A
+      // flag-ON CLIENT's navigate-deferred start carries §3d's RULED
+      // speculative-consequence stamp (2026-08-13): it is a handler
+      // CONSEQUENCE (the receipt + result wrapper of a speculative
+      // echo), so it stamps event-handler-kind and the overlay
+      // diverts it — committing it authored would race the SERVING
+      // side's own deferred start for the create-only receipt, and a
+      // client win would suppress the served navigateTo (no intent
+      // would ever be computed). §3d's bookkeeping-only rule governs
+      // internal writes at the wave seal destination, which this
+      // client-side start tx never reaches. The serving side and the
+      // OFF arm keep bookkeeping.
       this.runtime.stampServerRun(startTx, {
         actionId: `piece-start/${resultLink.id}`,
         ...(speculativeConsequence !== undefined
@@ -3337,10 +3340,10 @@ export class Runner {
       const startTx = this.runtime.edit();
       // Minted inside a commit callback — outside any scheduler run;
       // bookkeeping per serving-loop.md §3d, like the deferred start
-      // above (and with the same Phase-4 exception: a flag-ON client's
-      // navigate-deferred start is a speculative handler CONSEQUENCE
-      // and diverts to the overlay instead of racing the serving
-      // side's receipt create).
+      // above (and with the same §3d-RULED speculative-consequence
+      // stamp, 2026-08-13: a flag-ON client's navigate-deferred start
+      // is a speculative handler CONSEQUENCE and diverts to the
+      // overlay instead of racing the serving side's receipt create).
       this.runtime.stampServerRun(startTx, {
         actionId: `piece-start/${resultLink.id}`,
         ...(speculativeConsequence !== undefined
