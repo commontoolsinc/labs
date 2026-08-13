@@ -514,47 +514,26 @@ before we draw more of it ourselves.
 
 ## Considered and set aside
 
-**All verbs optional, as the default.** Declaring every verb as something a
-piece may have buys the most evolution for the least machinery — adding a
-verb is then always allowed, anywhere. It is set aside because it moves the
-maybe into every call site, permanently, failing the promise requirement: an
-interface whose every member is optional is not a contract but a suggestion.
-Every system in the longer arc bought the same evolution while keeping the
-promise. The measurements are kept because they locate who depends on verb
-declarations:
-
-- **8 call sites** in shipped pattern code read a verb off another piece,
-  across four files.
-- **396 call sites across 50 test files** do the same, every one of the form
-  `instance.verb.send(...)` — the documented way to test a pattern.
-
-Optional verbs turn each of those into a possibly-absent value, and the
-obvious rewrite, `instance.verb?.send(...)`, does nothing at all when the
-verb is absent. Whether the compiler would even catch a missed rewrite is
-unestablished: pattern `*.test.tsx` files are excluded from `deno task test`
-in `packages/patterns` and run through the `cf` binary instead.
-
-Optional members survive where absence is a real state — a generation that
-lacks a verb, a capability present by configuration — resolved once at
-binding. They are not an evolution device.
+**All verbs optional, as the default.** The cheapest evolution — adding a
+verb is then always allowed, anywhere — at the cost of a maybe at every
+call site, permanently: an interface whose every member is optional is not
+a contract but a suggestion, which fails the promise requirement. The 8
+cross-piece verb call sites in shipped patterns and the 396 across the
+tests would each become a possibly-absent value whose obvious rewrite,
+`instance.verb?.send(...)`, skips silently. Where absence is a real state,
+the design already admits an optional member, resolved once at binding.
 
 **Versioning every verb from day one.** Spelling the first generation
-`append_v1` taxes every verb forever to serve the few that ever need a
-second generation. The suffix appears when the second generation does.
+`append_v1` taxes every verb forever to serve the few that ever get a
+second. The suffix appears when the second generation does.
 
-**Redeploying a new pattern to escape a true break.** Deploying the
-successor as a new pattern looks like the safe way out of an incompatible
-change: the old piece keeps working, the new one starts clean. It is set
-aside because it forks the piece's identity. Every stored reference — boards
-holding notes, topics holding cross-references — keeps pointing at the old
-piece, and no forwarding mechanism exists or is scheduled; the data forks
-with it, and the two populations coexist unmanaged, which is the measured
-write-storm failure in the longer arc. Everything it seems to offer arrives
-better in place: migration handles the shape, versioned interfaces handle
-the callers, per-piece upgrade policy handles the rollout. What remains
-legitimate is creation — a genuinely new pattern, owing nothing to the old
-one's callers — and a move across spaces, where identity cannot follow.
-Neither is evolution, so neither is governed by this design.
+**Redeploying a new pattern to escape a true break.** It forks the piece's
+identity: every stored reference keeps pointing at the old piece, with no
+forwarding mechanism, and the two populations coexist unmanaged — the
+measured write-storm failure in the longer arc. Everything it offers
+arrives better in place: migration handles the shape, versioned interfaces
+the callers, upgrade policy the rollout. What remains — a genuinely new
+pattern, a move across spaces — is creation, not evolution.
 
 ## What is not settled here
 
