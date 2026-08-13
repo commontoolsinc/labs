@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -71,6 +71,11 @@ const OTHER_SPACE_DID =
   "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
 const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
+// A key the commands below can open a session with; they never reach a
+// server, so which identity it names does not matter.
+const TEST_PKCS8_KEY = `-----BEGIN PRIVATE KEY-----
+MMC4CAQAwBQYDK2VwBCIEICWSvx4QOW+mogjWSsjInQaPpmjErsDBqf2ZOoK+Y4IO
+-----END PRIVATE KEY-----`;
 
 describe("cli piece parsing", () => {
   it("formats structured pattern references for human output", () => {
@@ -631,6 +636,79 @@ describe("cli piece parsing", () => {
         embeddedSpace: SPACE_DID,
         path: ["field"],
       });
+    });
+  });
+
+  describe("embedded space DIDs given to a link command", () => {
+    // A `--space` given as a name resolves to a DID only when the session
+    // opens, so a DID embedded in a reference rides along to that point and
+    // is compared there. Each command below reaches the comparison without a
+    // server: the session derives the space key from the name locally, and
+    // the check runs before any storage is opened.
+    let identityPath = "";
+
+    beforeEach(async () => {
+      identityPath = await Deno.makeTempFile({ suffix: ".key" });
+      await Deno.writeTextFile(identityPath, TEST_PKCS8_KEY);
+    });
+
+    afterEach(async () => {
+      await Deno.remove(identityPath);
+    });
+
+    const options = () =>
+      `--identity ${identityPath} --api-url ${API_URL} --space ${SPACE}`;
+
+    const spaceRefusal = async (command: string) => {
+      const { code, stderr } = await cf(command);
+      expect(code).toBe(1);
+      return stripAnsi(stderr.join("\n"));
+    };
+
+    it("refuses a link whose source names another space", async () => {
+      expect(
+        await spaceRefusal(
+          `piece link ${options()} ` +
+            `/@${SPACE_DID}/${LLM_HANDLE}/notes ${LLM_HANDLE}/inbox`,
+        ),
+      ).toContain(`Reference names space "${SPACE_DID}"`);
+    });
+
+    it("refuses a link whose target names another space", async () => {
+      expect(
+        await spaceRefusal(
+          `piece link ${options()} ` +
+            `${LLM_HANDLE}/notes /@${SPACE_DID}/${LLM_HANDLE}/inbox`,
+        ),
+      ).toContain(`Reference names space "${SPACE_DID}"`);
+    });
+
+    it("refuses a sqlite link whose target names another space", async () => {
+      expect(
+        await spaceRefusal(
+          `piece link ${options()} ` +
+            `sqlite:/tmp/reference-data.db /@${SPACE_DID}/${LLM_HANDLE}/refDb`,
+        ),
+      ).toContain(`Reference names space "${SPACE_DID}"`);
+    });
+
+    it("refuses a slug whose source names another space", async () => {
+      expect(
+        await spaceRefusal(
+          `piece set-slug ${options()} ` +
+            `project-notes /@${SPACE_DID}/${LLM_HANDLE}/notes`,
+        ),
+      ).toContain(`Reference names space "${SPACE_DID}"`);
+    });
+
+    it("still requires a path on a link target given in the canonical form", async () => {
+      // The path rule is the bare form's, and reaching it proves the
+      // canonical endpoint was parsed rather than refused as unrecognized.
+      expect(
+        await spaceRefusal(
+          `piece link ${options()} ${LLM_HANDLE}/notes /${LLM_HANDLE}`,
+        ),
+      ).toContain("Target reference must include a path.");
     });
   });
 
