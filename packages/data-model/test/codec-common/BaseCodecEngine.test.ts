@@ -27,8 +27,8 @@ const CONTEXT = EMPTY_RECONSTRUCTION_CONTEXT;
 
 describe("BaseCodecEngine", () => {
   describe("terminal vs. nonterminal codecs", () => {
-    // The two host codecs return the identical state, `{ inner: "X" }`, and
-    // differ only in which base class they extend. Everything below is
+    // The two host codecs return the identical state, `{ inner: NESTED }`,
+    // and differ only in which base class they extend. Everything below is
     // therefore the engine's doing rather than theirs.
 
     it("leaves a terminal codec's state alone", () => {
@@ -36,8 +36,9 @@ describe("BaseCodecEngine", () => {
       const encoded = engine.encode(TERMINAL_HOST) as Tagged;
 
       expect(encoded.tag).toBe("T@1");
-      // `"X"` has a codec of its own, and it was not consulted: a terminal
-      // state is already in the format's domain, so the walk stops here.
+      // `NESTED` has a codec of its own, and it was not consulted: a
+      // terminal state is already in the format's domain, so the walk stops
+      // here.
       expect(encoded.state).toEqual({ inner: NESTED });
     });
 
@@ -46,8 +47,8 @@ describe("BaseCodecEngine", () => {
       const encoded = engine.encode(NONTERMINAL_HOST) as Tagged;
 
       expect(encoded.tag).toBe("N@1");
-      // The same state, expanded: `"X"` is a fabric value, so the walk went on
-      // and `XCodec` encoded it under its own tag.
+      // The same state, expanded: `NESTED` is a fabric value, so the walk
+      // went on and `XCodec` encoded it under its own tag.
       const inner = (encoded.state as { inner: ProbeValue }).inner as Tagged;
       expect(inner).toBeInstanceOf(Tagged);
       expect(inner.tag).toBe("X@1");
