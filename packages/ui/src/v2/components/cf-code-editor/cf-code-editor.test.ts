@@ -240,3 +240,103 @@ describe("CFCodeEditor reference-map housekeeping", () => {
     });
   });
 });
+
+describe("CFCodeEditor pasted-mention decision", () => {
+  // `_handleUrlPaste` decides whether a pasted URL becomes a mention, and it
+  // prevents the browser's own paste when it does. Anything it declines has to
+  // fall through UNPREVENTED, or the clipboard content goes nowhere — the
+  // failure this pins. Exercised against a minimal `this`, so no CodeMirror or
+  // DOM is constructed.
+
+  const HASH = "V2tROHl4KsExx5M0fYnkQaOryFwjVUkqXIlcdMWz7SQ";
+  const SPACE = "did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh";
+
+  // Built on the prototype so `_refMode` — a getter — and `_fabricHosts()`
+  // resolve; the insertion itself needs a runtime, so an own property shadows
+  // it. The decision under test needs neither.
+  function pasteThis(): Record<string, unknown> {
+    const own = (value: unknown) => ({ value, writable: true });
+    // Defined rather than assigned: assigning would run Lit's reactive
+    // property setters, which need instance state this object does not have.
+    // Own data properties also shadow those accessors for the rest of the test.
+    return Object.create(CFCodeEditor.prototype, {
+      // Its presence is what selects reference mode.
+      references: own({ get: () => ({}) }),
+      pattern: own({ space: () => "did:key:mock" }),
+      fabricHosts: own(["fabric.example"]),
+      _editorView: own(undefined),
+      _insertPastedMention: own(() => {}),
+    });
+  }
+
+  function paste(
+    fakeThis: Record<string, unknown>,
+    text: string,
+  ): { handled: boolean; prevented: boolean } {
+    let prevented = false;
+    const event = {
+      clipboardData: { getData: () => text },
+      preventDefault: () => (prevented = true),
+    };
+    const handled = (fakeThis as unknown as {
+      _handleUrlPaste(event: unknown, view: unknown): boolean;
+    })._handleUrlPaste(event, undefined);
+    return { handled, prevented };
+  }
+
+  it("takes over a paste of a URL naming a piece", () => {
+    const result = paste(pasteThis(), `/of:fid1:${HASH}`);
+    expect(result.handled).toBe(true);
+    expect(result.prevented).toBe(true);
+  });
+
+  it("takes over a paste of a page URL on a configured host", () => {
+    const result = paste(
+      pasteThis(),
+      `https://fabric.example/${SPACE}/of:fid1:${HASH}`,
+    );
+    expect(result.handled).toBe(true);
+  });
+
+  it("leaves an ordinary web page to the browser, unprevented", () => {
+    const result = paste(pasteThis(), "https://example.com/blog/post");
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+
+  it("leaves a slug URL to the browser, unprevented", () => {
+    // A slug addresses a redirect document, which needs a read before it can
+    // name a piece. Preventing the paste and then declining swallowed it.
+    // The space is a DID on purpose: a named space is refused one check
+    // earlier, so this would not reach the branch under test.
+    const result = paste(
+      pasteThis(),
+      `https://fabric.example/${SPACE}/my-note`,
+    );
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+
+  it("leaves a URL naming its space by name to the browser, unprevented", () => {
+    const result = paste(
+      pasteThis(),
+      `https://fabric.example/work/of:fid1:${HASH}`,
+    );
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+
+  it("leaves pasted prose alone", () => {
+    const result = paste(pasteThis(), "some words and a space");
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+
+  it("leaves every paste alone without a reference map", () => {
+    const fakeThis = pasteThis();
+    fakeThis.references = null;
+    const result = paste(fakeThis, `/of:fid1:${HASH}`);
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+});
