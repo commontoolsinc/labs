@@ -76,7 +76,7 @@ class UnregisteredInstance extends BaseFabricInstance {
     return "Unregistered@1";
   }
 
-  // The encode-side mandate guard fires before either of these is reached, so
+  // The encode-side mandate guard fires before any of these are reached, so
   // they are throwing stubs.
   [DEEP_FREEZE](_subFreeze: (value: FabricValue) => FabricValue): FabricValue {
     throw new Error("not implemented");
@@ -88,13 +88,12 @@ class UnregisteredInstance extends BaseFabricInstance {
     throw new Error("not implemented");
   }
 
-  protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
-    return new UnregisteredInstance();
-  }
-
-  // Also unreachable, for the same reason.
   protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
     throw new Error("not implemented");
+  }
+
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
+    return new UnregisteredInstance();
   }
 }
 
