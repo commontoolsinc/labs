@@ -1420,10 +1420,15 @@ discussion in Section 2.4).
 
 ### 2.2 Symbols
 
-The serialization symbol lives with the codec vocabulary; the in-process
+The serialization symbols live with the codec vocabulary; the in-process
 lifecycle symbols live on the implementation base class `BaseFabricInstance`
 (Section 2.3), kept off the pure-protocol `FabricInstance` interface as
 implementation plumbing.
+
+There is one serialization symbol per wire format, plus the format-neutral
+`CODEC` (Section 2.4). A registry reads the format's own symbol through a
+variable rather than naming it, which is what lets one curated class list serve
+every format.
 
 Each is a genuinely unique symbol rather than a registry-interned one, so a
 member keyed by it is reachable only by importing the symbol. The string passed
@@ -1440,6 +1445,15 @@ the symbol up by.
  * symbol (see Section 2.4).
  */
 export const CODEC: unique symbol = Symbol('data-model.codec');
+
+/**
+ * Well-known symbol for binding the static getter `[JSON_CODEC]` on a
+ * `FabricPrimitive` class. A class binds its codec per wire format, not
+ * once for all of them, where the formats disagree about it (see Section
+ * 2.4).
+ */
+export const JSON_CODEC: unique symbol =
+  Symbol('data-model.jsonCodecEngine');
 ```
 
 ```typescript
@@ -1674,14 +1688,21 @@ overlap — an all-string record satisfies `FabricValue` and JSON's value type
 alike. A codec therefore **declares** its kind by which base class it extends,
 and everything downstream reads that declaration.
 
-The kind belongs to the pair (class, format) rather than to the class. A
-nonterminal codec settles nothing about how its values are ultimately written
-down, so one instance serves every format and binds to the format-neutral
-`CODEC` symbol. A terminal codec belongs to one format, so a class supplies one
-per format it participates in, bound under that format's own symbol —
-`JSON_CODEC` for the JSON wire format. `FabricRegExp` shows why this cannot be
-a property of the class: it expands into a record of strings under JSON, which
-has no pattern type of its own to terminate into.
+The kind belongs to the pair (class, format) rather than to the class, and the
+symbol a class binds under is a separate question from the kind. Binding
+`[CODEC]` is the class-level claim that **one codec serves every format**; a
+terminal codec can never make that claim, since its state is in one format's
+domain, so a class binding here supplies a nonterminal one. A class the formats
+want to treat differently — in the state produced, in the kind of codec, or
+both — binds one per format under that format's own symbol instead, such as
+`JSON_CODEC` for the JSON wire format, and what it supplies there may be of
+either kind.
+
+So the symbol tracks whether the formats agree about the class, while the kind
+is settled per (class, format). `FabricRegExp` shows both halves at once: it
+binds per format, and what it gives JSON is *nonterminal*, expanding into a
+record of strings because JSON has no pattern type of its own to terminate
+into.
 
 ```typescript
 // Shown at module scope.
@@ -2409,7 +2430,7 @@ is not part of the public boundary interface.
  *
  * Deep-frozen invariant on the deserialize side: every such tree that
  * enters deserialization is deep-frozen, enforced at the two construction
- * sites that feed it (`decode()` and `fromBytes()`, unified in
+ * sites that feed it (`decode()` and `#fromBytes()`, unified in
  * `#parseWireText()`). This is what lets the tag-unwrap and `/quote` arms
  * hand back extracted sub-trees directly without further copying. The
  * serialize-side trees are transient (`JSON.stringify`-ed and discarded)
@@ -3881,7 +3902,7 @@ values cross from internal serialization machinery to callers:
   there is a separate follow-on. See Section 4.5 step 4.
 
 - **`JsonCodecValue` parse boundary.** The `#parseWireText()` helper
-  (invoked by `decode()` and `fromBytes()`) deep-freezes the parsed tree
+  (invoked by `decode()` and `#fromBytes()`) deep-freezes the parsed tree
   before handing it to the decode walker. This is what makes the
   deserialize-side `JsonCodecValue` invariant load-bearing: tag-unwrap and
   the `/quote` arm can hand back extracted sub-trees directly without

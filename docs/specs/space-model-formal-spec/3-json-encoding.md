@@ -369,7 +369,7 @@ properties a decoder preserves regardless of which form it sees.
 
 ## 7. Serialization Context Responsibilities
 
-The JSON encoding context's internal `wrapTag()` / `unwrapTag()` methods
+The JSON encoding context's internal `wrapTag()` / `#unwrapTag()` methods
 generate and parse `/<Type>@<Version>` keys. The context is also responsible
 for:
 

@@ -378,12 +378,18 @@ interface FabricCodec<Encoded> {
 }
 
 // Nonterminal: state made of fabric values, which the walker expands in
-// turn. One instance serves every wire format, and binds to `CODEC`.
+// turn. One such instance can serve every wire format.
 type NonterminalCodec = FabricCodec<FabricValue>;
 
 // Terminal: state already in one format's own domain, which the walker
-// passes through. Bound per format, under that format's own symbol.
+// passes through. Serves that one format alone.
 type TerminalCodec<Encoded> = FabricCodec<Encoded>;
+
+// The symbol a class binds under is a separate question from the kind.
+// `CODEC` is the claim that one codec serves every format, so only a
+// nonterminal codec can be bound there. A class the formats treat
+// differently binds per format instead, under that format's own symbol,
+// and what it supplies there may be of either kind.
 
 // Which kind a codec is cannot be read off its signature -- the domains
 // overlap -- so a codec declares it by which base class it extends.
