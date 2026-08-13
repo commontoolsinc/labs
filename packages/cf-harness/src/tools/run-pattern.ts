@@ -1,12 +1,9 @@
 import type { JSONSchema } from "@commonfabric/api";
-import {
-  type Cell,
-  compileAndSavePattern,
-  matchLLMFriendlyLink,
-} from "@commonfabric/runner";
+import { type Cell, compileAndSavePattern } from "@commonfabric/runner";
 import { validateAgainstSchema } from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
+  matchLLMFriendlyLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
 import { PieceController } from "@commonfabric/piece/ops";
