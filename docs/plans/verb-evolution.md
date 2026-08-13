@@ -224,6 +224,14 @@ pattern: "Notes, version 2" is a first-class thing, patterns declare which
 interfaces they provide, and consumers declare the minimum version they
 accept. Binding checks once; after that the caller holds a guarantee.
 
+Interface versions layer over new verb names; they do not replace them. A
+piece's shape is one namespace, so when two generations coexist on one
+piece the incompatible verb still lives under a fresh name — `append`
+beside `append_v2`. The interface version is the name a consumer binds
+against, and it maps to whichever spelling its generation carries: the
+suffix is bookkeeping inside the piece, the version is the contract outside
+it. Consumers reason in versions; pieces store names.
+
 This is what satisfies the across-authors requirement, and why it is
 scheduled rather than left in the distance: a name and a version are what
 let one author rely on another author's contract and know when it has moved.
