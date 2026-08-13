@@ -1,9 +1,25 @@
+/**
+ * The registry a wire format's walker consults: tag to codec on the way in,
+ * value to codec on the way out. On the encode side the match is by class
+ * where a value has a useful one and by primitive type otherwise, with a value
+ * that is already its own wire form answering to neither and getting a
+ * sentinel in place of a codec.
+ *
+ * A registry is mutable while it is being assembled and immutable once frozen,
+ * and that is a safety property rather than a convenience. A codec holds the
+ * registry it was constructed with, so one handed out unfrozen could gain a
+ * registration underneath a codec already relying on it. Building further on a
+ * frozen registry means extending it into a new one.
+ */
+
 import type { FabricValue } from "@/interface.ts";
 import {
   CODEC,
-  type FabricClassWithCodec,
-  type FabricCodec,
-} from "./interface.ts";
+  type CodecForFormat,
+  type WireFormat,
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
 /**
@@ -56,7 +72,7 @@ function constructorOf(
 }
 
 /**
- * Registry of `FabricCodec`s. Provides tag-based lookup for decoding, and
+ * Registry of codecs. Provides tag-based lookup for decoding, and
  * primitive-type and class matching for encoding.
  *
  * An instance is mutable while it is being built and immutable once
@@ -65,18 +81,82 @@ function constructorOf(
  * was constructed with and would otherwise see a later registration. Use
  * {@link #extend} to build on one that is already frozen.
  */
-export class CodecRegistry {
+export class CodecRegistry<Encoded> {
+  /** The wire format this registry is over. */
+  readonly #format: WireFormat<Encoded>;
+
   /** Tag -> codec map for O(1) decode dispatch. */
-  readonly #tagMap = new Map<string, FabricCodec>();
+  readonly #tagMap = new Map<string, CodecForFormat<Encoded>>();
 
   /** Class -> codec map for O(1) encode dispatch on object values. */
-  readonly #classMap = new Map<Constructor, FabricCodec>();
+  readonly #classMap = new Map<Constructor, CodecForFormat<Encoded>>();
 
   /** Primitive `type` -> codec map for O(1) encode dispatch on primitives. */
-  readonly #primitiveCodecs = new Map<PrimitiveTypeName, FabricCodec>();
+  readonly #primitiveCodecs = new Map<
+    PrimitiveTypeName,
+    CodecForFormat<Encoded>
+  >();
 
   /** Primitive `type`s that are self-representing (encoded as-is). */
   readonly #selfRepTypes = new Set<PrimitiveTypeName>();
+
+  /**
+   * Constructs an instance over the given wire format, which decides the
+   * symbol {@link #registerClass} reads a codec out from under.
+   *
+   * `format` must be frozen. A registry holds it for its lifetime and reads
+   * the symbol on every class registration, so a mutable descriptor could
+   * change which codec a class supplies partway through a registry being
+   * built. `readonly` does not carry that: it binds at the type level only,
+   * and says nothing about an object arriving from elsewhere.
+   *
+   * @throws If `format` is not frozen.
+   */
+  constructor(format: WireFormat<Encoded>) {
+    if (!Object.isFrozen(format)) {
+      throw new Error("`WireFormat` instances must be frozen.");
+    }
+
+    this.#format = format;
+  }
+
+  /**
+   * Registers the codec that the given class supplies for this registry's
+   * format: its `[CODEC]` if it has one, and otherwise the codec bound under
+   * the format's own symbol. A class with both supplies the former, that being
+   * the one which serves every format.
+   *
+   * This is what lets a single curated class list serve every format. Which
+   * symbol a given class binds is a question about that class and that format
+   * -- `FabricRegExp` supplies a nonterminal codec to JSON, having no pattern
+   * type of its own to terminate into -- and reading it here means no caller
+   * has to keep one list per format in step with the others.
+   *
+   * The parameter is only `Constructor`, and cannot be narrower: naming the
+   * symbol a class must bind would name a format, which is the thing a shared
+   * roster must not do. So this refuses at run time what a type cannot rule
+   * out. A registry is built at module scope, so the refusal still lands
+   * before anything has been encoded.
+   *
+   * @throws If the class supplies a codec under neither symbol.
+   */
+  registerClass(cls: Constructor): void {
+    this.#assertNotFrozen();
+
+    const bound = cls as unknown as Partial<
+      Record<symbol, CodecForFormat<Encoded>>
+    >;
+    const codec = bound[CODEC] ?? bound[this.#format.codecSymbol];
+
+    if (codec === undefined) {
+      throw new Error(
+        "Shouldn't happen: class supplies no codec for this registry's " +
+          `format: \`${cls.name}\``,
+      );
+    }
+
+    this.register(codec);
+  }
 
   /**
    * Registers a codec, indexing it by its `recognizedTypeTag` (for decode) and
@@ -84,8 +164,11 @@ export class CodecRegistry {
    * in which case the codec is left unindexed for the corresponding lookup;
    * note that a codec with no `uniqueHandledClass` is unreachable for encoding.
    */
-  register(codec: FabricCodec): void {
+  register(codec: CodecForFormat<Encoded>): void {
     this.#assertNotFrozen();
+
+    CodecRegistry.#assertClassified<Encoded>(codec);
+    CodecRegistry.#assertTagRegistrable(codec.recognizedTypeTag);
 
     const uniqueClass = codec.uniqueHandledClass;
     if (uniqueClass !== undefined) {
@@ -103,8 +186,14 @@ export class CodecRegistry {
    * Indexes the codec by its `recognizedTypeTag` (for decode) and by `type`
    * (for O(1) encode dispatch on primitives).
    */
-  registerPrimitive(type: PrimitiveTypeName, codec: FabricCodec): void {
+  registerPrimitive(
+    type: PrimitiveTypeName,
+    codec: CodecForFormat<Encoded>,
+  ): void {
     this.#assertNotFrozen();
+
+    CodecRegistry.#assertClassified<Encoded>(codec);
+    CodecRegistry.#assertTagRegistrable(codec.recognizedTypeTag);
 
     this.#primitiveCodecs.set(type, codec);
 
@@ -129,19 +218,36 @@ export class CodecRegistry {
   }
 
   /**
-   * Creates a frozen copy of this instance with the given classes' codecs
-   * additionally registered. This instance is left untouched, so a shared
-   * registry can be built on without being altered, and the result is frozen
-   * so that it in turn can be shared.
+   * Creates a frozen copy of this instance with the given codecs additionally
+   * registered. This instance is left untouched, so a shared registry can be
+   * built on without being altered, and the result is frozen so that it in
+   * turn can be shared.
    *
-   * This is the intended way to add classes to a registry someone else
-   * assembled: extending what a factory returns is what keeps a caller from
-   * omitting, by accident, everything that factory put there.
+   * This is the intended way to add to a registry someone else assembled:
+   * extending what a factory returns is what keeps a caller from omitting, by
+   * accident, everything that factory put there.
    *
-   * @param classes Classes whose static `[CODEC]` is to be registered.
+   * An argument may be a class, in which case its codec for this registry's
+   * format is found as {@link #registerClass} finds one. That is what a
+   * curated roster holds. A bare codec is also accepted, for a caller holding
+   * one it did not get from a class -- a codec built for a single registry,
+   * say, or one already read out from under a symbol.
+   *
+   * Arguments are taken as `Array.concat()` takes them -- any number, each
+   * either a single entry or a list of them -- so that a caller combining
+   * rosters need not splice them into one array first.
+   *
+   * @param entries The classes and codecs to register in addition,
+   *   individually or in lists.
    */
-  extend(classes: readonly FabricClassWithCodec[]): CodecRegistry {
-    const result = new CodecRegistry();
+  extend(
+    ...entries: readonly (
+      | Constructor
+      | CodecForFormat<Encoded>
+      | readonly (Constructor | CodecForFormat<Encoded>)[]
+    )[]
+  ): CodecRegistry<Encoded> {
+    const result = new CodecRegistry<Encoded>(this.#format);
 
     for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
     for (const [key, value] of this.#classMap) result.#classMap.set(key, value);
@@ -150,8 +256,16 @@ export class CodecRegistry {
     }
     for (const type of this.#selfRepTypes) result.#selfRepTypes.add(type);
 
-    for (const cls of classes) {
-      result.register(cls[CODEC]);
+    for (const arg of entries) {
+      if (Array.isArray(arg)) {
+        for (const entry of arg) {
+          result.#registerEntry(entry);
+        }
+      } else {
+        result.#registerEntry(
+          arg as Constructor | CodecForFormat<Encoded>,
+        );
+      }
     }
 
     // Frozen as a statement rather than by returning `Object.freeze()`'s
@@ -162,25 +276,14 @@ export class CodecRegistry {
   }
 
   /**
-   * Guards a mutator against a frozen instance.
-   *
-   * @throws If this instance is frozen.
-   */
-  #assertNotFrozen(): void {
-    if (Object.isFrozen(this)) {
-      throw new Error("Cannot modify frozen CodecRegistry");
-    }
-  }
-
-  /**
-   * Finds how to encode the given value: a `FabricCodec` that can encode it,
+   * Finds how to encode the given value: a matched codec that can encode it,
    * {@link SELF_REP} if it is a self-representing primitive, or `undefined` if
    * neither matches (the caller falls through to structural handling for
    * arrays and plain objects, or fails for an unencodable value).
    */
   codecFromValue(
     value: FabricValue,
-  ): FabricCodec | typeof SELF_REP | undefined {
+  ): CodecForFormat<Encoded> | typeof SELF_REP | undefined {
     // Primitive dispatch on the value's primitive `type` key (its `typeof`, or
     // `"null"`). The type's codec is tried first, then self-representation.
     let type: PrimitiveTypeName | undefined;
@@ -210,9 +313,9 @@ export class CodecRegistry {
     }
 
     if (type !== undefined) {
-      const codec = this.#primitiveCodecs.get(type);
-      if (codec && codec.canEncode(value)) {
-        return codec;
+      const matched = this.#primitiveCodecs.get(type);
+      if (matched && matched.canEncode(value)) {
+        return matched;
       }
       if (this.#selfRepTypes.has(type)) {
         return SELF_REP;
@@ -223,9 +326,9 @@ export class CodecRegistry {
     // Match by the value's exact constructor.
     const constructorFn = constructorOf(value);
     if (constructorFn) {
-      const codec = this.#classMap.get(constructorFn);
-      if (codec && codec.canEncode(value)) {
-        return codec;
+      const matched = this.#classMap.get(constructorFn);
+      if (matched && matched.canEncode(value)) {
+        return matched;
       }
     }
 
@@ -233,7 +336,83 @@ export class CodecRegistry {
   }
 
   /** Looks up a codec by tag for decoding. */
-  codecFromTag(typeTag: string): FabricCodec | undefined {
+  codecFromTag(typeTag: string): CodecForFormat<Encoded> | undefined {
     return this.#tagMap.get(typeTag);
+  }
+
+  /**
+   * Registers one {@link #extend} entry, which is a class when it is callable
+   * and a codec otherwise. Nothing else in the codec system is a function, so
+   * the two cannot be confused.
+   */
+  #registerEntry(
+    entry: Constructor | CodecForFormat<Encoded>,
+  ): void {
+    if (typeof entry === "function") {
+      this.registerClass(entry);
+    } else {
+      this.register(entry);
+    }
+  }
+
+  /**
+   * Guards a mutator against a frozen instance.
+   *
+   * @throws If this instance is frozen.
+   */
+  #assertNotFrozen(): void {
+    if (Object.isFrozen(this)) {
+      throw new Error("Cannot modify frozen `CodecRegistry`");
+    }
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Guards against registering a codec under the empty tag. A bare `"/"` key
+   * on the wire is an encoding error whatever follows it, per Section 9 of the
+   * formal spec, and a decoder reports it as such -- but only by finding no
+   * codec for the empty tag. A codec registered under one would intercept the
+   * very payload that rule exists to reject.
+   *
+   * @throws If `tag` is the empty string.
+   */
+  static #assertTagRegistrable(tag: string | undefined): void {
+    if (tag === "") {
+      throw new Error(
+        "Cannot register a codec under the empty tag: a bare `/` key is an " +
+          "encoding error, not a type.",
+      );
+    }
+  }
+
+  /**
+   * Checks that a codec declares a kind, by extending one of the two base
+   * classes. Nothing is stored: each walker reads the kind again with its own
+   * `instanceof` when it dispatches.
+   *
+   * That makes extending one of the two bases a requirement, which the
+   * parameter type does not express: it names the interfaces, and an object
+   * satisfying one of those without extending anything has no kind to read.
+   * Uses "death before confusion" on that case rather than letting a walker
+   * pick a default, because a codec silently taken for the kind it is not
+   * would have its state expanded, or left unexpanded, in whole-value
+   * encodings far from here.
+   *
+   * @throws If `codec` extends neither base class.
+   */
+  static #assertClassified<Encoded>(codec: CodecForFormat<Encoded>): void {
+    if (
+      !(codec instanceof BaseTerminalCodec) &&
+      !(codec instanceof BaseNonterminalCodec)
+    ) {
+      throw new Error(
+        "Shouldn't happen: codec extends neither `BaseNonterminalCodec` nor " +
+          "`BaseTerminalCodec`, so it declares no kind: " +
+          `\`${codec.constructor.name}\``,
+      );
+    }
   }
 }

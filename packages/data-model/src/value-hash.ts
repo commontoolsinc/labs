@@ -7,6 +7,7 @@
  * the full algorithm.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   createHasher,
   type IncrementalHasher,
@@ -21,7 +22,7 @@ import { isDeepFrozen } from "./deep-freeze.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
-import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+import { BaseFabricInstance } from "@/codec-common/BaseFabricInstance.ts";
 import { codecOf } from "@/codec-common/index.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
@@ -241,7 +242,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 
     default:
       throw new Error(
-        `hashOf: unsupported type: ${typeof value}`,
+        `\`hashOf()\`: unsupported type \`${typeof value}\``,
       );
   }
 }
@@ -340,8 +341,8 @@ function feedObjectValue(
       // Nothing else is handled. As of this writing, specifically missing are
       // `Map`, `Set`, and `Error`.
       throw new Error(
-        `hashOf: unsupported object type: ${
-          value?.constructor?.name ?? typeof value
+        `\`hashOf()\`: unsupported object type ${
+          backtickQuote(value?.constructor?.name ?? typeof value)
         }`,
       );
     }
@@ -535,7 +536,7 @@ function hashOfInternal(
     }
 
     default: {
-      throw new Error(`Cannot hash value of type ${typeof value}`);
+      throw new Error(`Cannot hash value of type \`${typeof value}\``);
     }
   }
 }

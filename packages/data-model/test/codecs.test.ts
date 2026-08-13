@@ -1,3 +1,18 @@
+/**
+ * The package's ready-made encode and decode entry points, exercised on the
+ * class set they come configured with.
+ *
+ * Much of this is that a value survives the trip, but the cases earning their
+ * space are the ones where the format's own syntax collides with ordinary
+ * data. An object keyed `/` has to escape and come back identical, and the
+ * markers other layers write into values -- a stream, an error, an alias --
+ * have to pass through untouched rather than being interpreted here.
+ *
+ * The plain-object entry point additionally refuses anything that decoded to
+ * something else, so a caller that asked for a record is not handed an array
+ * or an instance instead.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -8,10 +23,10 @@ import {
   valueFromJson,
 } from "@/codecs.ts";
 import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
-import { JsonCodec } from "@/codec-json/JsonCodec.ts";
+import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
-import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
+import { BaseReconstructionContext } from "@/codec-interface/BaseReconstructionContext.ts";
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {
@@ -38,7 +53,7 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
   const json = jsonFromValue(value);
   expect(seemsLikeJsonEncodedFabricValue(json)).toBe(true);
   expect(
-    JSON.parse(JsonCodec.unwrapEncodedValueForTesting(json)),
+    JSON.parse(JsonCodecEngine.unwrapEncodedValueForTesting(json)),
   ).toEqual(expected);
 }
 
@@ -235,23 +250,6 @@ describe("codecs", () => {
 
     it("explicit `undefined` runtime is equivalent to omission", () => {
       expect(valueFromJson('fvj1:{"a":1}', undefined)).toEqual({ a: 1 });
-    });
-
-    // (B) fold-in: the no-runtime fallback is a decode-framed empty context
-    // (`JSON_DECODE_EMPTY_CONTEXT`) instead of the bare singleton. This is
-    // message-only and behavior-preserving: every no-cell-ref decode above
-    // must still succeed unchanged (covered by the cases in this describe),
-    // and the round-trip with a runtime is unaffected. The decode-framed
-    // throw message itself is asserted on the exported class (see
-    // `EmptyReconstructionContext (exported class)` below) since a cell-ref
-    // decode requires runner-owned wire machinery not available here.
-    it("(B) no-runtime decode behavior is unchanged (round-trips, no cell ref)", () => {
-      // Same payloads as above, asserted as a single behavior-preservation
-      // checkpoint tied to the (B) fold-in.
-      expect(valueFromJson("fvj1:42")).toBe(42);
-      expect(valueFromJson('fvj1:{"a":1}')).toEqual({ a: 1 });
-      expect(valueFromJson('fvj1:{"\/Undefined@1":null}')).toBe(undefined);
-      expect(roundTrip(7)).toBe(7);
     });
   });
 

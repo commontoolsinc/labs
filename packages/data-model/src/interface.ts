@@ -1,6 +1,7 @@
 /**
- * Type-only declarations and the `FabricInstance` base class for the fabric
- * data model. This file is intentionally free of runtime imports from other
+ * Type-only declarations, the `FabricInstance` base class, and the protocol
+ * symbols keyed on a fabric class, for the fabric data model. This file is
+ * intentionally free of runtime imports from other
  * data-model modules (only `import type` is used) so that it can be imported
  * by any module without creating circular dependencies.
  *

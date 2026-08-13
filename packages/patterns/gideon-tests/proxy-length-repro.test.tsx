@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/gideon-tests/proxy-length-repro.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import ProxyLengthRepro from "./proxy-length-repro.tsx";
 
 export default pattern(() => {
@@ -92,7 +92,7 @@ export default pattern(() => {
   const assert_count_after = assert(() => subject.itemCount === 1);
 
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state ===
       { assertion: assert_items_length_direct },
       { assertion: assert_items_length_spread },

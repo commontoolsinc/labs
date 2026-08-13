@@ -136,6 +136,16 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+
+  if [[ "$haystack" == *"$needle"* ]]; then
+    error "$message"
+  fi
+}
+
 assert_not_exists() {
   local path="$1"
   local message="$2"
@@ -813,7 +823,10 @@ assert_contains "$HANDLER_HELP" "cf exec" "cf exec help should describe the cf e
 assert_contains "$HANDLER_HELP" "[invoke] --message <string>" "Handler help should show the optional invoke verb."
 assert_contains "$HANDLER_HELP" "--message <string>" "Handler help should expand schema-derived flags."
 assert_contains "$HANDLER_HELP" "Required." "Handler help should mark required flags."
-assert_contains "$HANDLER_HELP" "No output on success." "Handler help should describe handler output."
+# A handler's help says nothing about output rather than asserting there is
+# none: a verb declared `Stream<E, R>` does return a result, and this page
+# cannot see the declaration.
+assert_not_contains "$HANDLER_HELP" "Output:" "Handler help should carry no Output section."
 assert_contains "$HANDLER_HELP" "Alternatively, write JSON to this file to invoke the handler." "Handler help should mention write-through invocation."
 assert_contains "$TOOL_HELP" "[run] --query <string>" "Tool help should show the optional run verb."
 assert_contains "$TOOL_HELP" "--query <string>" "Tool help should expand schema-derived flags."

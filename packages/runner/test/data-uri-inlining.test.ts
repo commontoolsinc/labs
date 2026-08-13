@@ -337,7 +337,7 @@ describe("data URI inlining", () => {
     });
 
     describe("special objects", () => {
-      // A `FabricSpecialObject` is `isRecord`, so it reaches the record branch
+      // A `FabricSpecialObject` is `isObjectOrArray`, so it reaches the record branch
       // rather than the leaf return. What keeps it whole is that the branch
       // only clones when an entry inlines to something new, and a special
       // object has zero enumerable own properties: the loop body never runs,

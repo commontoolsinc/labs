@@ -261,7 +261,7 @@ describe("compile-cache version axis", () => {
     const occurrences = workflow.split(expected).length - 1;
     expect(occurrences).toBe(6);
     expect(workflow).toContain(
-      "hashFiles('packages/generated-patterns/**/*.ts')",
+      "hashFiles('packages/generated-patterns/**/*.ts', 'tasks/select-generated-pattern-files.ts')",
     );
   });
 

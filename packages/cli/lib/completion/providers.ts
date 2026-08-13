@@ -334,6 +334,7 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   "api-url": () => apiUrlCandidates(),
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
   root: () => Promise.resolve(directive({ kind: "dirs" })),
+  test: patternFiles,
   // `cf space clone --to <dir>` builds a clone directory.
   to: () => Promise.resolve(directive({ kind: "dirs" })),
   "log-file": () => Promise.resolve(directive({ kind: "files" })),
@@ -350,7 +351,9 @@ const ARGUMENT_PROVIDERS: Readonly<
 > = {
   "piece call:callable": callableCandidates,
   "piece get:path": cellPathCandidates,
+  "piece get-label:path": cellPathCandidates,
   "piece set:path": cellPathCandidates,
+  "piece set-label:path": cellPathCandidates,
   "piece link:source": linkEndpointCandidates,
   "piece link:target": linkEndpointCandidates,
   "piece new:main": patternFiles,

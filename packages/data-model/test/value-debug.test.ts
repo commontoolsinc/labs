@@ -1,8 +1,22 @@
+/**
+ * Rendering a value for a human to read, including the values that resist
+ * being rendered.
+ *
+ * A debug renderer is called on whatever is at hand, usually while something
+ * is already wrong, so it has to survive input that would defeat an ordinary
+ * serializer: a cycle, a value that refuses to be rendered, a structure too
+ * large to print whole. Producing something useful and bounded matters more
+ * than producing something complete, which is what the length limit is for.
+ *
+ * The compact and indented forms differ only in spacing, while the kind string
+ * names what a value is without rendering it at all. The custom inspector is
+ * how all of this reaches a `console.log()`.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
-  backtickQuote,
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
@@ -13,32 +27,6 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricSpecialObject } from "@/interface.ts";
-
-/**
- * Reads one Markdown code span: the opening and closing delimiters are
- * equal-length backtick runs, and a reader drops one leading and one trailing
- * space when the content has both and is not all spaces.
- *
- * Written from the specification rather than from `backtickQuote()`, so that
- * the round-trip test has an independent other half.
- */
-function parseCodeSpan(markdown: string): string {
-  const open = /^`+/.exec(markdown)?.[0];
-  const close = /`+$/.exec(markdown)?.[0];
-
-  if ((open === undefined) || (close === undefined)) {
-    throw new Error(`Not a code span: ${markdown}`);
-  } else if (open.length !== close.length) {
-    throw new Error(`Mismatched delimiters: ${markdown}`);
-  }
-
-  const content = markdown.slice(open.length, markdown.length - close.length);
-
-  return (content.startsWith(" ") && content.endsWith(" ") &&
-      /[^ ]/.test(content))
-    ? content.slice(1, -1)
-    : content;
-}
 
 describe("value-debug", () => {
   describe("toCompactDebugString", () => {
@@ -422,7 +410,7 @@ describe("value-debug", () => {
         .toBe('Symbol.for("ind")');
     });
 
-    it("renders nested function and symbol as bare tokens", () => {
+    it("renders a nested `function` and `symbol` as bare tokens", () => {
       function qux() {}
       const v = { fn: qux, sym: Symbol("s") };
       expect(toIndentedDebugString(v))
@@ -513,67 +501,6 @@ describe("value-debug", () => {
       // fallback.
       const weird = Object.create({ constructor: undefined as unknown });
       expect(toDebugKindString(weird)).toBe("object");
-    });
-  });
-
-  describe("backtickQuote()", () => {
-    it("wraps ordinary text in a single pair of backticks", () => {
-      expect(backtickQuote("hello")).toBe("`hello`");
-      expect(backtickQuote("a b c")).toBe("`a b c`");
-    });
-
-    it("returns a bare pair of backticks for empty text", () => {
-      expect(backtickQuote("")).toBe("``");
-    });
-
-    it("uses a longer delimiter than the longest run inside", () => {
-      expect(backtickQuote("a`b")).toBe("``a`b``");
-      expect(backtickQuote("a``b")).toBe("```a``b```");
-      expect(backtickQuote("a```b``c")).toBe("````a```b``c````");
-    });
-
-    it("pads when the text starts or ends with a backtick", () => {
-      expect(backtickQuote("`x")).toBe("`` `x ``");
-      expect(backtickQuote("x`")).toBe("`` x` ``");
-      expect(backtickQuote("`")).toBe("`` ` ``");
-    });
-
-    it("pads when the text both starts and ends with a space", () => {
-      expect(backtickQuote(" x ")).toBe("`  x  `");
-    });
-
-    it("does not pad when only one end is a space", () => {
-      expect(backtickQuote(" x")).toBe("` x`");
-      expect(backtickQuote("x ")).toBe("`x `");
-    });
-
-    it("does not pad all-space text, which a reader leaves alone", () => {
-      expect(backtickQuote(" ")).toBe("` `");
-      expect(backtickQuote("   ")).toBe("`   `");
-    });
-
-    it("round-trips through a Markdown reader", () => {
-      // The property that matters: parsing the result yields back the input.
-      for (
-        const text of [
-          "hello",
-          "a`b",
-          "a``b",
-          "`x",
-          "x`",
-          "`",
-          "``",
-          " x ",
-          " x",
-          "x ",
-          " ",
-          "   ",
-          '{"a":1}',
-          "Symbol(`odd`)",
-        ]
-      ) {
-        expect(parseCodeSpan(backtickQuote(text))).toBe(text);
-      }
     });
   });
 });

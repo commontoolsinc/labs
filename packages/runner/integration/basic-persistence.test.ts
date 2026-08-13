@@ -15,8 +15,6 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Simple object persistence ===");
 
-const TIMEOUT_MS = 180000; // 3 minutes timeout
-
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
@@ -86,20 +84,7 @@ async function runTest() {
 
 Deno.test({
   name: "basic persistence test",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([runTest(), timeoutPromise]);
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: runTest,
   sanitizeResources: false,
   sanitizeOps: false,
 });

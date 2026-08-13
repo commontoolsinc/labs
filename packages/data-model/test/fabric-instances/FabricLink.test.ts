@@ -1,3 +1,19 @@
+/**
+ * A link as a fabric instance: a payload object wrapped so that it can carry
+ * arbitrary nested values, a stored schema among them.
+ *
+ * Being an instance rather than a primitive is the first consequence -- a link
+ * is mutable until frozen rather than born immutable. The payload is validated
+ * on the way in, and the keys it refuses are the prototype-bearing ones: a
+ * payload is a plain record, and a key that would reach the prototype chain is
+ * not data.
+ *
+ * Cloning carries the interesting promises. A frozen deep clone shares an
+ * already-deep-frozen subtree rather than copying it, a mutable deep clone
+ * shares nothing, and a mutable shallow clone shares the payload reference
+ * outright.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -9,15 +25,15 @@ import {
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/fabric-instances/BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { jsonFromValue, valueFromJson } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 

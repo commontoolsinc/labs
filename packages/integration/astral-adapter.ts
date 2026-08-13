@@ -143,9 +143,9 @@ async function runProtocolCleanup(
 
 let objectGroupSequence = 0;
 
-function nextObjectGroup(): string {
+function nextObjectGroup(purpose = "pierce"): string {
   objectGroupSequence++;
-  return `common-tools-pierce-${objectGroupSequence}`;
+  return `common-tools-${purpose}-${objectGroupSequence}`;
 }
 
 function exceptionMessage(
@@ -235,6 +235,80 @@ async function remoteRoot(
     objectId: object.objectId,
     cleanup: () => Promise.resolve(),
   };
+}
+
+export interface ContentQuadPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Measure the composed content quad of an element retained on `globalThis`.
+ *
+ * The caller puts the exact element at `retainedKey` while it can still resolve
+ * its Astral handle. Addressing that remote object directly gives CDP enough
+ * information to include ancestor transforms, 3D projection, and SVG layout
+ * without returning to Astral's invalidatable DOM node id.
+ *
+ * The retained property and its remote object group are consumed by this call,
+ * including when measurement fails.
+ */
+export async function measureRetainedContentQuad(
+  page: AstralPage,
+  retainedKey: string,
+): Promise<ContentQuadPoint[]> {
+  const bindings = page.unsafelyGetCelestialBindings();
+  const objectGroup = nextObjectGroup("aim");
+  try {
+    const remote = await runProtocolCommand(
+      bindings,
+      () =>
+        bindings.Runtime.evaluate({
+          expression: `globalThis[${JSON.stringify(retainedKey)}]`,
+          objectGroup,
+          returnByValue: false,
+        }),
+    );
+    if (remote.exceptionDetails) {
+      throw new Error(exceptionMessage(remote.exceptionDetails));
+    }
+    const objectId = remote.result.objectId;
+    if (!objectId) {
+      throw new Error("Astral did not return a remote element object");
+    }
+
+    const { model } = await runProtocolCommand(
+      bindings,
+      () => bindings.DOM.getBoxModel({ objectId }),
+    );
+    const points: ContentQuadPoint[] = [];
+    for (let index = 0; index < model.content.length; index += 2) {
+      points.push({
+        x: model.content[index],
+        y: model.content[index + 1],
+      });
+    }
+    if (points.length === 0) {
+      throw new Error("Element content quad is empty");
+    }
+    return points;
+  } finally {
+    try {
+      await runProtocolCleanup(
+        bindings,
+        () =>
+          bindings.Runtime.evaluate({
+            expression: `delete globalThis[${JSON.stringify(retainedKey)}]`,
+            returnByValue: true,
+          }),
+      );
+    } finally {
+      await runProtocolCleanup(
+        bindings,
+        () => bindings.Runtime.releaseObjectGroup({ objectGroup }),
+      );
+    }
+  }
 }
 
 async function nodeIdsFromArray(

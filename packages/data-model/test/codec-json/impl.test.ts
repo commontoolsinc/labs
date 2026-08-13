@@ -1,3 +1,14 @@
+/**
+ * The cheap test for whether a string is this package's encoded form rather
+ * than JSON from somewhere else.
+ *
+ * It decides on the prefix alone and never parses, so the cases are about
+ * where that suffices and where it would be too eager: the bare prefix counts,
+ * a prefix that is partial or not at the front does not, and plain JSON that
+ * happens to look similar does not. One case feeds it real encoder output, so
+ * the shape recognized here cannot drift from the shape produced.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -21,11 +32,11 @@ describe("impl", () => {
       expect(seemsLikeJsonEncodedFabricValue(encoded)).toBe(true);
     });
 
-    it("rejects empty string", () => {
+    it("returns `false` for an empty string", () => {
       expect(seemsLikeJsonEncodedFabricValue("")).toBe(false);
     });
 
-    it("rejects plain JSON without the prefix", () => {
+    it("returns `false` for plain JSON without the prefix", () => {
       // These are plain JSON without the prefix, so the dispatch must reject
       // them.
       expect(seemsLikeJsonEncodedFabricValue("true")).toBe(false);
@@ -38,7 +49,7 @@ describe("impl", () => {
       expect(seemsLikeJsonEncodedFabricValue("-1")).toBe(false);
     });
 
-    it("rejects partial or misplaced prefixes", () => {
+    it("returns `false` for a partial or misplaced prefix", () => {
       expect(seemsLikeJsonEncodedFabricValue("fvj")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("fvj1")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("FVJ1:")).toBe(false);
@@ -47,7 +58,7 @@ describe("impl", () => {
       expect(seemsLikeJsonEncodedFabricValue("xfvj1:")).toBe(false);
     });
 
-    it("rejects bare identifiers and other non-JSON-looking strings", () => {
+    it("returns `false` for a bare identifier or other non-JSON-looking string", () => {
       expect(seemsLikeJsonEncodedFabricValue("hello")).toBe(false);
       expect(seemsLikeJsonEncodedFabricValue("undefined")).toBe(false);
     });

@@ -3,14 +3,14 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
@@ -21,9 +21,17 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
+  #map: Map<FabricValue, FabricValue>;
+
   /** Constructs an instance wrapping `map`. */
-  constructor(readonly map: Map<FabricValue, FabricValue>) {
+  constructor(map: Map<FabricValue, FabricValue>) {
     super();
+    this.#map = map;
+  }
+
+  /** The wrapped map. */
+  get map(): Map<FabricValue, FabricValue> {
+    return this.#map;
   }
 
   /**
@@ -48,27 +56,27 @@ export class FabricMap
   }
 
   /** @inheritDoc */
-  protected [SHALLOW_UNFROZEN_CLONE](): FabricMap {
-    return new FabricMap(this.map);
+  protected get wrappedValue(): Map<FabricValue, FabricValue> {
+    return this.#map;
   }
 
   /** @inheritDoc */
-  protected get wrappedValue(): Map<FabricValue, FabricValue> {
-    return this.map;
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricMap {
+    return new FabricMap(this.#map);
   }
 
   /** @inheritDoc */
   protected toNativeFrozen(): FrozenMap<FabricValue, FabricValue> {
-    return new FrozenMap(this.map);
+    return new FrozenMap(this.#map);
   }
 
   /** @inheritDoc */
   protected toNativeThawed(): Map<FabricValue, FabricValue> {
-    return new Map(this.map);
+    return new Map(this.#map);
   }
 
   static #codec = Object.freeze(
-    new (class FabricMapCodec extends BaseFabricCodec {
+    new (class FabricMapCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Map, FabricMap);
@@ -99,7 +107,7 @@ export class FabricMap
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }

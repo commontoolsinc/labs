@@ -1,20 +1,25 @@
-import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
+import type { Constructor } from "@commonfabric/utils/types";
+
+import type { FabricClassWithNonterminalCodec } from "@/codec-interface/interface.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricLink } from "./FabricLink.ts";
 import { FabricMap } from "./FabricMap.ts";
 import { FabricSet } from "./FabricSet.ts";
-import { ProblematicValue } from "./ProblematicValue.ts";
-import { UnknownValue } from "./UnknownValue.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 
-export { BaseFabricInstance } from "./BaseFabricInstance.ts";
-export { ExplicitTagValue } from "./ExplicitTagValue.ts";
-export { ProblematicValue } from "./ProblematicValue.ts";
-export { UnknownValue } from "./UnknownValue.ts";
 export { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 export { FabricError, type FabricErrorState } from "./FabricError.ts";
 export { FabricLink } from "./FabricLink.ts";
 export { FabricMap } from "./FabricMap.ts";
 export { FabricSet } from "./FabricSet.ts";
+
+/**
+ * A concrete instance class as this roster holds one: a class, and one binding
+ * a format-neutral `[CODEC]`. The second half is what a roster of primitives
+ * cannot claim, their codecs being bound per format.
+ */
+type InstanceCodecClass = Constructor & FabricClassWithNonterminalCodec;
 
 /**
  * The concrete instance classes whose instances are available over the wire,
@@ -29,11 +34,11 @@ export { FabricSet } from "./FabricSet.ts";
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function codecClasses(): readonly FabricClassWithCodec[] {
+export function codecClasses(): readonly InstanceCodecClass[] {
   return CODEC_CLASSES;
 }
 
-const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
+const CODEC_CLASSES: readonly InstanceCodecClass[] = Object.freeze([
   FabricError,
   FabricLink,
   FabricMap,

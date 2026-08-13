@@ -1,5 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import { looksLikeDiff, parseDiff } from "../lib/view/diff.ts";
 import {
   buildDiffDocument,
@@ -482,6 +484,79 @@ Deno.test("diff doc: structure is file → hunk → the workspace file's nodes",
   } finally {
     done();
   }
+});
+
+describe("decoded diff input", () => {
+  it("keeps a decoded BOM outside TypeScript structure ranges", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1 +1 @@
+-${bom}const alpha = 0;
++${bom}const alpha = 1;
+`;
+    const ws: DiffWorkspace = {
+      resolve: () => "/m.ts",
+      read: () => "const alpha = 1;\n",
+      hasUtf8Bom: () => true,
+    };
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const alpha = doc.flatStructure.find((node) => node.name === "alpha");
+
+    assert(alpha);
+    expect(alpha.startCol).toBe(2);
+    expect(alpha.startOffset).toBe(diff.indexOf("const alpha = 1;"));
+    assert(diff.slice(alpha.nameOffset!).startsWith("alpha"));
+
+    const fragment = buildDiffDocument(diff, parseDiff(diff)!, NO_WS).doc;
+    const fragmentAlpha = fragment.flatStructure.find((node) =>
+      node.name === "alpha"
+    );
+    assert(fragmentAlpha);
+    expect(fragmentAlpha.startOffset).toBe(diff.indexOf("const alpha = 1;"));
+    assert(diff.slice(fragmentAlpha.nameOffset!).startsWith("alpha"));
+  });
+
+  it("preserves textual hunk bodies for known binary filenames", () => {
+    const diff = `diff --git a/asset.png b/asset.png
+--- a/asset.png
++++ b/asset.png
+@@ -1 +1 @@
+-old bytes
++new bytes
+`;
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, NO_WS);
+
+    expect(doc.lines[4].spans.map((span) => span.text).join("")).toBe(
+      "-old bytes",
+    );
+    expect(doc.lines[5].spans.map((span) => span.text).join("")).toBe(
+      "+new bytes",
+    );
+  });
+
+  it("strips a BOM before parsing a Markdown fragment", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/notes.md b/notes.md
+--- a/notes.md
++++ b/notes.md
+@@ -0,0 +1,2 @@
++${bom}# Heading
++body
+`;
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, NO_WS);
+    const heading = doc.flatStructure.find((node) =>
+      node.label === "# Heading"
+    );
+
+    assert(heading);
+    expect(heading.startCol).toBe(2);
+    expect(heading.startOffset).toBe(diff.indexOf("# Heading"));
+    expect(doc.lines[4].spans.map((span) => span.text).join("")).toBe(
+      `+${bom}# Heading`,
+    );
+  });
 });
 
 Deno.test("diff doc: missing workspace file still highlights and structures via fragments", () => {

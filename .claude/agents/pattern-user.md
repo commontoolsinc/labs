@@ -26,15 +26,23 @@ Load `Skill("cf")` first for cf CLI documentation.
 
 ## Key Commands
 
+Before deploying new or changed pattern source, find every authored
+`*.test.tsx` entry that covers it and run each one with `cf test`. Stop if any
+entry fails. Once all entries pass, attach every authored test entry to the
+source package by repeating `--test`.
+
 ```bash
 # Check compilation only (no server, no deploy)
 deno task cf check main.tsx --no-run
 
+# Run the authored pattern test
+deno task cf test main.test.tsx
+
 # Deploy to toolshed (this is how you "run" it)
-API_URL=<url> deno task cf piece new main.tsx --identity <key_path>
+API_URL=<url> deno task cf piece new main.tsx --test main.test.tsx --identity <key_path>
 
 # Update existing piece
-API_URL=<url> deno task cf piece setsrc main.tsx --piece <piece_id> --identity <key_path>
+API_URL=<url> deno task cf piece setsrc main.tsx --test main.test.tsx --piece <piece_id> --identity <key_path>
 
 # Inspect state / call handler
 API_URL=<url> deno task cf piece inspect --piece <piece_id> --identity <key_path>
@@ -45,10 +53,17 @@ API_URL=<url> deno task cf piece call <handler> --piece <piece_id> --identity <k
 
 1. **Ask for config** (key, API URL, space)
 2. **Check compilation** (`cf check --no-run`)
-3. **Deploy** (`cf piece new`) — this gives you a piece ID and URL
-4. **Give user the link** to test in browser
-5. **Debug** with `inspect` and `call` as needed
+3. **Write or update automated tests** for changed behavior
+4. **Run every test entry** with `cf test`
+5. **Deploy with every test attached** using repeatable `--test`
+6. **Give user the link** to test in browser
+7. **Debug** with `inspect` and `call` as needed
+
+`--test` packages and type-checks the test; it does not run it. Repeat the
+same test flags on every `setsrc`, because each update defines the complete
+source package for that revision.
 
 ## Done When
 
-Piece deployed, user has link to test.
+Automated tests pass, every test entry is attached to the deployed source
+revision, the piece is deployed, and the user has the link.

@@ -1,0 +1,4 @@
+name: CI
+jobs:
+  go:
+    runs-on: blacksmith-4vcpu-ubuntu-2404

@@ -198,7 +198,8 @@ describe("CFC authored disjunctive confidentiality", () => {
     try {
       const caveat = {
         type: "https://commonfabric.org/cfc/atom/Caveat",
-        kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+        kind:
+          "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
         source: userA,
       };
       const schema = {

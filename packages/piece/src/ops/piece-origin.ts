@@ -11,6 +11,7 @@ import {
   type Cell,
   fabricAuthorityMatchesSpaceHost,
   type FabricRef,
+  formatFabricRef,
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSource,
@@ -114,6 +115,17 @@ type StableFabricRef = FabricRef & {
   ref: Extract<FabricRef["ref"], { kind: "uri" }>;
 };
 
+/** Make a relative fabric origin keep its meaning in another space. */
+export function qualifyFabricOrigin(
+  recorded: string,
+  sourceSpace: MemorySpace,
+): string {
+  const ref = parseFabricRef(recorded);
+  return ref === undefined || ref.space !== undefined
+    ? recorded
+    : formatFabricRef({ ...ref, space: sourceSpace });
+}
+
 /**
  * Resolves an origin now, returning the authored program and selected export a
  * repoint transition should apply.
@@ -160,11 +172,6 @@ export async function resolvePieceOriginSource(
   const sourceSpace = ref.space === undefined
     ? destinationSpace
     : ref.space as MemorySpace;
-  if (sourceSpace !== destinationSpace) {
-    throw new PieceOriginError(
-      "following a source from another space requires checked source replication",
-    );
-  }
   if (ref.host !== undefined) {
     const routedUrl = new URL(
       runtime.mappedHostFor(sourceSpace) ??
@@ -177,6 +184,11 @@ export async function resolvePieceOriginSource(
       (routedUrl.protocol === "http:" || routedUrl.protocol === "https:") &&
       fabricAuthorityMatchesSpaceHost(ref.host, routedUrl.origin);
     if (!matchesCurrentRoute) {
+      if (sourceSpace !== destinationSpace) {
+        throw new PieceOriginError(
+          `the cross-space host ${ref.host} is not an accepted route for ${sourceSpace}`,
+        );
+      }
       if (!runtime.registerSpaceHost(sourceSpace, explicitRoute.toString())) {
         throw new PieceOriginError(
           `the host ${ref.host} is not available for ${sourceSpace}`,
@@ -198,6 +210,7 @@ export async function resolvePieceOriginSource(
   const program = await runtime.patternManager
     .getPatternSourceProgramByIdentity(
       pattern.identity,
+      sourceSpace,
       destinationSpace,
     );
   if (program === undefined) {
@@ -393,16 +406,49 @@ export async function readPieceSourceState(
 ): Promise<PieceSourceState> {
   await piece.sync();
   const state = readPieceSourceMetadata(runtime, piece);
-  const pattern = state.pattern;
-  if (pattern !== undefined) {
+  if (state.pattern !== undefined) {
     const program = await runtime.patternManager
-      .getPatternSourceProgramByIdentity(pattern.identity, piece.space);
+      .getPatternSourceProgramByIdentity(
+        state.pattern.identity,
+        piece.space,
+      );
     if (program !== undefined) {
       state.entry = program.main;
       state.files = sortSourceFiles(program.files, program.main);
     }
   }
   return state;
+}
+
+export interface PieceSourceRevisionSource {
+  pattern: { identity: string; symbol: string };
+  files: { name: string; contents: string }[];
+}
+
+/** Read the retained authored files for one recorded source revision. */
+export async function readPieceSourceRevision(
+  runtime: Runtime,
+  piece: Cell<unknown>,
+  revisionId: string,
+): Promise<PieceSourceRevisionSource> {
+  await piece.sync();
+  const revision = getPieceSourceRevisions(piece).find((candidate) =>
+    candidate.revisionId === revisionId
+  );
+  if (revision === undefined) {
+    throw new PieceOriginError(`source revision ${revisionId} was not found`);
+  }
+  const program = await runtime.patternManager
+    .getPatternSourceProgramByIdentity(
+      revision.pattern.identity,
+      piece.space,
+    );
+  return {
+    pattern: revision.pattern,
+    files: program === undefined
+      ? []
+      : sortSourceFiles(program.files, program.main),
+  };
 }
 
 function tryClassifyOrigin(

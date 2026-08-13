@@ -89,6 +89,22 @@ const SCHEMA_MINT_XY = {
   required: ["out"],
 } as const satisfies JSONSchema;
 
+const SCHEMA_INTEGRITY_X = {
+  type: "object",
+  properties: {
+    out: { type: "string", ifc: { integrity: [ATOM_X] } },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
+const SCHEMA_EMPTY_INTEGRITY = {
+  type: "object",
+  properties: {
+    out: { type: "string", ifc: { integrity: [] } },
+  },
+  required: ["out"],
+} as const satisfies JSONSchema;
+
 type PersistedEntry = {
   path: string[];
   origin?: string;
@@ -1053,6 +1069,50 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
       expect(result.error).toBeUndefined();
       const entry = declaredEntryAt(result.entries, ["out"]);
       expect(entry?.label.integrity).toEqual([ATOM_X]);
+    });
+
+    it("removing the final integrity atom clears the declared entry", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        const first = await commitWrite(
+          runtime,
+          "dm-tight-empty-integ",
+          SCHEMA_INTEGRITY_X,
+          { out: "v1" },
+        );
+        expect(first.error).toBeUndefined();
+        expect(
+          declaredEntryAt(
+            persistedEntriesFor(storageManager, first.docId),
+            ["out"],
+          ),
+        ).toEqual({
+          path: ["out"],
+          label: { integrity: [ATOM_X] },
+          origin: "declared",
+        });
+        const second = await commitWrite(
+          runtime,
+          "dm-tight-empty-integ",
+          SCHEMA_EMPTY_INTEGRITY,
+          { out: "v2" },
+        );
+        expect(second.error).toBeUndefined();
+        expect(second.docId).toBe(first.docId);
+        expect(
+          declaredEntryAt(
+            persistedEntriesFor(storageManager, second.docId),
+            ["out"],
+          ),
+        ).toBeUndefined();
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await storageManager.close();
+      }
     });
 
     it("multiple stored declared entries at one path are joined before the integrity check", async () => {

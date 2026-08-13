@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/battleship/multiplayer/lobby.test.tsx --verbose
  */
-import { action, assert, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 import BattleshipLobby from "./lobby.tsx";
 import {
   createInitialShots,
@@ -203,7 +203,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial State Tests ===
       { assertion: assert_initial_game_name },
       { assertion: assert_initial_player1_null },

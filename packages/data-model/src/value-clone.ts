@@ -1,10 +1,28 @@
+/**
+ * Cloning a value that is already a `FabricValue`, in order to change how
+ * frozen it is. This is not conversion: the input is taken as valid, and what
+ * varies is frozenness, depth, and whether a copy is forced rather than
+ * elided.
+ *
+ * The more involved job is preparing a value for a structured mutation, which
+ * is a copy-on-write descent. Only the containers along the path being mutated
+ * are thawed and spliced back in, and every subtree off that path keeps its
+ * identity. That identity is the point rather than an incidental saving: an
+ * untouched subtree stays in the deep-frozen cache, so re-freezing the result
+ * short-circuits on it instead of walking it again.
+ *
+ * Cycles are refused rather than accommodated, on the deep paths that would
+ * otherwise recurse forever.
+ */
+
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { backtickQuote, toDebugKindString } from "./value-debug.ts";
+import { toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
 export interface CloneOptions {
@@ -242,9 +260,9 @@ export function cloneHelper(
     default:
       // All valid `FabricValue` types are handled above.
       throw new Error(
-        `Cannot clone: \`${
-          (value as object).constructor?.name ?? typeof value
-        }\``,
+        `Cannot clone: ${
+          backtickQuote((value as object).constructor?.name ?? typeof value)
+        }`,
       );
   }
 }
@@ -510,7 +528,9 @@ export function cloneForMutation<T extends FabricValue>(
         "missing-segment",
         i,
         "undefined",
-        `\`cloneForMutation()\`: missing path segment \`${key}\` at ` +
+        `\`cloneForMutation()\`: missing path segment ${
+          backtickQuote(key)
+        } at ` +
           `index \`${i}\``,
       );
     }

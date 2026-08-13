@@ -111,22 +111,30 @@ The power is in combining FUSE, CLI, and browser simultaneously:
 # 1. Develop a pattern
 deno task cf check packages/patterns/my-app/main.tsx --no-run
 
-# 2. Deploy to a space
-deno task cf piece new packages/patterns/my-app/main.tsx -s my-space
+# 2. Run its automated pattern tests
+deno task cf test packages/patterns/my-app/main.test.tsx
+
+# 3. Deploy to a space with the tests attached
+deno task cf piece new packages/patterns/my-app/main.tsx \
+  --test packages/patterns/my-app/main.test.tsx -s my-space
 # => Created piece bafyreia...
 
-# 3. Mount and interact via filesystem
+# 4. Mount and interact via filesystem
 deno task cf fuse mount /tmp/cf
 ls /tmp/cf/my-space/pieces/my-app/result/
 
-# 4. Edit cells from terminal while viewing in browser
+# 5. Edit cells from terminal while viewing in browser
 echo -n "Updated content" > /tmp/cf/my-space/pieces/my-app/input/title
 # => Browser shows the change within ~1 second
 
-# 5. Iterate on the pattern
-deno task cf piece setsrc packages/patterns/my-app/main.tsx --piece bafyreia...
+# 6. Iterate on the pattern and retain its tests
+deno task cf piece setsrc packages/patterns/my-app/main.tsx \
+  --test packages/patterns/my-app/main.test.tsx --piece bafyreia...
 # => Result updates in both browser AND filesystem
 ```
+
+For multiple authored test entries, repeat `--test`. Run every entry locally
+before deployment and repeat the complete flag set on every `setsrc`.
 
 ### Cross-Space Operations
 
@@ -186,15 +194,18 @@ Combine pattern-dev with FUSE for a tight feedback loop:
 # 1. Write pattern in packages/patterns/my-pattern/main.tsx
 # 2. Type check
 deno task cf check packages/patterns/my-pattern/main.tsx --no-run
-# 3. Deploy
-deno task cf piece new packages/patterns/my-pattern/main.tsx -s dev-space
-# 4. Mount
+# 3. Write and run automated pattern tests
+deno task cf test packages/patterns/my-pattern/main.test.tsx
+# 4. Deploy with every test entry attached
+deno task cf piece new packages/patterns/my-pattern/main.tsx \
+  --test packages/patterns/my-pattern/main.test.tsx -s dev-space
+# 5. Mount
 deno task cf fuse mount /tmp/cf
-# 5. Set input via filesystem (faster than cf piece set for complex data)
+# 6. Set input via filesystem (faster than cf piece set for complex data)
 cat test-data.json > /tmp/cf/dev-space/pieces/my-pattern/input.json
-# 6. Read result
+# 7. Read result
 cat /tmp/cf/dev-space/pieces/my-pattern/result.json | jq '.'
-# 7. Iterate: edit pattern → setsrc → result updates automatically
+# 8. Iterate: edit, run tests, then setsrc with every --test flag
 ```
 
 ## Important Gotchas
@@ -375,7 +386,8 @@ MOUNT/SPACE/pieces/My Piece/
 cat "MOUNT/SPACE/pieces/My Piece/.src/main.tsx"
 ```
 
-**Modify source** (use Python — shell redirect fails on FUSE):
+**Temporarily modify live source for diagnosis** (use Python — shell redirect
+fails on FUSE):
 
 ```python
 path = "MOUNT/SPACE/pieces/My Piece/.src/main.tsx"
@@ -384,6 +396,12 @@ src = open(path).read()
 open(path, "w").write(modified_src)
 # Write triggers setsrc automatically — no cf piece setsrc needed
 ```
+
+FUSE preserves the existing attached test roots during this write, but it does
+not run them and cannot change which entries are attached. Treat the live edit
+as a diagnostic experiment. Before completing the change, make it in the
+repository checkout, run every test against that changed source, and deploy it
+with explicit `cf piece setsrc` plus the complete set of `--test` flags.
 
 **Check for errors after modifying:**
 

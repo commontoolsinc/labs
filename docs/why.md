@@ -2,111 +2,98 @@
 not, and the claims below are checked against the code as of this
 commit. If one of them stops being true, fix it here.*
 
-Personal computing was supposed to make computers personal. Instead,
-your mail lives on someone else's machine, under someone else's rules.
-We are all renters in our digital lives. The landlords didn't win an
-argument — they got there first, with a trust model somebody improvised
-in the mid-nineties and everyone has been patching around ever since.
-Forty years of software's potential is still locked in silos, guarded
-by goblins.
+Software is alchemy. Combine data with code and something appears that
+was not there before, and the more of it you can combine, the more the
+result is worth. That is the whole promise, and forty years of it is
+still locked in silos, guarded by goblins.
 
-None of this is villainy. It is arithmetic. These are the physics of
-trust everything runs under — hand your data to the software, and trust
-the software — and silos are what those physics produce, every time.
-Nobody had to conspire. The rule did the work.
+We are all renters in our digital lives. Your data lives on someone
+else's machine, under someone else's rules, and the only lever you have
+is asking nicely. Our personal context got shattered into a million
+pocket universes, one per app, and the walls between them are the
+product: these are my users, and anyone who wants to talk to them pays
+my toll. We live in windowless silos to be safe. But that is antisocial,
+and the value forfeited is combinatorial — every pair of things that
+never got to meet.
 
-The arrangement is not a law of nature. Inverting it means new software,
-all the way down, which nobody could afford until language models
-started writing software for approximately free. The rewrite that was
-unthinkable is now just work. Arrangements like this one have rarely
-been replaced by anything but working code, so that is what we started
-writing.
+None of this is villainy. It is arithmetic. The trust model everything
+runs on says: hand your data to the software, and trust the software.
+Data accumulates inside a boundary at a rate proportional to how much is
+already inside. Nobody had to conspire; the rule did the work, and the
+entity that is supposed to be working for you ends up holding power over
+you.
 
-The rule underneath everything you use is: hand over your data, trust
-the software. We built a runtime on the opposite rule. The software is
-untrusted. Safety rides with the data. Every datum carries its own
-policies, the way GPL code carries its license, and anything derived
-from it carries them too. Code that cannot prove it honors those
-policies does not compile. Hold that rule and a stranger's program can
-touch your most private data and provably do only what you allow. That
-is the whole bet, and it is checkable.
+Our current physics of trust are insanely hard to navigate, even for
+professionals. Our current physics of trust are dangerous by default.
 
-The full argument — the physics, the hardware, the objections — is
-written up in [docs/plans/inverting-the-physics-of-trust.md](./plans/inverting-the-physics-of-trust.md).
-This file is the short version: what already runs, and what we hold.
+The patches never addressed it, because they could not. A permission
+prompt is responsibility laundering — technically you consented, and the
+consent is hollow, and the company you consented to may belong to
+somebody else in five years. Each patch is another epicycle on a model
+that has the wrong thing at the center. The same-origin model orbits the
+code. It should orbit the data.
 
-What already runs, in this repository, today:
+The arrangement is not a law of nature. Inverting it means new software
+all the way down, and until recently nobody could afford that. Two
+ingredients changed it. Secure enclaves — silicon originally built to
+run against the interests of the machine's owner, pointed the other way
+— mean a machine you do not own can prove what it is running before your
+data ever reaches it. And language models write software for
+approximately free, so a new framework no longer means convincing humans
+to write for an empty ecosystem.
 
-- a compiler that turns ordinary TypeScript into policy-checkable
-  dataflow — run `cf check <pattern> --show-transformed` and it prints
-  the exact code the runtime executes, no trust required
-- the flow checking that evaluates those policies, in
-  `packages/runner/` — enforcing on explicit boundaries today, with the
-  propagation still behind a flag, see 5 below
-- a hundred-odd running patterns in `packages/patterns/`, counters to
-  group chat — enough to show the runtime isn't bent around one use
-  case, and nowhere near the number that would matter
+So we built a runtime on the opposite rule. The software is untrusted,
+and safety attaches to the data. Every datum carries its own policies,
+and anything derived from it carries them too. Code that cannot prove it
+honors those policies does not compile. What it adds up to is a
+distributed, trusted microkernel for networked software in the AI era.
 
-And on real silicon, a machine you don't own can prove — bit for bit —
-that it runs the open runtime before your data ever reaches it. That
-part runs on the hardware today; the protocol around it is written up
-in the
-[verifiable-execution specification](specs/verifiable-execution/README.md).
+Concretely. A program that imports your mail gets a token that could
+read all of it. In the fabric that token carries four lines: never
+logged, never leaves the verified runtime, only ever sent to the one
+place that issued it, and only in the one field that place expects. That
+is the whole list. Any program can hold that token now, including one a
+model wrote thirty seconds ago, because the rules ride with the data
+instead of with the program's good intentions. In the fabric, how your
+data may be used is structurally aligned with your interests — not
+promised to be, or audited to be. Structurally.
 
-The people who came before us settled arguments like this one by
-writing code rather than papers, and we would rather be judged the same
-way. Most of what is here is early. All of it is readable.
+Identity is a keypair, not an account. There is nothing to suspend, and
+no one to ask.
 
-What we hold:
+What that buys is not a better app store. It is the end of needing
+apps — thinking in apps was always unnatural, and the answer is not to
+make it more natural but to not need them. Code flows to the data
+instead of data flowing to the code. Software finds you rather than
+being installed. Programs stop being monuments and become crowd-sourced,
+cached save points in the latent space of software: some rando sneezes,
+and what comes out is a thing you can actually run on your real data,
+because the substrate is what keeps you safe rather than the author's
+good name. What accumulates in a close-ended system gets trapped. In an
+open-ended one it blossoms.
 
-1. Identity is a keypair, not an account. There is nothing to suspend,
-   and no one to ask.
-2. Every line is open source. The runtime proves itself to you before
-   your data arrives — you are never trusting our word, you are checking
-   the machine's.
-3. Your data leaves with you, whole, policies and all. A copy is not a
-   downgrade — the rules travel with it, so leaving costs you nothing
-   but the leaving.
-4. Software should be multiplayer without a landlord. This is the one
-   we have not built. A space still has a host that enforces access and
-   can revoke a participant mid-session
-   (`#revokeDeauthorizedSessions`, `packages/memory/v2/server.ts`), and
-   there is no delegation yet — access is granted directly, one
-   participant at a time, through a space's access-control list
-   (`packages/memory/acl.ts`), with no way to pass authority on. The
-   landlord is smaller than it was. It is not gone.
-5. The other unfinished parts, plainly: the checker refuses a commit
-   that crosses a boundary it was told about, which is the third of
-   four rungs (`enforce-explicit`); the viral part — labels propagating
-   into everything derived from a value — is written but defaults to
-   off, and is rolling out. Strict-by-default is the current work.
-   Robustness and performance are not there yet. The dial table in
-   `docs/specs/cfc-enforcement-matrix.md` lists what each host runs
-   today, rather than what we would like it to.
+[How it works](./how.md) is the code: what the compiler emits for an
+ordinary pattern, where the runtime checks the result, and what the
+exits are. [The full argument](./inverting-the-physics-of-trust.md)
+is the physics and the hardware.
 
-Here is what "policies ride with the data" means in practice. A program
-that imports your mail gets an access token that could read all of it.
-In the fabric that token carries four lines: never logged, never leaves
-the verified runtime, only ever sent to the one place that issued it,
-and only in the one field that place expects. That is the whole list.
-Any program can hold that token now, because the rules ride with the
-data, not with the program's good intentions.
+Most of what is here is early, and all of it is readable. What runs
+today: the compiler, the checker — rejecting at explicit boundaries, the
+third of four rungs — a hundred-odd patterns, and machines that prove
+which runtime they are before your data arrives. What does not: label
+propagation defaults to off and is rolling out, strict-by-default is the
+current work, a space still has a host that can revoke a participant,
+and robustness and performance are not there yet. The people who came
+before us settled arguments like this one by writing code rather than
+papers, and we would rather be judged the same way.
 
-Nothing here needs a token, a chain, or a consensus mechanism. Only that
-trust be checkable by anyone, from evidence.
+Nothing here needs a token, a chain, or a consensus mechanism — only
+that trust be checkable by anyone, from evidence.
 
-Clone it. Run a pattern. Write one — it is plain TypeScript, and the
-checker names the exact flow a policy would forbid before anything runs.
-The [tutorial](tutorial/README.md) walks the mechanisms, and
-`packages/patterns/` is where to start.
-
-The aim is not modest. The rule we are trying to replace sits
-underneath everything, and what it has been holding back is most of what
-software could have been. The work is unglamorous: types, a checker, a
-runtime, patterns, and years of it. That is the only kind of work that
-has ever moved a rule like this one, and all of it is open to inspect.
-
-Same-origin was a hotfix. People made it in a hurry, and people can
-replace it. We do not know whether we are the ones who will. We think
-this is where the leverage is, and we are spending our shot on it rather
-than waiting for somebody else to.
+Same-origin was a hotfix. It got hardened until it felt like a law of
+gravity, but people made it in a hurry, and people can replace it. We do
+not know whether we are the ones who will. Language models make software
+infinite, and infinite software inside the same broken frame gives you
+infinite islands — not a continent. The substrate is the part that
+decides which one you get, and that is where we are spending our shot
+rather than waiting for somebody else to.

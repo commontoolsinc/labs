@@ -36,9 +36,12 @@ import {
   type PatternSourcesResponse,
   PendingWritesNotification,
   type PieceSourceAction,
+  type PieceSourceRevisionSourceView,
   type PieceSourceView,
   type PieceUpdateSourceResponse,
   RequestType,
+  type SpaceAclCapability,
+  type SpaceAclView,
   TelemetryNotification,
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
@@ -319,6 +322,40 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.source;
   }
 
+  /** Read the retained authored files for one recorded source revision. */
+  async getPieceSourceRevision(
+    pieceId: string,
+    space: DID,
+    revisionId: string,
+  ): Promise<PieceSourceRevisionSourceView> {
+    const response = await this.#conn.request<
+      RequestType.PieceGetSourceRevision
+    >({
+      type: RequestType.PieceGetSourceRevision,
+      pieceId,
+      space,
+      revisionId,
+    });
+    return response.source;
+  }
+
+  /** Create a copy that follows the selected piece's source. */
+  async clonePiece(
+    pieceId: string,
+    sourceSpace: DID,
+    destinationSpace: DID,
+    options: { copyData?: boolean } = {},
+  ): Promise<PageHandle> {
+    const response = await this.#conn.request<RequestType.PieceClone>({
+      type: RequestType.PieceClone,
+      pieceId,
+      sourceSpace,
+      destinationSpace,
+      ...(options.copyData === true ? { copyData: true } : {}),
+    });
+    return new PageHandle(this, response.page);
+  }
+
   /**
    * Change a piece's source lifecycle state and return the resulting source
    * view. An incompatible candidate is returned as a warning without mutation.
@@ -338,6 +375,43 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
         ? {}
         : { confirmationToken: options.confirmationToken }),
     });
+  }
+
+  /** Read a space's ACL and whether the active principal may change it. */
+  async getSpaceAcl(space: DID): Promise<SpaceAclView> {
+    const response = await this.#conn.request<RequestType.SpaceGetAcl>({
+      type: RequestType.SpaceGetAcl,
+      space,
+    });
+    return response.access;
+  }
+
+  /** Add or replace one entry in a space ACL. */
+  async setSpaceAclEntry(
+    space: DID,
+    user: string,
+    capability: SpaceAclCapability,
+  ): Promise<SpaceAclView> {
+    const response = await this.#conn.request<RequestType.SpaceSetAclEntry>({
+      type: RequestType.SpaceSetAclEntry,
+      space,
+      user,
+      capability,
+    });
+    return response.access;
+  }
+
+  /** Remove one entry from a space ACL. */
+  async removeSpaceAclEntry(
+    space: DID,
+    user: string,
+  ): Promise<SpaceAclView> {
+    const response = await this.#conn.request<RequestType.SpaceRemoveAclEntry>({
+      type: RequestType.SpaceRemoveAclEntry,
+      space,
+      user,
+    });
+    return response.access;
   }
 
   async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {

@@ -38,6 +38,7 @@ import {
   patternCoverageOutputPath,
   Runtime,
   runtimePresets,
+  TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -419,7 +420,7 @@ const handlers: Record<
     }
     await settle();
 
-    const stepsValue = resultCell.key("tests").asSchema(
+    const stepsValue = resultCell.key(TESTS).asSchema(
       {
         type: "array",
         items: { type: "object", asCell: ["cell"] },
@@ -428,7 +429,7 @@ const handlers: Record<
     ).get();
     if (!Array.isArray(stepsValue)) {
       throw new Error(
-        `Participant "${args.participant}" must return { tests: TestStep[] }`,
+        `Participant "${args.participant}" must return { [TESTS]: TestStep[] }`,
       );
     }
     stepCells = stepsValue as Cell<unknown>[];

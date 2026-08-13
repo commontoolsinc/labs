@@ -1,5 +1,5 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { getTopFrame } from "../builder/pattern.ts";
 import { type Frame } from "../builder/types.ts";
 import {
@@ -99,7 +99,7 @@ function formatTelemetryLink(link: NormalizedFullLink): string {
 }
 
 function getOptionalName(value: unknown): string | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isObjectOrArray(value)) return undefined;
   const debugName = value.debugName;
   if (typeof debugName === "string") return debugName;
   const name = value.name;
@@ -161,7 +161,7 @@ export function summarizeTriggerTraceValue(
   if (Array.isArray(value)) {
     return { kind: "array", size: value.length };
   }
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     return { kind: "object", size: Object.keys(value).length };
   }
   return { kind: "other", preview: Object.prototype.toString.call(value) };
@@ -191,15 +191,15 @@ export function getPieceMetadataFromFrame(frame?: Frame): {
   // cycle) and fall back to the in-hand pattern's entry ref when the cell has no
   // stored pointer (a keyless run()).
   const storedIdentity = resultCell.getMetaRaw("patternIdentity");
-  result.patternId =
-    (isRecord(storedIdentity) && typeof storedIdentity.identity === "string"
-      ? storedIdentity.identity
-      : undefined) ??
-      (frame?.unsafe_binding?.pattern
-        ? frame.runtime?.patternManager.getArtifactEntryRef(
-          frame.unsafe_binding.pattern,
-        )?.identity
-        : undefined);
+  result.patternId = (isObjectOrArray(storedIdentity) &&
+      typeof storedIdentity.identity === "string"
+    ? storedIdentity.identity
+    : undefined) ??
+    (frame?.unsafe_binding?.pattern
+      ? frame.runtime?.patternManager.getArtifactEntryRef(
+        frame.unsafe_binding.pattern,
+      )?.identity
+      : undefined);
   result.space = resultCell.space;
   // The FULL sourceURI, scheme included. All consumers are display (error
   // strings, console-log prefixes), and keeping the scheme means ids copied

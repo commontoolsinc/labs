@@ -1,3 +1,14 @@
+/**
+ * The JSON registry before any fabric class is added to it: what it already
+ * knows, and what it deliberately does not.
+ *
+ * It carries only the types JSON itself cannot express, and marks JSON's own
+ * scalars as needing no codec at all. No fabric class is in it, which is what
+ * leaves the choice of participating classes to whoever extends it. Each call
+ * builds a fresh registry and hands it back frozen, so extending means
+ * deriving a new one rather than adding to something shared.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -12,7 +23,7 @@ describe("createBaseJsonRegistry", () => {
 
   it("returns a registry that refuses further registration", () => {
     expect(() => createBaseJsonRegistry().registerSelfRep("string"))
-      .toThrow("Cannot modify frozen CodecRegistry");
+      .toThrow("Cannot modify frozen `CodecRegistry`");
   });
 
   it("returns a fresh registry on each call", () => {

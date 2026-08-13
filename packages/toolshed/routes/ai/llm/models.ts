@@ -11,6 +11,10 @@ import {
 } from "@commonfabric/llm/types";
 
 import env from "@/env.ts";
+import {
+  gatewayProvenanceHeaders,
+  withGatewayProvenance,
+} from "@/lib/gateway-provenance.ts";
 
 export type Capabilities = {
   contextWindow: number;
@@ -61,7 +65,12 @@ export type ModelConfig = {
 
 export type ModelList = Record<string, ModelConfig>;
 
-export const MODELS: ModelList = {};
+// A registry with no prototype, so a name is registered here or it is not a
+// model. A plain object answers a lookup for `constructor` or `toString` with
+// something off `Object.prototype`, and a request naming one of those would be
+// taken for a model and then fail on reading its capabilities, rather than
+// being turned away as the unknown model it is.
+export const MODELS: ModelList = Object.create(null);
 export const ALIAS_NAMES: string[] = [];
 export const PROVIDER_NAMES: Set<string> = new Set();
 
@@ -371,12 +380,9 @@ if (env.CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 async function loadGatewayModels() {
   const url = env.CFTS_AI_GATEWAY_URL.replace(/\/+$/, "");
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3_000);
     const res = await fetch(`${url}/v1/models`, {
-      signal: controller.signal,
+      headers: gatewayProvenanceHeaders("list-models"),
     });
-    clearTimeout(timeout);
 
     if (!res.ok) {
       console.warn(
@@ -388,9 +394,12 @@ async function loadGatewayModels() {
     const body: GatewayModelsResponse = await res.json();
     // Force HTTP/1.1 to avoid Deno HTTP/2 SSE streaming bug
     const http1Client = Deno.createHttpClient({ http2: false });
-    const gatewayFetch: typeof fetch = (input, init) => {
+    // Every request through this provider reaches the gateway, so provenance
+    // is attached here rather than at each call site: the gateway needs it to
+    // attribute the request, and no vendor API is on the other end of it.
+    const gatewayFetch: typeof fetch = withGatewayProvenance((input, init) => {
       return fetch(input, { ...init, client: http1Client } as RequestInit);
-    };
+    });
     const gatewayProvider = createOpenAI({
       baseURL: `${url}/v1`,
       apiKey: "gateway-internal",
@@ -442,20 +451,33 @@ async function loadGatewayModels() {
     // The gateway is only reachable on Tailscale; an unreachable URL is
     // expected off-network. Log as a warning and continue without gateway
     // models — direct provider entries (Anthropic, etc.) remain available.
-    if (err instanceof DOMException && err.name === "AbortError") {
-      console.warn(`[gateway] Timeout fetching models from ${url}; skipping.`);
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(
-        `[gateway] Could not reach ${url} (${message}); skipping gateway models.`,
-      );
-    }
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[gateway] Could not reach ${url} (${message}); skipping gateway models.`,
+    );
   }
 }
 
 export const findModel = (name: string) => {
   return MODELS[name];
 };
+
+/**
+ * The model registered under `name`, waiting for gateway discovery only where
+ * waiting could change the answer. A model a provider registered as this
+ * module loaded is returned straight away, so a request for one of those is
+ * served whatever the gateway is doing. A name that is not registered yet is
+ * answered once discovery has finished, which is what a gateway model, the
+ * `default` alias, and a name that is no model at all have in common.
+ */
+export async function resolveModel(
+  name: string,
+): Promise<ModelConfig | undefined> {
+  const registered = MODELS[name];
+  if (registered !== undefined) return registered;
+  await modelsReady;
+  return MODELS[name];
+}
 
 const registerDefaultModel = () => {
   const chosenName = DEFAULT_MODEL_CANDIDATES.find((name) => MODELS[name]);
@@ -475,8 +497,23 @@ const registerDefaultModel = () => {
   console.log(` Default model: ${chosenName}`);
 };
 
-if (env.CFTS_AI_GATEWAY_URL) {
-  await loadGatewayModels();
-}
+// Gateway model discovery is a network call to a host that answers only on
+// Tailscale, and the list it returns is only needed by a request that names a
+// model. It runs alongside the server coming up rather than in front of it, so
+// a gateway that is slow to answer, or that never answers, delays no more than
+// the requests that need what it says.
+const modelsReady: Promise<void> = (async () => {
+  if (env.CFTS_AI_GATEWAY_URL) {
+    await loadGatewayModels();
+  }
+  registerDefaultModel();
+})();
 
-registerDefaultModel();
+/**
+ * Resolves once the model list holds everything it is going to hold. Await
+ * this before reading {@link MODELS} whole; to answer for one model, prefer
+ * {@link resolveModel}, which waits only where the answer is still open.
+ */
+export function whenModelsReady(): Promise<void> {
+  return modelsReady;
+}

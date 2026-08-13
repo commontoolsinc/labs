@@ -6,15 +6,21 @@
 
 import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd";
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
+import { ValidationError } from "@cliffy/command";
 import { Identity } from "@commonfabric/identity";
 import { defaultCacheDir } from "@commonfabric/state-inspector";
+import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { inspect } from "../commands/inspect.ts";
 
 const DUMP_BASE = "/api/storage/memory/dump";
 const BASE = "http://cli-remote-test.invalid:9999";
 const DID_A = "did:key:z6MkCliRemoteTestSpaceAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const DID_B = "did:key:z6MkCliRemoteTestSpaceBBBBBBBBBBBBBBBBBBBBBBBBBB";
+const VIEWER_DID = "did:key:zInspector";
+const VIEWER_SESSION = "viewer-session";
 
 // Minimal valid memory-v2 space DB (schema mirrors state-inspector/test/cli.test.ts).
 const SCHEMA = `
@@ -36,7 +42,7 @@ CREATE TABLE branch (
   fork_seq INTEGER, created_seq INTEGER NOT NULL DEFAULT 0,
   head_seq INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active'
 );
-INSERT INTO branch (name, head_seq, status) VALUES ('', 1, 'active');
+INSERT INTO branch (name, head_seq, status) VALUES ('', 2, 'active');
 `;
 
 let dbBytes: Uint8Array;
@@ -51,6 +57,8 @@ async function buildDbBytes(): Promise<Uint8Array> {
   const path = `${dir}/space.sqlite`;
   const db = new Database(path, { create: true });
   db.exec(SCHEMA);
+  let deep: FabricValue = { leaf: "complete" };
+  for (let depth = 0; depth < 12; depth++) deep = { child: deep };
   db.prepare(
     `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
      VALUES (1, 'session:did:key:zX:u', 1, '{"reads":{"confirmed":[],"pending":[]}}', '{}')`,
@@ -58,7 +66,61 @@ async function buildDbBytes(): Promise<Uint8Array> {
   db.prepare(
     `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
      VALUES ('of:a', 1, 0, 'set', ?, 1)`,
-  ).run(JSON.stringify({ value: { n: 1 } }));
+  ).run(jsonFromValue({
+    value: {
+      n: 1,
+      deep,
+      "a/b": "literal slash key",
+      a: { b: "nested keys" },
+      "": "empty key",
+      items: ["zero", "one"],
+      "(root)": "reserved-looking key",
+      "line\nforged": "\u001b[2Jforged\nline",
+      "bidi\u202Eforged": "bidi one",
+      collision: undefined,
+    },
+  }));
+  db.prepare(
+    `INSERT INTO revision
+       (id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES ('of:a', 'user:did%3Akey%3AzInspector', 1, 0, 'set', ?, 1)`,
+  ).run(jsonFromValue({
+    value: {
+      n: 2,
+      deep,
+      "a/b": "identity slash key",
+      "": "identity empty key",
+      nested: { leaf: "identity nested key" },
+    },
+  }));
+  db.prepare(
+    `INSERT INTO revision
+       (id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES ('of:a', 'session:did%3Akey%3AzInspector:viewer-session', 1, 0, 'set', ?, 1)`,
+  ).run(JSON.stringify({
+    value: { "a/b": "session slash key" },
+  }));
+  db.prepare(
+    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+     VALUES (2, 'session:did:key:zX:u', 2, '{"reads":{"confirmed":[],"pending":[]}}', '{}')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+     VALUES ('of:a', 2, 0, 'set', ?, 2)`,
+  ).run(jsonFromValue({
+    value: {
+      n: 1,
+      deep,
+      "a/b": "literal slash key changed",
+      a: { b: "nested keys changed" },
+      "": "empty key changed",
+      items: ["zero", "one"],
+      "(root)": "reserved-looking key changed",
+      "line\nforged": "\u001b[31mother\rline",
+      "bidi\u202Eforged": "bidi two",
+      collision: { $undefined: true },
+    },
+  }));
   db.close();
   const bytes = await Deno.readFile(path);
   await Deno.remove(dir, { recursive: true });
@@ -69,10 +131,16 @@ interface StubOpts {
   status?: number;
   spaces?: { space: string; sizeBytes: number; mtimeMs: number }[];
 }
-function stubFetch(opts: StubOpts = {}): void {
+interface StubState {
+  requests: number;
+}
+
+function stubFetch(opts: StubOpts = {}): StubState {
+  const state: StubState = { requests: 0 };
   const spaces = opts.spaces ??
     [{ space: DID_A, sizeBytes: dbBytes.length, mtimeMs: 1 }];
   globalThis.fetch = ((input: string | URL | Request) => {
+    state.requests++;
     const url = new URL(typeof input === "string" ? input : input.toString());
     if (opts.status && opts.status !== 200) {
       return Promise.resolve(
@@ -95,6 +163,7 @@ function stubFetch(opts: StubOpts = {}): void {
     }
     return Promise.resolve(new Response("nope", { status: 404 }));
   }) as typeof fetch;
+  return state;
 }
 
 /** Run a subcommand, capturing stdout. */
@@ -198,8 +267,475 @@ describe("cf inspect --remote", () => {
     stubFetch();
     const out = await run(["summary", DID_A, "--remote", BASE, "--json"]);
     const s = JSON.parse(out);
-    assertEquals(s.commits, 1);
+    assertEquals(s.commits, 2);
     assertEquals(s.entities, 1);
+  });
+
+  it("preserves every nested value with `value-at --full-depth`", async () => {
+    stubFetch();
+    const shallow = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--json",
+      ]),
+    );
+    expect(JSON.stringify(shallow.value.deep)).toContain('"…"');
+
+    const full = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--full-depth",
+        "--json",
+      ]),
+    );
+    let nested = full.value.deep;
+    for (let depth = 0; depth < 12; depth++) nested = nested.child;
+    expect(nested).toEqual({ leaf: "complete" });
+
+    const identityView = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--as",
+        VIEWER_DID,
+        "--full-depth",
+        "--json",
+      ]),
+    );
+    expect(identityView.resolvedKind).toBe("user");
+    nested = identityView.value.deep;
+    for (let depth = 0; depth < 12; depth++) nested = nested.child;
+    expect(nested).toEqual({ leaf: "complete" });
+  });
+
+  it("value-at applies exact and slash paths to identity views", async () => {
+    stubFetch();
+    const identityPath = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--as",
+        VIEWER_DID,
+        "--path-json",
+        '["a/b"]',
+        "--json",
+      ]),
+    );
+    assertEquals(identityPath.resolvedKind, "user");
+    assertEquals(identityPath.pathExists, true);
+    assertEquals(identityPath.value, "identity slash key");
+
+    const identitySlashPath = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--as",
+        VIEWER_DID,
+        "--path",
+        "nested/leaf",
+        "--json",
+      ]),
+    );
+    assertEquals(identitySlashPath.resolvedKind, "user");
+    assertEquals(identitySlashPath.value, "identity nested key");
+
+    const primitivePath = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--as",
+        VIEWER_DID,
+        "--path",
+        "nested/leaf/length",
+        "--json",
+      ]),
+    );
+    assertEquals(primitivePath.resolvedKind, "user");
+    assertEquals(primitivePath.pathExists, true);
+    assertEquals(primitivePath.value, 19);
+
+    const sessionPath = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--as",
+        VIEWER_DID,
+        "--session",
+        VIEWER_SESSION,
+        "--path-json",
+        '["a/b"]',
+        "--json",
+      ]),
+    );
+    assertEquals(sessionPath.resolvedKind, "session");
+    assertEquals(sessionPath.pathExists, true);
+    assertEquals(sessionPath.value, "session slash key");
+
+    const identityDocument = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--as",
+        VIEWER_DID,
+        "--doc",
+        "--json",
+      ]),
+    );
+    assertEquals(identityDocument.resolvedKind, "user");
+    assertEquals(identityDocument.value.value["a/b"], "identity slash key");
+  });
+
+  it("value-at --path-json preserves exact and root paths", async () => {
+    stubFetch();
+    const slash = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--path-json",
+        '["a/b"]',
+        "--json",
+      ]),
+    );
+    assertEquals(slash.pathExists, true);
+    assertEquals(slash.value, "literal slash key changed");
+
+    const empty = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--path-json",
+        '[""]',
+        "--json",
+      ]),
+    );
+    assertEquals(empty.pathExists, true);
+    assertEquals(empty.value, "empty key changed");
+
+    const root = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--path-json",
+        "[]",
+        "--json",
+      ]),
+    );
+    assertEquals(root.pathExists, true);
+    assertEquals(root.value.n, 1);
+  });
+
+  it("value-at does not coerce array segments", async () => {
+    stubFetch();
+    const result = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--path-json",
+        '["items","01"]',
+        "--json",
+      ]),
+    );
+    assertEquals(result.pathExists, false);
+    assertEquals(result.value, { $undefined: true });
+
+    const slashResult = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--path",
+        "items/01",
+        "--json",
+      ]),
+    );
+    assertEquals(slashResult.pathExists, false);
+  });
+
+  it("diff preserves exact input and result path segments", async () => {
+    stubFetch();
+    const result = JSON.parse(
+      await run([
+        "diff",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--from",
+        "1",
+        "--to",
+        "2",
+        "--json",
+      ]),
+    );
+    assertEquals(
+      result.changes.map((change: { pathSegments: string[] }) =>
+        JSON.stringify(change.pathSegments)
+      ).sort(),
+      [
+        ["a/b"],
+        ["a", "b"],
+        [""],
+        ["(root)"],
+        ["line\nforged"],
+        ["bidi\u202Eforged"],
+        ["collision"],
+      ].map((segments) => JSON.stringify(segments)).sort(),
+    );
+    const collision = result.changes.find(
+      (change: { pathSegments: string[] }) =>
+        change.pathSegments.length === 1 &&
+        change.pathSegments[0] === "collision",
+    );
+    assertEquals(collision, {
+      path: "collision",
+      pathSegments: ["collision"],
+      kind: "changed",
+      before: { $undefined: true },
+      beforeIsUndefined: true,
+      after: { $undefined: true },
+      annotationCollision: true,
+      beforeValueKind: "undefined",
+      afterValueKind: "object",
+    });
+
+    const focused = JSON.parse(
+      await run([
+        "diff",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--from",
+        "1",
+        "--to",
+        "2",
+        "--path-json",
+        '["a/b"]',
+        "--json",
+      ]),
+    );
+    assertEquals(focused.changes, [{
+      path: "",
+      pathSegments: [],
+      kind: "changed",
+      before: "literal slash key",
+      after: "literal slash key changed",
+    }]);
+
+    const document = JSON.parse(
+      await run([
+        "diff",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--from",
+        "1",
+        "--to",
+        "2",
+        "--doc",
+        "--json",
+      ]),
+    );
+    const documentChange = document.changes.find(
+      (change: { pathSegments: string[] }) =>
+        JSON.stringify(change.pathSegments) ===
+          JSON.stringify(["value", "a/b"]),
+    );
+    assertEquals(documentChange, {
+      path: "value/a/b",
+      pathSegments: ["value", "a/b"],
+      kind: "changed",
+      before: "literal slash key",
+      after: "literal slash key changed",
+    });
+
+    const human = await run([
+      "diff",
+      DID_A,
+      "of:a",
+      "--remote",
+      BASE,
+      "--from",
+      "1",
+      "--to",
+      "2",
+    ]);
+    assertStringIncludes(human, '["a/b"]');
+    assertStringIncludes(human, "  ~ a/b:");
+    assertStringIncludes(human, '[""]');
+    assertStringIncludes(human, '["(root)"]');
+    assertStringIncludes(human, '["line\\nforged"]');
+    assertStringIncludes(human, '["bidi\\u202eforged"]');
+    assertStringIncludes(
+      human,
+      "  ~ collision: undefined [undefined] → {$undefined} [object] " +
+        "(display annotations match)",
+    );
+    assertStringIncludes(human, '"\\u001b[2Jforged\\nline"');
+    assertStringIncludes(human, '"\\u001b[31mother\\rline"');
+    assertEquals(human.includes("\u001b"), false);
+  });
+
+  it("value-at rejects ambiguous or invalid exact paths", async () => {
+    stubFetch();
+    await assertRejects(
+      () =>
+        run([
+          "value-at",
+          DID_A,
+          "of:a",
+          "--remote",
+          BASE,
+          "--path",
+          "a/b",
+          "--path-json",
+          '["a/b"]',
+          "--json",
+        ]),
+      ValidationError,
+      "either `--path` or `--path-json`",
+    );
+    await assertRejects(
+      () =>
+        run([
+          "value-at",
+          DID_A,
+          "of:a",
+          "--remote",
+          BASE,
+          "--path-json",
+          '["a/b",0]',
+          "--json",
+        ]),
+      ValidationError,
+      "JSON array of string segments",
+    );
+    await assertRejects(
+      () =>
+        run([
+          "value-at",
+          DID_A,
+          "of:a",
+          "--remote",
+          BASE,
+          "--doc",
+          "--path-json",
+          '["a/b"]',
+          "--json",
+        ]),
+      ValidationError,
+      "`--doc` without `--path` or `--path-json`",
+    );
+  });
+
+  it("value-at rejects selectors that cannot affect its view", async () => {
+    const fetchState = stubFetch();
+    await assertRejects(
+      () =>
+        run([
+          "value-at",
+          DID_A,
+          "of:a",
+          "--remote",
+          BASE,
+          "--as",
+          VIEWER_DID,
+          "--scope",
+          "space",
+          "--json",
+        ]),
+      ValidationError,
+      "either `--as` or `--scope`",
+    );
+    await assertRejects(
+      () =>
+        run([
+          "value-at",
+          DID_A,
+          "of:a",
+          "--remote",
+          BASE,
+          "--session",
+          VIEWER_SESSION,
+          "--json",
+        ]),
+      ValidationError,
+      "`--session` requires `--as`",
+    );
+    await assertRejects(
+      () =>
+        run([
+          "value-at",
+          DID_A,
+          "of:a",
+          "--remote",
+          BASE,
+          "--as",
+          "",
+          "--json",
+        ]),
+      ValidationError,
+      'Missing value for option "--as"',
+    );
+    await assertRejects(
+      () =>
+        run([
+          "value-at",
+          DID_A,
+          "of:a",
+          "--remote",
+          BASE,
+          "--as",
+          VIEWER_DID,
+          "--session",
+          "",
+          "--json",
+        ]),
+      ValidationError,
+      'Missing value for option "--session"',
+    );
+    assertEquals(fetchState.requests, 0);
   });
 
   it("resolveRemoteDid: a unique prefix resolves via the remote list", async () => {
@@ -271,6 +807,70 @@ describe("cf inspect --remote", () => {
     assertEquals(JSON.parse(out).id, "of:a");
   });
 
+  it("converge preserves exact path segments", async () => {
+    stubFetch({
+      spaces: [
+        { space: DID_A, sizeBytes: 10, mtimeMs: 2 },
+        { space: DID_B, sizeBytes: 10, mtimeMs: 1 },
+      ],
+    });
+    const result = JSON.parse(
+      await run([
+        "converge",
+        "of:a",
+        "--spaces",
+        `${DID_A},${DID_B}`,
+        "--remote",
+        BASE,
+        "--path-json",
+        '["a/b"]',
+        "--json",
+      ]),
+    );
+    assertEquals(result.path, ["a/b"]);
+    assertEquals(
+      result.views.map((view: { value: unknown }) => view.value),
+      ["literal slash key changed", "literal slash key changed"],
+    );
+
+    const exactHuman = await run([
+      "converge",
+      "of:a",
+      "--spaces",
+      `${DID_A},${DID_B}`,
+      "--remote",
+      BASE,
+      "--path-json",
+      '["a/b"]',
+    ]);
+    assertStringIncludes(exactHuman, 'path=["a/b"]');
+
+    const legacyHuman = await run([
+      "converge",
+      "of:a",
+      "--spaces",
+      `${DID_A},${DID_B}`,
+      "--remote",
+      BASE,
+      "--path",
+      "a/b",
+    ]);
+    assertStringIncludes(legacyHuman, "path=/a/b");
+
+    const unsafeLegacyHuman = await run([
+      "converge",
+      "of:a",
+      "--spaces",
+      `${DID_A},${DID_B}`,
+      "--remote",
+      BASE,
+      "--path",
+      "line\nforged",
+    ]);
+    assertStringIncludes(unsafeLegacyHuman, 'path=["line\\nforged"]');
+    assertEquals(unsafeLegacyHuman.includes("path=/line\nforged"), false);
+  });
+
   it("converge --all over --remote uses the remote listing", async () => {
     stubFetch({
       spaces: [
@@ -289,13 +889,83 @@ describe("cf inspect --remote", () => {
     assertEquals(JSON.parse(out).id, "of:a");
   });
 
-  it("converge --remote with neither --all nor --spaces errors", async () => {
-    stubFetch();
+  it("converge rejects conflicting selectors before remote I/O", async () => {
+    const fetchState = stubFetch();
     await assertRejects(
-      () => run(["converge", "of:a", "--remote", BASE, "--json"]),
-      Error,
-      "--all or --spaces",
+      () =>
+        run([
+          "converge",
+          "of:a",
+          "--all",
+          "--spaces",
+          DID_A,
+          "--remote",
+          BASE,
+          "--json",
+        ]),
+      ValidationError,
+      "only one",
     );
+    assertEquals(fetchState.requests, 0);
+  });
+
+  it("converge rejects a local directory in remote mode before I/O", async () => {
+    const fetchState = stubFetch();
+    await assertRejects(
+      () =>
+        run([
+          "converge",
+          "of:a",
+          "--dir",
+          tmpRoot,
+          "--remote",
+          BASE,
+          "--json",
+        ]),
+      ValidationError,
+      "cannot be used",
+    );
+    assertEquals(fetchState.requests, 0);
+  });
+
+  it("converge validates a missing selector before identity I/O", async () => {
+    const fetchState = stubFetch();
+    await assertRejects(
+      () =>
+        run([
+          "converge",
+          "of:a",
+          "--remote",
+          BASE,
+          "--identity",
+          `${tmpRoot}/missing.key`,
+          "--json",
+        ]),
+      ValidationError,
+      "Use one of",
+    );
+    assertEquals(fetchState.requests, 0);
+  });
+
+  it("converge rejects an empty spaces list before identity I/O", async () => {
+    const fetchState = stubFetch();
+    await assertRejects(
+      () =>
+        run([
+          "converge",
+          "of:a",
+          "--spaces",
+          " , ",
+          "--remote",
+          BASE,
+          "--identity",
+          `${tmpRoot}/missing.key`,
+          "--json",
+        ]),
+      ValidationError,
+      "must contain at least one space",
+    );
+    assertEquals(fetchState.requests, 0);
   });
 
   it("resolveRemoteDid: a token matching nothing errors", async () => {

@@ -5,9 +5,10 @@
  * {@link valueFromDataUriPayloadText}).
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   fromBase64url,
-  toUnpaddedBase64url,
+  toUnpaddedBase64urlFromText,
 } from "@commonfabric/utils/base64url";
 import { EmptyReconstructionContext } from "./codec-common/index.ts";
 import { jsonFromValue, valueFromJson } from "./codecs.ts";
@@ -64,9 +65,7 @@ export function isFabricDataUri(id: string): boolean {
  * other preparation of `value`; callers hand it a ready `FabricValue`.
  */
 export function dataUriFromValue(value: FabricValue): UriString {
-  const payload = toUnpaddedBase64url(
-    new TextEncoder().encode(jsonFromValue(value)),
-  );
+  const payload = toUnpaddedBase64urlFromText(jsonFromValue(value));
   return `data:${DATA_URI_MEDIA_TYPE},${payload}` as UriString;
 }
 
@@ -105,7 +104,7 @@ export function extractDataUriPayloadText(
 ): { mediaType: string; text: string } {
   const commaIndex = uri.indexOf(",");
   if (!hasDataUriScheme(uri) || commaIndex === -1) {
-    throw new Error(`Invalid data URI format: ${uri}`);
+    throw new Error(`Invalid data URI format: ${backtickQuote(uri)}`);
   }
 
   const mediaType = uri.substring("data:".length, commaIndex);
@@ -125,7 +124,9 @@ export function extractDataUriPayloadText(
     const bytes = fromBase64url(data);
     return { mediaType, text: textDecoder.decode(bytes) };
   } catch {
-    throw new Error(`Invalid data URI payload (not base64url): ${uri}`);
+    throw new Error(
+      `Invalid data URI payload (not base64url): ${backtickQuote(uri)}`,
+    );
   }
 }
 
@@ -168,7 +169,7 @@ export function valueFromDataUriPayloadText(text: string): FabricValue {
 export function valueFromDataUri(uri: UriString | string): any {
   const { mediaType, text } = extractDataUriPayloadText(uri);
   if (!isDataUriMediaType(mediaType)) {
-    throw new Error(`Invalid URI: ${uri}`);
+    throw new Error(`Invalid URI: ${backtickQuote(uri)}`);
   }
   return valueFromDataUriPayloadText(text);
 }

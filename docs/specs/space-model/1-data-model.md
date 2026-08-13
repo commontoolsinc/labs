@@ -342,10 +342,14 @@ well-known symbols:
 
 ```typescript
 // Shown inside a pattern body.
-const CODEC = Symbol.for('data-model.codec');
-const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
-const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
-// If protocol evolution is needed: Symbol.for('data-model.codec@2')
+// Unique symbols, not registry-interned ones: a member keyed by one is
+// reachable only by importing the symbol, and the string is a description
+// rather than a lookup key.
+const CODEC: unique symbol = Symbol('data-model.codec');
+const DEEP_FREEZE: unique symbol = Symbol('data-model.deepFreeze');
+const IS_DEEP_FROZEN: unique symbol = Symbol('data-model.isDeepFrozen');
+// If protocol evolution is needed: a further symbol,
+// e.g. `Symbol('data-model.codec@2')`.
 
 // Instance protocol: "here's how to freeze me deeply, and here's how to
 // clone me." (In-process lifecycle only -- serialization is class-level.)
@@ -358,22 +362,41 @@ abstract class FabricInstance {
 
 // Codec protocol: each class hosts an encoder-decoder object -- the
 // single source of truth for how its instances serialize -- as a static
-// getter keyed by `CODEC`.
-interface FabricCodec {
+// getter keyed by a well-known symbol. `Encoded` is the domain the
+// essential state lives in.
+interface FabricCodec<Encoded> {
   get uniqueHandledClass(): Constructor | undefined;
   get recognizedTypeTag(): string | undefined;
   canEncode(value: FabricValue): boolean;
   tagForValue(value: FabricValue): string;
-  encode(value: FabricValue): FabricValue;   // shallow
+  encode(value: FabricValue): Encoded;       // shallow
   decode(                                    // shallow
     typeTag: string,
-    state: FabricValue,
+    state: Encoded,
     context: ReconstructionContext,
   ): FabricValue;
 }
 
-interface FabricClassWithCodec {
-  get [CODEC](): FabricCodec;
+// Nonterminal: state made of fabric values, which the walker expands in
+// turn. One such instance can serve every wire format.
+type NonterminalCodec = FabricCodec<FabricValue>;
+
+// Terminal: state already in one format's own domain, which the walker
+// passes through. Serves that one format alone.
+type TerminalCodec<Encoded> = FabricCodec<Encoded>;
+
+// The symbol a class binds under is a separate question from the kind.
+// `CODEC` is the claim that one codec serves every format, which a
+// terminal codec cannot truthfully make, so only a nonterminal codec
+// belongs there; nothing enforces that. A class the formats treat
+// differently binds per format instead, under that format's own symbol,
+// and what it supplies there may be of either kind.
+
+// Which kind a codec is cannot be read off its signature -- the domains
+// overlap -- so a codec declares it by which base class it extends.
+
+interface FabricClassWithNonterminalCodec {
+  get [CODEC](): NonterminalCodec;
 }
 ```
 
@@ -410,7 +433,7 @@ Example implementation:
 ```typescript
 // Shown for illustration only.
 class Cell<T> extends FabricInstance {
-  static #codec = new (class extends BaseFabricCodec {
+  static #codec = new (class extends BaseNonterminalCodec {
     constructor() {
       super('Cell@1', Cell);
     }
@@ -428,7 +451,7 @@ class Cell<T> extends FabricInstance {
     }
   })();
 
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
@@ -488,7 +511,7 @@ class UnknownValue extends FabricInstance {
     readonly state: FabricValue,  // the raw state, already recursively processed
   ) { super(); }
 
-  static #codec = new (class extends BaseFabricCodec {
+  static #codec = new (class extends BaseNonterminalCodec {
     constructor() {
       // No recognized tag: the instance carries its own.
       super(undefined, UnknownValue);
@@ -507,7 +530,7 @@ class UnknownValue extends FabricInstance {
     }
   })();
 
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
@@ -824,8 +847,9 @@ Concretely:
   a known type, a built-in escape (`/object`, `/quote`), or an unrecognized
   tag (preserved as `UnknownValue` for round-tripping).
 - A multi-key object containing one or more `/`-prefixed keys among its
-  keys is a structural encoding error — also `ProblematicValue`. It is not
-  a valid plain object.
+  keys is a structural encoding error, and is rejected the same way: a
+  `ProblematicValue` from a lenient context, a raise from a strict one. It is
+  not a valid plain object.
 
 See Section 9 of the formal spec for the full rule and the
 `ProblematicValue` interpretation across the cases above.

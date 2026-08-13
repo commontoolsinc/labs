@@ -1,3 +1,11 @@
+/**
+ * A query-result proxy is a live, transaction-backed view. Structural
+ * mutations (freeze/seal/defineProperty/delete) cannot be honored without
+ * either corrupting the backing store or defeating live read-resolution, so
+ * the proxy refuses them outright -- callers must snapshot to a plain value
+ * first. These tests lock in that refusal.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -8,11 +16,6 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test proxy mutation guard");
 const space = signer.did();
 
-// A query-result proxy is a live, transaction-backed view. Structural
-// mutations (freeze/seal/defineProperty/delete) cannot be honored without
-// either corrupting the backing store or defeating live read-resolution, so
-// the proxy refuses them outright -- callers must snapshot to a plain value
-// first. These tests lock in that refusal.
 describe("query-result proxy structural-mutation guard", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

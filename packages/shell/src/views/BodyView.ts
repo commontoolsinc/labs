@@ -13,6 +13,11 @@ type SubPages = {
   fabUI?: VNode;
 };
 
+export type LoadError = {
+  kind: "space" | "piece";
+  error: unknown;
+};
+
 const SubPagesSchema = {
   type: "object",
   properties: {
@@ -68,23 +73,60 @@ export class XBodyView extends BaseView {
       min-height: 0;
     }
 
-    .pattern-error {
+    .load-error {
       display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 2rem;
-      color: #c00;
-      text-align: center;
+      min-height: 100%;
+      padding: clamp(1rem, 5vw, 3rem);
+      box-sizing: border-box;
     }
 
-    .pattern-error h2 {
-      margin: 0 0 1rem;
+    .load-error cf-alert {
+      width: min(100%, 42rem);
     }
 
-    .pattern-error p {
+    .load-error h2 {
       margin: 0;
-      font-family: monospace;
+      font: inherit;
+      font-weight: 600;
+    }
+
+    .load-error-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+    }
+
+    .load-error-details {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      border: 1px solid currentColor;
+      border-radius: 0.375rem;
+      text-align: left;
+    }
+
+    .load-error-details span {
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .load-error-details code {
+      font-family: var(--font-primary, ui-monospace, monospace);
+      font-size: 0.8rem;
+      font-weight: 400;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .runtime-error {
+      flex: none;
+      margin: 1rem 0 0;
     }
   `;
 
@@ -104,7 +146,10 @@ export class XBodyView extends BaseView {
   accessor showSidebar = false;
 
   @property({ attribute: false })
-  accessor patternError: Error | undefined = undefined;
+  accessor loadError: LoadError | undefined = undefined;
+
+  @property({ attribute: false })
+  accessor runtimeError: LoadError | undefined = undefined;
 
   @property({ type: Boolean })
   accessor embedded = false;
@@ -136,12 +181,25 @@ export class XBodyView extends BaseView {
   });
 
   override render() {
-    // Show error if pattern failed to start
-    const mainContent = this.patternError
+    const mainContent = this.loadError
       ? html`
-        <div slot="main" class="pattern-error">
-          <h2>Failed to load piece</h2>
-          <p>${this.patternError.message}</p>
+        <div slot="main" class="load-error">
+          <cf-alert status="error">
+            <span slot="icon" class="load-error-icon" aria-hidden="true">
+              !
+            </span>
+            <h2 slot="title">
+              We could not load this ${this.loadError.kind}
+            </h2>
+            <span slot="description">
+              Try reloading the page. If the problem continues, check that the link is
+              correct and that you have access.
+            </span>
+            <div class="load-error-details">
+              <span>Error details</span>
+              <code>${loadErrorMessage(this.loadError.error)}</code>
+            </div>
+          </cf-alert>
         </div>
       `
       : this.activePattern
@@ -156,9 +214,28 @@ export class XBodyView extends BaseView {
       ? undefined
       : this._subPages?.value?.sidebarUI;
     const fab = this.embedded ? undefined : this._subPages?.value?.fabUI;
+    const runtimeError = this.runtimeError
+      ? html`
+        <cf-alert class="runtime-error" status="error">
+          <span slot="icon" class="load-error-icon" aria-hidden="true">!</span>
+          <h2 slot="title">
+            This ${this.runtimeError.kind} encountered an error
+          </h2>
+          <span slot="description">
+            Some content may not be available. Try reloading the page if the problem
+            continues.
+          </span>
+          <div class="load-error-details">
+            <span>Error details</span>
+            <code>${loadErrorMessage(this.runtimeError.error)}</code>
+          </div>
+        </cf-alert>
+      `
+      : null;
 
     return html`
       <div class="content ${this.embedded ? "embedded" : ""}">
+        ${runtimeError}
         <x-omni-layout .sidebarOpen="${!this.embedded && this.showSidebar}">
           ${mainContent} ${sidebar
             ? html`
@@ -172,6 +249,26 @@ export class XBodyView extends BaseView {
         </x-omni-layout>
       </div>
     `;
+  }
+}
+
+/** Return the useful detail carried by an unknown thrown value. */
+function loadErrorMessage(error: unknown): string {
+  try {
+    let message: string | undefined;
+    if (error instanceof Error) {
+      message = error.message;
+    } else if (
+      typeof error === "object" && error !== null && "message" in error &&
+      typeof error.message === "string"
+    ) {
+      message = error.message;
+    } else if (error !== undefined && error !== null) {
+      message = String(error);
+    }
+    return message?.trim() || "No additional error details were provided.";
+  } catch {
+    return "No additional error details were provided.";
   }
 }
 

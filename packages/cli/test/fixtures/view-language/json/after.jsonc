@@ -1,0 +1,6 @@
+{
+  // Commands used by the workspace.
+  "tasks": {
+    "check": "deno task check"
+  }
+}

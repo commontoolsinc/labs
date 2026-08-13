@@ -1,3 +1,21 @@
+/**
+ * How an entity id and a link are represented in each of the two regimes the
+ * flag selects, and the storage-tree probe that finds one.
+ *
+ * The property that matters is not that each regime produces its own form but
+ * that each refuses the other's. A reader in one regime, handed the other's
+ * representation, throws rather than accepting it -- which is what stops a
+ * value written under one setting from being quietly misread under the other.
+ *
+ * The probe differs structurally between them rather than only in shape. The
+ * legacy form is a sub-tree to descend into, while the modern one sits at the
+ * position itself, so a storage walk takes a different path in each.
+ *
+ * The wire form is a separate matter again: tagged, and validated on the way
+ * back in -- including a refusal of prototype-polluting keys, that text having
+ * arrived from outside.
+ */
+
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -112,7 +130,7 @@ describe("cell-rep link-ref (legacy envelope form)", () => {
     expect(isLinkRef(linkRefFrom(PAYLOAD))).toBe(true);
   });
 
-  it("rejects everything that is not a link-ref envelope", () => {
+  it("returns `false` for everything that is not a link-ref envelope", () => {
     // The `{ "/": string }` entity-ref form is deliberately NOT a link ref.
     expect(isLinkRef({ "/": "fid1:abc" })).toBe(false);
     // Envelope with extra keys, or missing the tag, or wrong shape.
@@ -196,7 +214,7 @@ describe("cell-rep link storage-tree probe (legacy)", () => {
     expect(linkPayloadAtProbe({})).toEqual({});
   });
 
-  it("returns undefined when the probed value is not a record", () => {
+  it("returns `undefined` when the probed value is not a record", () => {
     expect(linkPayloadAtProbe(undefined)).toBeUndefined();
     expect(linkPayloadAtProbe(null)).toBeUndefined();
     expect(linkPayloadAtProbe("redirect")).toBeUndefined();
@@ -223,7 +241,7 @@ describe("cell-rep link storage-tree probe (modern)", () => {
     expect(linkPayloadAtProbe(linkRefFrom(PAYLOAD))).toEqual(PAYLOAD);
   });
 
-  it("returns undefined for a non-link value at the probe", () => {
+  it("returns `undefined` for a non-link value at the probe", () => {
     setModernCellRepConfig(true);
     // A bare record is the payload in legacy mode, but in modern mode only a
     // FabricLink denotes a link — plain data and the legacy envelope do not.
@@ -287,7 +305,7 @@ describe("cell-rep link-ref payload wire serialization", () => {
       expect(() => linkRefPayloadFromString('fcl1:{"a":["ok",2]}')).toThrow();
     });
 
-    it("rejects prototype-pollution keys carried on the wire", () => {
+    it("throws given prototype-pollution keys carried on the wire", () => {
       expect(() => linkRefPayloadFromString('fcl1:{"__proto__":"x"}'))
         .toThrow();
       expect(() => linkRefPayloadFromString('fcl1:{"constructor":"x"}'))

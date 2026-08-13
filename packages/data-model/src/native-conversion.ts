@@ -1,6 +1,25 @@
+/**
+ * The boundary between native JS values and fabric values, in both
+ * directions, along with the predicate saying in advance whether a value can
+ * cross it.
+ *
+ * Inbound, anything not representable is refused rather than approximated: a
+ * `Map`, a class instance, an unrecognized type all throw, on the principle
+ * that a wrong value is worse than none. A value that is already a deep-frozen
+ * fabric value crosses by identity instead of being rebuilt, and a cycle is
+ * detected rather than followed.
+ *
+ * Outbound, a wrapper is unwrapped to the native type it stands for, while a
+ * fabric instance with no native counterpart passes through untouched. Both
+ * directions take the result's freeze state as an argument; on the way out, a
+ * class defined to be always frozen comes back frozen regardless of what was
+ * asked for.
+ */
+
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isInstance,
-  isRecord,
+  isObjectOrArray,
   isUnsafeObjectKey,
   unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
@@ -363,9 +382,9 @@ export function shallowFabricFromNativeValue(
       // Unrecognized object types (`Map`, `Set`, class instances, etc.) --
       // not valid `FabricValue`. Death before confusion!
       throw new Error(
-        `Not representable as a \`FabricValue\`: \`${
-          (value as object).constructor?.name ?? typeof value
-        }\` (not a recognized fabric type)`,
+        `Not representable as a \`FabricValue\`: ${
+          backtickQuote((value as object).constructor?.name ?? typeof value)
+        } (not a recognized fabric type)`,
       );
   }
 }
@@ -413,7 +432,7 @@ function fabricFromNativeValueInternal(
   converted: Map<object, FabricValue>,
   freeze: boolean,
 ): FabricValue {
-  const isOriginalRecord = isRecord(original);
+  const isOriginalRecord = isObjectOrArray(original);
 
   if (isOriginalRecord && converted.has(original)) {
     const cached = converted.get(original);
@@ -443,7 +462,7 @@ function fabricFromNativeValueInternal(
   }
 
   // Primitives, `null`, and `undefined` don't need recursion or freezing.
-  // Spelled as a `typeof` test rather than `!isRecord()` so the non-object
+  // Spelled as a `typeof` test rather than `!isObjectOrArray()` so the non-object
   // arms of `FabricValueLayer` narrow: every non-object layer value is
   // already a `FabricValue`.
   //

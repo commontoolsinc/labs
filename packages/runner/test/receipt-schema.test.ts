@@ -27,6 +27,13 @@ import { defer } from "@commonfabric/utils/defer";
 import { parseLink } from "../src/link-utils.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 
+// The session a caller-supplied id is chosen within, for the sends whose
+// subject is something else: the pair is what a stream send accepts, and one
+// session is all a test needs whose ids never repeat across it — the replay
+// case wants its two sends under the same session, which is what makes them
+// one invocation.
+const callerSession = "ses:receipt-schema";
+
 /** Outcome of one dispatch, as its commit callback reported it. */
 type Outcome = {
   status: string;
@@ -98,7 +105,7 @@ describe("receipt schema", () => {
           ?.precondition,
         receiptLink: t.handlingReceiptLink,
       });
-    }, { eventId });
+    }, { eventId, session: callerSession });
     const outcome = await settled.promise;
     await runtime.scheduler.idleWithPendingCommits();
     return outcome;

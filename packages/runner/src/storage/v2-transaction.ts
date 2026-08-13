@@ -2,6 +2,7 @@ import {
   cloneIfNecessary,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type {
   CommitPrecondition,
@@ -20,7 +21,7 @@ import {
 import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import type { FabricValue } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   Activity,
   ChangeGroup,
@@ -261,12 +262,20 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   ) {
     return value;
   }
-  // `cloneIfNecessary()` (frozen by default) returns an already-deep-frozen
-  // value by identity (O(1) via the deep-frozen cache) and otherwise
-  // deep-clones-and-freezes -- isolating the result from later source
-  // mutation. On the hot read path, repeated reads of the same stored
-  // (deep-frozen) value collapse to a single cache lookup.
-  return cloneIfNecessary(value) as T;
+  // What isolates a read from later mutation of its source is frozen-ness,
+  // and `isDeepFrozen()` answers that question alone: a deep-frozen value
+  // goes back by identity, and anything else is deep-cloned and frozen by
+  // `cloneIfNecessary()`.
+  //
+  // `cloneIfNecessary()` decides its own identity fast path with
+  // `isDeepFrozenFabricValue()`, which conjoins the frozen-ness question with
+  // a membership walk of every node in the value. That walk is uncached, so
+  // the first read of a stored document runs it in full, and for a list it
+  // costs several times what the rest of the read does. Membership is settled
+  // before a value reaches the replica: the write paths below hand every
+  // value to `cloneIfNecessary()`, which either accepts it as a deep-frozen
+  // `FabricValue` or rebuilds it as one.
+  return (isDeepFrozen(value) ? value : cloneIfNecessary(value)) as T;
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
@@ -274,8 +283,7 @@ const collapseEmptyJsonDocumentEnvelope = (
 ): FabricValue | undefined => {
   if (
     value === undefined ||
-    !isRecord(value) ||
-    Array.isArray(value) ||
+    !isObjectNotArray(value) ||
     Object.keys(value).length > 0
   ) {
     return value;
@@ -343,7 +351,7 @@ const inspectPath = (
       continue;
     }
 
-    if (isRecord(current)) {
+    if (isObjectOrArray(current)) {
       current = current[segment];
       continue;
     }
@@ -364,7 +372,7 @@ const inspectPath = (
 const schedulerObservationCommitSpace = (
   observation: unknown,
 ): MemorySpace | undefined => {
-  if (!isRecord(observation)) {
+  if (!isObjectOrArray(observation)) {
     return undefined;
   }
   if (typeof observation.ownerSpace === "string") {
@@ -377,7 +385,7 @@ const schedulerObservationCommitSpace = (
       continue;
     }
     for (const address of addresses) {
-      if (!isRecord(address) || typeof address.space !== "string") {
+      if (!isObjectOrArray(address) || typeof address.space !== "string") {
         continue;
       }
       return address.space as MemorySpace;
@@ -724,7 +732,7 @@ const isSubsumedByTailSplice = (
     Number(childSegment) >= spliceCandidate.tailSpliceStartIndex;
 };
 
-// TODO(danfuzz): `isRecord` admits a `FabricSpecialObject` on both sides, so
+// TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject` on both sides, so
 // two special objects — or one against a plain `{}` — compare by their empty
 // key sets and report "unchanged" without ever reaching the fabric-aware
 // `valueEqual` fallback. An in-place fabric change at an ancestor prefix then
@@ -734,7 +742,7 @@ const shallowStructureChanged = (
   before: FabricValue | undefined,
   after: FabricValue | undefined,
 ): boolean => {
-  if (isRecord(before) && isRecord(after)) {
+  if (isObjectOrArray(before) && isObjectOrArray(after)) {
     const beforeKeys = Object.keys(before);
     const afterKeys = Object.keys(after);
     if (beforeKeys.length !== afterKeys.length) {

@@ -139,7 +139,8 @@ This system does not implement SQL-style transaction isolation. Key differences:
 
 ### Retry Semantics
 
-The `editWithRetry()` helper provides automatic retry on commit failure:
+The `editWithRetry()` helper provides automatic retry on a **retryable** commit
+failure:
 
 ```typescript
 // Shown for illustration only.
@@ -150,8 +151,61 @@ const result = await runtime.editWithRetry(async (tx) => {
 });
 ```
 
-- On commit error, re-runs the entire function with a fresh transaction
+- On a retryable commit rejection, re-runs the entire function with a fresh
+  transaction
+- On any other commit rejection, returns the error immediately — the first
+  attempt is the only attempt
 - Returns success or error after exhausting retries
+
+Retryability is an **allow-list**: `isRetryableCommitRejection`, defined in the
+shared rejection vocabulary (`packages/runner/src/storage/rejection.ts`) and
+consumed only by `editWithRetry()`. The scheduler's commit classifier
+(`classifyCommitDisposition`, `packages/runner/src/scheduler/events.ts`) draws
+its predicates from that same module but composes them itself, so the two
+classifiers are independent and can disagree — the scheduler retries only a
+stale basis (`ConflictError`, `StorageTransactionInconsistent`) and drops
+everything else on the first attempt, including the liveness and abort classes
+`editWithRetry()` does retry. A rejection is retried by `editWithRetry()` only
+when re-running the function against fresh state can produce a different
+outcome:
+
+| Class | Why a re-run can converge |
+| --- | --- |
+| `ConflictError` | Stale basis from upstream. The retry first awaits the conflict's `readyToRetry` catch-up gate, then pulls the doc the conflict names, so it runs against fresh state. |
+| `StorageTransactionInconsistent` | Stale basis on this replica — a value read during the transaction changed locally; re-reading resolves it. |
+| `ConnectionError`, `InvalidMessageError` | Liveness failure: the commit never reached a verdict, and the memory client re-establishes the link on its own (a transport close schedules `reconnect()`; a `transact` issued while disconnected queues and calls `restoreConnection()`), so a retry can land the identical write. `InvalidMessageError` is collateral — an undecodable frame makes the client reject every in-flight request, including commits it says nothing about. |
+| `StorageTransactionAborted` | The attempt was discarded before storage — the callback called `tx.abort()`, or CFC enforcement refused to hand the transaction over. A re-run is a genuinely new attempt, and costs no round-trip. |
+| `AuthorizationError` with `retriable: true` | The server itself marked this denial as one a fresh handshake heals (a session-open anti-replay race). |
+
+Everything else is **terminal on the first attempt**: a `ProtocolError` (the
+server refused the commit's shape), an unmarked `AuthorizationError` (the server
+evaluated the request and denied it), a `PreconditionFailedError` (permanent by
+definition — the client must not retry), a `RowLabelCommitError` (a commit-time
+rule refused the data), a `StoreError`, or the generic `TransactionError`. Those
+are deterministic with respect to the committed data: a re-run recomputes the
+identical refused write, and each doomed attempt costs a server round-trip plus
+a revert notification to the cell's subscribers.
+
+`SessionError` is terminal too, for a different reason — not the data, the retry
+path. The server raises it when a commit is routed to a session it no longer
+knows, and the argument for retrying it would be the same as for a
+`ConnectionError`: the commit was never evaluated, so a re-established session
+could land it. But nothing between two attempts re-establishes one. The replica
+memoizes its session mount and clears it only on close; the memory client
+reopens a session only from its transport-reconnect path. A transport drop
+therefore never surfaces as a `SessionError` at all — the commit queues and
+replays after the reconnect reopens the session. What surfaces is the other
+case: a live connection whose session the server dropped (an ACL
+de-authorization sweep, or a takeover), which is terminal for that session — the
+client's own remedy is the `session/revoked` frame, which closes it rather than
+reopening it. Retrying burns the budget within milliseconds and replaces the
+real cause with a generic `TransactionError` once the revocation lands. It
+belongs back in the allow-list only once the retry path remounts the session.
+
+A rejection class introduced later is non-retryable until someone establishes
+that re-running can converge and adds it to the allow-list. If a callback
+*throws* rather than aborting, the transaction is aborted and the error is
+returned without any retry.
 
 The scheduler also provides automatic retry for handlers on transaction conflict.
 

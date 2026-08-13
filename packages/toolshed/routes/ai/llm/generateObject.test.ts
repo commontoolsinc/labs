@@ -18,6 +18,11 @@ describe("generateObject server-side", () => {
       const result = findModel("");
       assertEquals(result, undefined);
     });
+
+    it("returns undefined for the name of an Object.prototype member", () => {
+      assertEquals(findModel("constructor"), undefined);
+      assertEquals(findModel("toString"), undefined);
+    });
   });
 
   describe("model registration", () => {

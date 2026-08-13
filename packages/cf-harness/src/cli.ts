@@ -15,8 +15,10 @@ import type { JSONSchema } from "@commonfabric/api";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
+  type HarnessFabricSessionConfig,
   type HarnessGatewayAuthMode,
   type HarnessModelProviderId,
+  isHarnessModelProviderId,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
 } from "./config.ts";
@@ -97,6 +99,11 @@ import {
   type HarnessCredentialStore,
 } from "./auth/credential-store.ts";
 import {
+  defaultHarnessProviderSettingsPath,
+  FileHarnessProviderSettingsStore,
+  resolveHarnessModelProviderPreference,
+} from "./auth/provider-settings.ts";
+import {
   completeOpenAICodexDeviceAuthorization,
   loginOpenAICodexWithBrowser,
   OpenAICodexAuthService,
@@ -117,6 +124,10 @@ import {
   setCurrentProvenance,
   setProvenanceCommand,
 } from "./provenance.ts";
+import {
+  HarnessControlError,
+  type HarnessControlErrorCode,
+} from "./control-errors.ts";
 
 const DEFAULT_MODEL = "gpt-5.6-terra";
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -159,6 +170,9 @@ const CLI_STRING_FLAGS = [
   "sandbox-docker-runtime",
   "max-model-turns",
   "fabric-mount",
+  "fabric-api-url",
+  "fabric-identity",
+  "fabric-space",
   "host-mount",
   "browser-access-lease-id",
   "browser-access-cdp-url",
@@ -228,6 +242,7 @@ export interface CfHarnessCliConfig {
   sandboxImage?: string;
   sandboxDockerRuntime?: string;
   fabricMount?: string;
+  fabricSession?: HarnessFabricSessionConfig;
   hostMounts: readonly CfHarnessHostMountConfig[];
 }
 
@@ -272,6 +287,11 @@ export interface CfHarnessCliCapabilities {
     promptCacheControls: true;
     reasoningEffort: true;
     compactThreshold: true;
+    persistentProviderConfig: true;
+    structuredAuthControl: true;
+    credentialHealth: true;
+    loomLocalOwnerBinding: false;
+    runPattern: true;
   };
 }
 
@@ -302,6 +322,12 @@ export interface RunCfHarnessCliDependencies {
     options: CreateHarnessPromptLoopOptions,
   ) => Pick<CfHarnessPromptLoop, "runPrompt" | "runTranscript">;
   credentialStore?: HarnessCredentialStore;
+  providerSettingsStore?: Pick<
+    FileHarnessProviderSettingsStore,
+    "inspect" | "initialize" | "set"
+  >;
+  controlSignal?: AbortSignal;
+  loginOpenAICodex?: typeof loginOpenAICodexWithBrowser;
   openAICodexCredentialResolver?: OpenAICodexCredentialResolverLike & {
     ownerKey?: string;
     credentialOwner?: HarnessCredentialOwnerRef;
@@ -388,17 +414,25 @@ export const installCfHarnessSignalHandlers = (
 const usage = `Usage: deno run -A src/main.ts [options] [prompt text]
 
 Options:
-  auth login openai-codex [--device]
+  config inspect [--json]       Inspect configured and effective provider
+  config init <provider> [--json]
+                                Initialize provider only when absent
+  config set <provider> [--json]
+                                Persist the default model provider
+  auth login openai-codex [--device] [--json]
                                 Connect a ChatGPT/Codex subscription
-  auth status openai-codex      Show local connection status without secrets
-  auth logout openai-codex      Remove only cf-harness local credentials
+  auth status openai-codex [--json]
+                                Show local connection status without secrets
+  auth logout openai-codex [--json]
+                                Remove only cf-harness local credentials
   models openai-codex           List models advertised for this subscription
   whoami [--json]               Show the provenance this host reports to the gateway,
                                 including the principal that identifies its requests
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | run_pattern);
+                                run_pattern additionally requires the three --fabric-* session flags
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -440,6 +474,10 @@ Options:
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
+  --fabric-api-url <url>        Deployed Fabric API URL for the run_pattern tool
+  --fabric-identity <path>      PKCS#8 identity keyfile for the run_pattern fabric session
+  --fabric-space <space>        Target space (name or did:key) for the run_pattern tool;
+                                all three --fabric-* session flags go together
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -458,6 +496,9 @@ Environment:
   CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
+  CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
+  CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
+  CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -511,6 +552,7 @@ const CLI_PARENT_TOOL_IDS = [
   "edit_file",
   "write_file",
   "delegate_task",
+  "run_pattern",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -550,6 +592,11 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     promptCacheControls: true,
     reasoningEffort: true,
     compactThreshold: true,
+    persistentProviderConfig: true,
+    structuredAuthControl: true,
+    credentialHealth: true,
+    loomLocalOwnerBinding: false,
+    runPattern: true,
   },
 });
 
@@ -1138,7 +1185,10 @@ const parseStructuredResultConfig = async (
 
 export const parseCfHarnessCliArgs = async (
   argv: readonly string[],
-  deps: Pick<RunCfHarnessCliDependencies, "cwd" | "env" | "readTextFile"> = {},
+  deps: Pick<
+    RunCfHarnessCliDependencies,
+    "cwd" | "env" | "readTextFile" | "providerSettingsStore"
+  > = {},
 ): Promise<CfHarnessCliConfig | { help: true }> => {
   const normalizedArgv = argv[0] === "--" ? argv.slice(1) : argv;
   const args = parseArgs([...normalizedArgv], {
@@ -1301,6 +1351,9 @@ export const parseCfHarnessCliArgs = async (
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
       ),
       CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
+      CF_HARNESS_FABRIC_API_URL: Deno.env.get("CF_HARNESS_FABRIC_API_URL"),
+      CF_HARNESS_FABRIC_IDENTITY: Deno.env.get("CF_HARNESS_FABRIC_IDENTITY"),
+      CF_HARNESS_FABRIC_SPACE: Deno.env.get("CF_HARNESS_FABRIC_SPACE"),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1324,15 +1377,32 @@ export const parseCfHarnessCliArgs = async (
     throw new Error("gateway auth mode must be one of bearer, none");
   }
   const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
-  const rawModelProvider = typeof args["model-provider"] === "string"
+  const harnessHome = resolve(
+    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
+      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
+  );
+  const rawExplicitModelProvider = typeof args["model-provider"] === "string"
     ? args["model-provider"]
-    : nonEmptyEnvValue(env.CF_HARNESS_MODEL_PROVIDER);
-  const modelProvider = parseModelProvider(rawModelProvider);
-  if (rawModelProvider !== undefined && modelProvider === undefined) {
+    : undefined;
+  const rawEnvironmentModelProvider = nonEmptyEnvValue(
+    env.CF_HARNESS_MODEL_PROVIDER,
+  );
+  const explicitModelProvider = parseModelProvider(rawExplicitModelProvider);
+  const environmentModelProvider = parseModelProvider(
+    rawEnvironmentModelProvider,
+  );
+  if (
+    (rawExplicitModelProvider !== undefined &&
+      explicitModelProvider === undefined) ||
+    (rawExplicitModelProvider === undefined &&
+      rawEnvironmentModelProvider !== undefined &&
+      environmentModelProvider === undefined)
+  ) {
     throw new Error(
       "model provider must be one of openai-compatible-gateway, openai-codex",
     );
   }
+  const modelProvider = explicitModelProvider ?? environmentModelProvider;
   const reasoningEffort = typeof args["reasoning-effort"] === "string"
     ? nonEmptyEnvValue(args["reasoning-effort"])
     : nonEmptyEnvValue(env.CF_HARNESS_REASONING_EFFORT);
@@ -1381,10 +1451,6 @@ export const parseCfHarnessCliArgs = async (
       "gateway URL/auth options cannot be used with --model-provider openai-codex",
     );
   }
-  const harnessHome = resolve(
-    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
-      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
-  );
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
@@ -1464,6 +1530,69 @@ export const parseCfHarnessCliArgs = async (
   const fabricMount = rawFabricMount !== undefined
     ? resolve(cwd, rawFabricMount)
     : undefined;
+  const fabricSessionFlagValue = (
+    flag: "fabric-api-url" | "fabric-identity" | "fabric-space",
+    envValue: string | undefined,
+  ): string | undefined => {
+    const raw = typeof args[flag] === "string"
+      ? args[flag].trim()
+      : nonEmptyEnvValue(envValue);
+    if (raw === "") {
+      throw new Error(`--${flag} requires a non-empty value`);
+    }
+    return raw;
+  };
+  const fabricApiUrl = fabricSessionFlagValue(
+    "fabric-api-url",
+    env.CF_HARNESS_FABRIC_API_URL,
+  );
+  const fabricIdentity = fabricSessionFlagValue(
+    "fabric-identity",
+    env.CF_HARNESS_FABRIC_IDENTITY,
+  );
+  const fabricSpace = fabricSessionFlagValue(
+    "fabric-space",
+    env.CF_HARNESS_FABRIC_SPACE,
+  );
+  let fabricSession: HarnessFabricSessionConfig | undefined;
+  if (
+    fabricApiUrl !== undefined || fabricIdentity !== undefined ||
+    fabricSpace !== undefined
+  ) {
+    const missing = [
+      ...(fabricApiUrl === undefined ? ["--fabric-api-url"] : []),
+      ...(fabricIdentity === undefined ? ["--fabric-identity"] : []),
+      ...(fabricSpace === undefined ? ["--fabric-space"] : []),
+    ];
+    if (missing.length > 0) {
+      throw new Error(
+        `--fabric-api-url, --fabric-identity, and --fabric-space configure one fabric session and go together; missing ${
+          missing.join(", ")
+        }`,
+      );
+    }
+    try {
+      new URL(fabricApiUrl!);
+    } catch {
+      throw new Error(`--fabric-api-url must be a valid URL: ${fabricApiUrl}`);
+    }
+    fabricSession = {
+      apiUrl: fabricApiUrl!,
+      identityKeyPath: resolve(cwd, fabricIdentity!),
+      space: fabricSpace!,
+    };
+  }
+  // An allowlisted `run_pattern` with no session to run it against is a
+  // configuration contradiction, surfaced here rather than as a tool that is
+  // silently absent from the run.
+  if (
+    allowedToolIds?.includes("run_pattern") === true &&
+    fabricSession === undefined
+  ) {
+    throw new Error(
+      "--allow-tool run_pattern requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space",
+    );
+  }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
   const apiKeySource = env.CF_HARNESS_API_KEY !== undefined
     ? "CF_HARNESS_API_KEY"
@@ -1528,6 +1657,7 @@ export const parseCfHarnessCliArgs = async (
     ...(sandboxImage !== undefined ? { sandboxImage } : {}),
     ...(sandboxDockerRuntime !== undefined ? { sandboxDockerRuntime } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
+    ...(fabricSession !== undefined ? { fabricSession } : {}),
     hostMounts,
   };
 };
@@ -1586,7 +1716,8 @@ const createSelectedModelClient = async (options: {
   let resolver = options.deps.openAICodexCredentialResolver;
   if (options.loom) {
     if (resolver === undefined) {
-      throw new Error(
+      throw new HarnessControlError(
+        "provider-auth-required",
         "Loom openai-codex runs require an injected owner-bound credential resolver",
       );
     }
@@ -2241,6 +2372,208 @@ const defaultOpenUrl = async (url: string): Promise<void> => {
   }
 };
 
+interface HarnessControlResult<T> {
+  type: "cf-harness.control-result";
+  version: 1;
+  ok: true;
+  command: string;
+  result: T;
+}
+
+interface HarnessControlFailure {
+  type: "cf-harness.control-result";
+  version: 1;
+  ok: false;
+  command: string;
+  error: {
+    code: HarnessControlErrorCode;
+    message: string;
+  };
+}
+
+const writeJsonControlResult = <T>(
+  io: CfHarnessCliIO,
+  command: string,
+  result: T,
+): void => {
+  const envelope: HarnessControlResult<T> = {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: true,
+    command,
+    result,
+  };
+  io.stdout(`${JSON.stringify(envelope)}\n`);
+};
+
+const writeJsonControlFailure = (
+  io: CfHarnessCliIO,
+  command: string,
+  error: unknown,
+  signal?: AbortSignal,
+): void => {
+  const controlError = signal?.aborted
+    ? new HarnessControlError(
+      "operation-canceled",
+      "The cf-harness control operation was canceled",
+    )
+    : error instanceof HarnessControlError
+    ? error
+    : error instanceof DOMException && error.name === "AbortError"
+    ? new HarnessControlError(
+      "operation-canceled",
+      "The cf-harness control operation was canceled",
+    )
+    : new HarnessControlError(
+      "provider-unavailable",
+      "The cf-harness control operation failed",
+    );
+  const envelope: HarnessControlFailure = {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: false,
+    command,
+    error: { code: controlError.code, message: controlError.message },
+  };
+  io.stdout(`${JSON.stringify(envelope)}\n`);
+};
+
+const writeJsonControlEvent = <T>(
+  io: CfHarnessCliIO,
+  command: string,
+  event: string,
+  data: T,
+): void => {
+  io.stdout(`${
+    JSON.stringify({
+      type: "cf-harness.control-event",
+      version: 1,
+      command,
+      event,
+      data,
+    })
+  }\n`);
+};
+
+const harnessHomeForControl = (
+  deps: RunCfHarnessCliDependencies,
+): string => {
+  const env = deps.env ?? {
+    CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+    HOME: Deno.env.get("HOME"),
+  };
+  const cwd = resolve(deps.cwd ?? Deno.cwd());
+  return resolve(
+    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
+      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
+  );
+};
+
+const runCfHarnessConfigCommand = async (
+  argv: readonly string[],
+  deps: RunCfHarnessCliDependencies,
+  io: CfHarnessCliIO,
+): Promise<number | undefined> => {
+  const normalized = argv[0] === "--" ? argv.slice(1) : [...argv];
+  if (normalized[0] !== "config") return undefined;
+  const action = normalized[1];
+  const json = normalized.includes("--json");
+  const positional = normalized.slice(2).filter((value) => value !== "--json");
+  const command = action === undefined ? "config" : `config.${action}`;
+  const store = deps.providerSettingsStore ??
+    new FileHarnessProviderSettingsStore({
+      path: defaultHarnessProviderSettingsPath(harnessHomeForControl(deps)),
+    });
+  try {
+    if (
+      (action !== "inspect" && action !== "init" && action !== "set") ||
+      (action === "inspect" ? positional.length !== 0 : positional.length !== 1)
+    ) {
+      throw new HarnessControlError(
+        "invalid-request",
+        "usage: config inspect|init|set [provider] [--json]",
+      );
+    }
+    if (action === "inspect") {
+      const state = await store.inspect();
+      let effectiveProvider: HarnessModelProviderId | undefined;
+      let effectiveSource:
+        | "environment"
+        | "persistent"
+        | "default"
+        | undefined;
+      const rawEnvironment = nonEmptyEnvValue(
+        deps.env?.CF_HARNESS_MODEL_PROVIDER ??
+          (deps.env === undefined
+            ? Deno.env.get("CF_HARNESS_MODEL_PROVIDER")
+            : undefined),
+      );
+      const environment = parseModelProvider(rawEnvironment);
+      if (rawEnvironment !== undefined && environment === undefined) {
+        throw new HarnessControlError(
+          "invalid-request",
+          "CF_HARNESS_MODEL_PROVIDER must be openai-compatible-gateway or openai-codex",
+        );
+      }
+      if (environment !== undefined) {
+        effectiveProvider = environment;
+        effectiveSource = "environment";
+      } else if (
+        state.state === "configured" || state.state === "missing"
+      ) {
+        if (state.state === "configured") {
+          effectiveProvider = state.settings.modelProvider;
+          effectiveSource = "persistent";
+        } else {
+          effectiveProvider = "openai-compatible-gateway";
+          effectiveSource = "default";
+        }
+      }
+      const result = {
+        state: state.state,
+        ...(state.state === "configured"
+          ? { configuredProvider: state.settings.modelProvider }
+          : {}),
+        ...(effectiveProvider !== undefined
+          ? { effectiveProvider, effectiveSource }
+          : {}),
+        ...(state.state === "unsupported-version"
+          ? { version: state.version }
+          : {}),
+      };
+      if (json) writeJsonControlResult(io, command, result);
+      else io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+      return state.state === "invalid" || state.state === "unreadable" ||
+          state.state === "unsupported-version"
+        ? 1
+        : 0;
+    }
+    const provider = positional[0];
+    if (!isHarnessModelProviderId(provider)) {
+      throw new HarnessControlError(
+        "provider-configuration-required",
+        "Model provider must be openai-compatible-gateway or openai-codex",
+      );
+    }
+    const result = action === "init"
+      ? await store.initialize(provider, deps.controlSignal)
+      : await store.set(provider, deps.controlSignal);
+    if (json) writeJsonControlResult(io, command, result);
+    else {
+      io.stdout(
+        `model provider: ${result.settings.modelProvider} (${
+          result.changed ? "saved" : "unchanged"
+        })\n`,
+      );
+    }
+    return 0;
+  } catch (error) {
+    if (!json) throw error;
+    writeJsonControlFailure(io, command, error, deps.controlSignal);
+    return 1;
+  }
+};
+
 const runCfHarnessAuthCommand = async (
   argv: readonly string[],
   deps: RunCfHarnessCliDependencies,
@@ -2250,64 +2583,126 @@ const runCfHarnessAuthCommand = async (
   if (normalized[0] !== "auth") return undefined;
   const action = normalized[1];
   const provider = normalized[2];
-  if (
-    (action !== "login" && action !== "status" && action !== "logout") ||
-    provider !== "openai-codex"
-  ) {
-    throw new Error(
-      "usage: auth login|status|logout openai-codex [--device]",
-    );
-  }
-  const env = deps.env ?? {
-    CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
-    HOME: Deno.env.get("HOME"),
-  };
-  const cwd = resolve(deps.cwd ?? Deno.cwd());
-  const harnessHome = resolve(
-    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
-      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
-  );
+  const json = normalized.includes("--json");
+  const command = action === undefined ? "auth" : `auth.${action}`;
+  const harnessHome = harnessHomeForControl(deps);
   const store = deps.credentialStore ?? new FileHarnessCredentialStore({
     path: defaultHarnessCredentialStorePath(harnessHome),
   });
   const auth = new OpenAICodexAuthService(store, "local");
-  if (action === "status") {
-    const status = await auth.status();
-    io.stdout(
-      status.signedIn
-        ? `openai-codex: connected (${
-          status.expired ? "refresh required" : "ready"
-        })\n`
-        : "openai-codex: not connected\n",
+  const allowedArguments = action === "login"
+    ? new Set(["--device", "--json"])
+    : new Set(["--json"]);
+  if (
+    (action !== "login" && action !== "status" && action !== "logout") ||
+    provider !== "openai-codex" ||
+    normalized.slice(3).some((argument) => !allowedArguments.has(argument))
+  ) {
+    const error = new HarnessControlError(
+      "invalid-request",
+      "usage: auth login|status|logout openai-codex [--device] [--json]",
     );
-    return status.signedIn ? 0 : 1;
+    if (!json) throw error;
+    writeJsonControlFailure(io, command, error, deps.controlSignal);
+    return 1;
+  }
+  if (action === "status") {
+    try {
+      const status = await auth.status();
+      if (json) writeJsonControlResult(io, command, status);
+      else {
+        io.stdout(
+          status.status === "connected"
+            ? `openai-codex: connected (${
+              status.refreshHealth === "refresh-on-use"
+                ? "refresh required"
+                : "ready"
+            })\n`
+            : status.status === "reconnect-required"
+            ? `openai-codex: reconnect required (${status.reason})\n`
+            : "openai-codex: not connected\n",
+        );
+      }
+      return status.status === "connected" ? 0 : 1;
+    } catch (error) {
+      if (!json) throw error;
+      writeJsonControlFailure(io, command, error, deps.controlSignal);
+      return 1;
+    }
   }
   if (action === "logout") {
-    await auth.logout();
-    io.stdout("openai-codex: disconnected\n");
-    return 0;
+    try {
+      await auth.logout();
+      const result = { providerId: "openai-codex", status: "disconnected" };
+      if (json) writeJsonControlResult(io, command, result);
+      else io.stdout("openai-codex: disconnected\n");
+      return 0;
+    } catch (error) {
+      if (!json) throw error;
+      writeJsonControlFailure(io, command, error, deps.controlSignal);
+      return 1;
+    }
   }
-  if (normalized.slice(3).some((argument) => argument !== "--device")) {
-    throw new Error("auth login openai-codex accepts only --device");
-  }
-  if (normalized.includes("--device")) {
-    const device = await startOpenAICodexDeviceAuthorization();
-    io.stdout(
-      `Open ${device.verificationUrl} and enter code ${device.userCode}\n`,
+  const loginController = new AbortController();
+  const signal = deps.controlSignal ?? loginController.signal;
+  const cleanupSignal = deps.controlSignal !== undefined
+    ? () => {}
+    : (deps.registerSignalHandler ?? defaultRegisterSignalHandler)(
+      ["SIGINT", "SIGTERM"],
+      () =>
+        loginController.abort(new DOMException("login canceled", "AbortError")),
     );
-    const credential = await completeOpenAICodexDeviceAuthorization({ device });
-    await auth.save(credential);
-  } else {
-    await loginOpenAICodexWithBrowser({
-      authService: auth,
-      onAuthorizationUrl: async (url) => {
-        io.stdout(`Open this URL to connect openai-codex:\n${url}\n`);
-        await (deps.openUrl ?? defaultOpenUrl)(url);
-      },
-    });
+  try {
+    if (normalized.includes("--device")) {
+      const device = await startOpenAICodexDeviceAuthorization({ signal });
+      if (json) {
+        writeJsonControlEvent(io, command, "authorization-required", {
+          method: "device",
+          verificationUrl: device.verificationUrl,
+          userCode: device.userCode,
+        });
+      } else {
+        io.stdout(
+          `Open ${device.verificationUrl} and enter code ${device.userCode}\n`,
+        );
+      }
+      const credential = await completeOpenAICodexDeviceAuthorization({
+        device,
+        signal,
+      });
+      await auth.save(credential, signal);
+    } else {
+      await (deps.loginOpenAICodex ?? loginOpenAICodexWithBrowser)({
+        authService: auth,
+        signal,
+        onAuthorizationUrl: async (url) => {
+          if (json) {
+            writeJsonControlEvent(io, command, "authorization-required", {
+              method: "browser",
+              url,
+            });
+          } else {
+            io.stdout(`Open this URL to connect openai-codex:\n${url}\n`);
+          }
+          await (deps.openUrl ?? defaultOpenUrl)(url);
+        },
+      });
+    }
+    const result = {
+      providerId: "openai-codex",
+      status: "connected",
+      refreshHealth: "ready",
+    };
+    if (json) writeJsonControlResult(io, command, result);
+    else io.stdout("openai-codex: connected\n");
+    return 0;
+  } catch (error) {
+    if (!json) throw error;
+    writeJsonControlFailure(io, command, error, signal);
+    return 1;
+  } finally {
+    cleanupSignal();
   }
-  io.stdout("openai-codex: connected\n");
-  return 0;
 };
 
 /**
@@ -2316,7 +2711,8 @@ const runCfHarnessAuthCommand = async (
  */
 export const cfHarnessCliCommandName = (argv: readonly string[]): string => {
   const first = argv[0] === "--" ? argv[1] : argv[0];
-  return first === "auth" || first === "models" || first === "whoami"
+  return first === "auth" || first === "config" || first === "models" ||
+      first === "whoami"
     ? first
     : "prompt";
 };
@@ -2338,6 +2734,8 @@ export const runCfHarnessCli = async (
     );
   };
   try {
+    const configResult = await runCfHarnessConfigCommand(argv, deps, io);
+    if (configResult !== undefined) return configResult;
     const authResult = await runCfHarnessAuthCommand(argv, deps, io);
     if (authResult !== undefined) return authResult;
     const modelsResult = await runCfHarnessModelsCommand(argv, deps, io);
@@ -2434,7 +2832,8 @@ export const runCfHarnessCli = async (
         requestedProvider !== undefined &&
         requestedProvider !== recordedProvider
       ) {
-        throw new Error(
+        throw new HarnessControlError(
+          "provider-mismatch",
           `resume provider mismatch: run uses ${recordedProvider}, requested ${requestedProvider}`,
         );
       }
@@ -2464,7 +2863,8 @@ export const runCfHarnessCli = async (
           credentialOwner,
         )
       ) {
-        throw new Error(
+        throw new HarnessControlError(
+          "provider-mismatch",
           "resume credential owner mismatch: requested owner does not match the recorded run",
         );
       }
@@ -2476,7 +2876,8 @@ export const runCfHarnessCli = async (
         modelProvider === "openai-codex" && loom &&
         recordedRunManifest?.credentialOwner === undefined
       ) {
-        throw new Error(
+        throw new HarnessControlError(
+          "provider-auth-required",
           "Loom openai-codex runs require an authenticated credential owner reference",
         );
       }
@@ -2517,6 +2918,9 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(parsed.fabricSession !== undefined
+          ? { fabricSession: parsed.fabricSession }
+          : {}),
         ...(effectiveRunManifest !== undefined
           ? { runManifest: effectiveRunManifest }
           : {}),
@@ -2599,7 +3003,12 @@ export const runCfHarnessCli = async (
     } else {
       const modelProvider = parsed.modelProvider ??
         runManifest?.modelProvider ??
-        "openai-compatible-gateway";
+        (await resolveHarnessModelProviderPreference({
+          store: deps.providerSettingsStore ??
+            new FileHarnessProviderSettingsStore({
+              path: defaultHarnessProviderSettingsPath(parsed.harnessHome),
+            }),
+        })).provider;
       if (
         modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
       ) {
@@ -2623,7 +3032,8 @@ export const runCfHarnessCli = async (
         modelProvider === "openai-codex" && runManifest?.source === "loom" &&
         runManifest.credentialOwner === undefined
       ) {
-        throw new Error(
+        throw new HarnessControlError(
+          "provider-auth-required",
           "Loom openai-codex runs require an authenticated credential owner reference",
         );
       }
@@ -2670,6 +3080,9 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(parsed.fabricSession !== undefined
+          ? { fabricSession: parsed.fabricSession }
+          : {}),
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }

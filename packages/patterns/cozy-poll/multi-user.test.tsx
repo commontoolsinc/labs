@@ -14,7 +14,7 @@
  * Cross-runtime reads use INLINE literal accesses — see
  * scrabble/multi-user.test.tsx.
  */
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, computed, multiUserTest, pattern, TESTS } from "commonfabric";
 import CozyPoll, { type CozyPollOutput } from "./main.tsx";
 
 interface Setup {
@@ -62,7 +62,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join },
       { assertion: assert_joined_as_host },
       { action: action_add_ramen },
@@ -122,7 +122,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-set-up" },
       { assertion: assert_sees_alice_setup },
       { assertion: assert_not_joined_yet },

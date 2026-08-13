@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import {
@@ -7,7 +8,7 @@ import {
   type FabricValue,
 } from "./interface.ts";
 import { hashStringOf } from "./value-hash.ts";
-import { backtickQuote, toCompactDebugString } from "./value-debug.ts";
+import { toCompactDebugString } from "./value-debug.ts";
 
 /**
  * Compares two `FabricValue`s for logical (content) equality.

@@ -70,10 +70,9 @@ const legacyStrip = (atoms: readonly CfcConfClause[]): CfcConfClause[] =>
       .filter((clause) => clause !== undefined),
   );
 
-// The new rule path, exactly as the sanitizer runs it (path-local,
-// bare-InjectionSafe material-risk discharge). This calls the REAL sanitizer
-// entry point — including its legacy bare-string normalization — so the golden
-// guards the shipped code, not a reimplementation (codex P2 on #4567).
+// The sanitizer runs this path with path-local, bare-InjectionSafe
+// material-risk discharge. Calling its exported entry point includes short
+// alias normalization.
 const dischargeViaProfile = (
   atoms: readonly CfcConfClause[],
 ): CfcConfClause[] => dischargeMaterialRiskAtoms(atoms);
@@ -99,29 +98,19 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
       ["bare unscreened risk", [caveat(
         CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
       )]],
-      ["legacy single-risk URI", [caveat(
-        "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
-      )]],
       ["bare-string alias", [caveat("prompt-injection-risk-value-screened")]],
-      // Legacy §4.7.3 bare-STRING atoms: the atom is the raw string, not a
-      // caveat record. The old strip removed these; the discharge rules match
-      // `{type:Caveat}`, so the sanitizer must normalize the string form first
-      // (codex P2 on #4567).
-      ["bare-string alias atom", ["prompt-injection-risk"]],
-      ["bare-string legacy URI atom", [
-        "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
-      ]],
+      ["bare-string alias atom", ["prompt-injection-risk-unscreened"]],
       ["bare-string risk atom beside retained secret", [
         "prompt-injection-risk-unscreened",
         secret,
       ]],
       ["bare-string risk atom hidden as an OR-clause alternative", [
-        { anyOf: ["prompt-injection-risk", secret] },
+        { anyOf: ["prompt-injection-risk-ingress-screened", secret] },
       ]],
       ["OR-clause of only bare-string risk atoms", [
         {
           anyOf: [
-            "prompt-injection-risk",
+            "prompt-injection-risk-unscreened",
             "prompt-injection-risk-value-screened",
           ],
         },
@@ -150,10 +139,7 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
       ]],
       ["no material risk at all", [influence, secret]],
       ["empty", []],
-      ["all four canonical tiers together", [
-        caveat(
-          "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
-        ),
+      ["all three canonical tiers together", [
         caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened),
         caveat(CFC_CONCEPT_KIND.PromptInjectionRiskIngressScreened),
         caveat(CFC_CONCEPT_KIND.PromptInjectionRiskValueScreened),
@@ -168,6 +154,17 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
         expect(clauseSetsEqual(ruled, oracle)).toBe(true);
       });
     }
+
+    it("retains retired unsuffixed identifiers", () => {
+      const retiredUri = caveat(
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      );
+      const retiredAlias = "prompt-injection-risk";
+      expect(dischargeViaProfile([retiredUri, retiredAlias])).toEqual([
+        retiredUri,
+        retiredAlias,
+      ]);
+    });
 
     it("does not discharge material risk WITHOUT InjectionSafe", () => {
       const input = [caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened)];

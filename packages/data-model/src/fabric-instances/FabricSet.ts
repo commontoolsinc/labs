@@ -3,14 +3,14 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+} from "@/codec-interface/interface.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
 
@@ -20,9 +20,17 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  * beyond the wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
+  #set: Set<FabricValue>;
+
   /** Constructs an instance wrapping `set`. */
-  constructor(readonly set: Set<FabricValue>) {
+  constructor(set: Set<FabricValue>) {
     super();
+    this.#set = set;
+  }
+
+  /** The wrapped set. */
+  get set(): Set<FabricValue> {
+    return this.#set;
   }
 
   /**
@@ -47,27 +55,27 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   }
 
   /** @inheritDoc */
-  protected [SHALLOW_UNFROZEN_CLONE](): FabricSet {
-    return new FabricSet(this.set);
+  protected get wrappedValue(): Set<FabricValue> {
+    return this.#set;
   }
 
   /** @inheritDoc */
-  protected get wrappedValue(): Set<FabricValue> {
-    return this.set;
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricSet {
+    return new FabricSet(this.#set);
   }
 
   /** @inheritDoc */
   protected toNativeFrozen(): FrozenSet<FabricValue> {
-    return new FrozenSet(this.set);
+    return new FrozenSet(this.#set);
   }
 
   /** @inheritDoc */
   protected toNativeThawed(): Set<FabricValue> {
-    return new Set(this.set);
+    return new Set(this.#set);
   }
 
   static #codec = Object.freeze(
-    new (class FabricSetCodec extends BaseFabricCodec {
+    new (class FabricSetCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Set, FabricSet);
@@ -98,7 +106,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }

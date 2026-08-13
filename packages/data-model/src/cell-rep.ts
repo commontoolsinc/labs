@@ -4,9 +4,10 @@
  * entity-id reference form.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
+  isObjectOrArray,
   isPlainObject,
-  isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
 import { FabricHash } from "@/fabric-primitives/index.ts";
@@ -81,7 +82,7 @@ export function entityRefFrom(hash: FabricHash): EntityRef {
 export function isEntityRef(value: unknown): value is EntityRef {
   return modernCellRepEnabled
     ? value instanceof FabricHash
-    : isRecord(value) && typeof value["/"] === "string";
+    : isObjectOrArray(value) && typeof value["/"] === "string";
 }
 
 /**
@@ -91,7 +92,7 @@ export function isEntityRef(value: unknown): value is EntityRef {
 export function entityRefToString(value: EntityRef): string {
   if (modernCellRepEnabled) {
     if (value instanceof FabricHash) return value.taggedHashString;
-  } else if (isRecord(value) && typeof value["/"] === "string") {
+  } else if (isObjectOrArray(value) && typeof value["/"] === "string") {
     return value["/"];
   }
   throw new Error(
@@ -151,9 +152,9 @@ export function linkRefFrom<Payload extends FabricPlainObject>(
 function isLegacyLinkEnvelope(
   value: unknown,
 ): value is { "/": { [LINK_V1_TAG]: FabricPlainObject } } {
-  return isRecord(value) &&
+  return isObjectOrArray(value) &&
     Object.keys(value).length === 1 &&
-    isRecord(value["/"]) &&
+    isObjectOrArray(value["/"]) &&
     LINK_V1_TAG in value["/"];
 }
 
@@ -218,7 +219,9 @@ export function linkPayloadAtProbe(
   if (modernCellRepEnabled) {
     return isLinkRef(probeValue) ? linkRefPayload(probeValue) : undefined;
   }
-  return isRecord(probeValue) ? probeValue as FabricPlainObject : undefined;
+  return isObjectOrArray(probeValue)
+    ? probeValue as FabricPlainObject
+    : undefined;
 }
 
 //
@@ -262,14 +265,16 @@ function assertWireLinkRefPayloadShape(
   }
   for (const [key, val] of Object.entries(value)) {
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Cell-link wire payload has a forbidden key: "${key}".`);
+      throw new Error(
+        `Cell-link wire payload has a forbidden key: ${backtickQuote(key)}.`,
+      );
     }
     const ok = typeof val === "string" ||
       (Array.isArray(val) && val.every((e) => typeof e === "string"));
     if (!ok) {
       throw new Error(
-        `Cell-link wire payload field "${key}" must be a \`string\` or ` +
-          `\`string[]\`.`,
+        `Cell-link wire payload field ${backtickQuote(key)} must be a ` +
+          `\`string\` or \`string[]\`.`,
       );
     }
   }
@@ -296,7 +301,7 @@ export function linkRefPayloadToString(payload: WireLinkRefPayload): string {
 export function linkRefPayloadFromString(wire: string): WireLinkRefPayload {
   if (!wire.startsWith(CELL_LINK_WIRE_PREFIX)) {
     throw new Error(
-      `Not a cell-link wire string (missing "${CELL_LINK_WIRE_PREFIX}" prefix).`,
+      `Not a cell-link wire string (missing \`${CELL_LINK_WIRE_PREFIX}\` prefix).`,
     );
   }
   let parsed: unknown;

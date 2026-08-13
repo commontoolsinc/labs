@@ -1,26 +1,40 @@
-// model spend: month-to-date API cost across the LLM providers we use, projected
-// to a full-month total against an optional monthly budget. Each provider's
-// authoritative billing API is read in real USD: OpenAI and Anthropic (org Admin
-// keys, which expose per-day cost) and OpenRouter (a key, which exposes only a
-// running monthly total).
-//
-// The two providers with a daily series are charted as one line each over the
-// trailing ~45 days, dimmed except for the daily-rate window that feeds the
-// headline (like the github-ci-spend sparkline), with each line's month-to-date
-// total in the right gutter. The headline is the projected full-month spend,
-// extrapolated from the recent daily rate — spilling into last month's tail when
-// this month is under two weeks old — summed across every provider we could read.
-// The subtitle is the key (which colour is which provider, plus OpenRouter's total
-// since it has no line); the combined month-to-date total sits in the header aside,
-// and the span the chart covers goes to the tile's duration slot.
-//
-// Any provider we can't read shows "$???" and drops the tile to gray, but the
-// rest still chart and total. All LLM traffic routes through the AI gateway, but
-// the gateway exposes tokens, not dollars — these provider APIs are the
-// authoritative source of spend.
+/**
+ * Reports month-to-date API cost across the language-model providers we use,
+ * projected to a full-month total against an optional monthly budget. Each
+ * provider's authoritative billing API is read in real US dollars: OpenAI and
+ * Anthropic through organization Admin keys, which expose per-day cost, and
+ * OpenRouter through a key, which exposes only a running monthly total.
+ *
+ * The two providers with a daily series are charted as one line each over the
+ * trailing 45 days or so, dimmed except for the daily-rate window that feeds
+ * the headline, in the same way the ci-spend sparkline is drawn, with each
+ * line's month-to-date total in the right gutter. The headline is the
+ * projected full-month spend, extrapolated from the recent daily rate and
+ * spilling into last month's tail when this month is under two weeks old,
+ * summed across every provider we could read. The subtitle is the key, saying
+ * which colour is which provider and carrying OpenRouter's total since it has
+ * no line of its own. The combined month-to-date total sits in the header
+ * aside, and the span the chart covers goes to the tile's duration slot.
+ *
+ * Any provider we cannot read shows "$???" and drops the tile to gray, but the
+ * rest still chart and total. A provider whose cost report has stopped being
+ * written is one of those: a day past the end of its report has no figure, and
+ * charting it at $0 would claim a quiet day the provider never reported. All
+ * traffic to these models routes through the AI gateway, and the gateway
+ * exposes tokens rather than dollars, so these provider APIs are the
+ * authoritative source of spend.
+ */
+
 import type { Status, Tile, TileView } from "../types.ts";
 import { budgetStatus, readBudget, usd } from "../lib.ts";
-import { DAY_MS, SPEND_HISTORY_DAYS, spendChart, summarizeDailySpend } from "../spend.ts";
+import {
+  DAY_MS,
+  newestReportedDay,
+  reportLagDays,
+  SPEND_HISTORY_DAYS,
+  spendChart,
+  summarizeDailySpend,
+} from "../spend.ts";
 import { themedChartSeries } from "../theme.ts";
 
 // The provider billing APIs are slow — OpenAI's costs endpoint alone takes ~12-16s
@@ -29,8 +43,34 @@ import { themedChartSeries } from "../theme.ts";
 // returned shouldn't be cut off, stranding the whole provider as "$???".
 const TIMEOUT = 30000;
 const PROVIDER_LAG_DAYS = 1;
+// How far back a provider's newest bucket may sit before the tile stops reading
+// the provider. Both cost endpoints answer a date range with a bucket per day,
+// carrying a day the org spent nothing as a bucket with no figures in it, so a
+// day the provider is still reporting on has a bucket whether or not it cost
+// anything. A report that ends further back than a few days has stopped, and
+// the days after it are unreported rather than quiet.
+const MAX_REPORT_LAG_DAYS = 4;
 const OPENAI_COLOR = "#10a37f";
 const ANTHROPIC_COLOR = "#d97757";
+
+// The provider's days, or null when its report ends too far back to read the
+// days after it. A provider with no bucket at all has dated nothing, so there
+// is nothing to hold against the limit.
+function stillReporting(byDay: Map<string, number> | null, now: Date): Map<string, number> | null {
+  const newest = byDay === null ? undefined : newestReportedDay(byDay);
+  if (newest !== undefined && reportLagDays(newest, now) > MAX_REPORT_LAG_DAYS) return null;
+  return byDay;
+}
+
+// One provider's line. A provider with no bucket at all has no day of its own,
+// and the day axis the other provider supplies says nothing about this one, so
+// it draws no line rather than a run of $0 across days it never reported on.
+const chartSource = (byDay: Map<string, number> | null, color: string, label?: string) => ({
+  spend: byDay && byDay.size > 0 ? { byDay } : null,
+  color,
+  label,
+  lagDays: PROVIDER_LAG_DAYS,
+});
 
 // Daily billable USD, keyed by "YYYY-MM-DD", from OpenAI's org cost buckets.
 async function openaiDaily(key: string, startSec: number): Promise<Map<string, number>> {
@@ -130,12 +170,15 @@ export const modelSpend: Tile = {
     const startSec = Math.floor(startMs / 1000);
     const startISO = `${new Date(startMs).toISOString().slice(0, 10)}T00:00:00Z`;
 
-    // Read each provider concurrently. null = key absent or the billing API errored.
-    const [oaMap, anMap, orMonthly] = await Promise.all([
+    // Read each provider concurrently. null = key absent, the billing API
+    // errored, or the report it returned has stopped being written.
+    const [oaRead, anRead, orMonthly] = await Promise.all([
       oaKey ? openaiDaily(oaKey, startSec).catch(() => null) : Promise.resolve(null),
       anKey ? anthropicDaily(anKey, startISO).catch(() => null) : Promise.resolve(null),
       orKey ? openrouterMonthly(orKey).catch(() => null) : Promise.resolve(null),
     ]);
+    const oaMap = stillReporting(oaRead, now);
+    const anMap = stillReporting(anRead, now);
 
     const oa = oaMap
       ? summarizeDailySpend(oaMap, now, { lagDays: PROVIDER_LAG_DAYS })
@@ -163,18 +206,8 @@ export const modelSpend: Tile = {
 
     const chart = spendChart(
       [
-        {
-          spend: oaMap ? { byDay: oaMap } : null,
-          color: OPENAI_COLOR,
-          label: oa ? usd(oa.mtd) : undefined,
-          lagDays: PROVIDER_LAG_DAYS,
-        },
-        {
-          spend: anMap ? { byDay: anMap } : null,
-          color: ANTHROPIC_COLOR,
-          label: an ? usd(an.mtd) : undefined,
-          lagDays: PROVIDER_LAG_DAYS,
-        },
+        chartSource(oaMap, OPENAI_COLOR, oa ? usd(oa.mtd) : undefined),
+        chartSource(anMap, ANTHROPIC_COLOR, an ? usd(an.mtd) : undefined),
       ],
       now,
       status,

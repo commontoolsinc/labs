@@ -15,11 +15,28 @@ alias. Both options keep the pipe read-only and suppress unified-diff
 auto-detection. An explicit language takes priority when both options are
 present. Use `--diff` instead when the pipe is a unified diff.
 
-Automatic container detection is limited to structurally identified raw unified
-diffs and standard Git commit output. A raw diff starts at the first nonblank
-line. Recognized shebangs and transformed compiler headers remain explicit
-selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped source is
-not guessed from its syntax.
+The binary language handles known binary filenames, input containing a NUL byte,
+and input that is not valid UTF-8. It starts in a read-only rendered view with
+16 bytes per hex-dump row. Printable ASCII bytes appear at the right of each
+row. Other bytes use the same control-picture glyphs as the pager's
+non-printable display mode. Use `--language binary` or its `bytes` alias to
+select it explicitly for piped input. Interactive views retain at most 256 KiB
+and report the omitted byte count when the complete size is known. Use `--plain`
+to stream the complete dump without building it in memory.
+
+Each language selects how bytes are decoded. Text languages currently require
+valid UTF-8. The binary language keeps each raw byte unchanged. An explicit
+language also selects its decoder, so an invalid UTF-8 sequence reported under
+an explicit text language is an error rather than silently becoming binary. A
+UTF-8 byte order mark is removed before parsing and restored when an edited file
+is saved. Binary workspace files and Git blobs remain outside text diff editing
+and TypeScript semantic lookup.
+
+Automatic content detection is limited to binary input, structurally identified
+raw unified diffs, and standard Git commit output. A raw diff starts at the
+first nonblank line. Recognized shebangs and transformed compiler headers remain
+explicit selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped
+source is not guessed from its syntax.
 
 A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, coloured like additions
@@ -36,9 +53,10 @@ wrapping, and word wrapping. Hard wrapping fills every screen row before it
 continues. Word wrapping breaks at whitespace and repeats the line's leading
 punctuation and whitespace on each continuation row.
 
-Redirected output keeps the source text verbatim by default and adds ANSI color
-only when the selected color mode permits it. Pass `--rendered` to start in, or
-print, the rendered representation when one is available. Editing from a
+Redirected text output keeps the source text verbatim by default and adds ANSI
+color only when the selected color mode permits it. Binary output uses its
+hex-dump view by default. Pass `--rendered` to start in, or print, another
+language's rendered representation when one is available. Editing from a
 rendered view returns to source first.
 
 ```bash
@@ -49,7 +67,23 @@ git diff upstream/main | cf view
 cf view --rendered README.md
 generate-source | cf view --filename generated.py
 generate-markdown | cf view --language markdown --rendered
+generate-bytes | cf view --language binary
 ```
+
+## Piece references
+
+Commands that take a piece accept two textual reference forms:
+
+- The canonical fabric reference: the LLM-friendly link form,
+  `/[@did:.../]of:fid1:<id>[@scope][/path]`. This is the one reference syntax of
+  the fabric — the same string names the same cell in patterns, in the shell,
+  and here. A path embedded in a canonical `--piece` reference prefixes the
+  command's positional path argument.
+- The CLI's bare form: `pieceId[@scope]`, `pieceId[@scope]/path` at link
+  endpoints, and slugs. This is a convenience alias for interactive use.
+
+New reference-syntax capabilities land in the canonical form first; the alias
+does not grow a capability the canonical form lacks.
 
 ## Piece discovery
 
@@ -96,6 +130,39 @@ as `cf piece ls`. Human-readable output uses the same columns as `piece ls`.
 matches. If part of a piece cannot be read, the command reports a warning on
 standard error and continues searching that piece and the rest of the space.
 
+## Piece CFC labels
+
+`cf piece get-label` returns the effective CFC label view for a result path.
+Pass `--input` to select the input cell. The paths in the returned view are
+relative to the selected path, and the view includes declared, derived, and
+link-carried labels. An unlabeled value returns JSON `null`.
+
+```bash
+cf piece get-label --piece ID messages/0/body
+cf piece get-label --piece ID credentials --input
+```
+
+`cf piece set-label` reads a declared label update from standard input and
+returns the updated effective view. The input is an object with a
+`confidentiality` array, an `integrity` array, or both. An optional `observes`
+field selects `value`, `shape`, `enumerate`, or `followRef` consumption.
+
+```bash
+echo '{"confidentiality":["team"]}' \
+  | cf piece set-label --piece ID notes
+echo '{"integrity":[],"observes":"value"}' \
+  | cf piece set-label --piece ID draft --input
+```
+
+The command updates the label through the same checked write path used by
+ordinary runtime operations. It does not edit raw CFC metadata. The
+stored-schema rules reject a confidentiality update that would make data less
+restricted and an integrity update that would silently make data more trusted.
+An absent path is also rejected rather than creating policy metadata without a
+value. An `observes` update is rejected when it would combine with an existing
+observation class instead of preserving the requested class. Omitting `observes`
+from a later update preserves an existing unambiguous class.
+
 ## Output Conventions
 
 - stdout carries command output only; hints and diagnostics go to stderr.
@@ -120,7 +187,7 @@ standard error and continues searching that piece and the rest of the space.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
-### Transforming `piece get` output
+### Transforming `piece get` and `piece call` output
 
 `piece get` can filter an array before it reaches stdout and project the result
 to a smaller shape:
@@ -132,6 +199,21 @@ cf piece get --piece ID items \
   --select id,title,author.name
 ```
 
+`piece call` takes the same three flags, with the same grammar, the same
+conflict rule, and the same error messages, written before the callable name:
+
+```bash
+cf piece call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
+cf piece call --piece ID --filter '.status == "open"' listTopics
+```
+
+Everything below describes both commands. The one difference is what the
+selection is about: `piece get` shapes a cell's value, and `piece call` shapes
+the **result of the call** — a handler's `result` inside the Invocation JSON, or
+a tool's JSON on stdout. See
+[what a selection means for a call](#what-a-selection-means-for-a-call) for the
+three cases where that difference shows.
+
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
 `.tags[-1]`), JSON literals, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`,
@@ -141,12 +223,13 @@ missing value and is also falsey. Filtering happens before schema projection.
 
 Two flags project, one per input language:
 
-- `--select` takes a comma-separated field list such as `id,title,author.name`;
+- `--select` takes a comma-separated field list such as `id,title,author.name`,
+  in which a segment ending in `@` asks for an address rather than contents;
 - `--schema` takes an inline JSON Schema object or `@path/to/schema.json`, and
   also accepts the same field list `--select` takes.
 
 A command that names both has not said which shape it wants, and is refused
-before the read.
+before the read or the call.
 
 For an array result, the field list describes each item. An inline/file JSON
 Schema describes the complete returned value, so a schema combined with
@@ -195,8 +278,8 @@ override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
 
 #### Asking for an address instead of contents
 
-A JSON `--schema` marks a position with `"$link": true` to get that position's
-address rather than what is behind it:
+A projection marks a position to get that position's address rather than what is
+behind it. A JSON `--schema` marks with `"$link": true`:
 
 ```bash
 cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
@@ -237,13 +320,157 @@ and the title — and replaces the contents when it is alone. It is accepted
 anywhere `properties` is, except under `additionalProperties`, whose membership
 the stored value rather than the selection decides.
 
+A field list marks with a trailing `@`, which is that same marker at the
+position the segment names:
+
+```bash
+cf piece get --piece ID --select 'topic@,topic.title'
+```
+
+```json
+{ "topic": { "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" } }
+```
+
+The two paths union into the one position, and `topic@.title` says the same
+thing in one path. `@` is special only as the final character of a segment:
+`user@home` names a field, and `\@` writes a literal `@` where a trailing one
+would otherwise mark, so `a\@` names the field `a@`. Naming a position both
+ways, `topic,topic@`, returns the address beside the whole contents.
+
+A field list applies to each element wherever it crosses an array, and an
+address is one of the things it applies. Where the marked position holds an
+array the answer is one address per element, so `notes@` is the concise spelling
+of `{"type":"array","items":{"$link":true}}`:
+
+```bash
+cf piece get --piece ID --select 'notes@'
+```
+
+```json
+{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }] }
+```
+
+Those element documents are what a caller cannot work out for themselves; the
+array position's own address is only the source address plus the path they just
+typed. Where the marked position holds anything else, `topic@` among them, the
+address is that position's own. Marking below an array — `notes.title@` — is
+element-wise for the same reason, and answers with each note's own `id` and
+`path` `["title"]`.
+
+A path that is only `@` names the position the read is already at, which no
+field path reaches because it sits above every field:
+
+```bash
+cf piece get --piece ID topic --select '@,title'
+```
+
+```json
+{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }
+```
+
+It composes exactly as a suffix one level down does: `@` alone replaces the
+contents with the address, `@` beside a field path returns both in the one
+result, and a source that holds an array answers with one address per element. A
+leading `@` followed by anything else is an `@file`, which `--schema` reads and
+`--select` does not, so `--select '@fields.json'` is refused and pointed there.
+
 A marked position is never fetched: it contributes a rejecting selector to the
 same path union the projection builds, and the address is composed from links
 already stored in the documents the read visited rather than by following one. A
 marked collection therefore costs one document read rather than one per element.
-The marker is a JSON-schema spelling only, and it cannot be combined with
-`--filter`: the elements a predicate keeps no longer say which positions they
-came from, and an address names a position.
+Neither spelling can be combined with `--filter`: the elements a predicate keeps
+no longer say which positions they came from, and an address names a position.
+
+#### What a selection means for a call
+
+A selection shapes a result that already exists. It does not narrow what the
+call fetches: the readback materializes the whole receipt before the selection
+runs, and a handling's receipt declares no schema for a selector to narrow
+against. The same holds for a tool, whose result is read off the cell the tool
+wrote. Use a selection to control what reaches stdout, not to control what
+travels.
+
+Three cases follow from that:
+
+- **A value-less verb still reports nothing.** Its receipt is the empty witness,
+  and the Invocation JSON omits `result` to say so. A selection is about a
+  value, so with none there the step never runs and `result` stays absent — it
+  does not become `{}`, and it is not an error. A selection that keeps nothing
+  from a result that _does_ exist is a different fact, and it is refused rather
+  than reported as an absent result.
+- **`--no-wait` refuses all three flags.** That mode exits once the commit is
+  acknowledged and skips the receipt readback, so there is no result to shape.
+  The refusal names the flags that need the readback, alongside `--show-links`
+  for the same reason. What it still returns is the envelope's `receipt` — the
+  address of the cell holding the outcome, known at commit — so the shaping
+  flags apply to the `cf piece get` that collects it.
+- **`--show-links` composes with a projection, not with `--filter`.** Links are
+  collected after the selection, over exactly the value the caller is holding: a
+  projection leaves every surviving path where it was, so each address still
+  names the position it annotates, and a path the projection dropped simply gets
+  no entry. A predicate does not — the elements it keeps land at positions that
+  are no longer the ones they came from — so `--filter --show-links` is refused,
+  the same refusal a `$link` marker meets for the same reason.
+
+#### A result that points back at itself
+
+A verb returning the piece it created hands back a value that can be reached
+from inside itself, whenever that piece carries a back-reference — `parent`
+beside `children`, the shape
+[self-reference](../../docs/common/concepts/self-reference.md) documents. A
+circle has no JSON rendering at all, so a readback that follows one has nothing
+to write.
+
+Where the caller named no shape, `cf` derives one from the verb's declared
+result. The declaration is the boundary the author drew: the position where the
+declared type re-enters itself is the position that closes the circle, so that
+position renders its address and everything else reads as it always did.
+
+```json
+{
+  "item": {
+    "title": "Rotate signing key",
+    "status": "open",
+    "children": [],
+    "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+  }
+}
+```
+
+Three things follow:
+
+- **It is the same `$link` a caller writes by hand.** The derived bound composes
+  its addresses through the same walk the selection step above composes a
+  written `$link` with, so `--schema` over the same position produces the same
+  address.
+- **A caller's own shape wins wherever it renders.** `--filter`, `--select` and
+  `--schema` are applied to the receipt first, and a projection that narrows
+  past the circle — `--select item.title` — is answered exactly as written, with
+  nothing derived added to it. A projection that names the re-entering subtree
+  whole — `--select item` — keeps the circle it selected and is bounded on the
+  way out, but the bound is a cut into what was selected rather than a shape
+  that replaces it: the closing position renders its address, and no position
+  the caller did not name comes back beside it. `--select item.parent` names the
+  closing position itself, and is answered with that one address alone.
+- **Nothing else pays for it.** A result that renders is written out exactly as
+  it was read, and the compiled pattern a declared result is matched through is
+  loaded only where a readback cannot render. The bound itself is a cut into the
+  value already in hand — no pattern graph and no transaction — leaving the
+  address walk a written `$link` is composed through as the only work beside it.
+
+Where nothing bounds the circle — the verb declares no result, the declaration
+it made leaves the closing position wide, or a `--filter` is in play — the call
+reports the position the circle closes at, states that the handling committed,
+and names the receipt to collect the outcome from. It exits nonzero: the outcome
+could not be rendered. The write still landed, which is the property the message
+leads with.
+
+A `--filter` is the case with no bound to reach for rather than one that failed:
+the predicate hands back the elements themselves, which no longer say which
+positions they came from, and a bound is written in addresses, which name
+positions — the refusal `--filter --show-links` earns above, for the same
+reason. Narrowing past the circle with a projection beside the predicate —
+`--filter '.status == "open"' --select title` — renders.
 
 ## Built Binary
 

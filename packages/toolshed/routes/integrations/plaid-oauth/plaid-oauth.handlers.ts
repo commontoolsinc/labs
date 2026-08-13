@@ -26,11 +26,10 @@ import env from "@/env.ts";
 import {
   CountryCode,
   LinkTokenCreateRequest,
-  PlaidError,
   Transaction,
   TransactionsSyncRequest,
 } from "plaid";
-import { isRecord } from "@commonfabric/utils/types";
+import { plaidErrorFrom } from "./plaid-oauth.error.ts";
 
 /**
  * Plaid Create Link Token Handler
@@ -85,8 +84,8 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     logger.error({ error }, "Failed to create link token");
 
     // Extract Plaid error details if available
-    if (isRecord(error) && isRecord(error.response) && error.response.data) {
-      const plaidError = error.response.data as PlaidError;
+    const plaidError = plaidErrorFrom(error);
+    if (plaidError) {
       return c.json({
         error: plaidError.error_message || "Failed to create link token",
         error_code: plaidError.error_code,

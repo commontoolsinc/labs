@@ -11,17 +11,17 @@ import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
-} from "./BaseFabricInstance.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { ProblematicValue } from "./ProblematicValue.ts";
+} from "@/codec-interface/interface.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
  * A link value in the fabric type system: the modern, object-shaped form of a
@@ -111,7 +111,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   //
 
   static #codec = Object.freeze(
-    new (class LinkCodec extends BaseFabricCodec {
+    new (class LinkCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Link, FabricLink);
@@ -147,7 +147,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
@@ -165,7 +165,9 @@ function assertValidPayload(
   }
   for (const key of Object.keys(payload)) {
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Link payload has a forbidden key: \`${key}\`.`);
+      throw new Error(
+        `Link payload has a forbidden key: \`${key}\`.`,
+      );
     }
   }
 }

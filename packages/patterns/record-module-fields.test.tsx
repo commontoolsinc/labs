@@ -41,7 +41,15 @@
  *
  * Run: deno task cf test packages/patterns/record-module-fields.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, NAME, pattern, UI, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  NAME,
+  pattern,
+  TESTS,
+  UI,
+  Writable,
+} from "commonfabric";
 import RecordPattern from "./record.tsx";
 
 interface AddResult {
@@ -244,7 +252,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_plain_name },
 
       { action: action_add_icon_module },

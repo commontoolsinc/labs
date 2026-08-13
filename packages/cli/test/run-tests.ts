@@ -14,11 +14,10 @@ const PERMISSIONS = [
 // `deno task check` (tasks/check.sh), so the test run skips it.
 const BASE_FLAGS = ["--no-check"];
 
-// Optional sharding for CI fan-out: CLI_TEST_SHARD="i/n" (1-based) runs only
-// the test files where (sorted index % n) == (i - 1), so the CLI suite spreads
-// across several workspace test shards instead of all landing in one. Mirrors
-// PATTERN_INTEGRATION_SHARD in packages/patterns/integration/all.test.ts.
-// Unset (local dev) runs every test file.
+// Optional sharding for CI fan-out. CLI_TEST_SHARD uses the same one-based
+// "i/n" syntax as PATTERN_INTEGRATION_SHARD. Ordinary files advance through
+// the shards in sorted order, starting with the second shard and wrapping after
+// the last. An unset variable runs every test file for local development.
 function parseCliTestShard(): { index: number; count: number } {
   const raw = Deno.env.get("CLI_TEST_SHARD");
   if (!raw) return { index: 0, count: 1 };
@@ -54,10 +53,25 @@ const SERIAL_TESTS = [
   "test/runtime-creation.test.ts",
   "test/test-runner-compile-byte-cache.test.ts",
   "test/test-runner-pattern-coverage.test.ts",
-  "test/view-commitmsg.test.ts",
+  "test/view-commitmsg-01.test.ts",
+  "test/view-commitmsg-02.test.ts",
+  "test/view-commitmsg-03.test.ts",
+  "test/view-commitmsg-04.test.ts",
+  "test/view-commitmsg-05.test.ts",
+  "test/view-commitmsg-06.test.ts",
+  "test/view-commitmsg-07.test.ts",
+  "test/view-commitmsg-08.test.ts",
+  "test/view-commitmsg-09.test.ts",
+  "test/view-commitmsg-10.test.ts",
   "test/view-mod-gate.test.ts",
   "test/view-pager-pty.test.ts",
   "test/wish-command.test.ts",
+];
+
+// These tests exercise Linux procfs paths, which Deno exposes only to an
+// all-access process.
+const ALL_ACCESS_TESTS = [
+  "test/view-procfs.test.ts",
 ];
 
 // Tests that need a live toolshed named by API_URL. This runner excludes
@@ -89,6 +103,7 @@ async function run(
   label: string,
   options: string[],
   files: string[],
+  permissions = PERMISSIONS,
 ): Promise<void> {
   if (files.length === 0) {
     console.log(`Skipping ${label} (0 files)`);
@@ -97,7 +112,7 @@ async function run(
 
   console.log(`Running ${label} (${files.length} files)`);
   const result = await new Deno.Command(Deno.execPath(), {
-    args: ["test", ...PERMISSIONS, ...BASE_FLAGS, ...options, ...files],
+    args: ["test", ...permissions, ...BASE_FLAGS, ...options, ...files],
     stdout: "inherit",
     stderr: "inherit",
   }).spawn().status;
@@ -120,6 +135,19 @@ if (missingSerialTests.length > 0) {
   Deno.exit(1);
 }
 
+const allAccess = new Set(ALL_ACCESS_TESTS);
+const missingAllAccessTests = ALL_ACCESS_TESTS.filter((test) =>
+  !allTests.includes(test)
+);
+if (missingAllAccessTests.length > 0) {
+  console.error(
+    `All-access CLI test file(s) not found: ${
+      missingAllAccessTests.join(", ")
+    }`,
+  );
+  Deno.exit(1);
+}
+
 const integration = new Set(INTEGRATION_TESTS);
 const missingIntegrationTests = INTEGRATION_TESTS.filter((test) =>
   !allTests.includes(test)
@@ -135,11 +163,22 @@ if (missingIntegrationTests.length > 0) {
 const unitTests = allTests.filter((test) => !integration.has(test));
 
 const shard = parseCliTestShard();
-const tests = unitTests.filter((_, i) => i % shard.count === shard.index);
+const tests = unitTests.filter((_, index) =>
+  (index + 1) % shard.count === shard.index
+);
 
-const parallelTests = tests.filter((test) => !serial.has(test));
+const parallelTests = tests.filter((test) =>
+  !serial.has(test) && !allAccess.has(test)
+);
+const allAccessTests = tests.filter((test) => allAccess.has(test));
 const serialTests = tests.filter((test) => serial.has(test));
 const denoTestArgs = Deno.args[0] === "--" ? Deno.args.slice(1) : Deno.args;
 
 await run("parallel CLI tests", ["--parallel", ...denoTestArgs], parallelTests);
+await run(
+  "all-access CLI tests",
+  ["--parallel", ...denoTestArgs],
+  allAccessTests,
+  ["--allow-all"],
+);
 await run("serial CLI tests", denoTestArgs, serialTests);

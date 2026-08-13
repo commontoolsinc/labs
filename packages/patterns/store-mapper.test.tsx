@@ -31,6 +31,7 @@ import {
   equals,
   handler,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 import StoreMapper, {
@@ -458,7 +459,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Test 1: Initial state ===
       { assertion: assert_initial_store_name },
       { assertion: assert_initial_no_aisles },
