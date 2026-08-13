@@ -118,7 +118,7 @@ export class FabricBytes extends BaseFabricPrimitive {
   // Static members
   //
 
-  static #codec = Object.freeze(
+  static #jsonCodec = Object.freeze(
     new (class BytesCodec extends BaseTerminalCodec<JsonCodecValue> {
       /** Constructs an instance. */
       constructor() {
@@ -159,6 +159,6 @@ export class FabricBytes extends BaseFabricPrimitive {
 
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
-    return this.#codec;
+    return this.#jsonCodec;
   }
 }
