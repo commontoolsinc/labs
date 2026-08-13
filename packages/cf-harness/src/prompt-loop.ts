@@ -15,7 +15,11 @@ import {
   type HarnessParentToolAllowance,
   type HarnessPromptSlotBindingSource,
 } from "./contracts/cfc-policy-snapshot.ts";
-import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+import {
+  HANDLE_TOKEN_PATTERN,
+  type HarnessHandleEntry,
+  type HarnessHandleTable,
+} from "./contracts/handle-table.ts";
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
 import {
@@ -82,6 +86,7 @@ import {
   createHarnessHandleTable,
   defineOwnEntry,
   mintAddressHandle,
+  resolveHandleToken,
   swapLinksForTokens,
   swapTokensForRefs,
 } from "./handle-table.ts";
@@ -676,6 +681,85 @@ const createSubagentInputSummary = async (
       }
       : {}),
   };
+};
+
+/**
+ * The tool surface a subagent profile offers in this run. `run_pattern` is
+ * declared by the `default` profile, but a run with no fabric session cannot
+ * build one, so the tool leaves the profile rather than being offered and
+ * failing — the same gate the parent surface applies.
+ */
+const subagentProfileConfigForRun = (
+  profile: HarnessSubagentProfile,
+  fabricSessionAvailable: boolean,
+): HarnessSubagentProfileConfig => {
+  const config = getHarnessSubagentProfileConfig(profile);
+  if (
+    fabricSessionAvailable || !config.allowedToolIds.includes("run_pattern")
+  ) {
+    return config;
+  }
+  return {
+    ...config,
+    allowedToolIds: config.allowedToolIds.filter((toolId) =>
+      toolId !== "run_pattern"
+    ),
+  };
+};
+
+/**
+ * The child's initial handle table for a delegation: an empty table salted
+ * with the child's own run id, carrying a verbatim copy of every parent entry
+ * whose token the parent named in the delegation's `goal` or `context`.
+ * Returns `undefined` when the delegation names no resolvable token, leaving
+ * the child to mint its first table itself.
+ *
+ * This is the cross-agent privilege boundary. A token the parent did not
+ * write into the delegation is not in the child's table, so the child cannot
+ * resolve it — what a child can reach is exactly what the delegation handed
+ * it. Copying entries verbatim keeps the token stable across the hierarchy:
+ * minting looks up by `addressKey`, so a child minting a handle for a seeded
+ * address returns the parent's token.
+ */
+const seedSubagentHandleTable = (
+  parentTable: HarnessHandleTable | undefined,
+  childRunId: string,
+  input: DelegateTaskToolInput,
+): HarnessHandleTable | undefined => {
+  if (parentTable === undefined || parentTable.entries.length === 0) {
+    return undefined;
+  }
+  const seeded = new Map<string, HarnessHandleEntry>();
+  for (const text of [input.goal, input.context ?? ""]) {
+    for (const match of text.matchAll(new RegExp(HANDLE_TOKEN_PATTERN))) {
+      const entry = resolveHandleToken(parentTable, match[0]);
+      if (entry !== undefined) {
+        seeded.set(entry.token, entry);
+      }
+    }
+  }
+  if (seeded.size === 0) {
+    return undefined;
+  }
+  return {
+    ...createHarnessHandleTable(childRunId),
+    entries: [...seeded.values()].map((entry) => ({ ...entry })),
+  };
+};
+
+/**
+ * The child's final text with its own tokens resolved back to canonical
+ * references, which is how a reference the child produced reaches the parent.
+ * The parent's own outbound boundary mints what comes back: a seeded address
+ * mints to the token the parent already holds, and an address the child
+ * discovered for itself becomes a fresh parent token.
+ */
+const resolveChildHandleTokens = (
+  childEngine: CfHarnessEngine,
+  text: string,
+): string => {
+  const table = childEngine.handleTable;
+  return table === undefined ? text : swapTokensForRefs(table, text) as string;
 };
 
 const resolveSubagentModel = (
@@ -1940,7 +2024,10 @@ export class CfHarnessPromptLoop {
         allowedSkillScripts: this.engine.config.allowedSkillScripts ?? [],
         allowedSubagentProfiles,
         subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
-          getHarnessSubagentProfileConfig(profile)
+          subagentProfileConfigForRun(
+            profile,
+            this.engine.fabricSessionAvailable,
+          )
         ),
         ...(cfc?.absenceBehavior !== undefined
           ? { absenceBehavior: cfc.absenceBehavior }
@@ -2954,8 +3041,9 @@ export class CfHarnessPromptLoop {
     resultRef: ToolResultRef;
   }> {
     const delegateInput = options.input;
-    const profileConfig = getHarnessSubagentProfileConfig(
+    const profileConfig = subagentProfileConfigForRun(
       delegateInput.profile,
+      this.engine.fabricSessionAvailable,
     );
     const childModel = resolveSubagentModel(options.model, profileConfig);
     const inheritsParentModel = childModel.source === "parent";
@@ -3020,10 +3108,23 @@ export class CfHarnessPromptLoop {
         ? { browserAccess: this.#browserAccess }
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
+      // The child shares the parent's fabric session, so a subagent can call
+      // `run_pattern` against the one space the run is configured for.
+      ...(this.engine.fabricSessionFactory !== undefined
+        ? { fabricSessionFactory: this.engine.fabricSessionFactory }
+        : {}),
       ...(parentRunState.runManifest !== undefined
         ? { runManifest: parentRunState.runManifest }
         : {}),
     });
+    const seededHandleTable = seedSubagentHandleTable(
+      this.engine.handleTable,
+      childRunId,
+      delegateInput,
+    );
+    if (seededHandleTable !== undefined) {
+      await childEngine.recordHandleTable(seededHandleTable);
+    }
     const childCreatedState = childEngine.getRunState();
     const childSkillContextMessages: string[] = [];
     const manifest: HarnessSubagentRunManifest = {
@@ -3151,7 +3252,16 @@ export class CfHarnessPromptLoop {
         promptSlotBinding: options.promptSlotBinding,
         signal: options.signal,
       });
-      summary = childResult.finalAssistantText;
+      // The child speaks in its own tokens; the parent boundary speaks in
+      // addresses. Resolving here is what makes a reference the child
+      // produced usable by the parent: the parent's outbound swap mints the
+      // canonical address into a parent token — the same token for a seeded
+      // address, a fresh one for an address only the child ever saw.
+      const childFinalText = resolveChildHandleTokens(
+        childEngine,
+        childResult.finalAssistantText,
+      );
+      summary = childFinalText;
       childModelTurns = childResult.modelTurns;
       const childUsage = childResult.totalUsage ?? childResult.usage;
       if (childUsage !== undefined) {
@@ -3172,7 +3282,7 @@ export class CfHarnessPromptLoop {
         const structured = await createStructuredSubagentReturn({
           childEngine,
           childRunId,
-          rawFinalAssistantText: childResult.finalAssistantText,
+          rawFinalAssistantText: childFinalText,
           schema: delegateInput.returnSchema,
           handleTable,
         });

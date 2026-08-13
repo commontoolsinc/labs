@@ -118,8 +118,9 @@ network confinement model.
   device login, refresh-token rotation, live model discovery, resume, and
   owner-bound Loom integration
 - a session-local address handle table: deterministic short `cfh:a:` tokens for
-  cell addresses, minted per run, recorded in run state, and carried across
-  `--resume-run`; see
+  cell addresses, minted per run, recorded in run state, carried across
+  `--resume-run`, and seeded into a subagent's own table by the delegation that
+  names them; see
   [Session-local address handles](#session-local-address-handles)
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` together) that compiles and runs a pattern against a deployed
@@ -130,9 +131,8 @@ network confinement model.
 What is not done yet:
 
 - real runner-driven CFC feedback integration
-- session handle coverage beyond the wired seams: denial-path tool messages,
-  cross-agent handle semantics for `delegate_task` arguments, and value handles
-  (`cfh:v:`)
+- session handle coverage beyond the wired seams: denial-path tool messages, and
+  value handles (`cfh:v:`)
 - richer opaque-handle/pass-through behavior outside schema-validated subagent
   returns, including an explicit release/readback mechanism
 - first-class browser operation policy on top of the provisional browser
@@ -603,12 +603,44 @@ bound for model context carries tokens, while the persisted tool-output artifact
 keeps the raw addresses. Model-authored tool arguments resolve tokens back to
 canonical references before policy evaluation, summarization, and dispatch —
 except for `delegate_task`, whose arguments reach the child verbatim, so a token
-there is inert text. And a sealed subagent structured-return string whose raw
-value names an address comes back as a token rather than an opaque `@link`
-object; the return's `linkedStringCount` counts only the positions still sealed.
-Denial-path tool messages are not swapped; that coverage, cross-agent handle
-semantics, value handles, and an explicit release/readback mechanism are listed
+there is inert text to the parent boundary. And a sealed subagent
+structured-return string whose raw value names an address comes back as a token
+rather than an opaque `@link` object; the return's `linkedStringCount` counts
+only the positions still sealed. Denial-path tool messages are not swapped; that
+coverage, value handles, and an explicit release/readback mechanism are listed
 in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+#### Handles across a delegation
+
+A child resolves the parent's tokens through its own boundary, against a table
+the delegation seeds. When the parent delegates, the tokens written into the
+`goal` and `context` are looked up in the parent's table, and each entry that
+resolves is copied verbatim — same token, same reference — into a fresh table
+salted with the child's run id. Nothing else crosses. A token the parent held
+but did not write into the delegation is not in the child's table, so the child
+cannot resolve it; it stays the inert text an unknown token always is. This is
+the privilege boundary: what a subagent can reach by reference is exactly what
+its delegation handed it, and the decomposition structure is therefore the
+opacity structure.
+
+Copying entries verbatim keeps a reference stable across the hierarchy. Minting
+looks up by address, so a child minting a handle for a seeded address gets the
+parent's token back, and the same address is the same token in both runs.
+
+Returns come back the other way. The child's final text is resolved through the
+child's table into canonical references, and the parent's ordinary outbound swap
+mints those into parent tokens. A seeded address mints to the token the parent
+already holds, so a token the child echoes round-trips unchanged. An address
+only the child ever saw — a `run_pattern` result cell it created, say — becomes
+a new entry in the parent's table and reaches the parent as a token the parent
+can pass straight back into its own tools. The child's raw tokens never appear
+in parent-facing text.
+
+A `default`-profile subagent inherits the parent's fabric session, so it can
+call `run_pattern` itself, under the same gate as the parent: with no session
+configured the tool is absent from the child's surface rather than
+present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles do
+not offer it.
 
 ### Running patterns against a Fabric space
 
@@ -632,7 +664,10 @@ configuration error naming the missing flags. The same holds under an explicit
 allowlist: `--allow-tool run_pattern` without the three session flags is a
 configuration error, and the tool is never offered to the model without a
 session. `--fabric-space` accepts a space name or a `did:key`, and
-`--describe-capabilities` reports `runPattern` among its features.
+`--describe-capabilities` reports `runPattern` among its features. A
+`default`-profile subagent is offered the tool under the same gate and works
+through the parent's session; the `browser`, `web_fetch`, and `web_search`
+profiles never receive it.
 
 `run_pattern` executes on the trusted host side — it never enters the docker
 sandbox. The session (a `PiecesController` against the deployed API) is built

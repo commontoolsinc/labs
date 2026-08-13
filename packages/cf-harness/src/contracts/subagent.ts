@@ -25,12 +25,19 @@ export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
 export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
   "summary-and-sanitized-state" as const;
+/**
+ * Tool surface of the `default` profile. `run_pattern` is gated the same way
+ * the parent surface gates it: the prompt loop drops it from a child whose
+ * engine has no fabric session, so the tool is absent rather than
+ * present-but-failing.
+ */
 export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
   "read_file",
   "view_image",
   "edit_file",
   "write_file",
+  "run_pattern",
 ] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash-no-sandbox",

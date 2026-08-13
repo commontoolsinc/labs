@@ -62,6 +62,12 @@ The current package provides:
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
   and resolves tokens in model-authored tool arguments before policy evaluation
   and dispatch, `delegate_task` arguments excepted;
+- cross-agent handles: a delegation seeds the child's own table with a verbatim
+  copy of every parent entry whose token the `goal` or `context` names, and
+  nothing else, so a child resolves exactly the references the delegation handed
+  it while the tokens stay identical across the hierarchy; a reference the child
+  produces is resolved through the child's table and minted through the parent's
+  boundary, reaching the parent as a parent-resolvable token;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern
@@ -76,7 +82,8 @@ The current package provides:
   value, and leaves the piece detached (no recorded origin) and out of the
   space's registered piece list, with run→piece provenance carried by the run's
   persisted artifacts; without the session configuration the tool is absent from
-  the tool surface.
+  the tool surface, for a `default`-profile subagent as much as for the parent —
+  a child shares the one session the parent built.
 
 Run the capability probe instead of copying this list into adapters:
 

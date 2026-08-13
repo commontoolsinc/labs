@@ -558,6 +558,16 @@ export class CfHarnessEngine {
     return this.#fabricSessionFactory !== undefined;
   }
 
+  /**
+   * The run's cached fabric-session factory, or `undefined` when the run has
+   * none. A delegating parent hands its factory to the child engine, so a
+   * subagent's `run_pattern` shares the one session the parent built rather
+   * than opening a second one against the same space.
+   */
+  get fabricSessionFactory(): HarnessFabricSessionFactory | undefined {
+    return this.#fabricSessionFactory;
+  }
+
   bindRunModel(model: string): HarnessRunState {
     const recordedModel = this.#runState.model;
     if (
