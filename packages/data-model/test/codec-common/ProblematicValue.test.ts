@@ -64,6 +64,29 @@ describe("ProblematicValue", () => {
       expect(() => deepFreeze(ps)).not.toThrow();
     });
 
+    it("survives a state whose own membership check throws", () => {
+      // Prophylaxis rather than a proxy guard: this path must not fail even
+      // if `isFabricValue()` itself has a defect, since throwing here would
+      // replace the failure being reported rather than add to it. A hostile
+      // proxy is the only way to provoke that from outside.
+      const hostile = new Proxy({}, {
+        get() {
+          throw new Error("hostile");
+        },
+        getPrototypeOf() {
+          throw new Error("hostile");
+        },
+        ownKeys() {
+          throw new Error("hostile");
+        },
+      });
+
+      const ps = new ProblematicValue("T@1", hostile, "boom");
+
+      expect(typeof ps.state).toBe("string");
+      expect(ps.error).toBe("boom");
+    });
+
     it("renders values with no fabric representation at all", () => {
       for (const state of [new Map([["a", 1]]), new Set([1]), () => 1]) {
         expect(typeof new ProblematicValue("T@1", state, "b").state)

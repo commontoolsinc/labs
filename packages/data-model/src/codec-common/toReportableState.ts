@@ -24,11 +24,27 @@ const MAX_RENDERED_LENGTH = 200;
  * description of a value rather than the value, which is the honest answer
  * where fidelity is not on offer.
  *
+ * The membership check runs guarded, so that a defect in it cannot take this
+ * function down with it. That is prophylaxis against an unanticipated bug in
+ * `isFabricValue()` rather than a guard against any particular input: this
+ * runs on the failure path, where throwing does not surface a second problem
+ * so much as replace the first one, the original error being lost in favor of
+ * whatever the predicate did. `toCompactDebugString()` needs no such wrapping,
+ * already answering `"<unrenderable debug string>"` for anything it cannot
+ * render, and is the floor this rests on.
+ *
  * @param state - The state at fault, of any type whatsoever.
  * @returns `state` itself, or a rendering of it.
  */
 export function toReportableState(state: any): FabricValue {
-  return isFabricValue(state)
-    ? state
-    : toCompactDebugString(state, MAX_RENDERED_LENGTH);
+  try {
+    if (isFabricValue(state)) {
+      return state;
+    }
+  } catch {
+    // Fall through to the rendering, which is what a state this function
+    // cannot classify gets anyway.
+  }
+
+  return toCompactDebugString(state, MAX_RENDERED_LENGTH);
 }
