@@ -574,7 +574,8 @@ export function shouldPreserveBindingDeclaredTypeNode(
       name === "PerUser" ||
       name === "PerSession" ||
       name === "PerAny" ||
-      name === "Default"
+      name === "Default" ||
+      name === "Demand"
     );
   }
 

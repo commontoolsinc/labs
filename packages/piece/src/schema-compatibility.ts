@@ -73,6 +73,12 @@ const ANNOTATION_KEYS = new Set([
   "$schema",
   "default",
   "definitions",
+  // Holder-side demand marker (`Demand<T>` in the API): records that a
+  // subtree is what a holder requires of a stored piece rather than state
+  // it owns. Validation-neutral by construction, so it must add and remove
+  // freely across pattern updates — classified here BEFORE the generator
+  // emits it anywhere, per the C3 append-only lesson.
+  "demand",
   // Standard JSON Schema annotation. The generator emits it from
   // `@deprecated` JSDoc so `cf piece verbs` can hide legacy streams by
   // default; it is validation-neutral by spec, so it must add and remove

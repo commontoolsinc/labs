@@ -96,6 +96,23 @@ const resolveScopeWrapperNode = (
   return scope === undefined ? undefined : { scope, node: typeNode };
 };
 
+const DEMAND_WRAPPER_NAME = "Demand";
+
+const isDemandWrapperName = (name: string | undefined): boolean =>
+  name === DEMAND_WRAPPER_NAME;
+
+const resolveDemandWrapperNode = (
+  typeNode: ts.TypeNode | undefined,
+): ts.TypeReferenceNode | undefined => {
+  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+    return undefined;
+  }
+  const name = ts.isIdentifier(typeNode.typeName)
+    ? typeNode.typeName.text
+    : typeNode.typeName.right.text;
+  return isDemandWrapperName(name) ? typeNode : undefined;
+};
+
 const applyScopeToAsCellEntry = (
   entry: AsCellEntry,
   scope: SchemaScope,
@@ -131,6 +148,14 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     if (resolveScopeWrapperNode(context.typeNode)) {
+      return true;
+    }
+
+    if (isDemandWrapperName(aliasName)) {
+      return true;
+    }
+
+    if (resolveDemandWrapperNode(context.typeNode)) {
       return true;
     }
 
@@ -208,6 +233,27 @@ export class CommonFabricFormatter implements TypeFormatter {
         undefined,
       );
       return this.applyScopeWrapperSemantics(innerSchema, aliasScope);
+    }
+
+    const resolvedDemandWrapper = resolveDemandWrapperNode(n);
+    if (resolvedDemandWrapper) {
+      return this.formatDemandWrapperTypeFromNode(
+        resolvedDemandWrapper,
+        context,
+      );
+    }
+
+    if (isDemandWrapperName(aliasType.aliasSymbol?.name)) {
+      const innerType = aliasType.aliasTypeArguments?.[0];
+      if (!innerType) {
+        throw new Error(`Demand<T> requires type argument`);
+      }
+      const innerSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+      return this.applyDemandWrapperSemantics(innerSchema);
     }
 
     const resolvedCfcAlias = this.resolveCfcAliasInstantiation(
@@ -519,6 +565,47 @@ export class CommonFabricFormatter implements TypeFormatter {
     );
 
     return this.applyScopeWrapperSemantics(innerSchema, scope);
+  }
+
+  private formatDemandWrapperTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+  ): MutableJSONSchema {
+    const innerTypeNode = typeRefNode.typeArguments?.[0];
+    if (!innerTypeNode) {
+      throw new Error(`Demand<T> requires type argument`);
+    }
+
+    let innerType: ts.Type;
+    try {
+      innerType = context.typeRegistry?.get(innerTypeNode) ??
+        context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+    } catch {
+      innerType = context.typeChecker.getAnyType();
+    }
+
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      context,
+      innerTypeNode,
+    );
+
+    return this.applyDemandWrapperSemantics(innerSchema);
+  }
+
+  /**
+   * `demand: true` marks the subtree as a holder-side demand. Unlike scope,
+   * nesting is harmless (`Demand<Demand<T>>` is one demand), and the marker
+   * stays on the subtree root rather than riding an `asCell` entry: it
+   * records the contract's provenance, not the cell's capability.
+   */
+  private applyDemandWrapperSemantics(
+    schema: MutableJSONSchema,
+  ): MutableJSONSchema {
+    if (typeof schema === "boolean") {
+      return schema === false ? { not: true, demand: true } : { demand: true };
+    }
+    return { ...schema, demand: true };
   }
 
   private applyScopeWrapperSemantics(

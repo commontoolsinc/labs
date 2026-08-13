@@ -451,6 +451,16 @@ export type PerUser<T> = Scoped<T, "user">;
 export type PerSession<T> = Scoped<T, "session">;
 export type PerAny<T> = Scoped<T, "any">;
 
+export declare const DEMAND_BRAND: unique symbol;
+/**
+ * Marks a holder-side demand: the shape this pattern requires of a piece it
+ * stores or binds, as distinct from state the pattern owns. Compile-time
+ * only — at runtime `Demand<T>` is just `T`. The schema generator stamps
+ * `demand: true` on the marked subtree so tooling can tell a demand from
+ * owned state; validation is unaffected.
+ */
+export type Demand<T> = T & { readonly [DEMAND_BRAND]?: true };
+
 type ScopedConstructorResult<
   Scope extends CellScope,
   T,
@@ -1960,6 +1970,10 @@ export type JSONSchemaObj = {
   readonly tags?: readonly string[];
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: readonly AsCellType[];
+  // Holder-side demand marker: this subtree describes what the pattern
+  // requires of a piece it stores or binds, not state it owns. Emitted by
+  // the schema generator from `Demand<T>`; validation-neutral.
+  readonly demand?: true;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
     readonly confidentiality?: readonly JSONValue[];
