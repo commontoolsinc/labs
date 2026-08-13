@@ -277,6 +277,9 @@ export function markProfileStoppedOnce(
  * Enables, configures, and starts the profiler as one guarded transaction.
  * A marker-triggered start may happen after the debugger resumes, so the
  * profiler domain is enabled at the point where its active state is required.
+ * The inspector could still disable the domain between the enable reply and
+ * start command; if that produces -32000 again, prefer a bounded retry of this
+ * transaction over moving the enable earlier in the handshake.
  */
 export async function startProfilerIfReady(
   state: ProfileCaptureState,
@@ -296,6 +299,11 @@ export async function startProfilerIfReady(
   }
   state.profilerStarting = true;
   try {
+    if (options.clearStop ?? true) {
+      // Clear only stops that preceded this transaction. A stop observed while
+      // the inspector commands are in flight must survive the eventual start.
+      state.sawProfileStop = false;
+    }
     const steps = [
       { name: "Profiler.enable", command: () => profiler.enable() },
       {
@@ -314,7 +322,7 @@ export async function startProfilerIfReady(
         );
       }
     }
-    markProfilerStarted(state, options);
+    markProfilerStarted(state, { clearStop: false });
     log("profile: profiler started");
     return true;
   } finally {
@@ -469,10 +477,9 @@ export async function captureDenoInspectorProfile(
     requestStop(reason);
   };
   const recordProfilerStartError = (error: unknown): void => {
-    const message = error instanceof Error ? error.message : String(error);
-    profilerStartError = message.startsWith("Profiler.start failed")
-      ? message
-      : `Profiler.start failed: ${message}`;
+    profilerStartError = error instanceof Error && Object.hasOwn(error, "cause")
+      ? error.message
+      : `Profiler.start failed: ${error}`;
     output.error(`profile: ${profilerStartError}`);
     requestStop("profiler-start-failed");
   };

@@ -970,6 +970,7 @@ describe("capture-deno-inspector-profile helpers", () => {
     await withTempDir(async (tmpDir) => {
       const celestial = new FakeCelestial();
       const logs: string[] = [];
+      const errors: string[] = [];
       const resumed = Promise.withResolvers<void>();
       const started = Promise.withResolvers<void>();
       const outputPath = `${tmpDir}/profile.cpuprofile`;
@@ -981,13 +982,21 @@ describe("capture-deno-inspector-profile helpers", () => {
           "--profile-stop-pattern=profile stop",
           "--websocket-url=ws://127.0.0.1:9333/session",
         ],
-        createCaptureRuntime({ celestial, logs, resumed, started }),
+        createCaptureRuntime({ celestial, logs, errors, resumed, started }),
       );
 
       await resumed.promise;
       celestial.profilerEnabled = false;
       celestial.dispatchConsole({ value: "profile start" });
-      await started.promise;
+      const startedBeforeCaptureEnded = await Promise.race([
+        started.promise.then(() => true),
+        done.then(() => false),
+      ]);
+      assertEquals(
+        startedBeforeCaptureEnded,
+        true,
+        `capture ended before profiler started: ${errors.join("\n")}`,
+      );
       celestial.dispatchConsole({ value: "profile stop" });
 
       assertEquals(await done, 0);
@@ -1060,8 +1069,8 @@ describe("capture-deno-inspector-profile helpers", () => {
         createCaptureRuntime({ celestial, logs, resumed, started }),
       );
 
-      // A stop that precedes the start marker is stale, and the deferred
-      // start carries that answer rather than the default.
+      // A stop that precedes the start marker is stale, so the transaction
+      // clears it before enabling the profiler.
       await resumed.promise;
       celestial.dispatchConsole({ value: "profile stop" });
       celestial.dispatchConsole({ value: "profile start" });
@@ -1073,6 +1082,43 @@ describe("capture-deno-inspector-profile helpers", () => {
 
       assertEquals(await done, 0);
       assertEquals(celestial.starts, 1);
+      assertEquals(celestial.stops, 1);
+    });
+  });
+
+  it("preserves a live stop after clearing an earlier stop", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const gate = Promise.withResolvers<void>();
+      celestial.profilerEnableGate = gate;
+      const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=done",
+          "--profile-start-pattern=profile start",
+          "--profile-stop-pattern=profile stop",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, resumed, started }),
+      );
+
+      await resumed.promise;
+      celestial.dispatchConsole({ value: "profile stop" });
+      celestial.dispatchConsole({ value: "profile start" });
+      await celestial.profilerEnableCalled.promise;
+      celestial.dispatchConsole({ value: "profile stop" });
+
+      gate.resolve();
+      await started.promise;
+      await Promise.resolve();
+      // Bounds the regression if the live stop above is dropped.
+      celestial.dispatchConsole({ value: "done" });
+
+      assertEquals(await done, 0);
+      assertEquals(logs.includes("profile: profile stop matched"), true);
       assertEquals(celestial.stops, 1);
     });
   });
