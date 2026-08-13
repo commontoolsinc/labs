@@ -21,10 +21,7 @@ import {
   type AdmittedCommitNotice,
   type Server as MemoryServer,
 } from "@commonfabric/memory/v2/server";
-import {
-  resetServerExecutionConfig,
-  setServerExecutionConfig,
-} from "@commonfabric/memory/v2";
+import { acquireServerExecutionEnabler } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
@@ -69,14 +66,18 @@ export class ExecutorHost {
    * the engine's stored max on first use. */
   readonly #localSeqBySpace = new Map<string, { value: number }>();
   readonly #stats: ServingLoopStats = emptyServingLoopStats();
+  #releaseServerExecution: () => void = () => {};
   #closed = false;
 
   constructor(options: ExecutorHostOptions) {
     this.#options = options;
-    // The host owns the PROCESS-level flag lifecycle: while it lives,
-    // the ambient flag stays on (the memory server's per-class admission
-    // reads it), whatever individual runtimes construct or dispose.
-    setServerExecutionConfig(true);
+    // The host is a PROCESS-level flag ENABLER: while it lives, the
+    // ambient flag stays on (the memory server's per-class admission
+    // reads it), whatever individual runtimes construct or dispose. The
+    // claim is reference-counted with the Runtime enablers' own (the
+    // count lives beside the flag), so neither owner's teardown can
+    // un-claim `derived` while the other still serves.
+    this.#releaseServerExecution = acquireServerExecutionEnabler();
     options.server.setServerExecutionObserver({
       commitAdmitted: (notice) => this.#onCommitAdmitted(notice),
       sessionOpened: (space) => this.#onSessionOpened(space),
@@ -170,7 +171,18 @@ export class ExecutorHost {
       this.#reactivateAfterPark(existing, space as MemorySpace);
       return;
     }
-    // Activation on session open (serving-loop.md §1).
+    // Activation on session open (serving-loop.md §1), gated on the
+    // ACTIVE criteria like the admission and reactivation paths: the
+    // service's OWN sessions (loopback planes) are not client demand,
+    // and activating on one would hold a runtime and the lease with no
+    // client demanding anything.
+    if (
+      !this.#options.server.hasLiveSessionsForSpace(space, {
+        excludePrincipal: this.#options.serviceIdentity,
+      })
+    ) {
+      return;
+    }
     void this.#activate(space as MemorySpace, []);
   }
 
@@ -243,10 +255,10 @@ export class ExecutorHost {
           if (this.#spaces.get(space) === server) {
             this.#spaces.delete(space);
           }
-          // Belt over the refcounted ambient lifecycle (Runtime.dispose
-          // resets only when the LAST explicit enabler goes): the
-          // process still serves, so re-assert until close.
-          if (!this.#closed) setServerExecutionConfig(true);
+          // No flag re-assert needed: the host's OWN enabler (claimed
+          // at construction, shared refcount with Runtime enablers)
+          // keeps the ambient flag on until close — a parked runtime's
+          // dispose releases only its own claim.
         },
       });
       // Register BEFORE the async activation so admissions racing it
@@ -262,6 +274,14 @@ export class ExecutorHost {
       const activated = await server.activate();
       if (!activated) {
         this.#spaces.delete(space);
+        return;
+      }
+      if (this.#closed) {
+        // close() ran while this activation was in flight (it awaits us,
+        // but park() on a not-yet-active server is a no-op — so the
+        // just-activated server must park itself, or it serves and
+        // renews a lease after the host closed).
+        await server.park("host-closed");
       }
     } catch (error) {
       this.#spaces.delete(space);
@@ -275,11 +295,24 @@ export class ExecutorHost {
     this.#closed = true;
     this.#options.server.setServerExecutionObserver(undefined);
     registerServingLoopStatsProvider(undefined);
+    // Await in-flight activations FIRST: an activation past its #closed
+    // check would otherwise register and start serving after close
+    // returned (a leaked runtime renewing a lease nobody can take), and
+    // park() on a not-yet-active server is a no-op — so the park sweep
+    // below cannot stop it. #activateInner's own post-activate check
+    // parks the freshly-activated server once #closed is set; awaiting
+    // here makes close() cover it. The loop re-checks because a chained
+    // re-activation may have been in flight when the snapshot was taken.
+    while (this.#activating.size > 0) {
+      await Promise.allSettled([...this.#activating.values()]);
+    }
     await Promise.all(
       [...this.#spaces.values()].map((server) => server.park("host-closed")),
     );
     this.#spaces.clear();
-    // The process stops serving: the ambient flag returns to its default.
-    resetServerExecutionConfig();
+    this.#pendingNotices.clear();
+    // The host's enabler releases; the ambient flag resets only when no
+    // other enabler (an explicitly-enabled Runtime) is still live.
+    this.#releaseServerExecution();
   }
 }

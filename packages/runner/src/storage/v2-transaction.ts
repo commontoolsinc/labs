@@ -2269,7 +2269,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       const writtenSpaces = new Set(commits.map((commit) => commit.space));
       const readOnlyReads = new Map<MemorySpace, IMemorySpaceAddress[]>();
       const log = this.buildReactivityLog();
-      for (const read of log.reads) {
+      // Both read classes: a shallow (nonRecursive) read of withdrawn
+      // state makes a derived write exactly as blind as a deep one, and
+      // the withdrawal closure folds by DOC identity anyway.
+      for (const read of [...log.reads, ...log.shallowReads]) {
         if (writtenSpaces.has(read.space)) continue;
         let reads = readOnlyReads.get(read.space);
         if (reads === undefined) {

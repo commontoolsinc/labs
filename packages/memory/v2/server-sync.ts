@@ -171,6 +171,12 @@ const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
     root.selector.schema === undefined
       ? ""
       : internSchemaAsTaggedHashString(root.selector.schema),
+    // The explicit INSTANCE is query semantics like scope and path
+    // (protocol.md §2's read row): a changed `entityScopeKey` on the
+    // same watch id must compare as a CHANGED spec, or watch.add keeps
+    // silently tracking the old instance. `null` for the (universal)
+    // keyless case, so OFF-arm identities stay pairwise-identical.
+    root.entityScopeKey ?? null,
   ]);
 
 const watchQueryIdentity = (watch: WatchSpec): string =>
@@ -223,6 +229,15 @@ export const buildDiffSync = (
   next: ReadonlyMap<string, SessionCacheEntry>,
   fromSeq: number,
   toSeq: number,
+  // Delivery-state out-parameter (CT-1927 family): the wire frame strips
+  // instance keys, so a caller that must be able to ROLL BACK this
+  // frame's delivery (the push path) collects the internal instance-keyed
+  // entries here — the only exact record of which instances the frame
+  // carried.
+  delivered?: {
+    upserts: SessionCacheEntry[];
+    removes: SessionCacheEntry[];
+  },
 ): SessionSync => {
   const upserts: SessionCacheEntry[] = [];
   for (const [key, current] of next.entries()) {
@@ -230,14 +245,20 @@ export const buildDiffSync = (
       upserts.push(current);
     }
   }
-  const removes = [...previous.entries()]
+  const removedEntries = [...previous.entries()]
     .filter(([key]) => !next.has(key))
-    .map(([, entry]) => ({
+    .map(([, entry]) => entry);
+  const removes = removedEntries
+    .map((entry) => ({
       branch: entry.branch,
       id: entry.id,
       scope: entry.scope,
     }))
     .sort(compareSyncAddress);
+  if (delivered !== undefined) {
+    delivered.upserts.push(...upserts);
+    delivered.removes.push(...removedEntries);
+  }
   return {
     type: "sync",
     fromSeq,

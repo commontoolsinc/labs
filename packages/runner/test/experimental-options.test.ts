@@ -13,6 +13,8 @@ import {
   resetCommitPreconditionsConfig,
   resetServerExecutionConfig,
 } from "@commonfabric/memory/v2";
+import { ExecutorHost } from "../src/executor/host.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -198,5 +200,125 @@ describe("ExperimentalOptions", () => {
       expect(getCommitPreconditionsConfig()).toBe(true);
       expect(getServerExecutionConfig()).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The serverExecution ambient-flag OWNERSHIP family (PR #5439 threads
+// r3731191424, r3731191435, r3731191451): the flag is a process-global
+// admission input, so its lifecycle must be reference-counted across ALL
+// owners (explicit-enabler Runtimes AND the ExecutorHost), survive
+// construction/dispose failures, and never be stomped by a co-hosted
+// non-serving runtime.
+// ---------------------------------------------------------------------------
+
+describe("serverExecution ambient-flag ownership", () => {
+  afterEach(() => {
+    resetModernCellRepConfig();
+    resetCommitPreconditionsConfig();
+    resetServerExecutionConfig();
+  });
+
+  it("a co-hosted explicit-false Runtime must not un-claim the ambient flag while an enabler is live", async () => {
+    const smEnabler = StorageManager.emulate({ as: signer });
+    const enabler = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smEnabler,
+      experimental: { serverExecution: true },
+    });
+    expect(getServerExecutionConfig()).toBe(true);
+
+    const smDisabled = StorageManager.emulate({ as: signer });
+    const disabled = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smDisabled,
+      experimental: { serverExecution: false },
+    });
+    // The live serving enabler keeps the ambient admission claim: an
+    // explicit-false construction elsewhere in the process must not
+    // silently un-claim `derived` mid-serve.
+    expect(getServerExecutionConfig()).toBe(true);
+    // The explicit-false runtime keeps its OWN posture.
+    expect(disabled.experimental.serverExecution).toBe(false);
+
+    await disabled.dispose();
+    expect(getServerExecutionConfig()).toBe(true);
+    await enabler.dispose();
+    expect(getServerExecutionConfig()).toBe(false);
+    await smDisabled.close();
+    await smEnabler.close();
+  });
+
+  it("a THROWING construction rolls its enabler back instead of poisoning the process-global lifecycle", async () => {
+    const smBad = StorageManager.emulate({ as: signer });
+    expect(() =>
+      new Runtime({
+        apiUrl: "::not a url::" as never,
+        storageManager: smBad,
+        experimental: { serverExecution: true },
+      })
+    ).toThrow();
+    // The failed construction must not leak an enabler: a later
+    // well-formed enabler's dispose still resets the ambient flag.
+    const sm = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { serverExecution: true },
+    });
+    expect(getServerExecutionConfig()).toBe(true);
+    await runtime.dispose();
+    expect(getServerExecutionConfig()).toBe(false);
+    await sm.close();
+    await smBad.close();
+  });
+
+  it("ExecutorHost close does not un-claim the flag while an explicit-enabler Runtime is live (shared refcount across owners)", async () => {
+    const server = newSharedServer();
+    const host = new ExecutorHost({
+      server,
+      serviceIdentity: "did:key:z6Mk-flag-test-service",
+      createRuntime: () => Promise.reject(new Error("never activated")),
+    });
+    expect(getServerExecutionConfig()).toBe(true);
+
+    const sm = StorageManager.emulate({ as: signer });
+    const enabler = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { serverExecution: true },
+    });
+
+    // Host teardown while a serving runtime still lives: the ambient
+    // claim must survive (its in-flight wave commits are admitted off
+    // this flag).
+    await host.close();
+    expect(getServerExecutionConfig()).toBe(true);
+
+    await enabler.dispose();
+    expect(getServerExecutionConfig()).toBe(false);
+    await sm.close();
+    await server.close();
+  });
+
+  it("a REJECTING dispose still releases the enabler (the reset must not depend on a clean async teardown)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { serverExecution: true },
+    });
+    expect(getServerExecutionConfig()).toBe(true);
+    (runtime.scheduler as unknown as { idle: () => Promise<void> }).idle = () =>
+      Promise.reject(new Error("induced dispose failure"));
+    let threw = false;
+    try {
+      await runtime.dispose();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    expect(getServerExecutionConfig()).toBe(false);
+    await sm.close();
   });
 });
