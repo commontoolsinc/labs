@@ -19,7 +19,7 @@ import {
   type RealmCodecValue,
   type RealmTaggedValue,
 } from "@/codec-realm/interface.ts";
-import { realmFromValue, valueFromRealm } from "@/codecs.ts";
+import { fabricFromRealmValue, realmFromFabricValue } from "@/codecs.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -49,7 +49,7 @@ async function crossRealm(value: FabricValue): Promise<EchoReport> {
   worker.onerror = (ev) => report.reject(new Error(ev.message));
 
   try {
-    worker.postMessage(realmFromValue(value));
+    worker.postMessage(realmFromFabricValue(value));
     return await report.promise;
   } finally {
     worker.terminate();
@@ -59,7 +59,7 @@ async function crossRealm(value: FabricValue): Promise<EchoReport> {
 describe("RealmCodecEngine", () => {
   describe("encode()", () => {
     it("envelopes the result in a single-entry `Map` under the format tag", () => {
-      const encoded = realmFromValue({ a: 1 });
+      const encoded = realmFromFabricValue({ a: 1 });
 
       expect(encoded).toBeInstanceOf(Map);
       expect([...(encoded as RealmTaggedValue).keys()]).toEqual([
@@ -72,13 +72,13 @@ describe("RealmCodecEngine", () => {
 
       // Copy-on-write: nothing here needs encoding, so nothing is rebuilt and
       // the transport does the only copying.
-      expect(payloadOf(realmFromValue(value))).toBe(value);
+      expect(payloadOf(realmFromFabricValue(value))).toBe(value);
     });
 
     it("rebuilds only the containers on the path to an encoded value", () => {
       const untouched = { c: "two" };
       const value = { a: new FabricBytes(new Uint8Array([1])), b: untouched };
-      const payload = payloadOf(realmFromValue(value)) as Record<
+      const payload = payloadOf(realmFromFabricValue(value)) as Record<
         string,
         RealmCodecValue
       >;
@@ -90,12 +90,12 @@ describe("RealmCodecEngine", () => {
     it("leaves a `/`-prefixed key untouched, this format reserving no key", () => {
       const value = { "/quote": "not a tag here", "/Bytes@1": "nor this" };
 
-      expect(payloadOf(realmFromValue(value))).toBe(value);
+      expect(payloadOf(realmFromFabricValue(value))).toBe(value);
     });
 
     it("encodes a `FabricBytes` to the bytes themselves", () => {
       const payload = payloadOf(
-        realmFromValue(new FabricBytes(new Uint8Array([1, 2, 250]))),
+        realmFromFabricValue(new FabricBytes(new Uint8Array([1, 2, 250]))),
       );
       const state = (payload as RealmTaggedValue).get("Bytes@1");
 
@@ -105,7 +105,7 @@ describe("RealmCodecEngine", () => {
 
     it("encodes a `FabricEpochNsec` to a `bigint`", () => {
       const payload = payloadOf(
-        realmFromValue(new FabricEpochNsec(1234567890123456789n)),
+        realmFromFabricValue(new FabricEpochNsec(1234567890123456789n)),
       );
 
       expect((payload as RealmTaggedValue).get("EpochNsec@1")).toBe(
@@ -115,7 +115,7 @@ describe("RealmCodecEngine", () => {
 
     it("does not hand out the bytes an encoded `FabricBytes` holds", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      const state = (payloadOf(realmFromValue(bytes)) as RealmTaggedValue)
+      const state = (payloadOf(realmFromFabricValue(bytes)) as RealmTaggedValue)
         .get("Bytes@1") as Uint8Array;
 
       state[0] = 99;
@@ -126,7 +126,7 @@ describe("RealmCodecEngine", () => {
       const value: Record<string, FabricValue> = { a: 1 };
       value.self = value;
 
-      expect(() => realmFromValue(value)).toThrow(/Circular reference/);
+      expect(() => realmFromFabricValue(value)).toThrow(/Circular reference/);
     });
 
     it("throws given an object with a key this runtime reserves", () => {
@@ -137,17 +137,19 @@ describe("RealmCodecEngine", () => {
         writable: true,
       });
 
-      expect(() => realmFromValue(value)).toThrow(/reserves/);
+      expect(() => realmFromFabricValue(value)).toThrow(/reserves/);
     });
   });
 
   describe("decode()", () => {
     it("throws given a value carrying no envelope", () => {
-      expect(() => valueFromRealm({ a: 1 })).toThrow(/Not a realm-encoded/);
+      expect(() => fabricFromRealmValue({ a: 1 })).toThrow(
+        /Not a realm-encoded/,
+      );
     });
 
     it("throws given an envelope whose tag is not this format's", () => {
-      expect(() => valueFromRealm(new Map([["nope", 1]]))).toThrow(
+      expect(() => fabricFromRealmValue(new Map([["nope", 1]]))).toThrow(
         /Not a realm-encoded/,
       );
     });

@@ -191,12 +191,13 @@ const REALM_DECODE_EMPTY_CONTEXT = Object.freeze(
  * `structuredClone()` or `postMessage()` carries to another realm without
  * loss, enveloped so that a receiver can recognize it.
  *
- * TODO(danfuzz): Settle this pair's names. These follow the family the rest of
- * the format uses, but `valueFromRealm()` reads as "a value from a realm"
- * where `valueFromJson()` reads as "a value from JSON" -- the JSON pair names
- * a form and this one names a boundary.
+ * Named for the `<target>From<Source>Value` family that
+ * `fabricFromNativeValue()` and `nativeFromFabricValue()` establish. Both
+ * sides being qualified is what keeps `realm` readable only as a modifier on
+ * `value` -- a *realm value* is this transport form, as a *native value* is a
+ * plain JavaScript one -- rather than as the boundary being crossed.
  */
-export function realmFromValue(value: FabricValue): RealmCodecValue {
+export function realmFromFabricValue(value: FabricValue): RealmCodecValue {
   return realmCodecEngine.encode(value);
 }
 
@@ -205,7 +206,7 @@ export function realmFromValue(value: FabricValue): RealmCodecValue {
  * omitted, the shared decode-framed empty context is substituted, which throws
  * if any reconstruction is needed.
  */
-export function valueFromRealm(
+export function fabricFromRealmValue(
   data: RealmCodecValue,
   context?: ReconstructionContext | undefined,
 ): FabricValue {

@@ -4,7 +4,7 @@
 //
 // Not a `*.test.ts` file, so the runner does not pick it up as a suite.
 
-import { valueFromRealm } from "@/codecs.ts";
+import { fabricFromRealmValue } from "@/codecs.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 
 /** What the worker reports back about one decoded value. */
@@ -24,7 +24,7 @@ export type EchoReport = {
 
 self.onmessage = (ev: MessageEvent) => {
   try {
-    const value = valueFromRealm(ev.data as RealmCodecValue) as Record<
+    const value = fabricFromRealmValue(ev.data as RealmCodecValue) as Record<
       string,
       unknown
     >;
