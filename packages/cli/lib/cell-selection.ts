@@ -1011,6 +1011,186 @@ export async function parseCellSelectionOptions(options: {
     : { filter, projection };
 }
 
+/**
+ * The `source` a derived projection records, in place of the text a caller
+ * would have typed. It reaches the derived read's cause, so it is a fixed
+ * string rather than a rendering of the schema: two calls that derive the same
+ * bound from the same receipt should land on the same cell.
+ */
+const DERIVED_PROJECTION_SOURCE = "<the verb's declared result>";
+
+/**
+ * One position of a derivation, and whether the walk cut anything at or below
+ * it. An absent `schema` drops the position: nothing is read there and no
+ * address stands in for it.
+ */
+interface DerivedPosition {
+  schema?: unknown;
+  /** A `$link` marker was emitted at or below this position. */
+  cut: boolean;
+}
+
+/** The position reads whatever is stored, which is what an unbounded read
+ * already does — so a derivation that only ever answers this bounds nothing. */
+const DERIVED_WHOLE: DerivedPosition = { schema: true, cut: false };
+
+/** The position renders its address instead of being followed. */
+const DERIVED_ADDRESS: DerivedPosition = {
+  schema: { [LINK_MARKER_KEY]: true },
+  cut: true,
+};
+
+/** The position contributes nothing: a stream is a dispatch surface, and there
+ * is no value at it to read or address. */
+const DERIVED_DROPPED: DerivedPosition = { cut: false };
+
+/**
+ * The schema a local JSON pointer names inside `root`. Only the local form is
+ * resolved, which is the only form a lowered declared result carries; anything
+ * else reads as an unresolvable reference and leaves the position unbounded.
+ */
+function schemaAtLocalRef(
+  root: JSONSchema,
+  ref: string,
+): JSONSchema | undefined {
+  if (!ref.startsWith("#")) return undefined;
+  const pointer = ref.slice(1);
+  if (pointer !== "" && !pointer.startsWith("/")) return undefined;
+  let current: unknown = root;
+  for (const segment of pointer.split("/").slice(1)) {
+    if (!isRecord(current)) return undefined;
+    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current === undefined || typeof current === "boolean" ||
+      isRecord(current)
+    ? current as JSONSchema | undefined
+    : undefined;
+}
+
+/**
+ * Helper for {@link declaredResultProjection}: one position of the declared
+ * result, written as the projection position it derives.
+ *
+ * `following` holds the references the walk is already inside. A reference it
+ * already holds is the cut: the declared type re-enters itself there, so
+ * following it once more is what closes the circle. Every other position is
+ * left as wide as it was declared — the derivation bounds a recursion and
+ * narrows nothing else.
+ */
+function derivePosition(
+  schema: JSONSchema | undefined,
+  root: JSONSchema,
+  following: ReadonlySet<string>,
+): DerivedPosition {
+  if (schema === undefined || typeof schema === "boolean") return DERIVED_WHOLE;
+  // A stream carries no value: it renders as the empty object and reading it
+  // says nothing. `asCell` otherwise says how a position is held rather than
+  // what shape it has, and the shape beside it is what decides the cut.
+  if (Array.isArray(schema.asCell) && schema.asCell.includes("stream")) {
+    return DERIVED_DROPPED;
+  }
+
+  if (typeof schema.$ref === "string") {
+    if (following.has(schema.$ref)) return DERIVED_ADDRESS;
+    const target = schemaAtLocalRef(root, schema.$ref);
+    if (target === undefined) return DERIVED_WHOLE;
+    return derivePosition(
+      target,
+      root,
+      new Set([...following, schema.$ref]),
+    );
+  }
+
+  // `allOf` is a conjunction: every member describes the same value at once,
+  // so a member that re-enters says nothing about whether the members beside it
+  // can be read, and cutting on its account would drop what they contribute. A
+  // projection states one shape per position, so the cut and the rest cannot be
+  // stated together either. The position is left as wide as it was declared,
+  // and a readback that still closes a circle after that refuses and names the
+  // position — which beats answering a different question quietly.
+  if (schema.allOf !== undefined) return DERIVED_WHOLE;
+
+  const branches = [...schema.anyOf ?? [], ...schema.oneOf ?? []];
+  if (branches.length > 0) {
+    // A projection states one shape per position, and a union does not. Where
+    // any branch re-enters, the position renders its address: that answers
+    // every branch, since an address names the position rather than describing
+    // what sits at it. `parent: Item | null` is the case — a root's null still
+    // has a position, and it is the position the caller would follow.
+    return branches.some((branch) =>
+        derivePosition(branch, root, following).cut
+      )
+      ? DERIVED_ADDRESS
+      : DERIVED_WHOLE;
+  }
+
+  if (schema.type === "array" || schema.items !== undefined) {
+    const items = derivePosition(schema.items, root, following);
+    if (!items.cut) return DERIVED_WHOLE;
+    // The elements are what re-enter, so each renders its own address rather
+    // than the array position's — a caller wants the children, not the slot
+    // holding them.
+    return items.schema === undefined
+      ? DERIVED_DROPPED
+      : { schema: { type: "array", items: items.schema }, cut: true };
+  }
+
+  if (schema.type === "object" || schema.properties !== undefined) {
+    const declared = schema.properties;
+    if (!isRecord(declared)) return DERIVED_WHOLE;
+    const properties: Record<string, unknown> = {};
+    let cut = false;
+    for (const [key, child] of Object.entries(declared)) {
+      const derived = derivePosition(child as JSONSchema, root, following);
+      cut ||= derived.cut;
+      if (derived.schema !== undefined) properties[key] = derived.schema;
+    }
+    // Only where something below re-enters. An object that holds no recursion
+    // is left whole, so the positions this derivation does not need to bound
+    // read exactly as an unbounded readback reads them.
+    return cut
+      ? { schema: { type: "object", properties }, cut }
+      : DERIVED_WHOLE;
+  }
+
+  return DERIVED_WHOLE;
+}
+
+/**
+ * The projection a verb's declared result bounds its own readback with, or
+ * `undefined` where the declaration bounds nothing.
+ *
+ * A declared result that re-enters itself — the `parent`/`children` shape
+ * `docs/common/concepts/self-reference.md` documents — describes a value that
+ * closes a circle, and a circle has no JSON rendering. The bound is written in
+ * the author's own terms: every position the declaration names is read as
+ * declared, and the position where the declaration re-enters renders its
+ * address instead of being followed. That is a cut at the boundary the author
+ * drew, and it is the same `$link` vocabulary a caller writes by hand.
+ *
+ * `undefined` where nothing re-enters: a declaration that describes a finite
+ * value is not a bound, and answering with one would narrow a result that
+ * renders perfectly well. The caller's own `--select`/`--schema` is the wider
+ * instrument and stays the only thing that narrows a result on request.
+ *
+ * The derived projection is written in the `--schema` language and reports
+ * itself as that flag, which is the flag that replaces it.
+ */
+export function declaredResultProjection(
+  declared: JSONSchema | undefined,
+): SelectionProjection | undefined {
+  if (declared === undefined || typeof declared === "boolean") return undefined;
+  const derived = derivePosition(declared, declared, new Set());
+  if (!derived.cut || derived.schema === undefined) return undefined;
+  return {
+    source: DERIVED_PROJECTION_SOURCE,
+    ...normalizeProjectionSchema(derived.schema),
+    kind: "json",
+    flag: "--schema",
+  };
+}
+
 function schemaTypes(schema: JSONSchema | undefined): string[] {
   if (!isRecord(schema)) return [];
   return Array.isArray(schema.type)
@@ -2309,4 +2489,93 @@ export async function deriveSelectedValue(
   } finally {
     runtime.runner.stop(resultCell);
   }
+}
+
+/**
+ * Helper for {@link boundReadValue}: `markers` restricted to the positions the
+ * value in hand actually holds.
+ *
+ * `values` is every value occupying one position: the single value below a
+ * property, and every element below `items`, which one marker answers for at
+ * once.
+ *
+ * The restriction is what keeps a bound from widening. A marker composition
+ * writes its key whether or not the value has one, because it is normally
+ * composed onto a value projected by the very schema the markers came from. A
+ * bound applied to a value someone else already shaped has no such agreement:
+ * every position that caller narrowed away has to lose its marker too, or it
+ * comes back as an address and the answer holds more than was asked for.
+ */
+function markersHeldBy(
+  markers: LinkMarkers,
+  values: readonly unknown[],
+): LinkMarkers | undefined {
+  const held = values.filter((value) => value !== undefined);
+  if (held.length === 0) return undefined;
+  const kept: LinkMarkers = {};
+  if (markers.marked === true) kept.marked = true;
+  if (markers.items !== undefined) {
+    const elements = held.flatMap((value) => Array.isArray(value) ? value : []);
+    const items = markersHeldBy(markers.items, elements);
+    if (items !== undefined) kept.items = items;
+  }
+  if (markers.properties !== undefined) {
+    const properties: Record<string, LinkMarkers> = {};
+    for (const [key, child] of Object.entries(markers.properties)) {
+      const below = held.flatMap((value) =>
+        isRecord(value) && !Array.isArray(value) && key in value
+          ? [(value as Record<string, unknown>)[key]]
+          : []
+      );
+      const childMarkers = markersHeldBy(child, below);
+      if (childMarkers !== undefined) properties[key] = childMarkers;
+    }
+    if (Object.keys(properties).length > 0) kept.properties = properties;
+  }
+  return Object.keys(kept).length === 0 ? undefined : kept;
+}
+
+/**
+ * `value`, read from `sourceCell`, with the positions `declared` re-enters
+ * rendered as their addresses — or `undefined` where the declaration bounds
+ * nothing.
+ *
+ * A value that closes a circle has no JSON rendering, and the declaration is
+ * the boundary its author drew: the position where the declared type re-enters
+ * itself is the position that closes the circle, so an address there cuts
+ * exactly where the shape says it should. The addresses are composed by the
+ * same walk {@link deriveSelectedValue} composes its own with, off the same
+ * cell, so a derived bound and a hand-written `$link` name the same position
+ * the same way.
+ *
+ * Applied to the value already in hand rather than read afresh, which is what
+ * lets it bound a result a caller has ALREADY shaped without widening it: the
+ * cut removes positions and never adds one, so whatever `--select`/`--schema`
+ * narrowed to stays narrowed. Reading a second time through the derived
+ * projection cannot do that — it answers with the declaration's whole shape,
+ * which for a caller who named one field is a projection handing back the
+ * fields they did not name. Working off the value in hand also runs no pattern
+ * graph and commits no transaction; what remains is the address walk itself,
+ * which is the same one a hand-written `$link` is composed through.
+ */
+export async function boundReadValue(
+  sourceCell: Cell<unknown>,
+  declared: JSONSchema | undefined,
+  value: unknown,
+): Promise<unknown> {
+  const projection = declaredResultProjection(declared);
+  if (projection === undefined) return undefined;
+  // The derived projection is written at fixed depth, so it is applied at
+  // fixed depth: `kind` is `"json"` for everything `declaredResultProjection`
+  // returns, and a concise field list's implicit array traversal has no part
+  // in a shape derived from a declaration.
+  const projected = projectValue(value, projection.schema);
+  const markers = projection.markers === undefined
+    ? undefined
+    : markersHeldBy(projection.markers, [value]);
+  return markers === undefined ? projected : await composeLinkAddresses(
+    sourcePosition(sourceCell),
+    markers,
+    projected,
+  );
 }
