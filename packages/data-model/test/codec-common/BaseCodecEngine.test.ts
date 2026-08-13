@@ -173,42 +173,111 @@ describe("BaseCodecEngine", () => {
   });
 
   describe("`lenient`", () => {
-    it("raises a codec's rejection when not lenient", () => {
-      const { engine } = newProbeEngine();
+    // A codec rejects a state in one of two ways, and which it picks is the
+    // codec author's business rather than a caller's. `lenient` is what
+    // decides what a caller sees, so it has to settle BOTH ways -- which is
+    // why each group below covers both. `ThrowingCodec` and `RejectingCodec`
+    // differ in nothing but that choice.
 
-      expect(engine.lenient).toBe(false);
-      expect(() => engine.decode(new Tagged("", "x"), CONTEXT)).toThrow();
-    });
+    /** A wire form whose codec rejects by throwing. */
+    const THROWN = new Tagged("Throws@1", "x");
 
-    it("keeps a malformation the engine found, when lenient", () => {
-      const { engine } = newProbeEngine({ lenient: true });
-      const result = engine.decode(new Tagged("", "x"), CONTEXT);
+    /** A wire form whose codec rejects by returning a report. */
+    const RETURNED = new Tagged("Rejects@1", "x");
 
-      expect(result).toBeInstanceOf(ProblematicValue);
-      expect((result as ProblematicValue).error).toMatch(/empty tag/);
-    });
+    /** A wire form the walk itself finds malformed, no codec involved. */
+    const MALFORMED = new Tagged("", "x");
 
-    it("deep-freezes the `ProblematicValue` it keeps", () => {
-      // A `ProblematicValue` is not frozen at construction, so this is what
-      // witnesses the contract on that arm.
-      const { engine } = newProbeEngine({ lenient: true });
-
-      expect(isDeepFrozen(engine.decode(new Tagged("", "x"), CONTEXT)))
-        .toBe(true);
-    });
+    /** A wire form under a tag no codec claims, which is not a rejection. */
+    const UNCLAIMED = new Tagged("Nope@1", "x");
 
     it("is `false` by default", () => {
       expect(newProbeEngine().engine.lenient).toBe(false);
     });
 
-    it("does not reach an unrecognized tag either way", () => {
-      // An unclaimed tag is not a rejection, so `lenient` has no say in it.
-      const wire = new Tagged("Nope@1", "x");
+    describe("when `lenient === false`", () => {
+      it("raises a codec's throw", () => {
+        const { engine } = newProbeEngine();
 
-      expect(newProbeEngine().engine.decode(wire, CONTEXT))
-        .toBeInstanceOf(UnknownValue);
-      expect(newProbeEngine({ lenient: true }).engine.decode(wire, CONTEXT))
-        .toBeInstanceOf(UnknownValue);
+        expect(() => engine.decode(THROWN, CONTEXT))
+          .toThrow(/rejected by throwing/);
+      });
+
+      it("turns a `ProblematicValue` a codec returned into a throw", () => {
+        // The half that used to do nothing: this rejection stood either way
+        // before, so the setting governed only the codecs that threw.
+        const { engine } = newProbeEngine();
+
+        expect(() => engine.decode(RETURNED, CONTEXT))
+          .toThrow(/rejected by returning/);
+      });
+
+      it("raises a malformation the walk itself found", () => {
+        const { engine } = newProbeEngine();
+
+        expect(() => engine.decode(MALFORMED, CONTEXT)).toThrow(/empty tag/);
+      });
+
+      it("wraps an unclaimed tag in an `UnknownValue` regardless", () => {
+        // Not a rejection, so the setting has no say in it.
+        const { engine } = newProbeEngine();
+
+        expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
+      });
+    });
+
+    describe("when `lenient === true`", () => {
+      it("turns a codec's throw into a `ProblematicValue`", () => {
+        const { engine } = newProbeEngine({ lenient: true });
+        const result = engine.decode(THROWN, CONTEXT);
+
+        expect(result).toBeInstanceOf(ProblematicValue);
+        // Carrying the codec's own message, so what went wrong survives the
+        // conversion.
+        expect((result as ProblematicValue).error)
+          .toMatch(/rejected by throwing/);
+        expect((result as ProblematicValue).wireTypeTag).toBe("Throws@1");
+      });
+
+      it("lets a `ProblematicValue` a codec returned stand", () => {
+        const { engine } = newProbeEngine({ lenient: true });
+        const result = engine.decode(RETURNED, CONTEXT);
+
+        expect(result).toBeInstanceOf(ProblematicValue);
+        expect((result as ProblematicValue).error)
+          .toMatch(/rejected by returning/);
+      });
+
+      it("keeps a malformation the walk itself found", () => {
+        const { engine } = newProbeEngine({ lenient: true });
+        const result = engine.decode(MALFORMED, CONTEXT);
+
+        expect(result).toBeInstanceOf(ProblematicValue);
+        expect((result as ProblematicValue).error).toMatch(/empty tag/);
+      });
+
+      it("deep-freezes a `ProblematicValue` a codec returned", () => {
+        // The codec arm's freeze: this report is the codec's own product.
+        const { engine } = newProbeEngine({ lenient: true });
+
+        expect(isDeepFrozen(engine.decode(RETURNED, CONTEXT))).toBe(true);
+      });
+
+      it("deep-freezes a `ProblematicValue` it built itself", () => {
+        // The other arm, and a separate line of code: one is the engine
+        // wrapping a throw, the other the walk reporting a malformation.
+        // Neither stands in for the other.
+        const { engine } = newProbeEngine({ lenient: true });
+
+        expect(isDeepFrozen(engine.decode(THROWN, CONTEXT))).toBe(true);
+        expect(isDeepFrozen(engine.decode(MALFORMED, CONTEXT))).toBe(true);
+      });
+
+      it("wraps an unclaimed tag in an `UnknownValue` regardless", () => {
+        const { engine } = newProbeEngine({ lenient: true });
+
+        expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
+      });
     });
   });
 });

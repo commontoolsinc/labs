@@ -18,6 +18,7 @@ import type {
   WireFormat,
 } from "@/codec-interface/interface.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
  * This format's tagged form. A class, so that it cannot be mistaken for a
@@ -180,6 +181,63 @@ export class NonterminalHostCodec extends BaseNonterminalCodec {
 }
 
 /**
+ * Codec that rejects a state by THROWING. Reachable by tag only: nothing
+ * encodes to it, since what it exists to exercise is the decode side.
+ */
+export class ThrowingCodec extends BaseTerminalCodec<ProbeValue> {
+  constructor() {
+    super("Throws@1", undefined);
+  }
+
+  override canEncode(_value: FabricValue): boolean {
+    return false;
+  }
+
+  encode(_value: FabricValue): ProbeValue {
+    throw new Error("Shouldn't happen: this codec never encodes.");
+  }
+
+  decode(
+    typeTag: string,
+    _state: ProbeValue,
+    _context: ReconstructionContext,
+  ): FabricValue {
+    throw new Error(`${typeTag}: rejected by throwing`);
+  }
+}
+
+/**
+ * Codec that rejects a state by RETURNING a `ProblematicValue`, which is the
+ * other way the spec sanctions. Its counterpart above returns nothing and
+ * throws; the engine is what makes the two indistinguishable to a caller.
+ */
+export class RejectingCodec extends BaseTerminalCodec<ProbeValue> {
+  constructor() {
+    super("Rejects@1", undefined);
+  }
+
+  override canEncode(_value: FabricValue): boolean {
+    return false;
+  }
+
+  encode(_value: FabricValue): ProbeValue {
+    throw new Error("Shouldn't happen: this codec never encodes.");
+  }
+
+  decode(
+    typeTag: string,
+    state: ProbeValue,
+    _context: ReconstructionContext,
+  ): FabricValue {
+    return new ProblematicValue(
+      typeTag,
+      state as FabricValue,
+      "rejected by returning",
+    );
+  }
+}
+
+/**
  * A value that is an OBJECT and is claimed by a codec. The primitive-keyed
  * codecs above cannot stand in for it: the engine's cycle bookkeeping only
  * engages for an object, so nothing else reaches it.
@@ -315,6 +373,8 @@ export function newProbeEngine(
   registry.registerPrimitive("number", new TerminalHostCodec(record));
   registry.registerPrimitive("string", new NonterminalHostCodec(record));
   registry.register(new MarkerCodec());
+  registry.register(new ThrowingCodec());
+  registry.register(new RejectingCodec());
   for (const t of ["null", "boolean", "number", "string", "bigint"] as const) {
     registry.registerSelfRep(t);
   }
