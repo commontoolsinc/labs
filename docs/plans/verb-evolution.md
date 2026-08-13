@@ -304,17 +304,8 @@ rather than silent.
 
 The default is still to stay compatible. Most patterns are updated by models
 that will cheerfully jump through hoops to avoid a break, and a compatible
-update needs none of this machinery.
-
-**Redeploying as a new pattern is the special case, not the answer.** A
-redeploy mints a new piece with a new identity. What it buys is coexistence
-— the old piece keeps working for its callers — and unmanaged coexistence is
-the measured failure mode in the longer arc, not a free good. What it costs
-is every stored reference: boards hold notes, topics hold cross-references,
-and nothing re-points them at the successor. There is no forwarding
-mechanism, and building one has not been scheduled. That cost belongs to
-choosing a redeploy — a deliberately new thing, or a move across spaces,
-where identity genuinely cannot follow — not to every incompatible change.
+update needs none of this machinery. Deploying the successor as a *new*
+pattern instead is considered and set aside below.
 
 ## How the design holds up
 
@@ -535,6 +526,20 @@ binding. They are not an evolution device.
 `append_v1` taxes every verb forever to serve the few that ever need a
 second generation. The suffix appears when the second generation does.
 
+**Redeploying a new pattern to escape a true break.** Deploying the
+successor as a new pattern looks like the safe way out of an incompatible
+change: the old piece keeps working, the new one starts clean. It is set
+aside because it forks the piece's identity. Every stored reference — boards
+holding notes, topics holding cross-references — keeps pointing at the old
+piece, and no forwarding mechanism exists or is scheduled; the data forks
+with it, and the two populations coexist unmanaged, which is the measured
+write-storm failure in the longer arc. Everything it seems to offer arrives
+better in place: migration handles the shape, versioned interfaces handle
+the callers, per-piece upgrade policy handles the rollout. What remains
+legitimate is creation — a genuinely new pattern, owing nothing to the old
+one's callers — and a move across spaces, where identity cannot follow.
+Neither is evolution, so neither is governed by this design.
+
 ## What is not settled here
 
 One question is open by design, and it is the one the cross product exposes:
@@ -545,12 +550,6 @@ or a migration that rewrites holders. Which carries it — and whether the
 gate should learn that removal beneath a demand marker is narrowing rather
 than breakage — decides how much of this design applies to what is already
 running.
-
-One mechanism is missing and unscheduled: **reference forwarding.** A
-redeploy mints a new piece identity, and nothing re-points stored references
-to the successor; until something does, a redeploy means re-pointing them by
-hand. The migration-in-place path makes this rarer, not moot: anything that
-is genuinely a new pattern still forks its references.
 
 Three smaller calls belong to whoever does the work:
 
