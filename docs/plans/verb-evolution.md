@@ -132,6 +132,33 @@ deliberate deferral — recording outputs would commit us to a format that the
 planned Fabric-types work is expected to replace — and it means output changes
 are governed by convention alone.
 
+The same gate governs what a *holder* may change about what it demands, and
+there the rules are considerably tighter than they look:
+
+| Change a holder makes to its own demand | Result |
+| --- | --- |
+| Demand a new optional field or verb | allowed |
+| Demand a new required field that carries a default | allowed |
+| Demand a new **required verb** | **refused** |
+| Stop demanding a field or verb it no longer uses | **refused** |
+
+Both refusals come from `packages/piece/src/schema-compatibility.ts`. Dropping
+a named field is rejected outright as `existing argument field was removed` —
+the gate has no notion of narrowing, so giving up a demand looks exactly like
+breaking one. Raising a demand hits `newly required argument field has no
+default`, and a verb is a stream, which cannot carry a default; that message is
+the very refusal this document opens with, arriving from the other direction.
+
+The consequence is worth stating plainly, because most of the design rests on
+it: **a deployed holder's required demands are write-once.** They cannot be
+added to and cannot be given up. Only optional demands can evolve at all, and
+only by growing.
+
+Note the asymmetry with the provider side, which is deliberate and correct: a
+pattern may add a newly required field to its own *result*, because the new
+graph materializes it when it runs. Nobody is left holding a gap. A demand has
+no such escape, because the piece it points at already exists.
+
 ## What a piece promises
 
 In ordinary object-oriented programming, an object promises an interface:
@@ -303,47 +330,118 @@ elsewhere has to re-point those references themselves. There is no general
 forwarding mechanism — no way for an old identity to hand its callers on to
 its successor — and building one has not been scheduled.
 
+## How the design holds up
+
+The way to evaluate any of this is to cross what a provider might do to its
+interface against what a holder wrote down, and read the cells. Five kinds of
+demand are reachable: embedding the provider's whole **Output** type (today's
+default), a narrow demand naming **fields only**, a narrow demand naming a
+**required verb**, one naming an **optional verb**, and a **versioned**
+interface demand. Probing callers are omitted because they bind late and
+survive every row.
+
+| Provider evolution | Full Output | Fields only | Req. verb | Opt. verb | Versioned |
+| --- | --- | --- | --- | --- | --- |
+| Add a verb | **holder refused** | ok | ok | ok | ok |
+| Add an optional field | ok | ok | ok | ok | ok |
+| Add a required field carrying a default | ok | ok | ok | ok | ok |
+| Widen a verb's input with an optional field | ok | ok | ok | ok | ok |
+| Require more of a verb's input | **breaks at call** | **breaks at call** | **breaks at call** | **breaks at call** | **breaks at call** |
+| Change a verb's output | **breaks at call** | **breaks at call** | **breaks at call** | **breaks at call** | **breaks at call** |
+| Rename or remove a verb | provider refused | provider refused | provider refused | provider refused | provider refused |
+| Retire: add the replacement, deprecate the old | **holder refused** | ok | ok | ok | ok |
+
+"Holder refused" means the gate stops the *holder's* next update, so nothing
+breaks at runtime but the holder is stuck. "Breaks at call" means every gate
+passes and the failure arrives when someone calls the verb.
+
+Four things fall out of it.
+
+**Every refusal lives in one column.** The whole cost of today's default is the
+Full Output column, and both of its refusals are the same event — a provider
+adding an action. That is the argument for holder-side demands in one column,
+and it is why the mechanical check belongs where embedding happens.
+
+**Two rows are red everywhere.** Requiring more of a verb's input and changing
+a verb's output break every demand shape equally, because neither is recorded
+where a gate can see it. No declaration discipline helps: the first is a filed
+defect ([#5663](https://github.com/commontoolsinc/labs/issues/5663)) and the
+second is the naming convention above, and until they are closed a holder's
+care buys nothing on those two rows. Versioning does not rescue them either
+until outputs are in the shape and a provider actually bumps.
+
+**The optional-verb and versioned columns are identical.** Every cell agrees,
+which says the choice between them is not about what can evolve — it is about
+what a reader can tell. `BackwardsCompatibleProfile` in
+`packages/patterns/system/profile-home.tsx` is the exhibit: a `PartialBy` over
+the full Output that records its vintages in a comment ("setBio/addPiece
+2026-06-17, toggleEditing 2026-06-16") because the type cannot say them, and
+carries a hand-maintained instruction to add every future stream to the list.
+The optionality *is* a version boundary with its name erased. Versioning names
+the vintage, and moves the maybe from every seam to bind time.
+
+**The columns are not reachable from one another.** This is the finding that
+changes what happens next. A deployed holder cannot move rightward: it cannot
+add a required verb demand, because that is a newly required field with no
+default, and it cannot drop what it no longer needs, because removal reads as a
+break. Escalating a versioned demand from v1 to v2 hits the identical wall. So
+the design is complete for holders that do not exist yet, and inert for every
+holder already deployed — which puts scoped acknowledgment and migration on
+the critical path for adoption rather than in the nice-to-have pile.
+
 ## What the tooling does
 
 The rules above are only as good as the number of authors who never have to
 learn them. These are the mechanisms that carry them.
 
-### A pattern exports interfaces, not the type it returns
+### The rule is about embedding, not exporting
 
-Exporting the type a pattern declares its own output with is the fast route
-into the incompatibility this document exists to remove: every consumer that
-imports it embeds the provider's whole shape, and every addition to the
-provider becomes a change to each consumer.
+A pattern's output type has to be **exported**: TypeScript cannot otherwise
+name the factory's return type, which
+[composition](../common/patterns/composition.md) requires and most shipped
+patterns do. Export is not the vector either — the refusal reproduces inside a
+single file with no import anywhere in it, when a board stores `NoteOutput[]`
+declared in the same module.
 
-A pattern exports **interfaces describing how to use it** instead. Those grow
-by optional member, by version, or by both — an optional member covering the
-deployed generations that lack it, a version for the consumer that requires
-what the new generation added. The pattern's own declaration is free to mark
-the same member required; the two are different artifacts with different jobs.
+The enforceable joint is **embedding**: a holder does not put another pattern's
+Output type into its own schema. It declares the fields and verbs it uses,
+which is usually a title and a single verb. The transformer already has the
+resolved type at every `pattern<I, O>` call, so it can check this where it
+happens — including the aliases that sound narrow and are not, where a name
+like `EventPiece` turns out to be a whole Output.
 
-The transformer is the natural place to enforce this, and it is the highest
-leverage item here, because it is a rule the one-off author never has to know.
+Embedding the provider's type stays right in one legitimate case: the holder
+genuinely means "that interface, with those required verbs". The other reason
+it happens — the type is large and restating it is redundant — is practical
+rather than principled, and it is the case worth designing away.
 
-Landing it has a known cost: compatibility baselines involving re-exports need
-resetting, because a pattern that today returns `B[]` will afterwards return
-considerably less. That is a deliberate one-time break of the recorded
-baselines, not a regression, and it interacts with the append-only baselines
-gate — so it needs planning rather than a quiet edit.
+`skills/pattern-critic/SKILL.md` already asks for this direction under
+"oversized cross-pattern contracts" (critique-guide category 17): prefer a
+consumer-owned minimal structural type over the full pattern schema and over
+`Pick`/`Omit` coupling. What a critique cannot do is enforce the rule or record
+which demands exist, which is what everything below needs.
 
-### A holder declares what it uses
+### Demands are recorded as demands
 
-The consumer half of the same rule: a pattern does not import a provider's
-type in order to store or call it. It declares the fields and verbs it
-actually uses, which is usually a title and a single verb.
+Today a holder's demand is indistinguishable from its own state: the refusal
+path `argument.notes[].append` *is* the demand subtree, unmarked. That single
+gap is why the impact report below cannot count anything, why the gate treats
+giving up a demand as a break rather than the safe narrowing it is, and why a
+deliberate break can only be acknowledged by turning the whole gate off.
 
-Importing the provider's type stays right in two cases. One is legitimate: the
-holder genuinely means "that interface, at that version, with those required
-verbs". The other is practical rather than principled — the type is large and
-restating it is redundant — and it is the case worth designing away.
+Marking demands is therefore the substrate the rest of the tooling stands on,
+not a nicety.
+[#5746](https://github.com/commontoolsinc/labs/pull/5746) prototypes both
+halves — a `Demand<T>` marker whose stamp rides the referencing node so a
+shared definition stays neutral and each use site declares its own
+demand-ness, and an advisory warning when a contract embeds a foreign Output
+type, with self-reference still legal and `@sharedContract` opting a genuine
+protocol type out.
 
-Nothing checks this today. `skills/pattern-critic/SKILL.md` has no rule for it,
-and adding one is the cheapest first step, ahead of anything in the
-transformer.
+Adopting narrow demands across already-deployed patterns is itself a break,
+and on both sides: a deployed holder cannot drop the fields it stopped needing
+(see the holder table above), so the migration needs the scoped acknowledgment
+below rather than a quiet edit.
 
 ### Authoring time shows the blast radius
 
@@ -479,12 +577,21 @@ generation does.
 
 ## What is not settled here
 
-Three implementation calls belong to whoever does the work, not to this
-document:
+One question is open by design, and it is the one the cross product exposes:
+**how a deployed holder moves.** Narrow demands, required-verb demands and
+versioned demands are all reachable when a holder is written and none of them
+are reachable afterwards, so every adoption path runs through either a scoped
+acknowledgment or a migration that rewrites holders. Which of those carries it
+— and whether the gate should learn that removal beneath a demand marker is
+narrowing rather than breakage — decides how much of this design applies to
+what is already running.
 
-- Whether the holder-demand rule is a transformer error, a lint, or authoring
-  guidance backed by `pattern-critic` — and in what order those arrive.
-- How wide the re-export baseline reset has to be, and how it is sequenced
-  against the append-only baselines gate.
+Three smaller calls belong to whoever does the work:
+
+- Whether the embedding rule warns, lints, or fails, and in what order those
+  arrive; [#5746](https://github.com/commontoolsinc/labs/pull/5746) starts at
+  advisory on purpose.
+- How wide the baseline reset has to be once narrow demands land, and how it
+  is sequenced against the append-only baselines gate.
 - Whether an interim output check is possible before Fabric-types, given that
   the shape discards verb outputs today.
