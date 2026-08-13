@@ -339,6 +339,10 @@ One line per archived document; each document's header carries the fuller
   — why the dashboard's 21% benchmark headline was mostly the host two runs
   landed on: the runner group serves several machines under one processor name,
   and neither the artifact nor the tile could tell them apart. August 2026.
+- [2026-08-cell-bench-micro-steps.md](development/performance/2026-08-cell-bench-micro-steps.md)
+  — why the two `cell.bench.ts` steps inside the 21% benchmark headline are not
+  regressions: one stalled runner sample per run, folded into the average the
+  trend read, August 2026.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`

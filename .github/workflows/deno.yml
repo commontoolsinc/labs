@@ -12,10 +12,36 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The bounds the jobs below are built from. They are YAML anchors, used as
+# aliases at each job and each work step, so the numbers live here and nowhere
+# else. Most jobs take the first pair. The CLI integration suites take the
+# `cli-` ones, which are tighter because a wedged suite there is what they were
+# sized against. The environment variables holding the numbers are how a
+# workflow declares a value an anchor can name; nothing reads them.
+env:
+  WORK_TIMEOUT_MINUTES: &work-timeout 30
+  JOB_TIMEOUT_MINUTES: &job-timeout 40
+  CLI_WORK_TIMEOUT_MINUTES: &cli-work-timeout 10
+  CLI_FUSE_WORK_TIMEOUT_MINUTES: &cli-fuse-work-timeout 15
+  CLI_JOB_TIMEOUT_MINUTES: &cli-job-timeout 25
+
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
 # scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
 # "Step phase markers" table in docs/development/CI_PERFORMANCE.md for the
 # vocabulary and which emoji belongs to which phase.
+#
+# Every work step carries a bound of its own, and the bound on the job around it
+# is the longer of the two by ten minutes. GitHub ends a job that runs past the
+# bound on the job by cancelling it, and the job's conclusion is then
+# `cancelled`, which is the conclusion a run stopped by hand or by a newer push
+# also gets. A step that runs past the bound on the step fails, and its job
+# fails with it. So the bound that a wedged test hits first is the one on the
+# step, and a wedge is reported as a failure. tasks/ci-workflow.test.ts holds
+# every work step here to that shape, and refuses a bound written as anything
+# but an alias.
+#
+# The deploy jobs at the end carry no bound. Each hands the work to a script
+# that lives elsewhere, and how long that takes is not this workflow's to say.
 jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
@@ -23,7 +49,7 @@ jobs:
   check:
     name: "Check"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -35,9 +61,11 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 🔎 Check codebase formatting
+        timeout-minutes: *work-timeout
         run: deno fmt --check
 
       - name: 🧹 Lint codebase
+        timeout-minutes: *work-timeout
         run: deno lint
 
       # This is the only type check for the paths listed in tasks/check.sh:
@@ -45,44 +73,55 @@ jobs:
       # --no-check and rely on it. Removing a path from check.sh removes its
       # type checking entirely.
       - name: 🔎 Type check codebase
+        timeout-minutes: *work-timeout
         run: deno task check
 
       - name: 🧭 Check agent-facing facts
+        timeout-minutes: *work-timeout
         run: deno task check-skill-facts
 
       - name: 🚧 Check tripwires
+        timeout-minutes: *work-timeout
         run: deno task check-tripwires
 
       - name: 📄 Type-check docs code blocks
+        timeout-minutes: *work-timeout
         run: deno task check-docs
 
       - name: 🚧 Guard against new polling waitFor in integration tests
+        timeout-minutes: *work-timeout
         run: deno task check-no-waitfor
 
       - name: 🩹 Check for unresolved merge-conflict markers
+        timeout-minutes: *work-timeout
         run: deno task check-conflict-markers
 
       - name: 🔎 Check for unused import map dependencies
+        timeout-minutes: *work-timeout
         run: deno task check-unused-deps
 
       - name: 🔎 Check Deno toolchain pins are aligned
+        timeout-minutes: *work-timeout
         run: deno task check-deno-pins
 
       - name: 🔎 Check single-copy packages resolve once
+        timeout-minutes: *work-timeout
         run: deno task check-single-copy-deps
 
       - name: 🔎 Check generated commonfabric/cfc types are up to date
+        timeout-minutes: *work-timeout
         working-directory: packages/static
         run: deno task check-cfc-types
 
       - name: 🔎 Check type libraries declare no withheld globals
+        timeout-minutes: *work-timeout
         working-directory: packages/static
         run: deno task check-withheld-globals
 
   cfcheck:
     name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     strategy:
       fail-fast: false
       matrix:
@@ -99,6 +138,7 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 🔎 Check Common Fabric patterns
+        timeout-minutes: *work-timeout
         env:
           CFCHECK_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
         run: deno task cfcheck
@@ -106,7 +146,7 @@ jobs:
   pattern-compat:
     name: "Pattern Update Compatibility (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +167,7 @@ jobs:
       # structural check before swapping a pattern onto a running piece, so an
       # incompatible schema that merges here reaches every deployed piece.
       - name: 🔎 Check pattern update compatibility
+        timeout-minutes: *work-timeout
         env:
           PATTERN_COMPAT_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
         run: deno task pattern-compat
@@ -134,7 +175,7 @@ jobs:
   pattern-vintage:
     name: "Pattern Update State Continuity"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -176,12 +217,13 @@ jobs:
       # not CI steps: a gate that wrote its own evidence would be grading its
       # own homework.
       - name: 🔁 Replay every committed vintage under today's source
+        timeout-minutes: *work-timeout
         run: deno task pattern-vintage
 
   baselines-append-only:
     name: "Pattern Baselines Append-Only"
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: *job-timeout
     steps:
       # Needs real history: the check diffs against the merge base, and the
       # default shallow checkout has none.
@@ -201,12 +243,13 @@ jobs:
       # of recorded JSON — so deleting a baseline without retiring its pattern
       # is refused here.
       - name: 🔎 Check pattern baselines are append-only
+        timeout-minutes: *work-timeout
         run: deno task check-baselines-append-only origin/${{ github.base_ref || 'main' }}
 
   test:
     name: "Test (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     strategy:
       fail-fast: false
       matrix:
@@ -241,6 +284,7 @@ jobs:
           fi
 
       - name: 🧪 Run parallel workspace tests
+        timeout-minutes: *work-timeout
         run: deno task test
         env:
           DENO_COVERAGE_DIR: coverage/raw/workspace-${{ matrix.shard }}
@@ -263,7 +307,7 @@ jobs:
   runner-test:
     name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     strategy:
       fail-fast: false
       matrix:
@@ -280,6 +324,7 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 🧪 Run runner tests
+        timeout-minutes: *work-timeout
         working-directory: packages/runner
         env:
           DENO_COVERAGE_DIR: ../../coverage/raw/runner-${{ matrix.shard }}
@@ -325,7 +370,7 @@ jobs:
   build-toolshed:
     name: "Build Binary (toolshed)"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -337,6 +382,7 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 🏗️ Build toolshed binary
+        timeout-minutes: *work-timeout
         run: deno task build-binaries toolshed
         env:
           COMMIT_SHA: ${{ github.sha }}
@@ -351,7 +397,7 @@ jobs:
   build-bg-piece-service:
     name: "Build Binary (bg-piece-service)"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -363,6 +409,7 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 🏗️ Build bg-piece-service binary
+        timeout-minutes: *work-timeout
         run: deno task build-binaries bg-piece-service
 
       - name: 📤 Upload bg-piece-service binary
@@ -375,7 +422,7 @@ jobs:
   build-cf:
     name: "Build Binary (cf)"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -387,6 +434,7 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 🏗️ Build cf binary
+        timeout-minutes: *work-timeout
         run: deno task build-binaries cf
 
       - name: 📤 Upload cf binary
@@ -399,7 +447,7 @@ jobs:
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     strategy:
       fail-fast: false
       matrix:
@@ -433,6 +481,7 @@ jobs:
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
       - name: 🧪 Run generated patterns integration tests
+        timeout-minutes: *work-timeout
         working-directory: packages/generated-patterns
         env:
           CF_COMPILE_CACHE_FILE: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
@@ -479,7 +528,7 @@ jobs:
   package-integration-test:
     name: "Package Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     needs: ["build-toolshed"]
     strategy:
       fail-fast: false
@@ -543,6 +592,7 @@ jobs:
           fi
 
       - name: 🧪 Run ${{ matrix.step_name }}
+        timeout-minutes: *work-timeout
         working-directory: ${{ matrix.package_dir }}
         env:
           DENO_COVERAGE_DIR: ../../coverage/raw/package-${{ matrix.suite_name }}
@@ -583,7 +633,7 @@ jobs:
   cli-integration-test:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.timeout_minutes }}
+    timeout-minutes: *cli-job-timeout
     needs: ["build-toolshed", "build-cf"]
     strategy:
       fail-fast: false
@@ -594,31 +644,26 @@ jobs:
             section: piece-values
             toolshed_port: 8000
             install_fuse_deps: false
-            timeout_minutes: 10
           - suite_name: core-piece-links
             script: integration.sh
             section: piece-links
             toolshed_port: 8001
             install_fuse_deps: false
-            timeout_minutes: 10
           - suite_name: core-piece-call
             script: integration.sh
             section: piece-call
             toolshed_port: 8002
             install_fuse_deps: false
-            timeout_minutes: 10
           - suite_name: acl
             script: acl.sh
             section: ""
             toolshed_port: 8004
             install_fuse_deps: false
-            timeout_minutes: 10
           - suite_name: fuse
             script: fuse-exec.sh
             section: ""
             toolshed_port: 8003
             install_fuse_deps: true
-            timeout_minutes: 15
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -669,6 +714,7 @@ jobs:
 
       - name: 🧪 Run CLI integration suite
         if: ${{ startsWith(matrix.suite_name, 'core-') }}
+        timeout-minutes: *cli-work-timeout
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
@@ -684,6 +730,7 @@ jobs:
       # default MEMORY_ACL_MODE=enforce, so it deliberately sets no override.
       - name: 🧪 Run CLI ACL integration suite
         if: ${{ matrix.suite_name == 'acl' }}
+        timeout-minutes: *cli-work-timeout
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
@@ -696,6 +743,7 @@ jobs:
       # than the source-tree CLI task.
       - name: 🧪 Run CLI deno integration tests
         if: ${{ matrix.suite_name == 'core-piece-values' }}
+        timeout-minutes: *cli-work-timeout
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
@@ -706,6 +754,7 @@ jobs:
 
       - name: 🧪 Run CLI FUSE integration suite
         if: ${{ matrix.suite_name == 'fuse' }}
+        timeout-minutes: *cli-fuse-work-timeout
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
@@ -757,7 +806,7 @@ jobs:
   pattern-integration-test:
     name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     needs: ["build-toolshed"]
     strategy:
       fail-fast: false
@@ -846,6 +895,7 @@ jobs:
       # harness resolves it against a working directory that differs between the
       # two integration jobs. See docs/development/COVERAGE.md.
       - name: 🧩 Run end-to-end patterns integration tests
+        timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
           mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
@@ -892,7 +942,7 @@ jobs:
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -917,6 +967,7 @@ jobs:
 
       # Both kinds of coverage — see the note on pattern-integration-test above.
       - name: 🧩 Run pattern reload integration tests
+        timeout-minutes: *work-timeout
         run: |
           mkdir -p test-results
           HEADLESS=1 \
@@ -952,7 +1003,7 @@ jobs:
   pattern-unit-test:
     name: "Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     needs: ["build-cf"]
     strategy:
       matrix:
@@ -992,6 +1043,7 @@ jobs:
           path: common-binaries
 
       - name: 🧪 Run pattern unit tests
+        timeout-minutes: *work-timeout
         run: |
           chmod +x ./common-binaries/cf
           mkdir -p test-results .compile-cache coverage/lcov/pattern-runtime/pattern-unit-${{ matrix.chunk }}
@@ -1031,7 +1083,7 @@ jobs:
     name: "Coverage Check"
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     needs:
       - check
       - test
@@ -1072,6 +1124,7 @@ jobs:
           digest-mismatch: error
 
       - name: 📊 Run coverage check
+        timeout-minutes: *work-timeout
         env:
           COVERAGE_ARTIFACTS_DIR: coverage-artifacts
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1124,8 +1177,10 @@ jobs:
       - coverage-check
     permissions: {}
     runs-on: ubuntu-latest
+    timeout-minutes: *job-timeout
     steps:
       - name: 🔎 Verify pull request jobs
+        timeout-minutes: *work-timeout
         env:
           JOB_RESULTS: ${{ toJSON(needs) }}
         run: |
@@ -1144,7 +1199,7 @@ jobs:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: *job-timeout
     # A release artifact must not outlive a failed pattern-migration gate.
     # Production deploys consume this artifact without rerunning those gates.
     needs:
@@ -1209,6 +1264,7 @@ jobs:
           path: coverage-artifacts
 
       - name: 🧬 Combine coverage LCOV
+        timeout-minutes: *work-timeout
         continue-on-error: true
         run: |
           deno run --allow-read --allow-write tasks/combine-coverage-lcov.ts \
@@ -1217,6 +1273,7 @@ jobs:
             --repo-name=${{ github.event.repository.name }}
 
       - name: 🔐 Process & sign binaries
+        timeout-minutes: *work-timeout
         run: |
           mkdir -p release
           mkdir -p signed
@@ -1277,6 +1334,7 @@ jobs:
 
       - name: 📝 Generate attestation for toolshed binary
         id: attest_toolshed
+        timeout-minutes: *work-timeout
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ./dist/toolshed
@@ -1284,6 +1342,7 @@ jobs:
 
       - name: 📝 Generate attestation for bg-piece-service binary
         id: attest_bg_piece_service
+        timeout-minutes: *work-timeout
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ./dist/bg-piece-service
@@ -1291,6 +1350,7 @@ jobs:
 
       - name: 📝 Generate attestation for cf binary
         id: attest_cf
+        timeout-minutes: *work-timeout
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ./dist/cf
@@ -1298,6 +1358,7 @@ jobs:
 
       - name: 📝 Generate attestation for tarball
         id: attest_tarball
+        timeout-minutes: *work-timeout
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz
@@ -1315,6 +1376,7 @@ jobs:
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
       - name: 🔎 Verify binary attestations
+        timeout-minutes: *work-timeout
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

@@ -756,10 +756,13 @@ Notes:
     A late-starting CPU line sits at the right. A single sample appears as a
     point. A stale line visibly ends short of the current date. The dashboard
     tile leaves out the CPU legend to keep the compact chart readable.
-    Selectors choose which measurement to plot (a percentile ladder — **p0** =
-    min, **p50** = the mean, **p75**, **p99**, **p99.5**, **p99.9**, **p100** =
-    max) and whether to group by source **file** or sort by latest **duration**
-    or **trend**. A "hide green" checkbox drops the steady ones. A slider from 1
+    Selectors choose which measurement to plot (**p0** = the fastest sample,
+    **mean** = the arithmetic mean, **p75**, **p99**, **p99.5**, **p99.9**,
+    **p100** = the slowest) and whether to group by source **file** or sort by
+    latest **duration** or **trend**. The mean selector was once labelled
+    `p50`, and `?stat=p50` still opens it so that a saved link does not quietly
+    fall back to the default column.
+    A "hide green" checkbox drops the steady ones. A slider from 1
     through 45 days changes the visible calendar range. The displayed samples
     are spread across at most 200 time buckets, so a shorter window uses more of
     the collected samples per day. Each graph chooses its vertical scale after
