@@ -6,6 +6,7 @@ import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   forEachSubschema,
+  isSubschema,
   mapSubschemas,
   type SchemaWalkOptions,
 } from "../schema-walk.ts";
@@ -132,7 +133,7 @@ const localDefinitionNamesInScope = (
 ): Set<string> => {
   const names = new Set(Object.keys(definitions));
   const collect = (fragment: JSONSchema): void => {
-    if (typeof fragment === "boolean") return;
+    if (!isRecord(fragment)) return;
     if (typeof fragment.$ref === "string") {
       const name = localDefinitionName(fragment.$ref);
       if (name !== undefined) names.add(name);
@@ -180,7 +181,7 @@ const namespaceLocalDefinitionScope = (
   }
 
   const rewrite = (fragment: JSONSchema): JSONSchema => {
-    if (typeof fragment === "boolean") return fragment;
+    if (!isRecord(fragment)) return fragment;
     let result = fragment;
     if (typeof fragment.$ref === "string") {
       const name = localDefinitionName(fragment.$ref);
@@ -217,7 +218,7 @@ const addRefs = (target: Set<string>, source: ReadonlySet<string>): void => {
 };
 
 const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
-  if (typeof schema === "boolean") return EMPTY_REF_SUMMARY;
+  if (!isRecord(schema)) return EMPTY_REF_SUMMARY;
   const cached = schemaRefSummaryCache.get(schema);
   if (cached !== undefined) return cached;
 
@@ -310,8 +311,10 @@ export const selectReferencedCfcSchemaDefs = (
   schema: JSONSchema,
   inheritedDefinitions?: SchemaDefinitions,
 ): SchemaDefinitions | undefined => {
-  if (typeof schema === "boolean") return undefined;
-  const definitions = schema.$defs ?? inheritedDefinitions;
+  if (!isRecord(schema)) return undefined;
+  const definitions = isRecord(schema.$defs)
+    ? schema.$defs
+    : inheritedDefinitions;
   if (definitions === undefined) return undefined;
 
   const initial = summarizeCfcSchemaRefs(schema).localDefinitions;
@@ -360,7 +363,9 @@ const pruneCfcSchemaDefinitionsInternal = (
   schema: JSONSchema,
   preserveScopeBoundary: boolean,
 ): JSONSchema => {
-  if (typeof schema === "boolean") return schema;
+  // A boolean schema, and anything a schema cannot be, has no definitions to
+  // prune and is returned as it arrived.
+  if (!isRecord(schema)) return schema;
   const cacheable = isDeepFrozen(schema);
   const cache = preserveScopeBoundary
     ? prunedScopedSchemaCache
@@ -375,7 +380,9 @@ const pruneCfcSchemaDefinitionsInternal = (
     (child) => pruneCfcSchemaDefinitionsInternal(child, true),
     ALL_SUBSCHEMAS,
   );
-  if (schema.$defs !== undefined) {
+  // Only a `$defs` that is a definition map is pruned, the same test
+  // `cfcSchemaChildRoot` uses to decide whether one opens a definition scope.
+  if (isRecord(schema.$defs)) {
     const selected = selectReferencedCfcSchemaDefs(schema);
     let definitions = selected ??
       (preserveScopeBoundary ? EMPTY_DEFINITIONS : undefined);
@@ -497,6 +504,16 @@ const resolveCfcSchemaRefUncached = (
       return undefined;
     }
     schemaCursor = schemaCursor[pathToDef[i]];
+  }
+  if (!isSubschema(schemaCursor)) {
+    // A definition holding something a schema cannot be resolves no better than
+    // a name the document does not carry.
+    logger.warn("cfc", () => [
+      "Non-schema target for $ref in schema: ",
+      schemaRef,
+      fullSchema,
+    ]);
+    return undefined;
   }
   if (isRecord(schemaCursor)) {
     const schemaRefs = new Set<string>();
