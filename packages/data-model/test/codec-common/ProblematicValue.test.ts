@@ -38,6 +38,38 @@ describe("ProblematicValue", () => {
       expect(ps.state).toEqual({ x: 1 });
       expect(ps.error).toBe("boom");
     });
+
+    it("keeps a `FabricValue` state by identity", () => {
+      const state = { x: 1, nested: [2, 3] };
+
+      expect(new ProblematicValue("T@1", state, "boom").state).toBe(state);
+    });
+
+    it("renders a non-`FabricValue` state as a debug string", () => {
+      const ps = new ProblematicValue("T@1", new Uint8Array([1, 2]), "boom");
+
+      expect(typeof ps.state).toBe("string");
+      // A description of the value, not a conversion of it: nothing here
+      // should read as though the wire carried a `FabricBytes`.
+      expect(ps.state).toMatch(/Uint8Array/);
+    });
+
+    it("survives a state that cannot be frozen", () => {
+      // The reason coercion belongs in the constructor rather than at each
+      // call site: `Object.freeze()` throws on a typed array with elements,
+      // and this class deep-freezes its state. Reporting a failure must not
+      // itself fail.
+      const ps = new ProblematicValue("T@1", new Uint8Array([1, 2, 3]), "b");
+
+      expect(() => deepFreeze(ps)).not.toThrow();
+    });
+
+    it("renders values with no fabric representation at all", () => {
+      for (const state of [new Map([["a", 1]]), new Set([1]), () => 1]) {
+        expect(typeof new ProblematicValue("T@1", state, "b").state)
+          .toBe("string");
+      }
+    });
   });
 
   describe("instance members", () => {

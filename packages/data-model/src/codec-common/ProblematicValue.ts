@@ -13,12 +13,27 @@ import {
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
+import { isFabricValue } from "@/type-check.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
 
 /**
  * Container for a value whose deconstruction or reconstruction failed.
  * Preserves the original tag and raw state for round-tripping and debugging.
  * Used in lenient mode to allow graceful degradation rather than hard
  * failures. See Section 3.5 of the formal spec.
+ *
+ * `state` is whatever was at fault, which is why the constructor takes
+ * anything at all: a wire format's states need not be `FabricValue`s, and the
+ * one thing this class must not do is fail while reporting a failure. What is
+ * already a `FabricValue` is kept exactly; anything else is replaced by a
+ * debug rendering of it.
+ *
+ * The rendering is deliberately not a conversion. A `Uint8Array` could be
+ * turned into a `FabricBytes` and a `RegExp` into a `FabricRegExp`, and doing
+ * so would misreport the wire: a reader would find a `FabricBytes` in `state`
+ * and conclude the payload carried one, when it carried raw bytes this format
+ * does not accept. A string plainly reads as a description of the value rather
+ * than the value, which is the honest answer where fidelity is not available.
  */
 export class ProblematicValue extends ExplicitTagValue {
   /** Value for {@link #error}. */
@@ -27,14 +42,17 @@ export class ProblematicValue extends ExplicitTagValue {
   /**
    * Constructs an instance for the given tag and state, with `error`
    * describing what went wrong.
+   *
+   * @param wireTypeTag - The tag the faulty data arrived under.
+   * @param state - What was at fault, of any type whatsoever. Kept as-is if it
+   *   is a `FabricValue`, and otherwise replaced by a debug rendering.
+   * @param error - Description of what went wrong.
    */
-  constructor(
-    wireTypeTag: string,
-    state: FabricValue,
-    /** Description of what went wrong. */
-    error: string,
-  ) {
-    super(wireTypeTag, state);
+  constructor(wireTypeTag: string, state: any, error: string) {
+    super(
+      wireTypeTag,
+      isFabricValue(state) ? state : toCompactDebugString(state, 200),
+    );
 
     this.#error = error;
   }

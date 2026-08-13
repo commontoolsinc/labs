@@ -220,15 +220,17 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    *
    * @param wireTypeTag The tag the malformed data arrived under, or the
    *   meta-tag naming the structure at fault.
-   * @param state The data at fault, preserved so that a lenient result
-   *   round-trips.
+   * @param state The data at fault, of any type whatsoever, preserved so that
+   *   a lenient result round-trips. A format whose states are not
+   *   `FabricValue`s hands one over as it stands; `ProblematicValue` renders
+   *   what it cannot keep.
    * @param error What is wrong with it, phrased to stand on its own -- it is
    *   the whole of the message when this raises.
    * @throws If this engine is not lenient.
    */
   protected reportMalformed(
     wireTypeTag: string,
-    state: FabricValue,
+    state: any,
     error: string,
   ): FabricValue {
     if (!this.lenient) {
