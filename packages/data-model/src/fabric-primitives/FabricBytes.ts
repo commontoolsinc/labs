@@ -29,10 +29,8 @@ import { JSON_CODEC } from "@/codec-interface/interface.ts";
  */
 export class FabricBytes extends BaseFabricPrimitive {
   /**
-   * Private byte storage. Callers use `slice()`, `sliceBuffer()` or
-   * `copyInto()`. Never backed by a `SharedArrayBuffer`, which is what
-   * `toOwnedUint8Array()` guarantees and what lets `sliceBuffer()` promise a
-   * transferable result.
+   * Private byte storage. Guaranteed to be backed by an exact-sized and
+   * unshared `ArrayBuffer`.
    */
   readonly #bytes: Uint8Array<ArrayBuffer>;
 
@@ -75,14 +73,7 @@ export class FabricBytes extends BaseFabricPrimitive {
 
   /**
    * Returns a copy of the bytes (or a sub-range) as a bare `ArrayBuffer`. The
-   * counterpart to {@link #slice} for a caller that wants the buffer rather
-   * than a view onto it, and which allocates no view to get there.
-   *
-   * An `ArrayBuffer` is what a caller needs in order to *transfer* the bytes
-   * across a realm boundary, `ArrayBuffer` being transferable where a typed
-   * array is not. The result is unshared and covers exactly the requested
-   * range, so it can be transferred outright rather than reasoned about
-   * through an offset and a length.
+   * returned buffer is unshared -- the caller may mutate it freely.
    *
    * @param start - Start index (inclusive, default 0).
    * @param end - End index (exclusive, default `length`).
