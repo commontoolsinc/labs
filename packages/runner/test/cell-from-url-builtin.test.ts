@@ -133,6 +133,53 @@ describe("cellFromUrl builtin", () => {
     expect(resolved).toBeUndefined();
   });
 
+  it("resolves a URL naming an unknown space to no cell", async () => {
+    // A space named rather than addressed resolves only from the runtime's
+    // cache. Until it is there, the honest answer is that this names no cell
+    // — not a cell in whichever space happened to be asking.
+    const id = anExistingCell();
+    const { pending, id: resolved } = await resolve(
+      `https://fabric.example/some-space-name/${id}`,
+      HOSTS,
+    );
+
+    expect(pending).toBe(false);
+    expect(resolved).toBeUndefined();
+  });
+
+  it("clears a resolved cell once the URL stops naming one", async () => {
+    // Reading through the stored link answers undefined for an empty target,
+    // so a guard on that would leave the previous URL's answer in place.
+    const id = anExistingCell();
+    const url = runtime.getCell<string>(space, "cell-from-url-input", {
+      type: "string",
+    }, tx);
+    url.withTx(tx).set(`/${id}`);
+
+    const builtin = byRef("cellFromUrl");
+    const testPattern = pattern<{ url: string }>(({ url }) => builtin({ url }));
+    const resultCell = runtime.getCell(
+      space,
+      "cell-from-url-clear",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, { url }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+    await result.pull();
+    expect(result.key("cell").getRaw()).toBeDefined();
+
+    const edit = runtime.edit();
+    url.withTx(edit).set("https://example.com/not-a-cell");
+    edit.commit();
+    await result.pull();
+
+    const slot = result.key("cell");
+    const sub = runtime.getCellFromLink(parseLink(slot.getRaw(), slot)!);
+    expect(sub.getRaw()).toBeUndefined();
+  });
+
   it("resolves prose to no cell", async () => {
     expect((await resolve("just some words")).id).toBeUndefined();
   });
