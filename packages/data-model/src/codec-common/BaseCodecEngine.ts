@@ -56,14 +56,8 @@ import { UnknownValue } from "./UnknownValue.ts";
  */
 export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   implements SerializationContext<SerializedForm> {
-  /**
-   * Whether a failed reconstruction produces a `ProblematicValue` instead of
-   * throwing.
-   */
-  readonly lenient: boolean;
-
-  /** Registry consulted for per-type encoding and decoding. */
-  protected readonly registry: CodecRegistry<Encoded>;
+  readonly #lenient: boolean;
+  readonly #registry: CodecRegistry<Encoded>;
 
   /**
    * Constructs an instance. `options.registry` supplies the codecs this
@@ -75,12 +69,12 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   constructor(
     options: { registry: CodecRegistry<Encoded>; lenient?: boolean },
   ) {
-    this.lenient = options.lenient ?? false;
-    this.registry = options.registry;
+    this.#lenient = options.lenient ?? false;
+    this.#registry = options.registry;
   }
 
   //
-  // Instance members
+  // Subclass contract
   //
 
   /**
@@ -121,6 +115,44 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
     data: SerializedForm,
     context: ReconstructionContext,
   ): FabricValue;
+
+  /** Encodes an array, which is this format's business entirely. */
+  protected abstract encodeArray(
+    value: readonly FabricValue[],
+    seen: Set<object>,
+  ): Encoded;
+
+  /** Encodes a plain object, which is this format's business entirely. */
+  protected abstract encodePlainObject(
+    value: Record<string, FabricValue>,
+    seen: Set<object>,
+  ): Encoded;
+
+  /** Wraps a tag and state into this format's tagged wire form. */
+  protected abstract wrapTag(tag: string, state: Encoded): Encoded;
+
+  /** Decodes a transport tree back into fabric values. */
+  protected abstract decodeValue(
+    data: Encoded,
+    context: ReconstructionContext,
+  ): FabricValue;
+
+  //
+  // Instance members
+  //
+
+  /**
+   * Whether a failed reconstruction produces a `ProblematicValue` instead of
+   * throwing.
+   */
+  get lenient(): boolean {
+    return this.#lenient;
+  }
+
+  /** Registry consulted for per-type encoding and decoding. */
+  protected get registry(): CodecRegistry<Encoded> {
+    return this.#registry;
+  }
 
   /**
    * Encodes a fabric value into the transport tree, dispatching on what the
@@ -206,37 +238,6 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
     return deepFreeze(new ProblematicValue(wireTypeTag, state, error));
   }
 
-  /** Encodes one value through the codec the registry matched to it. */
-  #encodeTagged(
-    value: FabricValue,
-    matched: CodecForFormat<Encoded>,
-    seen: Set<object>,
-  ): Encoded {
-    const isObject = (value !== null) && (typeof value === "object");
-
-    if (isObject) {
-      BaseCodecEngine.enterOrThrow(seen, value as object);
-    }
-
-    // `tagForValue()` rather than any direct property of `value`, because the
-    // value need not know which codec is being used for it: the tag is the
-    // codec's determination, not the value's.
-    //
-    // A terminal codec's state is already in this format's domain, so it is
-    // final; a nonterminal codec's is made of fabric values, which this walk
-    // has yet to expand.
-    const tag = matched.tagForValue(value);
-    const state = (matched instanceof BaseTerminalCodec)
-      ? (matched as TerminalCodec<Encoded>).encode(value)
-      : this.encodeValue((matched as NonterminalCodec).encode(value), seen);
-
-    if (isObject) {
-      seen.delete(value as object);
-    }
-
-    return this.wrapTag(tag, state);
-  }
-
   /**
    * Decodes one tagged value, dispatching on the tag through the registry. A
    * subclass calls this once it has recognized a tagged form and taken off
@@ -315,26 +316,36 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
     return deepFreeze(decoded);
   }
 
-  /** Encodes an array, which is this format's business entirely. */
-  protected abstract encodeArray(
-    value: readonly FabricValue[],
+  /** Encodes one value through the codec the registry matched to it. */
+  #encodeTagged(
+    value: FabricValue,
+    matched: CodecForFormat<Encoded>,
     seen: Set<object>,
-  ): Encoded;
+  ): Encoded {
+    const isObject = (value !== null) && (typeof value === "object");
 
-  /** Encodes a plain object, which is this format's business entirely. */
-  protected abstract encodePlainObject(
-    value: Record<string, FabricValue>,
-    seen: Set<object>,
-  ): Encoded;
+    if (isObject) {
+      BaseCodecEngine.enterOrThrow(seen, value as object);
+    }
 
-  /** Wraps a tag and state into this format's tagged wire form. */
-  protected abstract wrapTag(tag: string, state: Encoded): Encoded;
+    // `tagForValue()` rather than any direct property of `value`, because the
+    // value need not know which codec is being used for it: the tag is the
+    // codec's determination, not the value's.
+    //
+    // A terminal codec's state is already in this format's domain, so it is
+    // final; a nonterminal codec's is made of fabric values, which this walk
+    // has yet to expand.
+    const tag = matched.tagForValue(value);
+    const state = (matched instanceof BaseTerminalCodec)
+      ? (matched as TerminalCodec<Encoded>).encode(value)
+      : this.encodeValue((matched as NonterminalCodec).encode(value), seen);
 
-  /** Decodes a transport tree back into fabric values. */
-  protected abstract decodeValue(
-    data: Encoded,
-    context: ReconstructionContext,
-  ): FabricValue;
+    if (isObject) {
+      seen.delete(value as object);
+    }
+
+    return this.wrapTag(tag, state);
+  }
 
   //
   // Static members
