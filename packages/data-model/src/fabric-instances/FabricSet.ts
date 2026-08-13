@@ -20,9 +20,17 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  * beyond the wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
+  #set: Set<FabricValue>;
+
   /** Constructs an instance wrapping `set`. */
-  constructor(readonly set: Set<FabricValue>) {
+  constructor(set: Set<FabricValue>) {
     super();
+    this.#set = set;
+  }
+
+  /** The wrapped set. */
+  get set(): Set<FabricValue> {
+    return this.#set;
   }
 
   /**
@@ -48,22 +56,22 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
 
   /** @inheritDoc */
   protected get wrappedValue(): Set<FabricValue> {
-    return this.set;
+    return this.#set;
   }
 
   /** @inheritDoc */
   protected [SHALLOW_UNFROZEN_CLONE](): FabricSet {
-    return new FabricSet(this.set);
+    return new FabricSet(this.#set);
   }
 
   /** @inheritDoc */
   protected toNativeFrozen(): FrozenSet<FabricValue> {
-    return new FrozenSet(this.set);
+    return new FrozenSet(this.#set);
   }
 
   /** @inheritDoc */
   protected toNativeThawed(): Set<FabricValue> {
-    return new Set(this.set);
+    return new Set(this.#set);
   }
 
   static #codec = Object.freeze(

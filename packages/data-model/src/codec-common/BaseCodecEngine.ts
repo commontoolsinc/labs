@@ -56,6 +56,9 @@ import { UnknownValue } from "./UnknownValue.ts";
  */
 export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   implements SerializationContext<SerializedForm> {
+  readonly #lenient: boolean;
+  readonly #registry: CodecRegistry<Encoded>;
+
   /**
    * Constructs an instance. `options.registry` supplies the codecs this
    * instance encodes and decodes with, and so decides which classes it can
@@ -66,8 +69,8 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   constructor(
     options: { registry: CodecRegistry<Encoded>; lenient?: boolean },
   ) {
-    this.lenient = options.lenient ?? false;
-    this.registry = options.registry;
+    this.#lenient = options.lenient ?? false;
+    this.#registry = options.registry;
   }
 
   //
@@ -142,10 +145,14 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * Whether a failed reconstruction produces a `ProblematicValue` instead of
    * throwing.
    */
-  readonly lenient: boolean;
+  get lenient(): boolean {
+    return this.#lenient;
+  }
 
   /** Registry consulted for per-type encoding and decoding. */
-  protected readonly registry: CodecRegistry<Encoded>;
+  protected get registry(): CodecRegistry<Encoded> {
+    return this.#registry;
+  }
 
   /**
    * Encodes a fabric value into the transport tree, dispatching on what the
