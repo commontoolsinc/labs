@@ -13,9 +13,10 @@ import { ValidationError } from "@cliffy/command";
 import type { CellScope } from "@commonfabric/api";
 import { isDID } from "@commonfabric/identity";
 import {
+  linkPathSegmentToCellPathSegment,
   matchLLMFriendlyLink,
   parseLLMFriendlyLink,
-} from "@commonfabric/runner";
+} from "@commonfabric/runner/shared";
 
 /** A piece reference normalized from its LLM-friendly link form. */
 export interface NormalizedLLMFriendlyRef {
@@ -66,37 +67,6 @@ export function validateEmbeddedSpaces(
 }
 
 /**
- * A canonical array-index token: `0`, or digits without a leading zero.
- * Only these convert to numbers; a non-canonical numeric-looking token
- * such as `01`, `007`, `1.5`, or `-2` names a string property, and
- * converting it would address a different cell than the pointer names.
- */
-const canonicalArrayIndex = /^(0|[1-9][0-9]*)$/;
-
-/**
- * The largest valid JS array index, 2^32 - 2. A canonical token above it
- * cannot name an array element, and past `Number.MAX_SAFE_INTEGER` the
- * conversion itself is lossy — `Number("9007199254740993")` rounds to a
- * neighboring integer and would address a different cell — so larger
- * tokens stay strings.
- */
-const MAX_ARRAY_INDEX = 4294967294;
-
-/**
- * Convert a decoded link path segment to the number-or-string form the
- * CLI's cell traversal uses, so an embedded path and a positional path
- * address the same cells. Not the runner's `parseCellPath`, because that
- * splits on `/` (a JSON-pointer segment may contain one) and coerces any
- * numeric-looking token — including non-canonical ones like `01` — to a
- * number; here only canonical array-index tokens convert, deliberately.
- */
-function toCellPathSegment(segment: string): string | number {
-  if (!canonicalArrayIndex.test(segment)) return segment;
-  const num = Number(segment);
-  return num <= MAX_ARRAY_INDEX ? num : segment;
-}
-
-/**
  * Normalize an LLM-friendly piece reference — `/of:fid1:abc.../path`,
  * optionally with a `/@did:.../` space prefix or an `@scope` suffix on the
  * id — into the piece id, scope, and path the CLI's own intake uses.
@@ -126,14 +96,9 @@ export function normalizeLLMFriendlyRef(
     );
   }
 
-  // The parser throws rather than return a link without an id; the guard
-  // narrows the optional field on its return type.
-  if (parsed.id === undefined) {
-    throw new ValidationError(
-      'Target must include a piece handle, e.g. "/of:fid1:abc123/path".',
-      { exitCode: 1 },
-    );
-  }
+  // The parser throws rather than return a link without an id, so the
+  // optional field on its return type is populated here.
+  const pieceId = parsed.id!;
 
   let embeddedSpace: string | undefined;
   if (parsed.space) {
@@ -147,9 +112,9 @@ export function normalizeLLMFriendlyRef(
   }
 
   return {
-    pieceId: parsed.id,
+    pieceId,
     ...(parsed.scope && { scope: parsed.scope as CellScope }),
     ...(embeddedSpace !== undefined && { embeddedSpace }),
-    path: parsed.path.map(toCellPathSegment),
+    path: parsed.path.map(linkPathSegmentToCellPathSegment),
   };
 }

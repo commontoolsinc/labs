@@ -53,6 +53,7 @@ import { cliText } from "../lib/cli-name.ts";
 import { absPath } from "../lib/utils.ts";
 import type { CellScope } from "@commonfabric/api";
 import { parseCellPath } from "@commonfabric/runner";
+import { parseScopedIdSegment } from "@commonfabric/runner/shared";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
@@ -2406,25 +2407,19 @@ export async function setPieceSourceFromCommand(
   return pieceConfig;
 }
 
-const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
-
-function parseScopedIdSegment(id: string): {
-  id: string;
-  scope?: CellScope;
-} {
-  const scopeSeparator = id.lastIndexOf("@");
-  if (scopeSeparator === -1) return { id };
-
-  const scope = id.slice(scopeSeparator + 1);
-  const scopedId = id.slice(0, scopeSeparator);
-  if (!scopedId || !CELL_SCOPE_VALUES.has(scope)) {
+/**
+ * Like `parseScopedIdSegment`, except a rejected `@scope` suffix is raised
+ * as a usage error, the suffix being something the user typed.
+ */
+function parseScopedId(id: string): { id: string; scope?: CellScope } {
+  try {
+    return parseScopedIdSegment(id);
+  } catch (error) {
     throw new ValidationError(
-      `Invalid scope suffix "@${scope}". Expected @space, @user, or @session.`,
+      error instanceof Error ? error.message : String(error),
       { exitCode: 1 },
     );
   }
-
-  return { id: scopedId, scope: scope as CellScope };
 }
 
 function parseSetHomeOptions(
@@ -2529,7 +2524,7 @@ export function parseSpaceOptions(
       if (llmRef.path.length > 0) output.piecePath = llmRef.path;
       if (llmRef.embeddedSpace) output.embeddedSpaces = [llmRef.embeddedSpace];
     } else {
-      const parsedPiece = parseScopedIdSegment(input.piece);
+      const parsedPiece = parseScopedId(input.piece);
       output.piece = parsedPiece.id;
       if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
     }
@@ -2604,7 +2599,7 @@ export function parseLink(
     );
   }
 
-  const parsedPiece = parseScopedIdSegment(parts[0]);
+  const parsedPiece = parseScopedId(parts[0]);
   const pieceId = parsedPiece.id;
 
   if (parts.length === 1) {
@@ -2642,7 +2637,7 @@ function parseUrl(
     );
   }
   if (!piece) return { apiUrl, space };
-  const parsedPiece = parseScopedIdSegment(piece);
+  const parsedPiece = parseScopedId(piece);
   return {
     apiUrl,
     space,

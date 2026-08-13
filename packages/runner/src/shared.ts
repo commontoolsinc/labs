@@ -6,11 +6,15 @@
 
 export {
   addressKey,
+  CELL_SCOPE_VALUES,
   createLLMFriendlyLink,
   isAliasBinding,
   isSigilLink,
+  linkPathSegmentToCellPathSegment,
+  matchLLMFriendlyLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,
+  parseScopedIdSegment,
 } from "./link-types.ts";
 export {
   isLinkRef,
