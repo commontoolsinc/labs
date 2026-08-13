@@ -229,10 +229,12 @@ const holdsSubschemaArray = (
 /**
  * Whether a record-valued keyword holds an object, reporting it when not.
  *
- * An array counts, unlike in a subschema position: validation enumerates these
- * keywords with `Object.entries` and asks `Object.hasOwn`, both of which read
- * an array's indices as names, so a walk that answered "no subschemas here"
- * would answer for keys the validation does read.
+ * An array counts, unlike in a subschema position. `validateSchemaDefinition`
+ * refuses one here, but that gate gets its say over an authored schema, not
+ * over a stored one, and the validator that reads values enumerates these
+ * keywords with `Object.entries` and asks `Object.hasOwn` — both of which read
+ * an array's indices as names. A walk answering "no subschemas here" would be
+ * answering for keys a read goes on to use.
  */
 const holdsSubschemaRecord = (
   value: unknown,
