@@ -15,7 +15,7 @@ import { JSON_CODEC } from "@/interface.ts";
 /**
  * Tag prefix on the encoded form of a fabric value. The prefix is explicit so
  * as to make it unambiguous whether a given JSON-ish text string is the result
- * of encoding by `JsonCodec` vs. being JSON from some other source. The tag
+ * of encoding by `JsonCodecEngine` vs. being JSON from some other source. The tag
  * stands for "Fabric Value Json, version 1."
  */
 export const ENCODING_PREFIX_TAG = "fvj1:" as const;

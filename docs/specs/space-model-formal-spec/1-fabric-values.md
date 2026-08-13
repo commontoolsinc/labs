@@ -2266,11 +2266,11 @@ under the preserved tag, so the wire form is identical to that of the
 value the `ProblematicValue` stands in for (and a later decode under a
 then-recognized tag can recover the real value). The `error` field aids
 in-process debugging by recording what went wrong; the failure-construction
-paths (e.g., lenient mode) populate it. Whether to wrap failures in
-`ProblematicValue` or to throw is an implementation decision that may vary
-by context — strict contexts (e.g., tests) may prefer to throw, while
-lenient contexts (e.g., production reconstruction) may prefer graceful
-degradation.
+paths populate it. Whether a decode failure surfaces as a
+`ProblematicValue` or as a throw is the encoding context's `lenient`
+setting alone, not the codec's: a strict context (e.g., tests) raises
+either form of rejection, while a lenient one (e.g., production
+reconstruction) degrades either into a value.
 
 ---
 
@@ -2285,7 +2285,7 @@ encoding/decoding.
 
 ### 4.2 Codec Value Types
 
-`JsonCodec` uses an intermediate tree representation during serialization
+`JsonCodecEngine` uses an intermediate tree representation during serialization
 and deserialization. This type is internal to the JSON implementation — it
 is not part of the public boundary interface.
 
@@ -2353,7 +2353,7 @@ export interface SerializationContext<SerializedForm = unknown> {
 }
 ```
 
-`JsonCodec` implements `SerializationContext<string>`:
+`JsonCodecEngine` implements `SerializationContext<string>`:
 
 - `encode(value)` serializes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
@@ -2376,20 +2376,20 @@ Encode:  value -> codec.encode(value) -> serialized form (e.g., JSON string)
 Decode:  serialized form -> codec.decode(data, context) -> FabricValue
 ```
 
-Internally, `JsonCodec`'s `encode()` method calls a private encode walker
+Internally, `JsonCodecEngine`'s `encode()` method calls a private encode walker
 (`#encodeValue()`) to walk the `FabricValue` tree and produce a
 `JsonCodecValue` tree, then stringifies it. The `decode()` method parses
 the JSON string, then calls a private decode walker (`#decodeValue()`) to
 walk the `JsonCodecValue` tree and reconstruct modern runtime types. The
-recursive descent and codec dispatch are entirely internal to `JsonCodec`.
+recursive descent and codec dispatch are entirely internal to `JsonCodecEngine`.
 
 ### 4.5 Codecs, the Registry, and Internal Tree Walking
 
 The serialization and deserialization logic is implemented as private
-methods on `JsonCodec`. It dispatches per-type logic to the **codecs**
+methods on `JsonCodecEngine`. It dispatches per-type logic to the **codecs**
 (Section 2.4) held in a **`CodecRegistry`** — an index of which codec
 handles which class (for encoding) and which tag (for decoding). Codecs
-are shallow: `JsonCodec` owns recursion and tag-wrapping, and each codec
+are shallow: `JsonCodecEngine` owns recursion and tag-wrapping, and each codec
 translates exactly one layer.
 
 ```typescript
@@ -2506,7 +2506,7 @@ types) are handled by the walker itself after no codec matches.
 
 #### Private encode walker (`#encodeValue()`)
 
-`JsonCodec`'s private encode walker processes the `FabricValue` tree:
+`JsonCodecEngine`'s private encode walker processes the `FabricValue` tree:
 
 1. **Codec dispatch** — `codecFromValue()` finds how to encode the value.
    A `SELF_REP` result means the value is its own wire form (emitted
@@ -2531,7 +2531,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 
 #### Private decode walker (`#decodeValue()`)
 
-`JsonCodec`'s private decode walker processes the `JsonCodecValue` tree:
+`JsonCodecEngine`'s private decode walker processes the `JsonCodecValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed
    keys.
@@ -2540,11 +2540,16 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    `3-json-encoding.md`.
 3. **State decode + bare-`/` check** — for any other tag, the walker first
    recursively decodes the wrapped state, then rejects an empty tag (a
-   bare `"/"` key) as an encoding error, producing a `ProblematicValue`
-   (Section 3.5; see also Section 9 of `3-json-encoding.md`).
+   bare `"/"` key) as an encoding error. That rejection, and every other
+   malformed-wire fault the walker finds for itself, is settled against
+   `lenient` exactly as a codec's is: a `ProblematicValue` leniently
+   (Section 3.5), a raise strictly (see also Section 9 of
+   `3-json-encoding.md`).
 4. **Codec dispatch** — `codecFromTag()` routes the tag to its registered
-   codec's `decode()`. When `JsonCodec` is in lenient mode, codec
-   exceptions produce `ProblematicValue`. Values returned from this arm
+   codec's `decode()`, and settles the codec's verdict against `lenient`:
+   leniently, a throw becomes a `ProblematicValue`; strictly, a
+   `ProblematicValue` the codec returned becomes a throw. Values returned
+   from this arm
    are guaranteed deep-frozen at the walker boundary (the contract holds
    for both the codec-produced value and the lenient-mode
    `ProblematicValue`), so callers need not each freeze. This contract is
@@ -2558,9 +2563,10 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 7. **Arrays** — recursively deserialized; `hole` entries reconstructed as
    true holes (absent indices).
 8. **Plain objects** — recursively deserialized; output frozen. Any
-   `/`-prefixed key in a plain (non-single-key-tagged) object is reserved:
-   the walker produces a `ProblematicValue` rather than silently
-   round-tripping it (Section 9 of `3-json-encoding.md`).
+   `/`-prefixed key in a plain (non-single-key-tagged) object is reserved, as
+   is any name this runtime reserves: rather than silently round-trip it, the
+   walker rejects it, settled against `lenient` as in step 3 (Section 9 of
+   `3-json-encoding.md`).
 
 > **Previous design: type handlers + class registry.** The earlier design
 > dispatched per-type logic to `TypeHandler` objects (which did their own
@@ -2569,7 +2575,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > everything else; tag resolution checked a `wireTypeTag` property on each
 > instance. That made the wire-serializable surface implicit and smeared
 > the format mechanics across every handler. The codec model replaces all
-> of it: codecs are shallow (`JsonCodec` owns recursion and tag-wrapping),
+> of it: codecs are shallow (`JsonCodecEngine` owns recursion and tag-wrapping),
 > the surface is explicit and curated, the class registry is retired
 > (concrete types decode through their own codecs; unknown tags fall
 > straight to `UnknownValue`), and per-instance `wireTypeTag` survives
@@ -2578,7 +2584,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > **Previous design.** The earlier spec presented `serialize()` and
 > `deserialize()` as standalone top-level functions that received the
 > `SerializationContext` as a parameter. The current design moves these into
-> private methods on `JsonCodec`, keeping the public API clean
+> private methods on `JsonCodecEngine`, keeping the public API clean
 > (`encode()`/`decode()` only) and allowing the codec to encapsulate its
 > internal state (registry, codec view, lenient mode) without threading it
 > through every recursive call.
@@ -2666,7 +2672,7 @@ export function plainObjectFromJson<T extends object = object>(
 export function seemsLikeJsonEncodedFabricValue(value: string): boolean;
 ```
 
-`codecs.ts` creates a single stateless `JsonCodec` instance at module load
+`codecs.ts` creates a single stateless `JsonCodecEngine` instance at module load
 time and reuses it for all encode/decode operations.
 
 The `memory` package wraps these at its serialization boundary
@@ -3188,10 +3194,10 @@ This applies at every point where deserialized data is consumed:
   concrete example.
 
 - **JSON-side codec decoding** (Section 3 of `3-json-encoding.md`) must
-  validate the format of its state before processing. Malformed input
-  should produce a `ProblematicValue` rather than throwing or silently
-  producing garbage (a codec may also throw and rely on a lenient context
-  to do the wrapping; Section 4.5).
+  validate the format of its state before processing. Malformed input must
+  be rejected rather than silently producing garbage; a codec rejects by
+  throwing or by returning a `ProblematicValue`, and the encoding context
+  settles the two against its `lenient` setting (Section 4.5).
 
 - **Hashing** (Section 6.3) may operate on values that have been
   through a deserialization round-trip. Code that extracts properties from

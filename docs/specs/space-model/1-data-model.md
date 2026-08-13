@@ -828,8 +828,9 @@ Concretely:
   a known type, a built-in escape (`/object`, `/quote`), or an unrecognized
   tag (preserved as `UnknownValue` for round-tripping).
 - A multi-key object containing one or more `/`-prefixed keys among its
-  keys is a structural encoding error — also `ProblematicValue`. It is not
-  a valid plain object.
+  keys is a structural encoding error, and is rejected the same way: a
+  `ProblematicValue` from a lenient context, a raise from a strict one. It is
+  not a valid plain object.
 
 See Section 9 of the formal spec for the full rule and the
 `ProblematicValue` interpretation across the cases above.

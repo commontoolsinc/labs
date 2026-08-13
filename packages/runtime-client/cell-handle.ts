@@ -553,7 +553,7 @@ export class CellHandle<T = unknown> {
     //
     // TODO(danfuzz): carry the whole `FabricValue` domain across this
     // connection, at which point this becomes a conversion rather than a
-    // refusal. `JsonCodec` is the mechanism, and the gap it closes is the one
+    // refusal. `JsonCodecEngine` is the mechanism, and the gap it closes is the one
     // marked on `WireCellValue` in `protocol/types.ts`.
     if (value instanceof FabricSpecialObject) {
       throw new Error(

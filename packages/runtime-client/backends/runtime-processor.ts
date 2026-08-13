@@ -2,7 +2,7 @@ import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { newDefaultJsonCodec } from "@commonfabric/data-model/codecs";
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
   PieceController,
@@ -183,7 +183,7 @@ import {
 } from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
-const blobUploadCodec = newDefaultJsonCodec();
+const blobUploadCodec = newDefaultJsonCodecEngine();
 
 function spaceAclResponse(
   runtime: Runtime,

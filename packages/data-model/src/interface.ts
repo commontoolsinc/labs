@@ -40,7 +40,7 @@
  * the other direction, and this module imports nothing, so a symbol here is
  * reachable from anywhere without closing a cycle.
  */
-export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodec");
+export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodecEngine");
 
 /**
  * Abstract base class for all fabric-system value types. This is the common
