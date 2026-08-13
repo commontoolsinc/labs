@@ -19,9 +19,20 @@ import type {
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 
-const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
+/** The scopes an `@scope` suffix on a link handle may name. */
+export const CELL_SCOPE_VALUES: ReadonlySet<string> = new Set([
+  "space",
+  "user",
+  "session",
+]);
 
-function parseScopedIdSegment(idSegment: string): {
+/**
+ * Splits a link's id segment into the id and the scope its `@scope` suffix
+ * names, leaving the scope absent when the segment carries no suffix. Throws
+ * when a suffix is present but names something other than a scope, or leaves
+ * no id in front of it.
+ */
+export function parseScopedIdSegment(idSegment: string): {
   id: string;
   scope?: CellScope;
 } {
@@ -336,6 +347,32 @@ export function decodeJsonPointer(pointer: string): string[] {
   return pointer
     .split("/")
     .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+/** A canonical array-index token: `0`, or digits without a leading zero. */
+const canonicalArrayIndex = /^(0|[1-9][0-9]*)$/;
+
+/** The largest valid JS array index, 2^32 - 2. */
+const MAX_ARRAY_INDEX = 4294967294;
+
+/**
+ * Converts one path segment of a reference to the number-or-string form cell
+ * traversal addresses with. Only a canonical index token — `0`, or digits
+ * with no leading zero — whose value is a valid JS array index (at most
+ * `4294967294`) becomes a number; every other token stays a string.
+ *
+ * Both halves of that rule keep a segment addressing the cell it names. A
+ * non-canonical token such as `01` names a property of that spelling rather
+ * than element `1`, and above `Number.MAX_SAFE_INTEGER` the conversion is
+ * itself lossy — `Number("9007199254740993")` is `9007199254740992` — so
+ * either conversion would silently address a different cell.
+ */
+export function linkPathSegmentToCellPathSegment(
+  segment: string,
+): string | number {
+  if (!canonicalArrayIndex.test(segment)) return segment;
+  const index = Number(segment);
+  return index <= MAX_ARRAY_INDEX ? index : segment;
 }
 
 // Matches both standard links (/of:...) and cross-space links (/@did:...)

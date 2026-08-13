@@ -70,6 +70,21 @@ generate-markdown | cf view --language markdown --rendered
 generate-bytes | cf view --language binary
 ```
 
+## Piece references
+
+Commands that take a piece accept two textual reference forms:
+
+- The canonical fabric reference: the LLM-friendly link form,
+  `/[@did:.../]of:fid1:<id>[@scope][/path]`. This is the one reference syntax of
+  the fabric — the same string names the same cell in patterns, in the shell,
+  and here. A path embedded in a canonical `--piece` reference prefixes the
+  command's positional path argument.
+- The CLI's bare form: `pieceId[@scope]`, `pieceId[@scope]/path` at link
+  endpoints, and slugs. This is a convenience alias for interactive use.
+
+New reference-syntax capabilities land in the canonical form first; the alias
+does not grow a capability the canonical form lacks.
+
 ## Piece discovery
 
 `cf piece ls` lists the pieces in the selected space's piece registry. It reads
