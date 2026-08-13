@@ -208,11 +208,11 @@ export class FabricRegExp extends BaseFabricPrimitive
       /**
        * @inheritDoc
        *
-       * Reports a bad state by throwing rather than by returning a
-       * `ProblematicValue`. The two are equivalent to a caller -- the engine
-       * settles them against `lenient` -- so the choice is only about what can
-       * be expressed, and a `ProblematicValue` holds a `FabricValue` where
-       * this format's states need not be one.
+       * Reports a bad state by returning a `ProblematicValue`, as this
+       * class's JSON codec does. The two ways a codec can reject -- this and
+       * throwing -- are equivalent to a caller, the engine settling them
+       * against `lenient`, so what decides between them is consistency across
+       * the codecs a reader meets together.
        *
        * As on the JSON side, regex syntax is not enforced as part of wire
        * participation beyond what the constructor validates eagerly for the
@@ -224,8 +224,10 @@ export class FabricRegExp extends BaseFabricPrimitive
         _context: ReconstructionContext,
       ): FabricValue {
         if (!isPlainObject(state)) {
-          throw new Error(
-            `\`${typeTag}\`: expected object state, got ${typeof state}`,
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `expected object state, got ${typeof state}`,
           );
         }
 

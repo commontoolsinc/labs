@@ -4,6 +4,7 @@ import {
 } from "@commonfabric/utils/base64url";
 import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
+import type { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
@@ -183,20 +184,22 @@ export class FabricBytes extends BaseFabricPrimitive {
       /**
        * @inheritDoc
        *
-       * Reports a bad state by throwing rather than by returning a
-       * `ProblematicValue`. The two are equivalent to a caller -- the engine
-       * settles them against `lenient` -- so the choice is only about what can
-       * be expressed, and a `ProblematicValue` holds a `FabricValue` where
-       * this format's states need not be one.
+       * Reports a bad state by returning a `ProblematicValue`, as this
+       * class's JSON codec does. The two ways a codec can reject -- this and
+       * throwing -- are equivalent to a caller, the engine settling them
+       * against `lenient`, so what decides between them is consistency across
+       * the codecs a reader meets together.
        */
       decode(
         typeTag: string,
         state: RealmCodecValue,
         _context: ReconstructionContext,
-      ): FabricBytes {
+      ): FabricValue {
         if (!(state instanceof ArrayBuffer)) {
-          throw new Error(
-            `\`${typeTag}\`: expected \`ArrayBuffer\` state, got ${typeof state}`,
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `expected \`ArrayBuffer\` state, got ${typeof state}`,
           );
         }
 

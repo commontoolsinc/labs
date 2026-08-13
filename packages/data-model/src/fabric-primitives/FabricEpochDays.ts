@@ -100,11 +100,11 @@ export class FabricEpochDays extends BaseFabricPrimitive
       /**
        * @inheritDoc
        *
-       * Reports a bad state by throwing rather than by returning a
-       * `ProblematicValue`. The two are equivalent to a caller -- the engine
-       * settles them against `lenient` -- so the choice is only about what can
-       * be expressed, and a `ProblematicValue` holds a `FabricValue` where
-       * this format's states need not be one.
+       * Reports a bad state by returning a `ProblematicValue`, as this
+       * class's JSON codec does. The two ways a codec can reject -- this and
+       * throwing -- are equivalent to a caller, the engine settling them
+       * against `lenient`, so what decides between them is consistency across
+       * the codecs a reader meets together.
        */
       decode(
         typeTag: string,
@@ -112,8 +112,10 @@ export class FabricEpochDays extends BaseFabricPrimitive
         _context: ReconstructionContext,
       ): FabricValue {
         if (typeof state !== "bigint") {
-          throw new Error(
-            `\`${typeTag}\`: expected \`bigint\` state, got ${typeof state}`,
+          return new ProblematicValue(
+            typeTag,
+            state,
+            `expected \`bigint\` state, got ${typeof state}`,
           );
         }
 

@@ -15,11 +15,18 @@ import type { FabricValue } from "@/interface.ts";
 import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/index.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import {
   type RealmCodecValue,
   type RealmTaggedValue,
 } from "@/codec-realm/interface.ts";
-import { fabricFromRealmValue, realmFromFabricValue } from "@/codecs.ts";
+import {
+  fabricFromRealmValue,
+  newDefaultRealmCodecEngine,
+  realmFromFabricValue,
+} from "@/codecs.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -169,6 +176,36 @@ describe("RealmCodecEngine", () => {
     it("refuses a multi-entry `Map`, the tagged form being single-entry", () => {
       expect(() => fabricFromRealmValue(new Map([["a", 1], ["b", 2]]) as never))
         .toThrow(/not a form this format emits/);
+    });
+
+    it("raises a codec's rejection as a `ProblematicStateError`", () => {
+      // A codec's own rejection rather than the walk's: the tag is claimed,
+      // and `FabricBytes` wants an `ArrayBuffer` where this carries a string.
+      // The default engine is strict, so this throws.
+      try {
+        fabricFromRealmValue(new Map([["Bytes@1", "nope"]]));
+        throw new Error("Should have thrown.");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProblematicStateError);
+        expect((e as ProblematicStateError).state).toBe("nope");
+        // Named once. The engine supplies the tag, so a codec that named it
+        // too would read `` `Bytes@1`: `Bytes@1`: ... ``.
+        expect((e as Error).message.match(/Bytes@1/g)).toHaveLength(1);
+      }
+    });
+
+    it("returns that same rejection as a `ProblematicValue` when lenient", () => {
+      // Every realm codec now reports by returning one, as its JSON
+      // counterpart does; `lenient` is what decides which a caller sees.
+      const engine = newDefaultRealmCodecEngine({ lenient: true });
+      const decoded = engine.decode(
+        new Map([["Bytes@1", "nope"]]),
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      );
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).wireTypeTag).toBe("Bytes@1");
+      expect((decoded as ProblematicValue).error).toMatch(/ArrayBuffer/);
     });
 
     it("wraps an unclaimed tag in an `UnknownValue` rather than refusing", () => {
