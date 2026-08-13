@@ -752,6 +752,138 @@ describe("stage F serving loop", () => {
     expect(host.stats().lease.lost).toBeGreaterThanOrEqual(1);
   });
 
+  it("parks on a serving-loop failure instead of leaving a zombie holding the lease (thread r3731191431)", async () => {
+    // A policy whose flushDeadlineMs getter can be made to throw: the
+    // loop reads it once per wave cycle, so flipping `blowUp` makes the
+    // NEXT cycle fail inside #waveCycle — a stand-in for any transient
+    // loop failure. The pinned behavior: the loop's failure PARKS the
+    // space (lease released, host hooks can recover); the pre-fix loop
+    // died silently while the space stayed active and the renew timer
+    // kept the lease alive forever — serving nothing, blocking every
+    // successor.
+    let blowUp = false;
+    host = newHost({
+      idleParkMs: 600_000,
+      renewIntervalMs: 25,
+      get flushDeadlineMs(): number {
+        if (blowUp) throw new Error("induced loop failure");
+        return 1_000;
+      },
+    } as ConstructorParameters<typeof ExecutorHost>[0]["policy"]);
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+
+    const input = clientRuntime.getCell<{ value: number }>(
+      space,
+      "loop-failure-input",
+      undefined,
+    );
+    const tx = clientRuntime.edit();
+    input.withTx(tx).set({ value: 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const spaceServer = host.spaceServer(space)!;
+
+    // Fail the next cycle and wake the loop.
+    blowUp = true;
+    spaceServer.noteDemandChanged();
+
+    await waitUntil(
+      () => host!.spaceServer(space)?.active !== true,
+      "space to park after the loop failure",
+    );
+    // The lease was RELEASED (not left renewing): a rival acquires
+    // immediately.
+    const engine = await server.engineForSpace(space);
+    const rival = executionLeaseHolder("did:key:loop-failure-rival");
+    expect(acquireExecutionLease(engine, { space, holder: rival })).toBe(true);
+    releaseExecutionLease(engine, { space, holder: rival });
+  });
+
+  it("close() during a mid-flight activation leaves no serving zombie: the activated space parks and the lease frees (thread r3731191438)", async () => {
+    host = newHost({ flushDeadlineMs: 1_000, idleParkMs: 600_000 });
+    // Initiate close WHILE the activation is mid-flight (createRuntime
+    // awaits this hook, deterministically interleaving the two).
+    let closeStarted: Promise<void> | undefined;
+    onServingRuntime = () => {
+      closeStarted = host!.close();
+      return Promise.resolve();
+    };
+    openClient();
+
+    const input = clientRuntime.getCell<{ value: number }>(
+      space,
+      "close-race-input",
+      undefined,
+    );
+    const tx = clientRuntime.edit();
+    input.withTx(tx).set({ value: 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    await waitUntil(
+      () => closeStarted !== undefined,
+      "the activation to reach the close-race hook",
+    );
+    await closeStarted;
+
+    // After close() resolves: nothing serves this space, and the lease
+    // row is free for a successor process — the pre-fix close returned
+    // while the activation completed behind it, leaving an active
+    // SpaceServer renewing a lease nobody could take.
+    expect(host.spaceServer(space)?.active ?? false).toBe(false);
+    const engine = await server.engineForSpace(space);
+    const rival = executionLeaseHolder("did:key:close-race-rival");
+    expect(acquireExecutionLease(engine, { space, holder: rival })).toBe(true);
+    releaseExecutionLease(engine, { space, holder: rival });
+  });
+
+  it("a service-principal session alone is not demand: session-open activation is gated like the admission path (thread r3731191525)", async () => {
+    host = newHost({ flushDeadlineMs: 1_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+
+    // A session under the SERVICE identity (a loopback plane, not a
+    // client): its open must NOT activate the space — the loop would
+    // hold a runtime and the lease with no client demanding anything.
+    const serviceManager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    const serviceRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: serviceManager,
+    });
+    try {
+      const probe = serviceRuntime.getCell<{ value: number }>(
+        space,
+        "service-session-probe",
+        undefined,
+      );
+      await probe.sync();
+      // Give any (wrong) activation a beat to happen.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(host.spaceServer(space)).toBeUndefined();
+
+      // A real CLIENT session still activates.
+      openClient();
+      const clientProbe = clientRuntime.getCell<{ value: number }>(
+        space,
+        "service-session-probe",
+        undefined,
+      );
+      await clientProbe.sync();
+      await waitUntil(
+        () => host!.spaceServer(space)?.active === true,
+        "a client session to activate the space",
+      );
+    } finally {
+      await serviceRuntime.dispose();
+      await serviceManager.close();
+    }
+  });
+
   it("parks an idle space with no live sessions (IDLE_PARK_MS), releasing the lease", async () => {
     server = newSharedServer({ sessionTtlMs: 50 });
     host = newHost({

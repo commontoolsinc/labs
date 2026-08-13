@@ -176,10 +176,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
-  /** INBOUND settlement only (server-execution v2 stage F): watch
-   * refreshes + update processing, excluding commit settlement — the
-   * serving loop's wave-settle barrier (a sealed commit settles at the
-   * wave commit itself, so the full synced() would deadlock there). */
+  /** INBOUND settlement only (server-execution v2 stage F): outstanding
+   * watch refreshes/pulls, EXCLUDING commit settlement AND update
+   * processing — the serving loop's wave-settle barrier. Both exclusions
+   * are deadlocks by construction there: a sealed commit settles only at
+   * the wave commit the loop performs AFTER settling, and update
+   * PROCESSING can park behind that same sealed commit (promotion
+   * ordering). The residual — an inbound frame whose processing parks
+   * behind a sealed commit settles after the wave commit — is accepted
+   * for Phase 1 (owner, 2026-08-05) and self-heals on the next wave; see
+   * SpaceReplica.inputSynced for the full statement. */
   inputSynced?(): Promise<void>;
 
   /**
@@ -359,10 +365,16 @@ export interface IStorageProvider {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
-  /** INBOUND settlement only (server-execution v2 stage F): watch
-   * refreshes + update processing, excluding commit settlement — the
-   * serving loop's wave-settle barrier (a sealed commit settles at the
-   * wave commit itself, so the full synced() would deadlock there). */
+  /** INBOUND settlement only (server-execution v2 stage F): outstanding
+   * watch refreshes/pulls, EXCLUDING commit settlement AND update
+   * processing — the serving loop's wave-settle barrier. Both exclusions
+   * are deadlocks by construction there: a sealed commit settles only at
+   * the wave commit the loop performs AFTER settling, and update
+   * PROCESSING can park behind that same sealed commit (promotion
+   * ordering). The residual — an inbound frame whose processing parks
+   * behind a sealed commit settles after the wave commit — is accepted
+   * for Phase 1 (owner, 2026-08-05) and self-heals on the next wave; see
+   * SpaceReplica.inputSynced for the full statement. */
   inputSynced?(): Promise<void>;
 
   /**

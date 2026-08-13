@@ -404,6 +404,13 @@ export class SpaceServer implements TransactionSealDestination {
       }
     } catch (error) {
       logger.error("loop-failed", "serving loop failed", error);
+      // Zombie guard: an ACTIVE space whose loop died would renew its
+      // lease forever while serving nothing — no successor can acquire,
+      // and no cycle ever runs. Park instead: the lease releases, and
+      // the host's activation hooks (admission / session open) recover
+      // the space with a fresh runtime — the same recovery arm as every
+      // other abort (serving-loop.md §6 step 2's recompute-on-demand).
+      await this.park("loop-failed");
     } finally {
       this.#loopRunning = false;
     }

@@ -1023,6 +1023,44 @@ export function getServerExecutionConfig(): boolean {
 
 export function resetServerExecutionConfig(): void {
   serverExecutionEnabled = false;
+  serverExecutionEnablers = 0;
+}
+
+// The flag is a process-global admission input with SEVERAL owners in a
+// serving process (each explicitly-enabled Runtime, plus the
+// ExecutorHost itself), so its production lifecycle is reference-counted
+// HERE — beside the flag — rather than in any one owner: an owner-local
+// count cannot see the others, and an unconditional reset from one owner
+// un-claims `derived` for every other owner's in-flight commit. The
+// direct set/reset functions above remain the test seam (reset is a HARD
+// reset: flag off, count zero).
+let serverExecutionEnablers = 0;
+
+/** Live enabler count — consulted by the one sanctioned explicit-disable
+ * arm (a Runtime constructed with `serverExecution: false` writes the
+ * ambient flag only when NO enabler is live). */
+export function serverExecutionEnablerCount(): number {
+  return serverExecutionEnablers;
+}
+
+/**
+ * Claim the ambient server-execution flag, reference-counted. Returns
+ * the matching release; the flag resets only when the LAST live enabler
+ * releases. The release is idempotent per handle, so exception-safe
+ * callers can release from both a rollback and a finally.
+ */
+export function acquireServerExecutionEnabler(): () => void {
+  serverExecutionEnablers += 1;
+  serverExecutionEnabled = true;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    serverExecutionEnablers = Math.max(0, serverExecutionEnablers - 1);
+    if (serverExecutionEnablers === 0) {
+      serverExecutionEnabled = false;
+    }
+  };
 }
 
 /**
