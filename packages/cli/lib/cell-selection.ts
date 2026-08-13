@@ -1058,12 +1058,12 @@ function schemaAtLocalRef(
   if (pointer !== "" && !pointer.startsWith("/")) return undefined;
   let current: unknown = root;
   for (const segment of pointer.split("/").slice(1)) {
-    if (!isRecord(current)) return undefined;
+    if (!isObjectOrArray(current)) return undefined;
     const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
     current = (current as Record<string, unknown>)[key];
   }
   return current === undefined || typeof current === "boolean" ||
-      isRecord(current)
+      isObjectOrArray(current)
     ? current as JSONSchema | undefined
     : undefined;
 }
@@ -1138,7 +1138,7 @@ function derivePosition(
 
   if (schema.type === "object" || schema.properties !== undefined) {
     const declared = schema.properties;
-    if (!isRecord(declared)) return DERIVED_WHOLE;
+    if (!isObjectNotArray(declared)) return DERIVED_WHOLE;
     const properties: Record<string, unknown> = {};
     let cut = false;
     for (const [key, child] of Object.entries(declared)) {
@@ -2521,7 +2521,7 @@ function markersHeldBy(
     const properties: Record<string, LinkMarkers> = {};
     for (const [key, child] of Object.entries(markers.properties)) {
       const below = held.flatMap((value) =>
-        isRecord(value) && !Array.isArray(value) && key in value
+        isObjectNotArray(value) && key in value
           ? [(value as Record<string, unknown>)[key]]
           : []
       );
