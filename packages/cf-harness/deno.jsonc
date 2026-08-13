@@ -27,6 +27,8 @@
     "./auth/types": "./src/auth/types.ts",
     "./auth/credential-store": "./src/auth/credential-store.ts",
     "./auth/openai-codex": "./src/auth/openai-codex.ts",
+    "./auth/provider-settings": "./src/auth/provider-settings.ts",
+    "./control-errors": "./src/control-errors.ts",
     "./contracts/prompt-slot": "./src/contracts/prompt-slot.ts",
     "./contracts/cfc-invocation-context": "./src/contracts/cfc-invocation-context.ts",
     "./contracts/image": "./src/contracts/image.ts",

@@ -42,7 +42,7 @@ import type {
 } from "@commonfabric/api";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
@@ -127,7 +127,7 @@ const EXCLUDED_REJECTED: JSONSchema = Object.freeze({
 });
 
 const isExcluded = (schema: JSONSchema): boolean =>
-  isRecord(schema) &&
+  isObjectOrArray(schema) &&
   (schema.$comment === "emptyProperties" ||
     schema.$comment === "missingProperty" ||
     schema.$comment === "rejectedProperty");
@@ -195,12 +195,14 @@ const branchWithOuter = (
 ): JSONSchema => {
   const { anyOf: _anyOf, oneOf: _oneOf, ...outer } = schema;
   const combined = combineSchema(outer as JSONSchemaObj, branch);
-  if (!isRecord(combined) || !isRecord(schema.$defs)) return combined;
+  if (!isObjectOrArray(combined) || !isObjectOrArray(schema.$defs)) {
+    return combined;
+  }
   return {
     ...combined as JSONSchemaObj,
     $defs: {
       ...schema.$defs,
-      ...(isRecord(combined.$defs) ? combined.$defs : {}),
+      ...(isObjectOrArray(combined.$defs) ? combined.$defs : {}),
     },
   };
 };
@@ -217,7 +219,7 @@ const branchWithOuter = (
  * same answer, decided on the schema instead.
  */
 const preferAsCellBranch = (schema: JSONSchema): JSONSchema => {
-  if (!isRecord(schema)) return schema;
+  if (!isObjectOrArray(schema)) return schema;
   const branches = schema.anyOf ?? schema.oneOf;
   if (!Array.isArray(branches)) return schema;
   const resolved = branches.map((branch) => resolveBranch(branch, schema));
@@ -250,9 +252,9 @@ const resolveBranch = (
   branch: JSONSchema,
   parent: JSONSchemaObj,
 ): JSONSchema => {
-  if (!isRecord(branch) || !("$ref" in branch)) return branch;
+  if (!isObjectOrArray(branch) || !("$ref" in branch)) return branch;
   const roots = [
-    ...(isRecord(parent.$defs)
+    ...(isObjectOrArray(parent.$defs)
       ? [{ $defs: parent.$defs } as JSONSchemaObj]
       : []),
     branch as JSONSchemaObj,
@@ -267,7 +269,9 @@ const resolveBranch = (
       // matches everything and `false` matches nothing, which is what the
       // definition said. Only exhausting the roots is a failure, and the
       // resolver throws rather than returning a boolean for that.
-      if (isRecord(resolved) || typeof resolved === "boolean") return resolved;
+      if (isObjectOrArray(resolved) || typeof resolved === "boolean") {
+        return resolved;
+      }
     } catch {
       // Try the next root; the warning below covers exhausting them.
     }
@@ -293,7 +297,7 @@ const narrowForValue = (
   schema: JSONSchema | undefined,
   value: FabricValue,
 ): JSONSchema | undefined => {
-  if (!isRecord(schema)) return schema;
+  if (!isObjectOrArray(schema)) return schema;
   const rawBranches = schema.anyOf ?? schema.oneOf;
   if (!Array.isArray(rawBranches) || rawBranches.length === 0) return schema;
   // Resolve `$ref` branches against this schema's own `$defs` first. A branch
@@ -321,7 +325,7 @@ const narrowForValue = (
 };
 
 const requiredKeys = (schema: JSONSchema | undefined): readonly string[] =>
-  isRecord(schema) && Array.isArray(schema.required)
+  isObjectOrArray(schema) && Array.isArray(schema.required)
     ? schema.required as string[]
     : [];
 
@@ -337,7 +341,7 @@ const childSchema = (
     EXCLUDED_EMPTY,
     EXCLUDED_MISSING,
   );
-  if (narrowed !== false || !isRecord(schema)) {
+  if (narrowed !== false || !isObjectOrArray(schema)) {
     return preferAsCellBranch(narrowed);
   }
   // `schemaAtPath` decides which children exist from the schema's `type`, so a
@@ -346,7 +350,9 @@ const childSchema = (
   // subschema is right there, so read it directly rather than refuse. Losing it
   // costs more than a refusal: the child's `asCell` marker goes with it, and
   // the reader gets a plain view where the pattern declared a `Cell`.
-  if (isRecord(schema.properties) && Object.hasOwn(schema.properties, key)) {
+  if (
+    isObjectOrArray(schema.properties) && Object.hasOwn(schema.properties, key)
+  ) {
     const declared = (schema.properties as Record<string, JSONSchema>)[key];
     // Except where the subschema is `false`, which turns the child down rather
     // than describing one to read through.
@@ -359,16 +365,18 @@ const childSchema = (
   // has turned this key down. Without `additionalProperties` the same shape
   // reaches `schemaAtPath` as a missing property rather than as `false`, and an
   // eager read drops the property either way.
-  if (isRecord(schema.properties) && schema.additionalProperties === false) {
+  if (
+    isObjectOrArray(schema.properties) && schema.additionalProperties === false
+  ) {
     return EXCLUDED_REJECTED;
   }
   return false;
 };
 
 const declaredDefault = (schema: JSONSchema): FabricValue | undefined => {
-  if (!isRecord(schema)) return undefined;
+  if (!isObjectOrArray(schema)) return undefined;
   const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
-  return isRecord(resolved)
+  return isObjectOrArray(resolved)
     ? resolved.default as FabricValue | undefined
     : undefined;
 };
@@ -385,7 +393,7 @@ const declaredDefault = (schema: JSONSchema): FabricValue | undefined => {
 const defaultForAbsentValue = (
   schema: JSONSchema | undefined,
 ): FabricValue | undefined =>
-  isRecord(schema) ? declaredDefault(schema) : undefined;
+  isObjectOrArray(schema) ? declaredDefault(schema) : undefined;
 
 /**
  * Build a view over `value` at `link`, or report that the data does not match.
@@ -473,7 +481,7 @@ export function materializeSchemaView(
   }
 
   const actualType = jsonTypeOf(value);
-  if (isRecord(schema) && schema.type !== undefined) {
+  if (isObjectOrArray(schema) && schema.type !== undefined) {
     if (!typeAccepts(schema.type, actualType)) {
       return mismatch(
         `expected ${JSON.stringify(schema.type)}, found ${actualType}`,
@@ -486,7 +494,7 @@ export function materializeSchemaView(
   // `required: ["length"]` — so the check is prototype-chain membership with
   // the brand exemption, which is what an eager read applies before letting one
   // through.
-  if (value instanceof FabricPrimitive && isRecord(schema)) {
+  if (value instanceof FabricPrimitive && isObjectOrArray(schema)) {
     if (opaqueLeafMissesRequired(schema, value)) {
       return mismatch("opaque leaf is missing a required property");
     }
@@ -494,7 +502,7 @@ export function materializeSchemaView(
 
   // A primitive, and a `FabricPrimitive` with it, is a leaf: the type check
   // above is the whole of what a schema says about it.
-  if (!isRecord(value) || value instanceof FabricPrimitive) {
+  if (!isObjectOrArray(value) || value instanceof FabricPrimitive) {
     // The caller read this document without telling the scheduler — the eager
     // traverser registers its own reads as it walks, and so does a view. Same
     // granularity it uses: non-recursive, which a write at this path still
@@ -554,7 +562,7 @@ const visibleKeys = (
   const keys = Object.keys(value).filter((key) =>
     !isExcluded(childSchema(schema, key))
   );
-  if (isRecord(schema) && isRecord(schema.properties)) {
+  if (isObjectOrArray(schema) && isObjectOrArray(schema.properties)) {
     for (const key of Object.keys(schema.properties)) {
       if (Object.hasOwn(value, key)) continue;
       if (declaredDefault(childSchema(schema, key)) === undefined) continue;
@@ -762,7 +770,7 @@ function createArrayView(
     // carries its own identity, and an `asCell` item is a handle whose link is
     // the point of it.
     if (
-      isRecord(item) && !Array.isArray(item) && !isSigilLink(item) &&
+      isObjectNotArray(item) && !isSigilLink(item) &&
       !SchemaObjectTraverser.hasAsCell(itemSchema)
     ) {
       // The read still belongs to the slot, and recursively: the identity is

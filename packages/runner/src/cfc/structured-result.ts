@@ -1,5 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { cfcOpaqueLinkForPath } from "./observation.ts";
 import {
   cfcObjectSchemaIsClosed,
@@ -31,7 +31,7 @@ const schemaAllowsRawString = (
   fullSchema: JSONSchema,
 ): boolean => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
-  if (!isRecord(resolved)) {
+  if (!isObjectOrArray(resolved)) {
     return false;
   }
   if (Array.isArray(resolved.enum)) {
@@ -64,8 +64,8 @@ const schemaAllowsRawString = (
 const schemaDirectlyDeclaresOpaqueLinkObject = (
   schema: Record<string, unknown>,
 ): boolean =>
-  isRecord(schema.properties) &&
-  isRecord(schema.properties["@link"]) &&
+  isObjectOrArray(schema.properties) &&
+  isObjectOrArray(schema.properties["@link"]) &&
   schema.properties["@link"].type === "string" &&
   Array.isArray(schema.required) &&
   schema.required.includes("@link") &&
@@ -81,7 +81,7 @@ const matchingBranches = (
   }
   return branches
     .filter((branch): branch is JSONSchema =>
-      (typeof branch === "boolean" || isRecord(branch)) &&
+      (typeof branch === "boolean" || isObjectOrArray(branch)) &&
       validateAgainstSchema(branch, value, fullSchema) === undefined
     )
     .map((branch) => resolveSchemaForValidation(branch, fullSchema));
@@ -93,7 +93,7 @@ const schemaAcceptsOpaqueLinkObject = (
   fullSchema: JSONSchema,
 ): boolean => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
-  if (!isRecord(resolved)) {
+  if (!isObjectOrArray(resolved)) {
     return false;
   }
   if (validateAgainstSchema(resolved, value, fullSchema) !== undefined) {
@@ -121,7 +121,7 @@ const schemaAcceptsOpaqueLinkObject = (
 const valueIsOpaqueLinkObject = (
   value: unknown,
 ): value is { "@link": string } =>
-  isRecord(value) &&
+  isObjectOrArray(value) &&
   typeof value["@link"] === "string" &&
   Object.keys(value).length === 1;
 
@@ -134,7 +134,7 @@ const matchingBranch = (
     return undefined;
   }
   const branch = branches.find((branch): branch is JSONSchema =>
-    (typeof branch === "boolean" || isRecord(branch)) &&
+    (typeof branch === "boolean" || isObjectOrArray(branch)) &&
     validateAgainstSchema(branch, value, fullSchema) === undefined
   );
   return branch === undefined
@@ -143,7 +143,7 @@ const matchingBranch = (
 };
 
 const isEmptySchemaObject = (schema: JSONSchema): boolean =>
-  isRecord(schema) && Object.keys(schema).length === 0;
+  isObjectOrArray(schema) && Object.keys(schema).length === 0;
 
 const combineAllOf = (schemas: readonly JSONSchema[]): JSONSchema => {
   const constrained = schemas.filter((schema) =>
@@ -175,7 +175,7 @@ const schemaForValue = (
   fullSchema: JSONSchema,
 ): JSONSchema => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
-  if (!isRecord(resolved)) {
+  if (!isObjectOrArray(resolved)) {
     return resolved;
   }
   let base: JSONSchema = resolved;
@@ -199,20 +199,20 @@ const childSchemaForKey = (
   fullSchema: JSONSchema,
 ): JSONSchema => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
-  if (!isRecord(resolved)) {
+  if (!isObjectOrArray(resolved)) {
     return true;
   }
   const childSchemas: JSONSchema[] = [];
-  if (isRecord(resolved.properties)) {
+  if (isObjectOrArray(resolved.properties)) {
     const child = resolved.properties[key];
-    if (typeof child === "boolean" || isRecord(child)) {
+    if (typeof child === "boolean" || isObjectOrArray(child)) {
       childSchemas.push(child);
     }
   }
   if (
-    !(isRecord(resolved.properties) && key in resolved.properties) &&
+    !(isObjectOrArray(resolved.properties) && key in resolved.properties) &&
     (typeof resolved.additionalProperties === "boolean" ||
-      isRecord(resolved.additionalProperties))
+      isObjectOrArray(resolved.additionalProperties))
   ) {
     childSchemas.push(resolved.additionalProperties);
   }
@@ -233,10 +233,10 @@ const knownPropertyNames = (
 ): Set<string> => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
   const known = new Set<string>();
-  if (!isRecord(resolved)) {
+  if (!isObjectOrArray(resolved)) {
     return known;
   }
-  if (isRecord(resolved.properties)) {
+  if (isObjectOrArray(resolved.properties)) {
     for (const key of Object.keys(resolved.properties)) {
       known.add(key);
     }
@@ -263,7 +263,7 @@ const itemSchemaForIndex = (
 ): JSONSchema => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
   const itemSchemas: JSONSchema[] = [];
-  if (isRecord(resolved)) {
+  if (isObjectOrArray(resolved)) {
     // 2020-12 array semantics: a tuple slot governs its exact index; the
     // uniform `items` schema governs only the indices past the slots.
     // Collecting only `items` let tuple elements sanitize against an
@@ -273,11 +273,11 @@ const itemSchemaForIndex = (
       : undefined;
     if (prefixItems !== undefined && index < prefixItems.length) {
       const slot = prefixItems[index];
-      if (typeof slot === "boolean" || isRecord(slot)) {
+      if (typeof slot === "boolean" || isObjectOrArray(slot)) {
         itemSchemas.push(slot);
       }
     } else if (
-      typeof resolved.items === "boolean" || isRecord(resolved.items)
+      typeof resolved.items === "boolean" || isObjectOrArray(resolved.items)
     ) {
       itemSchemas.push(resolved.items);
     }
@@ -295,7 +295,7 @@ const itemSchemaForIndex = (
 
 // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this path
 // today, but will in the not-too-distant future; at that point this guard-less
-// `isRecord`-walk fails (a `FabricPrimitive` is decomposed, a `FabricInstance`
+// `isObjectOrArray`-walk fails (a `FabricPrimitive` is decomposed, a `FabricInstance`
 // is walked by internal slots rather than codec contents). Mark ahead of that.
 const sanitizeValueWithOpaqueLinks = (
   value: unknown,
@@ -329,7 +329,7 @@ const sanitizeValueWithOpaqueLinks = (
     });
     return { value: items, linkedStringCount };
   }
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     if (
       valueIsOpaqueLinkObject(value) &&
       schemaAcceptsOpaqueLinkObject(schema, value, fullSchema)

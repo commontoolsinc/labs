@@ -49,7 +49,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -127,11 +127,11 @@ function setStampedModelOutput(
 function mergeLlmDerivedIntoNode(
   node: Record<string, unknown>,
 ): Record<string, unknown> {
-  const ifc = isRecord(node.ifc) ? node.ifc : {};
+  const ifc = isObjectOrArray(node.ifc) ? node.ifc : {};
   const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
   const stamp = cfcAtom.llmDerived();
   const already = addIntegrity.some((atom) =>
-    isRecord(atom) && isRecord(stamp) && atom.type === stamp.type
+    isObjectOrArray(atom) && isObjectOrArray(stamp) && atom.type === stamp.type
   );
   return {
     ...node,
@@ -175,11 +175,11 @@ function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
   const stampNode = (node: Record<string, unknown>): JSONSchema =>
     mapSubschemas(
       mergeLlmDerivedIntoNode(node) as JSONSchemaObj,
-      (child) => (isRecord(child) ? stampNode(child) : child),
+      (child) => (isObjectOrArray(child) ? stampNode(child) : child),
       { includeDefs: true, includeUnused: true },
     );
 
-  const base: Record<string, unknown> = isRecord(schema)
+  const base: Record<string, unknown> = isObjectOrArray(schema)
     ? schema
     : { type: "object" };
   return internSchema(stampNode(base));
@@ -588,7 +588,7 @@ async function pullContextCells(
         ? getCellOrThrow(value).resolveAsCell()
         : isCell(value)
         ? value.resolveAsCell()
-        : isRecord(value) && typeof value.resolveAsCell === "function"
+        : isObjectOrArray(value) && typeof value.resolveAsCell === "function"
         ? value.resolveAsCell()
         : undefined;
       await resolved?.pull?.();
@@ -1359,7 +1359,7 @@ export function generateObject<T extends Record<string, unknown>>(
         observedConfidentiality: [],
       };
     // Determine whether to use the tool-calling path or the direct generateObject path
-    const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const hasTools = isObjectNotArray(tools) && Object.keys(tools).length > 0;
     const validationSchema = schemaSanitizePromptInjection
       ? toDeepFrozenSchema(schema)
       : undefined;

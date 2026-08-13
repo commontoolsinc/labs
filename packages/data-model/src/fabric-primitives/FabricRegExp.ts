@@ -134,7 +134,7 @@ export class FabricRegExp extends BaseFabricPrimitive
   // Static members
   //
 
-  static #codec = Object.freeze(
+  static #jsonCodec = Object.freeze(
     new (class RegExpCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
@@ -187,7 +187,7 @@ export class FabricRegExp extends BaseFabricPrimitive
 
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): NonterminalCodec {
-    return this.#codec;
+    return this.#jsonCodec;
   }
 }
 

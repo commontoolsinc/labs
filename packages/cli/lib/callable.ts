@@ -18,6 +18,7 @@ import {
   classifyCallableEntry,
 } from "../../fuse/callables.ts";
 import {
+  boundReadValue,
   type CellSelection,
   CellSelectionError,
   deriveSelectedValue,
@@ -41,6 +42,19 @@ export interface CallableResolution {
   cellKey: string;
   pieces: PiecesController;
   space: MemorySpace;
+  /** This verb's declared result, resolved on demand.
+   *
+   * A THUNK rather than a value, because reaching it costs a pattern load and
+   * almost no call needs it. Two callers do: `--help`, which enumerates what a
+   * verb hands back, and a readback whose value closes a circle, which bounds
+   * itself with the declaration rather than failing. A readback that renders
+   * asks nothing of it, so an ordinary dispatch still loads no pattern.
+   *
+   * Absent where the resolution cannot match a declaration to the verb — a
+   * handler reached on the piece's input cell, a piece surface with no pattern
+   * to consult — which says this resolution cannot describe a result rather
+   * than promising there is none. */
+  declaredResult?: () => Promise<JSONSchema | undefined>;
 }
 
 /** The phases a handler invocation passes through, reported on early exit so
@@ -652,6 +666,165 @@ async function selectCallResult(
   return selected;
 }
 
+/**
+ * A result that cannot be written as JSON because it closes a circle, and that
+ * nothing in reach bounds: the verb declared no result, or the declaration it
+ * did make leaves the closing position unbounded.
+ *
+ * A distinct type because the condition is a rendering failure over a handling
+ * that COMMITTED, which is the one thing the message has to carry — the caller
+ * is holding a nonzero exit for a mutation that landed.
+ */
+export class CyclicResultError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CyclicResultError";
+  }
+}
+
+/**
+ * Helper for {@link circularResultPath}: the position, as a JSON pointer, that
+ * is reachable from inside itself.
+ *
+ * Ancestors, not visits: a value reachable by two paths is written twice and
+ * renders fine, while a value reachable from inside itself has no rendering at
+ * all. Own enumerable keys and nothing else, which is what a serializer reads.
+ *
+ * A node carrying `toJSON` is a leaf here, because it is a leaf to the
+ * serializer too: what gets written is whatever that method returns, and the
+ * properties underneath are never visited. The runtime objects a readback
+ * surfaces — a stream on a returned piece — are exactly that case, and their
+ * internals do refer back to themselves.
+ */
+function locateResultCycle(value: unknown): string | undefined {
+  const ancestors = new Set<object>();
+  const walk = (node: unknown, path: string[]): string | undefined => {
+    if (typeof node !== "object" || node === null) return undefined;
+    if (ancestors.has(node)) return encodeJsonPointer(["", ...path]);
+    if (typeof (node as { toJSON?: unknown }).toJSON === "function") {
+      return undefined;
+    }
+    ancestors.add(node);
+    try {
+      const keys = Array.isArray(node)
+        ? node.map((_, index) => String(index))
+        : Object.keys(node);
+      for (const key of keys) {
+        const found = walk(
+          (node as Record<string, unknown>)[key],
+          [...path, key],
+        );
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    } finally {
+      ancestors.delete(node);
+    }
+  };
+  return walk(value, []);
+}
+
+/**
+ * The JSON pointer of the position where `value` closes a circle, or
+ * `undefined` where `value` can be written as JSON.
+ *
+ * Two witnesses have to agree before this reports one. The serializer decides
+ * whether the value renders at all — it is the thing whose failure is being
+ * prevented, so nothing else gets to overrule it — and the walk beside it
+ * decides where. A value the serializer writes is left alone whatever the walk
+ * thinks, and a serializer failure the walk cannot place is left alone too:
+ * `JSON.stringify` refuses more than circles, and a refusal that is not one is
+ * not this path's to answer.
+ */
+function circularResultPath(value: unknown): string | undefined {
+  try {
+    JSON.stringify(value);
+    return undefined;
+  } catch {
+    return locateResultCycle(value);
+  }
+}
+
+/**
+ * Bound a readback that closes a circle with the verb's own declared result,
+ * and hand back the value that bounds to.
+ *
+ * The declaration is the boundary the AUTHOR drew: the position where the
+ * declared type re-enters itself is the position that closes the circle, so
+ * rendering an address there cuts exactly where the shape says it should, and
+ * leaves every other position reading as it already did. The addresses are
+ * written by the same walk `--select`/`--schema` compose theirs with, so a
+ * derived bound and a hand-written one name the same position the same way.
+ *
+ * The cut is applied to `value` — the result already in hand — and never reads
+ * a second one. That is what lets it bound a result a caller ALREADY shaped
+ * without widening it: a projection can name the re-entering subtree whole,
+ * which selects the circle rather than cutting past it, and the cut then
+ * removes the closing position from what they selected rather than answering
+ * with the declaration's whole shape in its place. Where a caller's own shape
+ * renders, this is never reached at all.
+ *
+ * Refuses where nothing in reach bounds it: no declaration at all, a
+ * declaration whose recursion does not reach the closing position, or a
+ * `--filter` beside it — a filtered array's elements no longer say which
+ * positions they came from, and the bound is written in addresses, which name
+ * positions. A refusal names where the circle closes and how to collect the
+ * outcome, which beats a stack trace for a handling that already committed.
+ */
+async function boundCyclicResult(
+  resolved: CallableResolution,
+  receiptCell: Cell<any>,
+  value: unknown,
+  cycle: string,
+  receiptId: string | undefined,
+  deps: CallableExecutionDeps,
+): Promise<unknown> {
+  // Each wording is its own statement, so a reader of the coverage report can
+  // tell which of them a test has ever produced. Inside one expression they
+  // could not: a ternary is a single statement, and its untaken arm is
+  // credited with the count of the statement holding it, so a wording nothing
+  // has ever emitted reads exactly like one every call emits.
+  let whyUnbounded: string;
+  if (deps.selection?.filter !== undefined) {
+    // Decided before the declaration is reached for, because reaching for it
+    // costs a pattern load and no derivation from it can be applied here: the
+    // selection step refuses a `$link` beside a `--filter` on the same grounds
+    // this refusal names, and every derived bound is `$link`s.
+    whyUnbounded = "This call's --filter is answered with the elements " +
+      "themselves, which no longer say which positions they came from, so " +
+      "the addresses a bound is written in cannot be composed beside it.";
+  } else {
+    const declared = await resolved.declaredResult?.();
+    const bounded = await boundReadValue(receiptCell, declared, value);
+    // The bound is only as good as the declaration: a position the declaration
+    // left wide can still expand into the circle, and answering with a value
+    // that cannot be written would move the same failure one step later.
+    if (bounded !== undefined && circularResultPath(bounded) === undefined) {
+      return bounded;
+    }
+    if (declared === undefined) {
+      whyUnbounded = "This verb declares no result for `cf` to bound the " +
+        "readback with.";
+    } else {
+      whyUnbounded = "This verb's declared result leaves the closing " +
+        "position unbounded.";
+    }
+  }
+  throw new CyclicResultError(
+    `Cannot render the result of "${resolved.cellKey}": it closes a circle at ` +
+      `"${cycle}", and JSON has no way to write one. The handling ` +
+      "COMMITTED — the write landed, and only this rendering failed. " +
+      whyUnbounded +
+      " Collect the outcome with a shape that bounds it: " +
+      (receiptId === undefined
+        ? "read the receipt with --select or --schema."
+        : `cf piece get --piece ${receiptId} ` +
+          `--schema '{"properties":{"<field>":{"$link":true}}}'.`) +
+      " Calling the verb again under --select or --schema shapes it at the " +
+      "call, but runs the handler body a second time.",
+  );
+}
+
 export async function executeResolvedCallable(
   resolved: CallableResolution,
   input: unknown,
@@ -764,16 +937,37 @@ export async function executeResolvedCallable(
       ) {
         result = value;
       }
-      if (deps.selection !== undefined && result !== undefined) {
-        // Only where a result exists. Shaping the empty witness would report
-        // `{}` for a verb whose whole answer is that it returned nothing, and
-        // that omission is the distinction the empty receipt exists to draw.
-        result = await selectCallResult(
-          resolved,
-          receipt,
-          deps.selection,
-          deps,
-        );
+      if (result !== undefined) {
+        // Both steps run only where a result exists. Shaping the empty witness
+        // would report `{}` for a verb whose whole answer is that it returned
+        // nothing, and that omission is the distinction the empty receipt
+        // exists to draw.
+        if (deps.selection !== undefined) {
+          result = await selectCallResult(
+            resolved,
+            receipt,
+            deps.selection,
+            deps,
+          );
+        }
+        // Whatever the value in hand came from — the whole receipt, or the
+        // caller's own shape over it — what goes out is written as JSON, and a
+        // circle has no JSON writing at all. A selection is no exemption: a
+        // projection that names the re-entering subtree whole keeps the circle
+        // it selected. The check reads a value already in hand and touches no
+        // storage, so a result that renders reaches stdout exactly as it always
+        // has, and the bound below engages only where one does not.
+        const cycle = circularResultPath(result);
+        if (cycle !== undefined) {
+          result = await boundCyclicResult(
+            resolved,
+            receipt,
+            result,
+            cycle,
+            receiptAddress?.id,
+            deps,
+          );
+        }
       }
       if (deps.showLinks) {
         // After readback and after the selection, off the same receipt the

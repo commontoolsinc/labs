@@ -115,7 +115,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   // Static members
   //
 
-  static #codec = Object.freeze(
+  static #jsonCodec = Object.freeze(
     new (class HashCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
@@ -163,7 +163,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
 
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): NonterminalCodec {
-    return this.#codec;
+    return this.#jsonCodec;
   }
 
   /**

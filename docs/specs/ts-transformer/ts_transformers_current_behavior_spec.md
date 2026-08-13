@@ -220,7 +220,7 @@ list — is the authoritative source. As of this writing it recognizes:
   `llm`, `llmDialog`, the fetch family from the #4206 split — `fetchJson`
   (which additionally gets dedicated type-argument schema injection, §10.5),
   `fetchJsonUnchecked`, `fetchText`, `fetchBinary` — `fetchProgram`,
-  `streamData`,
+  `streamData`, `cellFromUrl`,
   `compileAndRun`, `navigateTo`, and the SQLite builtins `sqliteDatabase` /
   `sqliteQuery` (`sqliteQuery<Row>` additionally gets dedicated type-argument
   schema injection)

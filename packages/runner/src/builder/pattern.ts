@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   ARRAY_SUBSCHEMA_KEYS,
@@ -240,7 +240,7 @@ export function patternFromFrame<T, R>(
  * on it.
  */
 export function assertNoReservedCauseKeys(cause: unknown): void {
-  if (isRecord(cause) && "$generated" in cause) {
+  if (isObjectOrArray(cause) && "$generated" in cause) {
     throw new Error(
       `Cannot use cause ${
         toCompactDebugString(cause)
@@ -306,7 +306,7 @@ function factoryFromPattern<T, R>(
   });
 
   // First from results
-  if (isRecord(outputs) && !isCell(outputs)) {
+  if (isObjectOrArray(outputs) && !isCell(outputs)) {
     Object.entries(outputs).forEach(([key, value]: [string, unknown]) => {
       if (isCell(value)) {
         const exported = value.export();
@@ -326,7 +326,7 @@ function factoryFromPattern<T, R>(
   allCells.forEach((cell) => {
     if (cell.export().path.length) return;
     cell.export().nodes.forEach((node: NodeRef) => {
-      if (isRecord(node.inputs)) {
+      if (isObjectOrArray(node.inputs)) {
         Object.entries(node.inputs).forEach(([key, input]) => {
           if (
             isReactive(input) && input.export().cell === cell &&
@@ -387,7 +387,7 @@ function factoryFromPattern<T, R>(
       return;
     }
 
-    const isStream = isRecord(value) && value.$stream === true;
+    const isStream = isObjectOrArray(value) && value.$stream === true;
     let partialCause: JSONValue;
     if (name === undefined) {
       partialCause = nextAnonymousPartialCause(isStream);
@@ -682,7 +682,7 @@ function asCellGrantsWritableHere(
   for (const entry of schema.asCell) {
     const kind = typeof entry === "string"
       ? entry
-      : isRecord(entry)
+      : isObjectOrArray(entry)
       ? entry.kind
       : undefined;
     if (typeof kind !== "string" || !READ_ONLY_CELL_KINDS.has(kind)) {
@@ -706,7 +706,7 @@ function asCellGrantsWritableHere(
  */
 function schemaMayGrantWritableHandles(schema: unknown): boolean {
   if (Array.isArray(schema)) return schema.some(schemaMayGrantWritableHandles);
-  if (!isRecord(schema)) return false;
+  if (!isObjectOrArray(schema)) return false;
   if (asCellGrantsWritableHere(schema)) return true;
   if ("$ref" in schema || "$dynamicRef" in schema) return true;
   return Object.values(schema).some(schemaMayGrantWritableHandles);
@@ -855,7 +855,7 @@ function assignComputedCellKinds(
     if (!schemaMayGrantWritableHandles(schema)) return;
     const collectAll = () =>
       collectCellRoots(value).forEach((root) => out.add(root));
-    if (!isRecord(schema) || Array.isArray(schema)) {
+    if (!isObjectNotArray(schema)) {
       // A grant may exist but the schema is not a plain object (unreachable
       // for booleans, which never grant): fail safe.
       collectAll();
@@ -918,18 +918,17 @@ function assignComputedCellKinds(
       }
       return;
     }
-    // TODO(danfuzz): `isRecord` admits a `FabricInstance`, whose
+    // TODO(danfuzz): `isObjectOrArray` admits a `FabricInstance`, whose
     // `Object.entries` are empty, so it takes this branch and collects
     // nothing instead of falling to the fail-safe `collectAll()` below. A
     // cell root reachable only through the instance's codec contents is
     // then never disqualified from the `computed` tag — the ack-and-drop
     // this function exists to prevent. (A `FabricPrimitive` passes the same
     // gate, harmlessly: it holds no cell roots.)
-    if (isRecord(target) && !isReactive(target)) {
-      const properties =
-        isRecord(schema.properties) && !Array.isArray(schema.properties)
-          ? schema.properties
-          : undefined;
+    if (isObjectOrArray(target) && !isReactive(target)) {
+      const properties = isObjectNotArray(schema.properties)
+        ? schema.properties
+        : undefined;
       for (const [key, child] of Object.entries(target)) {
         const childSchema = properties !== undefined && key in properties
           ? properties[key]
@@ -966,11 +965,13 @@ function assignComputedCellKinds(
       // is writable.
       if (module.writableProxy === true) return all();
       const schema = module.argumentSchema;
-      const properties = isRecord(schema) && !Array.isArray(schema) &&
-          isRecord(schema.properties) && !Array.isArray(schema.properties)
+      const properties = isObjectNotArray(schema) &&
+          isObjectNotArray(schema.properties)
         ? schema.properties
         : undefined;
-      if (properties === undefined || !isRecord(node.inputs)) return all();
+      if (properties === undefined || !isObjectOrArray(node.inputs)) {
+        return all();
+      }
       const roots = new Set<OpaqueCell<any>>();
       for (const [key, bound] of Object.entries(node.inputs)) {
         if (key === "$ctx" && properties[key] !== undefined) {
@@ -1032,7 +1033,7 @@ function assignComputedCellKinds(
     if (writers.some(writerDisqualifies)) return;
     if (disqualified.has(root)) return;
     const { value } = root.export();
-    if (isRecord(value) && value.$stream === true) return;
+    if (isObjectOrArray(value) && value.$stream === true) return;
     const descriptor = derivedInternalCells.find((candidate) =>
       deepEqual(candidate.partialCause, partialCause)
     );
@@ -1248,7 +1249,7 @@ function schemaWithDefault(
   if (schema === false) {
     return { not: true, default: value as JSONValue };
   }
-  if (isRecord(schema)) {
+  if (isObjectOrArray(schema)) {
     return schema.default === undefined
       ? { ...schema, default: value as JSONValue }
       : schema;

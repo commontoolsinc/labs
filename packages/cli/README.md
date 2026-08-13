@@ -70,6 +70,21 @@ generate-markdown | cf view --language markdown --rendered
 generate-bytes | cf view --language binary
 ```
 
+## Piece references
+
+Commands that take a piece accept two textual reference forms:
+
+- The canonical fabric reference: the LLM-friendly link form,
+  `/[@did:.../]of:fid1:<id>[@scope][/path]`. This is the one reference syntax of
+  the fabric — the same string names the same cell in patterns, in the shell,
+  and here. A path embedded in a canonical `--piece` reference prefixes the
+  command's positional path argument.
+- The CLI's bare form: `pieceId[@scope]`, `pieceId[@scope]/path` at link
+  endpoints, and slugs. This is a convenience alias for interactive use.
+
+New reference-syntax capabilities land in the canonical form first; the alias
+does not grow a capability the canonical form lacks.
+
 ## Piece discovery
 
 `cf piece ls` lists the pieces in the selected space's piece registry. It reads
@@ -396,6 +411,66 @@ Three cases follow from that:
   no entry. A predicate does not — the elements it keeps land at positions that
   are no longer the ones they came from — so `--filter --show-links` is refused,
   the same refusal a `$link` marker meets for the same reason.
+
+#### A result that points back at itself
+
+A verb returning the piece it created hands back a value that can be reached
+from inside itself, whenever that piece carries a back-reference — `parent`
+beside `children`, the shape
+[self-reference](../../docs/common/concepts/self-reference.md) documents. A
+circle has no JSON rendering at all, so a readback that follows one has nothing
+to write.
+
+Where the caller named no shape, `cf` derives one from the verb's declared
+result. The declaration is the boundary the author drew: the position where the
+declared type re-enters itself is the position that closes the circle, so that
+position renders its address and everything else reads as it always did.
+
+```json
+{
+  "item": {
+    "title": "Rotate signing key",
+    "status": "open",
+    "children": [],
+    "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+  }
+}
+```
+
+Three things follow:
+
+- **It is the same `$link` a caller writes by hand.** The derived bound composes
+  its addresses through the same walk the selection step above composes a
+  written `$link` with, so `--schema` over the same position produces the same
+  address.
+- **A caller's own shape wins wherever it renders.** `--filter`, `--select` and
+  `--schema` are applied to the receipt first, and a projection that narrows
+  past the circle — `--select item.title` — is answered exactly as written, with
+  nothing derived added to it. A projection that names the re-entering subtree
+  whole — `--select item` — keeps the circle it selected and is bounded on the
+  way out, but the bound is a cut into what was selected rather than a shape
+  that replaces it: the closing position renders its address, and no position
+  the caller did not name comes back beside it. `--select item.parent` names the
+  closing position itself, and is answered with that one address alone.
+- **Nothing else pays for it.** A result that renders is written out exactly as
+  it was read, and the compiled pattern a declared result is matched through is
+  loaded only where a readback cannot render. The bound itself is a cut into the
+  value already in hand — no pattern graph and no transaction — leaving the
+  address walk a written `$link` is composed through as the only work beside it.
+
+Where nothing bounds the circle — the verb declares no result, the declaration
+it made leaves the closing position wide, or a `--filter` is in play — the call
+reports the position the circle closes at, states that the handling committed,
+and names the receipt to collect the outcome from. It exits nonzero: the outcome
+could not be rendered. The write still landed, which is the property the message
+leads with.
+
+A `--filter` is the case with no bound to reach for rather than one that failed:
+the predicate hands back the elements themselves, which no longer say which
+positions they came from, and a bound is written in addresses, which name
+positions — the refusal `--filter --show-links` earns above, for the same
+reason. Narrowing past the circle with a projection beside the predicate —
+`--filter '.status == "open"' --select title` — renders.
 
 ## Built Binary
 

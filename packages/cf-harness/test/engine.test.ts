@@ -9,6 +9,10 @@ import type { HarnessSkillResourceReads } from "../src/contracts/skill.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
+import {
+  createHarnessHandleTable,
+  mintAddressHandle,
+} from "../src/handle-table.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
 import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
@@ -1170,4 +1174,77 @@ Deno.test("CfHarnessEngine keeps a resumed run's recorded provider authoritative
     Error,
     "credential owner does not match",
   );
+});
+
+Deno.test("CfHarnessEngine records the handle table and persists run state", async () => {
+  const persistedStates: HarnessRunState[] = [];
+  const runRoot = "/tmp/cf-harness-artifacts/run-handle-table";
+  const artifactStore: HarnessArtifactStore = {
+    artifactRoot: "/tmp/cf-harness-artifacts",
+    runRoot,
+    persistRunState(state) {
+      persistedStates.push(structuredClone(state));
+      return Promise.resolve(`${runRoot}/run-state.json`);
+    },
+    persistTranscript() {
+      return Promise.resolve(`${runRoot}/transcript.json`);
+    },
+    persistCapabilitySnapshot() {
+      return Promise.resolve(`${runRoot}/capabilities.json`);
+    },
+    persistCfcPolicySnapshot() {
+      return Promise.resolve(`${runRoot}/cfc-policy-snapshot.json`);
+    },
+    persistPolicyTrace() {
+      return Promise.resolve(`${runRoot}/policy-trace.json`);
+    },
+    persistRunReport() {
+      return Promise.resolve(`${runRoot}/run-report.json`);
+    },
+    persistToolOutput() {
+      return Promise.resolve(`${runRoot}/tool-output.json`);
+    },
+  };
+  const engine = new CfHarnessEngine({
+    artifactStore,
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: "run-handle-table",
+    cfcEnforcementMode: "observe",
+  });
+  const { table } = await mintAddressHandle(
+    createHarnessHandleTable("run-handle-table"),
+    `/of:fid1:${"A".repeat(43)}/items`,
+  );
+
+  await engine.recordHandleTable(table);
+
+  assertEquals(engine.getRunState().handleTable, table);
+  assertEquals(engine.handleTable, table);
+  assertEquals(persistedStates.at(-1)?.handleTable, table);
+});
+
+Deno.test("CfHarnessEngine exposes a handle table carried by a resumed run state", async () => {
+  const { table } = await mintAddressHandle(
+    createHarnessHandleTable("run-resumed-handles"),
+    `/of:fid1:${"B".repeat(43)}`,
+  );
+  const runState: HarnessRunState = {
+    runId: "run-resumed-handles",
+    status: "running",
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:00:01.000Z",
+    cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
+    handleTable: table,
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  };
+
+  const resumed = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState,
+  });
+
+  assertEquals(resumed.handleTable, table);
 });

@@ -33,6 +33,7 @@ import {
 import { FabricInstance, type FabricValue } from "@/interface.ts";
 import { JSON_FORMAT, type JsonCodecValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
+import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import {
   BaseFabricInstance,
@@ -342,22 +343,42 @@ describe("JsonCodecEngine", () => {
       );
     });
 
-    it("throws a codec's rejection when not lenient, tag named", () => {
+    it("throws a codec's rejection when not lenient, tag borne", () => {
       // The same rejection, through a strict engine. `BigInt@1` reports by
       // RETURNING a `ProblematicValue` rather than throwing, and the engine
       // settles the two reporting styles into one answer.
       const jsonCodecEngine = newDefaultJsonCodecEngine();
 
       expect(jsonCodecEngine.lenient).toBe(false);
-      expect(() =>
+
+      try {
         jsonCodecEngine.decode(
           JsonCodecEngine.wrapEncodedValueForTesting(
             JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
             true, // Undecodable on purpose; that is what this test is about.
           ),
           new TestReconstructionContext(),
-        )
-      ).toThrow(/`BigInt@1`: bigint: expected string state/);
+        );
+        throw new Error("Should have thrown.");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProblematicStateError);
+        expect((e as ProblematicStateError).wireTypeTag).toBe("BigInt@1");
+
+        // The tag rides on the error rather than being spliced into the
+        // message, so the codec's own words reach a caller unaltered. Taken
+        // from the lenient run rather than restated here, so that this
+        // compares the two dispositions of one rejection.
+        const lenient = newDefaultJsonCodecEngine({ lenient: true }).decode(
+          JsonCodecEngine.wrapEncodedValueForTesting(
+            JSON.stringify({ "/BigInt@1": { "/Undefined@1": "bad" } }),
+            true,
+          ),
+          new TestReconstructionContext(),
+        );
+
+        expect(lenient).toBeInstanceOf(ProblematicValue);
+        expect((e as Error).message).toBe((lenient as ProblematicValue).error);
+      }
     });
 
     it("hands a nonterminal codec state that has been expanded", () => {

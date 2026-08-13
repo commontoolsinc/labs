@@ -57,7 +57,7 @@ import {
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isPlainObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { isHandlerCell, isStreamValue } from "../../fuse/callables.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
@@ -89,6 +89,7 @@ import {
   CellSelectionError,
   deriveSelectedValue,
 } from "./cell-selection.ts";
+import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -105,6 +106,13 @@ export interface SpaceConfig {
   identity: string;
   jsonOutput?: boolean;
   deferSpaceCellSync?: boolean;
+  /**
+   * Space DIDs embedded in LLM-friendly references given to this command,
+   * carried here when `space` is a name rather than a DID. A name only
+   * resolves to a DID once the session opens, so `loadPieces` checks each
+   * of these against the session's resolved space DID.
+   */
+  embeddedSpaces?: string[];
 }
 
 /** Metadata returned for a piece whose stored data matches a search query. */
@@ -117,6 +125,13 @@ export interface PieceSearchResult {
 export interface PieceConfig extends SpaceConfig {
   piece: string;
   pieceScope?: CellScope;
+  /**
+   * Path segments embedded in an LLM-friendly `--piece` reference. A command
+   * that reads or writes at a path prepends these to its positional path
+   * argument; a command whose intake is id-only rejects a reference that
+   * carries them.
+   */
+  piecePath?: (string | number)[];
 }
 
 export interface SetPiecePatternOptions {
@@ -278,18 +293,17 @@ async function resultProjectionFailedAtPath(
   ) !== undefined;
 }
 
+/**
+ * A resolved piece callable: the shared resolution plus the command spec its
+ * flags and help page are built from.
+ *
+ * `declaredResult` (on {@link CallableResolution}) is attached here for a
+ * handler exposed on the piece's result cell, which is the only place a
+ * declared result can be matched from; a tool's result schema already rides
+ * its callable cell and reaches `commandSpec` directly.
+ */
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
-  /** This verb's declared result, resolved on demand.
-   *
-   * A THUNK rather than a value, because the two callers want it at different
-   * prices. Every `cf piece call` passes through resolution, and only `--help`
-   * has anything to do with a result schema — so the compiled pattern this
-   * needs is loaded when a page asks for it and never for a dispatch. Present
-   * for a handler exposed on the piece's result cell, which is the only place
-   * a declared result can be matched from; a tool's result schema already
-   * rides its callable cell and reaches `commandSpec` directly. */
-  declaredResult?: () => Promise<JSONSchema | undefined>;
 }
 
 export interface PieceCallableDependencies extends CallableExecutionDeps {
@@ -426,6 +440,10 @@ export async function loadPieces(
     "loadPieces.makeSession",
     () => makeSession(config),
   );
+  // A `--space` given as a name has only now resolved to a DID; this is the
+  // deferred half of the embedded-space check `normalizeLLMFriendlyRef`
+  // performs at parse time for a DID-configured space.
+  validateEmbeddedSpaces(config.embeddedSpaces, session.space);
   // Use a const ref object so we can assign later while keeping const binding
   const piecesRef: { current?: PiecesController } = {};
   const runtimeErrors: CliRuntimeErrorRecord[] = [];
@@ -1822,9 +1840,11 @@ function listingMarks(
   rootSchema: unknown,
   name: string,
 ): { tier?: "wrapper"; deprecated?: boolean } {
-  if (!isRecord(rootSchema) || !isRecord(rootSchema.properties)) return {};
+  if (!isObjectOrArray(rootSchema) || !isObjectOrArray(rootSchema.properties)) {
+    return {};
+  }
   const property = (rootSchema.properties as Record<string, unknown>)[name];
-  if (!isRecord(property)) return {};
+  if (!isObjectOrArray(property)) return {};
   return {
     ...(property.tier === "wrapper" ? { tier: "wrapper" as const } : {}),
     ...(property.deprecated === true ? { deprecated: true } : {}),
@@ -1838,10 +1858,10 @@ function listingMarks(
  * of aliases falls back to whole-link equality, which can only miss — and a
  * miss costs a row its `outputSchema`, never gives it the wrong one. */
 function samePatternLink(left: unknown, right: unknown): boolean {
-  if (!isRecord(left) || !isRecord(right)) return false;
+  if (!isObjectOrArray(left) || !isObjectOrArray(right)) return false;
   const leftAlias = left.$alias;
   const rightAlias = right.$alias;
-  if (!isRecord(leftAlias) || !isRecord(rightAlias)) {
+  if (!isObjectOrArray(leftAlias) || !isObjectOrArray(rightAlias)) {
     return deepEqual(left, right);
   }
   return deepEqual(leftAlias.partialCause, rightAlias.partialCause) &&
@@ -1867,17 +1887,17 @@ function declaredVerbResults(
 ): Map<string, JSONSchema> {
   const declared = new Map<string, JSONSchema>();
   const result = pattern?.result;
-  if (!isRecord(result)) return declared;
+  if (!isObjectOrArray(result)) return declared;
   const nodes = Array.isArray(pattern?.nodes) ? pattern.nodes : [];
   for (const [name, link] of Object.entries(result)) {
     let resultSchema: JSONSchema | undefined;
     let matched = 0;
     for (const node of nodes) {
-      if (!isRecord(node) || !isRecord(node.inputs)) continue;
+      if (!isObjectOrArray(node) || !isObjectOrArray(node.inputs)) continue;
       if (!samePatternLink(link, node.inputs.$event)) continue;
       matched++;
       const module = node.module;
-      if (isRecord(module) && module.resultSchema !== undefined) {
+      if (isObjectOrArray(module) && module.resultSchema !== undefined) {
         resultSchema = module.resultSchema as JSONSchema;
       }
     }
@@ -1960,10 +1980,11 @@ export async function listPieceCallables(
     if (cellProp === "result") resultRoot = rootCell;
     const value = rootCell.get?.();
     const schema = rootCell.schema;
-    const schemaKeys = isRecord(schema) && isRecord(schema.properties)
-      ? Object.keys(schema.properties)
-      : [];
-    const valueKeys = isRecord(value) ? Object.keys(value) : [];
+    const schemaKeys =
+      isObjectOrArray(schema) && isObjectOrArray(schema.properties)
+        ? Object.keys(schema.properties)
+        : [];
+    const valueKeys = isObjectOrArray(value) ? Object.keys(value) : [];
     for (const name of new Set([...valueKeys, ...schemaKeys])) {
       if (listings.has(name)) continue; // result shadows input, like call
       const callableCell = rootCell.key(name).asSchemaFromLinks();
@@ -2014,7 +2035,7 @@ export async function listPieceCallables(
     : undefined;
   if (pieceCell) {
     const pieceValue = pieceCell.get?.();
-    if (isRecord(pieceValue)) {
+    if (isObjectOrArray(pieceValue)) {
       for (const name of Object.keys(pieceValue)) {
         if (!listings.has(name)) rejected.add(name);
       }
@@ -2542,7 +2563,7 @@ async function inspectSlugTargetCell(
   const target = await resolveSlugTargetCell(pieces, slug);
   await target.pull();
   const result = target.get() as Readonly<unknown>;
-  const name = isRecord(result) && typeof result[NAME] === "string"
+  const name = isObjectOrArray(result) && typeof result[NAME] === "string"
     ? result[NAME]
     : undefined;
   const identityRef = getPatternIdentityRef(target);
@@ -2745,8 +2766,8 @@ export async function setCellCfcLabel(
   }
 
   const { observes: requestedObserves, ...label } = update;
-  const schemaIfc = isRecord(targetCell.schema) &&
-      isRecord(targetCell.schema.ifc)
+  const schemaIfc = isObjectOrArray(targetCell.schema) &&
+      isObjectOrArray(targetCell.schema.ifc)
     ? targetCell.schema.ifc
     : undefined;
   const existingObservationClasses = new Set<
@@ -3060,7 +3081,7 @@ export async function recreateSpaceRootPattern(
 
 function isVNodeLike(value: unknown): value is VNode {
   const visited = new Set<object>();
-  while (isRecord(value) && UI in value) {
+  while (isObjectOrArray(value) && UI in value) {
     if (visited.has(value)) return false; // Cycle detected
     visited.add(value);
     value = value[UI];

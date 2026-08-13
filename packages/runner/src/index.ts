@@ -123,6 +123,7 @@ export {
   isCellLink as isLink,
   isWriteRedirectLink,
   KeepAsCell,
+  matchLLMFriendlyLink,
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,

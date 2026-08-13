@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { EntityKind } from "../entity-kind.ts";
 import type { PatternBuilder } from "./pattern.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
@@ -16,6 +16,7 @@ import type {
   AsWriteonlyCell,
   ByRefFunction,
   Cell,
+  CellFromUrlFunction,
   CellScope,
   CellTypeConstructor,
   CfDataFunction,
@@ -196,7 +197,7 @@ export type StreamValue = {
 };
 
 export function isStreamValue(value: unknown): value is StreamValue {
-  return isRecord(value) && "$stream" in value && value.$stream === true;
+  return isObjectOrArray(value) && "$stream" in value && value.$stream === true;
 }
 
 declare module "@commonfabric/api" {
@@ -389,6 +390,7 @@ export interface BuilderFunctionsAndConstants {
   generateObject: GenerateObjectFunction;
   generateText: GenerateTextFunction;
   fetchBinary: FetchBinaryFunction;
+  cellFromUrl: CellFromUrlFunction;
   fetchText: FetchTextFunction;
   fetchJson: FetchJsonFunction;
   fetchJsonUnchecked: FetchJsonUncheckedFunction;

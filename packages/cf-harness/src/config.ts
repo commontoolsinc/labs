@@ -15,6 +15,19 @@ export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
   "enforce-explicit" as const satisfies CfcEnforcementMode;
 export type HarnessGatewayAuthMode = "bearer" | "none";
+
+/**
+ * Connection settings for the trusted Fabric session behind the
+ * `run_pattern` tool: the deployed API URL, a PKCS#8 identity keyfile path
+ * on the host, and the target space (a name or a `did:key`). When present,
+ * the run offers `run_pattern` in the parent tool surface; when absent, the
+ * tool is unavailable.
+ */
+export interface HarnessFabricSessionConfig {
+  apiUrl: string;
+  identityKeyPath: string;
+  space: string;
+}
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"
   | "openai-codex";
@@ -30,6 +43,7 @@ interface HarnessCommonConfig {
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
+  fabricSession?: HarnessFabricSessionConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -78,6 +92,7 @@ export interface ResolveHarnessConfigOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
+  fabricSession?: HarnessFabricSessionConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -214,6 +229,9 @@ export const resolveHarnessConfig = (
       : {}),
     cfcEnforcementMode: resolveCfcEnforcementMode(options),
     cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
+    ...(options.fabricSession !== undefined
+      ? { fabricSession: options.fabricSession }
+      : {}),
   };
   if (modelProvider === "openai-codex") {
     return {

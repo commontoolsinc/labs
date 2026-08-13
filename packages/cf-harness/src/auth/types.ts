@@ -12,9 +12,29 @@ export interface OpenAICodexOAuthCredential {
 
 export type HarnessCredential = OpenAICodexOAuthCredential;
 
-export interface HarnessCredentialStatus {
-  providerId: HarnessCredentialProviderId;
-  signedIn: boolean;
-  expiresAt?: number;
-  expired?: boolean;
+export type HarnessCredentialTerminalReason =
+  | "invalid-grant"
+  | "revoked"
+  | "refresh-token-reused";
+
+export interface HarnessCredentialHealth {
+  status: "reconnect-required";
+  reason: HarnessCredentialTerminalReason;
 }
+
+export type HarnessCredentialStatus =
+  | {
+    providerId: HarnessCredentialProviderId;
+    status: "disconnected";
+  }
+  | {
+    providerId: HarnessCredentialProviderId;
+    status: "connected";
+    refreshHealth: "ready" | "refresh-on-use";
+  }
+  | {
+    providerId: HarnessCredentialProviderId;
+    status: "reconnect-required";
+    refreshHealth: "reconnect-required";
+    reason: HarnessCredentialTerminalReason;
+  };

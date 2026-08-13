@@ -44,7 +44,11 @@ the rules therein. These include:
   new one — historical.
 - When you produce a point-in-time artifact (a report on completed work, an
   audit, a post-mortem), create it in `docs/history/` with the metadata header
-  defined in `docs/history/README.md`.
+  defined in `docs/history/README.md`, and add an entry for it to
+  `docs/history/INDEX.md`. That entry is a single line, however long it runs,
+  and that file holds nothing but its preamble, its section headings, and the
+  entries — both rules are what let git merge concurrent additions to the index
+  without a conflict.
 - When a live plan or design reaches "done" or is abandoned — for example, your
   change lands its last phase — archive it to `docs/history/` following the
   procedure in `docs/README.md`.
@@ -200,6 +204,9 @@ Each of these gates fails CI on its own, and none of them run as part of
   event
 - `deno task check-docs` — a TypeScript block under `docs/` that stopped
   compiling
+- `deno task check-docs-history-index` — an entry in `docs/history/INDEX.md`
+  that is wrapped, duplicated, or points at nothing, or a document in that tree
+  that no entry covers
 - `deno task check-conflict-markers` — an unresolved merge-conflict marker left
   in a file, which `docs/` has no other mechanical gate against
 - `deno task check-skill-facts` — a path or import cited by a skill, an

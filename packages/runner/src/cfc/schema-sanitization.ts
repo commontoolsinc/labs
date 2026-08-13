@@ -18,12 +18,13 @@ import {
 import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   hasOwnEnumerableDataProperty,
   isCellKind,
   isSchemaScope,
 } from "../scope.ts";
+import { isSubschema } from "../schema-walk.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 import {
   cfcSchemaChildRoot,
@@ -101,7 +102,7 @@ export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
   if (typeof atom === "string") {
     return PROMPT_INJECTION_RISK_KINDS.has(atom);
   }
-  return isRecord(atom) &&
+  return isObjectOrArray(atom) &&
     atom.type === CFC_ATOM_TYPE.Caveat &&
     typeof atom.kind === "string" &&
     PROMPT_INJECTION_RISK_KINDS.has(atom.kind);
@@ -183,7 +184,7 @@ const mergeIfc = (
     instructionInert: boolean;
   },
 ): Record<string, unknown> => {
-  const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+  const existingIfc = isObjectOrArray(schema.ifc) ? schema.ifc : {};
   const retainedConfidentiality = instructionInert
     ? dischargeMaterialRiskAtoms(observedConfidentiality)
     : uniqueAtoms(observedConfidentiality);
@@ -258,7 +259,7 @@ export const resolveSchemaForValidation = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
 ): JSONSchema =>
-  isRecord(schema) && typeof schema.$ref === "string"
+  isObjectOrArray(schema) && typeof schema.$ref === "string"
     ? resolveCfcSchemaRefs(schema, fullSchema) ?? false
     : schema;
 
@@ -273,7 +274,7 @@ const annotateSchema = (
   }
 
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
 
   // $ref cycle guard: resolveSchemaRefs only detects cycles within a single
   // call, but annotateSchema recurses across resolutions. A local ref string
@@ -459,7 +460,7 @@ const stripRequiredFields = (schema: JSONSchema): JSONSchema => {
   const { required: _required, ...rest } = schema as any;
   const result: Record<string, unknown> = { ...rest };
 
-  if (isRecord(result.properties)) {
+  if (isObjectOrArray(result.properties)) {
     result.properties = Object.fromEntries(
       Object.entries(result.properties).map(([key, value]) => [
         key,
@@ -769,7 +770,7 @@ const claimDefinitionScopes = (
   let claimed: Set<DefinitionKey> | undefined;
   for (const key of DEFINITION_KEYS) {
     const definitions = schema[key];
-    if (!isRecord(definitions) || Array.isArray(definitions)) continue;
+    if (!isObjectNotArray(definitions)) continue;
     let walked = context.walkedDefinitionsByRoot.get(rootKey);
     if (walked?.has(definitions)) continue;
     if (!walked) {
@@ -812,13 +813,13 @@ const validateSchemaDefinitionInternal = (
   path: string,
   context: SchemaDefinitionContext,
 ): string | undefined => {
-  if (typeof schema === "boolean") return undefined;
-  if (!isRecord(schema) || Array.isArray(schema)) {
+  if (!isSubschema(schema)) {
     return `${path}: schema must be an object or boolean`;
   }
+  if (typeof schema === "boolean") return undefined;
 
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (context.provenByRoot.get(rootKey)?.has(schema)) return undefined;
   let active = context.activeByRoot.get(rootKey);
   if (active?.has(schema)) {
@@ -897,7 +898,7 @@ const validateSchemaDefinitionInternal = (
       for (let index = 0; index < schema.asCell.length; index++) {
         const entry = schema.asCell[index] as unknown;
         if (isCellKind(entry)) continue;
-        if (!isRecord(entry) || Array.isArray(entry)) {
+        if (!isObjectNotArray(entry)) {
           return `${path}.asCell[${index}]: must be a cell kind or descriptor`;
         }
         if (!hasOwnEnumerableDataProperty(entry, "kind")) {
@@ -931,7 +932,7 @@ const validateSchemaDefinitionInternal = (
     ) {
       const value = schema[key];
       if (value === undefined) continue;
-      if (!isRecord(value) || Array.isArray(value)) {
+      if (!isObjectNotArray(value)) {
         return `${path}.${key}: must be an object of schemas`;
       }
     }
@@ -951,8 +952,7 @@ const validateSchemaDefinitionInternal = (
     }
     if (schema.dependentRequired !== undefined) {
       if (
-        !isRecord(schema.dependentRequired) ||
-        Array.isArray(schema.dependentRequired)
+        !isObjectNotArray(schema.dependentRequired)
       ) {
         return `${path}.dependentRequired: must be an object`;
       }
@@ -1107,7 +1107,7 @@ const validateSchemaDefinitionInternal = (
     for (const key of claimedDefinitions ?? []) {
       if (settledDefinitions.has(key)) continue;
       const definitions = schema[key];
-      if (isRecord(definitions)) {
+      if (isObjectOrArray(definitions)) {
         releaseCutDefinitionScope(rootKey, definitions, context, provenLogMark);
       }
     }
@@ -1504,11 +1504,11 @@ const validateAgainstSchemaInternal = (
 ): SchemaValidationFailure | undefined => {
   if (schema === true) return undefined;
   if (schema === false) return mismatch("schema rejects all values");
-  if (!isRecord(schema) || Array.isArray(schema)) {
+  if (!isObjectNotArray(schema)) {
     return indeterminate("schema must be an object or boolean");
   }
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (!markSchemaValueActive(rootKey, schema, value, context)) {
     return indeterminate("recursive schema validation made no progress");
   }

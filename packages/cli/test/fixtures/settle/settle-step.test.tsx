@@ -4,12 +4,12 @@
  * step. The settle step is transparent: it produces no assertion result and the
  * run passes.
  */
-import { action, computed, pattern, TESTS, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const flag = new Writable(false);
   const setFlag = action(() => flag.set(true));
-  const isSet = computed(() => flag.get() === true);
+  const isSet = assert(() => flag.get() === true);
 
   return {
     [TESTS]: [

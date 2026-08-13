@@ -13,6 +13,7 @@ import type {
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
+import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
 import { UnknownValue } from "./UnknownValue.ts";
 
@@ -220,19 +221,21 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    *
    * @param wireTypeTag The tag the malformed data arrived under, or the
    *   meta-tag naming the structure at fault.
-   * @param state The data at fault, preserved so that a lenient result
-   *   round-trips.
+   * @param state The data at fault, of any type whatsoever, preserved so that
+   *   a lenient result round-trips. A format whose states are not
+   *   `FabricValue`s hands one over as it stands; `ProblematicValue` renders
+   *   what it cannot keep.
    * @param error What is wrong with it, phrased to stand on its own -- it is
    *   the whole of the message when this raises.
    * @throws If this engine is not lenient.
    */
   protected reportMalformed(
     wireTypeTag: string,
-    state: FabricValue,
+    state: any,
     error: string,
   ): FabricValue {
     if (!this.lenient) {
-      throw new Error(error);
+      throw new ProblematicStateError(wireTypeTag, state, error);
     }
 
     return deepFreeze(new ProblematicValue(wireTypeTag, state, error));
@@ -286,7 +289,12 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
         );
     } catch (e: unknown) {
       if (!this.lenient) {
-        throw e;
+        // Normalized rather than rethrown: what a codec throws is not
+        // guaranteed to be an `Error`, let alone one naming the state it
+        // choked on. `fromThrown()` returns one that does -- the thrown
+        // value itself where it already qualifies, and otherwise a fresh one
+        // holding it as `cause`.
+        throw ProblematicStateError.fromThrown(tag, state, e);
       }
 
       // Report over the state the codec was actually handed, so that it says
@@ -306,7 +314,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // nothing about what a caller wants. `lenient` is what says that, so
       // this instance settles both into the same answer: a strict decode
       // fails, whichever way the codec spelled it.
-      throw new Error(`\`${tag}\`: ${decoded.error}`);
+      throw new ProblematicStateError(tag, decoded.state, decoded.error);
     }
 
     // A codec's `decode()` promises deep-frozen results rather than relying on

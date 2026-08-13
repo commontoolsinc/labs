@@ -1,3 +1,4 @@
+import { cellFromUrl } from "./cell-from-url.ts";
 import { raw } from "../module.ts";
 import { map } from "./map.ts";
 import { filter } from "./filter.ts";
@@ -45,6 +46,7 @@ const WISH_DEBOUNCE_MS = 50;
 export function registerBuiltins(runtime: Runtime) {
   const moduleRegistry = runtime.moduleRegistry;
 
+  moduleRegistry.addModuleByRef("cellFromUrl", raw(cellFromUrl));
   moduleRegistry.addModuleByRef("map", raw(map));
   moduleRegistry.addModuleByRef("filter", raw(filter));
   moduleRegistry.addModuleByRef("flatMap", raw(flatMap));

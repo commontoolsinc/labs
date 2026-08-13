@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type {
@@ -22,7 +22,8 @@ const isPrefix = (
   left.every((segment, index) => segment === right[index]);
 
 const isCfcMetadata = (value: unknown): value is CfcMetadata =>
-  isRecord(value) && value.version === 1 && isRecord(value.labelMap) &&
+  isObjectOrArray(value) && value.version === 1 &&
+  isObjectOrArray(value.labelMap) &&
   Array.isArray(value.labelMap.entries);
 
 export const readStoredCfcMetadata = (
@@ -45,7 +46,7 @@ export const readStoredCfcMetadata = (
   if (isCfcMetadata(document)) {
     return document;
   }
-  return isRecord(document) && isCfcMetadata(document.cfc)
+  return isObjectOrArray(document) && isCfcMetadata(document.cfc)
     ? document.cfc
     : undefined;
 };

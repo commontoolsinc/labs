@@ -29,7 +29,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -503,7 +503,7 @@ export class CellHandle<T = unknown> {
       return value.map((item) => CellHandle.deserialize(base, item));
     }
 
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       const reference = parseAsCellRef(
         value as JSONValue | undefined,
         base.ref(),
@@ -562,7 +562,7 @@ export class CellHandle<T = unknown> {
       );
     }
 
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       return Object.fromEntries(
         Object.entries(value).map((
           [key, member],
@@ -638,8 +638,8 @@ function applyValue(
   }
 
   // For plain objects, recursively apply to each property
-  if (isRecord(current)) {
-    const prevRecord = (isRecord(previous) && !Array.isArray(previous))
+  if (isObjectOrArray(current)) {
+    const prevRecord = (isObjectNotArray(previous))
       ? previous as Record<string, unknown>
       : {};
     const result: Record<string, unknown> = {};

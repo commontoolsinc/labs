@@ -5,12 +5,12 @@
  * FAIL with "expected non-idempotent computation(s), none detected" — a
  * silent pass here is exactly the detection regression the flag guards.
  */
-import { computed, pattern, TESTS, Writable } from "commonfabric";
+import { assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const value = new Writable("hello");
 
-  const ok = computed(() => value.get() === "hello");
+  const ok = assert(() => value.get() === "hello");
 
   return {
     [TESTS]: [{ assertion: ok }],

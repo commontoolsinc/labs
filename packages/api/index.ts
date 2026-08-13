@@ -2828,6 +2828,21 @@ export type FetchJsonUncheckedFunction = (
   }>,
 ) => Reactive<{ pending: boolean; result: any; error?: any }>;
 
+/**
+ * The cell a URL names, if it names one.
+ *
+ * Resolves with no `cell` when the URL addresses no cell — most URLs are web
+ * pages, and being told no is an answer rather than a failure. `hosts` names
+ * the hosts whose page URLs address cells; a page URL from anywhere else is a
+ * link to a web page.
+ */
+export type CellFromUrlFunction = (
+  params: FactoryInput<{
+    url: string;
+    hosts?: string[];
+  }>,
+) => Reactive<{ pending: boolean; cell?: ReadonlyCell<{ [NAME]: string }> }>;
+
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
 ) => Reactive<{
@@ -3417,6 +3432,7 @@ export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
+export declare const cellFromUrl: CellFromUrlFunction;
 export declare const fetchBinary: FetchBinaryFunction;
 export declare const fetchText: FetchTextFunction;
 export declare const fetchJson: FetchJsonFunction;

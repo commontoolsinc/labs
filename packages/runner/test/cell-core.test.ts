@@ -181,7 +181,7 @@ describe("Cell", () => {
     // `Cell.set` pre-resolves its top-level link, so to exercise
     // `normalizeAndDiff`'s redirect-resolution branch we need the redirect
     // at a nested key — that's the path it actually fires on, during the
-    // per-key recursion in the `isRecord(newValue)` branch.
+    // per-key recursion in the `isObjectOrArray(newValue)` branch.
     const parent = rt.getCell<{ slot: unknown }>(
       space,
       "nested redirect parent",

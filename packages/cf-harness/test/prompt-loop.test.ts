@@ -1874,6 +1874,109 @@ Deno.test("CfHarnessPromptLoop only advertises allowed tools when a tool allowli
   );
 });
 
+const noToolCallFetch =
+  (fetchCalls: RequestInit[]): typeof fetch => (_input, init) => {
+    fetchCalls.push(init ?? {});
+    return Promise.resolve(
+      new Response(
+        JSON.stringify(responsesBodyFromChatFixture({
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "No tool call needed.",
+            },
+          }],
+        })),
+        { status: 200 },
+      ),
+    );
+  };
+
+Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surface when a fabric session is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-default-surface",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    [
+      "bash",
+      "read_file",
+      "view_image",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+      "run_pattern",
+    ],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises run_pattern from an explicit allowlist when a fabric session is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "run_pattern"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-allowlisted",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "run_pattern"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops run_pattern from an explicit allowlist when no fabric session is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "run_pattern"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-pattern-no-session",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
 Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summary-only result", async () => {
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;

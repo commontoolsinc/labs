@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -1192,7 +1192,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // one concrete thing — no wildcards, no empty identifiers, no non-string
     // path segments. A rejected marker leaves the gate fully in force.
     if (
-      !isRecord(exemption) ||
+      !isObjectOrArray(exemption) ||
       typeof exemption.space !== "string" || exemption.space.length === 0 ||
       typeof exemption.id !== "string" || exemption.id.length === 0 ||
       !Array.isArray(exemption.path) ||
@@ -1748,7 +1748,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           ...address,
           path: lastExistingPath,
         }, { meta: ignoreReadForScheduling });
-        if (!isRecord(currentValue)) {
+        if (!isObjectOrArray(currentValue)) {
           // This should have already been caught as type mismatch error
           throw new Error(
             `Value at path ${address.path.join("/")} is not an object`,

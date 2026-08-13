@@ -3,17 +3,11 @@
  * trivially idempotent. No flagged participant sees a violation, so the run
  * must FAIL with the synthetic "expectNonIdempotent" result.
  */
-import {
-  computed,
-  multiUserTest,
-  pattern,
-  TESTS,
-  Writable,
-} from "commonfabric";
+import { assert, multiUserTest, pattern, TESTS, Writable } from "commonfabric";
 
 export const alice = pattern(() => {
   const value = new Writable("alice");
-  const ok = computed(() => value.get() === "alice");
+  const ok = assert(() => value.get() === "alice");
   return {
     [TESTS]: [{ assertion: ok }],
     expectNonIdempotent: true,
@@ -22,7 +16,7 @@ export const alice = pattern(() => {
 
 export const bob = pattern(() => {
   const value = new Writable("bob");
-  const ok = computed(() => value.get() === "bob");
+  const ok = assert(() => value.get() === "bob");
   return {
     [TESTS]: [{ assertion: ok }],
   };

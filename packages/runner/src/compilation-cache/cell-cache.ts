@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 import { normalize } from "@std/path/posix";
@@ -839,7 +839,7 @@ export function writeSourceDocs(
         ...(delegatedModuleIdentities.length > 0
           ? { delegatedModuleIdentities }
           : {}),
-        ...(isRecord(existingAnnotations)
+        ...(isObjectOrArray(existingAnnotations)
           ? { annotations: existingAnnotations }
           : {}),
       } as StoredSourceDoc);
@@ -942,7 +942,9 @@ export function readLoadedSourceClosure(
       ...(delegatedModuleIdentities.length > 0
         ? { delegatedModuleIdentities }
         : {}),
-      ...(isRecord(doc.annotations) ? { annotations: doc.annotations } : {}),
+      ...(isObjectOrArray(doc.annotations)
+        ? { annotations: doc.annotations }
+        : {}),
     });
     for (const child of childDocs) {
       if (!out.has(child.doc.identity)) queue.push(child);
@@ -1177,7 +1179,7 @@ function storedCoverageSpans(
   if (!Array.isArray(spans)) return undefined;
   const out: PatternCoverageSpan[] = [];
   for (const span of spans) {
-    if (!isRecord(span)) return undefined;
+    if (!isObjectOrArray(span)) return undefined;
     const { fileName, id, kind, startLine, endLine, startColumn, endColumn } =
       span;
     if (
