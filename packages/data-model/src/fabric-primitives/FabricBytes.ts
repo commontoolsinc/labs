@@ -28,8 +28,11 @@ import { JSON_CODEC } from "@/codec-interface/interface.ts";
  * (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the defense.)
  */
 export class FabricBytes extends BaseFabricPrimitive {
-  /** Private byte storage. Callers use `slice()` or `copyInto()`. */
-  readonly #bytes: Uint8Array;
+  /**
+   * Private byte storage. Guaranteed to be backed by an exact-sized and
+   * unshared `ArrayBuffer`.
+   */
+  readonly #bytes: Uint8Array<ArrayBuffer>;
 
   /**
    * Constructs an instance holding the given bytes, which it owns outright.
@@ -66,6 +69,21 @@ export class FabricBytes extends BaseFabricPrimitive {
    */
   slice(start?: number, end?: number): Uint8Array<ArrayBuffer> {
     return this.#bytes.slice(start, end);
+  }
+
+  /**
+   * Returns a copy of the bytes (or a sub-range) as a bare `ArrayBuffer`. The
+   * returned buffer is unshared -- the caller may mutate it freely.
+   *
+   * @param start - Start index (inclusive, default 0).
+   * @param end - End index (exclusive, default `length`).
+   */
+  sliceBuffer(start?: number, end?: number): ArrayBuffer {
+    // `#bytes` covers the whole of its own buffer, so the buffer's indices are
+    // this value's indices and `ArrayBuffer.prototype.slice()` takes `start`
+    // and `end` unaltered -- negative values included, exactly as `slice()`
+    // resolves them.
+    return this.#bytes.buffer.slice(start ?? 0, end);
   }
 
   /**
