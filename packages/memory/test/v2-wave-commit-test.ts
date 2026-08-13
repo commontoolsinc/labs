@@ -487,6 +487,147 @@ Deno.test("wave carriage: a scope_key annotation targeting a space-scoped write 
   }
 });
 
+Deno.test("wave carriage: a non-canonical annotated scope_key is refused at ADMISSION — raw delimiters and malformed escapes never key a row", async () => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    const nonCanonical = [
+      // Raw ":" in the segment — prefix-shaped, so a prefix-only check
+      // admits it, and the segment no longer splits exactly.
+      "user:did:key:alice",
+      // Raw "/" — descendant composite keys are "/"-delimited, so an
+      // admitted "/" corrupts their addressing.
+      "user:alice/space",
+      // Malformed escapes — percent-decoding downstream would THROW.
+      "user:%GG",
+      "user:%",
+      // Decodable, but not the casing the encoder emits (canon %3A).
+      "user:did%3akey%3aalice",
+    ];
+    let localSeq = 1;
+    for (const scopeKey of nonCanonical) {
+      assertThrows(
+        () =>
+          applyCommit(engine, {
+            sessionId: "server:executor",
+            space: SPACE,
+            commit: setCommit(localSeq++, [{
+              id: "of:scoped",
+              scope: "user",
+            }]),
+            commitClass: "derived",
+            holder,
+            annotations: [{ op: 0, scopeKey }],
+          }),
+        ProtocolError,
+        "not a canonical scope_key",
+      );
+    }
+    // The wave path refuses identically — a refusal, never a phantom
+    // conflict.
+    assertThrows(
+      () =>
+        applyWaveCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(localSeq, [{ id: "of:scoped", scope: "user" }]),
+          commitClass: "derived",
+          holder,
+          annotations: [{ op: 0, scopeKey: "user:alice/space" }],
+          waveBasis: { basisSeq: 0, rebasedHeads: [] },
+        }),
+      ProtocolError,
+      "not a canonical scope_key",
+    );
+    // Nothing was applied under ANY key — canonical or corrupt.
+    assertEquals(revisionScopeKeys(path, "of:scoped"), []);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("wave commit: basis-instance keys must be canonical scope keys — a corrupt action or entity instance is refused, and nothing is applied", async () => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    // scheduler_basis rows are ADDRESSING: recovery's re-mark scan
+    // matches storage rows against these instance values, so a
+    // non-canonical key stores a row no canonical key ever matches —
+    // a silent liveness hole, refused at the door instead.
+    assertThrows(
+      () =>
+        applyWaveCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:out" }]),
+          commitClass: "derived",
+          holder,
+          waveBasis: { basisSeq: 0, rebasedHeads: [] },
+          basisInstances: [{
+            action: "action-a",
+            actionScopeKey: "user:a/b",
+            rows: [{
+              entitySpace: SPACE,
+              entity: "of:in",
+              entityScopeKey: "space",
+              seq: 7,
+            }],
+          }],
+        }),
+      ProtocolError,
+      "not a canonical scope_key",
+    );
+    assertThrows(
+      () =>
+        applyWaveCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:out" }]),
+          commitClass: "derived",
+          holder,
+          waveBasis: { basisSeq: 0, rebasedHeads: [] },
+          basisInstances: [{
+            action: "action-a",
+            actionScopeKey: "space",
+            rows: [{
+              entitySpace: SPACE,
+              entity: "of:in",
+              // A truncated session key — prefix-shaped, one segment short.
+              entityScopeKey: "session:x",
+              seq: 7,
+            }],
+          }],
+        }),
+      ProtocolError,
+      "not a canonical scope_key",
+    );
+    // The refusal rolled back the whole transaction: no commit, no rows.
+    assertEquals(revisionScopeKeys(path, "of:out"), []);
+    assertEquals(
+      selectSchedulerBasisRows(engine, {
+        branch: "",
+        action: "action-a",
+        actionScopeKey: "user:a/b",
+      }),
+      [],
+    );
+    assertEquals(
+      selectSchedulerBasisRows(engine, {
+        branch: "",
+        action: "action-a",
+        actionScopeKey: "space",
+      }),
+      [],
+    );
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
 Deno.test("wave carriage: annotations and consequenceOf are refused on non-derived classes (closed metadata list)", async () => {
   const { engine } = await createEngine();
   try {
