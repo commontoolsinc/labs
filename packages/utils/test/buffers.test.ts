@@ -71,12 +71,14 @@ describe("buffers", () => {
       const window = new Uint8Array(new ArrayBuffer(16), 4, 3);
       window.set([1, 2, 3]);
 
-      for (const [label, source, transfer] of [
-        ["window, copied", window, false],
-        ["window, transfer requested", window, true],
-        ["whole buffer, copied", new Uint8Array([1, 2, 3]), false],
-        ["whole buffer, taken over", new Uint8Array([1, 2, 3]), true],
-      ] as [string, Uint8Array, boolean][]) {
+      for (
+        const [label, source, transfer] of [
+          ["window, copied", window, false],
+          ["window, transfer requested", window, true],
+          ["whole buffer, copied", new Uint8Array([1, 2, 3]), false],
+          ["whole buffer, taken over", new Uint8Array([1, 2, 3]), true],
+        ] as [string, Uint8Array, boolean][]
+      ) {
         const result = toOwnedUint8Array(source, transfer);
 
         expect(`${label}: ${result.byteOffset}`).toBe(`${label}: 0`);
