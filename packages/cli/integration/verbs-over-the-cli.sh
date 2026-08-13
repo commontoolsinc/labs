@@ -67,8 +67,11 @@ export EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true
 START=$(date +%s)
 
 step "1. Deploy the fixture"
-BOARD=$($CF piece new "$FIXTURE" $ARGS 2>&1 |
-  grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
+# --quiet makes the piece id stdout's only line; stderr is dropped and the
+# grep anchored so a compile warning carrying a fid1: token cannot be taken
+# for the deploy's id.
+BOARD=$($CF piece new --quiet "$FIXTURE" $ARGS 2>/dev/null |
+  grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
 if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
   bad "deploy failed"
   exit 1
