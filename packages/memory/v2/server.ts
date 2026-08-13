@@ -2258,8 +2258,7 @@ export class Server {
           // classified by the LAST op this commit applied to it: that op
           // produced the head this commit leaves behind, so it alone
           // decides the flush-time echo shape.
-          const committedWrites: Array<{ id: string; scopeKey: ScopeKey }> =
-            [];
+          const committedWrites: Array<{ id: string; scopeKey: ScopeKey }> = [];
           const dirtyOps = new Map<string, DirtyOp>();
           for (const operation of message.commit.operations) {
             if (operation.op === "sqlite") continue;
@@ -3514,6 +3513,19 @@ export class Server {
    * value-granular client pull — a subscription names what to serve).
    * Distinct (id, scope) pairs across every live session's watch specs;
    * the SpaceServer loads graph structure sufficient to resolve them.
+   *
+   * `entityScopeKey` is deliberately NOT part of a demand record, and
+   * that is an INVARIANT, not an omission (PR #5439 thread
+   * r3731191476): explicit-instance roots are admissible only to
+   * sessions whose principal is the live lease holder's service
+   * identity (#denyExplicitInstanceReads), and every session of that
+   * principal is EXCLUDED here (the serving loop's own reads are not
+   * client demand). So no root that survives the exclusion can carry an
+   * explicit key — client watches cannot express one. If a later phase
+   * admits explicit-instance CLIENT demand (Phase 2's per-instance
+   * demand mapping), the record must grow the key WITH the SpaceServer
+   * side that consumes it; silently dropping it here would serve the
+   * service's own instance in place of the named one.
    */
   watchedRootsForSpace(
     space: string,

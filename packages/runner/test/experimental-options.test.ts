@@ -309,8 +309,8 @@ describe("serverExecution ambient-flag ownership", () => {
       experimental: { serverExecution: true },
     });
     expect(getServerExecutionConfig()).toBe(true);
-    (runtime.scheduler as unknown as { idle: () => Promise<void> }).idle =
-      () => Promise.reject(new Error("induced dispose failure"));
+    (runtime.scheduler as unknown as { idle: () => Promise<void> }).idle = () =>
+      Promise.reject(new Error("induced dispose failure"));
     let threw = false;
     try {
       await runtime.dispose();

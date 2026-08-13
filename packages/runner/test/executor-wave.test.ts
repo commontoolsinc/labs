@@ -1974,10 +1974,12 @@ describe("stage F fix round: foreign-batch settle sequences and shallow reads", 
     }> = [];
     const sink: WaveCommitSink = {
       currentHeads: (_space, docs) =>
-        Promise.resolve(new Map(docs.map((doc) => [
-          `${doc.id} ${doc.scopeKey}`,
-          0,
-        ]))),
+        Promise.resolve(
+          new Map(docs.map((doc) => [
+            `${doc.id} ${doc.scopeKey}`,
+            0,
+          ])),
+        ),
       concurrentWritePaths: () => Promise.resolve([]),
       commitWave: (batch) => {
         nextSeq += 1;

@@ -762,14 +762,16 @@ describe("stage F serving loop", () => {
     // kept the lease alive forever — serving nothing, blocking every
     // successor.
     let blowUp = false;
-    host = newHost({
-      idleParkMs: 600_000,
-      renewIntervalMs: 25,
-      get flushDeadlineMs(): number {
-        if (blowUp) throw new Error("induced loop failure");
-        return 1_000;
-      },
-    } as ConstructorParameters<typeof ExecutorHost>[0]["policy"]);
+    host = newHost(
+      {
+        idleParkMs: 600_000,
+        renewIntervalMs: 25,
+        get flushDeadlineMs(): number {
+          if (blowUp) throw new Error("induced loop failure");
+          return 1_000;
+        },
+      } as ConstructorParameters<typeof ExecutorHost>[0]["policy"],
+    );
     onServingRuntime = () => Promise.resolve();
     openClient();
 

@@ -78,9 +78,7 @@ describe("event-dispatch stamp identity", () => {
     runtime.scheduler.queueEvent(streamB.getAsNormalizedFullLink(), { n: 3 });
     await runtime.idle();
 
-    const eventStamps = stamped.filter((info) =>
-      info.kind === "event-handler"
-    );
+    const eventStamps = stamped.filter((info) => info.kind === "event-handler");
     expect(eventStamps.length).toBe(3);
     // Stable per handler: both of handlerA's dispatches share one id.
     expect(eventStamps[1].actionId).toBe(eventStamps[0].actionId);

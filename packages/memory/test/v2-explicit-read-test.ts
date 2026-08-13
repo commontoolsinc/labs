@@ -831,13 +831,15 @@ Deno.test("a failed delivery of an explicit foreign-instance frame is redelivere
           return false;
         }
         const upserts = (message as {
-          effect?: { upserts?: Array<{ id: string; doc?: { value?: unknown } }> };
+          effect?: {
+            upserts?: Array<{ id: string; doc?: { value?: unknown } }>;
+          };
         }).effect?.upserts ?? [];
         return upserts.some((upsert) =>
           upsert.id === "of:profile" &&
           JSON.stringify(upsert.doc?.value) === JSON.stringify({
-            name: "alice-2",
-          })
+              name: "alice-2",
+            })
         );
       },
     );

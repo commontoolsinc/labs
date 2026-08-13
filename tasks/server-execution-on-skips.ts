@@ -48,11 +48,11 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
 
 /**
  * The lists themselves. Kept to what stage F's live ON-arm runs actually
- * surfaced: with the serving loop landed the ON arm genuinely SERVES, and
- * the plan's documented two-deriver interim (server and clients both
- * deriving until Phase 2 removes the client path) is a real posture, not
- * a hypothesis. Entries name their unskipping phase — never silent
- * filtering anywhere else.
+ * surfaced: with the serving loop landed the ON arm genuinely SERVES,
+ * and CI's ON arm is exactly the plan's mid-Phase-1 local flag flip —
+ * server and still-deriving clients CAS-storming, "expected, local-only,
+ * fine" (L14), and never a shipped state. Entries name their unskipping
+ * phase — never silent filtering anywhere else.
  */
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
@@ -62,12 +62,15 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     {
       file: "integration/cfc-group-chat-demo-two-browsers.test.ts",
       phase: "phase-2",
-      reason: "two-deriver interim: two real browser shells boot against " +
-        "a toolshed whose serving loop also derives, and the trusted-" +
-        "profile UI never becomes fillable under the CAS storming the " +
-        "plan documents as expected until Phase 2 removes the client " +
-        "derivation-commit path (this exact test is a named Phase 2 " +
-        "gate). The single-browser and multi-runtime variants pass ON.",
+      reason: "CI-only two-deriver bring-up condition: two real browser " +
+        "shells boot against a toolshed whose serving loop also derives, " +
+        "and the trusted-profile UI never becomes fillable under the CAS " +
+        "storming the plan calls expected and local-only for a mid-" +
+        "Phase-1 flag flip (L14). Retires when Phase 2 removes the " +
+        "client derivation-commit path. (The plan's named Phase 2 gates " +
+        "are `counter` and the multi-runtime group-chat variant, not " +
+        "this file.) The single-browser and multi-runtime variants " +
+        "pass ON.",
     },
   ],
   runner: [],

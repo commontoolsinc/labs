@@ -2,7 +2,7 @@
 
 **Verification instrument, NON-NORMATIVE.** The detail docs govern;
 a trace never overrides them. What a trace does is force the
-composition question the doc-by-doc organization hides: twelve
+composition question the doc-by-doc organization hides: thirteen
 canonical end-to-end journeys, each traced hop by hop, with every
 load-bearing value — identity, `scope_key`, commit class, envelope,
 stamp source — written down explicitly WITH A CITATION. A cell that

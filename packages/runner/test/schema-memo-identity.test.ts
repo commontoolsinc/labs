@@ -9,10 +9,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  assertSchemaMemoIdentity,
-  createSchemaMemo,
-} from "../src/traverse.ts";
+import { assertSchemaMemoIdentity, createSchemaMemo } from "../src/traverse.ts";
 
 describe("schema memo identity binding", () => {
   it("binds a memo to its first identity and refuses a different one", () => {
