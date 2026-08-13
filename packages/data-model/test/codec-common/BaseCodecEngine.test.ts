@@ -11,6 +11,7 @@ import type { FabricValue } from "@/interface.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/index.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import {
@@ -223,6 +224,37 @@ describe("BaseCodecEngine", () => {
         const { engine } = newProbeEngine();
 
         expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
+      });
+
+      it("raises a `ProblematicStateError` carrying tag and state", () => {
+        // The strict counterpart of the `ProblematicValue` the lenient side
+        // returns: the same three facts, disposed of by throwing.
+        const { engine } = newProbeEngine();
+
+        try {
+          engine.decode(MALFORMED, CONTEXT);
+          throw new Error("Should have thrown.");
+        } catch (e) {
+          expect(e).toBeInstanceOf(ProblematicStateError);
+          expect((e as ProblematicStateError).wireTypeTag).toBe("");
+          expect((e as ProblematicStateError).state).toBeDefined();
+        }
+      });
+
+      it("keeps what a codec threw as `cause`", () => {
+        // Rethrowing as-is would lose the state; building afresh would lose
+        // the original. Neither is acceptable, so the original is the cause.
+        const { engine } = newProbeEngine();
+
+        try {
+          engine.decode(THROWN, CONTEXT);
+          throw new Error("Should have thrown.");
+        } catch (e) {
+          expect(e).toBeInstanceOf(ProblematicStateError);
+          expect((e as Error).cause).toBeInstanceOf(Error);
+          expect(((e as Error).cause as Error).message)
+            .toMatch(/rejected by throwing/);
+        }
       });
     });
 

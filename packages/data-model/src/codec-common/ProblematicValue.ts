@@ -13,8 +13,7 @@ import {
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { isFabricValue } from "@/type-check.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { toReportableState } from "./toReportableState.ts";
 
 /**
  * Container for a value whose deconstruction or reconstruction failed.
@@ -51,7 +50,7 @@ export class ProblematicValue extends ExplicitTagValue {
   constructor(wireTypeTag: string, state: any, error: string) {
     super(
       wireTypeTag,
-      isFabricValue(state) ? state : toCompactDebugString(state, 200),
+      toReportableState(state),
     );
 
     this.#error = error;

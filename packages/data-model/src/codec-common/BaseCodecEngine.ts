@@ -13,6 +13,7 @@ import type {
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
+import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
 import { UnknownValue } from "./UnknownValue.ts";
 
@@ -234,7 +235,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
     error: string,
   ): FabricValue {
     if (!this.lenient) {
-      throw new Error(error);
+      throw new ProblematicStateError(wireTypeTag, state, error);
     }
 
     return deepFreeze(new ProblematicValue(wireTypeTag, state, error));
@@ -288,7 +289,10 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
         );
     } catch (e: unknown) {
       if (!this.lenient) {
-        throw e;
+        // Not rethrown as-is: what a codec throws is not guaranteed to be an
+        // `Error`, let alone one carrying the state it choked on. The original
+        // survives as `cause`.
+        throw ProblematicStateError.fromThrown(tag, state, e);
       }
 
       // Report over the state the codec was actually handed, so that it says
