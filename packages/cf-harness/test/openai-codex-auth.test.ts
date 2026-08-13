@@ -21,6 +21,7 @@ import {
   InMemoryHarnessCredentialStore,
 } from "../src/auth/credential-store.ts";
 import type { OpenAICodexOAuthCredential } from "../src/auth/types.ts";
+import { HarnessControlError } from "../src/control-errors.ts";
 
 const errorGraphText = (input: unknown): string => {
   const parts: string[] = [];
@@ -350,11 +351,11 @@ Deno.test("Codex credential resolution preserves abort during credential reads",
   });
   const store = new InMemoryHarnessCredentialStore();
   await store.set("local", "openai-codex", credential);
-  const originalGet = store.get.bind(store);
-  store.get = async (ownerKey, providerId) => {
+  const originalGetRecord = store.getRecord.bind(store);
+  store.getRecord = async (ownerKey, providerId) => {
     markReadStarted();
     await readHeld;
-    return await originalGet(ownerKey, providerId);
+    return await originalGetRecord(ownerKey, providerId);
   };
   const resolver = new OpenAICodexCredentialResolver({
     store,
@@ -712,12 +713,162 @@ Deno.test("Codex refresh classifies invalid grants without exposing tokens", asy
   });
 
   const error = await assertRejects(() => resolver.resolve());
-  assertEquals(error instanceof OpenAICodexAuthError, true);
-  assertEquals((error as OpenAICodexAuthError).kind, "invalid_grant");
+  assertEquals(error instanceof HarnessControlError, true);
+  assertEquals((error as HarnessControlError).code, "provider-auth-required");
   assertEquals(
     (error as Error).message.includes("do-not-print-refresh"),
     false,
   );
+});
+
+Deno.test("Codex terminal refresh health persists and prevents another request", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  await store.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "expired-access",
+    refreshToken: "terminal-refresh-secret",
+    expiresAt: 0,
+    accountId: "account-secret",
+  });
+  let requests = 0;
+  const resolver = new OpenAICodexCredentialResolver({
+    store,
+    ownerKey: "local",
+    now: () => 100_000,
+    fetchFn: () => {
+      requests += 1;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "refresh_token_reused",
+              detail: "secret-provider-detail",
+            },
+          }),
+          { status: 400 },
+        ),
+      );
+    },
+  });
+
+  const first = await assertRejects(() => resolver.resolve());
+  assertEquals((first as HarnessControlError).code, "provider-auth-required");
+  assertEquals(errorGraphText(first).includes("secret"), false);
+  assertEquals(await store.getHealth("local", "openai-codex"), {
+    status: "reconnect-required",
+    reason: "refresh-token-reused",
+  });
+  const second = await assertRejects(() => resolver.resolve());
+  assertEquals((second as HarnessControlError).code, "provider-auth-required");
+  assertEquals(requests, 1);
+});
+
+Deno.test("Codex transient refresh failures leave credential health unchanged", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  await store.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "expired-access",
+    refreshToken: "transient-refresh-secret",
+    expiresAt: 0,
+    accountId: "account-secret",
+  });
+  const resolver = new OpenAICodexCredentialResolver({
+    store,
+    ownerKey: "local",
+    now: () => 100_000,
+    fetchFn: () => Promise.reject(new Error("transient-refresh-secret")),
+  });
+
+  const error = await assertRejects(() => resolver.resolve());
+  assertEquals((error as OpenAICodexAuthError).kind, "network");
+  assertEquals(
+    errorGraphText(error).includes("transient-refresh-secret"),
+    false,
+  );
+  assertEquals(await store.getHealth("local", "openai-codex"), undefined);
+  assertEquals(
+    (await store.get("local", "openai-codex"))?.refreshToken,
+    "transient-refresh-secret",
+  );
+});
+
+Deno.test("Codex login clears terminal credential health", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  await store.updateRecord("local", "openai-codex", () => ({
+    credential: {
+      type: "oauth",
+      providerId: "openai-codex",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      expiresAt: 0,
+      accountId: "old-account",
+    },
+    health: { status: "reconnect-required", reason: "revoked" },
+  }));
+  const auth = new OpenAICodexAuthService(store, "local");
+
+  await auth.save({
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "new-access",
+    refreshToken: "new-refresh",
+    expiresAt: 4_000_000_000_000,
+    accountId: "new-account",
+  });
+
+  assertEquals(await store.getHealth("local", "openai-codex"), undefined);
+  assertEquals(await auth.status(), {
+    providerId: "openai-codex",
+    status: "connected",
+    refreshHealth: "ready",
+  });
+});
+
+Deno.test("Codex login cancellation while queued preserves prior auth", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  const previous: OpenAICodexOAuthCredential = {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "old-access",
+    refreshToken: "old-refresh",
+    expiresAt: 4_000_000_000_000,
+    accountId: "old-account",
+  };
+  await store.set("local", "openai-codex", previous);
+  let releaseMutation!: () => void;
+  const mutationHeld = new Promise<void>((resolve) => {
+    releaseMutation = resolve;
+  });
+  let markMutationStarted!: () => void;
+  const mutationStarted = new Promise<void>((resolve) => {
+    markMutationStarted = resolve;
+  });
+  const holding = store.updateRecord(
+    "local",
+    "openai-codex",
+    async (record) => {
+      markMutationStarted();
+      await mutationHeld;
+      return record;
+    },
+  );
+  await mutationStarted;
+  const auth = new OpenAICodexAuthService(store, "local");
+  const controller = new AbortController();
+  const saving = auth.save({
+    ...previous,
+    accessToken: "new-access",
+    refreshToken: "new-refresh",
+  }, controller.signal);
+  const reason = new DOMException("login canceled", "AbortError");
+  controller.abort(reason);
+
+  await assertRejects(() => saving, DOMException, "login canceled");
+  releaseMutation();
+  await holding;
+  assertEquals(await store.get("local", "openai-codex"), previous);
 });
 
 Deno.test("Codex token exchange rejects malformed token responses before persistence", async () => {

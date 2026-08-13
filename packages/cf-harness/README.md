@@ -140,7 +140,8 @@ What is not done yet:
 - [src/model/](src/model)
   - provider-neutral model client, gateway adapter, and Codex Responses adapter
 - [src/auth/](src/auth)
-  - owner-keyed credential store and OpenAI Codex OAuth flows
+  - persistent provider settings, owner-keyed credential storage, bounded
+    credential health, and OpenAI Codex OAuth flows
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
 - [src/provenance.ts](src/provenance.ts)
@@ -238,6 +239,11 @@ cd packages/cf-harness
 deno task run -- auth login openai-codex
 deno task run -- auth login openai-codex --device
 
+# Inspect or persist the provider preference used by new direct runs.
+deno task run -- config inspect --json
+deno task run -- config init openai-compatible-gateway --json
+deno task run -- config set openai-codex --json
+
 # Inspect local credential status and the live, subscription-scoped model catalog.
 deno task run -- auth status openai-codex
 deno task run -- models openai-codex
@@ -252,11 +258,25 @@ deno task run -- \
 deno task run -- auth logout openai-codex
 ```
 
-Local credentials live under `CF_HARNESS_HOME` (by default
-`~/.cf-harness/auth.json`). The directory and file are created with modes `0700`
-and `0600`, and updates replace the file atomically. `cf-harness` never imports
-or shares `~/.codex/auth.json`. A failed refresh does not fall back to
-`OPENAI_API_KEY`, the Common Tools gateway, or unauthenticated mode.
+The provider preference lives in `CF_HARNESS_HOME/config.json`; local
+credentials and bounded refresh health live in `CF_HARNESS_HOME/auth.json` (by
+default under `~/.cf-harness`). The home and files use private permissions, and
+mutations serialize through advisory locks before atomic replacement. The
+canonical home path and its ancestor chain are a trusted host configuration; the
+stores reject a symlink at the home, target, or lock path but do not claim
+descriptor-relative protection against an attacker who can replace trusted
+ancestors concurrently. `cf-harness` never imports or shares
+`~/.codex/auth.json`. A failed refresh does not fall back to `OPENAI_API_KEY`,
+the Common Tools gateway, or unauthenticated mode.
+
+Direct runs resolve a provider from explicit CLI, environment, persistent
+preference, then the historical gateway default. Provider resolution does not
+resolve or rewrite model aliases. Resume retains the recorded provider and
+ignores the persistent preference; an explicit conflicting provider is a
+`provider-mismatch` failure. Structured config and auth commands use versioned
+JSON result envelopes. Login emits a versioned NDJSON authorization event before
+its terminal result. These responses expose connection health but no tokens,
+full account identifiers, expiries, or raw provider errors.
 
 Resume a root run with `--resume-run <run-root-or-run-state.json>`. Codex resume
 keeps the recorded provider, model, exact credential owner, and encrypted

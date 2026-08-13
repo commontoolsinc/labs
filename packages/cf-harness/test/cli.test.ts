@@ -4255,6 +4255,222 @@ Deno.test("local auth status and logout are provider-scoped and secret-free", as
   assertEquals(await store.get("local", "openai-codex"), undefined);
 });
 
+Deno.test("structured config commands expose stable success and failure envelopes", async () => {
+  const home = await Deno.makeTempDir();
+  const env = { CF_HARNESS_HOME: home };
+
+  const missing = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(["config", "inspect", "--json"], {
+      io: missing.io,
+      env,
+    }),
+    0,
+  );
+  assertEquals(JSON.parse(missing.stdout[0]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: true,
+    command: "config.inspect",
+    result: {
+      state: "missing",
+      effectiveProvider: "openai-compatible-gateway",
+      effectiveSource: "default",
+    },
+  });
+
+  const initialized = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(
+      ["config", "init", "openai-compatible-gateway", "--json"],
+      { io: initialized.io, env },
+    ),
+    0,
+  );
+  assertEquals(JSON.parse(initialized.stdout[0]).result, {
+    settings: {
+      version: 1,
+      modelProvider: "openai-compatible-gateway",
+    },
+    changed: true,
+  });
+  assertEquals(
+    (await Deno.stat(join(home, "config.json"))).mode! & 0o777,
+    Deno.build.os === "windows"
+      ? (await Deno.stat(join(home, "config.json"))).mode! & 0o777
+      : 0o600,
+  );
+
+  await Deno.writeTextFile(join(home, "config.json"), "{secret-corruption", {
+    mode: 0o600,
+  });
+  const failed = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli(
+      ["config", "set", "openai-codex", "--json"],
+      { io: failed.io, env },
+    ),
+    1,
+  );
+  assertEquals(JSON.parse(failed.stdout[0]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: false,
+    command: "config.set",
+    error: {
+      code: "provider-configuration-required",
+      message: "Provider settings are invalid: settings file is not valid JSON",
+    },
+  });
+  assertEquals(failed.stdout[0].includes("secret-corruption"), false);
+});
+
+Deno.test("structured auth status exposes bounded health without credential fields", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  await store.updateRecord("local", "openai-codex", () => ({
+    credential: {
+      type: "oauth",
+      providerId: "openai-codex",
+      accessToken: "access-secret",
+      refreshToken: "refresh-secret",
+      expiresAt: 0,
+      accountId: "account-secret",
+    },
+    health: { status: "reconnect-required", reason: "invalid-grant" },
+  }));
+  const { io, stdout } = createIoBuffers();
+
+  assertEquals(
+    await runCfHarnessCli(["auth", "status", "openai-codex", "--json"], {
+      io,
+      env: {},
+      credentialStore: store,
+    }),
+    1,
+  );
+  assertEquals(JSON.parse(stdout[0]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: true,
+    command: "auth.status",
+    result: {
+      providerId: "openai-codex",
+      status: "reconnect-required",
+      refreshHealth: "reconnect-required",
+      reason: "invalid-grant",
+    },
+  });
+  assertEquals(stdout[0].includes("secret"), false);
+  assertEquals(stdout[0].includes("expiresAt"), false);
+});
+
+Deno.test("structured browser login emits JSON events and a bounded result", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  const { io, stdout } = createIoBuffers();
+
+  assertEquals(
+    await runCfHarnessCli(["auth", "login", "openai-codex", "--json"], {
+      io,
+      env: {},
+      credentialStore: store,
+      openUrl: () => {},
+      loginOpenAICodex: async (options) => {
+        await options.onAuthorizationUrl("https://auth.example/authorize");
+        const credential = {
+          type: "oauth" as const,
+          providerId: "openai-codex" as const,
+          accessToken: "access-secret",
+          refreshToken: "refresh-secret",
+          expiresAt: 4_000_000_000_000,
+          accountId: "account-secret",
+        };
+        await options.authService.save(credential);
+        return credential;
+      },
+    }),
+    0,
+  );
+  assertEquals(JSON.parse(stdout[0]), {
+    type: "cf-harness.control-event",
+    version: 1,
+    command: "auth.login",
+    event: "authorization-required",
+    data: {
+      method: "browser",
+      url: "https://auth.example/authorize",
+    },
+  });
+  assertEquals(JSON.parse(stdout[1]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: true,
+    command: "auth.login",
+    result: {
+      providerId: "openai-codex",
+      status: "connected",
+      refreshHealth: "ready",
+    },
+  });
+  assertEquals(JSON.stringify(stdout).includes("secret"), false);
+});
+
+Deno.test("structured login cancellation preserves prior auth and provider state", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  const previous = {
+    type: "oauth" as const,
+    providerId: "openai-codex" as const,
+    accessToken: "previous-access",
+    refreshToken: "previous-refresh",
+    expiresAt: 4_000_000_000_000,
+    accountId: "previous-account",
+  };
+  await store.set("local", "openai-codex", previous);
+  const controller = new AbortController();
+  controller.abort(new DOMException("cancel-secret", "AbortError"));
+  const { io, stdout } = createIoBuffers();
+
+  assertEquals(
+    await runCfHarnessCli(["auth", "login", "openai-codex", "--json"], {
+      io,
+      env: {},
+      credentialStore: store,
+      controlSignal: controller.signal,
+    }),
+    1,
+  );
+  assertEquals(JSON.parse(stdout[0]), {
+    type: "cf-harness.control-result",
+    version: 1,
+    ok: false,
+    command: "auth.login",
+    error: {
+      code: "operation-canceled",
+      message: "The cf-harness control operation was canceled",
+    },
+  });
+  assertEquals(await store.get("local", "openai-codex"), previous);
+  assertEquals(stdout[0].includes("cancel-secret"), false);
+});
+
+Deno.test("structured auth failures discard secret-bearing cause graphs", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  store.getRecord = () => Promise.reject(new Error("storage-secret-sentinel"));
+  const { io, stdout } = createIoBuffers();
+
+  assertEquals(
+    await runCfHarnessCli(["auth", "status", "openai-codex", "--json"], {
+      io,
+      env: {},
+      credentialStore: store,
+    }),
+    1,
+  );
+  const result = JSON.parse(stdout[0]);
+  assertEquals(result.ok, false);
+  assertEquals(result.error.code, "provider-unavailable");
+  assertEquals(stdout[0].includes("storage-secret-sentinel"), false);
+});
+
 Deno.test("models openai-codex reports live provider order", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(["models", "openai-codex"], {

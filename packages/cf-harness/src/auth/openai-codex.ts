@@ -8,10 +8,12 @@ import {
   type HarnessCredentialOwnerRef,
 } from "../contracts/run-manifest.ts";
 import {
+  type HarnessCredentialHealth,
   type HarnessCredentialStatus,
   OPENAI_CODEX_PROVIDER_ID,
   type OpenAICodexOAuthCredential,
 } from "./types.ts";
+import { HarnessControlError } from "../control-errors.ts";
 
 export const OPENAI_CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const OPENAI_CODEX_AUTH_ORIGIN = "https://auth.openai.com";
@@ -36,6 +38,7 @@ const activeBrowserLoginOwners = new Set<string>();
 export type OpenAICodexAuthErrorKind =
   | "invalid_grant"
   | "revoked"
+  | "refresh_token_reused"
   | "malformed_response"
   | "network"
   | "storage"
@@ -164,14 +167,14 @@ const readTokenResponse = async (
     }
     const kind: OpenAICodexAuthErrorKind = code === "invalid_grant"
       ? "invalid_grant"
-      : code === "refresh_token_reused" || response.status === 401
+      : code === "refresh_token_reused"
+      ? "refresh_token_reused"
+      : response.status === 401
       ? "revoked"
       : "provider";
     throw new OpenAICodexAuthError(
       kind,
-      `OpenAI Codex token ${operation} failed (${response.status})${
-        code ? `: ${code}` : ""
-      }`,
+      `OpenAI Codex token ${operation} failed (${response.status})`,
     );
   }
   let json: TokenResponse;
@@ -296,11 +299,14 @@ export class OpenAICodexCredentialResolver {
   async resolve(signal?: AbortSignal): Promise<OpenAICodexOAuthCredential> {
     if (signal?.aborted) throw abortReason(signal);
     let current: OpenAICodexOAuthCredential | undefined;
+    let health: HarnessCredentialHealth | undefined;
     try {
-      current = await this.#store.get(
+      const record = await this.#store.getRecord(
         this.#ownerKey,
         OPENAI_CODEX_PROVIDER_ID,
       );
+      current = record.credential;
+      health = record.health;
     } catch {
       if (signal?.aborted) throw abortReason(signal);
       throw new OpenAICodexAuthError(
@@ -310,26 +316,40 @@ export class OpenAICodexCredentialResolver {
     }
     if (signal?.aborted) throw abortReason(signal);
     if (!current) {
-      throw new Error(
+      throw new HarnessControlError(
+        "provider-auth-required",
         "OpenAI Codex is not connected for this credential owner",
+      );
+    }
+    if (health !== undefined) {
+      throw new HarnessControlError(
+        "provider-auth-required",
+        `OpenAI Codex must be reconnected (${health.reason})`,
       );
     }
     if (current.expiresAt - this.#refreshSkewMs > this.#now()) return current;
     let refreshed: OpenAICodexOAuthCredential | undefined;
     try {
-      refreshed = await this.#store.update(
+      const record = await this.#store.updateRecord(
         this.#ownerKey,
         OPENAI_CODEX_PROVIDER_ID,
-        async (latest) => {
+        async (currentRecord) => {
           if (signal?.aborted) throw abortReason(signal);
+          const latest = currentRecord.credential;
           if (!latest) {
-            throw new OpenAICodexAuthError(
-              "revoked",
+            throw new HarnessControlError(
+              "provider-auth-required",
               "OpenAI Codex credential was disconnected",
             );
           }
+          if (currentRecord.health !== undefined) {
+            throw new HarnessControlError(
+              "provider-auth-required",
+              `OpenAI Codex must be reconnected (${currentRecord.health.reason})`,
+            );
+          }
           if (latest.expiresAt - this.#refreshSkewMs > this.#now()) {
-            return latest;
+            return currentRecord;
           }
           let response: Response;
           try {
@@ -351,19 +371,33 @@ export class OpenAICodexCredentialResolver {
               "OpenAI Codex token refresh failed before receiving a response",
             );
           }
-          const credential = await readTokenResponse(
-            response,
-            "refresh",
-            this.#now(),
-            latest.refreshToken,
-          );
-          return credential;
+          try {
+            const credential = await readTokenResponse(
+              response,
+              "refresh",
+              this.#now(),
+              latest.refreshToken,
+            );
+            return { credential };
+          } catch (error) {
+            const terminal = terminalHealthOf(error);
+            if (terminal === undefined) throw error;
+            return { credential: latest, health: terminal };
+          }
         },
         signal,
       );
+      if (record.health !== undefined) {
+        throw new HarnessControlError(
+          "provider-auth-required",
+          `OpenAI Codex must be reconnected (${record.health.reason})`,
+        );
+      }
+      refreshed = record.credential;
       if (signal?.aborted) throw abortReason(signal);
     } catch (error) {
       if (signal?.aborted) throw abortReason(signal);
+      if (error instanceof HarnessControlError) throw error;
       if (error instanceof OpenAICodexAuthError) throw error;
       throw new OpenAICodexAuthError(
         "storage",
@@ -607,7 +641,7 @@ export const loginOpenAICodexWithBrowser = async (options: {
       signal: options.signal,
       now: options.now,
     });
-    await options.authService.save(credential);
+    await options.authService.save(credential, options.signal);
     return credential;
   } finally {
     activeBrowserLoginOwners.delete(options.authService.ownerKey);
@@ -627,26 +661,61 @@ export class OpenAICodexAuthService {
     readonly ownerKey: string,
   ) {}
 
-  async save(credential: OpenAICodexOAuthCredential): Promise<void> {
-    await this.store.set(this.ownerKey, OPENAI_CODEX_PROVIDER_ID, credential);
+  async save(
+    credential: OpenAICodexOAuthCredential,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.store.updateRecord(
+      this.ownerKey,
+      OPENAI_CODEX_PROVIDER_ID,
+      () => {
+        signal?.throwIfAborted();
+        return { credential };
+      },
+      signal,
+    );
   }
 
   async status(now = Date.now()): Promise<HarnessCredentialStatus> {
-    const credential = await this.store.get(
+    const record = await this.store.getRecord(
       this.ownerKey,
       OPENAI_CODEX_PROVIDER_ID,
     );
-    return credential
-      ? {
+    const { credential, health } = record;
+    if (health !== undefined) {
+      return {
         providerId: OPENAI_CODEX_PROVIDER_ID,
-        signedIn: true,
-        expiresAt: credential.expiresAt,
-        expired: credential.expiresAt <= now,
-      }
-      : { providerId: OPENAI_CODEX_PROVIDER_ID, signedIn: false };
+        status: "reconnect-required",
+        refreshHealth: "reconnect-required",
+        reason: health.reason,
+      };
+    }
+    return credential === undefined
+      ? { providerId: OPENAI_CODEX_PROVIDER_ID, status: "disconnected" }
+      : {
+        providerId: OPENAI_CODEX_PROVIDER_ID,
+        status: "connected",
+        refreshHealth: credential.expiresAt <= now ? "refresh-on-use" : "ready",
+      };
   }
 
   async logout(): Promise<void> {
     await this.store.delete(this.ownerKey, OPENAI_CODEX_PROVIDER_ID);
   }
 }
+
+const terminalHealthOf = (
+  error: unknown,
+): HarnessCredentialHealth | undefined => {
+  if (!(error instanceof OpenAICodexAuthError)) return undefined;
+  if (error.kind === "invalid_grant") {
+    return { status: "reconnect-required", reason: "invalid-grant" };
+  }
+  if (error.kind === "revoked") {
+    return { status: "reconnect-required", reason: "revoked" };
+  }
+  if (error.kind === "refresh_token_reused") {
+    return { status: "reconnect-required", reason: "refresh-token-reused" };
+  }
+  return undefined;
+};
