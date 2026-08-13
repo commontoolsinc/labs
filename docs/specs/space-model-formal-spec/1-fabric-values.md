@@ -1090,7 +1090,7 @@ The hash bytes are private (`#hash`). The public API provides:
   the first colon; entity URI schemes like `of:`/`computed:` are NOT part of
   this string and must be stripped — and preserved — by the caller).
 
-The `tag` field (formerly `algorithmTag`) is an opaque string identifier.
+The `tag` field is an opaque string identifier.
 Known algorithm tags:
 
 | Algorithm Tag | Meaning | Hash Algorithm | Output Size |
@@ -1643,10 +1643,9 @@ export abstract class BaseFabricInstance extends FabricInstance {
 }
 ```
 
-> **Why an abstract class, not an interface?** The earlier spec defined
-> `FabricInstance` as an interface with a single serialization method.
-> The current design uses an abstract class so that `shallowClone()` can be
-> an effectively-final template method (on `BaseFabricInstance`),
+> **Why an abstract class, not an interface?** An abstract class is what
+> lets `shallowClone()` be an effectively-final template method (on
+> `BaseFabricInstance`),
 > encapsulating the frozenness-management contract (clone-if-necessary,
 > freeze-if-requested) in one place. Concrete subclasses implement only
 > `[SHALLOW_UNFROZEN_CLONE]()` (the type-specific copy logic) plus the
@@ -1980,12 +1979,11 @@ if (value instanceof FabricInstance) {
 
 No dedicated type guard function is needed.
 
-> **`instanceof` vs. property-brand check.** The earlier spec used a
-> property-brand check (`DECONSTRUCT in value`) because `FabricInstance` was
-> an interface. Now that `FabricInstance` is an abstract class, `instanceof`
-> is the natural and more robust check. It avoids false positives from objects
-> that happen to have a `[DECONSTRUCT]` property without extending the base
-> class.
+> **Why `instanceof` rather than a property-brand check.** `FabricInstance`
+> being an abstract class, `instanceof` is both the natural check and the
+> more robust one: a property-brand test such as `DECONSTRUCT in value`
+> admits any object that happens to carry that property without extending
+> the base class.
 
 ### 2.7 Example: Temperature (Illustrative)
 
@@ -2493,14 +2491,11 @@ export interface SerializationContext<SerializedForm = unknown> {
 - `decode(data, context)` parses a JSON string, then deserializes tagged
   forms back into modern runtime types.
 
-> **Previous design.** The earlier spec described `SerializationContext` as a
-> lower-level interface with `getTagFor()`, `getClassFor()`, `encode(tag,
-> state)`, and `decode(data)` methods — essentially exposing the tag
-> wrapping/unwrapping mechanics as the public API. The current design pushes all
-> of that machinery inside the context class, leaving only the clean
+> **Why the boundary is this narrow.** Tag wrapping and unwrapping are
+> machinery internal to the context class, leaving only the
 > `encode(value) -> SerializedForm` / `decode(data, runtime) -> FabricValue`
-> boundary. This better reflects the principle that the context owns the full
-> pipeline, not just the tag encoding step.
+> pair as public API. The context owns the full pipeline rather than the tag
+> step alone, and the interface says so by exposing nothing else.
 
 ### 4.4 Serialization Flow
 
@@ -2757,26 +2752,20 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    walker rejects it, settled against `lenient` as in step 3 (Section 9 of
    `3-json-encoding.md`).
 
-> **Previous design: type handlers + class registry.** The earlier design
-> dispatched per-type logic to `TypeHandler` objects (which did their own
-> tag-wrapping *and* recursion) plus a separate tag→class registry for the
-> wrapper classes, with a generic `FabricInstanceHandler` covering
-> everything else; tag resolution checked a `wireTypeTag` property on each
-> instance. That made the wire-serializable surface implicit and smeared
-> the format mechanics across every handler. The codec model replaces all
-> of it: codecs are shallow (`JsonCodecEngine` owns recursion and tag-wrapping),
-> the surface is explicit and curated, the class registry is retired
-> (concrete types decode through their own codecs; unknown tags fall
-> straight to `UnknownValue`), and per-instance `wireTypeTag` survives
-> only on the `ExplicitTagValue` family, read back via `tagForValue()`.
+> **Where a tag comes from.** There is no tag→class registry: a concrete type
+> decodes through its own codec, and a tag no codec claims falls straight to
+> `UnknownValue`. A tag is normally the codec's, either its single
+> `recognizedTypeTag` or whatever `tagForValue()` returns for the specific
+> value. Only the `ExplicitTagValue` family carries a per-instance
+> `wireTypeTag`, which is the tag it was constructed around and what its
+> `tagForValue()` reads — that family exists precisely to hold a tag whose
+> codec is unknown or whose decode failed.
 
-> **Previous design.** The earlier spec presented `serialize()` and
-> `deserialize()` as standalone top-level functions that received the
-> `SerializationContext` as a parameter. The current design moves these into
-> private methods on `JsonCodecEngine`, keeping the public API clean
-> (`encode()`/`decode()` only) and allowing the codec to encapsulate its
-> internal state (registry, codec view, lenient mode) without threading it
-> through every recursive call.
+> **Why these are private methods.** `serialize()` and `deserialize()` are
+> private to `JsonCodecEngine`, which keeps the public API to
+> `encode()`/`decode()` and lets the engine hold its own state — registry,
+> codec view, lenient mode — instead of threading it through every recursive
+> call.
 
 ### 4.6 Separation of Concerns
 
@@ -3514,8 +3503,8 @@ export function fabricFromNativeValue(
 > the same native tag to clone primitives (no-op), arrays (shallow copy
 > preserving sparse holes), plain objects (spread copy), and
 > `FabricInstance` values (via the protocol's `shallowClone()` method from
-> Section 2.3). It centralizes clone-for-frozenness logic that was previously
-> duplicated across conversion call sites.
+> Section 2.3). It is the single home for clone-for-frozenness logic, which
+> every conversion call site reaches rather than implementing itself.
 
 #### Freeze Semantics
 
@@ -3763,10 +3752,10 @@ with no fabric wrappers at any depth. Without this recursion, an Error's
 
 > **Why `FabricBytes` copies its input.** `FabricBytes` is a
 > `FabricPrimitive` — always frozen at construction time with its bytes
-> defensively copied. Unlike the old `FabricUint8Array` (which was a
-> `FabricInstance` that unwrapped to `Blob` or `Uint8Array`), `FabricBytes`
-> has no native equivalent to unwrap to. Callers who need raw bytes can use
-> `slice()` or `copyInto()` on the `FabricBytes` instance directly.
+> defensively copied. `FabricBytes` has no native equivalent to unwrap to,
+> so it is the byte representation rather than a wrapper around one. Callers
+> who need raw bytes use `slice()` or `copyInto()` on the instance
+> directly.
 
 ### 8.5 Round-Trip Guarantees
 
