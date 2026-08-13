@@ -1,0 +1,288 @@
+// A minimal wire format, existing only so that `BaseCodecEngine` can be tested
+// as itself.
+//
+// Going through `JsonCodecEngine` would test the base and JSON's container
+// handling together, and for the question these fixtures exist to answer --
+// what a terminal codec's state does that a nonterminal one's does not -- JSON
+// is nearly blind: where a state is a record of strings, a walk that descends
+// into it and one that passes it through emit the same bytes. This format's
+// tagged form is a class instead, so "walked" and "not walked" are visibly
+// different things.
+
+import type { FabricValue } from "@/interface.ts";
+import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import type {
+  ReconstructionContext,
+  WireFormat,
+} from "@/codec-interface/interface.ts";
+import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
+
+/**
+ * This format's tagged form. A class, so that it cannot be mistaken for a
+ * `FabricValue` -- which is what lets a test see whether a state was walked.
+ */
+export class Tagged {
+  constructor(readonly tag: string, readonly state: ProbeValue) {
+    Object.freeze(this);
+  }
+}
+
+/** This format's transport tree. */
+export type ProbeValue =
+  | null
+  | undefined
+  | boolean
+  | number
+  | string
+  | bigint
+  | Marker
+  | Tagged
+  | readonly ProbeValue[]
+  | { readonly [key: string]: ProbeValue };
+
+/** The value the two host codecs nest inside their state. */
+export const NESTED = 7n;
+
+/**
+ * Codec for {@link NESTED}, whose whole purpose is to sit inside another
+ * codec's state. Its input, encoded and decoded forms are three different
+ * values, so a test can tell which of them it is looking at.
+ */
+export class XCodec extends BaseTerminalCodec<ProbeValue> {
+  constructor() {
+    super("X@1", undefined);
+  }
+
+  override canEncode(value: FabricValue): boolean {
+    return value === NESTED;
+  }
+
+  encode(_value: FabricValue): ProbeValue {
+    return "encoded-X";
+  }
+
+  decode(
+    _typeTag: string,
+    _state: ProbeValue,
+    _context: ReconstructionContext,
+  ): FabricValue {
+    return "decoded-X";
+  }
+}
+
+/** The value the terminal host codec claims. */
+export const TERMINAL_HOST = 1;
+
+/** The value the nonterminal host codec claims, whose state is identical. */
+export const NONTERMINAL_HOST = "N";
+
+/** What a host codec was handed, recorded so a test can assert on it. */
+export type HostRecord = {
+  /** States passed to `encode()`. */
+  encoded: FabricValue[];
+
+  /** States passed to `decode()`. */
+  decoded: unknown[];
+};
+
+/** Builds a fresh, empty record. */
+export function newRecord(): HostRecord {
+  return { encoded: [], decoded: [] };
+}
+
+/**
+ * Terminal codec whose state holds a value another codec could encode. Being
+ * terminal, that nested value is the engine's business to leave alone.
+ */
+export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
+  constructor(readonly record: HostRecord) {
+    super("T@1", undefined);
+  }
+
+  override canEncode(value: FabricValue): boolean {
+    return value === TERMINAL_HOST;
+  }
+
+  encode(value: FabricValue): ProbeValue {
+    this.record.encoded.push(value);
+    return { inner: NESTED };
+  }
+
+  decode(
+    _typeTag: string,
+    state: ProbeValue,
+    _context: ReconstructionContext,
+  ): FabricValue {
+    this.record.decoded.push(state);
+    return TERMINAL_HOST;
+  }
+}
+
+/**
+ * Nonterminal counterpart to {@link TerminalHostCodec}, returning the very
+ * same state. Everything the two do differently is the engine's doing.
+ */
+export class NonterminalHostCodec extends BaseNonterminalCodec {
+  constructor(readonly record: HostRecord) {
+    super("N@1", undefined);
+  }
+
+  override canEncode(value: FabricValue): boolean {
+    return value === NONTERMINAL_HOST;
+  }
+
+  encode(value: FabricValue): FabricValue {
+    this.record.encoded.push(value);
+    return { inner: NESTED };
+  }
+
+  decode(
+    _typeTag: string,
+    state: FabricValue,
+    _context: ReconstructionContext,
+  ): FabricValue {
+    this.record.decoded.push(state);
+    return NONTERMINAL_HOST;
+  }
+}
+
+/**
+ * A value that is an OBJECT and is claimed by a codec. The primitive-keyed
+ * codecs above cannot stand in for it: the engine's cycle bookkeeping only
+ * engages for an object, so nothing else reaches it.
+ */
+export class Marker {
+  constructor(readonly note: string = "m") {
+    Object.freeze(this);
+  }
+}
+
+/**
+ * Codec for {@link Marker}, reached by class rather than by primitive type.
+ * Its `decode()` returns a MUTABLE nested object on purpose: every other codec
+ * here returns a primitive, which is deep-frozen whatever the engine does, and
+ * so cannot witness the freeze the engine promises.
+ */
+export class MarkerCodec extends BaseTerminalCodec<ProbeValue> {
+  constructor() {
+    super("M@1", Marker as unknown as new (...args: never[]) => object);
+  }
+
+  encode(_value: FabricValue): ProbeValue {
+    return "m";
+  }
+
+  decode(
+    _typeTag: string,
+    _state: ProbeValue,
+    _context: ReconstructionContext,
+  ): FabricValue {
+    return { deep: { n: 1 } };
+  }
+}
+
+/**
+ * The engine. Its containers do the least a container can do, so that what a
+ * test observes is the base class and not this.
+ */
+export class ProbeEngine extends BaseCodecEngine<ProbeValue> {
+  //
+  // Instance members
+  //
+
+  override encode(value: FabricValue): ProbeValue {
+    return this.encodeValue(value);
+  }
+
+  override decode(
+    data: ProbeValue,
+    context: ReconstructionContext,
+  ): FabricValue {
+    return this.decodeValue(data, context);
+  }
+
+  protected override wrapTag(tag: string, state: ProbeValue): ProbeValue {
+    return new Tagged(tag, state);
+  }
+
+  protected override encodeArray(
+    value: readonly FabricValue[],
+    seen: Set<object>,
+  ): ProbeValue {
+    ProbeEngine.enterOrThrow(seen, value);
+    const result = value.map((v) => this.encodeValue(v, seen));
+    seen.delete(value);
+    return result;
+  }
+
+  protected override encodePlainObject(
+    value: Record<string, FabricValue>,
+    seen: Set<object>,
+  ): ProbeValue {
+    ProbeEngine.enterOrThrow(seen, value);
+    const result: Record<string, ProbeValue> = {};
+    for (const [k, v] of Object.entries(value)) {
+      result[k] = this.encodeValue(v, seen);
+    }
+    seen.delete(value);
+    return result;
+  }
+
+  protected override decodeValue(
+    data: ProbeValue,
+    context: ReconstructionContext,
+  ): FabricValue {
+    if (data instanceof Tagged) {
+      return this.decodeTagged(data.tag, data.state, context);
+    } else if (Array.isArray(data)) {
+      return data.map((d) => this.decodeValue(d, context));
+    } else if ((data !== null) && (typeof data === "object")) {
+      const result: Record<string, FabricValue> = {};
+      for (const [k, v] of Object.entries(data)) {
+        result[k] = this.decodeValue(v as ProbeValue, context);
+      }
+      return result;
+    }
+
+    return data as FabricValue;
+  }
+}
+
+/**
+ * This format, as a `CodecRegistry` needs one. Its symbol is its own: nothing
+ * binds a codec under it, since every codec here is registered directly.
+ */
+const PROBE_FORMAT: WireFormat<ProbeValue> = Object.freeze({
+  codecSymbol: Symbol("test.probeFormatCodec"),
+});
+
+/**
+ * Builds an engine over a registry carrying the three codecs above, plus the
+ * self-representing primitives a walk needs to get anywhere.
+ */
+export function newProbeEngine(
+  options?: { lenient?: boolean; record?: HostRecord },
+): { engine: ProbeEngine; record: HostRecord } {
+  const record = options?.record ?? newRecord();
+  const registry = new CodecRegistry<ProbeValue>(PROBE_FORMAT);
+
+  // Registered by primitive type, which is how `codecFromValue()` reaches a
+  // codec for a value that is not an instance of a class it names. Each claims
+  // exactly one value of its type, so every other value of that type falls
+  // through to self-representation below -- which the registry tries second.
+  registry.registerPrimitive("bigint", new XCodec());
+  registry.registerPrimitive("number", new TerminalHostCodec(record));
+  registry.registerPrimitive("string", new NonterminalHostCodec(record));
+  registry.register(new MarkerCodec());
+  for (const t of ["null", "boolean", "number", "string", "bigint"] as const) {
+    registry.registerSelfRep(t);
+  }
+  Object.freeze(registry);
+
+  return {
+    engine: new ProbeEngine({ registry, lenient: options?.lenient ?? false }),
+    record,
+  };
+}
