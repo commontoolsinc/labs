@@ -28,7 +28,14 @@ import {
 } from "commonfabric";
 
 /** One note. Deliberately small: this fixture is about what a verb hands back,
- * not about modelling notes. */
+ * not about modelling notes.
+ *
+ * The board below stores `NoteOutput[]` on purpose — the walkthrough's whole
+ * subject is calling verbs on a stored child — so this is the deliberate
+ * full-contract forwarding composition.md permits, and the tag records that
+ * intent for the foreign-output embedding check.
+ *
+ * @sharedContract */
 export interface NoteOutput {
   [NAME]: string;
   title: string;
