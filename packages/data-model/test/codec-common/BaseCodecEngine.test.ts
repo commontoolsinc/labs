@@ -226,6 +226,29 @@ describe("BaseCodecEngine", () => {
         expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
       });
 
+      it("carries tag and state however the codec spelled the rejection", () => {
+        // Throwing and returning a `ProblematicValue` are the codec author's
+        // choice and say nothing about what a caller wants, so a strict
+        // failure must look the same either way. It did not: the returned
+        // form used to become a bare `Error`.
+        const { engine } = newProbeEngine();
+
+        for (
+          const [label, wire] of [["threw", THROWN], [
+            "returned",
+            RETURNED,
+          ]] as const
+        ) {
+          try {
+            engine.decode(wire, CONTEXT);
+            throw new Error(`Should have thrown (${label}).`);
+          } catch (e) {
+            expect(e).toBeInstanceOf(ProblematicStateError);
+            expect((e as ProblematicStateError).state).toBe("x");
+          }
+        }
+      });
+
       it("raises a `ProblematicStateError` carrying tag and state", () => {
         // The strict counterpart of the `ProblematicValue` the lenient side
         // returns: the same three facts, disposed of by throwing.

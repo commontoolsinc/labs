@@ -15,6 +15,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
+  type HarnessFabricSessionConfig,
   type HarnessGatewayAuthMode,
   type HarnessModelProviderId,
   isHarnessModelProviderId,
@@ -169,6 +170,9 @@ const CLI_STRING_FLAGS = [
   "sandbox-docker-runtime",
   "max-model-turns",
   "fabric-mount",
+  "fabric-api-url",
+  "fabric-identity",
+  "fabric-space",
   "host-mount",
   "browser-access-lease-id",
   "browser-access-cdp-url",
@@ -238,6 +242,7 @@ export interface CfHarnessCliConfig {
   sandboxImage?: string;
   sandboxDockerRuntime?: string;
   fabricMount?: string;
+  fabricSession?: HarnessFabricSessionConfig;
   hostMounts: readonly CfHarnessHostMountConfig[];
 }
 
@@ -286,6 +291,7 @@ export interface CfHarnessCliCapabilities {
     structuredAuthControl: true;
     credentialHealth: true;
     loomLocalOwnerBinding: false;
+    runPattern: true;
   };
 }
 
@@ -425,7 +431,8 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | run_pattern);
+                                run_pattern additionally requires the three --fabric-* session flags
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -467,6 +474,10 @@ Options:
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
+  --fabric-api-url <url>        Deployed Fabric API URL for the run_pattern tool
+  --fabric-identity <path>      PKCS#8 identity keyfile for the run_pattern fabric session
+  --fabric-space <space>        Target space (name or did:key) for the run_pattern tool;
+                                all three --fabric-* session flags go together
   --host-mount <spec>           Extra host bind mount (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -485,6 +496,9 @@ Environment:
   CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
+  CF_HARNESS_FABRIC_API_URL     Default value for --fabric-api-url
+  CF_HARNESS_FABRIC_IDENTITY    Default value for --fabric-identity
+  CF_HARNESS_FABRIC_SPACE       Default value for --fabric-space
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -538,6 +552,7 @@ const CLI_PARENT_TOOL_IDS = [
   "edit_file",
   "write_file",
   "delegate_task",
+  "run_pattern",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -581,6 +596,7 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     structuredAuthControl: true,
     credentialHealth: true,
     loomLocalOwnerBinding: false,
+    runPattern: true,
   },
 });
 
@@ -1335,6 +1351,9 @@ export const parseCfHarnessCliArgs = async (
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
       ),
       CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
+      CF_HARNESS_FABRIC_API_URL: Deno.env.get("CF_HARNESS_FABRIC_API_URL"),
+      CF_HARNESS_FABRIC_IDENTITY: Deno.env.get("CF_HARNESS_FABRIC_IDENTITY"),
+      CF_HARNESS_FABRIC_SPACE: Deno.env.get("CF_HARNESS_FABRIC_SPACE"),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1511,6 +1530,69 @@ export const parseCfHarnessCliArgs = async (
   const fabricMount = rawFabricMount !== undefined
     ? resolve(cwd, rawFabricMount)
     : undefined;
+  const fabricSessionFlagValue = (
+    flag: "fabric-api-url" | "fabric-identity" | "fabric-space",
+    envValue: string | undefined,
+  ): string | undefined => {
+    const raw = typeof args[flag] === "string"
+      ? args[flag].trim()
+      : nonEmptyEnvValue(envValue);
+    if (raw === "") {
+      throw new Error(`--${flag} requires a non-empty value`);
+    }
+    return raw;
+  };
+  const fabricApiUrl = fabricSessionFlagValue(
+    "fabric-api-url",
+    env.CF_HARNESS_FABRIC_API_URL,
+  );
+  const fabricIdentity = fabricSessionFlagValue(
+    "fabric-identity",
+    env.CF_HARNESS_FABRIC_IDENTITY,
+  );
+  const fabricSpace = fabricSessionFlagValue(
+    "fabric-space",
+    env.CF_HARNESS_FABRIC_SPACE,
+  );
+  let fabricSession: HarnessFabricSessionConfig | undefined;
+  if (
+    fabricApiUrl !== undefined || fabricIdentity !== undefined ||
+    fabricSpace !== undefined
+  ) {
+    const missing = [
+      ...(fabricApiUrl === undefined ? ["--fabric-api-url"] : []),
+      ...(fabricIdentity === undefined ? ["--fabric-identity"] : []),
+      ...(fabricSpace === undefined ? ["--fabric-space"] : []),
+    ];
+    if (missing.length > 0) {
+      throw new Error(
+        `--fabric-api-url, --fabric-identity, and --fabric-space configure one fabric session and go together; missing ${
+          missing.join(", ")
+        }`,
+      );
+    }
+    try {
+      new URL(fabricApiUrl!);
+    } catch {
+      throw new Error(`--fabric-api-url must be a valid URL: ${fabricApiUrl}`);
+    }
+    fabricSession = {
+      apiUrl: fabricApiUrl!,
+      identityKeyPath: resolve(cwd, fabricIdentity!),
+      space: fabricSpace!,
+    };
+  }
+  // An allowlisted `run_pattern` with no session to run it against is a
+  // configuration contradiction, surfaced here rather than as a tool that is
+  // silently absent from the run.
+  if (
+    allowedToolIds?.includes("run_pattern") === true &&
+    fabricSession === undefined
+  ) {
+    throw new Error(
+      "--allow-tool run_pattern requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space",
+    );
+  }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
   const apiKeySource = env.CF_HARNESS_API_KEY !== undefined
     ? "CF_HARNESS_API_KEY"
@@ -1575,6 +1657,7 @@ export const parseCfHarnessCliArgs = async (
     ...(sandboxImage !== undefined ? { sandboxImage } : {}),
     ...(sandboxDockerRuntime !== undefined ? { sandboxDockerRuntime } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
+    ...(fabricSession !== undefined ? { fabricSession } : {}),
     hostMounts,
   };
 };
@@ -2835,6 +2918,9 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(parsed.fabricSession !== undefined
+          ? { fabricSession: parsed.fabricSession }
+          : {}),
         ...(effectiveRunManifest !== undefined
           ? { runManifest: effectiveRunManifest }
           : {}),
@@ -2994,6 +3080,9 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
+        ...(parsed.fabricSession !== undefined
+          ? { fabricSession: parsed.fabricSession }
+          : {}),
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }

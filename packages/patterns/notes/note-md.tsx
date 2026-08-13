@@ -18,6 +18,7 @@ import {
   type NoteMdInput,
   type NotePiece,
 } from "./schemas.tsx";
+import { referenceAddresses } from "./reference-address.ts";
 
 // Handler for clicking a backlink chip - module scope required for .map() binding
 const handleBacklinkClick = handler<
@@ -49,7 +50,7 @@ export interface NoteMdOutput {
 }
 
 export default pattern<NoteMdInput, NoteMdOutput>(
-  ({ note, sourceNoteRef, content }) => {
+  ({ note, sourceNoteRef, content, references }) => {
     const displayName = computed(() => {
       const title = note?.title || "Untitled";
       return `📖 ${title}`;
@@ -57,22 +58,37 @@ export default pattern<NoteMdInput, NoteMdOutput>(
 
     const hasBacklinks = computed(() => (note?.backlinks?.length ?? 0) > 0);
 
-    // Convert [[Name (id)]] wiki-links to markdown links [Name](/of:id)
-    // cf-markdown will then convert these to clickable cf-cell-link components
-    // Use content prop if provided, otherwise fall back to note.content
+    // Convert both mention forms to markdown links, which cf-markdown then
+    // turns into clickable cf-cell-link components. Use the content prop if
+    // provided, otherwise fall back to note.content.
     //
-    // The embedded id is the BARE tagged hash by contract: the editor strips
-    // `of:` at embed time (mentionIdFromCellId in packages/ui) and REJECTS
-    // `computed:` ids, so prepending `/of:` here is always correct. If
-    // mentionable cells ever include computed ones, the embed format must
-    // carry the scheme instead — the bare form cannot, because the scheme is
-    // part of the identity and `/of:` would address the wrong entity.
+    // A wiki-link's embedded id is the BARE tagged hash by contract: the
+    // editor strips `of:` at embed time (mentionIdFromCellId in packages/ui)
+    // and REJECTS `computed:` ids, so prepending `/of:` is always correct for
+    // that form. A reference's destination carries its own scheme, so that
+    // form reads the address off the destination instead.
     const processedContent = computed(() => {
       const raw = content?.get?.() ?? note?.content ?? "";
-      // Match [[Name (id)]] pattern and convert to [Name](/of:id)
-      return raw.replace(
+      const withWikiLinks = raw.replace(
         /\[\[([^\]]*?)\s*\(([^)]+)\)\]\]/g,
         (_match, name, id) => `[${name.trim()}](/of:${id})`,
+      );
+      const addresses = referenceAddresses(references);
+
+      // Match `[Label][key]`, the reference form. The key shape matches what
+      // the editor mints (`mintRefKey`, `packages/ui/src/v2/core/mention-refs.ts`);
+      // a pattern cannot import from the UI package, so the two are held in
+      // step by hand. The literal is built here rather than at module scope,
+      // where a stateful RegExp is not allowed.
+      //
+      // A key with no address is left exactly as written. It may be a
+      // hand-written reference link, or a mention pasted out of a note whose
+      // map is elsewhere; either way the label survives and the reader sees
+      // what the author typed rather than a link to nothing.
+      return withWikiLinks.replace(
+        /\[([^\]\n]*)\]\[([0-9a-z]{6,10})\]/g,
+        (match: string, label: string, key: string) =>
+          addresses[key] ? `[${label}](${addresses[key]})` : match,
       );
     });
 

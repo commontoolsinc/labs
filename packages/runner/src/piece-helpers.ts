@@ -7,7 +7,7 @@ import {
 import { isObjectOrArray } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
-import { isSigilLink } from "./link-types.ts";
+import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
 import {
   normalizePatternSource,
@@ -26,17 +26,17 @@ const logger = getLogger("piece-helpers");
 
 export type CellPath = (string | number)[];
 
+/**
+ * Splits a slash-separated cell path into its segments, converting each one
+ * through {@link linkPathSegmentToCellPathSegment} so that a path written on
+ * the command line addresses the same cells as the same path embedded in a
+ * reference. An empty path is no segments at all.
+ */
 export function parseCellPath(path: string): CellPath {
   if (!path || path.trim() === "") {
     return [];
   }
-  return path.split("/").map((segment) => {
-    if (segment === "") {
-      return segment;
-    }
-    const num = Number(segment);
-    return Number.isInteger(num) && num >= 0 ? num : segment;
-  });
+  return path.split("/").map(linkPathSegmentToCellPathSegment);
 }
 
 export function resolveCellPath<T>(

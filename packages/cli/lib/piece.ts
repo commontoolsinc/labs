@@ -89,6 +89,7 @@ import {
   CellSelectionError,
   deriveSelectedValue,
 } from "./cell-selection.ts";
+import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -105,6 +106,13 @@ export interface SpaceConfig {
   identity: string;
   jsonOutput?: boolean;
   deferSpaceCellSync?: boolean;
+  /**
+   * Space DIDs embedded in LLM-friendly references given to this command,
+   * carried here when `space` is a name rather than a DID. A name only
+   * resolves to a DID once the session opens, so `loadPieces` checks each
+   * of these against the session's resolved space DID.
+   */
+  embeddedSpaces?: string[];
 }
 
 /** Metadata returned for a piece whose stored data matches a search query. */
@@ -117,6 +125,13 @@ export interface PieceSearchResult {
 export interface PieceConfig extends SpaceConfig {
   piece: string;
   pieceScope?: CellScope;
+  /**
+   * Path segments embedded in an LLM-friendly `--piece` reference. A command
+   * that reads or writes at a path prepends these to its positional path
+   * argument; a command whose intake is id-only rejects a reference that
+   * carries them.
+   */
+  piecePath?: (string | number)[];
 }
 
 export interface SetPiecePatternOptions {
@@ -425,6 +440,10 @@ export async function loadPieces(
     "loadPieces.makeSession",
     () => makeSession(config),
   );
+  // A `--space` given as a name has only now resolved to a DID; this is the
+  // deferred half of the embedded-space check `normalizeLLMFriendlyRef`
+  // performs at parse time for a DID-configured space.
+  validateEmbeddedSpaces(config.embeddedSpaces, session.space);
   // Use a const ref object so we can assign later while keeping const binding
   const piecesRef: { current?: PiecesController } = {};
   const runtimeErrors: CliRuntimeErrorRecord[] = [];

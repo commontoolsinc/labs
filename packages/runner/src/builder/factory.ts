@@ -37,6 +37,7 @@ import {
   lift,
 } from "./module.ts";
 import {
+  cellFromUrl,
   compileAndRun,
   fetchBinary,
   fetchJson,
@@ -208,6 +209,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     generateObject,
     generateText,
     fetchBinary,
+    cellFromUrl,
     fetchText,
     fetchJson,
     fetchJsonUnchecked,

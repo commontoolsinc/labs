@@ -187,10 +187,12 @@ describe("RealmCodecEngine", () => {
         throw new Error("Should have thrown.");
       } catch (e) {
         expect(e).toBeInstanceOf(ProblematicStateError);
+        expect((e as ProblematicStateError).wireTypeTag).toBe("Bytes@1");
         expect((e as ProblematicStateError).state).toBe("nope");
-        // Named once. The engine supplies the tag, so a codec that named it
-        // too would read `` `Bytes@1`: `Bytes@1`: ... ``.
-        expect((e as Error).message.match(/Bytes@1/g)).toHaveLength(1);
+
+        // The tag rides on the error, so a codec that also named it in its
+        // message would say it twice. These do not.
+        expect((e as Error).message).not.toMatch(/Bytes@1/);
       }
     });
 

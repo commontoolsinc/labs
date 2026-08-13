@@ -4024,6 +4024,10 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "timingDelay"?: number;
   "$mentionable"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
   "$mentioned"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
+  "$references"?: CellLike<
+    Record<string, { destination: unknown; modifiedTitle: boolean }>
+  >;
+  "fabricHosts"?: string[];
   "$pattern"?: CellLike<any>;
   "pattern"?: any;
   "wordWrap"?: boolean;
@@ -4042,6 +4046,7 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-error"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
+  "onmention-ref-label-changed"?: any;
 }
 
 interface CFAutostartAttributes<T> extends CFHTMLAttributes<T> {

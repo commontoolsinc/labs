@@ -308,8 +308,9 @@ export const styles = css`
     position: relative;
   }
 
-  /* Collapsed pill view - complete backlink with ID (click to navigate) */
-  .cm-backlink-pill {
+  /* Collapsed pill view - a resolved mention in either form (click to navigate) */
+  .cm-backlink-pill,
+  .cm-mention-ref-pill {
     background-color: var(
       --cf-code-editor-color-primary-100,
       hsla(212, 100%, 47%, 0.15)
@@ -325,7 +326,8 @@ export const styles = css`
       var(--cf-code-editor-transition-ease, ease);
   }
 
-  .cm-backlink-pill:hover {
+  .cm-backlink-pill:hover,
+  .cm-mention-ref-pill:hover {
     background-color: var(
       --cf-code-editor-color-primary-200,
       hsla(212, 100%, 47%, 0.25)

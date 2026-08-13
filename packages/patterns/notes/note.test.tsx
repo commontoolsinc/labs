@@ -13,6 +13,7 @@
 import {
   action,
   assert,
+  FS,
   NAME,
   pattern,
   TESTS,
@@ -23,6 +24,7 @@ import {
 import { findNode, propsOf } from "../test/vnode-helpers.ts";
 import Note, { bareMentionId } from "./note.tsx";
 import Notebook from "./notebook.tsx";
+import { type MentionRefMap } from "./schemas.tsx";
 
 type BacklinkStream = {
   send: (event: {
@@ -36,6 +38,19 @@ const backlinkStreamOf = (subject: { [UI]: unknown }): BacklinkStream => {
     (node) => propsOf(node)?.["onbacklink-create"] !== undefined,
   );
   return propsOf(editor)?.["onbacklink-create"] as BacklinkStream;
+};
+
+/**
+ * Whether the note's editor was given a reference map. Its presence is the
+ * whole switch: with it the editor mints `[Label][key]` and puts the
+ * destination in that cell, without it a `[[Name (id)]]` wiki-link.
+ */
+const editorHasReferences = (subject: { [UI]: unknown }): boolean => {
+  const editor = findNode(
+    subject[UI],
+    (node) => propsOf(node)?.["onbacklink-create"] !== undefined,
+  );
+  return propsOf(editor)?.["$references"] !== undefined;
 };
 
 export default pattern(() => {
@@ -186,6 +201,10 @@ export default pattern(() => {
   const assert_name = assert(
     () => note[NAME] === "📝 Test Note",
   );
+  const assert_editor_has_references = assert(
+    () => editorHasReferences(note),
+  );
+
   const assert_initial_title = assert(() => note.title === "Test Note");
   const assert_initial_content = assert(
     () => note.content === "Line one\nLine two\nLine three",
@@ -350,11 +369,98 @@ export default pattern(() => {
     }
   });
 
+  // ===== The filesystem projection, and editing through it =====
+
+  const projectionTarget = Note({
+    title: "Target",
+    content: "",
+    isHidden: false,
+  });
+
+  // The test owns the map so it can seed a mention; the note's own result is
+  // a materialized view and holds no writer.
+  const projectedRefs = new Writable<MentionRefMap>({});
+
+  const projected = Note({
+    title: "Projected",
+    content: "See the target.",
+    isHidden: false,
+    references: projectedRefs,
+  });
+
+  // Staged so the assertions can hand the projection back verbatim.
+  const projectedBody = new Writable("");
+
+  const action_mention_in_projection = action(() => {
+    projectedRefs.key("a3f9zz").set({
+      destination: projectionTarget,
+      modifiedTitle: false,
+    });
+  });
+
+  const action_capture_projection = action(() => {
+    // `FsProjection` is a union whose open arm types content loosely.
+    projectedBody.set(String(projected[FS].content ?? ""));
+  });
+
+  // The property every `touch` depends on: handing back exactly what was
+  // projected changes neither the note's text nor its mentions.
+  const action_write_projection_back = action(() => {
+    projected.editProjection.send({ body: projectedBody.get() });
+  });
+
+  const action_drop_definition = action(() => {
+    projected.editProjection.send({ body: "See the target." });
+  });
+
+  // Clearing the file is an edit, not an absent one.
+  const action_clear_through_projection = action(() => {
+    projected.editProjection.send({ body: "" });
+  });
+
+  const assert_projection_carries_definition = assert(
+    () =>
+      String(projected[FS].content ?? "").startsWith(
+        "See the target.\n\n[a3f9zz]: /",
+      ),
+  );
+
+  const assert_round_trip_keeps_content = assert(
+    () => projected.content === "See the target.",
+  );
+
+  const assert_round_trip_keeps_reference = assert(
+    () => Object.keys(projectedRefs.get() ?? {}).length === 1,
+  );
+
+  const assert_dropped_definition_drops_reference = assert(
+    () => Object.keys(projectedRefs.get() ?? {}).length === 0,
+  );
+
+  const assert_cleared_projection_clears_content = assert(
+    () => projected.content === "",
+  );
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
   return {
     [TESTS]: [
+      // The editor is given the note's reference map, which is what selects
+      // the reference form for mentions made from here.
+      { assertion: assert_editor_has_references },
+
+      // === The filesystem projection ===
+      { action: action_mention_in_projection },
+      { assertion: assert_projection_carries_definition },
+      { action: action_capture_projection },
+      { action: action_write_projection_back },
+      { assertion: assert_round_trip_keeps_content },
+      { assertion: assert_round_trip_keeps_reference },
+      { action: action_drop_definition },
+      { assertion: assert_dropped_definition_drops_reference },
+      { action: action_clear_through_projection },
+      { assertion: assert_cleared_projection_clears_content },
       // === Initial state ===
       { assertion: assert_name },
       { assertion: assert_initial_title },

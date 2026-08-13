@@ -94,6 +94,7 @@ import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
+import { scrubBareFabricIdentifiers } from "./tools/run-pattern.ts";
 import {
   toModelFacingWebFetchOutput,
   type WebFetchToolOutput,
@@ -561,6 +562,33 @@ const summarizeToolInput = async (
           : {}),
         ...(isSafeNonNegativeInteger(input.maxModelTurns)
           ? { maxModelTurns: input.maxModelTurns }
+          : {}),
+      };
+    }
+    case "run_pattern": {
+      const sourceTextSummary = typeof input.sourceText === "string"
+        ? await summarizeSensitiveText(input.sourceText)
+        : undefined;
+      const resultSchemaSummary = input.resultSchema !== undefined
+        ? await summarizeSensitiveText(JSON.stringify(input.resultSchema))
+        : undefined;
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(sourceTextSummary !== undefined
+          ? {
+            sourceTextBytes: sourceTextSummary.bytes,
+            sourceTextDigest: sourceTextSummary.digest,
+          }
+          : {}),
+        ...(isObjectRecord(input.inputs)
+          ? { inputCount: Object.keys(input.inputs).length }
+          : {}),
+        ...(resultSchemaSummary !== undefined
+          ? {
+            resultSchemaBytes: resultSchemaSummary.bytes,
+            resultSchemaDigest: resultSchemaSummary.digest,
+          }
           : {}),
       };
     }
@@ -1838,8 +1866,17 @@ export class CfHarnessPromptLoop {
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
+    // `run_pattern` joins the tool surface exactly when the run can build a
+    // fabric session; without one the tool is absent rather than
+    // present-but-failing, even when an explicit allowlist names it.
+    const requestedToolIds = options.allowedToolIds ??
+      (this.engine.fabricSessionAvailable
+        ? [...DEFAULT_PROMPT_LOOP_TOOL_IDS, "run_pattern" as const]
+        : DEFAULT_PROMPT_LOOP_TOOL_IDS);
     this.#allowedToolIds = new Set(
-      options.allowedToolIds ?? DEFAULT_PROMPT_LOOP_TOOL_IDS,
+      this.engine.fabricSessionAvailable
+        ? requestedToolIds
+        : requestedToolIds.filter((toolId) => toolId !== "run_pattern"),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -2578,6 +2615,7 @@ export class CfHarnessPromptLoop {
         : await this.#invokeBuiltinTool(
           toolCall.function.name,
           input,
+          signal,
         );
     } catch (error) {
       recordActivity({
@@ -2755,6 +2793,25 @@ export class CfHarnessPromptLoop {
         output: toModelFacingWebFetchOutput(output as WebFetchToolOutput),
       };
     }
+    if (toolId === "run_pattern" && isObjectRecord(output)) {
+      // The persisted artifact keeps the raw result value and the piece id
+      // — a bare fabric identifier the handle boundary never swaps, and
+      // redundant with `resultRef` since the piece cell is the result cell.
+      // The model sees only `resultRef` and the schema-sanitized `value`.
+      // Free-text diagnostic fields can embed compiler-generated bare
+      // fabric identifiers the handle boundary never swaps, so those fields
+      // are scrubbed here; the artifact keeps the raw text.
+      const { rawValue: _rawValue, pieceId: _pieceId, ...publicOutput } =
+        output;
+      const scrubbed: Record<string, unknown> = { ...publicOutput };
+      for (const field of ["message", "valueError"]) {
+        const text = scrubbed[field];
+        if (typeof text === "string") {
+          scrubbed[field] = scrubBareFabricIdentifiers(text);
+        }
+      }
+      return { output: stripInternalCfcFields(scrubbed) };
+    }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };
     }
@@ -2848,6 +2905,7 @@ export class CfHarnessPromptLoop {
   async #invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<{
     output: Awaited<ReturnType<CfHarnessEngine["invokeBuiltinTool"]>>["output"];
     resultRef: ToolResultRef;
@@ -2855,6 +2913,7 @@ export class CfHarnessPromptLoop {
     const result = await this.engine.invokeBuiltinTool(
       toolId,
       input as unknown as BuiltinToolInputMap[TToolId],
+      signal !== undefined ? { signal } : {},
     );
     return {
       output: result.output,

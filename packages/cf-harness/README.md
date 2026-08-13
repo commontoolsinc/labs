@@ -54,6 +54,8 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
+  - `run_pattern` (present only when the run configures a fabric session; see
+    [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
 - bounded public HTTP(S) fetches through `web_fetch`, with redirect validation,
@@ -119,6 +121,11 @@ network confinement model.
   cell addresses, minted per run, recorded in run state, and carried across
   `--resume-run`; see
   [Session-local address handles](#session-local-address-handles)
+- an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
+  `--fabric-space` together) that compiles and runs a pattern against a deployed
+  Fabric space from the trusted host side and returns a live result cell
+  reference; see
+  [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space)
 
 What is not done yet:
 
@@ -144,6 +151,8 @@ What is not done yet:
   - core execution engine, run state, tool execution
 - [src/handle-table.ts](src/handle-table.ts)
   - session-local address handle table: token minting and both swap directions
+- [src/fabric-session.ts](src/fabric-session.ts)
+  - lazy, cached trusted Fabric session behind the `run_pattern` tool
 - [src/prompt-loop.ts](src/prompt-loop.ts)
   - bounded prompt/tool loop
 - [src/model/](src/model)
@@ -542,6 +551,77 @@ object; the return's `linkedStringCount` counts only the positions still sealed.
 Denial-path tool messages are not swapped; that coverage, cross-agent handle
 semantics, value handles, and an explicit release/readback mechanism are listed
 in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+### Running patterns against a Fabric space
+
+Three flags configure one trusted Fabric session, and all of them go together:
+
+```bash
+cd packages/cf-harness
+deno task run -- \
+  --workspace /path/to/workspace \
+  --fabric-api-url https://toolshed.example/ \
+  --fabric-identity ~/.cf/agent.pkcs8 \
+  --fabric-space my-space \
+  --prompt "Deploy a pattern that doubles its input and report the result."
+```
+
+With all three present (`CF_HARNESS_FABRIC_API_URL`,
+`CF_HARNESS_FABRIC_IDENTITY`, and `CF_HARNESS_FABRIC_SPACE` are the environment
+fallbacks), the `run_pattern` tool joins the parent tool surface; with none, the
+tool is absent and runs behave exactly as before; a partial set is a
+configuration error naming the missing flags. The same holds under an explicit
+allowlist: `--allow-tool run_pattern` without the three session flags is a
+configuration error, and the tool is never offered to the model without a
+session. `--fabric-space` accepts a space name or a `did:key`, and
+`--describe-capabilities` reports `runPattern` among its features.
+
+`run_pattern` executes on the trusted host side — it never enters the docker
+sandbox. The session (a `PiecesController` against the deployed API) is built
+lazily on the tool's first invocation; construction verifies the configured
+space's authorization, and only a healthy session is cached for the run. A
+session that fails to build surfaces as an ordinary tool-output error rather
+than a run failure, and the next tool call retries the construction.
+
+The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
+over-cap source is a structured tool error), an optional `inputs` object, and an
+optional `resultSchema`. An `inputs` string value that is a whole-string
+LLM-friendly link (`/of:fid1:.../path`) is passed to the pattern as a live cell
+reference; everything else passes through as plain JSON. A link that resolves
+into a space other than the configured session space is refused with a
+structured error before anything is created, and a live-cell input whose current
+value does not match the compiled pattern's argument schema for its key is
+refused the same way — named after the offending key, with no piece persisted.
+The deployed piece is deliberately unregistered — it never appears in the
+space's piece list — and deliberately detached: no origin is recorded, because
+model-authored source starts detached under the piece source-lifecycle spec.
+Run→piece provenance is carried by the run's persisted artifacts instead —
+run-state and the tool-output artifact record the `pieceId`. When the run's
+abort signal fires while the tool is waiting for the pattern to settle, the tool
+stops the created piece and returns a structured `cancelled` error; the signal
+is the only cancellation source — there is no timeout.
+
+Every `run_pattern` invocation persists such a piece in the configured space. A
+cancelled run stops its piece, but no piece is ever deleted, and each piece's
+source-history revision is a storage-retention root the piece list does not
+reveal. Tooling that enumerates a space's contents from the piece list must not
+assume the list is exhaustive, and there is no garbage collection for these
+pieces yet.
+
+A successful run returns `{ status: "ok", resultRef }` to the model, where
+`resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
+the schema-sanitized `value` (with `linkedStringCount`) when `resultSchema` was
+given. The ordinary outbound swap turns `resultRef` (and any link strings inside
+`value`) into `cfh:a:` tokens at the model boundary, and the ordinary inbound
+swap resolves such a token passed back through `inputs`; the tool itself carries
+no handle code. The persisted tool-output artifact keeps the raw reference, the
+raw result value, and the `pieceId` — a bare fabric identifier the handle
+boundary never swaps, so it stays out of the model-facing rendering. Compiler
+diagnostics come back as `{ status: "compile-error", message }` so the model can
+iterate on the source; bare fabric identifiers a diagnostic can embed
+(compiler-generated `fid1:` module roots, DIDs, `data:` URIs) are replaced with
+a `[fabric-id]` placeholder in the model-facing message, while the persisted
+artifact keeps the raw text.
 
 Interactive chat stdio transport:
 
