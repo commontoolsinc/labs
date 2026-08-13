@@ -1102,11 +1102,16 @@ function derivePosition(
     );
   }
 
-  const branches = [
-    ...schema.anyOf ?? [],
-    ...schema.oneOf ?? [],
-    ...schema.allOf ?? [],
-  ];
+  // `allOf` is a conjunction: every member describes the same value at once,
+  // so a member that re-enters says nothing about whether the members beside it
+  // can be read, and cutting on its account would drop what they contribute. A
+  // projection states one shape per position, so the cut and the rest cannot be
+  // stated together either. The position is left as wide as it was declared,
+  // and a readback that still closes a circle after that refuses and names the
+  // position — which beats answering a different question quietly.
+  if (schema.allOf !== undefined) return DERIVED_WHOLE;
+
+  const branches = [...schema.anyOf ?? [], ...schema.oneOf ?? []];
   if (branches.length > 0) {
     // A projection states one shape per position, and a union does not. Where
     // any branch re-enters, the position renders its address: that answers
@@ -2484,4 +2489,93 @@ export async function deriveSelectedValue(
   } finally {
     runtime.runner.stop(resultCell);
   }
+}
+
+/**
+ * Helper for {@link boundReadValue}: `markers` restricted to the positions the
+ * value in hand actually holds.
+ *
+ * `values` is every value occupying one position: the single value below a
+ * property, and every element below `items`, which one marker answers for at
+ * once.
+ *
+ * The restriction is what keeps a bound from widening. A marker composition
+ * writes its key whether or not the value has one, because it is normally
+ * composed onto a value projected by the very schema the markers came from. A
+ * bound applied to a value someone else already shaped has no such agreement:
+ * every position that caller narrowed away has to lose its marker too, or it
+ * comes back as an address and the answer holds more than was asked for.
+ */
+function markersHeldBy(
+  markers: LinkMarkers,
+  values: readonly unknown[],
+): LinkMarkers | undefined {
+  const held = values.filter((value) => value !== undefined);
+  if (held.length === 0) return undefined;
+  const kept: LinkMarkers = {};
+  if (markers.marked === true) kept.marked = true;
+  if (markers.items !== undefined) {
+    const elements = held.flatMap((value) => Array.isArray(value) ? value : []);
+    const items = markersHeldBy(markers.items, elements);
+    if (items !== undefined) kept.items = items;
+  }
+  if (markers.properties !== undefined) {
+    const properties: Record<string, LinkMarkers> = {};
+    for (const [key, child] of Object.entries(markers.properties)) {
+      const below = held.flatMap((value) =>
+        isRecord(value) && !Array.isArray(value) && key in value
+          ? [(value as Record<string, unknown>)[key]]
+          : []
+      );
+      const childMarkers = markersHeldBy(child, below);
+      if (childMarkers !== undefined) properties[key] = childMarkers;
+    }
+    if (Object.keys(properties).length > 0) kept.properties = properties;
+  }
+  return Object.keys(kept).length === 0 ? undefined : kept;
+}
+
+/**
+ * `value`, read from `sourceCell`, with the positions `declared` re-enters
+ * rendered as their addresses — or `undefined` where the declaration bounds
+ * nothing.
+ *
+ * A value that closes a circle has no JSON rendering, and the declaration is
+ * the boundary its author drew: the position where the declared type re-enters
+ * itself is the position that closes the circle, so an address there cuts
+ * exactly where the shape says it should. The addresses are composed by the
+ * same walk {@link deriveSelectedValue} composes its own with, off the same
+ * cell, so a derived bound and a hand-written `$link` name the same position
+ * the same way.
+ *
+ * Applied to the value already in hand rather than read afresh, which is what
+ * lets it bound a result a caller has ALREADY shaped without widening it: the
+ * cut removes positions and never adds one, so whatever `--select`/`--schema`
+ * narrowed to stays narrowed. Reading a second time through the derived
+ * projection cannot do that — it answers with the declaration's whole shape,
+ * which for a caller who named one field is a projection handing back the
+ * fields they did not name. Working off the value in hand also runs no pattern
+ * graph and commits no transaction: bounding a readback costs the pattern load
+ * the declaration sits behind, and nothing else.
+ */
+export async function boundReadValue(
+  sourceCell: Cell<unknown>,
+  declared: JSONSchema | undefined,
+  value: unknown,
+): Promise<unknown> {
+  const projection = declaredResultProjection(declared);
+  if (projection === undefined) return undefined;
+  // The derived projection is written at fixed depth, so it is applied at
+  // fixed depth: `kind` is `"json"` for everything `declaredResultProjection`
+  // returns, and a concise field list's implicit array traversal has no part
+  // in a shape derived from a declaration.
+  const projected = projectValue(value, projection.schema);
+  const markers = projection.markers === undefined
+    ? undefined
+    : markersHeldBy(projection.markers, [value]);
+  return markers === undefined ? projected : await composeLinkAddresses(
+    sourcePosition(sourceCell),
+    markers,
+    projected,
+  );
 }

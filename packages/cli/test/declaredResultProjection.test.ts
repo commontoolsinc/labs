@@ -111,6 +111,41 @@ describe("declaredResultProjection", () => {
     });
   });
 
+  it("returns a `$link` marker at a position one branch of a union re-enters", () => {
+    // `anyOf`/`oneOf` are a choice of shape, and a projection states one shape
+    // per position. An address answers every branch at once, since it names the
+    // position rather than describing what sits at it.
+    expect(derivedSchemaBeside({
+      origin: { anyOf: [{ $ref: "#/$defs/Item" }, { type: "null" }] },
+    })).toEqual({
+      type: "object",
+      properties: { item: CUT_ITEM, origin: false },
+      additionalProperties: false,
+    });
+  });
+
+  it("returns `true` at a conjunction, rather than one member's shape without the others", () => {
+    // `allOf` is a conjunction: the value satisfies every member at once, so a
+    // member that re-enters does not make the position a choice between shapes.
+    // Answering with the re-entering member alone would drop `at`, which is a
+    // projection handing back a different value than the declaration describes.
+    // The derivation cannot state two shapes at one position, so it leaves the
+    // position as wide as it was declared; a readback that then still closes a
+    // circle refuses legibly, naming the position it closes at.
+    expect(derivedSchemaBeside({
+      origin: {
+        allOf: [
+          { type: "object", properties: { of: { $ref: "#/$defs/Item" } } },
+          { type: "object", properties: { at: { type: "string" } } },
+        ],
+      },
+    })).toEqual({
+      type: "object",
+      properties: { item: CUT_ITEM, origin: true },
+      additionalProperties: false,
+    });
+  });
+
   describe("a `$ref` the declaration does not resolve", () => {
     /** What every case in this group derives: the reference contributes no
      * bound, so its position is read exactly as an unbounded readback reads

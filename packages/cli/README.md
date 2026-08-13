@@ -424,19 +424,23 @@ position renders its address and everything else reads as it always did.
 
 Three things follow:
 
-- **It is the same `$link` a caller writes by hand.** The derived bound is
-  answered by the selection step above, so `--schema` over the same position
-  produces the same address.
+- **It is the same `$link` a caller writes by hand.** The derived bound composes
+  its addresses through the same walk the selection step above composes a
+  written `$link` with, so `--schema` over the same position produces the same
+  address.
 - **A caller's own shape wins wherever it renders.** `--filter`, `--select` and
   `--schema` are applied to the receipt first, and a projection that narrows
   past the circle — `--select item.title` — is answered exactly as written, with
   nothing derived added to it. A projection that names the re-entering subtree
-  whole — `--select item` — keeps the circle it selected, and is bounded on the
-  way out like an unshaped readback: the answer is then the declaration's shape,
-  because the one asked for had no rendering at all.
+  whole — `--select item` — keeps the circle it selected and is bounded on the
+  way out, but the bound is a cut into what was selected rather than a shape
+  that replaces it: the closing position renders its address, and no position
+  the caller did not name comes back beside it. `--select item.parent` names the
+  closing position itself, and is answered with that one address alone.
 - **Nothing else pays for it.** A result that renders is written out exactly as
   it was read, and the compiled pattern a declared result is matched through is
-  loaded only where a readback cannot render.
+  loaded only where a readback cannot render. The bound itself is a walk over
+  the value already in hand: no second read, no pattern graph, no transaction.
 
 Where nothing bounds the circle — the verb declares no result, the declaration
 it made leaves the closing position wide, or a `--filter` is in play — the call

@@ -18,9 +18,9 @@ import {
   classifyCallableEntry,
 } from "../../fuse/callables.ts";
 import {
+  boundReadValue,
   type CellSelection,
   CellSelectionError,
-  declaredResultProjection,
   deriveSelectedValue,
 } from "./cell-selection.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
@@ -752,17 +752,17 @@ function circularResultPath(value: unknown): string | undefined {
  * The declaration is the boundary the AUTHOR drew: the position where the
  * declared type re-enters itself is the position that closes the circle, so
  * rendering an address there cuts exactly where the shape says it should, and
- * leaves every other position reading as it already did. It is applied through
- * the same selection step `--select`/`--schema` are answered by, so a derived
- * bound and a hand-written one produce the same vocabulary.
+ * leaves every other position reading as it already did. The addresses are
+ * written by the same walk `--select`/`--schema` compose theirs with, so a
+ * derived bound and a hand-written one name the same position the same way.
  *
- * A caller's own shape is applied to the receipt first and, where the value it
- * produces renders, this is never reached: nothing derived narrows a result a
- * caller already asked a renderable question of. A selection that keeps the
- * circle does reach here — a projection can name the re-entering subtree whole,
- * which selects the circle rather than cutting past it — and the bound answers
- * in the caller's place. Their shape had no rendering at all, and the
- * declaration's is the one in reach that does.
+ * The cut is applied to `value` — the result already in hand — and never reads
+ * a second one. That is what lets it bound a result a caller ALREADY shaped
+ * without widening it: a projection can name the re-entering subtree whole,
+ * which selects the circle rather than cutting past it, and the cut then
+ * removes the closing position from what they selected rather than answering
+ * with the declaration's whole shape in its place. Where a caller's own shape
+ * renders, this is never reached at all.
  *
  * Refuses where nothing in reach bounds it: no declaration at all, a
  * declaration whose recursion does not reach the closing position, or a
@@ -774,6 +774,7 @@ function circularResultPath(value: unknown): string | undefined {
 async function boundCyclicResult(
   resolved: CallableResolution,
   receiptCell: Cell<any>,
+  value: unknown,
   cycle: string,
   receiptId: string | undefined,
   deps: CallableExecutionDeps,
@@ -794,21 +795,12 @@ async function boundCyclicResult(
       "the addresses a bound is written in cannot be composed beside it.";
   } else {
     const declared = await resolved.declaredResult?.();
-    const projection = declaredResultProjection(declared);
-    if (projection !== undefined) {
-      const bounded = await (deps.deriveSelectedValue ?? deriveSelectedValue)(
-        resolved.pieces.runtime,
-        resolved.space,
-        receiptCell,
-        { projection },
-      );
-      // The bound is only as good as the declaration: a position the
-      // declaration left wide can still expand into the circle, and answering
-      // with a value that cannot be written would move the same failure one
-      // step later.
-      if (bounded !== undefined && circularResultPath(bounded) === undefined) {
-        return bounded;
-      }
+    const bounded = await boundReadValue(receiptCell, declared, value);
+    // The bound is only as good as the declaration: a position the declaration
+    // left wide can still expand into the circle, and answering with a value
+    // that cannot be written would move the same failure one step later.
+    if (bounded !== undefined && circularResultPath(bounded) === undefined) {
+      return bounded;
     }
     if (declared === undefined) {
       whyUnbounded = "This verb declares no result for `cf` to bound the " +
@@ -970,6 +962,7 @@ export async function executeResolvedCallable(
           result = await boundCyclicResult(
             resolved,
             receipt,
+            result,
             cycle,
             receiptAddress?.id,
             deps,

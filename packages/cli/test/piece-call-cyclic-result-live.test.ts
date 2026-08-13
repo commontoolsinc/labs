@@ -5,6 +5,7 @@ import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CyclicResultError } from "../lib/callable.ts";
 import {
+  deriveSelectedValue,
   parseSelectionFilter,
   parseSelectionProjection,
   parseSelectProjection,
@@ -327,6 +328,56 @@ describe("cf piece call on a piece that points back at its container", () => {
       // present in what `--select item` selects on its own, so this is what
       // separates the bound engaging from the raw selection going out.
       expect(Object.hasOwn(result.item, "addChild")).toBe(false);
+    });
+  });
+
+  it("answers a `--select` that names the closing position with that position alone", async () => {
+    await withTracker("cyclic-selection-names-cut", async ({ call }) => {
+      const result = await call("addChild", ["--title", "Pointed"], {
+        selection: { projection: parseSelectProjection("item.parent") },
+      }) as any;
+
+      expect(() => JSON.stringify(result)).not.toThrow();
+      // `item.parent` IS the position where the declared type re-enters, so
+      // this caller asked for exactly the thing that has no rendering. The
+      // address stands in for it, which is the whole of what a bound does.
+      expect(result.item.parent.$link.id.startsWith("of:")).toBe(true);
+      expect(result.item.parent.$link.path).toEqual(["parent"]);
+      // And nothing else comes back. Naming the absent fields is the point: an
+      // assertion that only checked `parent` would pass just as well against a
+      // bound that answered with the declaration's whole shape, which is a
+      // projection handing back MORE than the caller named.
+      expect(Object.hasOwn(result.item, "$NAME")).toBe(false);
+      expect(Object.hasOwn(result.item, "title")).toBe(false);
+      expect(Object.hasOwn(result.item, "status")).toBe(false);
+      expect(Object.hasOwn(result.item, "children")).toBe(false);
+      expect(Object.keys(result.item)).toEqual(["parent"]);
+      expect(Object.keys(result)).toEqual(["item"]);
+    });
+  });
+
+  it("bounds a readback off the value in hand rather than reading a second one", async () => {
+    await withTracker("cyclic-bound-read-cost", async ({ call }) => {
+      let reads = 0;
+      const counted: typeof deriveSelectedValue = (...args) => {
+        reads++;
+        return deriveSelectedValue(...args);
+      };
+
+      await call("addChild", ["--title", "Unshaped"], {
+        deriveSelectedValue: counted,
+      });
+      // Nothing was asked of the selection step, and the bound is a walk over
+      // the value the readback already holds: it runs no pattern graph and
+      // commits no transaction, so this call reads the receipt once.
+      expect(reads).toBe(0);
+
+      await call("addChild", ["--title", "Shaped"], {
+        selection: { projection: parseSelectProjection("item") },
+        deriveSelectedValue: counted,
+      });
+      // Exactly the caller's own read. The bound adds none.
+      expect(reads).toBe(1);
     });
   });
 
