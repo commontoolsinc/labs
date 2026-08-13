@@ -280,7 +280,11 @@ Deno.test("file credential store rejects malformed owners and expiries fail-clos
   const path = join(root, "auth.json");
   const malformedDocuments = [
     '{"version":1,"owners":[]}',
+    '{"version":2,"owners":{},"health":[]}',
+    '{"version":2,"owners":{},"health":{"local":[]}}',
+    '{"version":2,"owners":{"local":{"openai-codex":{"type":"oauth","providerId":"openai-codex","accessToken":"access","refreshToken":"refresh","expiresAt":1,"accountId":"account"}}},"health":{"local":{"openai-codex":[]}}}',
     '{"version":1,"owners":{"local":{"openai-codex":{"type":"oauth","providerId":"openai-codex","accessToken":"access","refreshToken":"refresh","expiresAt":1e999,"accountId":"account"}}}}',
+    '{"version":2,"owners":{},"health":{"local":{"openai-codex":{"status":"reconnect-required","reason":"revoked"}}}}',
   ];
   for (const malformed of malformedDocuments) {
     await Deno.writeTextFile(path, malformed, { mode: 0o600 });
@@ -305,5 +309,161 @@ Deno.test("logout deletes only the selected owner/provider entry", async () => {
   assertEquals(
     (await store.get("loom:user-b", "openai-codex"))?.accountId,
     "account-b",
+  );
+});
+
+Deno.test("version-1 credential documents migrate on mutation without losing owners", async () => {
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const original = {
+    version: 1,
+    owners: {
+      local: { "openai-codex": credential("local") },
+      other: { "openai-codex": credential("other") },
+    },
+  };
+  const originalText = `${JSON.stringify(original, null, 2)}\n`;
+  await Deno.writeTextFile(path, originalText, { mode: 0o600 });
+  const store = new FileHarnessCredentialStore({ path });
+
+  assertEquals(
+    (await store.get("local", "openai-codex"))?.accountId,
+    "account-local",
+  );
+  assertEquals(await Deno.readTextFile(path), originalText);
+  await store.set("local", "openai-codex", credential("updated"));
+
+  const migrated = JSON.parse(await Deno.readTextFile(path));
+  assertEquals(migrated.version, 2);
+  assertEquals(migrated.health, {});
+  assertEquals(
+    migrated.owners.other["openai-codex"].accountId,
+    "account-other",
+  );
+  assertEquals(
+    migrated.owners.local["openai-codex"].accountId,
+    "account-updated",
+  );
+});
+
+Deno.test("credential store never overwrites unknown future documents", async () => {
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const future = '{"version":3,"owners":{},"health":{},"future":true}';
+  await Deno.writeTextFile(path, future, { mode: 0o600 });
+  const store = new FileHarnessCredentialStore({ path });
+
+  await assertRejects(
+    () => store.set("local", "openai-codex", credential("replacement")),
+    Error,
+    "unsupported credential store format",
+  );
+  assertEquals(await Deno.readTextFile(path), future);
+});
+
+Deno.test("credential health is atomic with credentials and logout removes both", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  await store.updateRecord("local", "openai-codex", () => ({
+    credential: credential("local"),
+    health: { status: "reconnect-required", reason: "revoked" },
+  }));
+
+  assertEquals(await store.getHealth("local", "openai-codex"), {
+    status: "reconnect-required",
+    reason: "revoked",
+  });
+  await store.delete("local", "openai-codex");
+  assertEquals(await store.get("local", "openai-codex"), undefined);
+  assertEquals(await store.getHealth("local", "openai-codex"), undefined);
+});
+
+Deno.test("file credential health lookup and logout survive reopen", async () => {
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const store = new FileHarnessCredentialStore({ path });
+  await store.updateRecord("local", "openai-codex", () => ({
+    credential: credential("local"),
+    health: { status: "reconnect-required", reason: "revoked" },
+  }));
+  const reopened = new FileHarnessCredentialStore({ path });
+  assertEquals(await reopened.getHealth("local", "openai-codex"), {
+    status: "reconnect-required",
+    reason: "revoked",
+  });
+  await reopened.delete("local", "openai-codex");
+  assertEquals(await reopened.getRecord("local", "openai-codex"), {});
+});
+
+for (
+  const [name, createStore] of [
+    [
+      "in-memory",
+      () => ({
+        store: new InMemoryHarnessCredentialStore() as HarnessCredentialStore,
+        readBytes: undefined,
+      }),
+    ],
+    [
+      "file",
+      async () => {
+        const root = await Deno.makeTempDir();
+        const path = join(root, "auth.json");
+        return {
+          store: new FileHarnessCredentialStore({
+            path,
+          }) as HarnessCredentialStore,
+          readBytes: () => Deno.readTextFile(path),
+        };
+      },
+    ],
+  ] as const
+) {
+  Deno.test(`${name} credential store rejects orphan health atomically`, async () => {
+    const { store, readBytes } = await createStore();
+    await store.set("local", "openai-codex", credential("original"));
+    const originalBytes = await readBytes?.();
+
+    await assertRejects(
+      () =>
+        store.updateRecord("local", "openai-codex", () => ({
+          health: { status: "reconnect-required", reason: "revoked" },
+        })),
+      Error,
+      "credential health requires a credential",
+    );
+    assertEquals(
+      (await store.get("local", "openai-codex"))?.accountId,
+      "account-original",
+    );
+    if (readBytes !== undefined) {
+      assertEquals(await readBytes(), originalBytes);
+    }
+
+    await store.updateRecord("local", "openai-codex", () => ({
+      credential: credential("unhealthy"),
+      health: { status: "reconnect-required", reason: "revoked" },
+    }));
+    await store.update("local", "openai-codex", () => undefined);
+    assertEquals(await store.getRecord("local", "openai-codex"), {});
+  });
+}
+
+Deno.test("file credential store finishes an atomic commit after its updater starts", async () => {
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const store = new FileHarnessCredentialStore({ path });
+  await store.set("local", "openai-codex", credential("original"));
+  const controller = new AbortController();
+
+  await store.updateRecord("local", "openai-codex", () => {
+    controller.abort(new Error("late cancellation"));
+    return { credential: credential("replacement") };
+  }, controller.signal);
+  assertEquals(
+    (await new FileHarnessCredentialStore({ path }).get(
+      "local",
+      "openai-codex",
+    ))?.accountId,
+    "account-replacement",
   );
 });

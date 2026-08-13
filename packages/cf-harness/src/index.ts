@@ -17,6 +17,8 @@ export * from "./model/openai-codex-responses.ts";
 export * from "./auth/types.ts";
 export * from "./auth/credential-store.ts";
 export * from "./auth/openai-codex.ts";
+export * from "./auth/provider-settings.ts";
+export * from "./control-errors.ts";
 export * from "./contracts/http-fetch.ts";
 export * from "./contracts/image.ts";
 export * from "./contracts/prompt-slot.ts";

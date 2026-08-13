@@ -34,6 +34,8 @@ The current package provides:
 
 - batch CLI execution with bounded model turns and optional streamed events;
 - machine-readable capability discovery with `--describe-capabilities`;
+- persistent provider configuration and structured config/auth control, with
+  durable bounded Codex refresh health;
 - workspace, Fabric, and explicit host mounts with path containment;
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
