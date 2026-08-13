@@ -1375,7 +1375,8 @@ export const parseCfHarnessCliArgs = async (
   if (
     (rawExplicitModelProvider !== undefined &&
       explicitModelProvider === undefined) ||
-    (rawEnvironmentModelProvider !== undefined &&
+    (rawExplicitModelProvider === undefined &&
+      rawEnvironmentModelProvider !== undefined &&
       environmentModelProvider === undefined)
   ) {
     throw new Error(

@@ -10,6 +10,7 @@ import {
   OpenAICodexResponsesClient,
 } from "../src/model/openai-codex-responses.ts";
 import type { OpenAICodexOAuthCredential } from "../src/auth/types.ts";
+import { HarnessControlError } from "../src/control-errors.ts";
 import { createHarnessImageAttachment } from "../src/image-attachments.ts";
 
 const credential: OpenAICodexOAuthCredential = {
@@ -690,8 +691,8 @@ Deno.test("Codex Responses client rejects incomplete tool calls", async () => {
         nativeModelToolIds: [],
         runId: "run-incomplete-call",
       }),
-    Error,
-    "incomplete tool call",
+    HarnessControlError,
+    "invalid terminal response",
   );
 });
 
@@ -770,8 +771,8 @@ Deno.test("Codex Responses client rejects conflicting duplicate tool-call ids", 
         nativeModelToolIds: [],
         runId: "run-duplicate",
       }),
-    Error,
-    "conflicting duplicate tool-call ids",
+    HarnessControlError,
+    "invalid terminal response",
   );
 });
 
@@ -827,6 +828,34 @@ Deno.test("Codex model discovery is live, owner-authenticated, and ordered", asy
   assertEquals(models[0].supportedReasoningEfforts, ["high"]);
 });
 
+Deno.test("Codex model discovery classifies provider failures", async () => {
+  for (
+    const [fetchFn, expectedCode] of [
+      [
+        () => Promise.resolve(new Response("unauthorized", { status: 401 })),
+        "provider-auth-required",
+      ],
+      [
+        () => Promise.resolve(new Response("unavailable", { status: 503 })),
+        "provider-unavailable",
+      ],
+      [
+        () => Promise.reject(new Error("network detail")),
+        "provider-unavailable",
+      ],
+    ] as const
+  ) {
+    const client = new OpenAICodexResponsesClient({
+      credentialResolver: { resolve: () => Promise.resolve(credential) },
+      fetchFn,
+    });
+
+    const error = await assertRejects(() => client.listModels());
+    assertEquals(error instanceof HarnessControlError, true);
+    assertEquals((error as HarnessControlError).code, expectedCode);
+  }
+});
+
 Deno.test("Codex Responses quota errors are concise and do not retain response bodies", async () => {
   const attempts: unknown[] = [];
   const client = new OpenAICodexResponsesClient({
@@ -856,10 +885,38 @@ Deno.test("Codex Responses quota errors are concise and do not retain response b
   );
 
   assertEquals((error as Error).message, "OpenAI Codex usage limit reached");
+  assertEquals(error instanceof HarnessControlError, true);
+  assertEquals((error as HarnessControlError).code, "provider-unavailable");
   const serialized = JSON.stringify(attempts);
   assertEquals(serialized.includes("access-secret"), false);
   assertEquals(serialized.includes("acct-123"), false);
   assertStringIncludes(serialized, '"httpStatus":429');
+});
+
+Deno.test("Codex Responses classifies provider HTTP failures", async () => {
+  for (
+    const [status, expectedCode] of [
+      [401, "provider-auth-required"],
+      [503, "provider-unavailable"],
+    ] as const
+  ) {
+    const client = new OpenAICodexResponsesClient({
+      credentialResolver: { resolve: () => Promise.resolve(credential) },
+      fetchFn: () => Promise.resolve(new Response("unavailable", { status })),
+    });
+
+    const error = await assertRejects(() =>
+      client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-provider-unavailable",
+      })
+    );
+    assertEquals(error instanceof HarnessControlError, true);
+    assertEquals((error as HarnessControlError).code, expectedCode);
+  }
 });
 
 Deno.test("Codex transport errors redact credential and account values", async () => {
@@ -888,6 +945,8 @@ Deno.test("Codex transport errors redact credential and account values", async (
   );
 
   const serialized = `${errorGraphText(error)}${JSON.stringify(attempts)}`;
+  assertEquals(error instanceof HarnessControlError, true);
+  assertEquals((error as HarnessControlError).code, "provider-unavailable");
   assertEquals(serialized.includes("access-secret"), false);
   assertEquals(serialized.includes("refresh-secret"), false);
   assertEquals(serialized.includes("acct-123"), false);
@@ -1068,8 +1127,8 @@ Deno.test("Codex Responses recognizes response.failed as terminal", async () => 
         nativeModelToolIds: [],
         runId: "run-response-failed",
       }),
-    Error,
-    "ended with status failed",
+    HarnessControlError,
+    "invalid terminal response",
   );
 });
 

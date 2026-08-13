@@ -309,8 +309,8 @@ export class OpenAICodexCredentialResolver {
       health = record.health;
     } catch {
       if (signal?.aborted) throw abortReason(signal);
-      throw new OpenAICodexAuthError(
-        "storage",
+      throw new HarnessControlError(
+        "provider-unavailable",
         "OpenAI Codex credential storage could not be read",
       );
     }
@@ -398,13 +398,23 @@ export class OpenAICodexCredentialResolver {
     } catch (error) {
       if (signal?.aborted) throw abortReason(signal);
       if (error instanceof HarnessControlError) throw error;
-      if (error instanceof OpenAICodexAuthError) throw error;
-      throw new OpenAICodexAuthError(
-        "storage",
+      if (error instanceof OpenAICodexAuthError) {
+        throw new HarnessControlError(
+          "provider-unavailable",
+          error.message,
+        );
+      }
+      throw new HarnessControlError(
+        "provider-unavailable",
         "OpenAI Codex credential storage could not be updated",
       );
     }
-    if (!refreshed) throw new Error("OpenAI Codex credential was disconnected");
+    if (!refreshed) {
+      throw new HarnessControlError(
+        "provider-auth-required",
+        "OpenAI Codex credential was disconnected",
+      );
+    }
     return refreshed;
   }
 }

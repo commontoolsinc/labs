@@ -4030,6 +4030,18 @@ Deno.test("parseCfHarnessCliArgs selects openai-codex without an API key", async
   assertEquals(parsed.apiKey, undefined);
 });
 
+Deno.test("parseCfHarnessCliArgs applies explicit provider before environment validation", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--model-provider", "openai-codex", "--prompt", "hello"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_MODEL_PROVIDER: "not-a-provider" },
+    },
+  );
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.modelProvider, "openai-codex");
+});
+
 Deno.test("parseCfHarnessCliArgs rejects gateway configuration for openai-codex", async () => {
   await assertRejects(
     () =>

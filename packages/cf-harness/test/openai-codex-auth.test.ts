@@ -230,6 +230,8 @@ Deno.test("Codex credential resolution never falls back after revocation", async
   });
 
   const error = await assertRejects(() => resolver.resolve()) as Error;
+  assertEquals(error instanceof HarnessControlError, true);
+  assertEquals((error as HarnessControlError).code, "provider-unavailable");
   assertEquals(error.message.includes("secret-refresh-token"), false);
   assertEquals(error.message, "OpenAI Codex token refresh failed (400)");
 });
@@ -892,7 +894,8 @@ Deno.test("Codex transient refresh failures leave credential health unchanged", 
   });
 
   const error = await assertRejects(() => resolver.resolve());
-  assertEquals((error as OpenAICodexAuthError).kind, "network");
+  assertEquals(error instanceof HarnessControlError, true);
+  assertEquals((error as HarnessControlError).code, "provider-unavailable");
   assertEquals(
     errorGraphText(error).includes("transient-refresh-secret"),
     false,
