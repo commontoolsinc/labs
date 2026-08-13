@@ -594,8 +594,8 @@ against the earlier revision continue to expand references at alias schema
 positions, so those positions remain covered by the reservation rule below.
 
 The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
-legacy `$alias` payloads. Link recognition follows the canonical cell-rep
-form — in the legacy representation, the single-key `{ "/": { "link@1": … } }`
+`$alias` payloads. Link recognition follows the canonical cell-rep form — in
+the legacy representation, the single-key `{ "/": { "link@1": … } }`
 envelope — so an envelope carrying sibling keys is not a link and its contents
 are ordinary data. Memory servers MUST reject set or patch operations
 whose resulting stored document uses that prefix as an opaque schema string in

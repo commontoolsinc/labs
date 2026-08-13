@@ -11,7 +11,6 @@ import { resolveLink } from "../src/link-resolution.ts";
 import {
   areNormalizedLinksSame,
   isSigilLink,
-  parseAliasBinding,
   parseLink,
 } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -98,7 +97,7 @@ describe("link-resolution", () => {
       rawTx.abort();
     });
 
-    it("should follow a simple alias", () => {
+    it("should follow a simple write redirect", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
         "should follow a simple alias 1",
@@ -106,19 +105,20 @@ describe("link-resolution", () => {
         tx,
       );
       testCell.set({ value: 42 });
-      // `cell` only satisfies the AliasBinding constraint (name or
-      // partialCause); parseAliasBinding resolves against the base link.
-      const binding = { $alias: { cell: "result" as const, path: ["value"] } };
       const result = resolveLink(
         runtime,
         tx,
-        parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
+        {
+          ...testCell.getAsNormalizedFullLink(),
+          path: ["value"],
+          overwrite: "redirect",
+        },
         "writeRedirect",
       );
       expect(tx.readValueOrThrow(result)).toBe(42);
     });
 
-    it("should follow nested aliases", () => {
+    it("should follow nested write redirects", () => {
       const innerCell = runtime.getCell<{ inner: number }>(
         space,
         "should follow nested aliases 1",
@@ -135,11 +135,14 @@ describe("link-resolution", () => {
       outerCell.setRaw({
         outer: innerCell.key("inner").getAsWriteRedirectLink(),
       });
-      const binding = { $alias: { cell: "result" as const, path: ["outer"] } };
       const result = resolveLink(
         runtime,
         tx,
-        parseAliasBinding(binding, outerCell.getAsNormalizedFullLink()),
+        {
+          ...outerCell.getAsNormalizedFullLink(),
+          path: ["outer"],
+          overwrite: "redirect",
+        },
         "writeRedirect",
       );
       expect(
@@ -153,7 +156,7 @@ describe("link-resolution", () => {
       expect(tx.readValueOrThrow(result)).toBe(10);
     });
 
-    it("should allow aliases in aliased paths", () => {
+    it("should allow write redirects in redirected paths", () => {
       const testCell = runtime.getCell<any>(
         space,
         "should allow aliases in aliased paths 1",
@@ -168,13 +171,14 @@ describe("link-resolution", () => {
           b: { c: 1 },
         },
       });
-      const binding = {
-        $alias: { cell: "result" as const, path: ["a", "a", "c"] },
-      };
       const result = resolveLink(
         runtime,
         tx,
-        parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
+        {
+          ...testCell.getAsNormalizedFullLink(),
+          path: ["a", "a", "c"],
+          overwrite: "redirect",
+        },
         "writeRedirect",
       );
       expect(

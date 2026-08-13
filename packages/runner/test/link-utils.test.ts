@@ -16,13 +16,11 @@ import {
   decodeJsonPointer,
   encodeJsonPointer,
   inlineExternalSchemaRefsInValue,
-  isAliasBinding,
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedLink,
-  parseAliasBinding,
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
@@ -37,7 +35,7 @@ import {
   resetContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
 } from "../src/schema-doc-config.ts";
-import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -141,14 +139,6 @@ describe("link-utils", () => {
   });
 
   describe("isWriteRedirectLink", () => {
-    it("should not identify alias bindings as write redirect links", () => {
-      // `$alias` is only meaningful as a Pattern binding, not as a link in
-      // data; the binding predicate still matches it.
-      const legacyAlias = { $alias: { cell: "result", path: ["test"] } };
-      expect(isWriteRedirectLink(legacyAlias)).toBe(false);
-      expect(isAliasBinding(legacyAlias)).toBe(true);
-    });
-
     it("should identify sigil links with overwrite redirect as write redirect links", () => {
       const sigilLink = {
         "/": {
@@ -170,25 +160,6 @@ describe("link-utils", () => {
     it("should not identify non-links as write redirect links", () => {
       expect(isWriteRedirectLink("string")).toBe(false);
       expect(isWriteRedirectLink({ notLink: "value" })).toBe(false);
-    });
-  });
-
-  describe("isAliasBinding", () => {
-    it("should fail to match legacy aliases without name or cause", () => {
-      const legacyAlias = { $alias: { path: ["test"] } };
-      expect(isAliasBinding(legacyAlias)).toBe(false);
-    });
-
-    it("should fail to match legacy aliases with cell id", () => {
-      const cell = runtime.getCell(space, "test");
-      const legacyAlias = { $alias: { cell: cell.entityId, path: ["test"] } };
-      expect(isAliasBinding(legacyAlias)).toBe(false);
-    });
-
-    it("should not identify non-legacy aliases", () => {
-      expect(isAliasBinding({ notAlias: "value" })).toBe(false);
-      expect(isAliasBinding({ $alias: "not object" })).toBe(false);
-      expect(isAliasBinding({ $alias: { notPath: "value" } })).toBe(false);
     });
   });
 
@@ -385,102 +356,17 @@ describe("link-utils", () => {
       });
     });
 
-    it("should not parse alias bindings (those parse via parseAliasBinding)", () => {
+    it("returns `undefined` for an `$alias` record in data", () => {
       const cell = runtime.getCell(space, "test");
-      const legacyAlias = {
-        $alias: {
-          cell: cell.entityId,
-          path: ["nested", "value"],
-          schema: { type: "number" },
-        },
-      };
-      // As data, `$alias` is not a link.
-      expect(parseLink(legacyAlias, cell)).toBeUndefined();
-
-      // As a Pattern binding, it still parses via the binding-side parser
-      // (which ignores the doubly-legacy `cell` ref and resolves to base).
       expect(
-        parseAliasBinding(
-          legacyAlias as unknown as AliasBinding,
-          cell.getAsNormalizedFullLink(),
-        ),
-      ).toEqual({
-        id: expect.stringContaining("of:"),
-        path: ["nested", "value"],
-        space: space,
-        scope: "space",
-        schema: { type: "number" },
-        overwrite: "redirect",
-      });
-    });
-
-    it("should resolve named-cell alias bindings against the base", () => {
-      const baseCell = runtime.getCell(space, "base");
-      const legacyAlias = {
-        $alias: {
-          // Only satisfies the AliasBinding constraint (name or
-          // partialCause); parseAliasBinding resolves against the base link.
-          cell: "result" as const,
-          path: ["nested", "value"],
-        },
-      };
-      expect(parseLink(legacyAlias, baseCell)).toBeUndefined();
-
-      const result = parseAliasBinding(
-        legacyAlias,
-        baseCell.getAsNormalizedFullLink(),
-      );
-      expect(result).toEqual({
-        id: expect.stringContaining("of:"),
-        path: ["nested", "value"],
-        space: space,
-        scope: "space",
-        schema: undefined,
-        overwrite: "redirect",
-      });
-    });
-
-    it("should resolve explicit inherit scope on alias bindings to the base's scope", () => {
-      const baseCell = runtime.getCell(space, "base-inherit-scope");
-      const base = {
-        ...baseCell.getAsNormalizedFullLink(),
-        scope: "session" as const,
-      };
-
-      // The alias types no longer admit `scope: "inherit"` (the builder never
-      // generates it), but stored pattern JSON is untyped: parsing stays
-      // defensive and resolves it to the base link's scope, like an absent
-      // scope.
-      expect(
-        parseAliasBinding(
-          {
-            $alias: { path: ["nested", "value"], scope: "inherit" },
-          } as unknown as AliasBinding,
-          base,
-        ),
-      ).toEqual({
-        id: base.id,
-        path: ["nested", "value"],
-        space: space,
-        scope: "session",
-        overwrite: "redirect",
-      });
-
-      // A partialCause alias denotes a derived internal cell — a different
-      // document minted from the result cell and the partialCause, in the
-      // alias's own scope — so it cannot be parsed against a base link.
-      expect(() =>
-        parseAliasBinding(
-          {
-            $alias: {
-              partialCause: "internal-cell",
-              path: ["nested", "value"],
-              scope: "user",
-            },
+        parseLink({
+          $alias: {
+            cell: cell.entityId,
+            path: ["nested", "value"],
+            schema: { type: "number" },
           },
-          base,
-        )
-      ).toThrow("Cannot parse partialCause alias as link");
+        }, cell),
+      ).toBeUndefined();
     });
 
     it("should return undefined for non-link values", () => {

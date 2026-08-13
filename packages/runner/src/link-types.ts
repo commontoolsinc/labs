@@ -12,7 +12,6 @@ import {
 } from "./builder/types.ts";
 import { type MemorySpace } from "./cell.ts";
 import {
-  type AliasBinding,
   type CellLinkRefPayload,
   LINK_ADDRESS_KEYS,
   type SigilLink,
@@ -178,12 +177,13 @@ export function toMemorySpaceAddress(
 }
 
 /**
- * Primitive cell link types that can be serialized.
+ * The serializable link form. There is one, the sigil link, and every
+ * predicate and parser in this module speaks only about it.
  *
- * Legacy `$alias` records are NOT links: they only appear as bindings inside
- * Pattern objects (see {@link isAliasBinding}) and are plain data anywhere
- * else. Pattern machinery that consumes them checks `isAliasBinding`
- * explicitly and parses via {@link parseAliasBinding}.
+ * The one thing that resembles a link here and is not one is the `$alias`
+ * pattern binding, defined in `alias-binding.ts`. It carries no document
+ * identifier, so nothing in this module recognizes it and an `$alias` record
+ * found in data is data.
  */
 export type PrimitiveCellLink = SigilLink;
 
@@ -231,10 +231,6 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
 /**
  * Check if value is a write-redirect link (sigil `link@1` with
  * `overwrite: "redirect"`).
- *
- * Legacy `$alias` records are deliberately NOT matched: they are only
- * meaningful as bindings inside Pattern objects, not as links in data.
- * Binding-side callers pair this with an explicit `isAliasBinding` check.
  */
 export function isWriteRedirectLink(
   value: any,
@@ -244,21 +240,6 @@ export function isWriteRedirectLink(
   }
 
   return false;
-}
-
-/**
- * Check if value is a `$alias` Pattern binding.
- *
- * `$alias` records are no longer links: they appear only as bindings inside
- * Pattern objects, in the intermediate form where we don't have enough detail
- * to point to an actual cell. In data they are plain values.
- */
-export function isAliasBinding(value: any): value is AliasBinding {
-  return isObjectNotArray(value) && "$alias" in value &&
-    isObjectNotArray(value.$alias) &&
-    Array.isArray(value.$alias.path) &&
-    (value.$alias.partialCause !== undefined ||
-      value.$alias.cell === "result" || value.$alias.cell === "argument");
 }
 
 /**
@@ -297,40 +278,6 @@ export function parseLinkPrimitive(
     };
   }
   throw new Error(`Link is not a primitive: ${value}`);
-}
-
-/**
- * Parse a legacy `$alias` Pattern binding to normalized format.
- *
- * This is binding-side machinery only: `$alias` records are kept in Pattern
- * objects but are plain data everywhere else, so the generic link parsers
- * ({@link parseLinkPrimitive}, `parseLink`) no longer accept them.
- */
-export function parseAliasBinding(
-  value: AliasBinding,
-  base: NormalizedFullLink,
-): NormalizedFullLink {
-  const alias = value.$alias;
-  // A partialCause alias denotes a derived internal cell — a different
-  // document minted from the result cell and the partialCause (see
-  // getDerivedInternalCellLink), in the alias's own `scope` — not a path
-  // within the base document, so it cannot be parsed against a base link.
-  // Callers must convert it via unwrapOneLevelAndBindToDoc instead.
-  if (alias.partialCause !== undefined) {
-    throw new Error(
-      `Cannot parse partialCause alias as link: ${JSON.stringify(value)}`,
-    );
-  }
-  // Named-cell ("argument"/"result") aliases carry no absolute id of their
-  // own here, so resolve to the base cell's document, in the base's scope.
-  return {
-    id: base.id,
-    path: alias.path,
-    space: base.space,
-    scope: base.scope,
-    ...(alias.schema !== undefined && { schema: alias.schema }),
-    overwrite: "redirect",
-  };
 }
 
 /**

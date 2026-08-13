@@ -4,6 +4,7 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
+import { type AliasBinding } from "../alias-binding.ts";
 import { isCell, setCellUnlinkedSpace } from "../cell.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import { createRef } from "../create-ref.ts";
@@ -28,7 +29,6 @@ import {
   UNUSED_RECORD_SUBSCHEMA_KEYS,
   UNUSED_SINGLE_SUBSCHEMA_KEYS,
 } from "../schema-walk.ts";
-import { type AliasBinding } from "../sigil-types.ts";
 import {
   IExtendedStorageTransaction,
   MemorySpace,
