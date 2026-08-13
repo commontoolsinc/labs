@@ -501,8 +501,16 @@ carry an entire one, and what was asked for is where the value lives.
 
 Marking a position deeper than a link names the linked document and the path
 below it — `notes[0].title`, where `notes` holds links, renders the note's own
-`id` with `path` `["title"]`. A link is a durable identity; the slot that holds
-it stops naming the same value the moment the collection is reordered.
+`id` with `path` `["title"]`. A link is a durable identity for the edge it
+records; the slot that holds it stops naming the same value the moment the
+collection is reordered.
+
+It is not, though, the piece's canonical address. A piece created inside a
+handler and pushed into a collection is held through a wrapper that redirects to
+it, so a marker names the wrapper, and two positions holding one piece render
+two different `id`s. `cf piece call --show-links` follows the redirect and names
+the canonical result cell, which is what the runtime compares on. Use a marker
+address to read a position; use the resolved one to say which piece.
 
 The marker sits beside a projection when both are wanted, and the answer
 carries both:

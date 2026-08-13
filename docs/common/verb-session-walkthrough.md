@@ -338,9 +338,24 @@ piece it made, the address renders in place, and the next call takes it as its
 target. Identity survives the round trip instead of being flattened into a copy
 of the item's contents.
 
-`--show-links` is the **[today]** spelling of the same move: it returns a
-dictionary of RFC 6901 pointers naming the document behind each result path, so
-the address is one `jq` hop further away but reachable.
+`--show-links` is the **[today]** spelling of a neighbouring move, and it is
+worth knowing it is not the same one. It returns a dictionary of RFC 6901
+pointers naming the document behind each result path, so the address is one
+`jq` hop further away but reachable.
+
+The two answer different questions, and a caller who compares their `id`s finds
+them disagreeing. A `$link` marker renders the link **as stored** — the edge the
+selection already read. A piece created inside a handler and pushed into a
+collection is held through a wrapper that redirects to it, so the marker names
+the wrapper, and two positions holding one piece can render two different `id`s.
+`--show-links` follows that redirect and names the piece's canonical result
+cell, which is the identity the runtime itself compares on and is the same from
+every position the piece is reached from.
+
+Both read back the same contents, so neither is wrong about the value. Only the
+resolved answer is the piece's identity. A marker address may also carry a
+non-empty `path`, and `--piece` has no path spelling, so such an address names a
+position rather than a call target.
 
 Neither route needs a verb to declare its result. A `$link` marker on a link
 position renders the address and suppresses the fetch without consulting a
