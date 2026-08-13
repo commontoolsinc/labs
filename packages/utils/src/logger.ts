@@ -966,6 +966,10 @@ export class Logger {
     this.#flags.clear();
   }
 
+  //
+  // Private helpers
+  //
+
   /** Increments the count for a specific message key and log level. */
   #incrementKeyCount(key: string, level: ActiveLogLevel): void {
     // Skip reserved key name "total" to prevent corruption of breakdown totals
