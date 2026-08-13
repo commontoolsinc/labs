@@ -15,10 +15,12 @@ import {
   action,
   assert,
   computed,
+  equals,
   pattern,
   TESTS,
   UI,
   wish,
+  Writable,
 } from "commonfabric";
 import {
   findNodeByProp,
@@ -27,9 +29,11 @@ import {
 } from "../test/vnode-helpers.ts";
 import CozyPoll, {
   dayKeyOf,
+  type LunchProfile,
   type Option,
   type User,
   type Vote,
+  type VoteColor,
 } from "./main.tsx";
 
 // This file's single identity IS the host, so adding options triggers the
@@ -57,91 +61,55 @@ const COLLIDING_INITIAL_OPTION: Option = {
   addedByName: "Daffodil",
 };
 
-const COLLIDING_INITIAL_USERS: User[] = [
-  {
-    name: "Daffodil",
-    avatar: "",
-    color: "#2f6f4e",
-  },
-  {
-    name: "Dragonfly",
-    avatar: "",
-    color: "#c2573a",
-  },
-  {
-    name: "Dan",
-    avatar: "",
-    color: "#3b4a6b",
-  },
-  {
-    name: "Dana",
-    avatar: "",
-    color: "#a33b35",
-  },
-  {
-    name: "dan",
-    avatar: "",
-    color: "#b27722",
-  },
-  {
-    name: "A",
-    avatar: "",
-    color: "#7c3aed",
-  },
-  {
-    name: "a",
-    avatar: "",
-    color: "#2f6f4e",
-  },
-  {
-    name: "A1",
-    avatar: "",
-    color: "#c2573a",
-  },
-  {
-    name: "Bob Smith",
-    avatar: "",
-    color: "#3b4a6b",
-  },
-  {
-    name: "Bob  Smith",
-    avatar: "",
-    color: "#a33b35",
-  },
-  {
-    name: "👩🏽‍💻Alice",
-    avatar: "",
-    color: "#7c3aed",
-  },
-  {
-    name: "👩🏽‍💻Bob",
-    avatar: "",
-    color: "#2f6f4e",
-  },
-  {
-    name: "🇺🇸Alice",
-    avatar: "",
-    color: "#c2573a",
-  },
-  {
-    name: "🇺🇸Bob",
-    avatar: "",
-    color: "#3b4a6b",
-  },
-  {
-    name: "e\u0301Alice",
-    avatar: "",
-    color: "#a33b35",
-  },
-  {
-    name: "e\u0301Bob",
-    avatar: "",
-    color: "#b27722",
-  },
+/**
+ * Participants whose names share prefixes, so the vote-swatch labels must
+ * disambiguate them. Names and colours only — each one's identity is a profile
+ * cell minted in the pattern body, since a cell cannot be static seed data.
+ */
+const COLLIDING_INITIAL_PEOPLE: Array<[string, string]> = [
+  ["Daffodil", "#2f6f4e"],
+  ["Dragonfly", "#c2573a"],
+  ["Dan", "#3b4a6b"],
+  ["Dana", "#a33b35"],
+  ["dan", "#b27722"],
+  ["A", "#7c3aed"],
+  ["a", "#2f6f4e"],
+  ["A1", "#c2573a"],
+  ["Bob Smith", "#3b4a6b"],
+  ["Bob  Smith", "#a33b35"],
+  ["👩🏽‍💻Alice", "#7c3aed"],
+  ["👩🏽‍💻Bob", "#2f6f4e"],
+  ["🇺🇸Alice", "#c2573a"],
+  ["🇺🇸Bob", "#3b4a6b"],
+  ["e\u0301Alice", "#a33b35"],
+  ["e\u0301Bob", "#b27722"],
+];
+
+/** Each colliding participant's vote colour, in the same order. */
+const COLLIDING_VOTE_COLORS: VoteColor[] = [
+  "green",
+  "yellow",
+  "red",
+  "green",
+  "yellow",
+  "red",
+  "green",
+  "yellow",
+  "red",
+  "green",
+  "yellow",
+  "red",
+  "green",
+  "yellow",
+  "red",
+  "green",
 ];
 
 export default pattern(() => {
-  const poll = CozyPoll({});
+  // Identity is a profile cell; the test supplies the viewer's through the
+  // seam the `#profile` wish fills in production.
+  const alex = Writable.of<LunchProfile>({ name: "Alex" });
+  const poll = CozyPoll({ viewer: { profile: alex, name: "Alex" } });
 
   // Reference times derive from the interval `#now/300` wish — the same
   // shared ticking clock the pattern under test runs on (the pattern body
@@ -162,124 +130,56 @@ export default pattern(() => {
   // A vote cast "yesterday" — stored, but hidden by the current-day filter.
   // `castAt` resolves with the wish; until then it reads undefined, which
   // the filter also treats as not-today.
-  const STALE_VOTE: Vote = {
-    voterName: "Stan",
-    optionId: "opt-seeded",
-    voteType: "green",
-    castAt: staleCastAt,
-  };
+  const stan = Writable.of<LunchProfile>({ name: "Stan" });
+  const staleVotes = computed((): Vote[] => [
+    {
+      voter: stan,
+      optionId: "opt-seeded",
+      voteType: "green",
+      castAt: staleCastAt,
+    },
+  ]);
 
   // Second instance seeded with a stale vote, for the current-day filter
   // scenario (castVote always stamps "now", so staleness must be seeded).
   const stalePoll = CozyPoll({
     options: [SEEDED_OPTION],
-    votes: [STALE_VOTE],
+    votes: staleVotes,
+    viewer: { profile: stan, name: "Stan" },
   });
 
   // Participant names with shared prefixes use distinct current-day vote labels.
   // Each label preserves complete displayed characters.
   const collidingCastAt = computed(() => nowCell.result ?? undefined);
+  const collidingPeople = COLLIDING_INITIAL_PEOPLE.map((
+    [name, color],
+    index,
+  ) => ({
+    name,
+    color,
+    profile: Writable.of<LunchProfile>({ name }),
+    voteType: COLLIDING_VOTE_COLORS[index] ?? "green",
+  }));
+  const collidingUsers = computed((): User[] =>
+    collidingPeople.map(({ name, color, profile }) => ({
+      profile,
+      name,
+      avatar: "",
+      color,
+    }))
+  );
+  const collidingVotes = computed((): Vote[] =>
+    collidingPeople.map(({ profile, voteType }) => ({
+      voter: profile,
+      optionId: COLLIDING_INITIAL_OPTION.id,
+      voteType,
+      castAt: collidingCastAt,
+    }))
+  );
   const initialsPoll = CozyPoll({
     options: [COLLIDING_INITIAL_OPTION],
-    users: COLLIDING_INITIAL_USERS,
-    votes: [
-      {
-        voterName: "Daffodil",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Dragonfly",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Dan",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Dana",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "dan",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "A",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "a",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "A1",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Bob Smith",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "Bob  Smith",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "👩🏽‍💻Alice",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "👩🏽‍💻Bob",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "🇺🇸Alice",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "🇺🇸Bob",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "yellow",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "e\u0301Alice",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "red",
-        castAt: collidingCastAt,
-      },
-      {
-        voterName: "e\u0301Bob",
-        optionId: COLLIDING_INITIAL_OPTION.id,
-        voteType: "green",
-        castAt: collidingCastAt,
-      },
-    ],
+    users: collidingUsers,
+    votes: collidingVotes,
   });
 
   // Profile-first join + the header strip/viewer-chip rendering from stored
@@ -311,11 +211,12 @@ export default pattern(() => {
   });
 
   const action_join_as_alex = action(() => {
-    poll.joinAs.send({ name: "Alex" });
+    poll.joinAs.send({});
   });
 
   const action_try_rejoin_as_alex_two = action(() => {
-    poll.joinAs.send({ name: "Alex Two" });
+    // Same identity joining again: idempotent, not a second participant.
+    poll.joinAs.send({});
   });
 
   const action_add_chipotle = action(() => {
@@ -402,7 +303,7 @@ export default pattern(() => {
     poll.users.length === 1 &&
     poll.users[0]?.name === "Alex" &&
     poll.myName === "Alex" &&
-    poll.adminName === "Alex" &&
+    poll.hostName === "Alex" &&
     poll.isJoined === true &&
     poll.isAdmin === true
   );
@@ -424,7 +325,7 @@ export default pattern(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "green" &&
-      v?.voterName === "Alex" &&
+      equals(v?.voter, alex) &&
       // A handler-cast vote is stamped with today's castAt, so it must also
       // appear in the current-day view.
       poll.todaysVotes.length === 1 &&
@@ -464,7 +365,7 @@ export default pattern(() => {
   );
 
   const assert_still_alex_host = assert(() =>
-    poll.adminName === "Alex" && poll.isAdmin === true
+    poll.hostName === "Alex" && poll.isAdmin === true
   );
 
   // History lives in the `visits` PerSpace array now; we assert directly on the
@@ -662,7 +563,7 @@ export default pattern(() => {
   );
 
   const action_stale_join_as_stan = action(() => {
-    stalePoll.joinAs.send({ name: "Stan" });
+    stalePoll.joinAs.send({});
   });
 
   // Same color as the hidden stale vote.
@@ -677,7 +578,7 @@ export default pattern(() => {
     const v = stalePoll.todaysVotes[0];
     return todayKey !== "" &&
       stalePoll.todaysVotes.length === 1 &&
-      v?.voterName === "Stan" &&
+      equals(v?.voter, stan) &&
       v?.voteType === "green" &&
       typeof v?.castAt === "number" &&
       dayKeyOf(v.castAt) === todayKey &&

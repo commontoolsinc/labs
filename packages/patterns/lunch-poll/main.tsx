@@ -6,19 +6,25 @@
  *
  * Winner: fewest reds, then most greens.
  *
- * Identity follows the scrabble idiom:
- * - `users` is a per-space directory of joined participants.
- * - Each viewer's `myName` is per-user; it is set once on join and treated as
- *   immutable thereafter. A profile-backed join stores the viewer's live
- *   `wish({ query: "#profile" })` cell in the object-wrapped
- *   `participantProfiles` directory, while keeping a name/avatar snapshot in
- *   the legacy name-keyed poll state. A guest may instead type a string; guest
- *   entries deliberately have no canonical profile link.
- * - The first joiner's name is captured into `adminName` (per-space). They can
+ * Identity is the viewer's shared profile CELL, compared with `equals()`:
+ * - `users` is a per-space roster; each entry carries the participant's
+ *   `#profile` cell as its identity, plus a name/avatar snapshot that is
+ *   purely cosmetic. Two people who share a display name are two participants,
+ *   and renaming yourself orphans nothing.
+ * - "Am I joined?" is DERIVED by comparing the viewer's profile against the
+ *   roster — no per-user state is stored, so nothing can go stale and lock a
+ *   returning viewer out, on any device.
+ * - Joining requires a resolved profile. There is no typed-name path, so a
+ *   participant cannot be impersonated by typing their name.
+ * - `host` (per-space) points at the first joiner's profile. They can
  *   add/remove options and reset votes. `isAdmin` is derived, not stored.
  * - Open host takeover: any joined participant can `claimHost`, transferring
  *   the role (and the host controls) to themselves. Deliberately ungated
  *   beyond "must be joined"; see `ADMIN-FUTURE.md`.
+ * - A vote carries its voter's profile cell and is found by comparison, so a
+ *   vote cannot be keyed by a mergeable per-vote write: two viewers voting at
+ *   once conflict and the loser retries. Both votes survive; that retry is the
+ *   accepted cost of identity that cannot be spoofed.
  *
  * "We went here" history (Lunch Coordinator roadmap #1): the host logs where
  * the group actually ate via each option's "we went here" button. A host date
@@ -34,9 +40,10 @@
  * "📊 Lunch stats" card derives per-place visit + green/yellow/red tallies from
  * those embedded snapshots via a plain `computed` (the `tallyOptions` idiom).
  * Live voting stays on the in-cell `votes` array. Each history entry — and each
- * embedded vote — carries a frozen name plus a same-space `Cell<User>` roster
- * link. Canonical cross-space profile identity lives separately in
- * `participantProfiles` so legacy stored Lunch Poll arguments remain valid.
+ * embedded vote — carries a frozen display name plus the profile cell of whoever
+ * it refers to, so attribution stays correct through renames and roster
+ * changes. It must never hold a `users.key(i)` handle: that follows the SLOT,
+ * so removing an earlier participant would retarget it to the wrong person.
  *
  * History was briefly backed by the SQLite builtin (#4144/#4145, to dogfood it),
  * but that brought a deployed-piece "invalid database handle" failure plus a
@@ -68,7 +75,6 @@ import {
   NAME,
   pattern,
   type PerSpace,
-  type PerUser,
   Stream,
   UI,
   type VNode,
@@ -127,6 +133,28 @@ export interface PollHost {
 }
 
 export const DEFAULT_HOST: PollHost = {};
+
+/**
+ * Test seam for the viewer's identity.
+ *
+ * A unit test has no `#profile` wish environment, so it supplies the viewer's
+ * profile cell here instead. Object-wrapped on purpose: an unset optional CELL
+ * input reads as a present-but-empty cell (truthy), so a bare `override ??
+ * wish.result` silently returns the empty proxy in production. Wrapping makes
+ * "absent" read as an absent FIELD, which is unambiguous.
+ */
+export interface ViewerOverride {
+  readonly profile?: LunchProfileCell;
+  /** Stands in for `#profileName` / `#profileAvatar`, which also need a wish. */
+  readonly name?: string;
+  readonly avatar?: string;
+}
+
+export const DEFAULT_VIEWER: ViewerOverride = {};
+
+export type ViewerOverrideValue =
+  | ViewerOverride
+  | Default<typeof DEFAULT_VIEWER>;
 
 export type HostValue = PollHost | Default<typeof DEFAULT_HOST>;
 
@@ -919,6 +947,8 @@ export interface CozyPollInput {
   users?: PerSpace<User[] | Default<[]>>;
   /** Which participant hosts the poll — the first to join, transferable. */
   host?: PerSpace<HostValue>;
+  /** Test seam; production leaves this absent and resolves `#profile`. */
+  viewer?: PerSpace<ViewerOverrideValue>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
   // at MAX_HISTORY most-recent entries in `logVisit`. optionDraft etc. are
   // internal form drafts, declared as local per-session cells in the pattern
@@ -990,6 +1020,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       votes,
       users,
       host,
+      viewer,
       visits,
     },
   ) => {
@@ -1041,12 +1072,18 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // "Unknown profile". Profile-backed rendering is verified at the browser
     // tier (the scrabble/battleship precedent), not via a pattern-body cell
     // injection.
-    const viewerProfileCell = profileWish.result;
+    // The injected cell when a test supplies one, else the resolved wish.
+    // Input presence is fixed at instantiation, so this selection is static.
+    const injectedProfile = viewer.profile;
+    const viewerProfileCell = injectedProfile !== undefined
+      ? injectedProfile
+      : profileWish.result;
+    // Strings, unlike cells, are honestly absent when unset, so `??` is safe.
     const viewerProfileName = computed(() =>
-      trimmedName(profileNameWish.result ?? "")
+      trimmedName(viewer.name ?? profileNameWish.result ?? "")
     );
     const viewerProfileAvatar = computed(() =>
-      (profileAvatarWish.result ?? "").trim()
+      (viewer.avatar ?? profileAvatarWish.result ?? "").trim()
     );
     // Who this viewer is in THIS poll: their roster entry, found by comparing
     // profile cells. Derived, never stored per-user — so a viewer is recognised
@@ -1244,11 +1281,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     const v = todayVoteCount ?? 0;
                     const todayLabel = nowTick ? dayLabelOf(nowTick) : "…";
                     const admin = hostName;
-                    const viewer = me;
+                    const joined = isJoined;
                     const amAdmin = isAdmin;
                     // "you are the host" is handled by the HOST chip in the
                     // top right; only call out the host's name to non-admins.
-                    const hostNote = !amAdmin && viewer !== "" && admin !== ""
+                    const hostNote = !amAdmin && joined && admin !== ""
                       ? ` · hosted by ${admin}`
                       : "";
                     return (
@@ -1997,7 +2034,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
       hostName,
-      myName: me,
+      myName: viewerProfileName,
       userCount,
       optionCount,
       voteCount,

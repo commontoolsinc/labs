@@ -2,51 +2,82 @@
 /**
  * Multi-user pattern test for the lunch poll.
  *
- * main.test.tsx documents the single-identity caveat (CT-1598): one runtime
- * cannot simulate a second user, so admin gating against a real non-host and
- * host takeover were untestable. This runs ONE shared poll across two
- * worker-isolated runtimes and covers exactly that gap:
- * - second user join (PerUser identity isolation),
- * - admin gating rejecting a genuinely different non-host user,
- * - votes from two users tallied and visible cross-runtime,
- * - open host takeover (claimHost) observed from the deposed host's runtime.
+ * One runtime cannot simulate a second user, so this runs ONE shared poll
+ * across two worker-isolated runtimes and covers what a single identity
+ * cannot: a second user joining, host gating rejecting a genuinely different
+ * non-host, votes from two users tallied cross-runtime, and open host
+ * takeover observed from the deposed host's runtime.
  *
- * Joins go through the `joinAs` event-name override (the headless seam kept
- * by the profile migration); the profile-wish UI path needs a browser.
+ * Identity is each viewer's profile cell, so the shared state lives in `setup`
+ * and each participant binds their OWN poll view to it. That mirrors
+ * production, where every viewer resolves their own `#profile` against one
+ * shared roster.
  *
  * Cross-runtime reads use INLINE literal accesses (users[0].name) — `.map()`,
  * loop-variable indexing, and helper calls over another runtime's arrays do
  * not resolve before a local write (see scrabble/multi-user.test.tsx).
  */
-import { action, computed, multiUserTest, pattern, TESTS } from "commonfabric";
-import LunchPoll, { type CozyPollOutput } from "./main.tsx";
+import {
+  action,
+  computed,
+  Default,
+  multiUserTest,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
+import LunchPoll, {
+  DEFAULT_HOST,
+  type HostValue,
+  type LunchProfile,
+  type Option,
+  type User,
+  type Vote,
+} from "./main.tsx";
 
 interface Setup {
-  poll: CozyPollOutput;
+  users: Writable<User[] | Default<[]>>;
+  votes: Writable<Vote[] | Default<[]>>;
+  options: Writable<Option[] | Default<[]>>;
+  host: Writable<HostValue>;
 }
 
+/** The shared poll state both viewers read and write. */
 export const setup = pattern(() => ({
-  poll: LunchPoll({}),
+  users: Writable.perSpace.of<User[]>([]),
+  votes: Writable.perSpace.of<Vote[]>([]),
+  options: Writable.perSpace.of<Option[]>([]),
+  host: Writable.perSpace.of<HostValue>(DEFAULT_HOST),
 }));
 
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
-  const poll = setup.poll;
+  const aliceProfile = Writable.of<LunchProfile>({ name: "Alice" });
+  const poll = LunchPoll({
+    users: setup.users,
+    votes: setup.votes,
+    options: setup.options,
+    host: setup.host,
+    viewer: { profile: aliceProfile, name: "Alice" },
+  });
 
   const action_join = action(() => {
-    poll.joinAs.send({ name: "Alice" });
+    poll.joinAs.send({});
   });
   const action_add_sushi = action(() => {
     poll.addOption.send({ title: "Sushi" });
   });
   const action_vote_green = action(() => {
-    const first = poll.options?.[0];
-    if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+    // Read the id inline. Binding the element first and reading `.id` off the
+    // binding does not always resolve across runtimes before the send, which
+    // reaches the stream as an undefined argument.
+    const optionId = poll.options?.[0]?.id;
+    if (optionId) poll.castVote.send({ optionId, voteType: "green" });
   });
 
   // First joiner becomes the host.
   const assert_joined_as_host = computed(() =>
     poll.myName === "Alice" &&
-    poll.adminName === "Alice" &&
+    poll.hostName === "Alice" &&
     poll.isJoined === true &&
     poll.isAdmin === true &&
     (poll.users ?? []).length === 1 &&
@@ -58,7 +89,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   );
   const assert_own_vote = computed(() =>
     (poll.votes ?? []).length === 1 &&
-    poll.votes?.[0]?.voterName === "Alice" &&
     poll.votes?.[0]?.voteType === "green"
   );
   // Bob joined and voted; his two gated addOption attempts left no trace.
@@ -66,13 +96,12 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     (poll.users ?? []).length === 2 &&
     poll.users?.[1]?.name === "Bob" &&
     (poll.votes ?? []).length === 2 &&
-    poll.votes?.[1]?.voterName === "Bob" &&
     (poll.options ?? []).length === 1 &&
     poll.myName === "Alice"
   );
   // Host takeover observed from the deposed host's runtime.
   const assert_deposed = computed(() =>
-    poll.adminName === "Bob" && poll.isAdmin === false
+    poll.hostName === "Bob" && poll.isAdmin === false
   );
 
   return {
@@ -93,20 +122,30 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
 });
 
 export const bob = pattern<{ setup: Setup }>(({ setup }) => {
-  const poll = setup.poll;
+  const bobProfile = Writable.of<LunchProfile>({ name: "Bob" });
+  const poll = LunchPoll({
+    users: setup.users,
+    votes: setup.votes,
+    options: setup.options,
+    host: setup.host,
+    viewer: { profile: bobProfile, name: "Bob" },
+  });
 
   const action_try_add_before_join = action(() => {
     poll.addOption.send({ title: "Pizza" });
   });
   const action_join = action(() => {
-    poll.joinAs.send({ name: "Bob" });
+    poll.joinAs.send({});
   });
   const action_try_add_as_non_host = action(() => {
     poll.addOption.send({ title: "Pizza" });
   });
   const action_vote_green = action(() => {
-    const first = poll.options?.[0];
-    if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+    // Read the id inline. Binding the element first and reading `.id` off the
+    // binding does not always resolve across runtimes before the send, which
+    // reaches the stream as an undefined argument.
+    const optionId = poll.options?.[0]?.id;
+    if (optionId) poll.castVote.send({ optionId, voteType: "green" });
   });
   const action_claim_host = action(() => {
     poll.claimHost.send({});
@@ -116,32 +155,27 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const assert_sees_alice_setup = computed(() =>
     (poll.users ?? []).length === 1 &&
     poll.users?.[0]?.name === "Alice" &&
-    poll.adminName === "Alice" &&
+    poll.hostName === "Alice" &&
     (poll.options ?? []).length === 1 &&
     poll.options?.[0]?.title === "Sushi" &&
     (poll.votes ?? []).length === 1
   );
-  // PerUser isolation: Alice's join must not leak into Bob's identity.
+  // Identity isolation: Alice's join must not make Bob a participant.
   const assert_not_joined_yet = computed(() =>
-    poll.myName === "" && poll.isJoined === false
+    poll.myName === "Bob" && poll.isJoined === false
   );
   const assert_joined_not_host = computed(() =>
-    poll.myName === "Bob" &&
     poll.isJoined === true &&
     poll.isAdmin === false &&
     (poll.users ?? []).length === 2 &&
     poll.users?.[1]?.name === "Bob"
   );
-  // Both gated attempts (pre-join AND joined-but-not-host) left no trace —
-  // the CT-1598 gap: a real second user is rejected by the host gate.
+  // Both gated attempts (pre-join AND joined-but-not-host) left no trace: a
+  // real second user is rejected by the host gate.
   const assert_gating_held = computed(() => (poll.options ?? []).length === 1);
-  const assert_both_votes = computed(() =>
-    (poll.votes ?? []).length === 2 &&
-    poll.votes?.[0]?.voterName === "Alice" &&
-    poll.votes?.[1]?.voterName === "Bob"
-  );
+  const assert_both_votes = computed(() => (poll.votes ?? []).length === 2);
   const assert_is_host_now = computed(() =>
-    poll.adminName === "Bob" && poll.isAdmin === true
+    poll.hostName === "Bob" && poll.isAdmin === true
   );
 
   return {
@@ -161,6 +195,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { assertion: assert_is_host_now },
       { label: "bob-claimed-host" },
     ],
+    // A vote is a read-modify-write over the shared list, so two viewers
+    // writing at once conflict and the loser retries — the scheduler logs
+    // "commit failed transiently; backing off". That retry IS the designed
+    // behaviour here (identity is a cell, which cannot key a mergeable
+    // per-vote write), and every assertion above holds after it, so the
+    // warning is expected rather than a defect.
+    allowConsoleWarnings: true,
   };
 });
 

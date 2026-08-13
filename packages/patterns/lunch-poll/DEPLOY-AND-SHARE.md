@@ -20,10 +20,13 @@ addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
 So "share the state" = "everyone points at the same piece"; "copy the state" =
 "move that piece's values into a new piece." It all lives in **`PerSpace` input
 cells**, shared by everyone in the space: `question`, `options`, `votes`,
-`users`, `participantProfiles` (the object-wrapped directory of live canonical
-profile links for profile-backed joiners), `adminName`, and **`visits`** (the
-"Recently eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
-**`myName`**, which is **`PerUser`** (keyed by your DID).
+`users` (each entry carrying its participant's profile cell as identity),
+`host`, and **`visits`** (the "Recently eaten" log + embedded vote snapshots
+that feed "Lunch stats").
+
+There is no per-user state: whether you have joined is derived by comparing your
+`#profile` against the roster, so the same identity is recognised on any device
+and nothing can go stale.
 
 All of these survive an in-place `setsrc` (Option A) and — because `visits` is
 now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
@@ -156,8 +159,8 @@ which is why both the test commands and the flags are required.
 ## Option A — update the existing piece in place (recommended)
 
 > **Note:** servers built from `main` between #4717 (2026-07-15) and #4785
-> reject `setsrc` on any piece with a scoped input (this pattern's `myName`) or
-> a pushed list element, with
+> reject `setsrc` on any piece with a scoped input or a pushed list element,
+> with
 > `input link at <path> schema is not compatible:
 > source has no durable schema contract`.
 > If the server you're deploying to is on such a build, upgrade it or use
@@ -200,15 +203,12 @@ interface casually against a piece you care about.
 ## Option B — copy the state into your own piece
 
 > **Note:** the copy loop below writes with `cf piece set --input`, which
-> validates the whole input object on every write. Every field fails on this
-> pattern with
-> `updated input does not match its schema: myName: value does not
-> match type string`,
-> including a write to `myName` itself. The pattern's `myName` is `PerUser`, and
-> the read path materializes it as `""` while the write path's validation does
-> not see a string there. Joining first does not change this. Seed a piece
-> through the pattern's own handlers instead — `joinAs`, then `addOption` for
-> each option.
+> validates the whole input object on every write. This previously failed on
+> every field because of a scoped per-user input that no longer exists, so the
+> loop is worth retrying — but it has not been re-verified against the current
+> input shape, and `users` now carries profile cells that a JSON round-trip
+> cannot reconstruct. Seeding a piece through the pattern's own handlers
+> (`joinAs`, then `addOption` for each option) remains the reliable path.
 
 To get your **own** instance seeded with the current data (e.g. to experiment
 without touching the shared poll):
@@ -222,7 +222,7 @@ MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 
 # 2. Copy each PerSpace field from the shared piece into yours.
 #    `--input` reads/writes the input cell where these live.
-for field in question users options votes participantProfiles adminName visits; do
+for field in question users options votes host visits; do
   deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
@@ -257,7 +257,8 @@ gotcha and no SQLite files to inspect.
 **Smoke test after deploy** (host-gated handlers need a join first):
 
 ```bash
-deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{"name":"Host"}'
+# joinAs takes no arguments: it joins as the calling identity's own profile.
+deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 deno task cf piece call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
@@ -269,32 +270,31 @@ deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
 
 ## Identity & joining
 
-`myName` is `PerUser` (keyed by your authenticated DID); `adminName` (host) and
-the `users` directory are `PerSpace`. Consequences that bite:
+Your identity in a poll is your shared **profile cell** — the thing
+`wish({ query: "#profile" })` resolves. The roster, every vote, and the host
+pointer all hold that cell and compare it with `equals()`. A display name is
+only a label. Consequences that bite:
 
-1. **Joining is profile-first, with a free-text fallback.** When your shared
-   profile resolves (`#profileName`), the card offers a one-click **Join as
-   \<name\>** — carrying your profile name and avatar — plus a **Use a different
-   name** escape hatch. When no profile resolves, it falls back to a **Your
-   name…** field: type a name and click **Join**. Either way the **first person
-   to join becomes host**. The `joinAs` handler honors an explicit `name`, so
-   CLI/headless joins work regardless of the UI path.
+1. **Joining requires a profile.** The card offers a one-click **Join as
+   \<name\>** once yours resolves; when it does not, it renders the profile
+   create/pick surface instead. There is no free-text path, so nobody can join
+   as you by typing your name. The **first person to join becomes host**.
 
 2. **CLI and browser are different identities unless you make them the same.**
-   If you join/seed from the `cf` CLI (one DID) then open the piece in a browser
-   (a different DID), the browser's `myName` is empty and it won't treat you as
-   host. To act as the same person in both, import your CLI key in the browser
-   via **Import CLI Key**; see
+   The `cf` CLI runs as one DID and a browser session as another, each with its
+   own profile, so a CLI-seeded join is a different participant from your
+   browser one. To act as the same person in both, import your CLI key in the
+   browser via **Import CLI Key**; see
    [`docs/features/shared-identity.md`](../../../docs/features/shared-identity.md).
    Verify with `cf id did "$CF_IDENTITY"`.
 
-3. **Names are unique.** `joinAs` rejects a name already in `users`. If a
-   test/seed claimed your name, pick another or clear the stale entry.
+3. **Names may repeat.** Two people called "Alex" are two participants with
+   independent votes and host status, and renaming yourself keeps every vote you
+   have cast.
 
 4. **Host role is claimable.** Any joined participant can take the host seat
    with **Become host** (`claimHost`). A squatted/stale host seat doesn't need
-   an operator reset — just join and click Become host. (You can also reset
-   `adminName` to `""` directly when no one is joined.)
+   an operator reset — just join and click Become host.
 
 ## Resetting / re-seeding state (host or operator)
 
@@ -312,7 +312,7 @@ everyone sees, and direct `set` races anyone's live browser session.**
 - **PerSpace cells:** write the input cells directly:
   ```bash
   echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" users     --input -q
-  echo '""' | deno task cf piece set --piece "$PIECE" -s "$SPACE" adminName --input -q
+  echo '{}' | deno task cf piece set --piece "$PIECE" -s "$SPACE" host      --input -q
   echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" options   --input -q
   echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" votes     --input -q
   echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" visits    --input -q
@@ -350,7 +350,7 @@ NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
 # 2. Copy the PerSpace state across with the Option B loop (history carries too,
-#    since `visits` is now a PerSpace cell). Tip: leave users/adminName empty so
+#    since `visits` is now a PerSpace cell). Tip: leave users/host empty so
 #    the first joiner becomes host, or copy them and use Become host.
 
 # 3. Make the fresh piece the shared one: update the "live pieces" block above.

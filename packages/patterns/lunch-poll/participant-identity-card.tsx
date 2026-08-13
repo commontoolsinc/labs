@@ -52,18 +52,24 @@ const joinAs = handler<JoinEvent, {
   profileAvatar: string;
 }>(
   (_event, { users, host, profile, profileName, profileAvatar }) => {
-    if (!profile) return;
-    const existing = users.get();
+    // Gate on the NAME, not on `profile` being falsy: an unset optional CELL
+    // input reads as a present-but-empty cell, so `!profile` never fires and a
+    // viewer with no resolved profile would join with an empty identity. The
+    // name string is honestly "" when nothing resolved.
+    const name = trimmedName(profileName);
+    if (!name || !profile) return;
+    // A `Default<[]>` cell reads undefined until something writes it.
+    const existing = users.get() ?? [];
     // Already joined — on any device, under any name. Nothing to do.
     if (existing.some((u) => equals(u.profile, profile))) return;
     users.set([...existing, {
       profile,
-      name: trimmedName(profileName),
+      name,
       avatar: (profileAvatar ?? "").trim(),
       color: colorForIndex(existing.length),
     }]);
     // First to join hosts the poll.
-    if (host.get().profile === undefined) host.set({ profile });
+    if ((host.get() ?? {}).profile === undefined) host.set({ profile });
   },
 );
 
@@ -71,12 +77,13 @@ const claimHost = handler<ClaimHostEvent, {
   users: ParticipantIdentityUsersCell;
   host: HostCell;
   profile: LunchProfileCell | undefined;
-}>((_event, { users, host, profile }) => {
-  if (!profile) return;
+  profileName: string;
+}>((_event, { users, host, profile, profileName }) => {
+  if (!trimmedName(profileName) || !profile) return;
   // Only a participant may host, and taking a host role you already hold is a
   // no-op rather than a redundant write.
-  if (!users.get().some((u) => equals(u.profile, profile))) return;
-  const current = host.get().profile;
+  if (!(users.get() ?? []).some((u) => equals(u.profile, profile))) return;
+  const current = (host.get() ?? {}).profile;
   if (current !== undefined && equals(current, profile)) return;
   host.set({ profile });
 });
@@ -142,7 +149,7 @@ export default pattern<
       profileName,
       profileAvatar,
     });
-    const boundClaimHost = claimHost({ users, host, profile });
+    const boundClaimHost = claimHost({ users, host, profile, profileName });
 
     // Identity is derived, never stored per-user: compare the viewer's profile
     // cell against the roster. `equals()` follows links to the end, and a
@@ -151,20 +158,20 @@ export default pattern<
     const isJoined = computed(() => {
       const mine = profile;
       if (!mine) return false;
-      return users.get().some((u) => equals(u.profile, mine));
+      return (users.get() ?? []).some((u) => equals(u.profile, mine));
     });
     const isAdmin = computed(() => {
       const mine = profile;
-      const current = host.get().profile;
+      const current = (host.get() ?? {}).profile;
       if (!mine || current === undefined) return false;
       return equals(current, mine);
     });
     const hasProfile = computed(() => trimmedName(profileName) !== "");
     const canonicalProfileName = computed(() => trimmedName(profileName));
     const hostName = computed(() => {
-      const current = host.get().profile;
+      const current = (host.get() ?? {}).profile;
       if (current === undefined) return "";
-      const entry = users.get().find((u) => equals(u.profile, current));
+      const entry = (users.get() ?? []).find((u) => equals(u.profile, current));
       return entry ? entry.name : "";
     });
     const joinHint = computed(() =>

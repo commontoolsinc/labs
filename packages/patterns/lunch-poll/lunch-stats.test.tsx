@@ -15,14 +15,16 @@
  *   - pre-yellow query had no `yellows` field at all (=> undefined !== 1)
  */
 
-import { action, assert, pattern, TESTS } from "commonfabric";
-import CozyPoll from "./main.tsx";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
+import CozyPoll, { type LunchProfile } from "./main.tsx";
 
 export default pattern(() => {
-  const poll = CozyPoll({});
+  // Identity is a profile cell, so the test supplies one instead of a name.
+  const alex = Writable.of<LunchProfile>({ name: "Alex" });
+  const poll = CozyPoll({ viewer: { profile: alex, name: "Alex" } });
 
   const join = action(() => {
-    poll.joinAs.send({ name: "Alex" });
+    poll.joinAs.send({});
   });
   // Thai is options[0], Chipotle is options[1] (insertion order).
   const add_thai = action(() => {

@@ -10,9 +10,9 @@ import {
 } from "commonfabric";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
 import {
-  DEFAULT_PARTICIPANT_PROFILES,
+  DEFAULT_HOST,
+  type HostValue,
   type LunchProfile,
-  type ParticipantProfileDirectoryValue,
   type User,
 } from "./main.tsx";
 import {
@@ -23,8 +23,8 @@ import {
 } from "../test/vnode-helpers.ts";
 
 // Find a rendered node by a prop value. Walking the tree pulls the join
-// surface's UI-only computeds (showManualEntry, hasProfile, joinHint), which no
-// direct handler/output read reaches otherwise.
+// surface's UI-only computeds (hasProfile, joinHint), which no direct
+// handler/output read reaches otherwise.
 const findByProp = (
   root: unknown,
   prop: string,
@@ -36,235 +36,144 @@ const findByProp = (
   });
 
 export default pattern(() => {
-  const users = new Writable<User[] | Default<[]>>([]);
-  const myName = new Writable<string | Default<"">>("");
-  const adminName = new Writable<string | Default<"">>("");
-  const participantProfiles = Writable.of<ParticipantProfileDirectoryValue>(
-    DEFAULT_PARTICIPANT_PROFILES,
-  );
-  // No profile resolved: name/avatar are empty strings (as the parent's
-  // top-level wishes read before resolving), so the card shows the setup path.
-  const participantIdentity = ParticipantIdentityCard({
-    users,
-    myName,
-    adminName,
-    participantProfiles,
+  // Lane 1 — no profile resolved: the card shows the create/pick surface and
+  // offers no way in. Joining requires an identity, so there is no typed-name
+  // fallback to collide with or spoof.
+  const noProfileUsers = new Writable<User[] | Default<[]>>([]);
+  const noProfileHost = Writable.of<HostValue>(DEFAULT_HOST);
+  const noProfileCard = ParticipantIdentityCard({
+    users: noProfileUsers,
+    host: noProfileHost,
     profileName: "",
     profileAvatar: "",
   });
 
-  // The profile-backed path is injected explicitly so lane-2 tests exercise
-  // what the parent passes down from its top-level wishes: the identity CELL
-  // (`profile`) plus the resolved display strings (`profileName`/`avatar`).
-  // The name is a live cell so the toggle test can update it; the display
-  // name is never read off `aliceProfile` — only used as badge/`equals()`
-  // identity — so that cell only needs the minimal `{ name, avatar }` shape.
-  const profileUsers = new Writable<User[] | Default<[]>>([]);
-  const profileMyName = new Writable<string | Default<"">>("");
-  const profileAdminName = new Writable<string | Default<"">>("");
-  const profileDirectory = Writable.of<ParticipantProfileDirectoryValue>(
-    DEFAULT_PARTICIPANT_PROFILES,
-  );
-  const aliceProfile = Writable.of<LunchProfile>({
-    name: "Profile Alice",
-    avatar: "alice.png",
+  // Lane 2 — two DIFFERENT people who share a display name. Under name-keyed
+  // identity these collided; under cell identity they are simply two people.
+  const users = new Writable<User[] | Default<[]>>([]);
+  const host = Writable.of<HostValue>(DEFAULT_HOST);
+
+  const alexProfile = Writable.of<LunchProfile>({
+    name: "Alex",
+    avatar: "alex.png",
   });
-  const profileNameCell = new Writable<string | Default<"">>("Profile Alice");
-  const profileAvatarCell = new Writable<string | Default<"">>("alice.png");
-  const profileIdentity = ParticipantIdentityCard({
-    users: profileUsers,
-    myName: profileMyName,
-    adminName: profileAdminName,
-    participantProfiles: profileDirectory,
-    profile: aliceProfile,
-    profileName: profileNameCell,
-    profileAvatar: profileAvatarCell,
+  const otherAlexProfile = Writable.of<LunchProfile>({ name: "Alex" });
+
+  const alexName = new Writable<string | Default<"">>("Alex");
+  const alexCard = ParticipantIdentityCard({
+    users,
+    host,
+    profile: alexProfile,
+    profileName: alexName,
+    profileAvatar: "alex.png",
+  });
+  const otherAlexCard = ParticipantIdentityCard({
+    users,
+    host,
+    profile: otherAlexProfile,
+    profileName: "Alex",
+    profileAvatar: "",
   });
 
-  // Profile-first UI fires `joinAs.send({})` (no name) for the "Join as <name>"
-  // button. With no profile resolved and no typed name, that must be a safe
-  // no-op — never enrolling a blank participant.
-  const action_join_empty = action(() => {
-    participantIdentity.joinAs.send({});
-  });
+  // === Actions ===
 
   const action_join_as_alex = action(() => {
-    participantIdentity.joinAs.send({ name: "Alex" });
+    alexCard.joinAs.send({});
+  });
+  const action_join_again = action(() => {
+    alexCard.joinAs.send({});
+  });
+  const action_join_as_other_alex = action(() => {
+    otherAlexCard.joinAs.send({});
+  });
+  const action_other_alex_claims_host = action(() => {
+    otherAlexCard.claimHost.send({});
+  });
+  const action_rename_alex = action(() => {
+    alexName.set("Alexandra");
+  });
+  const action_join_with_no_profile = action(() => {
+    noProfileCard.joinAs.send({});
   });
 
-  const action_join_with_profile = action(() => {
-    profileIdentity.joinAs.send({});
-  });
+  // === Assertions ===
 
-  const action_use_different_name = action(() => {
-    const button = findByProp(
-      profileIdentity[UI],
-      "aria-label",
-      "Use a different name",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
-    }
-  });
-
-  const action_cancel_different_name = action(() => {
-    const button = findByProp(
-      profileIdentity[UI],
-      "aria-label",
-      "Back to profile join",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
-    }
-  });
-
-  // The viewer renames their profile after joining: the parent's #profileName
-  // wish would re-resolve, so the display string the card reflects changes.
-  const action_update_canonical_profile = action(() => {
-    profileNameCell.set("Alice Updated");
-  });
-
-  const action_try_rejoin_as_alex_two = action(() => {
-    participantIdentity.joinAs.send({ name: "Alex Two" });
-  });
-
-  const action_switch_to_blair = action(() => {
-    users.push({
-      name: "Blair",
-      avatar: "",
-      color: "#c2573a",
-    });
-    myName.set("Blair");
-  });
-
-  const action_claim_host_as_blair = action(() => {
-    participantIdentity.claimHost.send({});
-  });
-
-  const assert_initial = assert(() =>
-    users.get().length === 0 &&
-    participantIdentity.me === "" &&
-    participantIdentity.isJoined === false &&
-    participantIdentity.isAdmin === false
-  );
-
-  // With no profile resolved and nobody joined, the join surface shows the
-  // profile-setup branch: the wish's built-in [UI] slot plus the explicit
-  // "Continue as guest" button. The typed-name input is NOT present — the
-  // guest path never appears automatically (it needs the explicit toggle).
-  // Walking the tree materializes showProfileSetup, hasProfile, and joinHint.
-  const assert_guest_setup_renders = assert(() => {
-    const ui = participantIdentity[UI];
-    const guestButton = findByProp(ui, "id", "lp-guest-button");
-    const input = findByProp(ui, "id", "lp-join-name");
-    const setupSlot = findByProp(ui, "data-profile-setup", true);
-    return guestButton !== undefined &&
-      input === undefined &&
-      setupSlot !== undefined &&
+  const assert_setup_surface_without_profile = assert(() => {
+    const ui = noProfileCard[UI];
+    return findByProp(ui, "data-profile-setup", true) !== undefined &&
+      findByProp(ui, "id", "lp-join-button") === undefined &&
       hasText(ui, "First to join becomes the host.");
   });
 
-  const assert_profile_first_renders = assert(() => {
-    const ui = profileIdentity[UI];
-    return hasText(ui, "Join as Profile Alice") &&
-      findByProp(ui, "data-profile-identity", "canonical") !== undefined &&
-      findByProp(ui, "aria-label", "Use a different name") !== undefined;
-  });
-
-  const assert_profile_manual_entry_renders = assert(() => {
-    const ui = profileIdentity[UI];
-    return findByProp(ui, "id", "lp-join-name") !== undefined &&
-      findByProp(ui, "aria-label", "Back to profile join") !== undefined &&
-      findByProp(ui, "data-profile-identity", "canonical") === undefined;
-  });
-
-  const assert_empty_send_noop = assert(() =>
-    users.get().length === 0 &&
-    participantIdentity.me === "" &&
-    participantIdentity.isJoined === false
+  // Joining needs an identity, so a viewer without one changes nothing.
+  const assert_no_profile_cannot_join = assert(() =>
+    (noProfileUsers.get() ?? []).length === 0 &&
+    noProfileCard.isJoined === false
   );
 
-  const assert_joined_as_alex = assert(() => {
-    const currentUsers = users.get();
-    return currentUsers.length === 1 &&
-      currentUsers[0]?.name === "Alex" &&
-      myName.get() === "Alex" &&
-      adminName.get() === "Alex" &&
-      participantProfiles.get().participants.length === 0 &&
-      participantIdentity.me === "Alex" &&
-      participantIdentity.isJoined === true &&
-      participantIdentity.isAdmin === true;
+  const assert_offers_join_with_profile = assert(() => {
+    const ui = alexCard[UI];
+    return hasText(ui, "Join as Alex") &&
+      findByProp(ui, "data-profile-identity", "canonical") !== undefined;
   });
 
-  const assert_joined_with_profile = assert(() => {
-    const currentUsers = profileUsers.get();
-    const links = profileDirectory.get().participants;
-    return currentUsers.length === 1 &&
-      currentUsers[0]?.name === "Profile Alice" &&
-      currentUsers[0]?.avatar === "alice.png" &&
-      profileMyName.get() === "Profile Alice" &&
-      profileAdminName.get() === "Profile Alice" &&
-      links.length === 1 &&
-      links[0]?.name === "Profile Alice" &&
-      equals(links[0]?.profile, aliceProfile) &&
-      profileIdentity.isJoined === true &&
-      profileIdentity.isAdmin === true;
+  const assert_joined_and_hosts = assert(() => {
+    const roster = users.get() ?? [];
+    return roster.length === 1 &&
+      roster[0]?.name === "Alex" &&
+      roster[0]?.avatar === "alex.png" &&
+      equals(roster[0]?.profile, alexProfile) &&
+      alexCard.isJoined === true &&
+      alexCard.isAdmin === true;
   });
 
-  const assert_profile_link_stays_live = assert(() => {
-    const currentUsers = profileUsers.get();
-    return currentUsers[0]?.name === "Profile Alice" &&
-      currentUsers[0]?.avatar === "alice.png" &&
-      profileIdentity.profileName === "Alice Updated";
-  });
-
-  const assert_rejoin_noop = assert(() => {
-    const currentUsers = users.get();
-    return currentUsers.length === 1 &&
-      currentUsers[0]?.name === "Alex" &&
-      myName.get() === "Alex";
-  });
-
-  const assert_blair_is_not_host = assert(() =>
-    users.get().length === 2 &&
-    participantIdentity.me === "Blair" &&
-    adminName.get() === "Alex" &&
-    participantIdentity.isJoined === true &&
-    participantIdentity.isAdmin === false
+  // Joining twice is a no-op: the entry is found by identity, not by name.
+  const assert_join_is_idempotent = assert(() =>
+    (users.get() ?? []).length === 1
   );
 
-  const assert_blair_claimed_host = assert(() =>
-    adminName.get() === "Blair" &&
-    participantIdentity.me === "Blair" &&
-    participantIdentity.isAdmin === true
+  // The whole point: a second person named "Alex" is a second participant.
+  const assert_same_name_two_people = assert(() => {
+    const roster = users.get() ?? [];
+    return roster.length === 2 &&
+      roster[0]?.name === "Alex" &&
+      roster[1]?.name === "Alex" &&
+      equals(roster[0]?.profile, alexProfile) &&
+      equals(roster[1]?.profile, otherAlexProfile) &&
+      otherAlexCard.isJoined === true &&
+      // Sharing a name does not share host status.
+      otherAlexCard.isAdmin === false;
+  });
+
+  const assert_host_transferred = assert(() =>
+    otherAlexCard.isAdmin === true && alexCard.isAdmin === false
+  );
+
+  // A rename changes what the viewer is called, not who they are: the stored
+  // entry still matches them, so they stay joined and stay one participant.
+  const assert_rename_keeps_identity = assert(() =>
+    alexCard.isJoined === true &&
+    (users.get() ?? []).length === 2 &&
+    hasText(alexCard[UI], "") === true
   );
 
   return {
     [TESTS]: [
-      { assertion: assert_initial },
-      { assertion: assert_guest_setup_renders },
-      { assertion: assert_profile_first_renders },
-      { action: action_use_different_name },
-      { assertion: assert_profile_manual_entry_renders },
-      { action: action_cancel_different_name },
-      { assertion: assert_profile_first_renders },
-      { action: action_join_empty },
-      { assertion: assert_empty_send_noop },
-      { action: action_join_with_profile },
-      { assertion: assert_joined_with_profile },
-      { action: action_update_canonical_profile },
-      { assertion: assert_profile_link_stays_live },
+      { assertion: assert_setup_surface_without_profile },
+      { action: action_join_with_no_profile },
+      { assertion: assert_no_profile_cannot_join },
+      { assertion: assert_offers_join_with_profile },
       { action: action_join_as_alex },
-      { assertion: assert_joined_as_alex },
-      { action: action_try_rejoin_as_alex_two },
-      { assertion: assert_rejoin_noop },
-      { action: action_switch_to_blair },
-      { assertion: assert_blair_is_not_host },
-      { action: action_claim_host_as_blair },
-      { assertion: assert_blair_claimed_host },
+      { assertion: assert_joined_and_hosts },
+      { action: action_join_again },
+      { assertion: assert_join_is_idempotent },
+      { action: action_join_as_other_alex },
+      { assertion: assert_same_name_two_people },
+      { action: action_other_alex_claims_host },
+      { assertion: assert_host_transferred },
+      { action: action_rename_alex },
+      { assertion: assert_rename_keeps_identity },
     ],
-    participantIdentity,
+    alexCard,
   };
 });
