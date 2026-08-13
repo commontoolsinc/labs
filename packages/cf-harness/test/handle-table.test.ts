@@ -378,6 +378,16 @@ describe("handle-table", () => {
       expect(swapTokensForRefs(table, text)).toBe(text);
     });
 
+    it("returns a non-string primitive unchanged", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      expect(swapTokensForRefs(table, 7)).toBe(7);
+      expect(swapTokensForRefs(table, true)).toBe(true);
+      expect(swapTokensForRefs(table, null)).toBe(null);
+    });
+
     it("leaves a longer alphabet run that starts with a held token untouched while replacing the standalone token", async () => {
       const { table, token } = await mintAddressHandle(
         createHarnessHandleTable("run-1"),
@@ -423,6 +433,40 @@ describe("handle-table", () => {
     it("throws for an empty salt", () => {
       expect(() => assertValidHarnessHandleTable(createHarnessHandleTable("")))
         .toThrow("salt must be a non-empty string");
+    });
+
+    it("throws for entries that are not an array", () => {
+      const table = {
+        ...createHarnessHandleTable("run-1"),
+        entries: "not-entries",
+      } as unknown as HarnessHandleTable;
+      expect(() => assertValidHarnessHandleTable(table)).toThrow(
+        "entries must be an array",
+      );
+    });
+
+    it("throws for an entry that is not an object", () => {
+      const table = {
+        ...createHarnessHandleTable("run-1"),
+        entries: [null],
+      } as unknown as HarnessHandleTable;
+      expect(() => assertValidHarnessHandleTable(table)).toThrow(
+        "entry is not an object",
+      );
+    });
+
+    it("throws for an entry with an empty addressKey", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const broken = {
+        ...table,
+        entries: [{ ...table.entries[0], addressKey: "" }],
+      };
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "empty addressKey",
+      );
     });
 
     it("throws for a token outside the token grammar", async () => {

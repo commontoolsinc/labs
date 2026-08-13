@@ -1975,6 +1975,38 @@ Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async (
   assertEquals(createdOptions?.compactThreshold, 12_000);
 });
 
+Deno.test("runCfHarnessCli forwards --handle-mode to a fresh run's engine", async () => {
+  const { io } = createIoBuffers();
+  let createdEngine: CfHarnessEngine | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Inspect the workspace",
+      "--model",
+      "gpt-5.4",
+      "--handle-mode",
+      "session",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      createPromptLoop: (options) => {
+        createdEngine = (options as { engine?: CfHarnessEngine }).engine;
+        return {
+          runPrompt: () => Promise.resolve(completedCliResult("run-handles")),
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(createdEngine?.getRunState().handleMode, "session");
+});
+
 Deno.test("runCfHarnessCli reads CF_HARNESS_COMPACT_THRESHOLD from the process environment", async () => {
   // Every other CLI test injects `env`, which bypasses the default projection
   // built from `Deno.env.get` — exactly where this variable was missing:

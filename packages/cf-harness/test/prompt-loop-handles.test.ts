@@ -589,6 +589,81 @@ describe("prompt-loop address handles", () => {
     ).toEqual([expectedTokenA, expectedTokenB].sort());
   });
 
+  it("keeps a record sealed wholesale as an opaque link and passes a number through unchanged in a structured return", async () => {
+    const runId = "run-handles-sealed-record";
+    const childRunId = `${runId}.subagent.1`;
+    // `payload` declares only `name` while opting in to free-form keys, so a
+    // returned record carrying an undeclared key validates but is sealed
+    // wholesale: the sealed position's raw counterpart is a whole record, not
+    // a string, and no token is minted even though the record holds an
+    // address.
+    const returnSchema = {
+      type: "object",
+      properties: {
+        payload: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+          additionalProperties: true,
+        },
+        count: { type: "number" },
+      },
+      required: ["payload", "count"],
+      additionalProperties: false,
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        handleMode: "session",
+      }),
+      fetchFn: scriptedFetch([
+        {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-sealed-record",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Find the cell.",
+                    returnSchema,
+                  }),
+                },
+              }],
+            },
+          }],
+        },
+        finalTurn(JSON.stringify({
+          payload: { name: URI_A, extra: "surprise" },
+          count: 7,
+        })),
+        finalTurn("Parent done."),
+      ]),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the lookup." });
+
+    const output = JSON.parse(lastToolMessageContent(result.transcript)) as {
+      subagent: {
+        structuredReturn: { value: unknown; linkedStringCount: number };
+      };
+    };
+    expect(output.subagent.structuredReturn.value).toEqual({
+      payload: { "@link": `opaque:${childRunId}#/payload` },
+      count: 7,
+    });
+    expect(output.subagent.structuredReturn.linkedStringCount).toBe(0);
+    expect(result.runState.handleTable?.entries ?? []).toEqual([]);
+  });
+
   it("reuses the rehydrated table on resume, re-swapping to the same token and resolving it inbound", async () => {
     const runId = "run-handles-resume";
     const minted = await mintAddressHandle(

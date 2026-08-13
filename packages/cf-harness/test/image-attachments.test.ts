@@ -147,6 +147,99 @@ Deno.test("tampered snapshot fails closed with a snapshot-specific error", async
   );
 });
 
+Deno.test("snapshot file extension follows the detected media type", async () => {
+  const cases: Array<{
+    bytes: Uint8Array;
+    mediaType: string;
+    extension: string;
+  }> = [
+    {
+      bytes: new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 2, 3]),
+      mediaType: "image/gif",
+      extension: ".gif",
+    },
+    {
+      bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]),
+      mediaType: "image/jpeg",
+      extension: ".jpg",
+    },
+    {
+      bytes: new Uint8Array([
+        0x52,
+        0x49,
+        0x46,
+        0x46,
+        0,
+        0,
+        0,
+        0,
+        0x57,
+        0x45,
+        0x42,
+        0x50,
+        1,
+      ]),
+      mediaType: "image/webp",
+      extension: ".webp",
+    },
+  ];
+  for (const { bytes, mediaType, extension } of cases) {
+    const workspace = await Deno.makeTempDir();
+    // An extension-free name forces detection from the magic bytes alone.
+    const imagePath = join(workspace, "render");
+    await Deno.writeFile(imagePath, bytes);
+    const snapshotDir = join(await Deno.makeTempDir(), "image-attachments");
+
+    const attachment = await createHarnessImageAttachment({
+      workspaceHostPath: workspace,
+      cwd: workspace,
+      path: imagePath,
+      snapshotDir,
+    });
+
+    assertEquals(attachment.mediaType, mediaType);
+    assert(attachment.snapshotPath !== undefined);
+    assert(
+      attachment.snapshotPath.endsWith(extension),
+      `expected ${attachment.snapshotPath} to end with ${extension}`,
+    );
+  }
+});
+
+Deno.test("a snapshot dir blocked by a regular file surfaces the stat error itself", async () => {
+  const { workspace, imagePath } = await makeWorkspaceImage(pngBytes(5));
+  const snapshotDir = join(await Deno.makeTempDir(), "image-attachments");
+  await Deno.writeTextFile(snapshotDir, "not a directory");
+
+  await assertRejects(
+    () =>
+      createHarnessImageAttachment({
+        workspaceHostPath: workspace,
+        cwd: workspace,
+        path: imagePath,
+        snapshotDir,
+      }),
+    Deno.errors.NotADirectory,
+  );
+});
+
+Deno.test("a missing source without a snapshot surfaces the original NotFound", async () => {
+  const { workspace, imagePath } = await makeWorkspaceImage(pngBytes(8));
+
+  const attachment = await createHarnessImageAttachment({
+    workspaceHostPath: workspace,
+    cwd: workspace,
+    path: imagePath,
+  });
+  assertEquals(attachment.snapshotPath, undefined);
+  await Deno.remove(imagePath);
+
+  await assertRejects(
+    () => materializeImageAttachmentContentPart(attachment),
+    Deno.errors.NotFound,
+  );
+});
+
 Deno.test("missing snapshot fails closed with a clear error", async () => {
   const { workspace, imagePath } = await makeWorkspaceImage(pngBytes(6));
   const snapshotDir = join(await Deno.makeTempDir(), "image-attachments");
