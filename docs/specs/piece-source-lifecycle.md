@@ -158,7 +158,7 @@ the hinted host and replays every document read registered on it. An
 asynchronous read-only operation that overlaps replacement restarts on the
 hinted replica and returns that result instead of the provisional replica's
 closure error. These operations include document reads, entity listing and
-lookup, scheduler snapshot listing, and SQLite queries.
+lookup, and SQLite queries.
 An existing `synced()` barrier follows the replacement and waits for those
 replayed reads on the hinted replica.
 Replay also loads CFC schema documents discovered from the hinted data.
@@ -176,8 +176,8 @@ replica was replaced, storage rejects the transaction before handing the
 mutation to any host.
 
 Replacement is allowed until the provisional session accepts a stateful
-operation for issue. Stateful operations are ordinary transactions, scheduler
-transactions, ACL setup transactions, and injected SQLite source registration.
+operation for issue. Stateful operations are ordinary transactions, ACL setup
+transactions, and injected SQLite source registration.
 Work that is still waiting for a session does not prevent replacement. When the
 hint wins that race, the old replica is invalidated before the waiting work can
 issue. A failure before issuance also leaves the route provisional.
@@ -747,12 +747,12 @@ reads even if its connection has not opened. Route cancellation closes
 connection, initial or reconnect session signature creation, mount, and ACL
 setup work that is still in progress. The manager then replays its registered
 document reads on the hinted host. Asynchronous document reads, entity listing
-and lookup, scheduler snapshot listing, and SQLite queries that overlap
-replacement follow the hinted replica rather than returning the provisional
-close result. A `synced()` call that already started also waits for the
-replacement and its replay. Replay includes CFC schema documents discovered
-from the hinted entities. Existing reactive readers observe the hinted space's
-data, and convergence does not remain blocked on the provisional connection.
+and lookup, and SQLite queries that overlap replacement follow the hinted
+replica rather than returning the provisional close result. A `synced()` call
+that already started also waits for the replacement and its replay. Replay
+includes CFC schema documents discovered from the hinted entities. Existing
+reactive readers observe the hinted space's data, and convergence does not
+remain blocked on the provisional connection.
 
 Work already holding the invalidated replica cannot commit through it. A
 transaction that read from that replica becomes inconsistent and must recompute
@@ -764,23 +764,16 @@ connection, signature operation, mount, or ACL query settles instead of
 remaining alive beside the replacement.
 
 The manager refuses to replace a provisional replica after its session accepts
-any stateful operation for issue. Stateful operations include ordinary and
-scheduler transactions, ACL setup transactions, and injected SQLite source
+any stateful operation for issue. Stateful operations include ordinary
+transactions, ACL setup transactions, and injected SQLite source
 registration. The route is fixed at issuance rather than successful
 acknowledgement because a reported error does not prove that the host rejected
 the operation. A hint can still replace work that is waiting for a session or
 is rejected before the session accepts it. Route generations prevent
 invalidated work from starting a later mount or issuing a mutation after
-replacement. Waiting scheduler observations and SQLite registrations settle
-against the invalidated replica instead of blocking convergence. Storage
-rejects only the scheduler observations whose read routes were invalidated. It
-still issues valid observations from the same batch, and a failed earlier batch
-does not strand observations queued behind it. A semantic transaction waits for
-every scheduler-observation batch that was queued ahead of it, including a
-batch another waiter has already started. If an earlier batch fails, the
-semantic transaction is not issued and receives that failure. Its unused
-sequence number is not added to the failure's retry condition. A hint that names
-the default host confirms the provisional route without rebuilding the replica.
+replacement. Waiting SQLite registrations settle against the invalidated
+replica instead of blocking convergence. A hint that names the default host
+confirms the provisional route without rebuilding the replica.
 
 This policy settles ingestion of a known host hint. It does not yet make route
 discovery reliable. Host unavailability, replicated hosts, failover, stale
@@ -791,7 +784,7 @@ replicated-host failover remain open design work.
 |---|---|---|
 | Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and the first accepted late hint becomes authoritative |
 | Keep an accepted late hint stable before opening | **Implemented** | `StorageManager.registerSpaceHost` accepts the first late hint and rejects a different hint before or after the space opens |
-| Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. Invalid scheduler observations do not reject or strand valid observations. A matching default-host hint confirms without reconnecting. Ordinary and scheduler transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgement later fails |
+| Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. A matching default-host hint confirms without reconnecting. Ordinary transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgement later fails |
 | Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last origin-only HTTP or HTTPS route for each space, and registers those hints. It ignores credentials, paths, queries, fragments, malformed URLs, unsupported schemes, and entries whose `did` does not start with `did:`. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
 | Apply one origin-only grammar to every route | **Partial** | `normalizeSpaceHost` rejects credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration use it. The shared fabric-authority helper defaults to HTTPS and derives HTTP only for loopback when the current runtime route explicitly uses HTTP. Applying the grammar to the default host, future share-link receipt, and future effective-host results remains required |
 | Append an accepted route with commit acknowledgement | **Runtime persistence API required** | Generic `CellHandle` writes either overwrite the table or return before a remote append failure can reach the caller. There is no dedicated operation that synchronizes and applies the table's existing candidate, registers the supplied route, transactionally appends it, inspects the commit result, and reports live conflict separately from persistence failure |
@@ -1088,7 +1081,7 @@ The implementation evidence for this table is concentrated in:
   replica, and replay its reads so running patterns observe the hinted space.
   A provisional provider can move while an operation is waiting for a session.
   Invalidated transactions are rejected and recompute from the hinted replica.
-  Once an ordinary or scheduler transaction, ACL setup transaction, or SQLite
+  Once an ordinary transaction, ACL setup transaction, or SQLite
   source registration is issued, the route remains fixed even if its
   acknowledgement fails. The first accepted late hint remains stable,
   including against a later table update.
