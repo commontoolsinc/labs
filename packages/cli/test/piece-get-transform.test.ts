@@ -3184,6 +3184,181 @@ describe("cf piece get transforms", () => {
     });
   });
 
+  describe("a read repeated over one host", () => {
+    const itemsSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          title: { type: "string" },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    /** A committed array source, so a read has something to project. */
+    async function seededSource(
+      host: Runtime,
+      cause: string,
+      value: Array<{ id: number; title: string }>,
+    ): Promise<Cell<unknown>> {
+      const tx = host.edit();
+      const source = host.getCell(space, cause, itemsSchema, tx);
+      source.set(value);
+      expect((await tx.commit()).ok).toBeDefined();
+      return source as Cell<unknown>;
+    }
+
+    /** The value `selection` reads, beside the cell it was answered from. */
+    async function readWithCell(
+      host: Runtime,
+      source: Cell<unknown>,
+      selection: Parameters<typeof deriveSelectedValue>[3],
+    ): Promise<{ value: unknown; cell: string }> {
+      let outputCell: Cell<unknown> | undefined;
+      const value = await deriveSelectedValue(host, space, source, selection, {
+        onOutputCell: (cell) => outputCell = cell,
+      });
+      return { value, cell: outputCell!.getAsNormalizedFullLink().id };
+    }
+
+    it("answers the repeat from the cell the first read set up", async () => {
+      const source = await seededSource(runtime, "repeat-identical-source", [
+        { id: 1, title: "First" },
+        { id: 2, title: "Second" },
+      ]);
+      const selection = { projection: await parseSelectionProjection("id") };
+
+      const first = await readWithCell(runtime, source, selection);
+      const second = await readWithCell(runtime, source, selection);
+
+      expect(first.value).toEqual([{ id: 1 }, { id: 2 }]);
+      expect(second.value).toEqual([{ id: 1 }, { id: 2 }]);
+      // The same cell, not a fresh one per read: the repeat reuses the
+      // transform the first read installed rather than minting its own.
+      expect(second.cell).toBe(first.cell);
+    });
+
+    it("answers the repeat with a source change made between the reads", async () => {
+      const source = await seededSource(runtime, "repeat-restated-source", [
+        { id: 1, title: "First" },
+      ]);
+      const selection = { projection: await parseSelectionProjection("id") };
+
+      const first = await readWithCell(runtime, source, selection);
+      expect(first.value).toEqual([{ id: 1 }]);
+
+      const tx = runtime.edit();
+      source.withTx(tx).set([
+        { id: 1, title: "First" },
+        { id: 2, title: "Second" },
+      ]);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      // The reused cell answers what the source says now. A repeat that
+      // replayed the first read's stored answer would still report one row.
+      const second = await readWithCell(runtime, source, selection);
+      expect(second.value).toEqual([{ id: 1 }, { id: 2 }]);
+      expect(second.cell).toBe(first.cell);
+    });
+
+    it("answers each differing selection from its own cell", async () => {
+      const source = await seededSource(runtime, "repeat-distinct-source", [
+        { id: 1, title: "First" },
+        { id: 2, title: "Second" },
+      ]);
+
+      const ids = await readWithCell(runtime, source, {
+        projection: await parseSelectionProjection("id"),
+      });
+      const titles = await readWithCell(runtime, source, {
+        projection: await parseSelectionProjection("title"),
+      });
+      const filtered = await readWithCell(runtime, source, {
+        filter: parseSelectionFilter(".id == 2"),
+        projection: await parseSelectionProjection("id"),
+      });
+      const other = await seededSource(runtime, "repeat-other-source", [
+        { id: 7, title: "Other" },
+      ]);
+      const elsewhere = await readWithCell(runtime, other, {
+        projection: await parseSelectionProjection("id"),
+      });
+      const repeat = await readWithCell(runtime, source, {
+        projection: await parseSelectionProjection("id"),
+      });
+
+      expect(ids.value).toEqual([{ id: 1 }, { id: 2 }]);
+      expect(titles.value).toEqual([{ title: "First" }, { title: "Second" }]);
+      expect(filtered.value).toEqual([{ id: 2 }]);
+      expect(elsewhere.value).toEqual([{ id: 7 }]);
+      // A differing projection, filter or source is a different read and gets
+      // its own cell; only the repeat lands back on the first read's.
+      expect(
+        new Set([ids.cell, titles.cell, filtered.cell, elsewhere.cell]).size,
+      ).toBe(4);
+      expect(repeat.cell).toBe(ids.cell);
+    });
+
+    it("answers a repeat whose source changed root kind between the reads", async () => {
+      // A source whose schema names no root kind has its array-ness read off
+      // the value, and the projection's shape follows it. So the two reads
+      // below ask the same thing of two different shapes, and answering the
+      // second from the first read's transform would map over a non-array.
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        space,
+        "repeat-kind-flip-source",
+        true,
+        tx,
+      );
+      source.set([{ id: 1, title: "First" }] as never);
+      expect((await tx.commit()).ok).toBeDefined();
+      const selection = { projection: await parseSelectionProjection("id") };
+
+      expect(await deriveSelectedValue(runtime, space, source, selection))
+        .toEqual([{ id: 1 }]);
+
+      const flip = runtime.edit();
+      source.withTx(flip).set({ id: 9, title: "Ninth" } as never);
+      expect((await flip.commit()).ok).toBeDefined();
+
+      expect(await deriveSelectedValue(runtime, space, source, selection))
+        .toEqual({ id: 9 });
+    });
+
+    it("answers a second runtime's identical read over the same session", async () => {
+      const source = await seededSource(runtime, "repeat-two-hosts-source", [
+        { id: 1, title: "First" },
+      ]);
+      const selection = { projection: await parseSelectionProjection("id") };
+      const first = await readWithCell(runtime, source, selection);
+      expect(first.value).toEqual([{ id: 1 }]);
+
+      const second = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "observe",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        const sourceThere = second.getCell(
+          space,
+          "repeat-two-hosts-source",
+          itemsSchema,
+        );
+        const read = await readWithCell(second, sourceThere, selection);
+        expect(read.value).toEqual([{ id: 1 }]);
+        // A pattern graph belongs to the runtime that runs it, so the second
+        // runtime answers from its own cell rather than inheriting the setup
+        // stored on the first runtime's.
+        expect(read.cell).not.toBe(first.cell);
+      } finally {
+        await second.dispose();
+      }
+    });
+  });
+
   function derivedConfidentiality(id: string): string[] {
     type StoredEntry = {
       origin?: string;
