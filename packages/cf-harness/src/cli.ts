@@ -2431,13 +2431,13 @@ const runCfHarnessConfigCommand = async (
           "CF_HARNESS_MODEL_PROVIDER must be openai-compatible-gateway or openai-codex",
         );
       }
-      if (
+      if (environment !== undefined) {
+        effectiveProvider = environment;
+        effectiveSource = "environment";
+      } else if (
         state.state === "configured" || state.state === "missing"
       ) {
-        if (environment !== undefined) {
-          effectiveProvider = environment;
-          effectiveSource = "environment";
-        } else if (state.state === "configured") {
+        if (state.state === "configured") {
           effectiveProvider = state.settings.modelProvider;
           effectiveSource = "persistent";
         } else {

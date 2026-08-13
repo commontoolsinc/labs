@@ -4501,12 +4501,15 @@ Deno.test("structured config output redacts corrupt values and unreadable detail
     assertEquals(
       await runCfHarnessCli(["config", "inspect", "--json"], {
         io: inspect.io,
-        env: {},
+        env: { CF_HARNESS_MODEL_PROVIDER: "openai-codex" },
         providerSettingsStore: store,
       }),
       1,
     );
     assertEquals(inspect.stdout[0].includes(sentinel), false);
+    const inspectResult = JSON.parse(inspect.stdout[0]).result;
+    assertEquals(inspectResult.effectiveProvider, "openai-codex");
+    assertEquals(inspectResult.effectiveSource, "environment");
 
     const mutate = createIoBuffers();
     const rejectingStore = {
