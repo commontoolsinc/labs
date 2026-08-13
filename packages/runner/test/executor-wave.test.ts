@@ -51,6 +51,7 @@ import {
   WaveAccumulator,
   type WaveCommitRejection,
   type WaveCommitSink,
+  waveSettlementOf,
 } from "../src/executor/wave.ts";
 import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -1775,6 +1776,93 @@ describe("stage F fix round: foreign-batch settle sequences and shallow reads", 
     await runtime.dispose();
     await storageManager.close();
     await server.close();
+  });
+
+  it("waveSettlementOf: a sealed tx's settlement resolves ok on the wave commit and error on withdrawal (the durable-acceptance primitive the pattern swap gates on — thread r3731191444)", async () => {
+    const holder = executionLeaseHolder(`service:${space}`);
+    const cycle = new ExecutionLeaseCycle({ engine, space, holder });
+    if (!cycle.acquire()) throw new Error("test lease acquire failed");
+
+    // Committed arm.
+    const wave1 = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "settlement-session",
+      },
+      replicaFor: (s) => storageManager.open(s).replica,
+      lease: cycle,
+    });
+    runtime.installSealDestination(wave1);
+    const doc1 = runtime.getCell<{ n: number }>(
+      space,
+      "settlement-committed",
+      undefined,
+    );
+    const tx1 = runtime.edit();
+    stampWaveRunContext(tx1, {
+      actionId: "settlement-probe/committed",
+      kind: "bookkeeping",
+    });
+    doc1.withTx(tx1).set({ n: 1 });
+    expect((await tx1.commit()).error).toBeUndefined();
+    const settlement1 = waveSettlementOf(tx1);
+    expect(settlement1).toBeDefined();
+    runtime.clearSealDestination();
+    const sink = new EngineWaveCommitSink({
+      engineFor: () => engine,
+      sessionId: holder,
+    });
+    const outcome1 = await wave1.commitWave(sink);
+    await wave1.settled();
+    expect(outcome1.dispositions).toEqual([{ kind: "committed" }]);
+    expect((await settlement1!).error).toBeUndefined();
+
+    // Withdrawn arm: an abandoned wave withdraws the sealed setup — the
+    // settlement resolves with an error, and a swap gated on it keeps
+    // the OLD graph.
+    const wave2 = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "settlement-session-2",
+      },
+      replicaFor: (s) => storageManager.open(s).replica,
+      lease: cycle,
+    });
+    runtime.installSealDestination(wave2);
+    const doc2 = runtime.getCell<{ n: number }>(
+      space,
+      "settlement-withdrawn",
+      undefined,
+    );
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, {
+      actionId: "settlement-probe/withdrawn",
+      kind: "bookkeeping",
+    });
+    doc2.withTx(tx2).set({ n: 2 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    const settlement2 = waveSettlementOf(tx2);
+    expect(settlement2).toBeDefined();
+    runtime.clearSealDestination();
+    wave2.abandon("test-induced abort");
+    await wave2.settled();
+    expect((await settlement2!).error).toBeDefined();
+
+    // A tx that never sealed into a wave has no settlement (the OFF
+    // arm's discriminator).
+    const tx3 = runtime.edit();
+    const doc3 = runtime.getCell<{ n: number }>(
+      space,
+      "settlement-off-arm",
+      undefined,
+    );
+    doc3.withTx(tx3).set({ n: 3 });
+    expect((await tx3.commit()).error).toBeUndefined();
+    expect(waveSettlementOf(tx3)).toBeUndefined();
   });
 
   it("resolves each foreign contribution with ITS OWN batch's accepted seq — two delegated identities provisioning one space never share a promotion seq (thread r3731191406)", async () => {

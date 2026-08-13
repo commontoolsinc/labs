@@ -47,6 +47,7 @@ import type {
   Result,
   SealedCommitVerdict,
   SealedNativeCommit,
+  StorageTransactionRejected,
   TransactionSealDestination,
   Unit,
 } from "../storage/interface.ts";
@@ -162,6 +163,28 @@ export function waveRunContextOf(
   tx: IExtendedStorageTransaction,
 ): WaveRunContext | undefined {
   return waveRunContexts.get(tx);
+}
+
+// The DURABLE-acceptance settlement of a tx sealed into a wave: the seal
+// resolves the tx's commit() (acceptance into the wave), but the writes
+// become durable only at the wave commit — and a conflict there can
+// WITHDRAW the contribution after its commit() already resolved ok. A
+// caller whose side effects must wait for durability (the pattern swap's
+// teardown + reinstantiation, §3e) awaits this instead. Attached by the
+// accumulator at seal, same side-table mechanism as the run context.
+const waveSettlements = new WeakMap<
+  IExtendedStorageTransaction,
+  Promise<Result<Unit, StorageTransactionRejected>>
+>();
+
+/** The sealed tx's wave settlement: resolves ok when every sealed space
+ * PROMOTED (the wave commit accepted the contribution), error when any
+ * withdrew (conflict drop, requeue, abort, abandon). Undefined for a tx
+ * that did not seal into a wave (the OFF arm) or sealed nothing. */
+export function waveSettlementOf(
+  tx: IExtendedStorageTransaction,
+): Promise<Result<Unit, StorageTransactionRejected>> | undefined {
+  return waveSettlements.get(tx);
 }
 
 /**
@@ -545,6 +568,14 @@ export class WaveAccumulator
         spaces: assembly.spaces,
         readOnlyReadKeys: assembly.readOnlyReadKeys,
       });
+      waveSettlements.set(
+        tx,
+        Promise.all(
+          assembly.spaces.map((space) => space.sealed.settled),
+        ).then((settled) =>
+          settled.find((outcome) => outcome.error !== undefined) ?? { ok: {} }
+        ),
+      );
       return result;
     } finally {
       this.#assembly = undefined;

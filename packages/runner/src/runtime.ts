@@ -1699,6 +1699,14 @@ export class Runtime {
     this.#serverRunStamper = options.runStamper;
   }
 
+  /** Whether a seal destination is installed — the ON-arm SERVING
+   * posture (a flag-ON client speculating has none). Consumers branch
+   * durability-sensitive side effects on this (the pattern swap defers
+   * teardown to wave settlement only when sealing is in effect). */
+  get sealDestinationInstalled(): boolean {
+    return this.#transactionSealDestination !== undefined;
+  }
+
   /** Remove the installed seal destination (the wave closed or aborted). */
   clearSealDestination(): void {
     this.#transactionSealDestination = undefined;

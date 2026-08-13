@@ -77,6 +77,7 @@ import {
   useDeferredCancelOwnership,
 } from "./cancel.ts";
 import type { Runtime } from "./runtime.ts";
+import { waveSettlementOf } from "./executor/wave.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
@@ -2513,37 +2514,117 @@ export class Runner {
         // Server-execution v2 stage F (serving-loop.md §3d): under an
         // installed seal destination every commit path declares its run
         // context; the swap's setup write is runtime-internal
-        // bookkeeping. A no-op everywhere else.
+        // bookkeeping. A no-op everywhere else. The action identity is
+        // per PIECE (the swapped result cell's stable address), not per
+        // {identity, symbol}: two pieces swapping to one pattern must
+        // not share a basis action (their rows would overwrite each
+        // other under §3b's per-(action, instance) replacement), while
+        // consecutive swaps of ONE piece overwrite — bounded, exactly
+        // the S4-friendly shape.
+        const pieceLink = resultCell.getAsNormalizedFullLink();
         this.runtime.stampServerRun(setupTx, {
-          actionId: `pattern-swap/${newRef.identity}#${newRef.symbol}`,
+          actionId: `pattern-swap/${pieceLink.space}/${
+            pieceLink.scope ?? "space"
+          }/${pieceLink.id}`,
           kind: "bookkeeping",
         });
-        try {
-          this.applySetupState(
-            setupTx,
-            pattern,
-            newRef,
-            {
-              sameStoredSetup: false,
-              restageStoredArgument: true,
-              storedSetupMatches: false,
-            },
-            undefined,
-            resultCell,
-          );
-          this.runtime.prepareTxForCommit(setupTx);
-          setupTx.commit();
-        } catch (error) {
-          logger.error(
-            "pattern-swap-setup-error",
-            `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
-            error,
-          );
+        const finishSwap = () => {
+          cancelNodes?.();
+          instantiatePattern(pattern);
+          runningRef = newRef;
+        };
+        if (!this.runtime.sealDestinationInstalled) {
+          // The OFF arm (and ON-arm client speculation): today's
+          // behavior, byte for byte — setup commits to the store and the
+          // swap proceeds synchronously.
+          try {
+            this.applySetupState(
+              setupTx,
+              pattern,
+              newRef,
+              {
+                sameStoredSetup: false,
+                restageStoredArgument: true,
+                storedSetupMatches: false,
+              },
+              undefined,
+              resultCell,
+            );
+            this.runtime.prepareTxForCommit(setupTx);
+            setupTx.commit();
+          } catch (error) {
+            logger.error(
+              "pattern-swap-setup-error",
+              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+              error,
+            );
+            return;
+          }
+          finishSwap();
           return;
         }
-        cancelNodes?.();
-        instantiatePattern(pattern);
-        runningRef = newRef;
+        // ON-arm serving: the setup seals into the wave, and the wave
+        // can still WITHDRAW it at the commit step (a conflict drop, a
+        // lease-lost abort) AFTER commit() resolved — so the running
+        // graph is replaced only once the setup is DURABLY accepted
+        // (waveSettlementOf). On withdrawal the OLD graph stays: v2
+        // running against withdrawn setup is the "Handler used as lift"
+        // failure class, while old-graph-plus-new-pointer is a coherent
+        // not-yet-swapped state a later pointer write (or reactivation)
+        // repairs.
+        void (async () => {
+          try {
+            this.applySetupState(
+              setupTx,
+              pattern,
+              newRef,
+              {
+                sameStoredSetup: false,
+                restageStoredArgument: true,
+                storedSetupMatches: false,
+              },
+              undefined,
+              resultCell,
+            );
+            this.runtime.prepareTxForCommit(setupTx);
+            const committed = await setupTx.commit();
+            if (committed.error !== undefined) {
+              logger.error(
+                "pattern-swap-setup-error",
+                `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was refused at the seal`,
+                committed.error,
+              );
+              return;
+            }
+          } catch (error) {
+            logger.error(
+              "pattern-swap-setup-error",
+              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+              error,
+            );
+            return;
+          }
+          const settlement = waveSettlementOf(setupTx);
+          if (settlement !== undefined) {
+            const settled = await settlement;
+            if (settled.error !== undefined) {
+              logger.warn(
+                "pattern-swap-setup-withdrawn",
+                () => [
+                  `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was withdrawn by the wave; the running pattern is preserved`,
+                  settled.error,
+                ],
+              );
+              return;
+            }
+          }
+          // Liveness + supersession: the piece may have stopped, the
+          // runtime cycled, or a NEWER pointer write swapped past this
+          // one while the settlement was pending.
+          if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
+          if (currentPatternKey !== patternIdentityKey(newRef)) return;
+          finishSwap();
+        })();
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {

@@ -2988,7 +2988,12 @@ export function createSchemaMemo(): SchemaMemo {
 const schemaMemoIdentityBindings = new WeakMap<SchemaMemo, string>();
 
 const schemaMemoIdentityKey = (identity: ScopeKeyIdentity): string =>
-  `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`;
+  // Injective over the pair: JSON escapes every delimiter, and `null`
+  // keeps an ABSENT component distinct from an empty string. A raw
+  // `\0`-joined key let two DISTINCT identities collide (a NUL inside a
+  // segment; undefined vs ""), and a collision here is exactly the
+  // cross-identity sharing this tripwire exists to make loud.
+  JSON.stringify([identity.principal ?? null, identity.sessionId ?? null]);
 
 /**
  * Bind a shared schema memo to the traversing identity, or throw if it
