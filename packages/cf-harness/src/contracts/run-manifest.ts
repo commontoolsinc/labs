@@ -2,7 +2,7 @@ import {
   type CfcEnforcementMode,
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   normalizePromptSlotBinding,
   type PromptSlotBinding,
@@ -59,7 +59,7 @@ export interface LoomRunManifest {
 export type HarnessRunManifest = LoomRunManifest;
 
 const isJsonObject = (input: unknown): input is Record<string, unknown> =>
-  isRecord(input) && !Array.isArray(input);
+  isObjectNotArray(input);
 
 const isLoomRunManifestType = (input: unknown): boolean =>
   input === undefined || input === LOOM_RUN_MANIFEST_TYPE;

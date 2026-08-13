@@ -49,5 +49,10 @@ report in its failure result.
   every disallowed field, and permitted diagnostic metadata reaches the triage
   sink only after the CFC check passes.
 
+`cfh:` session tokens remain excluded from automatic export like any other
+identifier. They are run-salted and meaningless outside a run, but the export
+projection is an allowlist of enumerated categories, not a per-identifier
+judgment; the handle table, not the token, is the sensitive artifact.
+
 Success means an agent can report a missing or defective tool without gaining
 authority or creating a new path for source, request, or session data to leave.

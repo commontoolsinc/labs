@@ -38,5 +38,7 @@ export { BaseCodecEngine } from "./BaseCodecEngine.ts";
 export { BaseFabricInstance } from "./BaseFabricInstance.ts";
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 export { ExplicitTagValue } from "./ExplicitTagValue.ts";
+export { ProblematicStateError } from "./ProblematicStateError.ts";
 export { ProblematicValue } from "./ProblematicValue.ts";
+export { toReportableState } from "./toReportableState.ts";
 export { UnknownValue } from "./UnknownValue.ts";

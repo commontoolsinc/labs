@@ -2,7 +2,6 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { isFabricValue } from "@/type-check.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import type { ReconstructionContext } from "@/codec-interface/interface.ts";
@@ -229,7 +228,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     // all of which reach here.
     return this.reportMalformed(
       "",
-      RealmCodecEngine.#reportable(data),
+      data,
       `Cannot decode ${
         backtickQuote(toCompactDebugString(data, 50))
       }: not a form this format emits.`,
@@ -290,7 +289,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       if (isUnsafeObjectKey(key)) {
         return this.reportMalformed(
           key,
-          RealmCodecEngine.#reportable(data),
+          data,
           `object contains a key this runtime reserves: "${key}"`,
         );
       }
@@ -315,23 +314,6 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
   //
   // Static members
   //
-
-  /**
-   * Renders a state for reporting, since `reportMalformed()` preserves what it
-   * is given and so wants a `FabricValue`.
-   *
-   * JSON's engine hands one over directly, every `JsonCodecValue` being a
-   * `FabricValue` too. This format's are not so lucky: `RealmCodecValue`
-   * admits `Uint8Array`, `RegExp` and `Map`, none of which is a `FabricValue`,
-   * and a container can hold any of the three at any depth. Handing one over
-   * anyway would not merely mistype it -- a `ProblematicValue` deep-freezes
-   * its state, and `Object.freeze()` throws outright on a typed array with
-   * elements. So a state that is not a fabric value is described instead,
-   * which loses the ability to reproduce it and keeps everything else working.
-   */
-  static #reportable(state: RealmCodecValue): FabricValue {
-    return isFabricValue(state) ? state : toCompactDebugString(state, 200);
-  }
 
   /**
    * Unwraps a tagged wire representation. Returns `{ tag, state }`, or `null`

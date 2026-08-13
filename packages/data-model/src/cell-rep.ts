@@ -6,8 +6,8 @@
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
+  isObjectOrArray,
   isPlainObject,
-  isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
 import { FabricHash } from "@/fabric-primitives/index.ts";
@@ -82,7 +82,7 @@ export function entityRefFrom(hash: FabricHash): EntityRef {
 export function isEntityRef(value: unknown): value is EntityRef {
   return modernCellRepEnabled
     ? value instanceof FabricHash
-    : isRecord(value) && typeof value["/"] === "string";
+    : isObjectOrArray(value) && typeof value["/"] === "string";
 }
 
 /**
@@ -92,7 +92,7 @@ export function isEntityRef(value: unknown): value is EntityRef {
 export function entityRefToString(value: EntityRef): string {
   if (modernCellRepEnabled) {
     if (value instanceof FabricHash) return value.taggedHashString;
-  } else if (isRecord(value) && typeof value["/"] === "string") {
+  } else if (isObjectOrArray(value) && typeof value["/"] === "string") {
     return value["/"];
   }
   throw new Error(
@@ -152,9 +152,9 @@ export function linkRefFrom<Payload extends FabricPlainObject>(
 function isLegacyLinkEnvelope(
   value: unknown,
 ): value is { "/": { [LINK_V1_TAG]: FabricPlainObject } } {
-  return isRecord(value) &&
+  return isObjectOrArray(value) &&
     Object.keys(value).length === 1 &&
-    isRecord(value["/"]) &&
+    isObjectOrArray(value["/"]) &&
     LINK_V1_TAG in value["/"];
 }
 
@@ -219,7 +219,9 @@ export function linkPayloadAtProbe(
   if (modernCellRepEnabled) {
     return isLinkRef(probeValue) ? linkRefPayload(probeValue) : undefined;
   }
-  return isRecord(probeValue) ? probeValue as FabricPlainObject : undefined;
+  return isObjectOrArray(probeValue)
+    ? probeValue as FabricPlainObject
+    : undefined;
 }
 
 //

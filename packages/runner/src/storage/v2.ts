@@ -44,7 +44,7 @@ import {
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -267,7 +267,7 @@ const activeCommitPreconditions = (
     );
 
 const toExplicitDocument = (value: FabricValue): EntityDocument => {
-  if (!isObject(value)) {
+  if (!isObjectNotArray(value)) {
     throw new Error(
       "memory v2 transactions require explicit full-document roots",
     );
@@ -1461,7 +1461,7 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace,
     document: EntityDocument | undefined,
   ): Promise<Error | undefined> {
-    const cfc = isRecord(document?.cfc) ? document.cfc : undefined;
+    const cfc = isObjectOrArray(document?.cfc) ? document.cfc : undefined;
     const schemaHash = cfc?.schemaHash;
     if (typeof schemaHash !== "string" || schemaHash.length === 0) {
       return undefined;
@@ -1551,7 +1551,7 @@ export class StorageManager implements IStorageManager {
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
-      if (!isRecord(value) && !Array.isArray(value)) {
+      if (!isObjectOrArray(value)) {
         return;
       }
       value = (value as Record<string, unknown>)[segment];
@@ -1629,12 +1629,12 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
-    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose
+    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
     // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
     // reconstructed from the data URI is never found here and its target
     // document is never synced — the later read finds it absent. (A
     // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
         if (

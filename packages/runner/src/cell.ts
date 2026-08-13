@@ -1,8 +1,9 @@
 import {
   type Immutable,
   isFunction,
+  isObjectNotArray,
+  isObjectOrArray,
   isPlainContainer,
-  isRecord,
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
@@ -250,7 +251,7 @@ const storedSchemaForWritePolicyInput = (
   }, {
     meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
   });
-  if (!isRecord(stored) || stored.value === undefined) {
+  if (!isObjectOrArray(stored) || stored.value === undefined) {
     return undefined;
   }
   return ContextualFlowControl.getSchemaAtPath(
@@ -634,7 +635,7 @@ export function elementSchemaFor(
   arraySchema: JSONSchema | undefined,
   index?: number,
 ): JSONSchema | undefined {
-  if (!isRecord(arraySchema)) return undefined;
+  if (!isObjectOrArray(arraySchema)) return undefined;
   const prefixItems = Array.isArray(arraySchema.prefixItems)
     ? arraySchema.prefixItems as JSONSchema[]
     : undefined;
@@ -642,7 +643,7 @@ export function elementSchemaFor(
       index < prefixItems.length
     ? prefixItems[index]
     : arraySchema.items;
-  if (!isRecord(covering) || Array.isArray(covering)) {
+  if (!isObjectNotArray(covering)) {
     return covering as JSONSchema | undefined;
   }
   const defs = arraySchema.$defs;
@@ -1646,7 +1647,7 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers for partial updates, or .set() for non-object values",
       );
     }
-    if (!isRecord(values)) {
+    if (!isObjectOrArray(values)) {
       throw new Error(
         "Cell.update() requires transaction and object value\n" +
           "help: use in handlers for partial updates, or .set() for non-object values",
@@ -1675,7 +1676,7 @@ export class CellImpl<T extends FabricValue>
       // just wants to know whether the value could be an object.
       const allowsObject = resolvedSchema === undefined ||
         ContextualFlowControl.isTrueSchema(resolvedSchema) ||
-        (isRecord(resolvedSchema) &&
+        (isObjectOrArray(resolvedSchema) &&
           (resolvedSchema.type === "object" ||
             (Array.isArray(resolvedSchema.type) &&
               resolvedSchema.type.includes("object")) ||
@@ -1755,7 +1756,7 @@ export class CellImpl<T extends FabricValue>
       // and assigning that back to `currentValue` would discard the narrowing
       // this block exists to establish.
       const created: FabricValue[] =
-        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+        isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
             this.runtime,
             this.tx,
@@ -1836,7 +1837,7 @@ export class CellImpl<T extends FabricValue>
       // Annotated for the same reason as in `push()`: `processDefaultValue()`
       // answers `any`, which would discard the narrowing on assignment.
       const created: FabricValue[] =
-        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+        isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
             this.runtime,
             this.tx,
@@ -2224,7 +2225,7 @@ export class CellImpl<T extends FabricValue>
 
     // Determine the kind based on schema flags
     let kind: CellKind = this._kind;
-    if (isRecord(childSchema)) {
+    if (isObjectOrArray(childSchema)) {
       const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
       // we can override the kind of cell we use for a key
       if (asCellValues.length > 0) {
@@ -3247,7 +3248,7 @@ function maybeConvertArrayPathToDataURILink(
     | undefined;
 
   for (let i = 0; i < link.path.length; i++) {
-    if (!isRecord(current)) {
+    if (!isObjectOrArray(current)) {
       break;
     }
 
@@ -3259,7 +3260,7 @@ function maybeConvertArrayPathToDataURILink(
         break;
       }
       next = (current as unknown as Record<string, FabricValue>)[segment];
-      if (isRecord(next) && !isCellLink(next)) {
+      if (isObjectOrArray(next) && !isCellLink(next)) {
         candidate = {
           value: next,
           path: [...prefix, segment],
@@ -3490,7 +3491,7 @@ export function convertCellsToLinks(
   path: readonly string[] = [],
   ancestors: Map<object, readonly string[]> = new Map(),
 ): FabricValue {
-  if (isRecord(value) && ancestors.has(value)) {
+  if (isObjectOrArray(value) && ancestors.has(value)) {
     return linkRefFrom({ path: ancestors.get(value) });
   }
 
@@ -3499,7 +3500,7 @@ export function convertCellsToLinks(
     return linkToCell(getCellOrThrow(value), options);
   } else if (isCell(value)) {
     return linkToCell(value, options);
-  } else if (!(isRecord(value) || isFunction(value))) {
+  } else if (!(isObjectOrArray(value) || isFunction(value))) {
     return value as FabricValue;
   }
 
@@ -3541,13 +3542,13 @@ export function convertCellsToLinks(
     //
     // TODO(danfuzz): Both container branches below build a fresh container,
     // throwing away the copy just made above. One copy could serve both.
-    if (!isRecord(converted)) {
+    if (!isObjectOrArray(converted)) {
       // `shallowFabricFromNativeValue()` converted this into a primitive value
       // of some sort.
       //
       // `FabricValueLayer` is looser than `FabricValue` -- its containers hold
       // `unknown`, being unconverted until the recursion reaches them -- and
-      // `isRecord()` does not narrow an array out of the union. The cast is
+      // `isObjectOrArray()` does not narrow an array out of the union. The cast is
       // that gap, not a claim about the value.
       return converted as FabricValue;
     } else if (converted instanceof FabricPrimitive) {
@@ -3697,7 +3698,7 @@ function schemaWithDefaultAndScope<T>(
 export function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
-  return isRecord(schema) && isCellScope(schema.scope)
+  return isObjectOrArray(schema) && isCellScope(schema.scope)
     ? schema.scope
     : undefined;
 }

@@ -20,7 +20,7 @@ import {
   FabricInstance,
   FabricPrimitive,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";
 import type { CfcLabelView } from "./label-view-core.ts";
@@ -133,7 +133,7 @@ function transformSigilCfcLabelViews(
     });
     return changed ? out : value;
   }
-  // A `FabricPrimitive` is `isRecord` and leaves ahead of the record branch. It
+  // A `FabricPrimitive` is `isObjectOrArray` and leaves ahead of the record branch. It
   // holds no sigil link, so returning it whole is the answer.
   if (value instanceof FabricPrimitive) return value;
 
@@ -154,7 +154,7 @@ function transformSigilCfcLabelViews(
     refuseFabricInstance(value, "when transforming sigil CFC label views");
   }
 
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     let changed = false;
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {

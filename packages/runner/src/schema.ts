@@ -1,7 +1,11 @@
 import { AnyCellWrapping } from "@commonfabric/api";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isReadonlyObjectOrArray,
+} from "@commonfabric/utils/types";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
@@ -131,7 +135,7 @@ const asCellCompoundCandidates = (
       const resolved = resolveSchema(branchWithDefs) ?? branchWithDefs;
       const merged = combineSchema(baseSchema as JSONSchemaObj, resolved);
       if (
-        isRecord(merged) &&
+        isObjectOrArray(merged) &&
         ContextualFlowControl.getAsCellValues(merged).length > 0
       ) {
         candidates.push(merged as JSONSchemaObj);
@@ -186,7 +190,7 @@ export type CellViewRef = {
 
 const isCellViewRef = (
   ref: NormalizedFullLink | CellViewRef,
-): ref is CellViewRef => isRecord(ref) && "link" in ref;
+): ref is CellViewRef => isObjectOrArray(ref) && "link" in ref;
 
 const isPrefix = (
   prefix: readonly string[],
@@ -214,7 +218,7 @@ const containsLocalRef = (
   schema: JSONSchema,
   seen: Set<JSONSchema> = new Set(),
 ): boolean => {
-  if (!isRecord(schema) || seen.has(schema)) {
+  if (!isObjectOrArray(schema) || seen.has(schema)) {
     return false;
   }
   seen.add(schema);
@@ -237,9 +241,9 @@ const branchWithParentDefs = (
   branch: JSONSchema,
 ): JSONSchema => {
   if (
-    !isRecord(branch) ||
+    !isObjectOrArray(branch) ||
     branch.$defs !== undefined ||
-    !isRecord(parent.$defs) ||
+    !isObjectOrArray(parent.$defs) ||
     !containsLocalRef(branch)
   ) {
     return branch;
@@ -310,7 +314,7 @@ const matchesConcreteValue = (
     ).length === 1;
   }
 
-  if (isRecord(value) && isRecord(resolved.properties)) {
+  if (isObjectOrArray(value) && isObjectOrArray(resolved.properties)) {
     return Object.entries(resolved.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       matchesConcreteValue(
@@ -420,7 +424,7 @@ export function resolveSchema(
       );
       return false;
     }
-    if (!isRecord(resolved)) {
+    if (!isObjectOrArray(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
       return undefined;
@@ -467,7 +471,7 @@ export function resolveSchemaForValue(
   const resolved = resolveSchema(schema);
   if (
     resolved === undefined || typeof resolved === "boolean" ||
-    !isRecord(resolved)
+    !isObjectOrArray(resolved)
   ) {
     return resolved;
   }
@@ -481,11 +485,11 @@ export function resolveSchemaForValue(
       resolved;
   }
 
-  if (!isRecord(narrowed)) {
+  if (!isObjectOrArray(narrowed)) {
     return narrowed;
   }
 
-  if (!isRecord(value) || !isRecord(narrowed.properties)) {
+  if (!isObjectOrArray(value) || !isObjectOrArray(narrowed.properties)) {
     return narrowed;
   }
 
@@ -547,10 +551,10 @@ export function schemaHasIfc(
   const context: SchemaHasIfcContext = { seenByRoot: new WeakMap() };
   if (seen.size > 0) {
     const initialRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
-    const rootKey = isRecord(initialRoot) ? initialRoot : schema;
+    const rootKey = isObjectOrArray(initialRoot) ? initialRoot : schema;
     const initialSeen = new WeakSet<object>();
     for (const item of seen) {
-      if (isRecord(item)) initialSeen.add(item);
+      if (isObjectOrArray(item)) initialSeen.add(item);
     }
     context.seenByRoot.set(rootKey, initialSeen);
   }
@@ -569,7 +573,7 @@ function _schemaHasIfcUncached(
   context: SchemaHasIfcContext,
 ): boolean {
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
-  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   let seen = context.seenByRoot.get(rootKey);
   if (seen?.has(schema)) return false;
   if (!seen) {
@@ -581,7 +585,7 @@ function _schemaHasIfcUncached(
   const resolved = typeof schema.$ref === "string"
     ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
     : schema;
-  if (resolved === true || resolved === false || !isRecord(resolved)) {
+  if (resolved === true || resolved === false || !isObjectOrArray(resolved)) {
     return false;
   }
   const childFullSchema = cfcSchemaChildRoot(
@@ -603,7 +607,8 @@ function _schemaHasIfcUncached(
   return forEachSubschema(
     resolved,
     (child) =>
-      isRecord(child) && _schemaHasIfcUncached(child, childFullSchema, context),
+      isObjectOrArray(child) &&
+      _schemaHasIfcUncached(child, childFullSchema, context),
   );
 }
 
@@ -659,7 +664,7 @@ export function processDefaultValue(
   if (!schema) return defaultValue;
 
   let resolvedSchema = resolveSchema(schema);
-  if (!isRecord(resolvedSchema)) {
+  if (!isObjectOrArray(resolvedSchema)) {
     // For primitive types, return as is
     return annotateWithBackToCellSymbols(
       defaultValue,
@@ -746,8 +751,7 @@ export function processDefaultValue(
 
   // Handle object type defaults
   if (
-    resolvedSchema?.type === "object" && isRecord(defaultValue) &&
-    !Array.isArray(defaultValue)
+    resolvedSchema?.type === "object" && isObjectNotArray(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -759,13 +763,13 @@ export function processDefaultValue(
           resolvedSchema,
           [key],
         );
-        const propSchema =
-          (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
-            ? ContextualFlowControl.resolveSchemaRefs(
-              rawPropSchema,
-              resolvedSchema,
-            )
-            : rawPropSchema;
+        const propSchema = (isObjectOrArray(rawPropSchema) &&
+            typeof rawPropSchema.$ref === "string")
+          ? ContextualFlowControl.resolveSchemaRefs(
+            rawPropSchema,
+            resolvedSchema,
+          )
+          : rawPropSchema;
         // `Object.hasOwn`, not `in`: `key` is a schema-declared property NAME,
         // and `defaultValue` is data. `in` walks the prototype chain, so a
         // schema property called `toString` or `valueOf` matched every object
@@ -780,7 +784,7 @@ export function processDefaultValue(
             rebaseCfcLabelView(cfcLabelView, [key]),
           );
           processedKeys.add(key);
-        } else if (isRecord(propSchema)) {
+        } else if (isObjectOrArray(propSchema)) {
           const asCellValues = ContextualFlowControl.getAsCellValues(
             propSchema,
           );
@@ -937,7 +941,7 @@ export function mergeDefaults(
 
   // TODO(seefeld): What's the right thing to do for arrays?
   //
-  // TODO(danfuzz): `isReadonlyRecord` admits a `FabricSpecialObject` on
+  // TODO(danfuzz): `isReadonlyObjectOrArray` admits a `FabricSpecialObject` on
   // either side, and the spread copies zero properties from one, so a
   // fabric-valued default here merges to `{}` (or silently drops the other
   // side's contribution). Reachable: the schema generator emits
@@ -946,7 +950,8 @@ export function mergeDefaults(
   // schema takes the spread arm. Wants a `FabricSpecialObject` test choosing
   // the `defaultValue` arm.
   const mergedDefault = base.type === "object" &&
-      isReadonlyRecord(base.default) && isReadonlyRecord(defaultValue)
+      isReadonlyObjectOrArray(base.default) &&
+      isReadonlyObjectOrArray(defaultValue)
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 
@@ -972,7 +977,7 @@ function annotateWithBackToCellSymbols(
   cfcLabelView?: CfcLabelView,
 ) {
   if (
-    !isRecord(value) || isCell(value) ||
+    !isObjectOrArray(value) || isCell(value) ||
     value instanceof FabricPrimitive
   ) {
     // We only possibly annotate plain objects or arrays that _aren't_ cells.
@@ -1280,7 +1285,7 @@ export function validateAndTransform(
   // notify the scheduler for shallow reads as they occur.
   const value = readValueAtResolvedLink(tx, resolvedValueLink, address);
   const doc = { address, value: value };
-  const valueSelectedSchema = isRecord(effectiveSchema)
+  const valueSelectedSchema = isObjectOrArray(effectiveSchema)
     ? asCellCompoundSchemaForValue(effectiveSchema, value)
     : undefined;
   // If we have a ref with a schema, use that; otherwise, use the link's schema
@@ -1522,7 +1527,7 @@ class TransformObjectCreator
         false,
         this.labelViewFor(link),
       );
-    } else if (isRecord(link.schema)) {
+    } else if (isObjectOrArray(link.schema)) {
       const schema = asCellCompoundSchemaForValue(link.schema, value) ??
         link.schema;
       const asCellValues = ContextualFlowControl.getAsCellValues(schema);
@@ -1589,7 +1594,7 @@ class TransformObjectCreator
       // If we're an object, we may be missing some properties that have a
       // default.
       if (
-        isRecord(value) && !Array.isArray(value) &&
+        isObjectNotArray(value) &&
         schema.properties !== undefined
       ) {
         // Ensure value is mutable before injecting default properties.
@@ -1605,7 +1610,7 @@ class TransformObjectCreator
           JSONSchema,
         ][];
         for (const [propName, propSchema] of propertyEntries) {
-          if (isRecord(propSchema) && propSchema.default !== undefined) {
+          if (isObjectOrArray(propSchema) && propSchema.default !== undefined) {
             const valueObj = value as Record<string, any>;
             if (valueObj[propName] === undefined) {
               valueObj[propName] = processDefaultValue(
@@ -1652,14 +1657,14 @@ export function generateHandlerSchema(
   }
   const mergedDefs: Record<string, JSONSchema> = {};
   const mergedDefinitions: Record<string, JSONSchema> = {};
-  if (isRecord(eventSchema)) {
+  if (isObjectOrArray(eventSchema)) {
     // extract $defs and definitions and remove them from eventSchema
     const { $defs, definitions, ...rest } = eventSchema;
     eventSchema = rest;
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  if (isRecord(stateSchema)) {
+  if (isObjectOrArray(stateSchema)) {
     // extract $defs and definitions and remove them from stateSchema
     const { $defs, definitions, ...rest } = stateSchema;
     stateSchema = rest;
@@ -1708,7 +1713,7 @@ function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
 }
 
 function removeAsCellFromSchema(schema: JSONSchema): JSONSchema {
-  if (isRecord(schema)) {
+  if (isObjectOrArray(schema)) {
     const { asCell: _c, ...restSchema } = schema;
     return restSchema;
   }

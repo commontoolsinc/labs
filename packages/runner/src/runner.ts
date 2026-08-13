@@ -16,7 +16,11 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isPlainObject, isRecord } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainObject,
+} from "@commonfabric/utils/types";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -266,7 +270,7 @@ function schedulerActionInstanceKey(parts: {
 function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
-  return isRecord(schema) && isCellScope(schema.scope)
+  return isObjectOrArray(schema) && isCellScope(schema.scope)
     ? schema.scope
     : undefined;
 }
@@ -377,7 +381,7 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
-  // A `FabricInstance` is refused. `isRecord` admits one, and its enumerable
+  // A `FabricInstance` is refused. `isObjectOrArray` admits one, and its enumerable
   // properties are empty, so descent would stop without reaching its codec
   // contents -- and a write-redirect link nested inside one would record no
   // `kind: "schema"` entry.
@@ -400,7 +404,7 @@ const recordOutputSchemaPolicyInputs = (
     );
   }
 
-  if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
+  if (isObjectOrArray(outputBinding) && !isCellLink(outputBinding)) {
     for (const [key, child] of Object.entries(outputBinding)) {
       recordOutputSchemaPolicyInputs(
         tx,
@@ -477,10 +481,10 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
   }
 
   // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above:
-  // `isRecord` admits a `FabricSpecialObject`, whose empty entries end the
+  // `isObjectOrArray` admits a `FabricSpecialObject`, whose empty entries end the
   // descent, so a link inside a `FabricInstance`'s codec contents records no
   // policy input. Fails closed, as there.
-  if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
+  if (isObjectOrArray(outputBinding) && !isCellLink(outputBinding)) {
     for (const child of Object.values(outputBinding)) {
       recordRawBuiltinBindingSchemaPolicyInputs(
         tx,
@@ -601,12 +605,12 @@ export function firstResolvedOutputRedirect(
     }
     return undefined;
   }
-  // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose empty
+  // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose empty
   // entries end the descent, so a write-redirect link inside a
   // `FabricInstance`'s codec contents is invisible here. The caller then
   // sees no redirect and silently skips the sub-pattern's owned-cell
   // pre-sync keyed off it.
-  if (isRecord(binding) && !isCellLink(binding)) {
+  if (isObjectOrArray(binding) && !isCellLink(binding)) {
     for (const child of Object.values(binding)) {
       const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
       if (found) return found;
@@ -715,7 +719,7 @@ const recordSetupProjectionPolicyInputs = (
     );
   }
 
-  if (isRecord(projection) && !isCellLink(projection)) {
+  if (isObjectOrArray(projection) && !isCellLink(projection)) {
     for (const [key, child] of Object.entries(projection)) {
       recordSetupProjectionPolicyInputs(
         tx,
@@ -977,14 +981,17 @@ function closedWorldEventRejection(
   runtimeInjectedEventKeys?: readonly string[],
 ): string | undefined {
   if (event === undefined) return undefined;
-  if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
+  if (
+    !isObjectOrArray(argumentSchema) ||
+    !isObjectOrArray(argumentSchema.properties)
+  ) {
     return undefined;
   }
   const eventSchema = argumentSchema.properties.$event;
-  if (!isRecord(eventSchema)) return undefined;
+  if (!isObjectOrArray(eventSchema)) return undefined;
   const refTarget = localRefTarget(eventSchema, argumentSchema);
   const closed = eventSchema.additionalProperties === false ||
-    (isRecord(refTarget) && refTarget.additionalProperties === false);
+    (isObjectOrArray(refTarget) && refTarget.additionalProperties === false);
   if (!closed) return undefined;
 
   // The runtime itself merges keys into some payloads — the LLM tool-call
@@ -1013,10 +1020,10 @@ function closedWorldEventRejection(
   if (
     runtimeInjectedEventKeys !== undefined &&
     runtimeInjectedEventKeys.length > 0 &&
-    isRecord(event)
+    isObjectOrArray(event)
   ) {
     const declaredProperties =
-      isRecord(refTarget) && isRecord(refTarget.properties)
+      isObjectOrArray(refTarget) && isObjectOrArray(refTarget.properties)
         ? refTarget.properties
         : undefined;
     const rest = { ...(event as Record<string, unknown>) };
@@ -1046,9 +1053,10 @@ function closedWorldEventRejection(
     );
     if (cacheable) relaxedHandlerSchemaCache.set(argumentSchema, relaxedRoot);
   }
-  const relaxedEvent = isRecord(relaxedRoot) && isRecord(relaxedRoot.properties)
-    ? relaxedRoot.properties.$event
-    : undefined;
+  const relaxedEvent =
+    isObjectOrArray(relaxedRoot) && isObjectOrArray(relaxedRoot.properties)
+      ? relaxedRoot.properties.$event
+      : undefined;
   if (relaxedEvent === undefined) return undefined;
 
   const failure = validateSchemaValue(relaxedEvent, payload, relaxedRoot, {
@@ -1088,7 +1096,7 @@ function overlayUnresolvedLinkPlaceholders(
     }
     return result ?? materialized;
   }
-  if (isRecord(raw) && isRecord(materialized)) {
+  if (isObjectOrArray(raw) && isObjectOrArray(materialized)) {
     let result: Record<string, unknown> | undefined;
     for (const [key, rawChild] of Object.entries(raw)) {
       const child = overlayUnresolvedLinkPlaceholders(
@@ -1774,7 +1782,7 @@ export class Runner {
     });
     if (
       options.preserveName &&
-      isRecord(previousResult) &&
+      isObjectOrArray(previousResult) &&
       previousResult[NAME]
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
@@ -1869,7 +1877,7 @@ export class Runner {
         // a probe read of the not-yet-loaded value would otherwise enter the
         // commit's conflict set and lose to the durable value when it streams
         // in, reverting the whole instantiation commit.
-        const schemaDefault = isRecord(descriptor.schema)
+        const schemaDefault = isObjectOrArray(descriptor.schema)
           ? descriptor.schema.default as JSONValue | undefined
           : undefined;
         if (schemaDefault !== undefined) {
@@ -3931,8 +3939,8 @@ export class Runner {
 
       if (link) {
         promises.add(this.runtime.getCellFromLink(link).sync());
-      } else if (isRecord(value)) {
-        // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+      } else if (isObjectOrArray(value)) {
+        // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and
         // `for..in` sees none of its state, so a link nested in a
         // `FabricInstance`'s codec contents is never synced here — the cold
         // target this pre-sync exists to warm.
@@ -4054,9 +4062,9 @@ export class Runner {
     // first locally computed, then conflicts on write and only then properly
     // received from the server.
     if (
-      isRecord(pattern.result) &&
+      isObjectOrArray(pattern.result) &&
       pattern.result[UI] &&
-      (!isRecord(pattern.resultSchema) ||
+      (!isObjectOrArray(pattern.resultSchema) ||
         !pattern.resultSchema.properties?.[UI])
     ) {
       cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
@@ -4132,8 +4140,8 @@ export class Runner {
                 )
               ),
           );
-        } else if (isRecord(value)) {
-          // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+        } else if (isObjectOrArray(value)) {
+          // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and
           // `for..in` sees none of its state, so a link inside a
           // `FabricInstance` held in a raw argument value is never pre-synced
           // — a cold target can then enter the commit basis, the exact
@@ -4746,7 +4754,10 @@ export class Runner {
     event: unknown,
     depTx: IExtendedStorageTransaction,
   ): void {
-    if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
+    if (
+      !isObjectOrArray(argumentSchema) ||
+      !isObjectOrArray(argumentSchema.properties)
+    ) {
       return;
     }
     const eventSchema = argumentSchema.properties.$event;
@@ -4799,7 +4810,7 @@ export class Runner {
       currentValue: unknown,
       path: readonly string[],
     ): void => {
-      if (!isRecord(schema)) return;
+      if (!isObjectOrArray(schema)) return;
       const pathKey = JSON.stringify(path);
       const seenPaths = seen.get(schema);
       if (seenPaths?.has(pathKey)) return;
@@ -4865,7 +4876,7 @@ export class Runner {
       forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
         switch (keyword) {
           case "properties":
-            if (isRecord(currentValue)) {
+            if (isObjectOrArray(currentValue)) {
               visit(child, currentValue[key!], [...path, key!]);
             }
             return;
@@ -4890,9 +4901,9 @@ export class Runner {
             }
             return;
           case "additionalProperties":
-            if (isRecord(currentValue) && !Array.isArray(currentValue)) {
+            if (isObjectNotArray(currentValue)) {
               // Covers only the keys `properties` does not declare.
-              const declaredKeys = isRecord(schema.properties)
+              const declaredKeys = isObjectOrArray(schema.properties)
                 ? new Set(Object.keys(schema.properties))
                 : undefined;
               for (const [k, v] of Object.entries(currentValue)) {
@@ -4916,7 +4927,7 @@ export class Runner {
 
   private moduleHasOpaqueResult(module: Module): boolean {
     const resultSchema = module.resultSchema;
-    return isRecord(resultSchema) &&
+    return isObjectOrArray(resultSchema) &&
       Array.isArray(resultSchema.asCell) &&
       resultSchema.asCell.includes("opaque");
   }
@@ -4933,7 +4944,7 @@ export class Runner {
     const schemaWithRootDefinitions = (
       schema: JSONSchema | undefined,
     ): JSONSchema | undefined => {
-      if (!isRecord(schema) || !isRecord(rootSchema)) {
+      if (!isObjectOrArray(schema) || !isObjectOrArray(rootSchema)) {
         return schema;
       }
       return {
@@ -4965,7 +4976,7 @@ export class Runner {
       if (isCellLink(currentValue)) {
         return;
       }
-      if (!isRecord(schema)) return;
+      if (!isObjectOrArray(schema)) return;
       const seenValues = seen.get(schema) ?? new Set<unknown>();
       if (seenValues.has(currentValue)) return;
       seenValues.add(currentValue);
@@ -4990,7 +5001,7 @@ export class Runner {
           "when collecting scheduler read links from an argument",
         );
       }
-      if (isRecord(schema.properties) && isRecord(currentValue)) {
+      if (isObjectOrArray(schema.properties) && isObjectOrArray(currentValue)) {
         for (const [key, propertySchema] of Object.entries(schema.properties)) {
           visit(propertySchema, currentValue[key]);
         }
@@ -5015,9 +5026,9 @@ export class Runner {
       }
       if (
         schema.additionalProperties !== undefined &&
-        isRecord(currentValue)
+        isObjectOrArray(currentValue)
       ) {
-        const declaredKeys = isRecord(schema.properties)
+        const declaredKeys = isObjectOrArray(schema.properties)
           ? new Set(Object.keys(schema.properties))
           : undefined;
         for (const [key, propertyValue] of Object.entries(currentValue)) {
@@ -5176,7 +5187,7 @@ export class Runner {
     streamLink?: NormalizedFullLink;
     eventTarget?: { link?: NormalizedFullLink; value: FabricValue };
   } {
-    if (!isRecord(inputs) || !("$event" in inputs)) return {};
+    if (!isObjectOrArray(inputs) || !("$event" in inputs)) return {};
 
     // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
     // link; a residual `$alias` here could only be an embedded pattern's
@@ -6002,7 +6013,7 @@ export class Runner {
           // is an ambient local read (it may kick off, but never await, a
           // sync); guard each access so one lazy read failing doesn't abort
           // the rest of the presync.
-          if (!isRecord(value)) return;
+          if (!isObjectOrArray(value)) return;
           if (seen.has(value)) return;
           seen.add(value);
           for (const key of Object.keys(value)) {
@@ -6096,7 +6107,7 @@ export class Runner {
       schedulerRehydration,
     }: JavaScriptNodeContext,
   ): void {
-    if (isRecord(inputs) && "$event" in inputs) {
+    if (isObjectOrArray(inputs) && "$event" in inputs) {
       throw new Error(
         "Handler used as lift, because $stream: true was overwritten",
       );
@@ -6552,10 +6563,10 @@ export class Runner {
   ): unknown {
     const invoke = () => {
       if (module.wrapper === "handler") {
-        const event = isRecord(argument) && "$event" in argument
+        const event = isObjectOrArray(argument) && "$event" in argument
           ? argument.$event
           : undefined;
-        const context = isRecord(argument) && "$ctx" in argument
+        const context = isObjectOrArray(argument) && "$ctx" in argument
           ? argument.$ctx
           : undefined;
         return fn(event, context);
@@ -6636,9 +6647,9 @@ export class Runner {
     ) {
       return;
     }
-    if (!isRecord(inputBindings)) return;
+    if (!isObjectOrArray(inputBindings)) return;
     const op = (inputBindings as Record<string, unknown>).op;
-    if (!isRecord(op)) return;
+    if (!isObjectOrArray(op)) return;
     let ref = this.runtime.patternManager.getArtifactEntryRef(
       op as unknown as object,
     );
@@ -7341,7 +7352,7 @@ export function getPieceSourceRevisions(
   const revisions: PieceSourceRevision[] = [];
   const revisionIds = new Set<string>();
   for (const value of raw) {
-    if (!isRecord(value)) {
+    if (!isObjectOrArray(value)) {
       throw new Error("piece source history is invalid");
     }
     const pattern = asPatternIdentityRef(value.pattern);
@@ -7677,7 +7688,7 @@ export function asPatternIdentityRef(
   raw: unknown,
 ): { identity: string; symbol: string } | undefined {
   if (
-    isRecord(raw) && typeof raw.identity === "string" &&
+    isObjectOrArray(raw) && typeof raw.identity === "string" &&
     typeof raw.symbol === "string"
   ) {
     return { identity: raw.identity, symbol: raw.symbol };

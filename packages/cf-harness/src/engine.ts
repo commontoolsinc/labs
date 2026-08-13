@@ -41,6 +41,8 @@ import {
   summarizeCfcInvocationRunManifest,
 } from "./contracts/cfc-invocation-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
+import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+import { assertValidHarnessHandleTable } from "./handle-table.ts";
 import {
   createHarnessPolicyDecisionRecord,
   type HarnessPolicyDecisionRecord,
@@ -351,6 +353,9 @@ export class CfHarnessEngine {
         "resumed run credential owner does not match requested credential owner",
       );
     }
+    if (options.runState?.handleTable !== undefined) {
+      assertValidHarnessHandleTable(options.runState.handleTable);
+    }
     this.config = resolveHarnessConfig({
       ...options,
       modelProvider: options.runState === undefined
@@ -580,6 +585,31 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return this.getRunState();
+  }
+
+  /**
+   * The run's session-local handle table, or `undefined` while none has been
+   * recorded. A defensive copy, like `getRunState()`.
+   */
+  get handleTable(): HarnessHandleTable | undefined {
+    return this.#runState.handleTable === undefined
+      ? undefined
+      : structuredClone(this.#runState.handleTable);
+  }
+
+  /**
+   * Records `table` as the run's handle table and persists the run state.
+   *
+   * @throws Error when `table` is not a well-formed version-1 handle table.
+   */
+  async recordHandleTable(table: HarnessHandleTable): Promise<void> {
+    assertValidHarnessHandleTable(table);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { handleTable: structuredClone(table) },
+      this.#now(),
+    );
+    await this.persistRunState();
   }
 
   async persistRunState(): Promise<string | undefined> {

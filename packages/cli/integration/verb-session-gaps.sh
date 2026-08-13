@@ -3,7 +3,7 @@
 # not work yet. Its companion `verb-session-demo.sh` shows the session as it is
 # meant to read; this one is the thing that keeps that honest.
 #
-# Four steps assert a GAP rather than a capability. Each fails loudly the day
+# Three steps assert a GAP rather than a capability. Each fails loudly the day
 # the gap closes, so this script is how we find out that a capability arrived
 # rather than discovering it months later in a stale document.
 #
@@ -12,9 +12,6 @@
 # It deploys pattern/tracker.tsx and nothing else. That fixture belongs to this
 # session alone, so a change to a pattern the product ships can never break a
 # demonstration of what driving one through `cf` looks like.
-#
-# Two steps assert a gap rather than a capability, and say so. When the gap
-# closes they fail, which is the point: this script is how we find out.
 #
 # Run standalone against any host:
 #   API_URL=http://localhost:8000 packages/cli/integration/verb-session-gaps.sh
@@ -187,19 +184,23 @@ $CF piece call --quiet --piece "$KID" $ARGS \
   blockOn "{\"on\":\"$OTHER\"}" >/dev/null 2>&1
 gap "$?" "blockOn with a bare address"
 
-step "11. GAP: a verb returning a child piece crashes readback"
-# The returned item carries `parent`, which points back at its container, so
-# the result is cyclic and rendering it fails — issue #5577. The write lands
-# regardless, which is the property worth not losing.
+step "11. a verb returning a child piece renders the circle as an address"
+# The returned item carries `parent`, which points back at its container. The
+# readback bounds the result with the verb's own declared result and renders
+# the position where the declared type re-enters itself as an address, so the
+# whole outcome is JSON and the write it reports stays legible.
 BEFORE=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
-$CF piece call --quiet --piece "$EPIC" $ARGS \
-  addChild '{"title":"Cycle probe"}' >/dev/null 2>&1
-gap "$?" "addChild readback on a doubly-linked tree"
+CALLED=$($CF piece call --quiet --piece "$EPIC" $ARGS \
+  addChild '{"title":"Cycle probe"}' 2>/dev/null)
+RC=$?
+check "0" "$RC" "addChild readback on a doubly-linked tree"
+BACKREF=$(printf '%s' "$CALLED" | jq -r '.result.item.parent["$link"].id // ""')
+check "of:" "${BACKREF:0:3}" \
+  "the position that closes the circle answers an address"
 AFTER=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
-check "$((BEFORE + 1))" "$AFTER" \
-  "the write landed anyway — an absent result is not a failed mutation"
+check "$((BEFORE + 1))" "$AFTER" "the write the result describes landed"
 
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed — %ds wall clock\n' "$PASS" "$FAIL" "$ELAPSED"

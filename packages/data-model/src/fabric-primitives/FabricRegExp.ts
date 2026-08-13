@@ -138,7 +138,7 @@ export class FabricRegExp extends BaseFabricPrimitive
   // Static members
   //
 
-  static #codec = Object.freeze(
+  static #jsonCodec = Object.freeze(
     new (class RegExpCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
@@ -189,11 +189,6 @@ export class FabricRegExp extends BaseFabricPrimitive
     })(),
   );
 
-  /** The codec for instances of this class. */
-  static get [JSON_CODEC](): NonterminalCodec {
-    return this.#codec;
-  }
-
   static #realmCodec = Object.freeze(
     new (class RegExpCodec extends BaseTerminalCodec<RealmCodecValue> {
       /** Constructs an instance. */
@@ -241,6 +236,11 @@ export class FabricRegExp extends BaseFabricPrimitive
       }
     })(),
   );
+
+  /** The codec for instances of this class. */
+  static get [JSON_CODEC](): NonterminalCodec {
+    return this.#jsonCodec;
+  }
 
   /**
    * The codec for instances of this class in the realm-crossing format.
