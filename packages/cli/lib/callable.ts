@@ -788,14 +788,24 @@ async function boundCyclicResult(
       return bounded;
     }
   }
+  // Each wording is its own statement, so a reader of the coverage report can
+  // tell which of them a test has ever produced. Inside one expression they
+  // could not: a ternary is a single statement, and its untaken arm is
+  // credited with the count of the statement holding it, so a wording nothing
+  // has ever emitted reads exactly like one every call emits.
+  let whyUnbounded: string;
+  if (declared === undefined) {
+    whyUnbounded = "This verb declares no result for `cf` to bound the " +
+      "readback with.";
+  } else {
+    whyUnbounded = "This verb's declared result leaves the closing position " +
+      "unbounded.";
+  }
   throw new CyclicResultError(
     `Cannot render the result of "${resolved.cellKey}": it closes a circle at ` +
       `"${cycle}", and JSON has no way to write one. The handling ` +
       "COMMITTED — the write landed, and only this rendering failed. " +
-      (declared === undefined
-        ? "This verb declares no result for `cf` to bound the readback with."
-        : "This verb's declared result leaves the closing position " +
-          "unbounded.") +
+      whyUnbounded +
       " Collect the outcome with a shape that bounds it: " +
       (receiptId === undefined
         ? "read the receipt with --select or --schema."

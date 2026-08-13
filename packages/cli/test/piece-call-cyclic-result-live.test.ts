@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { type Cell, Runtime } from "@commonfabric/runner";
+import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CyclicResultError } from "../lib/callable.ts";
 import { parseSelectProjection } from "../lib/cell-selection.ts";
@@ -29,6 +29,10 @@ import { executePieceCallable } from "../lib/piece.ts";
  *   collection rather than through a single field.
  * - `addChildLoose` returns the same container behind `unknown`, which
  *   declares a shape that bounds nothing.
+ *
+ * A fourth answer needs no fourth verb: `addChild` reached on the piece's
+ * INPUT cell, under the name `fileUnder`, is a resolution a declared result
+ * cannot be keyed to at all. The harness wires that surface up for it.
  */
 const PROGRAM = {
   main: "/main.tsx",
@@ -108,6 +112,13 @@ const CONFIG = {
   space: "" as string,
 };
 
+/** The piece's input cell, carrying one stream. A piece receives streams as
+ * arguments, and this is the surface a verb reached there is resolved on. */
+const INPUT_CELL_SCHEMA = {
+  type: "object",
+  properties: { fileUnder: { asCell: ["stream"] } },
+} as const satisfies JSONSchema;
+
 interface Tracker {
   /** Dispatch `verb` the way `cf piece call` does, under an invocation id so
    * the outcome is read back off the handling's receipt. */
@@ -147,12 +158,30 @@ async function withTracker<T>(
     expect((await tx.commit()).error).toBeUndefined();
     await root.pull();
 
+    // The same stream the pattern put on `addChild`, reached on the piece's
+    // INPUT cell under a name the result cell does not carry. `cf piece call`
+    // resolves a name on the result cell first, so `fileUnder` is the
+    // input-cell resolution — and a declared result is keyed by the PATTERN's
+    // result properties, which is why that resolution can match none.
+    const inputTx = runtime.edit();
+    const inputCell = runtime.getCell(
+      space,
+      "cyclic-live-input",
+      INPUT_CELL_SCHEMA,
+      inputTx,
+    );
+    inputCell.setRaw({ fileUnder: root.key("addChild").getAsLink() } as never);
+    runtime.prepareTxForCommit(inputTx);
+    expect((await inputTx.commit()).error).toBeUndefined();
+
     let patternLoads = 0;
     const piece = {
       result: { getCell: () => Promise.resolve(root) },
       input: {
         getCell: () =>
-          Promise.resolve(runtime.getCell(space, "cyclic-live-input")),
+          Promise.resolve(
+            runtime.getCell(space, "cyclic-live-input", INPUT_CELL_SCHEMA),
+          ),
       },
       getCell: () => root,
       getPattern: () => {
@@ -274,6 +303,43 @@ describe("cf piece call on a piece that points back at its container", () => {
       // And the write did land.
       expect(childTitles(root)).toEqual(["Unbounded"]);
     });
+  });
+
+  it("refuses a verb it can match no declaration to without consulting a pattern", async () => {
+    await withTracker(
+      "cyclic-no-declaration",
+      async ({ call, patternLoads, root }) => {
+        // `fileUnder` is the piece's own `addChild`, reached on the input cell.
+        // The dispatch and the circle are identical; what differs is that this
+        // resolution carries no declared result to bound the readback with.
+        const error = await call("fileUnder", ["--title", "Undeclared"])
+          .then(() => undefined, (thrown: unknown) => thrown);
+
+        expect(error).toBeInstanceOf(CyclicResultError);
+        const message = (error as Error).message;
+        expect(message).toContain(
+          "This verb declares no result for `cf` to bound the readback with.",
+        );
+        // Nothing bounds the readback, so the position named is where the walk
+        // itself closes: the returned item, reached again from inside its own
+        // container. With a declaration in hand the cut lands at `parent` and
+        // the walk never gets this far.
+        expect(message).toContain(
+          'closes a circle at "/item/parent/children/0"',
+        );
+        expect(message).toContain("COMMITTED");
+        expect(message).toContain("cf piece get --piece of:");
+        expect(message).not.toContain("leaves the closing position");
+        // No pattern was loaded to look for a declaration, because this
+        // resolution attaches no thunk to reach one through.
+        expect(patternLoads()).toBe(0);
+        // And the handling landed. The refusal is a rendering failure over a
+        // write that committed, which is why it is a throw and not an
+        // invocation whose `result` is quietly omitted — an omitted `result`
+        // reports a verb that returned nothing.
+        expect(childTitles(root)).toEqual(["Undeclared"]);
+      },
+    );
   });
 
   it("pays for the declared result only where the result will not render", async () => {
