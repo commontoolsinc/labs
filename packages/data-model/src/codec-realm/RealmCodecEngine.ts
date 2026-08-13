@@ -312,6 +312,17 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
   //
 
   /**
+   * Indicates if the given value has a "first-blush" appearance as a value
+   * encoded by this class -- that is, whether it carries the
+   * format-identifying envelope. Takes `unknown` because what arrives across
+   * the boundary is whatever the far side sent.
+   */
+  static seemsLikeEncoded(value: unknown): boolean {
+    return (value instanceof Map) && (value.size === 1) &&
+      value.has(ENCODING_FORMAT_TAG);
+  }
+
+  /**
    * Renders a state for reporting, since `reportMalformed()` preserves what it
    * is given and so wants a `FabricValue`.
    *
@@ -342,16 +353,5 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
 
     const [tag, state] = data.entries().next().value!;
     return { tag, state };
-  }
-
-  /**
-   * Indicates if the given value has a "first-blush" appearance as a value
-   * encoded by this class -- that is, whether it carries the
-   * format-identifying envelope. Takes `unknown` because what arrives across
-   * the boundary is whatever the far side sent.
-   */
-  static seemsLikeEncoded(value: unknown): boolean {
-    return (value instanceof Map) && (value.size === 1) &&
-      value.has(ENCODING_FORMAT_TAG);
   }
 }
