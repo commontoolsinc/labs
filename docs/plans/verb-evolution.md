@@ -116,8 +116,7 @@ The callers are not alike, and the difference matters throughout:
 
 - **Probing callers** — the CLI, the UI, an agent — ask a piece what it has
   before acting. They bind late; a missing verb costs a listing lookup, not
-  a crash. (True only while listings tell the truth: [#5662], open, has the
-  CLI listing data fields as callable and dropping calls on them silently.)
+  a crash.
 - **Compiled callers** — TypeScript in one pattern calling a verb on another
   piece — bind when the code is written. They are what an interface promise
   exists for.
@@ -239,8 +238,8 @@ it. Go's `io.Reader` is the exhibit: defined once, owned by neither side,
 satisfied everywhere. Nor is the boundary guesswork here: demands are
 recorded, so a provider factors its interfaces from the clusters consumers
 actually demand. The demands are the evidence, the interface is the
-crystallization, and the registry is what carries it past the visibility
-horizon.
+crystallization — that is the build order, not only a composition — and
+the registry is what carries it past the visibility horizon.
 
 Interface versions layer over new verb names; they do not replace them. A
 piece's shape is one namespace, so when two generations coexist on one
@@ -253,9 +252,10 @@ it. Consumers reason in versions; pieces store names.
 This is what satisfies the across-authors requirement: a name and a version
 are what let one author rely on another's contract and know when it has
 moved. It is also the most machinery of anything here — an identity, a
-registry, a place in the shape, and a compatibility rule of its own, where
-what a version bump means and how a declared minimum resolves against what
-a piece provides are both still to be designed. Fabric-types is the natural
+registry, a place in the shape, the member-to-field mapping the layering
+above implies, and a compatibility rule of its own, where what a version
+bump means and how a declared minimum resolves against what a piece
+provides are both still to be designed. Fabric-types is the natural
 vehicle, the work is a design stream of its own (see
 [the longer arc](#the-longer-arc)), and everything else in this document
 stands as the interim until it lands.
@@ -321,7 +321,11 @@ the machinery that makes the break safe rather than nuclear: the scoped
 acknowledgment and blast-radius report under tooling, and the upgrade
 mechanisms of [the longer arc](#the-longer-arc). A migration still breaks
 callers whose expectations no longer hold; the blast-radius report is what
-makes that breakage enumerable and answerable rather than silent.
+makes that breakage enumerable and answerable rather than silent. The one
+measured failure on this path is the rollout window — an update once left
+old and new versions writing to the same space at 96% of commits — which
+is why [space-clone rehearsal](../development/space-clone-rehearsal.md)
+precedes any update against real data.
 
 The default is still to stay compatible. Most patterns are updated by models
 that will cheerfully jump through hoops to avoid a break, and a compatible
@@ -359,12 +363,13 @@ the Full Output column, and both of its refusals are the same event — a
 provider adding an action. That is the argument for holder-side demands, and
 why the mechanical check belongs where embedding happens.
 
-**Two rows are red everywhere.** Requiring more of a verb's input and
-changing a verb's output break every demand shape equally, because neither
-is recorded where a gate can see it. The first is the filed defect
-([#5663]), the second the naming convention above; until they close, a
-holder's care buys nothing on those rows, and versioning does not rescue
-them until outputs are in the shape and a provider actually bumps.
+**Two rows are red everywhere, for different reasons.** A verb's output is
+not in the shape, so no gate can see an output change until Fabric-types
+records one; only the naming convention above stands in front of it. A
+verb's input *is* in the shape — that row is red only while [#5663] stays
+open, and a version bump would move its failure from call time to bind
+time. The Versioned column is scored as today's behavior throughout: what
+a bump means is still undesigned, so its cells are contingent.
 
 **The optional-verb and versioned columns are identical.** So the choice
 between them is not about what can evolve but about what a reader can tell.
@@ -378,10 +383,17 @@ moves the maybe from every seam to bind time.
 **The columns are not reachable from one another.** A deployed holder cannot
 move rightward — every such move hits the write-once wall in the holder
 table, and escalating a versioned demand from v1 to v2 is the same event. So
-the design is complete for holders that do not exist yet and inert for every
-holder already deployed: on its own it fails the reach-what-is-deployed
-requirement, which puts scoped acknowledgment and migration on the critical
-path for adoption.
+the design is complete for holders that do not exist yet and — until scoped
+acknowledgment and migration exist — inert for every holder already
+deployed: requirement 6 unmet, and both mechanisms on the critical path for
+adoption.
+
+The table scores breakage only. Two requirements it cannot see: simplicity
+(requirement 2) is met the way requirement 1 demands — the machinery here
+belongs to the deliberate path, and the tooling below exists so the default
+author never meets it; across-authors (requirement 5) is carried by the
+blast-radius horizon under tooling, where a registry is what makes a
+foreign author's demands discoverable at all.
 
 ## What the tooling does
 
@@ -546,8 +558,8 @@ second. The suffix appears when the second generation does.
 
 **Redeploying a new pattern to escape a true break.** It forks the piece's
 identity: every stored reference keeps pointing at the old piece, with no
-forwarding mechanism, and the two populations coexist unmanaged — the
-measured write-storm failure in the longer arc. Everything it offers
+forwarding mechanism, and the two populations coexist unmanaged.
+Everything it offers
 arrives better in place: migration handles the shape, versioned interfaces
 the callers, upgrade policy the rollout. What remains — a genuinely new
 pattern, a move across spaces — is creation, not evolution.
@@ -578,7 +590,7 @@ demand it: a deliberate break proceeds when it says what those it breaks
 should do instead. A break stays a break, but no holder is left out in the
 cold.
 
-Three smaller calls belong to whoever does the work:
+Five smaller calls belong to whoever does the work:
 
 - Whether the embedding rule warns, lints, or fails, and in what order those
   arrive; [#5746] starts at advisory on purpose.
@@ -588,7 +600,12 @@ Three smaller calls belong to whoever does the work:
   baselines gate.
 - Whether an interim output check is possible before Fabric-types, given
   that the shape discards verb outputs today.
+- Whether a version bump is author-declared or derived from the shape diff;
+  the Versioned column's red rows depend on the answer.
+- When the `Demand<T>` marker grows interface and version fields: the
+  growth is free — annotation values are never compared across updates —
+  but only until a binding check reads them, at which point the key stops
+  being annotation-neutral. A real design step, not an extension.
 
-[#5662]: https://github.com/commontoolsinc/labs/issues/5662
 [#5663]: https://github.com/commontoolsinc/labs/issues/5663
 [#5746]: https://github.com/commontoolsinc/labs/pull/5746
