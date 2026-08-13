@@ -2469,11 +2469,16 @@ async function safelyPerformUpdate(
   action: (tx: IExtendedStorageTransaction) => void,
 ) {
   const { ok } = await runtime.editWithRetry((tx) => {
-    markEffectCompletion(tx, `llmDialog:${requestId}`);
     if (
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
     ) {
+      // Marked on the arm that writes (round-2 thread 6): a bail-out
+      // (pending=false or a superseded requestId) writes nothing and
+      // must not commit as a spurious no-op effect-completion for
+      // `llmDialog:<requestId>` on every canceled/superseded turn. The
+      // marker still precedes every write of this arm.
+      markEffectCompletion(tx, `llmDialog:${requestId}`);
       action(tx);
       internal.withTx(tx).key("lastActivity").set(Date.now());
       return true;
@@ -2489,12 +2494,43 @@ async function safelyPerformUpdate(
 }
 
 /**
+ * `editWithRetry` bound to the turn's abort signal (round-2 thread 14):
+ * a stopped or replaced turn must not persist pin/unpin/argument state
+ * from a tool call that was mid-flight when the cancel landed. Checked
+ * before starting AND inside the callback (a retry attempt after the
+ * cancel aborts too — the throw makes editWithRetry abort the tx and
+ * return the error without committing).
+ */
+function editWithRetryUnlessAborted(
+  runtime: Runtime,
+  abortSignal: AbortSignal | undefined,
+  fn: (tx: IExtendedStorageTransaction) => void,
+): ReturnType<Runtime["editWithRetry"]> {
+  if (abortSignal?.aborted) {
+    return Promise.resolve({
+      error: {
+        name: "StorageTransactionAborted" as const,
+        message: "Tool call cancelled",
+        reason: new Error("turn-aborted"),
+      },
+    });
+  }
+  return runtime.editWithRetry((tx) => {
+    if (abortSignal?.aborted) {
+      throw new Error("Tool call cancelled");
+    }
+    fn(tx);
+  });
+}
+
+/**
  * Handles the pin tool call.
  */
 async function handlePin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "pin" },
   pinnedCells: Cell<PinnedCell[]>,
+  abortSignal?: AbortSignal,
 ): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
 
@@ -2512,7 +2548,9 @@ async function handlePin(
   // §3d) vanished as an unhandled rejection while the tool reported
   // success. Classification (RULED 2026-08-05; implementation with
   // Phase 3): pin is COMPLETION-CLASS turn-lifecycle state.
-  const committed = await runtime.editWithRetry((tx) => {
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     pinnedCells.withTx(tx).set([
       ...currentInTx,
@@ -2543,6 +2581,7 @@ async function handleUnpin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "unpin" },
   pinnedCells: Cell<PinnedCell[]>,
+  abortSignal?: AbortSignal,
 ): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
   const filtered = current.filter((p) => p.path !== resolved.path);
@@ -2558,7 +2597,9 @@ async function handleUnpin(
   // handlePin (Flag 4). Classification (RULED 2026-08-05;
   // implementation with Phase 3): unpin is COMPLETION-CLASS
   // turn-lifecycle state.
-  const committed = await runtime.editWithRetry((tx) => {
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     const filteredInTx = currentInTx.filter((p) => p.path !== resolved.path);
     pinnedCells.withTx(tx).set(filteredInTx);
@@ -2653,6 +2694,7 @@ async function handleRead(
 async function handleUpdateArgument(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "updateArgument" },
+  abortSignal?: AbortSignal,
 ): Promise<{ type: string; value: any }> {
   const cell = resolved.cellRef;
   const updates = resolved.updates;
@@ -2679,7 +2721,9 @@ async function handleUpdateArgument(
   // Classification (RULED 2026-08-05; implementation with Phase 3):
   // updateArgument is a HANDLER-CLASS consequence — Phase-3 events
   // territory.
-  const committed = await runtime.editWithRetry((tx) => {
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
     if (
       isRecord(cellifiedValue) && !Array.isArray(cellifiedValue) &&
       !isCell(cellifiedValue)
@@ -3038,14 +3082,14 @@ async function invokeToolCall(
   // Handle pinned cell tools
   if (resolved.type === "pin") {
     return {
-      result: await handlePin(runtime, resolved, pinnedCells!),
+      result: await handlePin(runtime, resolved, pinnedCells!, abortSignal),
       observedConfidentiality: [],
     };
   }
 
   if (resolved.type === "unpin") {
     return {
-      result: await handleUnpin(runtime, resolved, pinnedCells!),
+      result: await handleUnpin(runtime, resolved, pinnedCells!, abortSignal),
       observedConfidentiality: [],
     };
   }
@@ -3078,7 +3122,7 @@ async function invokeToolCall(
   // Handle run-type tools (external, run with pattern/handler)
   if (resolved.type === "updateArgument") {
     return {
-      result: await handleUpdateArgument(runtime, resolved),
+      result: await handleUpdateArgument(runtime, resolved, abortSignal),
       observedConfidentiality: [],
     };
   }
