@@ -203,6 +203,17 @@ export type ServedEventDispatch = {
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
+  /** The EMITTING run's event id for a CLIENT-side same-wave cascade
+   * echo (independent review M1, 2026-08-11): cell.ts's plain
+   * queueEvent threads it when the send came from within a
+   * speculation-stamped handler run, so the dispatch stamp can mark
+   * the run's navigate capture ATTEMPT-MINTED (the cascade's id is
+   * fresh per attempt and diverges from the server's — see
+   * navigate-context.ts). Deliberately NOT carried on `served`:
+   * `served`'s PRESENCE classifies a no-handler outcome as
+   * deferred-vs-dropped (the drain's cold-view deferral), and a
+   * client echo must keep today's dropped shape. */
+  readonly parentEventId?: string;
   /**
    * Monotonic stamp minted at first enqueue and carried unchanged across
    * requeues (backoff, name-resolution). Commits are not awaited, so several

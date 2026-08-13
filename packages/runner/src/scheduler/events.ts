@@ -263,6 +263,7 @@ function readyQueuedEvent(args: {
   readonly time?: number;
   readonly runtimeInjectedEventKeys?: readonly string[];
   readonly served?: QueuedEvent["served"];
+  readonly parentEventId?: string;
 }): QueuedEvent {
   return {
     id: args.id,
@@ -277,6 +278,7 @@ function readyQueuedEvent(args: {
     retry: args.retries,
     onCommit: args.onCommit,
     served: args.served,
+    parentEventId: args.parentEventId,
   };
 }
 
@@ -334,6 +336,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly time?: number;
   readonly runtimeInjectedEventKeys?: readonly string[];
   readonly served?: QueuedEvent["served"];
+  readonly parentEventId?: string;
 }): void {
   // `eventId` here is an already-durable delivery id, used verbatim — an
   // ingress caller's opaque idempotency key is bound to its stream earlier,
@@ -1048,9 +1051,16 @@ export async function dispatchQueuedEvent(state: {
     // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
     // the emitter's own eventId, threaded from the emission's
     // dispatch carriage so the wave can roll a cascade child back
-    // with its requeued parent.
-    ...(served?.parentEventId !== undefined
-      ? { parentEventId: served.parentEventId }
+    // with its requeued parent. The client-echo thread
+    // (QueuedEvent.parentEventId, independent review M1) carries the
+    // same fact on a flag-ON client's speculative cascade, where the
+    // navigate capture derives its ATTEMPT-MINTED tag from it
+    // (navigate-context.ts) — the speculation stamp is never a wave
+    // context, so the fold semantics stay server-only.
+    ...((served?.parentEventId ?? queuedEvent.parentEventId) !== undefined
+      ? {
+        parentEventId: served?.parentEventId ?? queuedEvent.parentEventId,
+      }
       : {}),
     ...(served?.firedAt !== undefined
       ? {

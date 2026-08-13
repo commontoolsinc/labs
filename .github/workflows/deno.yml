@@ -584,9 +584,16 @@ jobs:
   # tasks/server-execution-on-skips.ts, printed by the run step — never by
   # silent filtering. No coverage collection: the OFF arm owns coverage, and
   # this arm exists to prove behavior under the flag. Browser-side runtimes
-  # still run the binary's baked-in shell build (flag OFF): no stage has
-  # browser-side ON behavior yet; the phase that adds one must add an ON
-  # shell build here or list the affected tests.
+  # still run the binary's baked-in shell build (flag OFF): the shell's flag
+  # rides an esbuild define (packages/shell/felt.config.ts) burned in at
+  # `build-binaries`, embedded via --include — there is no serve-time
+  # override. Phase 4 added the first browser-side ON behavior and
+  # discharged this contract's OTHER clause: the affected test is listed in
+  # tasks/server-execution-on-skips.ts (topics-navigation, with the
+  # mixed-posture reason), and the ON shell build itself is the owed row
+  # verification-coverage.md OW25 — until it lands, nothing in this lane
+  # exercises a flag-ON browser shell, and no browser-posture criterion may
+  # tick on this lane's green.
   package-integration-test-server-execution-on:
     name: "Package Integration Tests / server-execution ON (${{ matrix.suite_name }})"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -983,8 +990,11 @@ jobs:
   # cache save-back: the OFF arm owns both; the compile byte cache is
   # restored read-only (compiled bytes do not depend on the flag).
   # Browser-side runtimes still run the binary's baked-in shell build (flag
-  # OFF): no stage has browser-side ON behavior yet; the phase that adds one
-  # must add an ON shell build here or list the affected tests.
+  # OFF): Phase 4 added the first browser-side ON behavior and discharged
+  # this contract via the list-the-affected-tests clause — see the package
+  # ON job's comment above (topics-navigation skip entry; the ON shell
+  # build is owed as verification-coverage.md OW25). No browser-posture
+  # criterion may tick on this lane's green.
   pattern-integration-test-server-execution-on:
     name: "Pattern Integration Tests / server-execution ON (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: blacksmith-4vcpu-ubuntu-2404

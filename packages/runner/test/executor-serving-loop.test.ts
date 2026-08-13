@@ -658,6 +658,10 @@ describe("stage F serving loop", () => {
     // declared its run context — the recovery seed included.
     const stats = host.stats();
     expect(stats.unstampedSealRefusals).toBe(0);
+    // §7's servedIntentSealFailures (Phase-4 independent review
+    // NOTE-b): live in the stats block, zero on a healthy loop — no
+    // navigate intent's seal failed here.
+    expect(stats.servedIntentSealFailures).toBe(0);
     expect(stats.derivedCommits).toBeGreaterThanOrEqual(1);
     expect(stats.structureLoadFailures).toBe(0);
   });

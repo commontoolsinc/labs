@@ -787,6 +787,13 @@ export class Runtime {
   /** The client-effect channel (server-execution v2 Phase 4,
    * protocol.md §5) — constructed for flag-ON non-serving runtimes. */
   #effectsChannel: EffectsChannel | undefined;
+  /** The exact spaceOpenObserver closure THIS runtime installed on the
+   * (possibly shared) storage manager — dispose clears the manager
+   * hook only on identity match, so a later runtime's own hook
+   * survives an earlier runtime's teardown (independent review
+   * NOTE-a: R1.dispose after R2's construction must not drop R2's
+   * subscriptions). */
+  #installedSpaceOpenObserver: ((space: MemorySpace) => void) | undefined;
   // Whether THIS runtime explicitly set the serverExecution flag at
   // construction (the only case its dispose participates in the
   // process-global ambient lifecycle — see the constructor's propagation
@@ -1290,7 +1297,9 @@ export class Runtime {
       const channel = new EffectsChannel(this);
       this.#effectsChannel = channel;
       const manager = this.storageManager;
-      manager.spaceOpenObserver = (space) => channel.ensureSubscribed(space);
+      const observer = (space: MemorySpace) => channel.ensureSubscribed(space);
+      this.#installedSpaceOpenObserver = observer;
+      manager.spaceOpenObserver = observer;
       for (const space of manager.openedSpaces?.() ?? []) {
         channel.ensureSubscribed(space);
       }
@@ -1381,6 +1390,17 @@ export class Runtime {
   connectedSessionProbe:
     | ((principal: string, sessionId: string) => boolean)
     | undefined;
+
+  /**
+   * Count a served navigate-intent seal failure (server-execution v2
+   * Phase 4; serving-loop.md §7's `servedIntentSealFailures`): the
+   * builtin's intent tx resolved `{ error }` (or rejected) at its seal.
+   * Installed by the SpaceServer at activation on the serving runtime —
+   * the counter's home is the serving loop's stats block — and
+   * undefined everywhere else (the failure is still logged loudly by
+   * the builtin either way).
+   */
+  notifyServedIntentSealFailure: (() => void) | undefined;
 
   /**
    * Register an in-flight async builtin operation so `settled()` waits for it
@@ -1604,12 +1624,20 @@ export class Runtime {
     this.#speculationOverlay = undefined;
     this.#effectsChannel?.close();
     this.#effectsChannel = undefined;
-    // Release the manager-side hook (a later runtime over the SAME
-    // manager installs its own; without the clear a stale closure
-    // lingers on a shared manager).
-    if (this.storageManager.spaceOpenObserver !== undefined) {
+    // Release the manager-side hook — but only when the installed hook
+    // is OUR OWN (identity match): a later runtime constructed over the
+    // SAME manager (the LT8 second life) has already replaced it, and
+    // clearing unconditionally would drop THAT runtime's hook — its
+    // channel would miss every space opened after this dispose
+    // (independent review NOTE-a).
+    if (
+      this.#installedSpaceOpenObserver !== undefined &&
+      this.storageManager.spaceOpenObserver ===
+        this.#installedSpaceOpenObserver
+    ) {
       this.storageManager.spaceOpenObserver = undefined;
     }
+    this.#installedSpaceOpenObserver = undefined;
 
     // Background source checks are deliberately outside the scheduler. Abort
     // and settle them before the storage sessions they may write through close.

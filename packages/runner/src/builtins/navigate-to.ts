@@ -40,20 +40,26 @@ export function navigateTo(
   } as const;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
+    // A SERVED run never consults the `navigated` closure state
+    // (independent review M2, 2026-08-11): the running builtin instance
+    // and its closure are REUSED across a wave requeue (runner.ts's
+    // startWithTx cancels-guard), so closure state would suppress the
+    // re-issue a requeued event's wave-2 re-run owes — the handler's
+    // consequences re-landed while the intent stayed lost forever.
+    // Store-derived state governs the served arm instead: the
+    // result-cell read below returns a LANDED navigation early (and a
+    // withdrawn intent reads false, so the re-run re-issues), and the
+    // ENGINE's stored-nonce dedupe makes any re-issue idempotent
+    // (protocol.md §5). The served path also never writes the result
+    // cell on the wave tx — re-setting it here would ride the
+    // derivation-stamped wave tx and resolve against the wave-level
+    // SERVICE identity, the silent-empty-instance shape protocol.md §2
+    // names; the intent tx owns the acting-instance result write.
+    const servedRun = runtime.experimental.serverExecution === true &&
+      waveRunContextOf(tx) !== undefined;
     // The main reason we might be called again after navigating is that the
     // transaction to update the result cell failed, so we'll just set it again.
-    if (navigated) {
-      // SERVED runs excepted: the intent tx owns the acting-instance
-      // result write; re-setting it here would ride the derivation-
-      // stamped wave tx and resolve against the wave-level SERVICE
-      // identity — a service-session instance write (the
-      // silent-empty-instance shape protocol.md §2 names).
-      if (
-        runtime.experimental.serverExecution === true &&
-        waveRunContextOf(tx) !== undefined
-      ) {
-        return;
-      }
+    if (navigated && !servedRun) {
       resultCell?.withTx(tx).set(true);
       return;
     }
@@ -111,13 +117,11 @@ export function navigateTo(
     // target RESOLUTION stays inside each arm so the OFF path keeps
     // today's exact order (navigateCallback check before resolve).
     if (runtime.experimental.serverExecution === true) {
-      const waveContext = waveRunContextOf(tx);
-      const speculationContext = speculationRunContextOf(tx);
-      if (waveContext !== undefined) {
+      if (servedRun) {
         servedNavigate(tx, target);
         return;
       }
-      if (speculationContext !== undefined) {
+      if (speculationRunContextOf(tx) !== undefined) {
         optimisticNavigate(tx, target);
         return;
       }
@@ -193,9 +197,11 @@ export function navigateTo(
     const resolvedTarget = target.resolveAsCell();
     const targetLink = resolvedTarget.getAsNormalizedFullLink();
 
-    const previousNavigated = navigated;
-    const thisAttempt = ++navigationAttempt;
-    navigated = true;
+    // NO closure bookkeeping on the served arm (independent review M2):
+    // `navigated` is never consulted by a served run — the store owns
+    // idempotency (the engine's nonce dedupe; the result-cell read in
+    // the action) — so recording or rolling back closure state here
+    // would only re-create the requeue-suppression defect.
 
     const intentTx = runtime.edit();
     runtime.stampServerRun(intentTx, {
@@ -207,11 +213,6 @@ export function navigateTo(
         principal: acting.user,
         sessionId: acting.session as never,
       },
-    });
-    intentTx.addCommitCallback((_committedTx, commitResult) => {
-      if (commitResult.error && navigationAttempt === thisAttempt) {
-        navigated = previousNavigated;
-      }
     });
 
     // The intent append (protocol.md §5's entry shape): a tail-relative
@@ -250,57 +251,66 @@ export function navigateTo(
       // (protocol.md §5's issuedIn; the stream-entry seq precedent).
       issuedIn: null,
     };
-    const locallyPresent = Array.isArray(currentEntries) &&
-      currentEntries.some((entry) =>
-        entry !== null && typeof entry === "object" &&
-        (entry as { nonce?: string }).nonce === nonce
+    if (intentTx.recordMergeableOp === undefined) {
+      // FAIL CLOSED: without the mergeable-append record the commit
+      // would carry the WHOLE local array — the serving replica's
+      // scope-NAME-keyed view can hold other sessions' entries (the
+      // OW17 residual), and a whole-array write would bleed them
+      // into the acting session's instance.
+      throw new Error(
+        "navigate intent write requires mergeable-append support " +
+          "(the tail-relative append is what keeps the collapsed " +
+          "local view out of the acting session's instance)",
       );
-    if (!locallyPresent) {
-      if (intentTx.recordMergeableOp === undefined) {
-        // FAIL CLOSED: without the mergeable-append record the commit
-        // would carry the WHOLE local array — the serving replica's
-        // scope-NAME-keyed view can hold other sessions' entries (the
-        // OW17 residual), and a whole-array write would bleed them
-        // into the acting session's instance.
-        throw new Error(
-          "navigate intent write requires mergeable-append support " +
-            "(the tail-relative append is what keeps the collapsed " +
-            "local view out of the acting session's instance)",
-        );
-      }
-      intentTx.writeValueOrThrow(entriesLink, [
-        ...(Array.isArray(currentEntries) ? currentEntries : []),
-        intentEntry,
-      ] as never);
-      intentTx.recordMergeableOp(entriesLink, { op: "append", count: 1 });
     }
+    // ALWAYS append (independent review MINOR-4): the ENGINE's
+    // stored-nonce dedupe is the sole idempotency authority. The
+    // deleted local-presence gate consulted the OW17-collapsed local
+    // view to SUPPRESS the append — a store-visible derivation from a
+    // view that collapses instances (cross-session suppression the day
+    // foreign rows land in the serving replica) and, compounding M2,
+    // a withdrawn intent's residue could suppress its own re-issue.
+    // A re-appended duplicate is dropped at apply
+    // (transformEffectsDocOperation), so the extra append is one
+    // tail-relative op, never a doubled entry.
+    intentTx.writeValueOrThrow(entriesLink, [
+      ...(Array.isArray(currentEntries) ? currentEntries : []),
+      intentEntry,
+    ] as never);
+    intentTx.recordMergeableOp(entriesLink, { op: "append", count: 1 });
     // The result cell records the navigation in the ACTING session's
     // instance (the same annotation-keyed addressing) — the client's own
     // speculative write converges on the same instance.
     resultCell.withTx(intentTx).set(true);
     // The seal outcome resolves as { error } (commit promises always
     // resolve — extended-storage-transaction.ts); handle BOTH shapes,
-    // loudly. Recovery on failure: `navigated` rolls back via the
-    // commit callback above; a wave-conflict requeue re-runs the WHOLE
-    // event (the per-event fold in wave.ts's resolveConflicts), which
-    // recomputes the intent under the same deterministic nonce. An
-    // ISOLATED seal failure (no requeue, inputs unchanged) leaves the
-    // intent unissued until the next input change — the same
-    // input-driven re-land posture as the watermark doc's dropped
-    // write (space-server.ts); flagged in the Phase-4 PR.
+    // loudly, and COUNT them (serving-loop.md §7's
+    // servedIntentSealFailures). Recovery on failure is STORE-derived
+    // (independent review M2): a wave-conflict requeue withdraws the
+    // intent with the event's other contributions (the per-event fold
+    // in wave.ts's resolveConflicts), the wave-2 re-run reads the
+    // result cell FALSE and re-issues under the same deterministic
+    // nonce — no closure state to roll back. An ISOLATED seal failure
+    // (no requeue, inputs unchanged) leaves the intent unissued until
+    // the next input change — the same input-driven re-land posture as
+    // the watermark doc's dropped write (space-server.ts); flagged in
+    // the Phase-4 PR.
     intentTx.commit().then(({ error }) => {
       if (error !== undefined) {
+        runtime.notifyServedIntentSealFailure?.();
         logger.error(
           "intent-commit-failed",
-          `navigate intent ${nonce} failed to seal; navigated rolled ` +
-            "back — a requeue or the next input change retries",
+          `navigate intent ${nonce} failed to seal — a requeue's ` +
+            "re-run or the next input change re-issues",
           error,
         );
       }
     }).catch((error) => {
+      runtime.notifyServedIntentSealFailure?.();
       logger.error(
         "intent-commit-failed",
-        `navigate intent ${nonce} seal rejected; navigated rolled back`,
+        `navigate intent ${nonce} seal rejected — a requeue's re-run ` +
+          "or the next input change re-issues",
         error,
       );
     });
@@ -326,6 +336,26 @@ export function navigateTo(
       logger.warn("optimistic-navigate-refused", () => [
         "speculative navigateTo refused: no firing-event context " +
         "(builtins.md §4) — the served half would refuse the same run",
+      ]);
+      return;
+    }
+    if (context.attemptMinted) {
+      // A CASCADE-hop capture (independent review M1): the event id —
+      // and, through the handler-result frame's cause, the navigateTo
+      // INSTANCE id — were minted fresh for THIS client-side attempt,
+      // so the deterministic nonce this run would record CANNOT match
+      // the authoritative intent's (the server's attempt minted its
+      // own pair). Optimistically enacting here double-navigates: the
+      // channel sees the authoritative nonce unrecorded and enacts
+      // again, to a DIFFERENT target. Skip optimism — like the
+      // headless arm below, nothing is lost: the authoritative intent
+      // arrives on the effects channel and enacts exactly once
+      // (protocol.md §5). First-hop optimism (durable fire id,
+      // converging cause) is unaffected.
+      logger.warn("optimistic-navigate-skipped", () => [
+        "speculative navigateTo skipped: cascade-hop capture is " +
+        "attempt-minted — the authoritative intent enacts on the " +
+        "effects channel (one navigation)",
       ]);
       return;
     }

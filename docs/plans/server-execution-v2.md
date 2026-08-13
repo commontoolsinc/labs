@@ -607,13 +607,23 @@ Tasks:
 
 Success criteria:
 
-- [ ] `topics-navigation` and the navigateTo paths green in the ON arm.
-      (The runner-level navigateTo paths are green —
-      `executor-effect-channel.test.ts`, an ON-posture suite that runs
-      under both CI arms; the `sx2-effect-channel` gate is authored
-      and green live in BOTH arms locally, and the ON-arm CI jobs
-      carry it with `topics-navigation` — tick on the first green
-      ON-arm CI run.)
+- [ ] `topics-navigation` and the navigateTo paths green under the
+      FULL flag-ON posture: server, test processes, AND the browser
+      shell all flag-ON. A mixed-posture run — the ON-arm CI lane's
+      current shape, whose binary ships the OFF-built shell — CANNOT
+      satisfy this criterion, whatever its color: an OFF-shell green
+      asserts nothing about the browser-ON behavior this phase added,
+      and locally (where the harness bakes the flag into the shell
+      define) `topics-navigation` is red on the unmodified Phase-3
+      base (the inherited browser-ON red the P3 triage tracks). Tick
+      only when `topics-navigation` runs green UNSKIPPED in a CI lane
+      that builds the shell flag-ON (the owed ON shell build,
+      verification-coverage.md OW25; the interim skip entry is in
+      tasks/server-execution-on-skips.ts with the mixed-posture
+      reason). The runner-level navigateTo paths are green —
+      `executor-effect-channel.test.ts`, an ON-posture suite under
+      both CI arms — and the `sx2-effect-channel` gate is green live
+      in BOTH arms locally under the full posture.
 - [x] An intent is enacted exactly once per nonce, including across a
       client reload between intent and ack (2026-08-11:
       `executor-effect-channel.test.ts` pins the optimistic/

@@ -407,6 +407,12 @@ export class SpaceServer implements TransactionSealDestination {
     // CONNECTED to this (computing) space.
     runtime.connectedSessionProbe = (principal, sessionId) =>
       this.#options.server.hasLiveSessionFor(space, principal, sessionId);
+    // §7's servedIntentSealFailures (independent review NOTE-b): the
+    // builtin logs the failure either way; the serving loop owns the
+    // counter.
+    runtime.notifyServedIntentSealFailure = () => {
+      this.#options.stats.servedIntentSealFailures += 1;
+    };
     // Phase 4 (protocol.md §5): arm the acked-effect retirement scan —
     // a crash between an ack and its retirement re-owes the scan here.
     this.#effectsRetirementOwed = true;
@@ -2025,6 +2031,7 @@ export class SpaceServer implements TransactionSealDestination {
         this.#runtime.asyncWorkObserver = undefined;
         this.#runtime.effectMemoObserver = undefined;
         this.#runtime.connectedSessionProbe = undefined;
+        this.#runtime.notifyServedIntentSealFailure = undefined;
         // The shadow-flip wake dies with the tenure (a late flip on a
         // disposing replica must not poke a parked loop's stale wait).
         this.#runtime.storageManager.open(this.#options.space).replica

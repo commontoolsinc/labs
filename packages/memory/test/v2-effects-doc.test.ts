@@ -43,6 +43,7 @@ import {
   effectIntentNonce,
   resetServerExecutionConfig,
   resolvePrincipalSessionKey,
+  resolveScopeKey,
   SERVER_EXECUTION_EFFECTS_DOC_ID,
   type SessionEffectsDocValue,
   setServerExecutionConfig,
@@ -345,6 +346,122 @@ Deno.test("effects doc: the retirement scan (protocol §5's next-wave retirement
           acks: retirable[0].remainingAcks,
         });
         assertEquals(selectRetirableEffectsInstances(engine).length, 0);
+      },
+    );
+
+    await t.step(
+      "a NON-SESSION instance is skipped by the scan even when acked-shaped (T9: the effects doc is session-scoped by definition)",
+      () => {
+        // A user-scoped instance of the well-known doc id, holding
+        // exactly the shape that WOULD retire in a session instance
+        // (an entry plus its ack mark). The scan's session filter
+        // must skip it — the retirement writer stamps a SESSION
+        // identity parsed from the key, and a user-keyed write here
+        // would land bookkeeping under an unparseable identity.
+        const userKey = resolveScopeKey("user", { principal: ALICE });
+        const ackedNonce = effectIntentNonce("evt-user", "of:nav-user");
+        applyWaveCommit(engine, {
+          sessionId: holder,
+          space: SPACE,
+          commitClass: "derived",
+          holder,
+          commit: {
+            localSeq: 30,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: SERVER_EXECUTION_EFFECTS_DOC_ID as never,
+              scope: "user",
+              value: {
+                value: {
+                  entries: [intentOf(ackedNonce)],
+                  acks: { [ackedNonce]: true },
+                },
+              } as never,
+            }],
+          },
+          annotations: [{ op: 0, scopeKey: userKey }],
+          waveBasis: { basisSeq: headSeqOf(engine), rebasedHeads: [] },
+        });
+        // The acked-shaped user instance stored (non-vacuity)…
+        const stored = readState(engine, {
+          id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+          scopeKey: userKey,
+        })?.document?.value as SessionEffectsDocValue | undefined;
+        assertEquals(stored?.entries?.length, 1);
+        // …and the scan returns NOTHING for it (discriminated below:
+        // a session instance with the same shape IS returned).
+        assertEquals(
+          selectRetirableEffectsInstances(engine)
+            .filter((instance) => instance.scopeKey === userKey),
+          [],
+        );
+        ackCommit(engine, ALICE, ALICE_SESSION, 3, unacked);
+        const retirable = selectRetirableEffectsInstances(engine);
+        assertEquals(retirable.map((instance) => instance.scopeKey), [
+          ALICE_KEY,
+        ]);
+        // Clean up: retire alice's instance so later steps start
+        // clean.
+        waveSetInstance(engine, holder, 31, ALICE_KEY, {
+          entries: [],
+          acks: {},
+        });
+        assertEquals(selectRetirableEffectsInstances(engine).length, 0);
+      },
+    );
+
+    await t.step(
+      "dedupe consults the OP'S OWN instance only: a space-addressed duplicate of a session nonce is not deduped, and stamping still applies",
+      () => {
+        // The dedupe-skip arm (transformEffectsDocOperation): with no
+        // session key to resolve — a space-level derived write carries
+        // no annotation — the dedupe basis is the op's own (space)
+        // instance, NEVER another instance's. A nonce already stored
+        // in alice's SESSION instance therefore does not suppress a
+        // space-addressed append of the same nonce, and the `issuedIn`
+        // stamping proceeds regardless of the skipped dedupe.
+        const sessionNonce = effectIntentNonce("evt-space", "of:nav-space");
+        waveAppendIntents(engine, holder, 40, ALICE_KEY, [
+          intentOf(sessionNonce),
+        ]);
+        const outcome = applyWaveCommit(engine, {
+          sessionId: holder,
+          space: SPACE,
+          commitClass: "derived",
+          holder,
+          commit: {
+            localSeq: 41,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id: SERVER_EXECUTION_EFFECTS_DOC_ID as never,
+              patches: [{
+                op: "append",
+                path: "/value/entries",
+                values: [intentOf(sessionNonce)] as never[],
+              }],
+            }],
+          },
+          waveBasis: { basisSeq: headSeqOf(engine), rebasedHeads: [] },
+        });
+        assert(outcome.seq !== undefined);
+        const spaceValue = readState(engine, {
+          id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+          scopeKey: "space",
+        })?.document?.value as SessionEffectsDocValue | undefined;
+        // Not deduped against the session instance…
+        assertEquals(spaceValue?.entries?.length, 1);
+        assertEquals(spaceValue?.entries?.[0].nonce, sessionNonce);
+        // …and stamped (dedupe skipped ≠ stamping skipped).
+        assertEquals(spaceValue?.entries?.[0].issuedIn, outcome.seq);
+        // The session instance kept exactly its own copy.
+        assertEquals(
+          instanceValue(engine, ALICE_KEY).entries?.filter((entry) =>
+            entry.nonce === sessionNonce
+          ).length,
+          1,
+        );
       },
     );
 

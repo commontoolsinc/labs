@@ -192,6 +192,21 @@ export class SpeculationOverlayDestination
     return this.#entries.get(space)?.size ?? 0;
   }
 
+  /** DIAGNOSTIC (tests): cumulative EVENT-HANDLER-kind seals this
+   * overlay diverted — never decremented by retirement, so it
+   * witnesses transient echoes deterministically. The Phase-4
+   * receipt-race pin (independent review MINOR-3) counts on it: a
+   * navigate-bearing fire's client half diverts exactly TWO
+   * event-handler seals (the handler echo + the navigate-deferred
+   * start), and a neutralized divert drops the second — the
+   * authored-commit assert alone cannot see that, because the
+   * neutralized start's authored commit usually LOSES its create-only
+   * race to the serving side and vanishes whole. */
+  #eventEchoSeals = 0;
+  get eventEchoSealCount(): number {
+    return this.#eventEchoSeals;
+  }
+
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>> {
     const kind = speculationRunContextOf(tx)?.kind;
     if (kind !== "derivation" && kind !== "event-handler") {
@@ -207,6 +222,9 @@ export class SpeculationOverlayDestination
   async #sealSpeculative(
     tx: IExtendedStorageTransaction,
   ): Promise<Result<Unit, CommitError>> {
+    if (speculationRunContextOf(tx)?.kind === "event-handler") {
+      this.#eventEchoSeals += 1;
+    }
     if (this.#closed) {
       // A late derivation on a disposing runtime: nothing to render
       // into; drop the writes (the run's results are re-derivable by

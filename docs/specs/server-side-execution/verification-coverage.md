@@ -917,6 +917,65 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   Trigger: the first flag-ON client surface that drives llm-dialog
   turns (the dialog moves server-side with the loop, which may
   retire this row instead).
+- OW22 — `leaseHolderReads` is STICKY and the wire upsert path
+  strips scope keys (pre-existing adjacencies, surfaced by the
+  Phase-4 independent review's isolation trace): (i) the flag
+  (`session-registry.ts` — set once when a session is admitted an
+  explicit `entity_scope_key` read, lease holders only) is never
+  retired, so a session that ONCE held the lease keeps its push
+  applicable-set exemption — every instance's rows keep flowing to
+  it — after the lease expires or hands over; (ii) the recovery
+  path's wire upserts carry scope NAMES, so a lease-holder
+  session's explicit foreign instances mis-resolve to its OWN
+  identity (`server.ts`'s instanceKeyFor recovery — mitigated today
+  by forcing a full resync, itself keyed on the sticky flag). Owed:
+  retire the flag with the lease (or re-verify at push time), and a
+  test that a post-handover session stops receiving other
+  instances' rows. Trigger: Phase 5's grant-scoped read hardening
+  (FP2's named follow-up), or the first multi-server lease
+  handover work, whichever lands first.
+- OW23 — unvalidated scope strings reach `resolveScopeKey` with no
+  default arm (pre-existing adjacency): the switch covers the three
+  `CellScope` members and TypeScript exhaustiveness assumes the
+  closed union, but wire-supplied scope strings are not narrowed
+  before the call at every site — an out-of-vocabulary string falls
+  through to `undefined` typed as `ScopeKey`, silently keying rows
+  under an impossible instance instead of refusing. Owed: a default
+  arm that THROWS (the fail-closed twin of the session/user arms)
+  plus a wire-boundary negative. Trigger: the next
+  `key-vocabulary.md` touch, or the first wire surface that accepts
+  scope strings from untrusted clients into scoped-row keying.
+- OW24 — stream-entry compaction's latent skip-vs-re-execute flip
+  (pre-existing adjacency): events §4 allows entries at or below
+  `eventWatermark` to COMPACT, and admission's dedupe horizon
+  already excludes them — but the serving drain's duplicate arm
+  (`space-server.ts`'s already-consequenced-eventId skip) consults
+  the STORED log, so the day compaction lands, a reused eventId
+  re-admitted above the horizon flips from "skip (its consumed twin
+  is visible)" to "re-execute (the twin compacted away)". Which
+  behavior is contractual is UNPINNED — events §4's dedupe-horizon
+  paragraph sanctions the re-admission without saying whether the
+  drain may re-run it. Owed: the ruling (one sentence in events §4)
+  and its pin, in the same PR that implements compaction. Trigger:
+  the compaction implementation.
+- OW25 — the ON-ARM CI SHELL BUILD (the workflow contract's other
+  clause, discharged-by-listing in Phase 4): the ON-arm CI lanes
+  run the toolshed binary's OFF-built browser shell — the flag is
+  an esbuild define burned in at `build-binaries` and embedded via
+  `--include`, with no serve-time override — so browser-ON
+  behavior (Phase 4's effect channel in a real shell, and every
+  later phase's browser-side surface) is CI-UNCOVERED: locally
+  full-ON, in CI mixed-posture. The affected test is listed
+  (`tasks/server-execution-on-skips.ts`: topics-navigation, red on
+  the unmodified Phase-3 base under the full posture). Owed: a
+  flag-ON toolshed binary build feeding the two ON jobs (a second
+  `build-binaries` invocation with the define env set — contained
+  in the workflow, but it flips ~50 browser suites into a posture
+  with a known inherited red family, so it lands WITH the triage
+  of that family, not before). Trigger: the leg-C ruling landing
+  (the inherited red's fix), and no later than the Phase-7 flip
+  (a flip criterion measured on a mixed-posture lane would be
+  vacuous).
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**
@@ -1261,13 +1320,18 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   meta is the OW19 churn class;
   (vii) the serving replica's scope-NAME-keyed local view (the OW17
   residual) is TOLERATED, never trusted for instance state: the
-  served half still READS it (the append-mechanics tail and the
-  cheap local presence check), but nothing store-visible derives
-  from it — the intent write is a tail-relative MERGEABLE append
-  (only the appended tail crosses; the store applies it per
+  served half still READS it, but ONLY as the tail-append base —
+  nothing store-visible derives from it, and no suppression
+  consults it (the independent review's MINOR-4 deleted the local
+  presence gate that suppressed the append on a locally-seen nonce:
+  consulting the collapsed view to withhold a store write WAS a
+  store-visible derivation, redundant with the engine dedupe today
+  and cross-session suppression the day foreign rows land in the
+  serving replica) — the intent write is a tail-relative MERGEABLE
+  append (only the appended tail crosses; the store applies it per
   instance via the annotation key; the builtin FAILS CLOSED if the
   transaction cannot record the mergeable append) with the ENGINE's
-  stored-nonce dedupe as the idempotency authority, and the
+  stored-nonce dedupe as the SOLE idempotency authority, and the
   retirement write's pruned value is computed from
   `selectRetirableEffectsInstances`' engine reads.
 - serving-loop §7's `effectAcks` counter is LIVE (the feed drain
@@ -1278,8 +1342,8 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   client authoring garbage into its own instance inflates it; the
   notice carries no paths to discriminate by, and the inflation is
   the same self-poisoning class as the instance itself.)
-- The Phase-4 INDEPENDENT review's fix batch (2026-08-11; every
-  finding addressed in the same PR): (1) requeue is now ATOMIC PER
+- The Phase-4 SELF-review's fix batch (2026-08-11; every finding
+  addressed in the same PR): (1) requeue is now ATOMIC PER
   EVENT at the wave — an event can contribute SEVERAL transactions
   (the handler run + the served intent tx), and the conflict
   closure folds every same-eventId sibling into a requeue, with
@@ -1287,7 +1351,13 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   one entry per event (red-first pinned in `executor-wave.test.ts`'s
   per-event fold test: without the fold, a requeued handler beside a
   surviving intent marks the event consequenced while its
-  consequences were withdrawn — lost behind the idempotency skip);
+  consequences were withdrawn — lost behind the idempotency skip).
+  CORRECTED by the independent review (M2, below): the fold makes
+  the ROLLBACK atomic, but it did NOT restore the re-issue — the
+  wave-2 re-run re-landed the handler consequences while the served
+  navigateTo's closure guard (`navigated`, surviving in the reused
+  builtin instance) suppressed the intent forever; exactly-once
+  additionally required the store-owned idempotency fix below;
   (2) the overlay records the optimistic nonce BEFORE the flush (a
   slow async navigateCallback left a window where the authoritative
   intent double-navigated within one life); (3) the intent seal's
@@ -1295,11 +1365,67 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   resolve, never reject, on ordinary failure) — an ISOLATED intent
   seal failure (no requeue, inputs unchanged) leaves the intent
   unissued until the next input change, the watermark-doc drop's
-  input-driven re-land posture, recorded as accepted; (4) the
+  input-driven re-land posture, recorded as accepted (now also
+  COUNTED: §7's `servedIntentSealFailures`); (4) the
   served-side `navigated` re-run arm returns early instead of
-  re-writing the result cell under the wave-level service identity;
-  (5) the no-context refusal arm gained direct coverage (the
-  static-wiring test in `executor-effect-channel.test.ts`).
+  re-writing the result cell under the wave-level service identity
+  (superseded by the independent review's M2: served runs no longer
+  consult `navigated` at all — the result-cell read early-returns a
+  landed navigation, and the served path still never writes the
+  result cell on the wave tx); (5) the no-context refusal arm gained
+  direct coverage (the static-wiring test in
+  `executor-effect-channel.test.ts`).
+- The Phase-4 INDEPENDENT adversarial review's fix batch
+  (2026-08-11, the fixer PR-push; reviewed at d28276798):
+  (M1) CASCADE-HOP DOUBLE NAVIGATION fixed by suppressing
+  cascade-hop optimism — on a cascade hop the client's speculative
+  run and the server's authoritative run mint DIFFERENT attempt ids
+  (events §4's fresh-per-attempt cascades), and the handler-result
+  frame's cause embeds that id (`$event: tx.dispatchedEventId`), so
+  BOTH `effectIntentNonce` components (event id AND cause-derived
+  instance id) diverge across the twins: no keying scheme can
+  converge them, which is also why the review's probe saw two
+  DISTINCT targets. The capture is tagged attempt-minted
+  (`NavigateEventContext.attemptMinted`, threaded from the
+  emitter's eventId through the cascade dispatch on both sides),
+  and the optimistic arm refuses to enact an attempt-minted
+  capture — first-hop optimism (durable fire id, converging cause)
+  is unchanged; the authoritative intent is the cascade hop's ONE
+  navigation (red-first: the cascade × capable-client test in
+  `executor-effect-channel.test.ts` — two navigations, two targets
+  at d28276798);
+  (M2) REQUEUED NAVIGATE EVENTS RE-ISSUE: the served arm's
+  `navigated` closure guard is DELETED — the builtin instance and
+  its closure survive a requeue (runner.ts's cancels-guard reuse),
+  so closure state suppressed the wave-2 re-issue; store-derived
+  state governs instead (the result-cell read returns a landed
+  navigation early, a withdrawn intent reads false and re-issues,
+  and the ENGINE's stored-nonce dedupe makes re-issue idempotent)
+  (red-first: the requeue-through-the-builtin test — intent count
+  0 forever at d28276798, exactly 1 post-fix);
+  (MINOR-3) the receipt-race divert is PINNED structurally: zero
+  authored-class commits touch the served navigation's target doc
+  (the divert-neutralization probe that left the full runner suite
+  green now goes red);
+  (MINOR-4) the `locallyPresent` suppression gate deleted — see
+  (vii) above;
+  (MINOR-5) same-principal two-session isolation pinned BOTH
+  halves: the push half (memory-side, `v2-scoped-push.test.ts`) —
+  a derived write into `session:p:s1`'s effects instance delivers
+  the frame to s1 and ZERO rows of that doc to `session:p:s2` —
+  and the client half (`executor-effect-channel.test.ts`) — s2's
+  channel neither enacts nor acks s1's intent, and stays live for
+  its own;
+  plus: the dispose-order hazard fixed (a runtime's dispose clears
+  `spaceOpenObserver` only when the installed hook is its OWN — a
+  later runtime over the same manager keeps its channel);
+  `servedIntentSealFailures` added to §7's stats; the two engine
+  gap arms pinned (`v2-effects-doc.test.ts`: the retirement scan's
+  non-session-instance skip; append dedupe consults the OP's OWN
+  instance — a space-addressed duplicate is not deduped against a
+  session instance, and stamping still applies); the client-half
+  convergence assert made unconditional (the channel's
+  enacted-nonce count); owed rows OW22–OW25 below.
 
 ## 4. Standing rule
 

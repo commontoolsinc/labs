@@ -278,6 +278,10 @@ export interface DeliverOpts {
    * store entries are never renderer-trusted, so shaping never holds
    * them in practice). */
   served?: import("./types.ts").ServedEventDispatch;
+  /** The client-echo cascade thread (QueuedEvent.parentEventId), carried
+   * through a held delivery unchanged — defensive plumbing like `served`
+   * (a cascade send from a handler frame is never renderer-trusted). */
+  parentEventId?: string;
 }
 
 export type DeliverFn = (

@@ -36,10 +36,28 @@
  * the firing event's durable id (the nonce discipline keys on it —
  * protocol.md §5) and, on the serving side, the event's server-stamped
  * acting identity (absent on a flag-ON client's speculative capture,
- * where the client's own authenticated session is ambient). */
+ * where the client's own authenticated session is ambient).
+ *
+ * `attemptMinted` (independent review M1, 2026-08-11): set when the
+ * capture's event is a CASCADE-minted event — its id was minted fresh
+ * for THIS attempt (events.md §4's fresh-per-attempt cascades), so the
+ * client's speculative twin and the server's authoritative twin carry
+ * DIFFERENT ids, and the handler-result frame's cause embeds the id
+ * (`$event: tx.dispatchedEventId`, runner.ts), so the twins' navigateTo
+ * INSTANCE ids diverge too. Both `effectIntentNonce` components diverge:
+ * no keying can converge an attempt-minted capture's optimistic
+ * enactment with the authoritative intent, so the optimistic arm
+ * REFUSES to enact one (the authoritative intent, delivered on the
+ * effects channel, is the cascade hop's one navigation). Derived from
+ * `parentEventId` presence on the run stamp — the cascade dispatch
+ * carries its emitter's id on both sides (the wave carriage
+ * server-side, the client-echo thread in cell.ts's plain queueEvent),
+ * while a ROOT event (the client's durable fire, a drained delegated
+ * delivery) carries none. */
 export type NavigateEventContext = {
   eventId: string;
   acting?: { user: string; session?: string };
+  attemptMinted?: true;
 };
 
 const navigateEventContexts = new WeakMap<object, NavigateEventContext>();
@@ -66,6 +84,7 @@ export const navigateEventContextFromRunInfo = (
     | {
       kind: string;
       eventId?: string;
+      parentEventId?: string;
       acting?: { user: string; session?: string };
     }
     | undefined,
@@ -77,5 +96,8 @@ export const navigateEventContextFromRunInfo = (
   return {
     eventId: info.eventId,
     ...(info.acting !== undefined ? { acting: info.acting } : {}),
+    // A run with a parent is a same-wave cascade hop: its own eventId
+    // was minted for this attempt (see NavigateEventContext).
+    ...(info.parentEventId !== undefined ? { attemptMinted: true } : {}),
   };
 };

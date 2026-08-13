@@ -20,14 +20,24 @@
 
 import { assert, assertEquals, assertExists } from "@std/assert";
 import { Server } from "../v2/server.ts";
+import { applyWaveCommit } from "../v2/engine.ts";
 import {
+  acquireExecutionLease,
+  executionLeaseHolder,
+} from "../v2/execution-lease.ts";
+import {
+  effectIntentNonce,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
+  resetServerExecutionConfig,
+  resolvePrincipalSessionKey,
   type ResponseMessage,
+  SERVER_EXECUTION_EFFECTS_DOC_ID,
   type ServerMessage,
   type SessionOpenAuthMetadata,
+  setServerExecutionConfig,
   type WatchSetResult,
 } from "../v2.ts";
 
@@ -213,6 +223,144 @@ Deno.test("scoped push is per-instance: a user-scoped commit refreshes the SAME 
     bobWatcher.connection.close();
     aliceWriter.connection.close();
   } finally {
+    await server.close();
+  }
+});
+
+Deno.test("same-principal two-session isolation (Phase-4 review MINOR-5): a derived write into session:p:s1's effects instance delivers the frame to s1 and ZERO rows to s2", async () => {
+  // The sharpest instance pair — `session:p:s1` vs `session:p:s2`
+  // differ ONLY in the session segment (one principal). The write is
+  // the effect channel's own shape: a DERIVED wave commit addressed by
+  // annotation to s1's instance of the well-known effects doc
+  // (protocol.md §5), reported through `noteExecutorCommit` exactly as
+  // the serving loop reports its wave commits. Push must refresh s1's
+  // watcher and deliver NOTHING of the doc to s2 — a name-granular (or
+  // principal-granular) fan-out here would hand one session another
+  // session's navigation intents (protocol.md §3's applicable set).
+  const server = new Server({
+    store: new URL("memory://scoped-push-two-sessions"),
+    subscriptionRefreshDelayMs: 0,
+    authorizeSessionOpen: (message) => {
+      const iss = message.invocation?.iss;
+      return typeof iss === "string" ? iss : undefined;
+    },
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+  });
+  setServerExecutionConfig(true);
+  try {
+    const s1 = await connect(server);
+    const s1Session = await openSession(s1, ALICE);
+    const s2 = await connect(server);
+    const s2Session = await openSession(s2, ALICE);
+    assert(s1Session !== s2Session, "two distinct sessions");
+
+    const watchFor = (sessionId: string) => ({
+      type: "session.watch.set" as const,
+      requestId: nextRequestId("watch"),
+      space: SPACE,
+      sessionId,
+      watches: [{
+        id: "w-effects",
+        kind: "graph" as const,
+        query: {
+          roots: [{
+            id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+            scope: "session" as const,
+            selector: { path: [], schema: false as const },
+          }],
+        },
+      }],
+    });
+    const s1Watch = await server.watchSet(
+      watchFor(s1Session),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(s1Watch.ok, JSON.stringify(s1Watch.error));
+    const s2Watch = await server.watchSet(
+      watchFor(s2Session),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(s2Watch.ok, JSON.stringify(s2Watch.error));
+
+    const s1From = s1.messages.length;
+    const s2From = s2.messages.length;
+
+    // The derived intent write into s1's instance, engine-plane (the
+    // serving loop's path), then the push notify.
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(`service:${SPACE}`);
+    assert(acquireExecutionLease(engine, { space: SPACE, holder }));
+    const s1Key = resolvePrincipalSessionKey(ALICE, s1Session);
+    const applied = applyWaveCommit(engine, {
+      sessionId: holder,
+      space: SPACE,
+      commitClass: "derived",
+      holder,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: SERVER_EXECUTION_EFFECTS_DOC_ID as never,
+          scope: "session",
+          patches: [{
+            op: "append",
+            path: "/value/entries",
+            values: [{
+              nonce: effectIntentNonce("evt-s1", "of:nav-s1"),
+              kind: "navigate",
+              args: { target: { id: "of:nav-s1", path: [] } },
+              issuedIn: null,
+            }] as never[],
+          }],
+        }],
+      },
+      annotations: [{ op: 0, scopeKey: s1Key }],
+      waveBasis: { basisSeq: 0, rebasedHeads: [] },
+    });
+    assert(applied.seq !== undefined);
+    server.noteExecutorCommit({
+      space: SPACE,
+      seq: applied.seq,
+      class: "derived",
+      holder,
+      sessionId: holder,
+      writes: [{
+        id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+        scopeKey: s1Key as never,
+      }],
+    });
+
+    // Drain the refresh; s1's frame must arrive.
+    const deadline = Date.now() + 5_000;
+    while (
+      !effectUpsertIds(s1.messages, s1From)
+        .includes(SERVER_EXECUTION_EFFECTS_DOC_ID) &&
+      Date.now() < deadline
+    ) {
+      await server.idle();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    // Push half 1: s1 (the written instance's session) received the
+    // effects-doc refresh frame.
+    assert(
+      effectUpsertIds(s1.messages, s1From)
+        .includes(SERVER_EXECUTION_EFFECTS_DOC_ID),
+      "s1 must receive its own instance's refresh frame",
+    );
+    // Push half 2: s2 — same principal, different session — received
+    // ZERO rows of the doc.
+    await server.idle();
+    assertEquals(
+      effectUpsertIds(s2.messages, s2From)
+        .filter((id) => id === SERVER_EXECUTION_EFFECTS_DOC_ID),
+      [],
+      "s2 must receive zero rows of s1's instance",
+    );
+
+    s1.connection.close();
+    s2.connection.close();
+  } finally {
+    resetServerExecutionConfig();
     await server.close();
   }
 });

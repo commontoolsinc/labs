@@ -63,6 +63,16 @@ export class EffectsChannel {
     return this.#enacted.has(nonce);
   }
 
+  /** DIAGNOSTIC (tests): how many distinct nonces this life recorded
+   * enacted — the UNCONDITIONAL convergence witness (independent
+   * review NOTE-e): one navigation journey converging by nonce records
+   * exactly ONE, whether or not a store poll ever sampled the
+   * transient intent; a divergent optimistic/authoritative pair
+   * records two. */
+  get enactedNonceCount(): number {
+    return this.#enacted.size;
+  }
+
   /** Record a nonce as enacted (the optimistic path — the speculation
    * overlay's navigateTo flush carries the run's deterministic nonce). */
   recordEnacted(nonce: string): void {

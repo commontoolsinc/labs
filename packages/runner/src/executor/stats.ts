@@ -66,6 +66,15 @@ export type ServingLoopStats = {
    * landing, so the demanded derivation never materialized). Counted
    * here so the storm is a health-stats fact, not a log-grep. */
   unstampedSealRefusals: number;
+  /** Served navigate-intent transactions whose seal FAILED — resolved
+   * `{ error }` or rejected (navigate-to.ts's intent-commit arms,
+   * independent review NOTE-b). A wave-conflict requeue re-issues via
+   * the event's re-run (store-owned idempotency), so a count that
+   * grows without matching re-lands flags the ISOLATED-failure class:
+   * no requeue, inputs unchanged, the intent unissued until the next
+   * input change (the accepted input-driven re-land posture — the
+   * watermark-doc drop's class). */
+  servedIntentSealFailures: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
   events: {
@@ -91,6 +100,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   structureLoadDeferred: 0,
   watermarkClamped: 0,
   unstampedSealRefusals: 0,
+  servedIntentSealFailures: 0,
   watermarkLag: 0,
   events: {
     appended: 0,

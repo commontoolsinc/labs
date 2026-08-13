@@ -1068,8 +1068,12 @@ export class WaveAccumulator
           // beside a surviving intent marks the event consequenced
           // (survivedEventIds) while its consequences were withdrawn —
           // lost forever behind the idempotency skip; a requeued
-          // intent beside a surviving handler loses the intent with
-          // nothing left to retry it.
+          // intent beside a surviving handler strands the intent
+          // behind the consequenced mark until an unrelated input
+          // change happens to re-run the builtin (the store-owned
+          // re-issue, independent review M2 — the event itself is
+          // never re-drained, so the fold is what keeps intent and
+          // consequences moving together).
           const sameEvent = contribution.context.eventId;
           const eventRequeued = sameEvent !== undefined &&
             this.#contributions.some((c) =>

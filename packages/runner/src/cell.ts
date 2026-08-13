@@ -1718,6 +1718,24 @@ export class CellImpl<T extends FabricValue>
         }
       }
 
+      // The client-echo cascade thread (independent review M1,
+      // 2026-08-11): a send from WITHIN a speculation-stamped handler
+      // run is the echo of a same-wave cascade — the queued event's id
+      // is minted fresh for THIS attempt, diverging from the server's
+      // own mint, so the dispatch stamp must mark downstream navigate
+      // captures ATTEMPT-MINTED (navigate-context.ts). Thread the
+      // emitter's eventId the same way the serving arm's carriage does
+      // (cell.ts's LT1 branch above); root fires (unstamped sends)
+      // thread nothing and keep their durable-id capture.
+      const clientEmitterContext = this.tx !== undefined
+        ? speculationRunContextOf(this.tx)
+        : undefined;
+      const clientCascadeParent =
+        clientEmitterContext?.kind === "event-handler" &&
+          clientEmitterContext.eventId !== undefined
+          ? clientEmitterContext.eventId
+          : undefined;
+
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
@@ -1737,6 +1755,9 @@ export class CellImpl<T extends FabricValue>
             : sendOptions?.eventId === undefined
             ? undefined
             : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
+          ...(clientCascadeParent !== undefined
+            ? { parentEventId: clientCascadeParent }
+            : {}),
           originTx: this.tx ?? undefined,
           // Forward injection provenance only when it carries the mint (see
           // markRuntimeInjectedEventKeys): a plain array here — the shape any

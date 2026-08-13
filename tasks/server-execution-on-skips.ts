@@ -28,7 +28,8 @@ export type ServerExecutionPhase =
   | "phase-5"
   | "phase-6"
   | "phase-7"
-  | "phase-2-followup";
+  | "phase-2-followup"
+  | "phase-3-followup";
 
 export type ServerExecutionOnSkip = {
   /** Test file, relative to the suite's package root (the directory the
@@ -73,6 +74,25 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // it — the exact unskipping condition the entry named. That gate now
   // runs (and passes) ON.
   patterns: [
+    {
+      file: "integration/topics-navigation.test.ts",
+      phase: "phase-3-followup",
+      reason: "MIXED-POSTURE honesty (Phase 4 fixer, 2026-08-11; the " +
+        "workflow contract's list-the-affected-tests clause): the " +
+        "ON-arm CI lane ships the binary's OFF-built browser shell, " +
+        "so its green run of this file exercised an OFF-shell + " +
+        "ON-server posture that asserts nothing about the browser-ON " +
+        "behavior Phase 4 added — while under the FULL flag-ON " +
+        "posture (shell define baked ON, the local harness's " +
+        "start-local-dev env inheritance) the file is RED, reproduced " +
+        "verbatim on the unmodified Phase-3 base (5-minute " +
+        "'Navigation target' render timeout — the base-inherited " +
+        "browser-ON red family the P3 triage tracks, leg C's " +
+        "speculation-basis wedge pending its owner ruling). Skipped " +
+        "rather than green-by-vacuity; lifts when the ON shell build " +
+        "lands in CI (verification-coverage.md OW25) AND the " +
+        "inherited red is fixed.",
+    },
     {
       file: "integration/sx2-serving-loop.test.ts",
       phase: "phase-2-followup",

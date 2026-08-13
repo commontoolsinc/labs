@@ -861,6 +861,11 @@ export class Scheduler {
        * failure hook (QueuedEvent.served). Passed only by the
        * SpaceServer's drain; absent everywhere client-side. */
       served?: import("./types.ts").ServedEventDispatch;
+      /** The client-echo cascade thread (QueuedEvent.parentEventId):
+       * the emitting run's event id, passed by cell.ts's plain
+       * queueEvent for a send from within a speculation-stamped
+       * handler run. Kept OFF `served` — see QueuedEvent. */
+      parentEventId?: string;
     } = {},
   ): void {
     // Bind the event's wall-clock time at its causal origin. A pre-supplied time
@@ -896,6 +901,7 @@ export class Scheduler {
           time,
           runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
           served: opts.served,
+          parentEventId: opts.parentEventId,
         },
       );
       return;
@@ -911,6 +917,7 @@ export class Scheduler {
       time,
       runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
       served: opts.served,
+      parentEventId: opts.parentEventId,
     });
   }
 
@@ -934,6 +941,7 @@ export class Scheduler {
       time: opts.time,
       runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
       served: opts.served,
+      parentEventId: opts.parentEventId,
     });
 
   // The owning pattern instance for an input stream, used to group a pattern's
