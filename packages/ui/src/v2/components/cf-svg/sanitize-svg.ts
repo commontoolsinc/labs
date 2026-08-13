@@ -1,113 +1,137 @@
 /**
- * Sanitizes SVG strings to prevent XSS attacks.
+ * Turns SVG source into an element that is safe to put in a document.
  *
- * Uses browser-native DOMParser to parse and walk the SVG DOM tree,
- * removing dangerous elements and attributes.
+ * The guarantee is that nothing in the source runs script. An element survives
+ * only if it appears in the allowlist below, so an element nobody anticipated
+ * is dropped rather than kept; an attribute whose name begins with `on` is
+ * removed; and a URL-valued attribute keeps its value only when the scheme
+ * allowlist in `safe-url.ts` accepts it.
  *
- * @param svgString - The SVG string to sanitize
- * @returns Sanitized SVG string, or empty string if parsing fails
+ * The element that comes back is inserted as a node. Nothing serializes it
+ * back to a string, so no second parse can read the sanitized tree differently
+ * from the way this function left it.
+ *
+ * The guarantee does not extend to the network: a drawing may reference an
+ * image or a font, and displaying it fetches what it references.
  */
-export function sanitizeSvg(svgString: string): string {
-  // Handle empty input
-  if (!svgString || typeof svgString !== "string") {
-    return "";
-  }
 
-  const trimmed = svgString.trim();
-  if (trimmed === "") {
-    return "";
-  }
+import { safeImageUrl, safeUrl } from "../../core/safe-url.ts";
 
-  // Parse the SVG string
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(trimmed, "image/svg+xml");
+/**
+ * The elements a drawing is built from.
+ *
+ * The list leaves out three groups on purpose. `script` runs code. `animate`,
+ * `animateMotion`, `animateTransform` and `set` retarget an attribute while the
+ * drawing plays, which would let a drawing write a `javascript:` URL into an
+ * attribute this function had already checked. `foreignObject` opens a window
+ * back into HTML, where everything the list excludes becomes available again.
+ */
+const ALLOWED_ELEMENTS = new Set([
+  "a",
+  "circle",
+  "clippath",
+  "defs",
+  "desc",
+  "ellipse",
+  "feblend",
+  "fecolormatrix",
+  "fecomponenttransfer",
+  "fecomposite",
+  "feconvolvematrix",
+  "fediffuselighting",
+  "fedisplacementmap",
+  "fedistantlight",
+  "fedropshadow",
+  "feflood",
+  "fefunca",
+  "fefuncb",
+  "fefuncg",
+  "fefuncr",
+  "fegaussianblur",
+  "feimage",
+  "femerge",
+  "femergenode",
+  "femorphology",
+  "feoffset",
+  "fepointlight",
+  "fespecularlighting",
+  "fespotlight",
+  "fetile",
+  "feturbulence",
+  "filter",
+  "g",
+  "image",
+  "line",
+  "lineargradient",
+  "marker",
+  "mask",
+  "metadata",
+  "path",
+  "pattern",
+  "polygon",
+  "polyline",
+  "radialgradient",
+  "rect",
+  "stop",
+  "style",
+  "svg",
+  "switch",
+  "symbol",
+  "text",
+  "textpath",
+  "title",
+  "tspan",
+  "use",
+]);
 
-  // Check for parser errors
-  const parserError = doc.querySelector("parsererror");
-  if (parserError) {
-    return "";
-  }
+/** The attributes that name something for the browser to fetch or follow. */
+const URL_ATTRIBUTES = new Set(["href", "xlink:href", "src"]);
 
-  // Dangerous elements to remove (case-insensitive)
-  const DANGEROUS_ELEMENTS = new Set([
-    "script",
-    "foreignobject",
-    "iframe",
-    "embed",
-    "object",
-    "applet",
-    "meta",
-    "link",
-    "set", // SVG <set> can target event handler attributes
-  ]);
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
-  // URL attributes that need sanitization
-  const URL_ATTRIBUTES = new Set([
-    "href",
-    "xlink:href",
-    "src",
-    "action",
-    "formaction",
-  ]);
-
-  // Dangerous URL protocols (case-insensitive)
-  const DANGEROUS_PROTOCOLS = ["javascript:", "vbscript:", "data:text/html"];
-
-  /**
-   * Recursively walks the DOM tree and sanitizes nodes
-   */
-  function sanitizeNode(node: Node): void {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const element = node as Element;
-      const tagName = element.tagName.toLowerCase();
-
-      // Remove dangerous elements
-      if (DANGEROUS_ELEMENTS.has(tagName)) {
-        element.remove();
-        return;
-      }
-
-      // Remove event handler attributes (onclick, onload, onerror, etc.)
-      const attributesToRemove: string[] = [];
-      for (let i = 0; i < element.attributes.length; i++) {
-        const attr = element.attributes[i];
-        const attrName = attr.name.toLowerCase();
-
-        // Remove event handlers
-        if (attrName.startsWith("on")) {
-          attributesToRemove.push(attr.name);
-          continue;
-        }
-
-        // Sanitize URL attributes
-        if (URL_ATTRIBUTES.has(attrName)) {
-          const attrValue = attr.value.trim().toLowerCase();
-          for (const protocol of DANGEROUS_PROTOCOLS) {
-            if (attrValue.startsWith(protocol)) {
-              attributesToRemove.push(attr.name);
-              break;
-            }
-          }
-        }
-      }
-
-      // Remove dangerous attributes
-      for (const attrName of attributesToRemove) {
-        element.removeAttribute(attrName);
-      }
-
-      // Recursively sanitize children
-      const children = Array.from(element.childNodes);
-      for (const child of children) {
-        sanitizeNode(child);
-      }
+function sanitizeElement(element: Element): void {
+  for (const child of Array.from(element.children)) {
+    if (
+      child.namespaceURI !== SVG_NAMESPACE ||
+      !ALLOWED_ELEMENTS.has(child.localName.toLowerCase())
+    ) {
+      child.remove();
+      continue;
     }
+    sanitizeElement(child);
   }
 
-  // Sanitize the document
-  sanitizeNode(doc.documentElement);
+  // A link navigates, so it is held to the schemes a document may point at.
+  // Everything else with a URL loads a drawing, which may carry its own bytes.
+  const checkUrl = element.localName.toLowerCase() === "a"
+    ? safeUrl
+    : safeImageUrl;
+  for (const attribute of Array.from(element.attributes)) {
+    const name = attribute.name.toLowerCase();
+    const dangerous = name.startsWith("on") ||
+      (URL_ATTRIBUTES.has(name) && checkUrl(attribute.value) === null);
+    if (dangerous) element.removeAttributeNode(attribute);
+  }
+}
 
-  // Serialize back to string
-  const serializer = new XMLSerializer();
-  return serializer.serializeToString(doc);
+/**
+ * Parses and sanitizes SVG source, returning the drawing it describes.
+ *
+ * Returns `null` when the source holds no drawing.
+ *
+ * The source is read by the HTML parser, which puts a drawing in the SVG
+ * namespace whether or not the source declares one, and which recovers from
+ * markup that an XML parser would reject. The document it builds has no
+ * browsing context: nothing in it runs, and nothing in it loads, before this
+ * function has finished with it.
+ */
+export function sanitizeSvg(svgString: string): Element | null {
+  if (typeof svgString !== "string" || svgString.trim() === "") return null;
+
+  const doc = new DOMParser().parseFromString(svgString, "text/html");
+  const root = doc.body.querySelector("svg");
+  if (root === null || root.namespaceURI !== SVG_NAMESPACE) return null;
+
+  sanitizeElement(root);
+  return root;
 }
