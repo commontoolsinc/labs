@@ -12,17 +12,29 @@
 // the ENACTED-NONCE RECORD — process memory, deliberately reload-wiped:
 // a reload between intent and ack re-reads the unacked intent on
 // resubscribe and MAY re-enact it, which is ACCEPTED for reversible
-// effects (LT8, RULED 2026-08-03). The record has two writers:
+// effects (LT8, RULED 2026-08-03). The record has two writers, both
+// through `beginEnactment` (record BEFORE the enactment settles, with
+// its outcome attached):
 //
-// - the OPTIMISTIC path — the speculation overlay records the run's
-//   deterministic nonce here BEFORE flushing its navigateTo enactment
+// - the OPTIMISTIC path — the speculation overlay begins the run's
+//   deterministic nonce here BEFORE its navigateTo flush runs
 //   (speculation.md §2; the flush awaits an arbitrary callback, and the
 //   authoritative intent can arrive mid-flush), so the authoritative
-//   intent CONVERGES on the already-enacted nonce and is acked without
-//   a second navigation (T2.Q7);
+//   intent CONVERGES on the in-flight nonce and never re-navigates
+//   (T2.Q7);
 // - the AUTHORITATIVE path — an intent arriving unenacted (a reload, a
-//   client that never speculated the run) is recorded, enacted, and
-//   acked here (record-before-invoke guards re-entrant deliveries).
+//   client that never speculated the run) is begun, enacted, and — on
+//   SUCCESS — acked here (record-before-invoke guards re-entrant
+//   deliveries).
+//
+// The ACK FOLLOWS ENACTMENT SUCCESS (protocol.md §5: the client
+// "enacts, then commits an authored ack write"; owner review P1-1,
+// 2026-08-12): every ack chains on the enactment's outcome, and a
+// FAILED enactment retracts its record instead of acking — the entry
+// stays unacked in the store, so a later delivery (any commit touching
+// the instance, or the LT8 reload re-read) retries. Acking a failed
+// enactment would let the server retire a navigation that never
+// happened — permanent loss.
 //
 // The ack is once-per-nonce and the server-side retirement is
 // idempotent, so the accepted LT8 re-enactment never doubles anything
@@ -43,8 +55,16 @@ const logger = getLogger("effects-channel", {
 
 export class EffectsChannel {
   readonly #runtime: Runtime;
-  /** The enacted-nonce record (LT8): reload-wiped by construction. */
+  /** The enacted-nonce record (LT8): reload-wiped by construction. A
+   * FAILED enactment retracts its nonce (owner review P1-1), so the
+   * record holds successes and in-flight attempts only. */
   readonly #enacted = new Set<string>();
+  /** In-flight enactments by nonce — the outcome every ack must chain
+   * on (protocol.md §5's "enacts, THEN commits an authored ack"):
+   * resolves true on success (record kept, acks release), false on
+   * failure (record retracted; the entry — still unacked in the store
+   * — re-enacts on a later delivery). */
+  readonly #enactInFlight = new Map<string, Promise<boolean>>();
   /** space -> cancel fn for the effects-doc sink. */
   readonly #sinks = new Map<MemorySpace, () => void>();
   /** In-flight ack writes (`${space}\0${nonce}`) — one authored ack per
@@ -73,10 +93,32 @@ export class EffectsChannel {
     return this.#enacted.size;
   }
 
-  /** Record a nonce as enacted (the optimistic path — the speculation
-   * overlay's navigateTo flush carries the run's deterministic nonce). */
-  recordEnacted(nonce: string): void {
+  /** Record `nonce` as enacted BEFORE `work` (the enactment itself)
+   * settles — the mid-flight convergence guard: the authoritative
+   * intent can arrive mid-enactment and must converge, not
+   * double-navigate. The outcome rides with the record (owner review
+   * P1-1; protocol.md §5's enact-then-ack ordering): SUCCESS keeps the
+   * record and releases any ack chained on the returned promise;
+   * FAILURE retracts the record and withholds the ack, so the durable
+   * entry — still unacked in the store — re-enacts on a later
+   * delivery (or the LT8 reload re-read). Callers: the speculation
+   * overlay's optimistic flush, and this channel's authoritative arm. */
+  beginEnactment(nonce: string, work: Promise<unknown>): Promise<boolean> {
     this.#enacted.add(nonce);
+    const settled = work.then(() => true, (error) => {
+      logger.warn("enact-failed", () => [
+        `navigate enactment for ${nonce} failed; left unacked — a ` +
+        "later delivery retries",
+        error,
+      ]);
+      return false;
+    }).then((ok) => {
+      this.#enactInFlight.delete(nonce);
+      if (!ok) this.#enacted.delete(nonce);
+      return ok;
+    });
+    this.#enactInFlight.set(nonce, settled);
+    return settled;
   }
 
   /** Subscribe to this session's effects instance in `space` (idempotent
@@ -154,14 +196,27 @@ export class EffectsChannel {
       ) {
         continue;
       }
-      if ((acks as Record<string, unknown>)[entry.nonce] === true) continue;
-      if (!this.#enacted.has(entry.nonce)) {
+      const nonce = entry.nonce;
+      if ((acks as Record<string, unknown>)[nonce] === true) continue;
+      const inFlight = this.#enactInFlight.get(nonce);
+      if (inFlight !== undefined) {
+        // An enactment (optimistic or authoritative) is MID-FLIGHT:
+        // chain the ack on its SUCCESS (protocol.md §5's enact-then-ack
+        // ordering; owner review P1-1) — a failure retracts the record
+        // and a later delivery retries instead of acking a navigation
+        // that never happened.
+        void inFlight.then((ok) => {
+          if (ok && !this.#closed) this.#ack(space, nonce);
+        });
+        continue;
+      }
+      if (!this.#enacted.has(nonce)) {
         if (entry.kind !== "navigate") {
           // A kind this client does not ship (protocol.md §5's closed
           // set): leave it unacked — acking would claim an enactment
           // that never happened.
           logger.warn("unknown-intent-kind", () => [
-            `effects intent ${entry.nonce} carries unknown kind ` +
+            `effects intent ${nonce} carries unknown kind ` +
             `${String((entry as { kind?: unknown }).kind)}; left unacked`,
           ]);
           continue;
@@ -180,10 +235,7 @@ export class EffectsChannel {
           }
           continue;
         }
-        // Record BEFORE invoking the (possibly async) callback so a
-        // re-entrant delivery cannot double-enact; a thrown callback is
-        // today's posture — logged, the navigation consumed.
-        this.#enacted.add(entry.nonce);
+        let work: Promise<unknown>;
         try {
           const target = entry.args?.target;
           if (target === null || typeof target !== "object") {
@@ -195,22 +247,32 @@ export class EffectsChannel {
             scope: (target.scope ?? "space") as never,
             path: [...(target.path ?? [])],
           });
-          const work = Promise.resolve().then(() => navigate(targetCell));
+          work = Promise.resolve().then(() => navigate(targetCell));
           this.#runtime.trackAsyncWork(work);
-          work.catch((error) => {
-            logger.warn("enact-failed", () => [
-              `navigate enactment for ${entry.nonce} failed`,
-              error,
-            ]);
-          });
         } catch (error) {
+          // Staging failed (malformed target, a cell-construction
+          // throw): nothing was recorded and nothing acks — the entry
+          // stays unacked, loud on every delivery (the session-lifetime
+          // GC is the eventual backstop for a permanently malformed
+          // entry, protocol.md §5).
           logger.warn("enact-failed", () => [
-            `navigate enactment for ${entry.nonce} failed`,
+            `navigate enactment for ${nonce} could not be staged; ` +
+            "left unacked",
             error,
           ]);
+          continue;
         }
+        // Record BEFORE the (deferred) callback can run — a re-entrant
+        // delivery converges on the in-flight record instead of
+        // double-enacting — and chain the ack on SUCCESS only.
+        void this.beginEnactment(nonce, work).then((ok) => {
+          if (ok && !this.#closed) this.#ack(space, nonce);
+        });
+        continue;
       }
-      this.#ack(space, entry.nonce);
+      // A settled-successful record (this life enacted it, or the
+      // optimistic flush completed): ack converges without re-enacting.
+      this.#ack(space, nonce);
     }
   }
 

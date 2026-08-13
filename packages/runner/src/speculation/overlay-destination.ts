@@ -391,21 +391,32 @@ export class SpeculationOverlayDestination
       void (async () => {
         for (const effect of enactable) {
           try {
-            // Phase 4 (protocol.md §5, T2.Q7): record the run's
-            // deterministic nonce BEFORE the flush — the flush awaits
-            // an arbitrary (possibly slow, async) navigateCallback, and
-            // the authoritative intent can arrive on the effects
-            // channel MID-flush; recording first makes the channel
+            // Phase 4 (protocol.md §5, T2.Q7): BEGIN the run's
+            // deterministic nonce on the channel BEFORE the flush's
+            // callback can run — the flush awaits an arbitrary
+            // (possibly slow, async) navigateCallback, and the
+            // authoritative intent can arrive on the effects channel
+            // MID-flush; the in-flight record makes the channel
             // converge instead of double-navigating within one life
-            // (LT8 accepts re-enactment only across a RELOAD). A flush
-            // that then no-ops on a superseded attempt is deliberate
-            // non-enactment, and a thrown callback is today's
-            // navigation-consumed posture — acking either is correct.
-            // The record lives in the reload-wiped channel.
+            // (LT8 accepts re-enactment only across a RELOAD). The
+            // flush's OUTCOME rides with the record (owner review
+            // P1-1): a FAILED flush retracts it, so the durable intent
+            // re-enacts on a later delivery instead of being
+            // acked-and-retired unenacted; a flush that no-ops on a
+            // superseded attempt is deliberate non-enactment and
+            // resolves as success — acking it is correct (a newer
+            // attempt owns the navigation). Call order is safe: the
+            // flush's callback is deferred to a microtask
+            // (navigate-to.ts's Promise.resolve().then), so the
+            // synchronous beginEnactment below records first.
+            const flushed = Promise.resolve(effect.flush(tx));
             if (effect.nonce !== undefined) {
-              this.#runtime.effectsChannel?.recordEnacted(effect.nonce);
+              void this.#runtime.effectsChannel?.beginEnactment(
+                effect.nonce,
+                flushed,
+              );
             }
-            await effect.flush(tx);
+            await flushed;
           } catch (error) {
             logger.error(
               "speculative-enact-failed",

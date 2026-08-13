@@ -582,7 +582,11 @@ Tasks:
       stream-entry `seq` precedent); the ack is the session's own
       authored `acks[nonce] = true` mark (per-nonce marks — a scalar
       last-ack field would lose an earlier unretired ack under two
-      quick intents); the next wave retires acked entries via a
+      quick intents; PENDING OWNER RATIFICATION: normative
+      protocol.md §5 still specifies the scalar `{ ackedNonce }`
+      write, so the two documents disagree until the owner rules
+      which side amends — flagged in the 2026-08-12 owner review,
+      P1); the next wave retires acked entries via a
       bookkeeping-stamped SpaceServer write per instance (addressing,
       no acting principal — protocol.md §1; serving-loop.md §3d),
       armed at activation and on ack admission, self-healing across

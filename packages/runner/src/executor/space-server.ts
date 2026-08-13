@@ -550,7 +550,22 @@ export class SpaceServer implements TransactionSealDestination {
     }
     const wave = this.#openWave();
     this.#waveByTx.set(tx, wave);
-    const sealed = this.#sealChain.then(() => wave.seal(tx));
+    const sealed = this.#sealChain.then(() => wave.seal(tx)).then(
+      (result) => {
+        if (result.error !== undefined) {
+          // An EVENT-STAMPED tx that failed its seal requeues its
+          // event (owner review P1-2): the served navigateTo's intent
+          // tx is a separate event-handler-stamped tx, and an isolated
+          // seal failure must not leave the event consequenced-clean
+          // with the intent lost. Noted INSIDE the seal chain, so the
+          // flush's pre-commit `await #sealChain` barrier guarantees
+          // the mark precedes commitWave. Non-event contexts note
+          // nothing (noteSealFailure filters).
+          wave.noteSealFailure(waveRunContextOf(tx));
+        }
+        return result;
+      },
+    );
     this.#sealChain = sealed.then(() => undefined, () => undefined);
     // The scheduler runs autonomously off storage notifications: a seal
     // can arrive while the loop waits for input, and the wave it opened

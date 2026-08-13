@@ -976,6 +976,34 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   (the inherited red's fix), and no later than the Phase-7 flip
   (a flip criterion measured on a mixed-posture lane would be
   vacuous).
+- OW26 — the DEMANDED-EFFECT retry wedge (scheduler adjacency,
+  surfaced by the owner-review P1 batch, 2026-08-12): when an
+  `isEffect` builtin's action THROWS (the arms are builtins.md §4's
+  navigateTo runtime errors — no-context, sessionless, LT3) and an
+  authored input lands in the tight window after the failure, the
+  failed action's retry parks idle-blocking and STARVES — no
+  further charge ever appears, every subsequent flush exhausts its
+  deadline, and the space's W freezes below the new input (observed
+  ≥30s with no recovery). DETERMINISTIC for a statically-demanded
+  navigateTo (the invalid-pattern shape: the demand persistently
+  re-arms the node) and INTERMITTENT for the event-instantiated
+  throws (the sessionless test's kick-and-await-W barrier froze ~1
+  run in 4 before being reverted to a bounded drain). A throwing
+  `computed` under the IDENTICAL schedule does not wedge (charged,
+  bounded-retried, W advances in <1s), so the class is the
+  demanded-EFFECT retry park, not action errors per se; with
+  ≥500ms between the failure and the next input the wedge does not
+  arm. Reachable only downstream of a §4 runtime error today, but
+  one erroring pattern then degrades the whole space's serving
+  (waitForSettled stalls for every session). Owed: a scheduler fix
+  aligning the erroring-demanded-effect posture with the
+  erroring-derivation posture (charge, bounded retry, settle), plus
+  a regression test racing an input into the failure window; the
+  three refusal tests' absence asserts then move from fixed drains
+  to the kick-and-await-W barrier this batch had to revert.
+  Trigger: before the Phase-7 flip (a flip with a user-authorable
+  space-wide W freeze is not shippable), or the first additional
+  throwing effect builtin, whichever lands first.
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**
@@ -1362,11 +1390,11 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   slow async navigateCallback left a window where the authoritative
   intent double-navigated within one life); (3) the intent seal's
   resolved-`{error}` outcome is logged loudly (commit promises
-  resolve, never reject, on ordinary failure) — an ISOLATED intent
-  seal failure (no requeue, inputs unchanged) leaves the intent
-  unissued until the next input change, the watermark-doc drop's
-  input-driven re-land posture, recorded as accepted (now also
-  COUNTED: §7's `servedIntentSealFailures`); (4) the
+  resolve, never reject, on ordinary failure) — the isolated
+  failure's input-driven re-land posture recorded there was
+  OVERRULED by the owner review (P1-2, below: every seal failure
+  now requeues the owning event), and the failures are COUNTED
+  (§7's `servedIntentSealFailures`); (4) the
   served-side `navigated` re-run arm returns early instead of
   re-writing the result cell under the wave-level service identity
   (superseded by the independent review's M2: served runs no longer
@@ -1426,6 +1454,73 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   session instance, and stamping still applies); the client-half
   convergence assert made unconditional (the channel's
   enacted-nonce count); owed rows OW22–OW25 below.
+- The OWNER review's fix batch (seefeldb review 2026-08-12, the six
+  P1s; fixer push):
+  (P1-1) THE ACK FOLLOWS ENACTMENT SUCCESS (protocol.md §5's
+  "enacts, then commits an authored ack write"): the channel
+  previously acked unconditionally — before the async
+  navigateCallback settled and regardless of its outcome — so a
+  failed enactment was acked, retired by the next wave, and the
+  navigation lost permanently. Now every ack chains on the
+  enactment's outcome (`beginEnactment`: record-before-invoke with
+  the outcome attached), a FAILED enactment retracts the
+  enacted-nonce record and withholds the ack (the entry stays
+  durable and unacked; a later delivery or the LT8 reload re-read
+  retries), and the OPTIMISTIC flush propagates its failure into
+  the same discipline (the flag-ON flush no longer swallows the
+  callback error; the OFF arm's legacy swallow is untouched).
+  Red-first: the two enactment-failure tests in
+  `executor-effect-channel.test.ts` (throwing-then-recovering
+  callbacks; both red at the pre-fix batch — the failed-enactment
+  entry was retired with zero navigations). Known residual: a
+  failed enactment retries only on the NEXT delivery of the
+  instance (no in-life retry timer — protocol.md §5 forbids
+  server-side retries and names no client timer; recorded, not
+  filled), and a permanently-malformed entry (no stageable target)
+  now stays unacked-loud instead of being silently consumed (the
+  session-lifetime GC is the backstop);
+  (P1-2) INTENT-SEAL FAILURE REQUEUES THE OWNING EVENT: an isolated
+  seal failure of the served navigateTo's intent tx previously only
+  logged — the handler contribution (carrying the entry's
+  `consequenced` mark) committed and the event went
+  consequenced-clean with the intent lost forever. Now the
+  SpaceServer's seal wrapper notes every failed wave-bound seal on
+  the wave (`noteSealFailure`, INSIDE the seal chain, so the
+  flush's pre-commit `await #sealChain` barrier orders the note
+  before commitWave), and commitWave seeds the noted events into
+  the requeue set — the per-event fold withdraws the handler's mark
+  with the failed consequence, the entry stays pending, the
+  re-drain re-runs the event, and the engine's nonce dedupe absorbs
+  the re-issue (red-first: the one-shot seal-injection test — at
+  the pre-fix batch the event consequenced clean with zero intents
+  forever);
+  (P1-3) THE NO-CONTEXT ARM RAISES THE §4 RUNTIME ERROR: the served
+  navigateTo's no-firing-event-context arm warned-and-returned
+  where builtins.md §4 mandates the SAME runtime error as the
+  sessionless chain ("Enforce with a runtime check"); it now throws
+  like the sessionless and LT3 arms, charged to the run
+  (red-first: the no-context test asserts the charge via
+  scheduler.onError — no charge at the pre-fix batch). The
+  acknowledged costs: a re-instantiated past instance re-running
+  after a restart surfaces the same loud error (nothing further is
+  lost — its navigation already happened), and the throw is the
+  first deterministic thrower on a DEMANDED effect node, exposing
+  the pre-existing OW26 scheduler wedge above;
+  (P1-4) the ack WIRE SHAPE (`acks[nonce]` map vs protocol.md §5's
+  scalar `{ ackedNonce }`) is PENDING OWNER RATIFICATION — neither
+  the spec nor the implementation was touched; the plan doc's
+  passage now carries the pending marker;
+  (P1-5) the deferred-start stamping (serving-loop.md §3d's sole
+  sanctioned internal `bookkeeping` stamp vs the flag-ON client's
+  event-handler-stamped navigate-deferred start) is FLAGGED as a
+  genuine spec-vs-design contradiction, evidence in the fixer
+  report: conforming to §3d's letter (the bookkeeping mutation) is
+  exactly the MINOR-3 neutralization and fails the receipt-race pin
+  deterministically — the spec edit is the owner's call, not the
+  fixer's;
+  (P1-6) the shared-manager observer clear was already
+  identity-guarded in this batch (NOTE-a above; red-first:
+  `effects-channel-dispose.test.ts` fails at d28276798).
 
 ## 4. Standing rule
 

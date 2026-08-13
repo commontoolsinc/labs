@@ -68,12 +68,12 @@ export type ServingLoopStats = {
   unstampedSealRefusals: number;
   /** Served navigate-intent transactions whose seal FAILED — resolved
    * `{ error }` or rejected (navigate-to.ts's intent-commit arms,
-   * independent review NOTE-b). A wave-conflict requeue re-issues via
-   * the event's re-run (store-owned idempotency), so a count that
-   * grows without matching re-lands flags the ISOLATED-failure class:
-   * no requeue, inputs unchanged, the intent unissued until the next
-   * input change (the accepted input-driven re-land posture — the
-   * watermark-doc drop's class). */
+   * independent review NOTE-b). Every failure requeues the owning
+   * event (owner review P1-2: the seal wrapper's noteSealFailure —
+   * conflict AND isolated classes alike), so the count is a pure
+   * health signal: a growing count means intent seals are failing and
+   * the loop is burning re-drains on them, never that navigations are
+   * being lost. */
   servedIntentSealFailures: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;

@@ -443,6 +443,18 @@ export class WaveAccumulator
   #assembly: PendingAssembly | undefined;
   #closed = false;
   #derivedThrough: number | undefined;
+  /** Events one of whose EVENT-STAMPED transactions failed its seal
+   * (owner review P1-2, 2026-08-12): the served navigateTo issues its
+   * intent as a SEPARATE event-handler-stamped tx (builtins.md §4),
+   * and an isolated seal failure of that tx must not leave the event
+   * consequenced-clean — the wave host notes the failure here
+   * (noteSealFailure), and commitWave seeds these events into the
+   * requeue set, so the surviving sibling contributions (the handler
+   * run carrying the entry's `consequenced` mark, events.md §4)
+   * withdraw with the failed consequence and the entry stays pending
+   * for the re-drain. Store-owned idempotency (the engine's nonce
+   * dedupe) absorbs the re-run's re-issue. */
+  readonly #sealFailedEventIds = new Set<string>();
   /** Outbound appends staged per transaction before its seal
    * (enqueueOutboundAppend); folded (by copy) into the contribution at
    * seal so only surviving contributions' appends ride the wave (FP1).
@@ -629,6 +641,36 @@ export class WaveAccumulator
     } finally {
       this.#assembly = undefined;
     }
+  }
+
+  /**
+   * Note a seal FAILURE for an event-stamped transaction (owner review
+   * P1-2): called by the wave host's seal wrapper whenever a wave-bound
+   * seal resolves `{ error }`. The eventId folds into commitWave's
+   * requeue set, so the event's other contributions withdraw with the
+   * failed consequence — the event is never consequenced-clean while a
+   * consequence of it failed to seal. Non-event transactions (and
+   * unstamped ones) note nothing: derivations re-run through their own
+   * reads, and bookkeeping re-derives next wave. A failure noted after
+   * the wave CLOSED is unrepairable here — loud, because the event may
+   * have gone consequenced-clean in the committed wave; the serving
+   * loop's pre-commit seal-chain barrier is what keeps this arm
+   * unreachable in production.
+   */
+  noteSealFailure(context: WaveRunContext | undefined): void {
+    if (context?.kind !== "event-handler" || context.eventId === undefined) {
+      return;
+    }
+    if (this.#closed) {
+      logger.error("seal-failure-after-close", () => [
+        `event ${context.eventId}'s failed seal was noted after its ` +
+        "wave closed; the event may be consequenced-clean with a lost " +
+        "consequence (the serving loop's seal-chain barrier should " +
+        "make this unreachable)",
+      ]);
+      return;
+    }
+    this.#sealFailedEventIds.add(context.eventId);
   }
 
   /**
@@ -1097,6 +1139,26 @@ export class WaveAccumulator
         }
       }
     };
+
+    // Seed the requeue set with events whose SEPARATE event-stamped
+    // seal FAILED (noteSealFailure — owner review P1-2): every sealed
+    // contribution of such an event requeues, so the handler run's
+    // `consequenced` mark withdraws with the failed consequence and
+    // the entry stays pending. resolveConflicts' per-event fold and
+    // cascade closure take it from here (a cascade child's failed
+    // intent rolls its own contributions back; the parent-fold rules
+    // are the same ones every requeue obeys).
+    if (this.#sealFailedEventIds.size > 0) {
+      for (const contribution of this.#contributions) {
+        if (
+          contribution.context.kind === "event-handler" &&
+          contribution.context.eventId !== undefined &&
+          this.#sealFailedEventIds.has(contribution.context.eventId)
+        ) {
+          requeued.add(contribution.index);
+        }
+      }
+    }
 
     await resolveConflicts();
 

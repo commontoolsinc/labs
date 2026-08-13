@@ -26,11 +26,20 @@
 //   (the enacted-nonce record is reload-wiped — accepted for
 //   reversible effects), then acks ONCE; retirement is idempotent and
 //   nothing resurrects after it;
-// - the SESSIONLESS refusal (builtins.md §4): a chain with no acting
-//   session reaches navigateTo and the served half refuses — no intent
-//   is written anywhere;
-// - the LT3 refusal: an acting session NOT connected to the computing
-//   space is refused the same way (cross-space navigateTo deferred).
+// - the §4 runtime errors (builtins.md §4 — one error class, three
+//   arms): a navigateTo computed OUTSIDE any client-fired event's
+//   consequences, a chain with NO acting session, and an acting
+//   session NOT connected to the computing space (LT3) all raise the
+//   runtime error, write no intent anywhere, and the charging wave
+//   settles (a racing input CAN wedge the demanded-effect retry — the
+//   flagged OW26 scheduler adjacency, see the no-context test);
+// - enactment failure leaves the intent UN-ACKED (protocol.md §5's
+//   enact-then-ack ordering): the ack follows enactment SUCCESS, a
+//   failed enactment retracts the enacted-nonce record, and the entry
+//   stays durable for a retry delivery;
+// - an ISOLATED intent-seal failure requeues the owning event: the
+//   event is never consequenced-clean, and the re-drain re-issues the
+//   intent exactly once.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -49,6 +58,7 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
+import { WaveAccumulator, waveRunContextOf } from "../src/executor/wave.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 /** The settle-gate seam (see executor-events-down.test.ts): holds the
@@ -179,6 +189,11 @@ describe("Phase 4 client-effect channel", () => {
 
   const newHost = (
     policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"],
+    /** Called with each serving runtime the host constructs, BEFORE any
+     * wave runs on it — the deterministic hook for observing served-run
+     * errors (`scheduler.onError`); a post-activation install would race
+     * the first wave. */
+    onRuntime?: (runtime: Runtime) => void,
   ): ExecutorHost =>
     new ExecutorHost({
       server,
@@ -198,6 +213,7 @@ describe("Phase 4 client-effect channel", () => {
           },
         });
         servingManager = manager;
+        onRuntime?.(runtime);
         return {
           runtime,
           dispose: async () => {
@@ -228,7 +244,19 @@ describe("Phase 4 client-effect channel", () => {
 
   const openClient = (
     signer: Identity = aliceSigner,
-    options: { navigations?: string[]; sessionId?: string } = {},
+    options: {
+      navigations?: string[];
+      sessionId?: string;
+      /** Custom navigate callback (wins over `navigations`) — the
+       * enactment-failure tests inject throwing callbacks here. */
+      navigate?: (
+        target: Parameters<
+          NonNullable<
+            ConstructorParameters<typeof Runtime>[0]["navigateCallback"]
+          >
+        >[0],
+      ) => void;
+    } = {},
   ): { manager: EmulatedStorageManager; runtime: Runtime } => {
     const manager = EmulatedStorageManager.connectTo(server, {
       as: signer,
@@ -238,7 +266,9 @@ describe("Phase 4 client-effect channel", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: manager,
       experimental: { serverExecution: true },
-      ...(options.navigations !== undefined
+      ...(options.navigate !== undefined
+        ? { navigateCallback: options.navigate }
+        : options.navigations !== undefined
         ? {
           navigateCallback: (target) => {
             options.navigations!.push(target.getAsNormalizedFullLink().id);
@@ -724,6 +754,99 @@ describe("Phase 4 client-effect channel", () => {
     cancelDemand();
   });
 
+  it("an ISOLATED intent-seal failure requeues the owning event (owner P1-2): the event is NOT consequenced-clean — the re-drain re-issues the intent exactly once", async () => {
+    // Fault injection at the real seal boundary: the wave destination
+    // resolves the FIRST navigate-intent tx `{ error }` with nothing
+    // sealed — the ISOLATED-failure class (no wave conflict engages
+    // the per-event fold; inputs unchanged). Pre-fix the failure only
+    // logged-and-counted: the handler's contribution — carrying the
+    // entry's `consequenced` mark (events.md §4) — committed, the
+    // event went consequenced-clean with NO intent anywhere, and
+    // nothing ever re-issued it (permanent navigation loss; the owner
+    // review's P1-2). Post-fix the SpaceServer notes the seal failure
+    // on the OPEN wave, the wave commit folds the event's
+    // contributions into a requeue (the entry stays pending and
+    // durable), and the re-drain re-runs handler + builtin under the
+    // same durable event id; the second seal (the injector is
+    // one-shot) lands the intent exactly once — the store-owned
+    // idempotency M2 established.
+    const realSeal = WaveAccumulator.prototype.seal;
+    let injected = 0;
+    WaveAccumulator.prototype.seal = function (
+      tx: Parameters<typeof realSeal>[0],
+    ) {
+      if (
+        injected === 0 &&
+        waveRunContextOf(tx)?.actionId?.startsWith(
+          "server-execution/navigate-intent:",
+        )
+      ) {
+        injected += 1;
+        return Promise.resolve({
+          error: {
+            name: "StorageTransactionAborted",
+            message: "intent seal failure (test-injected, isolated)",
+            reason: new Error("test-injected"),
+          },
+        } as Awaited<ReturnType<typeof realSeal>>);
+      }
+      return realSeal.call(this, tx);
+    };
+    try {
+      ({ manager: clientManager, runtime: clientRuntime } = openClient(
+        aliceSigner,
+      ));
+      const engine = await server.engineForSpace(space);
+      const { argument, result } = await standUp(
+        clientRuntime,
+        NAVIGATE_PATTERN,
+        { arg: "sealfail-arg", result: "sealfail-result" },
+      );
+      const cancelDemand = result.sink(() => {});
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+
+      host = newHost();
+      result.key("go").send({});
+      // The injector fired: the first intent seal failed in isolation.
+      await waitUntil(() => injected === 1, "the injected seal failure");
+      // The requeue engages: the event re-drains (processed reaches 2).
+      await waitUntil(
+        () => (host!.stats().events.processed ?? 0) >= 2,
+        "the requeued event to re-drain",
+      );
+      // The re-issued intent lands exactly once (headless client:
+      // nothing acks it, so the entry is stable to read).
+      const sessionId = clientManager.id;
+      await waitUntil(
+        () => intentsOf(engine, aliceSigner.did(), sessionId).length === 1,
+        "the re-drain to re-issue the intent",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(intentsOf(engine, aliceSigner.did(), sessionId).length).toBe(1);
+      // The handler's consequence landed exactly once NET (the requeue
+      // withdrew the first attempt's writes with the intent).
+      const doc = Engine.read(engine, {
+        id: argument.getAsNormalizedFullLink().id,
+      });
+      expect((doc?.value as { value?: number })?.value).toBe(1);
+      // The event consequenced exactly once (wave 2's mark).
+      const sidecarId = sidecarIdsIn(engine)[0];
+      const stored = (Engine.read(engine, { id: sidecarId })?.value ??
+        {}) as StreamEventsDocValue;
+      expect(
+        (stored.entries ?? []).filter((entry) => entry?.consequenced === true)
+          .length,
+      ).toBe(1);
+      // The failure was counted (§7's servedIntentSealFailures).
+      expect(host!.stats().servedIntentSealFailures).toBe(1);
+
+      cancelDemand();
+    } finally {
+      WaveAccumulator.prototype.seal = realSeal;
+    }
+  });
+
   it("the LT8 reload journey: a reload between intent and ack re-enacts (accepted), acks once, retires once, nothing resurrects", async () => {
     // "Reload" here = the RUNTIME dies and is rebuilt over the same
     // live session: the speculation overlay, the effects channel, and
@@ -839,6 +962,176 @@ describe("Phase 4 client-effect channel", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(firstLife.length).toBe(1);
     expect(secondLife.length).toBe(1);
+  });
+
+  it("optimistic-flush failure retracts the record (owner P1-1): a throwing navigateCallback yields NO ack for the failed enactment — the authoritative delivery re-enacts and only then acks", async () => {
+    // protocol.md §5's enact-THEN-ack ordering ("the session's client
+    // subscribes..., enacts, then commits an authored ack write"). At
+    // the pre-fix head the optimistic record survived its own flush
+    // failure: the channel converged the authoritative intent on the
+    // recorded nonce and acked it, the next wave retired the entry,
+    // and the navigation was lost permanently (owner review P1 —
+    // "the server can retire a failed effect"). Post-fix: the failed
+    // flush retracts the enacted-nonce record, so the authoritative
+    // delivery re-enacts (the callback has recovered) and the ack
+    // follows the SUCCESSFUL enactment.
+    const navigations: string[] = [];
+    let failuresRemaining = 1;
+    ({ manager: clientManager, runtime: clientRuntime } = openClient(
+      aliceSigner,
+      {
+        navigate: (target) => {
+          if (failuresRemaining > 0) {
+            failuresRemaining -= 1;
+            throw new Error("enactment failed (test-injected)");
+          }
+          navigations.push(target.getAsNormalizedFullLink().id);
+        },
+      },
+    ));
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, NAVIGATE_PATTERN, {
+      arg: "optfail-arg",
+      result: "optfail-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    result.key("go").send({});
+    // The optimistic flush consumes the injected failure...
+    await waitUntil(
+      () => failuresRemaining === 0,
+      "the optimistic flush to fail",
+    );
+    // ...the authoritative intent lands on the channel, is re-enacted
+    // (the callback now works), acked, and retired — exactly ONE
+    // successful navigation end to end.
+    await waitUntil(
+      () => navigations.length === 1,
+      "the authoritative delivery to re-enact after the failed flush",
+    );
+    const sessionId = clientManager.id;
+    await waitUntil(
+      () => {
+        const value = effectsInstanceOf(engine, aliceSigner.did(), sessionId);
+        const entries = Array.isArray(value.entries) ? value.entries : [];
+        const acks = value.acks ?? {};
+        return entries.length === 0 && Object.keys(acks).length === 0;
+      },
+      "the ack to follow the successful enactment and the entry to retire",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(navigations.length).toBe(1);
+
+    cancelDemand();
+  });
+
+  it("authoritative-enactment failure leaves the entry UN-ACKED (owner P1-1): no ack, no retirement — the next delivery retries and acks only on success", async () => {
+    // The channel's own enactment arm (effects-channel.ts — the owner
+    // review's cited line): pre-fix the ack fired unconditionally,
+    // BEFORE the async navigateCallback settled and regardless of its
+    // outcome, so a rejecting callback lost the navigation permanently
+    // (acked → retired, nothing ever retried). Post-fix the ack is
+    // chained on enactment SUCCESS; failure retracts the record and
+    // leaves the entry unacked in the store, and the next delivery of
+    // the instance re-enacts.
+    //
+    // Shape: a HEADLESS first life fires (no optimistic arm, the
+    // intent stays unacked in the store — the headless posture), then
+    // a second life over the same session brings a callback that
+    // throws ONCE. Its resubscribe re-read enacts → fails → the entry
+    // must survive unacked; an own-instance authored touch then
+    // triggers the retry delivery, which enacts (callback recovered)
+    // and acks.
+    const pinnedSession = crypto.randomUUID();
+    ({ manager: clientManager, runtime: clientRuntime } = openClient(
+      aliceSigner,
+      { sessionId: pinnedSession },
+    ));
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, NAVIGATE_PATTERN, {
+      arg: "authfail-arg",
+      result: "authfail-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    result.key("go").send({});
+    await waitUntil(
+      () => intentsOf(engine, aliceSigner.did(), pinnedSession).length === 1,
+      "the intent to land unacked (headless first life)",
+    );
+    cancelDemand();
+
+    // Life 2 over the same session: a callback that fails once.
+    const navigations: string[] = [];
+    let failuresRemaining = 1;
+    await clientRuntime.dispose({ closeStorage: false });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+      navigateCallback: (target) => {
+        if (failuresRemaining > 0) {
+          failuresRemaining -= 1;
+          throw new Error("enactment failed (test-injected)");
+        }
+        navigations.push(target.getAsNormalizedFullLink().id);
+      },
+    });
+    // The resubscribe re-read enacts and FAILS.
+    await waitUntil(
+      () => failuresRemaining === 0,
+      "the second life's re-read enactment to fail",
+    );
+    // The entry survives UN-ACKED: nothing acked a failed enactment,
+    // so no retirement can consume it (bounded settle, then the
+    // store's truth).
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    {
+      const value = effectsInstanceOf(engine, aliceSigner.did(), pinnedSession);
+      const entries = Array.isArray(value.entries) ? value.entries : [];
+      expect(entries.length).toBe(1);
+      expect(Object.keys(value.acks ?? {})).toEqual([]);
+      expect(navigations.length).toBe(0);
+    }
+    // The retry delivery: an own-instance authored touch (the
+    // session's write authority over its own instance) pushes the
+    // instance, the channel re-reconciles, the enactment succeeds,
+    // the ack follows, and the next wave retires the entry.
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.getCellFromLink<number>({
+        space,
+        id: SERVER_EXECUTION_EFFECTS_DOC_ID as never,
+        scope: "session",
+        path: ["retryPoke"],
+      }).withTx(tx).set(1);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await waitUntil(
+      () => navigations.length === 1,
+      "the retry delivery to enact after the callback recovered",
+    );
+    await waitUntil(
+      () => {
+        const value = effectsInstanceOf(
+          engine,
+          aliceSigner.did(),
+          pinnedSession,
+        );
+        const entries = Array.isArray(value.entries) ? value.entries : [];
+        const acks = value.acks ?? {};
+        return entries.length === 0 && Object.keys(acks).length === 0;
+      },
+      "the ack to land after the successful retry and the entry to retire",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(navigations.length).toBe(1);
   });
 
   it("the receipt-race divert pin (review MINOR-3): the flag-ON client's navigate-deferred start commits NOTHING authored — zero authored-class commits ever touch the served navigation's target doc", async () => {
@@ -1020,13 +1313,20 @@ describe("Phase 4 client-effect channel", () => {
     cancelDemand();
   });
 
-  it("the NO-CONTEXT refusal (builtins.md §4): a navigateTo outside any client-fired event's consequences writes no intent and does not wedge the wave", async () => {
+  it("the NO-CONTEXT runtime error (builtins.md §4): a navigateTo outside any client-fired event's consequences raises the §4 error, writes no intent, and does not wedge the wave", async () => {
     // A STATICALLY wired navigateTo (not handler-returned): its target
     // arrives via an ordinary authored write, so the served run carries
-    // no firing-event context — the split contract's refusal arm
-    // (implemented as a loud refusal-without-throw: a re-instantiated
-    // past instance is indistinguishable at the action — the Phase-4
-    // PR's flagged surface iii).
+    // no firing-event context. builtins.md §4 classifies pure-derivation
+    // navigation and the sessionless chain as the SAME runtime ERROR
+    // ("navigateTo MUST be reachable only from the consequences of a
+    // client-fired event... Enforce with a runtime check"), and the
+    // owner review (P1, 2026-08-12) ruled the earlier warn-and-return
+    // arm a spec deviation: the served run must THROW, like the
+    // sessionless and LT3 arms. The error is charged to the run
+    // (scheduler.onError) and the wave continues — a re-instantiated
+    // past instance re-running into this arm after a restart surfaces
+    // the same loud error (the acknowledged cost of the ruling; its
+    // navigation already happened and nothing further is lost).
     ({ manager: clientManager, runtime: clientRuntime } = openClient(
       aliceSigner,
     ));
@@ -1075,7 +1375,14 @@ describe("Phase 4 client-effect channel", () => {
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
 
-    host = newHost();
+    // Capture served-run errors from construction (before any wave):
+    // the §4 error must be CHARGED to the run, not merely logged.
+    const servedErrors: unknown[] = [];
+    host = newHost(undefined, (runtime) => {
+      runtime.scheduler.onError((error) => {
+        servedErrors.push(error);
+      });
+    });
     // Kick the serving side (activation + demand): an authored write.
     {
       const kick = clientRuntime.getCell<{ n: number }>(
@@ -1088,13 +1395,32 @@ describe("Phase 4 client-effect channel", () => {
       kick.withTx(tx).set({ n: 1 });
       expect((await tx.commit()).error).toBeUndefined();
     }
-    // Let the serving side settle a few cycles, then assert: NO intent
-    // exists in ANY effects instance (the refusal wrote nothing), and
-    // the loop is healthy (the watermark advanced past the kick).
+    // The §4 runtime error is raised and charged to the served run.
+    await waitUntil(
+      () =>
+        servedErrors.some((error) =>
+          /no firing-event context/.test(String(error))
+        ),
+      "the builtins.md §4 no-context error to be charged to the run",
+    );
+    // The charging wave settles (the watermark advances past the
+    // kick): the throw did not wedge the wave that raised it.
     await waitUntil(
       () => (host!.spaceServer(space)?.watermark ?? 0) > 0,
       "the serving loop to settle the kick",
     );
+    // Deliberately NOT the settleAnotherWaveFamily barrier here: an
+    // authored input landing in the tight window after a DEMANDED
+    // effect builtin's failure arms a scheduler liveness wedge — the
+    // failed action's retry parks idle-blocking and STARVES (no second
+    // charge ever appears), every subsequent flush exhausts its
+    // deadline, and W freezes below the new input (observed ≥30s with
+    // no recovery; a throwing `computed` under the IDENTICAL schedule
+    // does not wedge, so the class is the demanded-EFFECT retry park,
+    // not the throw itself). FLAGGED as verification-coverage.md OW26
+    // and in the Phase-4 fixer report — until that scheduler adjacency
+    // is fixed, this test bounds the drain with a fixed settle window
+    // instead of racing an input into the wedge.
     await new Promise((resolve) => setTimeout(resolve, 300));
     const instances = engine.database.prepare(
       `SELECT scope_key FROM head WHERE id = :id AND op != 'delete'`,
@@ -1175,8 +1501,13 @@ describe("Phase 4 client-effect channel", () => {
       },
       "the sessionless event's handler consequence to land",
     );
-    // Let the wave family settle, then assert: no NEW intent anywhere —
-    // not in alice's instance, not in a service-keyed one.
+    // Bounded settle, then assert: no NEW intent anywhere — not in
+    // alice's instance, not in a service-keyed one. NOT a
+    // kick-and-await-W barrier: an authored input racing the window
+    // right after the §4 throw intermittently arms the OW26
+    // demanded-effect retry wedge (see the no-context test) and
+    // freezes W — the fixed drain stays until that scheduler
+    // adjacency is fixed.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(
       intentsOf(engine, aliceSigner.did(), clientManager.id).length,
@@ -1252,6 +1583,8 @@ describe("Phase 4 client-effect channel", () => {
       },
       "the LT3 event's handler consequence to land",
     );
+    // Bounded settle (not a kick-and-await-W barrier — the OW26 wedge;
+    // see the sessionless test above).
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(
       intentsOf(

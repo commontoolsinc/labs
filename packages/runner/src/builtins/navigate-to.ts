@@ -145,22 +145,28 @@ export function navigateTo(
     const context = navigateEventContextOf(action);
     if (context === undefined) {
       // No event context: either a navigateTo computed OUTSIDE the
-      // consequences of a client-fired event (builtins.md §4's runtime
-      // refusal — pure-derivation navigation has no session to address),
-      // or a RE-INSTANTIATED builtin from a past fire re-running after a
-      // restart/re-demand (its navigation already happened; the durable
-      // intent entry and the client-side LT8 journey own any
-      // re-enactment). The two are indistinguishable here — the tag
-      // lives with the instantiating run — so this arm REFUSES the
-      // navigation without wedging the action: no intent is written,
-      // nothing navigates, and the refusal is loud in the log.
-      logger.warn("served-navigate-refused", () => [
+      // consequences of a client-fired event (pure-derivation
+      // navigation has no session to address), or a RE-INSTANTIATED
+      // builtin from a past fire re-running after a restart/re-demand
+      // (its navigation already happened; the durable intent entry and
+      // the client-side LT8 journey own any re-enactment). The two are
+      // indistinguishable here — the tag lives with the instantiating
+      // run — and builtins.md §4 classifies the no-context run with
+      // the sessionless chain as the SAME runtime ERROR ("Enforce with
+      // a runtime check"), so this arm THROWS like the sessionless and
+      // LT3 arms below (owner review P1, 2026-08-12 — the earlier
+      // warn-and-return was a spec deviation). The error is charged to
+      // the run; the wave is not wedged; no intent is written. A
+      // re-instantiated past instance surfaces the same loud error —
+      // the acknowledged cost of the ruling; nothing further is lost
+      // (its navigation already happened).
+      throw new Error(
         "navigateTo refused: no firing-event context — navigateTo must " +
-        "be reachable only from the consequences of a client-fired " +
-        "event (builtins.md §4); a re-instantiated instance whose " +
-        "navigation already happened re-runs into this arm harmlessly",
-      ]);
-      return;
+          "be reachable only from the consequences of a client-fired " +
+          "event (builtins.md §4); a re-instantiated instance whose " +
+          "navigation already happened re-runs into this same error " +
+          "harmlessly",
+      );
     }
     const acting = context.acting;
     if (acting?.session === undefined) {
@@ -286,22 +292,24 @@ export function navigateTo(
     // resolve — extended-storage-transaction.ts); handle BOTH shapes,
     // loudly, and COUNT them (serving-loop.md §7's
     // servedIntentSealFailures). Recovery on failure is STORE-derived
-    // (independent review M2): a wave-conflict requeue withdraws the
-    // intent with the event's other contributions (the per-event fold
-    // in wave.ts's resolveConflicts), the wave-2 re-run reads the
-    // result cell FALSE and re-issues under the same deterministic
-    // nonce — no closure state to roll back. An ISOLATED seal failure
-    // (no requeue, inputs unchanged) leaves the intent unissued until
-    // the next input change — the same input-driven re-land posture as
-    // the watermark doc's dropped write (space-server.ts); flagged in
-    // the Phase-4 PR.
+    // (independent review M2) and the event is NEVER consequenced-clean
+    // over a failed intent (owner review P1-2): a wave-conflict requeue
+    // withdraws the intent with the event's other contributions (the
+    // per-event fold in wave.ts's resolveConflicts), and an ISOLATED
+    // seal failure requeues the owning event through the seal
+    // destination's failure note (space-server.ts's seal wrapper →
+    // wave.ts's noteSealFailure — the handler's `consequenced` mark
+    // withdraws with it, the entry stays pending). Either way the
+    // re-drain's re-run reads the result cell FALSE and re-issues
+    // under the same deterministic nonce — no closure state to roll
+    // back, and the engine's nonce dedupe absorbs the re-append.
     intentTx.commit().then(({ error }) => {
       if (error !== undefined) {
         runtime.notifyServedIntentSealFailure?.();
         logger.error(
           "intent-commit-failed",
-          `navigate intent ${nonce} failed to seal — a requeue's ` +
-            "re-run or the next input change re-issues",
+          `navigate intent ${nonce} failed to seal — the owning event ` +
+            "requeues and the re-drain re-issues",
           error,
         );
       }
@@ -309,8 +317,8 @@ export function navigateTo(
       runtime.notifyServedIntentSealFailure?.();
       logger.error(
         "intent-commit-failed",
-        `navigate intent ${nonce} seal rejected — a requeue's re-run ` +
-          "or the next input change re-issues",
+        `navigate intent ${nonce} seal rejected — the owning event ` +
+          "requeues and the re-drain re-issues",
         error,
       );
     });
@@ -397,8 +405,9 @@ export function navigateTo(
       }`,
       kind: "navigateTo",
       // The convergence key (protocol.md §5): the overlay destination
-      // records it as ENACTED after a successful flush, and the effects
-      // channel acks the authoritative intent without re-enacting.
+      // BEGINS it on the effects channel before this flush's callback
+      // runs, and the channel acks the authoritative intent without
+      // re-enacting.
       nonce,
       flush: async () => {
         if (navigationAttempt !== thisAttempt) return;
@@ -406,11 +415,16 @@ export function navigateTo(
           navigateCallback(resolvedTarget)
         );
         runtime.trackAsyncWork(work, parentCell);
-        try {
-          await work;
-        } catch (error) {
-          console.error("navigateTo callback failed:", error);
-        }
+        // Failure PROPAGATES (owner review P1-1, unlike the OFF arm's
+        // legacy swallow below): the overlay hands this flush's outcome
+        // to the effects channel, which retracts the enacted-nonce
+        // record on failure so the authoritative intent re-enacts on a
+        // later delivery — swallowing here would let the channel ack a
+        // navigation that never happened, and the server would retire
+        // it (permanent loss). The overlay logs the failure
+        // (speculative-enact-failed); the channel logs the retraction
+        // (enact-failed).
+        await work;
       },
     });
     resultCell.withTx(tx).set(true);

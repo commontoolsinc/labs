@@ -129,10 +129,17 @@ describe("sx2 effect channel (Phase 4 gates)", () => {
       await cc.runtime.storageManager.synced();
       await effectsCell.sync();
       const value = effectsCell.get();
+      // STRICT (cubic review): the OFF arm writes NOTHING to the
+      // effects doc — no channel exists, no served intent, no ack, no
+      // retirement — so the instance must be strictly absent. Accepting
+      // a present-but-empty doc would let a spuriously-created effects
+      // instance (an OFF-arm effects-processing regression) pass the
+      // very gate meant to catch it.
       assert(
-        value === undefined ||
-          (value.entries ?? []).length === 0,
-        "no effects instance exists in the OFF arm",
+        value === undefined,
+        `no effects instance may exist in the OFF arm; got ${
+          JSON.stringify(value)
+        }`,
       );
       return;
     }
