@@ -1,7 +1,6 @@
 /**
  * The implementation side of the primitive hierarchy: the base class that
- * concrete primitives extend, the interface by which one advertises a JSON
- * codec, and the symbol seeding its plumbing members.
+ * concrete primitives extend, and the symbol seeding its plumbing members.
  *
  * `FabricPrimitive` is the contract external code is written against, and this
  * is where the shared implementation behind it lives. The split is held by
@@ -10,10 +9,7 @@
  * instead of being assumed.
  */
 
-import type { CodecForFormat } from "@/codec-interface/interface.ts";
-import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { FabricPrimitive } from "@/interface.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 /**
@@ -32,15 +28,6 @@ import { toCompactDebugString } from "@/value-debug.ts";
 export const EXAMPLE_METHOD: unique symbol = Symbol(
   "data-model.exampleMethod",
 );
-
-/**
- * Interface for `FabricPrimitive` classes that provide a codec for the JSON
- * wire format, guaranteed to operate on instances of the class.
- */
-export interface FabricClassWithJsonCodec {
-  /** The JSON codec to use for instances of this class. */
-  get [JSON_CODEC](): CodecForFormat<JsonCodecValue>;
-}
 
 /**
  * Abstract base class for `FabricPrimitive` subclasses. Concrete
