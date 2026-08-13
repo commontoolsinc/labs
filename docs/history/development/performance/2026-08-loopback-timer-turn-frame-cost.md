@@ -22,9 +22,9 @@ The cost was the price of waking Deno's event loop for a zero-delay
 were taken on, paid twice per round trip. Once in the loopback transport, which
 took a timer per server frame. Once in the memory server, whose subscription
 refresh the same commit moved onto a zero-delay timer of its own. Nothing about
-the work the runtime did changed: the same run exchanges the same number of
-frames before and after, and spends about 2.5 extra milliseconds on each of
-them doing nothing.
+the work the runtime did changed: the same run exchanges the same frames to
+within a few percent, and spends about 2.5 extra milliseconds on each of them
+doing nothing.
 
 The fix keeps the delivery model the commit was buying and takes the waiting
 out of it. Both places now schedule through one helper, `armTurn` in
@@ -119,9 +119,13 @@ inside `loopback`:
 | b96b47a24, the commit | 1525 ms | 588 | 588 |
 | b96b47a24 plus the transport fix | 150 ms | 550 | 550 |
 
-The frame count is the same in all three. The commit added 1384 ms across 588
-frames, which is 2.4 ms a frame, and the timer measurement above says a frame's
-timer costs 2.3 ms. There is no other cost in it.
+The frame count barely moves and does not track the wall clock. It varies by a
+few percent from run to run, because how many frames a fan-out coalesces into
+depends on the timing of the commits it covers: 560, 588 and 550 across the
+three, a spread of 7% between the extremes, while the wall clock goes up by a
+factor of 10.8 and back down again. Dividing the commit's extra 1384 ms over
+its 588 frames gives 2.4 ms a frame, and the timer measurement above says a
+frame's timer costs 2.3 ms. There is no other cost in it.
 
 The second timer shows up in the benchmark that does nothing but commit —
 `Cell.set() - multiple transactions, one set each`, a hundred `await
