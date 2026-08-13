@@ -5,7 +5,7 @@ This document designs
 projection key the reader does not recognize — and the larger rule that refusal
 is only half of. It is written to be checkable: every claim about current
 behavior below was read out of the named code or measured against it, and the
-three places where it corrects the plan it is designing say so in those words.
+symbol it was read from is named beside it.
 
 The command surface it governs is `--schema` on the read commands. The design
 in [shaped reads and verb results](shaped-reads-and-verb-results.md) says what a
@@ -38,8 +38,14 @@ design:
 - The **output schema** — re-asserted on the result in `deriveSelectedValue` as
   `result.key("value").asSchema(outputSchema)`, and carried as the declared
   result of the computed pattern that performs the read. This is the **read
-  boundary**: past it, a schema is the runner's to enforce, and the runner
-  enforces everything a JSON Schema can say.
+  boundary**: past it, a schema is the runner's to act on.
+  `SchemaObjectTraverser` (`packages/runner/src/traverse.ts`) acts on the
+  traversal semantics it supports — the declared `type`, the descent through
+  `properties` and `items`, and `required`, which decides whether an object is
+  read at all. Value constraints are not among them: `minLength`, `minimum`,
+  `minItems` and their neighbours appear nowhere in that traversal. `required`
+  being one of the keywords it does act on is what makes a caller's schema
+  crossing this boundary consequential.
 
 `resolveProjection` builds all three, and it builds them two different ways.
 For the concise spelling it derives the output schema through
@@ -82,10 +88,10 @@ is disclosure-shaped: the caller's schema is the only thing standing between a
 value and its reader, and a single transposed letter removes it while reporting
 success.
 
-The widening case is the stronger motivation for this item, and it is the half
-the plan does not carry. The plan inherits "a typo selects nothing and says
-nothing" from a record written about the no-`type` case alone. Both are real,
-they are opposite, and only one of them is in the plan today.
+The widening case is the stronger motivation for this item. The two are
+opposite, both are real, and the narrowing one is the easier to reach for
+because it is what a missing `type` was fixed for twice already. A design that
+only stops narrowing leaves the disclosure-shaped half standing.
 
 **A recognized key can empty a read entirely.** [#5734]: a projection naming a
 `required` field it does not project returns nothing at all, exit 0. `required`
@@ -107,9 +113,9 @@ decides the shape of the fix.
 Refusing unrecognized keys does not achieve this, and `required` is the proof.
 It is recognized. It is consulted — `OBJECT_PROJECTION_KEYS` lists it, so
 `impliedProjectionType` reads it to infer an object. And it is then forwarded
-verbatim into a schema the runner honors. A classification exercise that ended
-at "known keys pass, unknown keys are refused" would file `required` under
-*known*, forward it, and leave [#5734] exactly where it is.
+verbatim into a schema whose `required` the runner acts on. A classification
+exercise that ended at "known keys pass, unknown keys are refused" would file
+`required` under *known*, forward it, and leave [#5734] exactly where it is.
 
 So the design has two halves, and the second is the load-bearing one:
 
@@ -119,9 +125,10 @@ So the design has two halves, and the second is the load-bearing one:
    it already is on the concise path.
 
 Half 2 is what makes the tiers below meaningful. Once the outgoing schema is
-constructed, a tier does not describe what gets forwarded — nothing is
-forwarded — it describes what a caller is allowed to write and what the reader
-does with it.
+constructed, a tier does not describe what gets forwarded — no key crosses the
+boundary because a caller wrote it — it describes what a caller is allowed to
+write and what the reader does with it. What the reader then puts in the schema
+it builds is a separate question, answered from the source schema.
 
 Note that `selectSourceSchema` already carries the exact rule half 2 needs,
 with a comment giving exactly this reason:
@@ -132,21 +139,25 @@ the object unsatisfiable, which reads as an absent value for the whole
 selection rather than for the one position that declined to be read.
 ```
 
-It filters `required` down to the properties that survived selection. It runs
-on the source-read schema and on the concise path's output schema, and never on
-the JSON path's. **This item applies an existing rule to a second call site
-rather than inventing one.**
+It takes the *source* schema's `required`, filters it to the properties that
+survived selection, and re-emits it — so the schema the reader constructs does
+carry `required`, on the reader's own authority and with the source's meaning.
+That construction runs on the source-read schema and on the concise path's
+output schema, and never on the JSON path's. **This item applies an existing
+rule to a second call site rather than inventing one**, and the rule it applies
+is *derive the constraint*, not *delete the keyword*.
 
 ## Four tiers
 
-The plan proposes three — honored, tolerated, refused. Four are needed, because
-one group of keys is neither honored nor inert: the CLI reads it, acts on it,
-and must then stop it from going any further.
+Honored, consulted, tolerated, refused. **Consulted** is the one a three-tier
+split has nowhere to put: a group of keys that is neither honored nor inert,
+because the CLI reads it, acts on it, and must then stop it from going any
+further.
 
 | Tier | Meaning | Members |
 | --- | --- | --- |
 | **H** — Honored | Drives the projection | `type`, `properties`, `items`, `additionalProperties`, `$link` |
-| **C** — Consulted | Read for container inference, then dropped | `required`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems` |
+| **C** — Consulted | Read for container inference; the caller's constraint goes no further | `required`, `minProperties`, `maxProperties`, `minItems`, `maxItems`, `uniqueItems` |
 | **T** — Tolerated | Accepted, changes nothing | `ANNOTATION_KEYS` less the three tier R already claims |
 | **R** — Refused | Named in an error | Everything else |
 
@@ -157,14 +168,30 @@ and must then stop it from going any further.
 having been lifted out one step earlier — which is why the marker is honored
 without ever being a keyword the mask has to understand.
 
-**C** is the tier the plan is missing, and calling its members "tolerated"
-would be false. `impliedProjectionType` decides whether an untyped position is
-an object or an array by looking for exactly these six keys — that is the
-container inference a caller relies on for nested positions, and it is
-behavior, not decoration. Their treatment is: **consumed during inference, then
-absent from what the reader constructs.** A key that changed the read and was
-then dropped is a third thing, and a registry that records a class rather than
-a spelling — which the plan rightly asks for — has to be able to say so.
+**C** is the tier that earns the fourth slot, and calling its members
+"tolerated" would be false. `impliedProjectionType` decides whether an untyped
+position is an object or an array from nine keys, and these six are the ones
+tier H does not already claim: `ARRAY_PROJECTION_KEYS` holds `items`,
+`minItems`, `maxItems` and `uniqueItems` and is tested first,
+`OBJECT_PROJECTION_KEYS` holds `properties`, `additionalProperties`,
+`required`, `minProperties` and `maxProperties`. The six tier C members
+participate on equal footing with the honored three — a position naming only
+`minItems` reads as an array — which is the container inference a caller relies
+on for nested positions, and it is behavior, not decoration.
+
+Their treatment is: **the caller's tier C constraint is consumed during
+inference and is not propagated.** That is a claim about the caller's key, not
+about the keyword. The reader may legitimately emit the same keyword from a
+different origin: `selectSourceSchema` reconstructs `required` from the *source*
+schema, filtered to the properties that survived selection, and that `required`
+carries the source's meaning across the read boundary. Discarding what the
+caller wrote must leave that derivation intact — the two are one spelling over
+two origins, and only one of them is the caller's to supply. A key that changed
+the read, was then discarded, and whose spelling the reader may re-emit on its
+own authority is a third thing. A registry that records a class rather than a
+spelling has to be able to say so — which is the reason to record a class at
+all: a key admitted without its kind has its treatment decided by whatever the
+reader happens to default to.
 
 **T** is derived, not restated. Its source is `ANNOTATION_KEYS`
 (`packages/piece/src/schema-compatibility.ts`), the compatibility checker's
@@ -182,14 +209,17 @@ good reasons that survive this change — `default` is controlled by the source
 schema, and the two definition keys have no meaning without the `$ref` that
 projection also refuses.
 
-## Three corrections this design makes to the plan
+## Three things the coupling has to respect
 
-### 1. "One edit admits a key to both" is not true
+Tier T couples the projection reader to the compatibility checker. Three
+properties of that coupling are easy to state wrongly, and each one wrong costs
+something concrete: a red test, a derivation that admits keys projection cannot
+honor, and a refusal message that sends a caller somewhere that does not exist.
 
-The plan states that deriving the tolerated set from `ANNOTATION_KEYS` means one
-edit admits a key to both registries, and that where derivation is impossible
-the fallback is "a test asserting every annotation key the checker knows is
-non-refused by the projection reader."
+### 1. The derivation is not one-to-one
+
+Deriving tier T from `ANNOTATION_KEYS` does not mean one edit admits a key to
+both registries.
 
 `ANNOTATION_KEYS` has twelve members: `$comment`, `$defs`, `$id`, `$schema`,
 `default`, `definitions`, `deprecated`, `description`, `examples`, `tags`,
@@ -198,10 +228,11 @@ refused by projection and must stay refused. So the relation is not identity but
 **`ANNOTATION_KEYS` minus a stated exception set**, and admitting a key to the
 compat dialect admits it to projection only if it is not one of the three.
 
-The consequence for the fallback test is concrete: **as the plan words it, that
-test is red the day it is written**, because three of the twelve keys it asserts
-are non-refused are refused on purpose. What it should assert instead is the
-exception relation itself:
+The consequence for the fallback test — the one that guards the coupling where
+the derivation itself cannot — is concrete. **A test asserting that every
+annotation key the checker knows is non-refused by the projection reader is red
+the day it is written**, because three of the twelve are refused on purpose.
+What it asserts instead is the exception relation itself:
 
 > Every member of `ANNOTATION_KEYS` is either tolerated by the projection
 > reader or listed in projection's stated exception set, and every member of
@@ -225,9 +256,9 @@ it is what catches an exception list that stops matching its source.
 
 ### 2. The validation half must not be derived
 
-The plan's tolerated tier is described as "the annotation and validation
-keywords". Deriving the annotation half is right. Deriving the validation half
-from the same file would be wrong, and the wrongness is not subtle.
+Tier T is the annotation keywords, derived. The validation keywords a
+projection tolerates are not derivable from the same file, and the reason is not
+subtle.
 
 The compatibility checker's set of keys it can reason about is assembled in
 `unknownKeywordIssue` as a union of `ANNOTATION_KEYS`,
@@ -244,42 +275,39 @@ So: derive the annotation tier from `ANNOTATION_KEYS`, and write the validation
 tier out by hand as a list this document's tiers H and C define. The tier table
 above is that list.
 
-### 3. The remediation advice does not work on this surface
+### 3. A refusal cannot tell a caller to lift a source schema
 
-The plan says a caller met by a refusal is told to lift a source schema and
-prune it, and reasons from there that the tolerated tier must exist to receive
-what a lifted schema carries.
+"Lift the source schema and prune it" is the natural remediation for a refusal
+over a schema-shaped argument, and it does not work on this surface, for a plain
+reason: **no CLI surface prints the read-side source schema.** `cf piece
+inspect` prints values. `cf piece get` has no flag that emits the schema it read
+against. There is nothing to lift.
 
-The tier still has to exist. The advice does not work here, for a plain reason:
-**no CLI surface prints the read-side source schema.** `cf piece inspect` prints
-values. `cf piece get` has no flag that emits the schema it read against. There
-is nothing to lift.
+It is sound one surface over. Item 12's refusal is about a verb's event fields,
+and `cf piece verbs --json` carries `inputSchema` on every row
+(`PieceCallableListing`, `packages/cli/lib/piece.ts`) — the same schema
+`cf piece call <verb> --help --json` serves. A caller refused there can be told
+exactly where to look.
 
-The advice is sound one surface over, which is likely where it came from. Item
-12's refusal is about a verb's event fields, and `cf piece verbs --json` carries
-`inputSchema` on every row (`PieceCallableListing`, `packages/cli/lib/piece.ts`)
-— the same schema `cf piece call <verb> --help --json` serves. A caller refused
-there can be told exactly where to look.
-
-What a read-side refusal should say instead is what the reader knows without
-any source at all: the key that was refused, the position it appeared at, and
-the vocabulary that position accepts. The denylist refusals in
+What a read-side refusal says instead is what the reader knows without any
+source at all: the key that was refused, the position it appeared at, and the
+vocabulary that position accepts. The denylist refusals in
 `normalizeProjectionSchema` already carry the first two —
 
 ```text
 Invalid --schema at <root>.notes: "allOf" is not supported by projection schemas
 ```
 
-— and the refusal this item adds should carry the third as well, because for an
+— and the refusal this item adds carries the third as well, because for an
 unrecognized key the accepted vocabulary is the entire remediation. A caller who
 transposed two letters needs the honored key named, not a document that cannot
 be fetched.
 
-Two smaller notes follow from this. A tolerated tier derived from the compat
-checker's annotation keys is still right, because schemas *do* get copied
-between surfaces even without a command that prints them. And this refusal and
-item 12's should share one vocabulary for what a refusal says — a caller meets
-both through `cf piece call`.
+Two smaller notes follow from this. Tier T is still worth deriving from the
+compat checker's annotation keys, because schemas *do* get copied between
+surfaces even without a command that prints them. And this refusal and item 12's
+share one vocabulary for what a refusal says — a caller meets both through
+`cf piece call`.
 
 ## Blast radius
 
@@ -316,11 +344,11 @@ itself runs.
 ## Scope
 
 **In scope.** The JSON Schema spelling of `--schema`, on every command that
-takes it. [#5734] belongs here: the `required` filter and dropping tier C's keys
-from the constructed schema are the same edit as the refusal, landing in the
-same branch of `resolveProjection`, and shipping a loud refusal for typos while
-leaving an unsatisfiable `required` silently returning nothing would be a
-strange thing to have done deliberately.
+takes it. [#5734] belongs here: deriving the constructed schema's `required`
+from the source rather than carrying the caller's is the same edit as the
+refusal, landing in the same branch of `resolveProjection`, and shipping a loud
+refusal for typos while leaving an unsatisfiable `required` silently returning
+nothing would be a strange thing to have done deliberately.
 
 **Out of scope.** `--select`, entirely. Its grammar is comma-separated field
 paths — `parseSelectProjection` refuses a JSON Schema argument outright and
@@ -336,15 +364,25 @@ happens to a key, never what a key means.
 ## What "done" looks like
 
 - A key in no tier is refused, and the message names the key and its position.
-- A tier C key is read for container inference and does not appear in the schema
-  the read boundary receives.
+- A caller-written tier C key is read for container inference and no
+  caller-written tier C constraint reaches the read boundary.
+- The reader's own derivation is untouched by the bullet above: a read whose
+  source schema marks a projected property required still carries `required`
+  past the read boundary, filtered to the projected properties, exactly as
+  `selectSourceSchema` builds it.
+- A test holds those two apart — a caller's `required` does not survive into the
+  constructed schema, and a source-derived `required` does.
+  `packages/cli/test/piece-get-transform.test.ts` asserts the second today in
+  "narrows the initial source selector to predicate and projection fields",
+  which reads the selector handed to the storage provider and expects `required`
+  filtered to the projected properties.
 - A tier T key is accepted and changes nothing about what is read.
 - A projection naming a `required` field it does not project reads the fields it
   does project, rather than nothing.
 - A misspelled `properties` beside a stated `type` is refused, rather than
   returning the whole object.
-- A test asserts the `ANNOTATION_KEYS` relation in both directions, per
-  correction 1.
+- A test asserts the `ANNOTATION_KEYS` relation in both directions, as the
+  first of the three coupling constraints words it.
 - A test asserts a **read outcome** for a projection carrying `required`, not
   only its normalized schema — the coverage [#5734] identifies as missing from
   `packages/cli/test/piece-get-transform.test.ts`.
@@ -355,17 +393,19 @@ That is the point of the item rather than a regression against it.
 ## What is not settled here
 
 - **Whether `ANNOTATION_KEYS` is exported as a set or behind a predicate.**
-  Either satisfies correction 1. A predicate keeps the membership question in
-  the package that owns it; a set is simpler to assert the relation over.
+  Either satisfies the first coupling constraint above. A predicate keeps the
+  membership question in the package that owns it; a set is simpler to assert
+  the relation over.
 - **What the refusal message offers beyond the accepted vocabulary.** A
   near-miss suggestion against tier H is clearly worth it for a typo; whether
   the message enumerates all of H, or only the keys legal at that position's
   inferred container, is a wording call best made against the real output.
-- **Whether tier C's keys should be honored rather than dropped.** Dropping is
-  correct now, because nothing in the CLI enforces them and the runner enforcing
-  them produces [#5734]. If a later change wants `minItems` to mean something on
-  a projection, the registry will record that it was deliberately ignored rather
-  than overlooked — which is the whole reason the plan asks for a class rather
-  than a spelling.
+- **Whether a caller's tier C constraint should be honored rather than
+  discarded.** Discarding it is correct now, because nothing in the CLI enforces
+  it and the runner acting on a caller's `required` produces [#5734]. If a later
+  change wants `minItems` to mean something a caller can state on a projection,
+  the registry will record that it was deliberately ignored rather than
+  overlooked — which is the whole reason to record a class rather than a
+  spelling.
 
 [#5734]: https://github.com/commontoolsinc/labs/issues/5734
