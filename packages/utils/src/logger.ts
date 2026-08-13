@@ -547,7 +547,7 @@ export type LoggerBreakdown = {
 export class Logger {
   #moduleName: string | undefined;
   #disabled: boolean;
-  public level?: LogLevel;
+  #level: LogLevel | undefined;
   #counts: { debug: number; info: number; warn: number; error: number };
   #countsByKey: Record<
     string,
@@ -577,10 +577,10 @@ export class Logger {
     // Default to false (enabled) if not specified
     this.#disabled = options?.enabled === undefined ? false : !options.enabled;
 
-    // Set logger-specific level if provided; default to "info" when unset.
-    // This keeps behavior consistent and avoids assigning undefined with
-    // exactOptionalPropertyTypes enabled.
-    this.level = options?.level ?? getEnvLevel() ?? "info";
+    // Set logger-specific level if provided, falling back to the environment
+    // and then to "info", so that every instance reports a level rather than
+    // leaving callers to interpret its absence.
+    this.#level = options?.level ?? getEnvLevel() ?? "info";
 
     // Initialize call counts
     this.#counts = { debug: 0, info: 0, warn: 0, error: 0 };
@@ -603,6 +603,19 @@ export class Logger {
   /** @inheritDoc */
   set disabled(value: boolean) {
     this.#disabled = value;
+  }
+
+  /**
+   * Minimum level at which this logger emits. A message below it is counted
+   * but not printed.
+   */
+  get level(): LogLevel | undefined {
+    return this.#level;
+  }
+
+  /** @inheritDoc */
+  set level(value: LogLevel | undefined) {
+    this.#level = value;
   }
 
   /**
@@ -684,7 +697,7 @@ export class Logger {
       this.#lastLoggedAt = threshold;
 
       // Only log if debug level is enabled
-      if (shouldLog("debug", this.level)) {
+      if (shouldLog("debug", this.#level)) {
         const { prefix, color } = this.#getLogFormat("debug");
         const moduleName = this.#moduleName || "logger";
         const message =
@@ -722,7 +735,7 @@ export class Logger {
     this.#incrementKeyCount(key, "debug");
     if (this.#disabled) return;
     this.#maybeLogCountSummary();
-    if (shouldLog("debug", this.level)) {
+    if (shouldLog("debug", this.#level)) {
       const { prefix, color } = this.#getLogFormat("debug");
       if (shouldLogToStderr()) {
         logToStderr(
@@ -747,7 +760,7 @@ export class Logger {
     this.#incrementKeyCount(key, "info");
     if (this.#disabled) return;
     this.#maybeLogCountSummary();
-    if (shouldLog("info", this.level)) {
+    if (shouldLog("info", this.#level)) {
       const { prefix, color } = this.#getLogFormat("info");
       if (shouldLogToStderr()) {
         logToStderr(
@@ -767,7 +780,7 @@ export class Logger {
     this.#incrementKeyCount(key, "warn");
     if (this.#disabled) return;
     this.#maybeLogCountSummary();
-    if (shouldLog("warn", this.level)) {
+    if (shouldLog("warn", this.#level)) {
       const { prefix, color } = this.#getLogFormat("warn");
       if (shouldLogToStderr()) {
         logToStderr(
@@ -787,7 +800,7 @@ export class Logger {
     this.#incrementKeyCount(key, "error");
     if (this.#disabled) return;
     this.#maybeLogCountSummary();
-    if (shouldLog("error", this.level)) {
+    if (shouldLog("error", this.#level)) {
       const { prefix, color } = this.#getLogFormat("error");
       if (shouldLogToStderr()) {
         logToStderr(
