@@ -58,7 +58,7 @@ export class ProblematicStateError extends Error {
   //
 
   /**
-   * Answers with an instance accounting for something a codec threw, which
+   * Returns an instance accounting for something a codec threw, which
    * JavaScript permits to be any value at all. An `Error` contributes its
    * message and is kept as `cause`, so nothing about it is lost to a caller
    * willing to look; anything else is rendered, there being no message to

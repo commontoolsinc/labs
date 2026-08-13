@@ -198,11 +198,11 @@ export class ThrowingCodec extends BaseTerminalCodec<ProbeValue> {
   }
 
   decode(
-    typeTag: string,
+    _typeTag: string,
     _state: ProbeValue,
     _context: ReconstructionContext,
   ): FabricValue {
-    throw new Error(`${typeTag}: rejected by throwing`);
+    throw new Error("rejected by throwing");
   }
 }
 
