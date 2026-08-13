@@ -24,6 +24,19 @@ export abstract class BaseReconstructionContext
     this.#shouldDeepFreeze = shouldDeepFreeze;
   }
 
+  //
+  // Subclass contract
+  //
+
+  /** Resolves a cell reference. Subclass-specific. */
+  abstract getCell(
+    ref: { id: string; path: string[]; space: string },
+  ): FabricInstance;
+
+  //
+  // Instance members
+  //
+
   /**
    * Whether a reconstruction call should produce a deep-frozen result. See
    * `ReconstructionContext.shouldDeepFreeze`.
@@ -31,9 +44,4 @@ export abstract class BaseReconstructionContext
   get shouldDeepFreeze(): boolean {
     return this.#shouldDeepFreeze;
   }
-
-  /** Resolves a cell reference. Subclass-specific. */
-  abstract getCell(
-    ref: { id: string; path: string[]; space: string },
-  ): FabricInstance;
 }

@@ -48,13 +48,13 @@ export class FabricMap
   }
 
   /** @inheritDoc */
-  protected [SHALLOW_UNFROZEN_CLONE](): FabricMap {
-    return new FabricMap(this.map);
+  protected get wrappedValue(): Map<FabricValue, FabricValue> {
+    return this.map;
   }
 
   /** @inheritDoc */
-  protected get wrappedValue(): Map<FabricValue, FabricValue> {
-    return this.map;
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricMap {
+    return new FabricMap(this.map);
   }
 
   /** @inheritDoc */

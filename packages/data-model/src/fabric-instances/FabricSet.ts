@@ -47,13 +47,13 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   }
 
   /** @inheritDoc */
-  protected [SHALLOW_UNFROZEN_CLONE](): FabricSet {
-    return new FabricSet(this.set);
+  protected get wrappedValue(): Set<FabricValue> {
+    return this.set;
   }
 
   /** @inheritDoc */
-  protected get wrappedValue(): Set<FabricValue> {
-    return this.set;
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricSet {
+    return new FabricSet(this.set);
   }
 
   /** @inheritDoc */

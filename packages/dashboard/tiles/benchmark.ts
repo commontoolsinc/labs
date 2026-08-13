@@ -155,11 +155,11 @@ const performanceBenchmarkGitHub: BenchmarkGitHub = {
 
 // deno bench reports these seven timings per benchmark (all nanoseconds).
 type Stats = BenchmarkStats;
-// Shown as one percentile ladder: min is p0, the average stands in for p50, max is
-// p100. (avg is the mean, not a true median, but reads consistently here.)
+// Shown as a ladder from the fastest sample to the slowest. Each label names
+// the timing it plots: six percentiles and the mean.
 const STATS: { label: string; field: keyof Stats }[] = [
   { label: "p0", field: "min" },
-  { label: "p50", field: "avg" },
+  { label: "mean", field: "avg" },
   { label: "p75", field: "p75" },
   { label: "p99", field: "p99" },
   { label: "p99.5", field: "p995" },
@@ -757,10 +757,37 @@ const errorMessage = (error: unknown): string =>
 
 // The geometric mean of the per-benchmark ratios between two runs on the same
 // processor, over the benchmarks they share that match `select` (each with a
-// positive average). Geometric, not arithmetic, so a benchmark that doubles and
-// one that halves cancel to no change. A benchmark in only one of the two runs
-// is not in the ratio, so adding or removing one is not a change. 1 when the
-// runs share nothing selected.
+// positive 75th percentile). Geometric, not arithmetic, so a benchmark that
+// doubles and one that halves cancel to no change. A benchmark in only one of
+// the two runs is not in the ratio, so adding or removing one is not a change.
+// 1 when the runs share nothing selected.
+//
+// The ratio compares the 75th percentile of each benchmark rather than its
+// average. `deno bench` measures each benchmark for a fixed wall-clock budget,
+// so one stalled sample raises the reported average by the stall divided by
+// that budget, whatever the sample count. A stall of a fifth of a second
+// against a budget of half a second is a quarter added to the average, which is
+// the size of the moves the trend is meant to detect. The runners stall that
+// long often enough that reading the average reports steps no commit caused.
+//
+// The 75th percentile is far enough up the distribution to move when a change
+// makes some but not all of an operation's runs slower, and far enough down
+// that a handful of stalled samples cannot reach it. The fastest sample
+// survives a stall equally well but is the floor of the distribution, so it is
+// blind to a change that leaves the floor alone and widens everything above it
+// — a slow path taken only sometimes moves nothing it can see.
+//
+// Both the product ratio and the calibration ratio read this one statistic, and
+// have to: an index step divides the second out of the first, and two different
+// statistics would not cancel.
+//
+// A change confined above the 75th percentile is still invisible here, and on
+// user-facing timings that tail is what a person actually notices. Reading it
+// from these runs would need the stalls told apart from the tail the code
+// produces, which the current sample counts do not allow: on the busiest
+// processor, `p99` puts 11% of neighbouring run pairs more than a quarter
+// apart with no change behind them, against 2% for the 75th percentile. The
+// drill-down plots the whole ladder from `min` to `max` in the meantime.
 function sharedBenchmarkRatio(
   previous: CachedBenchmarkRun,
   current: CachedBenchmarkRun,
@@ -770,8 +797,8 @@ function sharedBenchmarkRatio(
   for (const [key, stats] of current.metrics) {
     if (!select(key)) continue;
     const before = previous.metrics.get(key);
-    if (before && before.avg > 0 && stats.avg > 0) {
-      logSum += Math.log(stats.avg / before.avg);
+    if (before && before.p75 > 0 && stats.p75 > 0) {
+      logSum += Math.log(stats.p75 / before.p75);
       count++;
     }
   }
@@ -1717,7 +1744,10 @@ export function benchPage(
   repo: CiHistorySourceKey = "labs",
   options: BenchmarkPageOptions = {},
 ): string {
-  const stat = STATS.find((s) => s.label === statLabel) ??
+  // "p50" is what the mean column used to be called, so a link saved under the
+  // old name still opens the column it named.
+  const requested = statLabel === "p50" ? "mean" : statLabel;
+  const stat = STATS.find((s) => s.label === requested) ??
     STATS.find((s) => s.label === DEFAULT_LABEL)!;
   const sort = sortMode === "trend" || sortMode === "duration"
     ? sortMode
@@ -2004,7 +2034,7 @@ export function benchPage(
 
   const rangeContent = `<div id="range-content">
     ${progressHtml}${refreshNotice}
-    <p class="legend">Percentile of per-op time across a run's samples — p0 = min, p50 = mean, p100 = max. Lower is faster. Each CPU has its own coloured line. The value, trend, and row colour use the CPU with the most benchmark samples in the selected ${days}-day window; a tie uses the CPU with the newest sample. Fewer than seven distinct days are marked new. Duration and trend sorting use the displayed value and trend.</p>
+    <p class="legend">Per-op time across a run's samples — p0 = the fastest, p100 = the slowest, mean = the arithmetic mean. Lower is faster. Each CPU has its own coloured line. The value, trend, and row colour use the CPU with the most benchmark samples in the selected ${days}-day window; a tie uses the CPU with the newest sample. Fewer than seven distinct days are marked new. Duration and trend sorting use the displayed value and trend.</p>
     ${body}
     ${cpuLegend}
     <p class="note">Successful main runs come from the <a href="https://github.com/${REPO}/actions/workflows/${WORKFLOW}" target="_blank" rel="noopener">${WORKFLOW} runs ↗</a> (deno bench artifacts). Collection keeps enough samples for the shortest window, and charts reduce longer windows to about ${CI_HISTORY_POINT_TARGET} evenly spaced points.</p>

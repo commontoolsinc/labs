@@ -23,6 +23,41 @@ connects measurements from different processors. A report without a CPU
 identity is unusable for trends because its measurements cannot be assigned to
 a processor.
 
+The trend compares the 75th percentile of each benchmark between runs, not its
+average. `deno bench` measures a benchmark for a roughly fixed wall-clock
+budget, so a single stalled sample raises the reported average by the length of
+the stall divided by that budget, no matter how many samples the run collected.
+The runners stall for a fifth of a second often enough to matter, and against a
+budget of half a second that is a quarter added to the average — the size of
+the moves the trend exists to find.
+
+The 75th percentile is far enough up the distribution to move when a change
+makes some but not all of an operation's runs slower, and far enough down that
+a stalled sample or two cannot reach it. The fastest sample survives a stall
+equally well, but it is the floor of the distribution and so is blind to a
+change that leaves the floor alone and widens everything above it — a slow path
+taken only sometimes moves nothing it can see. That is why the trend does not
+read `min`.
+
+How much protection that is depends on how many samples the run collected,
+because the 75th percentile ignores the slowest quarter of them and no more. A
+benchmark that fits 31 samples into the budget absorbs seven stalls before one
+reaches the figure the trend reads; one that fits 11 absorbs two. The slowest
+benchmarks in the repository are down at that end, so a benchmark written to
+take tens of milliseconds per iteration is buying less of this protection than
+one written to take tens of microseconds.
+
+What the trend still cannot see is a change confined above the 75th percentile,
+and on a user-facing timing that tail is what a person actually notices. Reading
+it from these runs would first need the runner's stalls told apart from the tail
+the code itself produces, which the current sample counts do not allow: on the
+busiest processor `p99` puts 11% of neighbouring run pairs more than a quarter
+apart with no change behind them, against 2% for the 75th percentile. Until
+that is separable, the drill-down's ladder from `min` to `max` is where the tail
+is visible. A benchmark that measures a whole user-facing journey rather than
+one operation has a different balance here, because its tail is the thing being
+measured.
+
 The runner group does not make two runs comparable, and the processor field
 only goes part of the way. Over a forty-five day stretch the group served six
 processor models, and within one model two runs have measured a fifth apart on
@@ -127,6 +162,26 @@ over. So:
 
 `packages/runner/test/esm-verifier.bench.ts` shows the pattern: short stable
 names, per-module labels derived from source paths, sizes logged to stderr.
+
+**Time only the operation the name promises.** `Deno.bench` times the whole
+body unless the body takes the context argument and calls `b.start()` and
+`b.end()` around the part under test. A body that builds a runtime, a storage
+manager, or a fixture of documents, and then measures without that bracket,
+reports the fixture as though it were the operation. Two costs follow. The
+first is that the benchmark cannot see what it is named for: before its
+measurement was bracketed, `Cell equals - comparison operations (100x)` in
+`packages/runner/test/cell.bench.ts` spent 93% of its reported time building
+and tearing down a runtime, so doubling the cost of `Cell.equals()` would have
+moved it by 7%. The second is the reverse — a change to runtime construction or
+to commit moves every benchmark shaped like that one, which reads on the chart
+as a regression in whatever each is named for. The two `Cell getAsLink`
+benchmarks in the same file show the bracket in place.
+
+Many bench bodies in the repository still measure their fixture along with
+their operation, so this is a rule for new benches rather than a description of
+the tree. Bracketing an existing one changes the number it reports, which the
+dashboard reads as a one-off step in that benchmark's line; the name stays the
+same, so the series continues rather than restarting.
 
 **The calibration bodies stay as they are.** The bodies in
 `packages/dashboard/machine-calibration.bench.ts` are the ruler every other

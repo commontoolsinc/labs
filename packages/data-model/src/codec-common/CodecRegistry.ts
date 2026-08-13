@@ -276,32 +276,6 @@ export class CodecRegistry<Encoded> {
   }
 
   /**
-   * Registers one {@link #extend} entry, which is a class when it is callable
-   * and a codec otherwise. Nothing else in the codec system is a function, so
-   * the two cannot be confused.
-   */
-  #registerEntry(
-    entry: Constructor | CodecForFormat<Encoded>,
-  ): void {
-    if (typeof entry === "function") {
-      this.registerClass(entry);
-    } else {
-      this.register(entry);
-    }
-  }
-
-  /**
-   * Guards a mutator against a frozen instance.
-   *
-   * @throws If this instance is frozen.
-   */
-  #assertNotFrozen(): void {
-    if (Object.isFrozen(this)) {
-      throw new Error("Cannot modify frozen `CodecRegistry`");
-    }
-  }
-
-  /**
    * Finds how to encode the given value: a matched codec that can encode it,
    * {@link SELF_REP} if it is a self-representing primitive, or `undefined` if
    * neither matches (the caller falls through to structural handling for
@@ -364,6 +338,32 @@ export class CodecRegistry<Encoded> {
   /** Looks up a codec by tag for decoding. */
   codecFromTag(typeTag: string): CodecForFormat<Encoded> | undefined {
     return this.#tagMap.get(typeTag);
+  }
+
+  /**
+   * Registers one {@link #extend} entry, which is a class when it is callable
+   * and a codec otherwise. Nothing else in the codec system is a function, so
+   * the two cannot be confused.
+   */
+  #registerEntry(
+    entry: Constructor | CodecForFormat<Encoded>,
+  ): void {
+    if (typeof entry === "function") {
+      this.registerClass(entry);
+    } else {
+      this.register(entry);
+    }
+  }
+
+  /**
+   * Guards a mutator against a frozen instance.
+   *
+   * @throws If this instance is frozen.
+   */
+  #assertNotFrozen(): void {
+    if (Object.isFrozen(this)) {
+      throw new Error("Cannot modify frozen `CodecRegistry`");
+    }
   }
 
   //

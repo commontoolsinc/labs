@@ -36,6 +36,24 @@ export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
     this.#uniqueHandledClass = uniqueHandledClass;
   }
 
+  //
+  // Subclass contract
+  //
+
+  /** @inheritDoc */
+  abstract decode(
+    typeTag: string,
+    state: Encoded,
+    context: ReconstructionContext,
+  ): FabricValue;
+
+  /** @inheritDoc */
+  abstract encode(value: FabricValue): Encoded;
+
+  //
+  // Instance members
+  //
+
   /** @inheritDoc */
   get uniqueHandledClass(): Constructor | undefined {
     return this.#uniqueHandledClass;
@@ -68,14 +86,4 @@ export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
     }
     return this.#recognizedTypeTag;
   }
-
-  /** @inheritDoc */
-  abstract decode(
-    typeTag: string,
-    state: Encoded,
-    context: ReconstructionContext,
-  ): FabricValue;
-
-  /** @inheritDoc */
-  abstract encode(value: FabricValue): Encoded;
 }
