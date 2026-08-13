@@ -25,13 +25,20 @@ export const ADDRESS_HANDLE_TOKEN_PREFIX = "cfh:a:";
  */
 export const HANDLE_TOKEN_ALPHABET = "23456789abcdefghjkmnpqrstvwxyz";
 
-/** Smallest number of alphabet characters in a token suffix. */
+/**
+ * Number of alphabet characters in every minted token suffix. Minting is
+ * fixed-width: a suffix collision re-derives a fresh five-character suffix
+ * rather than extending the token, so no token is a prefix of another.
+ */
 export const MIN_HANDLE_TOKEN_SUFFIX_LENGTH = 5;
 
 /**
  * Matches address-handle tokens in free text: `cfh:a:` followed by five or
- * more {@link HANDLE_TOKEN_ALPHABET} characters. Global, and therefore
- * stateful under `exec()` — take a fresh copy via
+ * more {@link HANDLE_TOKEN_ALPHABET} characters. Detection deliberately stays
+ * open-ended even though minted suffixes are exactly five characters: a
+ * longer alphabet run swallowed whole resolves to no entry and passes through
+ * unknown, so a token abutting alphabet text is never substituted inside it.
+ * Global, and therefore stateful under `exec()` — take a fresh copy via
  * `new RegExp(HANDLE_TOKEN_PATTERN)` where a shared `lastIndex` could leak
  * between calls.
  */

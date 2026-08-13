@@ -42,6 +42,7 @@ import {
 } from "./contracts/cfc-invocation-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+import { assertValidHarnessHandleTable } from "./handle-table.ts";
 import {
   createHarnessPolicyDecisionRecord,
   type HarnessPolicyDecisionRecord,
@@ -352,8 +353,28 @@ export class CfHarnessEngine {
         "resumed run credential owner does not match requested credential owner",
       );
     }
+    // A run state with a table but no recorded mode predates the recorded
+    // field; the table itself is the evidence the run was in session mode.
+    const persistedHandleMode = options.runState === undefined
+      ? undefined
+      : options.runState.handleMode ??
+        (options.runState.handleTable !== undefined
+          ? ("session" as const)
+          : undefined);
+    if (
+      options.handleMode !== undefined && persistedHandleMode !== undefined &&
+      options.handleMode !== persistedHandleMode
+    ) {
+      throw new Error(
+        `resumed run handle mode ${persistedHandleMode} does not match requested handle mode ${options.handleMode}`,
+      );
+    }
+    if (options.runState?.handleTable !== undefined) {
+      assertValidHarnessHandleTable(options.runState.handleTable);
+    }
     this.config = resolveHarnessConfig({
       ...options,
+      handleMode: options.handleMode ?? persistedHandleMode,
       modelProvider: options.runState === undefined
         ? options.modelProvider
         : recordedProvider,
@@ -450,6 +471,11 @@ export class CfHarnessEngine {
         artifactRoot: this.artifactStore?.runRoot,
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
+        // Recorded only for session mode: a resume inherits it, and a
+        // conflicting explicit request is refused above.
+        ...(this.config.handleMode === "session"
+          ? { handleMode: this.config.handleMode }
+          : {}),
         lineage: options.lineage,
         now: this.#now(),
       });
@@ -593,8 +619,13 @@ export class CfHarnessEngine {
       : structuredClone(this.#runState.handleTable);
   }
 
-  /** Records `table` as the run's handle table and persists the run state. */
+  /**
+   * Records `table` as the run's handle table and persists the run state.
+   *
+   * @throws Error when `table` is not a well-formed version-1 handle table.
+   */
   async recordHandleTable(table: HarnessHandleTable): Promise<void> {
+    assertValidHarnessHandleTable(table);
     this.#runState = patchHarnessRunState(
       this.#runState,
       { handleTable: structuredClone(table) },

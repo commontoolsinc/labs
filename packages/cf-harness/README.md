@@ -483,21 +483,23 @@ carry a full LLM-friendly link. The flag accepts exactly `disabled` and
 `session`, the CLI flag takes precedence over the environment variable, and
 `--describe-capabilities` reports `handleMode` among its features.
 
-An address token is `cfh:a:<suffix>`, where the suffix is five or more
+An address token is `cfh:a:<suffix>`, where the suffix is exactly five
 characters drawn from a 30-character alphabet — the digits `2`–`9` and the
 lowercase letters minus `i`, `l`, `o`, and `u` — chosen so a token survives
 being retyped. The `cfh:v:` prefix is reserved for a future value-handle kind
 and is not implemented. Token derivation is deterministic: the suffix is
 computed from the table's salt (the run id) and the normalized address, so the
-same referent yields the same token within a run, two spellings of one address
-(an LLM-friendly link and the bare entity URI, say) share one token, and a
-suffix collision extends the token one character at a time.
+same referent yields the same token within a run and two spellings of one
+address (an LLM-friendly link and the bare entity URI, say) share one token. A
+suffix collision re-derives a fresh five-character suffix with a counter mixed
+into the hash, so no token is ever a prefix of another.
 
 The table supports swapping in both directions:
 
 - Outbound, positively-marked address forms become tokens: LLM-friendly link
-  strings, standalone `of:`/`computed:`-schemed entity URIs, and whole
-  single-key `{"@link": "<address>"}` objects. A bare `fid1:` hash is never
+  strings, standalone `of:`/`computed:`-schemed entity URIs (any tagged hash
+  after the scheme, `fid1:` among them), and whole single-key
+  `{"@link": "<address>"}` objects. A bare tagged hash without a scheme is never
   treated as an address — schema hashes, blob ids, and slugs share that
   encoding, so only the schemed forms are positively an address. Occurrences the
   runner cannot parse, and `@link` strings that are not entity addresses
@@ -508,7 +510,11 @@ The table supports swapping in both directions:
 
 The table is per-run state: it is persisted in `run-state.json` alongside the
 transcript and policy evidence, and a resumed run (`--resume-run`) carries its
-table, so tokens stay stable across resume.
+table, so tokens stay stable across resume. The selected mode is recorded in the
+run state too: a resume without `--handle-mode` inherits the recorded mode (a
+legacy run state that carries a table but no recorded mode counts as `session`),
+and an explicit `--handle-mode` that conflicts with the recorded mode is refused
+rather than silently downgrading the run.
 
 In `session` mode the prompt/tool loop applies the swaps at three seams.
 Successful tool output bound for model context carries tokens, while the

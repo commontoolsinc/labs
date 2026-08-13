@@ -9,6 +9,7 @@ import {
   MIN_HANDLE_TOKEN_SUFFIX_LENGTH,
 } from "../src/contracts/handle-table.ts";
 import {
+  assertValidHarnessHandleTable,
   createHarnessHandleTable,
   type HandleTokenHasher,
   mintAddressHandle,
@@ -23,9 +24,17 @@ const LINK_A = `/of:fid1:${HASH_A}`;
 const LINK_B = `/of:fid1:${HASH_B}`;
 const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 
-/** A hasher whose every digest is 32 zero bytes, forcing suffix collisions. */
-const constantHasher: HandleTokenHasher = () =>
-  Promise.resolve(new Uint8Array(32));
+/**
+ * A hasher that yields the same digest for every first-attempt preimage
+ * (`<salt>\0<key>`, two segments) and a different digest once a retry
+ * counter joins the preimage, forcing exactly one suffix collision.
+ */
+const collidingHasher: HandleTokenHasher = (input) => {
+  const segments = new TextDecoder().decode(input).split("\0");
+  return Promise.resolve(
+    new Uint8Array(32).fill(segments.length > 2 ? 1 : 0),
+  );
+};
 
 const tokenPattern = () => new RegExp(`^${HANDLE_TOKEN_PATTERN.source}$`);
 
@@ -121,26 +130,26 @@ describe("handle-table", () => {
       expect(resolveHandleToken(table, token)?.ref).toBe(ref);
     });
 
-    it("extends a colliding token by one more derived character", async () => {
+    it("re-derives a fixed-width suffix on collision, keeping both tokens five characters and distinct", async () => {
       const first = await mintAddressHandle(
         createHarnessHandleTable("run-1"),
         LINK_A,
-        constantHasher,
+        collidingHasher,
       );
       const second = await mintAddressHandle(
         first.table,
         LINK_B,
-        constantHasher,
+        collidingHasher,
       );
-      const zeroChar = HANDLE_TOKEN_ALPHABET[0];
       expect(first.token).toBe(
         ADDRESS_HANDLE_TOKEN_PREFIX +
-          zeroChar.repeat(MIN_HANDLE_TOKEN_SUFFIX_LENGTH),
+          HANDLE_TOKEN_ALPHABET[0].repeat(MIN_HANDLE_TOKEN_SUFFIX_LENGTH),
       );
       expect(second.token).toBe(
         ADDRESS_HANDLE_TOKEN_PREFIX +
-          zeroChar.repeat(MIN_HANDLE_TOKEN_SUFFIX_LENGTH + 1),
+          HANDLE_TOKEN_ALPHABET[1].repeat(MIN_HANDLE_TOKEN_SUFFIX_LENGTH),
       );
+      expect(first.token.length).toBe(second.token.length);
       expect(second.table.entries.length).toBe(2);
     });
 
@@ -250,14 +259,55 @@ describe("handle-table", () => {
       expect(table.entries).toEqual([]);
     });
 
-    it("leaves near-miss text untouched: a short hash and a scheme-like word ending", async () => {
-      const text = `of:fid1:${"A".repeat(42)} and proof:fid1:${HASH_A}x`;
+    it("leaves near-miss text untouched: a too-short id and a scheme-like word ending", async () => {
+      const text = `of:fid1:abc and proof:fid1:${HASH_A}`;
       const { table, value } = await swapLinksForTokens(
         createHarnessHandleTable("run-1"),
         text,
       );
       expect(value).toBe(text);
       expect(table.entries).toEqual([]);
+    });
+
+    it("replaces a schemed URI carrying a tagged hash with a non-`fid1` tag", async () => {
+      const { table, value } = await swapLinksForTokens(
+        createHarnessHandleTable("run-1"),
+        `stored at of:fid9:${HASH_A} today`,
+      );
+      expect(value).toBe(`stored at ${table.entries[0].token} today`);
+      expect(table.entries[0].ref).toBe(`/of:fid9:${HASH_A}`);
+    });
+
+    it("consumes an `@space` scope suffix, minting the canonical unsuffixed ref", async () => {
+      const { table, value } = await swapLinksForTokens(
+        createHarnessHandleTable("run-1"),
+        `${LINK_A}@space holds it`,
+      );
+      expect(value).toBe(`${table.entries[0].token} holds it`);
+      expect(table.entries[0].ref).toBe(LINK_A);
+    });
+
+    it("preserves an own `__proto__` key as data through a swap round-trip", async () => {
+      const input = JSON.parse(
+        `{"__proto__": {"note": "${LINK_A}"}}`,
+      ) as Record<string, unknown>;
+      const swapped = await swapLinksForTokens(
+        createHarnessHandleTable("run-1"),
+        input,
+      );
+      const swappedValue = swapped.value as Record<string, unknown>;
+      expect(Object.getPrototypeOf(swappedValue)).toBe(Object.prototype);
+      expect(
+        Object.getOwnPropertyDescriptor(swappedValue, "__proto__")?.value,
+      ).toEqual({ note: swapped.table.entries[0].token });
+      const restored = swapTokensForRefs(
+        swapped.table,
+        swappedValue,
+      ) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(restored)).toBe(Object.prototype);
+      expect(
+        Object.getOwnPropertyDescriptor(restored, "__proto__")?.value,
+      ).toEqual({ note: LINK_A });
     });
 
     it("replaces a single-key `@link` object wholesale with the token string", async () => {
@@ -326,6 +376,131 @@ describe("handle-table", () => {
       );
       const text = "see cfh:a:99999 for details";
       expect(swapTokensForRefs(table, text)).toBe(text);
+    });
+
+    it("leaves a longer alphabet run that starts with a held token untouched while replacing the standalone token", async () => {
+      const { table, token } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const longer = `${token}xyz`;
+      const text = `real ${token} beside fake ${longer} end`;
+      expect(swapTokensForRefs(table, text)).toBe(
+        `real ${LINK_A} beside fake ${longer} end`,
+      );
+    });
+  });
+
+  describe("assertValidHarnessHandleTable()", () => {
+    it("accepts a freshly minted table", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      expect(() => assertValidHarnessHandleTable(table)).not.toThrow();
+    });
+
+    it("throws for an unsupported version", () => {
+      const table = {
+        ...createHarnessHandleTable("run-1"),
+        version: 2,
+      } as unknown as HarnessHandleTable;
+      expect(() => assertValidHarnessHandleTable(table)).toThrow(
+        "unsupported handle table version: 2",
+      );
+    });
+
+    it("throws for a wrong type discriminator", () => {
+      const table = {
+        ...createHarnessHandleTable("run-1"),
+        type: "cf-harness.other",
+      } as unknown as HarnessHandleTable;
+      expect(() => assertValidHarnessHandleTable(table)).toThrow(
+        "type must be",
+      );
+    });
+
+    it("throws for an empty salt", () => {
+      expect(() => assertValidHarnessHandleTable(createHarnessHandleTable("")))
+        .toThrow("salt must be a non-empty string");
+    });
+
+    it("throws for a token outside the token grammar", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const broken = {
+        ...table,
+        entries: [{ ...table.entries[0], token: "cfh:a:1!" }],
+      };
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "malformed token",
+      );
+    });
+
+    it("throws for an entry kind other than `address`", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const broken = {
+        ...table,
+        entries: [{ ...table.entries[0], kind: "value" }],
+      } as unknown as HarnessHandleTable;
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "entry kind must be `address`",
+      );
+    });
+
+    it("throws for an entry with an empty ref", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const broken = {
+        ...table,
+        entries: [{ ...table.entries[0], ref: "" }],
+      };
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "empty ref",
+      );
+    });
+
+    it("throws for a duplicate token", async () => {
+      const first = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const second = await mintAddressHandle(first.table, LINK_B);
+      const broken = {
+        ...second.table,
+        entries: second.table.entries.map((entry) => ({
+          ...entry,
+          token: first.token,
+        })),
+      };
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "duplicate token",
+      );
+    });
+
+    it("throws for a duplicate addressKey", async () => {
+      const first = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+      );
+      const second = await mintAddressHandle(first.table, LINK_B);
+      const broken = {
+        ...second.table,
+        entries: second.table.entries.map((entry) => ({
+          ...entry,
+          addressKey: second.table.entries[0].addressKey,
+        })),
+      };
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "duplicate addressKey",
+      );
     });
   });
 

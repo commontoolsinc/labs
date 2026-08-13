@@ -7,6 +7,7 @@
  * writes state, and swapping never throws on text it cannot parse.
  */
 
+import { sha256 } from "@commonfabric/content-hash";
 import {
   ENTITY_URI_SCHEMES,
   hasEntityUriScheme,
@@ -36,8 +37,10 @@ export type HandleTokenHasher = (
   input: Uint8Array<ArrayBuffer>,
 ) => Promise<Uint8Array<ArrayBuffer>>;
 
-const sha256Hasher: HandleTokenHasher = async (input) =>
-  new Uint8Array(await crypto.subtle.digest("SHA-256", input));
+// The canonical SHA-256 from `@commonfabric/content-hash`, wrapped to fit the
+// async hasher seam.
+const sha256Hasher: HandleTokenHasher = (input) =>
+  Promise.resolve(sha256(input) as Uint8Array<ArrayBuffer>);
 
 /**
  * Context space handed to `createLLMFriendlyLink()` when a link carries its
@@ -85,23 +88,47 @@ const canonicalRef = (link: NormalizedFullLink): string =>
   );
 
 /**
- * Helper for minting, which yields an unbounded deterministic stream of
- * alphabet characters: SHA-256 of `<salt>\0<addressKey>` mapped byte-by-byte
- * into the alphabet, re-hashing the digest whenever the bytes run out.
+ * Helper for minting, which derives one fixed-width token suffix: SHA-256 of
+ * `<salt>\0<addressKey>` (or `<salt>\0<addressKey>\0<attempt>` for attempts
+ * past the first) mapped byte-by-byte into the alphabet. Every suffix is
+ * exactly {@link MIN_HANDLE_TOKEN_SUFFIX_LENGTH} characters, so no token can
+ * be a prefix of another.
  */
-async function* deriveTokenSuffixChars(
+const deriveTokenSuffix = async (
   salt: string,
   key: string,
+  attempt: number,
   hasher: HandleTokenHasher,
-): AsyncGenerator<string, never> {
-  let digest = await hasher(new TextEncoder().encode(`${salt}\0${key}`));
-  while (true) {
-    for (const byte of digest) {
-      yield HANDLE_TOKEN_ALPHABET[byte % HANDLE_TOKEN_ALPHABET.length];
-    }
-    digest = await hasher(digest);
+): Promise<string> => {
+  const preimage = attempt === 0
+    ? `${salt}\0${key}`
+    : `${salt}\0${key}\0${attempt}`;
+  const digest = await hasher(new TextEncoder().encode(preimage));
+  let suffix = "";
+  for (const byte of digest.subarray(0, MIN_HANDLE_TOKEN_SUFFIX_LENGTH)) {
+    suffix += HANDLE_TOKEN_ALPHABET[byte % HANDLE_TOKEN_ALPHABET.length];
   }
-}
+  return suffix;
+};
+
+/**
+ * Copies `key` onto `target` as an own data property. Assignment would
+ * install an own `__proto__` key as the object's prototype; a define keeps it
+ * data, so the deep walkers here and in the prompt loop cannot be steered
+ * into prototype pollution by hostile tool output.
+ */
+export const defineOwnEntry = (
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void => {
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+};
 
 /** Constructs an empty handle table salted with `salt` (the run id). */
 export const createHarnessHandleTable = (
@@ -118,9 +145,10 @@ export const createHarnessHandleTable = (
  * token. Minting is idempotent per address: two spellings of one address —
  * an LLM-friendly link and the bare entity URI, say — normalize to the same
  * `addressKey` and share one token. The token suffix is derived
- * deterministically from the table's salt and the address, extended one
- * character at a time while it collides with a token already held by a
- * different address.
+ * deterministically from the table's salt and the address, always exactly
+ * {@link MIN_HANDLE_TOKEN_SUFFIX_LENGTH} characters; while the suffix
+ * collides with a token already held by a different address, a fresh suffix
+ * is re-derived with an attempt counter mixed into the hash preimage.
  *
  * @throws Error when `refText` does not name an entity address; see
  * `swapLinksForTokens()` for the swallow-and-skip caller.
@@ -136,11 +164,8 @@ export const mintAddressHandle = async (
   if (existing !== undefined) {
     return { table, token: existing.token };
   }
-  const chars = deriveTokenSuffixChars(table.salt, key, hasher);
-  let suffix = "";
-  while (suffix.length < MIN_HANDLE_TOKEN_SUFFIX_LENGTH) {
-    suffix += (await chars.next()).value;
-  }
+  let attempt = 0;
+  let suffix = await deriveTokenSuffix(table.salt, key, attempt, hasher);
   // Any table entry holding the candidate token has a different addressKey —
   // the same key returned above — so each hit means a genuine collision.
   while (
@@ -148,7 +173,8 @@ export const mintAddressHandle = async (
       (entry) => entry.token === ADDRESS_HANDLE_TOKEN_PREFIX + suffix,
     )
   ) {
-    suffix += (await chars.next()).value;
+    attempt += 1;
+    suffix = await deriveTokenSuffix(table.salt, key, attempt, hasher);
   }
   const entry: HarnessHandleEntry = {
     token: ADDRESS_HANDLE_TOKEN_PREFIX + suffix,
@@ -170,14 +196,17 @@ export const resolveHandleToken = (
   table.entries.find((entry) => entry.token === token);
 
 // The free-text address grammar, assembled from the entity URI schemes so a
-// new scheme cannot leave a stale alternation here. A bare tagged hash
-// (`fid1:<hash>` with no scheme) is deliberately unmatchable: schema hashes,
-// blob ids, and slugs share that encoding, so only the schemed forms are
-// positively an address.
+// new scheme cannot leave a stale alternation here. The scheme prefix is the
+// sole positive marker; after it, any `<tag>:<base64url-ish>` tagged hash is
+// accepted (`fid1` today, whatever `FabricHash` tags come later), and the
+// runner's parser decides whether the occurrence is a real address. A bare
+// tagged hash (`fid1:<hash>` with no scheme) is deliberately unmatchable:
+// schema hashes, blob ids, and slugs share that encoding, so only the schemed
+// forms are positively an address.
 const HASH_CHAR = "[A-Za-z0-9_-]";
 const ENTITY_ID_SOURCE = `(?:${
   ENTITY_URI_SCHEMES.join("|")
-}):fid1:${HASH_CHAR}{43}`;
+}):[A-Za-z0-9]+:${HASH_CHAR}+`;
 // A path segment ends at whitespace, quotes, backticks, or closing
 // punctuation, so an address at the end of a sentence does not swallow it.
 const PATH_SEGMENT_SOURCE = `[^/\\s"'\`\\)\\]\\}>,;]+`;
@@ -188,8 +217,10 @@ const LINK_OCCURRENCE_SOURCE =
   // it and passes; when absent it keeps `proof:fid1:…` and `x-of:fid1:…`
   // from half-matching.
   `(?<![A-Za-z0-9_:.@-])` +
-  `${ENTITY_ID_SOURCE}(?!${HASH_CHAR})` +
-  `(?:@(?:user|session))?` +
+  `${ENTITY_ID_SOURCE}` +
+  // `@space` is consumed too: it is the default scope, so the canonical
+  // serialization of the minted ref simply drops it.
+  `(?:@(?:user|session|space))?` +
   `((?:/${PATH_SEGMENT_SOURCE})*)`;
 
 /**
@@ -236,7 +267,7 @@ export const swapLinksForTokens = async (
     for (const key of keys) {
       const result = await swapLinksForTokens(table, record[key], hasher);
       table = result.table;
-      swapped[key] = result.value;
+      defineOwnEntry(swapped, key, result.value);
     }
     return { table, value: swapped };
   }
@@ -295,11 +326,90 @@ export const swapTokensForRefs = (
     return value.map((item) => swapTokensForRefs(table, item));
   }
   if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map((
-        [key, item],
-      ) => [key, swapTokensForRefs(table, item)]),
-    );
+    const swapped: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      defineOwnEntry(swapped, key, swapTokensForRefs(table, item));
+    }
+    return swapped;
   }
   return value;
+};
+
+/** Token grammar accepted by {@link assertValidHarnessHandleTable}. */
+const FULL_TOKEN_PATTERN = new RegExp(`^${HANDLE_TOKEN_PATTERN.source}$`);
+
+/**
+ * Asserts that `table` is a well-formed version-1 handle table, guarding the
+ * seams that adopt one from persisted state: a version this code does not
+ * understand, an empty salt, a malformed entry, or a duplicate token or
+ * address is refused with an error naming the problem rather than carried
+ * silently into a run.
+ *
+ * @throws Error naming the first problem found.
+ */
+export const assertValidHarnessHandleTable = (
+  table: HarnessHandleTable,
+): void => {
+  const raw = table as unknown as Record<string, unknown>;
+  if (raw.type !== HARNESS_HANDLE_TABLE_TYPE) {
+    throw new Error(
+      `invalid handle table: type must be \`${HARNESS_HANDLE_TABLE_TYPE}\`, got \`${
+        String(raw.type)
+      }\``,
+    );
+  }
+  if (raw.version !== 1) {
+    throw new Error(
+      `unsupported handle table version: ${String(raw.version)}`,
+    );
+  }
+  if (typeof raw.salt !== "string" || raw.salt.length === 0) {
+    throw new Error("invalid handle table: salt must be a non-empty string");
+  }
+  if (!Array.isArray(raw.entries)) {
+    throw new Error("invalid handle table: entries must be an array");
+  }
+  const tokens = new Set<string>();
+  const addressKeys = new Set<string>();
+  for (const entry of table.entries) {
+    if (typeof entry !== "object" || entry === null) {
+      throw new Error("invalid handle table: entry is not an object");
+    }
+    if (
+      typeof entry.token !== "string" || !FULL_TOKEN_PATTERN.test(entry.token)
+    ) {
+      throw new Error(
+        `invalid handle table: malformed token \`${String(entry.token)}\``,
+      );
+    }
+    if (entry.kind !== "address") {
+      throw new Error(
+        `invalid handle table: entry kind must be \`address\`, got \`${
+          String(entry.kind)
+        }\``,
+      );
+    }
+    if (typeof entry.ref !== "string" || entry.ref.length === 0) {
+      throw new Error(
+        `invalid handle table: entry \`${entry.token}\` has an empty ref`,
+      );
+    }
+    if (typeof entry.addressKey !== "string" || entry.addressKey.length === 0) {
+      throw new Error(
+        `invalid handle table: entry \`${entry.token}\` has an empty addressKey`,
+      );
+    }
+    if (tokens.has(entry.token)) {
+      throw new Error(
+        `invalid handle table: duplicate token \`${entry.token}\``,
+      );
+    }
+    tokens.add(entry.token);
+    if (addressKeys.has(entry.addressKey)) {
+      throw new Error(
+        `invalid handle table: duplicate addressKey for token \`${entry.token}\``,
+      );
+    }
+    addressKeys.add(entry.addressKey);
+  }
 };

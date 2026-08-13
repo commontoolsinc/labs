@@ -28,6 +28,12 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { normalize } from "@std/path/posix";
+import { join } from "@std/path";
+import { decodeBase64 } from "@std/encoding/base64";
+
+const ONE_PIXEL_PNG = decodeBase64(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
+);
 
 const HASH_A = "A".repeat(43);
 const HASH_B = "B".repeat(43);
@@ -353,6 +359,71 @@ describe("prompt-loop address handles", () => {
     expect(childUserPrompt).not.toContain(HASH_A);
   });
 
+  it("keeps a raw address out of the view_image tool and followup messages when a token resolves inside the path", async () => {
+    const runId = "run-handles-view-image";
+    const workspace = await Deno.realPath(await Deno.makeTempDir());
+    const refDir = URI_A;
+    await Deno.mkdir(join(workspace, refDir));
+    await Deno.writeFile(join(workspace, refDir, "capture.png"), ONE_PIXEL_PNG);
+    const minted = await mintAddressHandle(
+      createHarnessHandleTable(runId),
+      URI_A,
+    );
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      workspaceHostPath: workspace,
+      runId,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+      handleMode: "session",
+    });
+    await engine.recordHandleTable(minted.table);
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn: scriptedFetch([
+        {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-image",
+                type: "function",
+                function: {
+                  name: "view_image",
+                  arguments: JSON.stringify({
+                    path: `/workspace/${minted.token}/capture.png`,
+                  }),
+                },
+              }],
+            },
+          }],
+        },
+        finalTurn("Done."),
+      ]),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Look at the capture." });
+
+    const toolMessage = result.transcript.at(-3);
+    if (toolMessage?.role !== "tool") {
+      throw new Error("expected a view_image tool message");
+    }
+    // Success proves the token resolved to the real address before dispatch:
+    // the tool found the image inside the referent-named directory.
+    expect(JSON.parse(toolMessage.content).imageAttached).toBe(true);
+    expect(toolMessage.content).toContain("cfh:a:");
+    expect(toolMessage.content).not.toContain(HASH_A);
+    const followup = result.transcript.at(-2);
+    if (followup?.role !== "user" || typeof followup.content !== "string") {
+      throw new Error("expected a view_image followup user message");
+    }
+    expect(followup.content).toContain("cfh:a:");
+    expect(followup.content).not.toContain(HASH_A);
+  });
+
   it("returns a sealed structured-return string that names an address as a token while a free-form string stays opaque", async () => {
     const runId = "run-handles-post";
     const childRunId = `${runId}.subagent.1`;
@@ -419,6 +490,105 @@ describe("prompt-loop address handles", () => {
     ).toEqual([expectedToken]);
   });
 
+  it("aligns sealed positions with their raw counterparts across nested arrays and objects in a structured return", async () => {
+    const runId = "run-handles-tandem";
+    const childRunId = `${runId}.subagent.1`;
+    const expectedTokenA =
+      (await mintAddressHandle(createHarnessHandleTable(runId), URI_A)).token;
+    const expectedTokenB =
+      (await mintAddressHandle(createHarnessHandleTable(runId), LINK_B)).token;
+    const entrySchema = {
+      type: "object",
+      properties: {
+        link: { type: "string" },
+        note: { type: "string" },
+      },
+      required: ["link", "note"],
+      additionalProperties: false,
+    };
+    const returnSchema = {
+      type: "object",
+      properties: {
+        items: { type: "array", items: entrySchema },
+        meta: {
+          type: "object",
+          properties: { primary: { type: "string" } },
+          required: ["primary"],
+          additionalProperties: false,
+        },
+      },
+      required: ["items", "meta"],
+      additionalProperties: false,
+    };
+    const childReturn = {
+      items: [
+        { link: URI_A, note: "free-form one" },
+        { link: "free-form two", note: LINK_B },
+      ],
+      meta: { primary: URI_A },
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        handleMode: "session",
+      }),
+      fetchFn: scriptedFetch([
+        {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-tandem",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Find the cells.",
+                    returnSchema,
+                  }),
+                },
+              }],
+            },
+          }],
+        },
+        finalTurn(JSON.stringify(childReturn)),
+        finalTurn("Parent done."),
+      ]),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the lookup." });
+
+    const output = JSON.parse(lastToolMessageContent(result.transcript)) as {
+      subagent: {
+        structuredReturn: { value: unknown; linkedStringCount: number };
+      };
+    };
+    expect(output.subagent.structuredReturn.value).toEqual({
+      items: [
+        {
+          link: expectedTokenA,
+          note: { "@link": `opaque:${childRunId}#/items/0/note` },
+        },
+        {
+          link: { "@link": `opaque:${childRunId}#/items/1/link` },
+          note: expectedTokenB,
+        },
+      ],
+      meta: { primary: expectedTokenA },
+    });
+    // Five sealed string positions, three of which became tokens.
+    expect(output.subagent.structuredReturn.linkedStringCount).toBe(2);
+    expect(
+      result.runState.handleTable?.entries.map((entry) => entry.token).sort(),
+    ).toEqual([expectedTokenA, expectedTokenB].sort());
+  });
+
   it("reuses the rehydrated table on resume, re-swapping to the same token and resolving it inbound", async () => {
     const runId = "run-handles-resume";
     const minted = await mintAddressHandle(
@@ -448,12 +618,13 @@ describe("prompt-loop address handles", () => {
       { stdout: `again ${URI_A}`, stderr: "", exitCode: 0 },
       { stdout: "ok", stderr: "", exitCode: 0 },
     ]);
+    // No explicit handleMode here: the resumed engine inherits the recorded
+    // session mode from the run state.
     const resumedLoop = new CfHarnessPromptLoop({
       apiKey: "test-key",
       engine: new CfHarnessEngine({
         sandboxRuntime: resumedSandbox,
         runState: firstResult.runState,
-        handleMode: "session",
       }),
       fetchFn: scriptedFetch([
         bashCallTurn("call-2", "cat a.txt"),

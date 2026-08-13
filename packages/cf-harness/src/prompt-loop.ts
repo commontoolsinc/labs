@@ -80,6 +80,7 @@ import {
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import {
   createHarnessHandleTable,
+  defineOwnEntry,
   mintAddressHandle,
   swapLinksForTokens,
   swapTokensForRefs,
@@ -896,7 +897,7 @@ const swapSealedAddressStringsForTokens = async (
       );
       table = result.table;
       replaced += result.replaced;
-      entries[key] = result.value;
+      defineOwnEntry(entries, key, result.value);
     }
     return { table, value: entries, replaced };
   }
@@ -2248,6 +2249,24 @@ export class CfHarnessPromptLoop {
     return swapTokensForRefs(table, input) as Record<string, unknown>;
   }
 
+  /**
+   * Helper for `#invokeToolCall()`, which applies the outbound handle swap
+   * to a model-bound value, recording the table when minting extended it.
+   * Returns `value` itself outside `session` handle mode.
+   */
+  async #swapModelBoundValue(value: unknown): Promise<unknown> {
+    if (this.engine.config.handleMode !== "session") {
+      return value;
+    }
+    const table = this.engine.handleTable ??
+      createHarnessHandleTable(this.engine.getRunState().runId);
+    const swapped = await swapLinksForTokens(table, value);
+    if (swapped.table !== table) {
+      await this.engine.recordHandleTable(swapped.table);
+    }
+    return swapped.value;
+  }
+
   async #invokeToolCall(
     toolCall: HarnessToolCall,
     model: string,
@@ -2594,19 +2613,12 @@ export class CfHarnessPromptLoop {
       toolCall.id,
       recordPolicyEvent,
     );
-    let modelOutput = modelOutputResult.output;
-    if (this.engine.config.handleMode === "session") {
-      // The raw output is already persisted by the tool invocation above, so
-      // artifacts keep the raw addresses; only this model-bound rendering
-      // carries tokens.
-      const table = this.engine.handleTable ??
-        createHarnessHandleTable(this.engine.getRunState().runId);
-      const swapped = await swapLinksForTokens(table, modelOutput);
-      modelOutput = swapped.value;
-      if (swapped.table !== table) {
-        await this.engine.recordHandleTable(swapped.table);
-      }
-    }
+    // The raw output is already persisted by the tool invocation above, so
+    // artifacts keep the raw addresses; only this model-bound rendering
+    // carries tokens.
+    const modelOutput = await this.#swapModelBoundValue(
+      modelOutputResult.output,
+    );
     const policyEvents = this.engine.getRunState().policyEvents;
     let activityPolicyDecision: HarnessToolPolicyDecision = policyDecision;
     for (const index of policyEventIndexes) {
@@ -2634,12 +2646,16 @@ export class CfHarnessPromptLoop {
       resultRef: result.resultRef,
     };
     if (isViewImageToolSuccessOutput(result.output)) {
+      // The raw path may embed an address a token resolved to, so the
+      // followup goes through the same outbound swap as the tool message.
+      const followupContent = await this.#swapModelBoundValue(
+        `Image loaded by view_image from ${result.output.path} (outputId: ${result.output.outputId}).`,
+      ) as string;
       return {
         toolMessage,
         followupMessages: [{
           role: "user",
-          content:
-            `Image loaded by view_image from ${result.output.path} (outputId: ${result.output.outputId}).`,
+          content: followupContent,
           imageAttachments: [result.output.imageAttachment],
         }],
       };
