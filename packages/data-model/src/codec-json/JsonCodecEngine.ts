@@ -357,42 +357,6 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   static readonly #textDecoder = new TextDecoder();
 
   /**
-   * Unwraps a wire representation. Detects single-key objects with `/`-prefixed
-   * keys. Returns `{ tag, state }` or `null` if not a tagged value. The
-   * returned `state` is extracted directly from `data`, so if `data` is
-   * deep-frozen (as it should be) then `state` will be too.
-   *
-   * See Section 5.4 of the formal spec.
-   */
-  static #unwrapTag(
-    data: JsonCodecValue,
-  ): { tag: string; state: JsonCodecValue } | null {
-    if (!isPlainObject(data)) {
-      return null;
-    }
-
-    if (!JsonCodecEngine.#isEncodedInstance(data)) {
-      return null;
-    }
-
-    // `#isEncodedInstance()` guaranteed a single-property object, so this
-    // destructures that one entry.
-    const [key, value] = Object.entries(data)[0]!;
-    return { tag: key.slice(1), state: value };
-  }
-
-  /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
-  static #toBytes(data: JsonCodecValue): Uint8Array {
-    return JsonCodecEngine.#textEncoder.encode(JSON.stringify(data));
-  }
-
-  /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
-  static #fromBytes(bytes: Uint8Array): JsonCodecValue {
-    const json = JsonCodecEngine.#textDecoder.decode(bytes);
-    return JsonCodecEngine.#parseWireText(json);
-  }
-
-  /**
    * Registry for the throwaway checks in the testing helpers below: this
    * format's primitive determination, plus the two classes the format uses to
    * represent its own failures. No domain class is registered.
@@ -428,73 +392,6 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       "no runtime context (validity check in a test-only helper).",
     ),
   );
-
-  /**
-   * Indicates whether `count` is usable as a `/hole` run length: a safe
-   * integer of at least one. A run always stands for at least one absent
-   * index, so zero is refused along with everything else that is not a count.
-   */
-  static #isHoleCount(count: JsonCodecValue): count is number {
-    // `isSafeInteger()` returns `false` for a non-number, but it cannot be a
-    // TypeScript type predicate on `number` since it also returns `false` for
-    // plenty of numbers. So, the subsequent cast `as number` is safe by
-    // construction but is nonetheless required.
-    return Number.isSafeInteger(count) && ((count as number) >= 1);
-  }
-
-  /**
-   * Returns true if `v` is a single-key object whose key starts with `/` --
-   * the wire form of an encoded instance (tag-wrapped value).
-   */
-  static #isEncodedInstance(v: JsonCodecValue): boolean {
-    if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
-    const keys = Object.keys(v);
-    return keys.length === 1 && keys[0]!.startsWith("/");
-  }
-
-  /**
-   * Returns true if the already-encoded codec value `v` can be embedded
-   * inside a /quote wrap without inner deserialization: primitives, plain
-   * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
-   * values (which `#unquote()` can collapse).
-   */
-  static #isQuoteSafe(v: JsonCodecValue): boolean {
-    if (v === null || typeof v !== "object") return true;
-    if (Array.isArray(v)) {
-      return v.every((item) => JsonCodecEngine.#isQuoteSafe(item));
-    }
-    if (!JsonCodecEngine.#isEncodedInstance(v)) {
-      return Object.values(v).every((item) =>
-        JsonCodecEngine.#isQuoteSafe(item as JsonCodecValue)
-      );
-    }
-    return Object.keys(v)[0] === "/quote";
-  }
-
-  /**
-   * Unwraps /quote forms one level so their literal content can be embedded
-   * directly inside a parent /quote. The inner content of a /quote is already
-   * literal and must not be recursed into.
-   */
-  static #unquote(v: JsonCodecValue): JsonCodecValue {
-    if (v === null || typeof v !== "object") {
-      return v;
-    } else if (Array.isArray(v)) {
-      const result = v.map(JsonCodecEngine.#unquote) as JsonCodecValue;
-      return Object.freeze(result);
-    } else if (
-      JsonCodecEngine.#isEncodedInstance(v) && Object.keys(v)[0] === "/quote"
-    ) {
-      return (v as Record<string, JsonCodecValue>)["/quote"]!;
-    } else {
-      const result = Object.fromEntries(
-        Object.entries(v).map(
-          ([k, val]) => [k, JsonCodecEngine.#unquote(val as JsonCodecValue)],
-        ),
-      ) as JsonCodecValue;
-      return Object.freeze(result);
-    }
-  }
 
   /**
    * Indicates if the given text has a "first-blush" appearance as valid JSON
@@ -613,6 +510,109 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     }
 
     return encoded;
+  }
+
+  /**
+   * Unwraps a wire representation. Detects single-key objects with `/`-prefixed
+   * keys. Returns `{ tag, state }` or `null` if not a tagged value. The
+   * returned `state` is extracted directly from `data`, so if `data` is
+   * deep-frozen (as it should be) then `state` will be too.
+   *
+   * See Section 5.4 of the formal spec.
+   */
+  static #unwrapTag(
+    data: JsonCodecValue,
+  ): { tag: string; state: JsonCodecValue } | null {
+    if (!isPlainObject(data)) {
+      return null;
+    }
+
+    if (!JsonCodecEngine.#isEncodedInstance(data)) {
+      return null;
+    }
+
+    // `#isEncodedInstance()` guaranteed a single-property object, so this
+    // destructures that one entry.
+    const [key, value] = Object.entries(data)[0]!;
+    return { tag: key.slice(1), state: value };
+  }
+
+  /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
+  static #toBytes(data: JsonCodecValue): Uint8Array {
+    return JsonCodecEngine.#textEncoder.encode(JSON.stringify(data));
+  }
+
+  /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
+  static #fromBytes(bytes: Uint8Array): JsonCodecValue {
+    const json = JsonCodecEngine.#textDecoder.decode(bytes);
+    return JsonCodecEngine.#parseWireText(json);
+  }
+
+  /**
+   * Indicates whether `count` is usable as a `/hole` run length: a safe
+   * integer of at least one. A run always stands for at least one absent
+   * index, so zero is refused along with everything else that is not a count.
+   */
+  static #isHoleCount(count: JsonCodecValue): count is number {
+    // `isSafeInteger()` returns `false` for a non-number, but it cannot be a
+    // TypeScript type predicate on `number` since it also returns `false` for
+    // plenty of numbers. So, the subsequent cast `as number` is safe by
+    // construction but is nonetheless required.
+    return Number.isSafeInteger(count) && ((count as number) >= 1);
+  }
+
+  /**
+   * Returns true if `v` is a single-key object whose key starts with `/` --
+   * the wire form of an encoded instance (tag-wrapped value).
+   */
+  static #isEncodedInstance(v: JsonCodecValue): boolean {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+    const keys = Object.keys(v);
+    return keys.length === 1 && keys[0]!.startsWith("/");
+  }
+
+  /**
+   * Returns true if the already-encoded codec value `v` can be embedded
+   * inside a /quote wrap without inner deserialization: primitives, plain
+   * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
+   * values (which `#unquote()` can collapse).
+   */
+  static #isQuoteSafe(v: JsonCodecValue): boolean {
+    if (v === null || typeof v !== "object") return true;
+    if (Array.isArray(v)) {
+      return v.every((item) => JsonCodecEngine.#isQuoteSafe(item));
+    }
+    if (!JsonCodecEngine.#isEncodedInstance(v)) {
+      return Object.values(v).every((item) =>
+        JsonCodecEngine.#isQuoteSafe(item as JsonCodecValue)
+      );
+    }
+    return Object.keys(v)[0] === "/quote";
+  }
+
+  /**
+   * Unwraps /quote forms one level so their literal content can be embedded
+   * directly inside a parent /quote. The inner content of a /quote is already
+   * literal and must not be recursed into.
+   */
+  static #unquote(v: JsonCodecValue): JsonCodecValue {
+    if (v === null || typeof v !== "object") {
+      return v;
+    } else if (Array.isArray(v)) {
+      const result = v.map(JsonCodecEngine.#unquote) as JsonCodecValue;
+      return Object.freeze(result);
+    } else if (
+      JsonCodecEngine.#isEncodedInstance(v) && Object.keys(v)[0] === "/quote"
+    ) {
+      return (v as Record<string, JsonCodecValue>)["/quote"]!;
+    } else {
+      const result = Object.fromEntries(
+        Object.entries(v).map(
+          ([k, val]) => [k, JsonCodecEngine.#unquote(val as JsonCodecValue)],
+        ),
+      ) as JsonCodecValue;
+      return Object.freeze(result);
+    }
   }
 
   /** Parses the JSON-text wire form, _without_ a tag prefix. */
