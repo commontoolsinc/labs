@@ -340,16 +340,16 @@ export const runPatternTool: HarnessToolDefinition<
     let piece: PieceController<unknown>;
     try {
       // Deliberately unregistered: no `pieces.add()` and no default-pattern
-      // touch, so the piece never appears in the space's piece list. The
-      // origin must be URL-shaped or the piece renders as detached.
+      // touch, so the piece never appears in the space's piece list. No
+      // origin either: model-authored source starts detached under the piece
+      // source-lifecycle spec, and run→piece provenance lives in the run's
+      // persisted artifacts — run-state and the tool-output artifact record
+      // the `pieceId`.
       const pieceCell = await pieces.runPersistent(
         pattern,
         pieceInput ?? {},
         undefined,
-        {
-          start: true,
-          origin: `https://cf-harness.invalid/run/${context.runId}`,
-        },
+        { start: true },
       );
       piece = new PieceController(pieces, pieceCell);
     } catch (error) {

@@ -593,10 +593,20 @@ structured error before anything is created, and a live-cell input whose current
 value does not match the compiled pattern's argument schema for its key is
 refused the same way — named after the offending key, with no piece persisted.
 The deployed piece is deliberately unregistered — it never appears in the
-space's piece list. When the run's abort signal fires while the tool is waiting
-for the pattern to settle, the tool stops the created piece and returns a
-structured `cancelled` error; the signal is the only cancellation source — there
-is no timeout.
+space's piece list — and deliberately detached: no origin is recorded, because
+model-authored source starts detached under the piece source-lifecycle spec.
+Run→piece provenance is carried by the run's persisted artifacts instead —
+run-state and the tool-output artifact record the `pieceId`. When the run's
+abort signal fires while the tool is waiting for the pattern to settle, the tool
+stops the created piece and returns a structured `cancelled` error; the signal
+is the only cancellation source — there is no timeout.
+
+Every `run_pattern` invocation persists such a piece in the configured space. A
+cancelled run stops its piece, but no piece is ever deleted, and each piece's
+source-history revision is a storage-retention root the piece list does not
+reveal. Tooling that enumerates a space's contents from the piece list must not
+assume the list is exhaustive, and there is no garbage collection for these
+pieces yet.
 
 A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus

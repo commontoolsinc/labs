@@ -59,7 +59,22 @@ permanently growing implementation plan.
   reads routed through the same policy surface as `read_file`, with CFC
   observation metadata on the source bytes.
 
-## 6. Evolve skills only from concrete needs
+## 6. Bound, retain, and check `run_pattern` side effects
+
+- Give each `run_pattern` invocation a resource ceiling and deadline, aligned
+  with the hosted-pattern-authoring prerequisite that an agent session runs
+  under configured limits on model tokens, tool invocations, CPU, memory, and
+  disk; today only the abort signal bounds an invocation.
+- Define a retention and deletion story for the unlisted pieces `run_pattern`
+  persists and for the run-state handle table. Each invocation leaves a
+  stopped-but-never-deleted piece whose source-history revision is a
+  storage-retention root invisible to the piece list, and handle-table entries
+  accumulate per run with no expiry.
+- Add an outbound CFC flow check on compiled pattern source. The current
+  space-equality gate covers inbound input links only; nothing checks what a
+  compiled pattern's own code sends out of the session space.
+
+## 7. Evolve skills only from concrete needs
 
 - Keep explicit caller preload and profile-scoped child skills as the stable
   path.

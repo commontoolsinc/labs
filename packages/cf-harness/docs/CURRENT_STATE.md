@@ -73,8 +73,10 @@ The current package provides:
   signal by stopping the created piece and returning a structured `cancelled`
   error; scrubs bare fabric identifiers from model-facing diagnostics; returns
   the result cell's canonical reference plus an optionally schema-sanitized
-  value, and leaves the piece out of the space's registered piece list; without
-  the session configuration the tool is absent from the tool surface.
+  value, and leaves the piece detached (no recorded origin) and out of the
+  space's registered piece list, with run→piece provenance carried by the run's
+  persisted artifacts; without the session configuration the tool is absent from
+  the tool surface.
 
 Run the capability probe instead of copying this list into adapters:
 
@@ -119,6 +121,12 @@ mode.
 - Package-default sandbox networking is a provisional bridge-oriented posture,
   not the final destination policy model. Product adapters may narrow it.
 - Delegation is serial: only one child runs at a time.
+- Every `run_pattern` invocation persists an unlisted piece in the configured
+  space. An aborted run stops its piece, but no piece is ever deleted, and each
+  piece's source-history revision is a storage-retention root the piece list
+  does not reveal. Tooling that enumerates a space's contents from the piece
+  list must not assume the list is exhaustive; there is no garbage collection
+  for these pieces yet.
 - Model-driven dynamic skill activation is not implemented. Skills are
   explicitly preloaded by the caller; child skills are profile-controlled.
 - Resume is transcript-oriented and does not recover an arbitrary partially
