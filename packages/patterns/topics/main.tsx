@@ -193,7 +193,15 @@ const boardRows = lift(
           topic: t as TopicPiece,
           title: t.title,
           createdAt: t.createdAt,
-          createdBy: t.createdBy,
+          // Copied as a VALUE, not passed through. Every other field here is a
+          // scalar, which can only ever be written inline; `createdBy` is an
+          // object, and handing one straight from a read to a `.set()` writes a
+          // link to where it was read from when it still carries that
+          // provenance and an inline copy when it does not. Both are valid
+          // writes, which is the problem: the same inputs then produce two
+          // different documents and the idempotency recheck fails the pattern.
+          // A row is a snapshot, so the copy is also what this field means.
+          createdBy: t.createdBy ? { ...t.createdBy } : undefined,
           commentCount: t.commentCount ?? 0,
           lastActivityAt: t.lastActivityAt ?? 0,
         }),
