@@ -47,9 +47,9 @@ without reconstructing it.
 | 10. listing rows carry a handler's declared result | on main (#5629) |
 | 9b. closed-world event emission | **ruled against** (#5589); does not land |
 | 12. `cf` refuses an undeclared field on a call | not started — where the ruling puts this capability |
-| 4. `receipt` as a top-level envelope field | not started — and its precondition now holds |
+| 4. `receipt` as a top-level envelope field | on main (#5694) |
 | 2. an unrecognized projection key is refused | not started |
-| 3. a rejection propagates up through what holds it | not started |
+| 3. a rejection propagates up through what holds it | on main (#5701) |
 | 5. `cf wish` and `cf exec` take the read options | not started |
 | 11. a caller may name a reference | not started; sequenced, gated on one measurement |
 
@@ -360,16 +360,16 @@ its own track.
 
 | # | Step | Delivers | After | Why here |
 | --- | --- | --- | --- | --- |
-| 1 | The doubly-linked tracker fixture and its walkthrough | **on main** (#5639, #5631) — repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none could be demonstrated until one existed. `verb-session-gaps.sh` is where they are asserted, and four of its assertions expect a gap and fail loudly the day it closes — so a capability arriving announces itself instead of quietly turning a check green |
-| 2 | A projected read survives a handler | #5633 | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
+| 1 | The doubly-linked tracker fixture and its walkthrough | **on main** (#5639, #5631) — repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none could be demonstrated until one existed. `verb-session-gaps.sh` is where they are asserted, and several of its assertions expect a gap and fail loudly the day it closes — so a capability arriving announces itself instead of quietly turning a check green. The script states its own count; repeating it here only creates a second place to be wrong |
+| 2 | A projected read survives a handler | #5633 — **handed off, owned by the runner** | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
 | 3 | Listing rows carry a handler's declared result | **on main** (#5629) — item 10, #5619 | — | The consumer half of item 1 |
-| 4 | The forced-stream fallback stops inventing verbs | #5576 | 3 | Same file as step 3, which has landed, so this is the front of the queue. It narrows the listing, so sweep the open branches for writers first |
-| 5 | The help page stops claiming a verb returns nothing | #5558 (the false claim) | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
+| 4 | The forced-stream fallback stops inventing verbs | **on main** (#5683) — #5576, #5662 | 3 | Same file as step 3, which has landed, so this is the front of the queue. It narrows the listing, so sweep the open branches for writers first |
+| 5 | The help page stops claiming a verb returns nothing | **on main** (#5680) — #5558, first half | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
 | 5a | An author's prose reaches the caller | #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
-| 6 | Help enumerates what a verb returns | #5558 (the missing fields) | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
-| 7 | A returned piece reads back through its own cycle | #5577 | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
-| 8 | `receipt` as a top-level envelope field | item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
-| 9 | A rejection propagates up through what holds it | item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
+| 6 | Help enumerates what a verb returns | **on main** (#5717) — #5558, second half | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
+| 7 | A returned piece reads back through its own cycle | #5577 — **in review** (#5740) | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
+| 8 | `receipt` as a top-level envelope field | **on main** (#5694) — item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
+| 9 | A rejection propagates up through what holds it | **on main** (#5701) — item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
 | 10 | Two identical projections stop colliding | #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
 | 11 | One piece, one address | #5632, #5498 | — | Trace where each id is minted; the outcome is a fix or a statement that they are aliases. Must precede step 13, which spreads the address vocabulary to two more commands |
 | 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step and the only one with design surface, since it couples the projection reader to the compatibility checker's annotation keys |
@@ -540,9 +540,12 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 
 | Issue | What | Attaches at |
 | --- | --- | --- |
-| #5633 | a projected read fails after an unrelated handler runs, while the same path unshaped succeeds | step 2 |
-| #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | step 4 |
-| #5558 | `piece call --help` claims every handler returns nothing, including one that declares a result | steps 5 and 6 — the false claim needs nothing, enumerating the fields needs the lookup |
+| #5633 | a projected read fails on the SECOND read of the same source and schema; the handler is a red herring | **owned by the runner** — the container's result link is not re-issued after a stale-basis retry. #5706 is why it reproduces every time |
+| #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | **fixed** by #5683, with #5662 |
+| #5698 | `cf piece verbs` returns nothing for a piece whose declared result type omits its verbs, though they are callable | the other direction of the same surface: 8 verbs invisible to the listing AND to tab-completion |
+| #5706 | a shaped read permanently writes to the user's space — per-element sub-patterns land at space scope | runner-owned, beside #5633 |
+| #5722 | a verb's help shows its usage twice, and shows no way to copy it | found by driving the surface by hand, which no test does |
+| #5558 | `piece call --help` claims every handler returns nothing, including one that declares a result | **fixed** by #5680 (the false claim) and #5717 (the enumerated fields) |
 | #5637 | an author's prose does not reach a caller: on a verb, on an event field, and on the event interface | step 5a — it absorbed #5559, which described one symptom and had its cause backwards |
 | #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | step 7 |
 | #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | step 10 |
