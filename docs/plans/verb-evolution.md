@@ -435,6 +435,17 @@ break stays possible with impact and recourse visible. Generated migrations
 and adapters — applied eagerly, or lazily when a piece is next touched — are
 the recourse this grows into.
 
+The count has a horizon, and the report has to name it. References cross
+spaces — a stored link carries its target's space (`NormalizedFullLink`,
+`packages/runner/src/link-types.ts`) — and links are one-directional,
+recorded in the holder's space, with no reverse index anywhere. So the
+report enumerates in rings: the workspace's recorded demands, completely;
+spaces the deployment can read, by scan; and beyond that nothing, because a
+consumer in a space nobody here can read is invisible in principle. That
+invisible ring is also the sharpest argument for versioned interfaces: a
+registry consumers declare against is the only mechanism that makes foreign
+demands discoverable at all.
+
 ### A break is acknowledged one at a time
 
 The only override today turns the entire gate off, so accepting one
@@ -448,8 +459,13 @@ and what eventually lets a dead verb be removed rather than hidden.
 
 Retirement policy is guesswork without usage data; deprecation windows work
 in other systems because usage is observable. The planned invocation-record
-work is the natural place for this to ride, and the blast-radius report is
-far more useful when it can say which contracts are live.
+work is the natural place for this to ride. Counting also sees past the
+blast-radius horizon: a call executes against the provider's piece, in the
+provider's space, so invocation records catch the cross-space and
+third-party callers no static enumeration can reach. The two signals are
+complementary and both partial — enumeration sees recorded demands within
+its horizon, dormant holders included; counting sees live callers beyond
+it, and misses anyone who has not called lately.
 
 ## The longer arc
 
