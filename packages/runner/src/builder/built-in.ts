@@ -172,6 +172,16 @@ export const fetchJson = createNodeFactory({
   }>,
 ) => Reactive<{ pending: boolean; result: T; error?: unknown }>;
 
+export const cellFromUrl = createNodeFactory({
+  type: "ref",
+  implementation: "cellFromUrl",
+}) as (
+  params: FactoryInput<{
+    url: string;
+    hosts?: string[];
+  }>,
+) => Reactive<{ pending: boolean; cell?: unknown }>;
+
 export const fetchJsonUnchecked = createNodeFactory({
   type: "ref",
   implementation: "fetchJsonUnchecked",

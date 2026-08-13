@@ -66,13 +66,15 @@ turning one into the other is mechanical: `slugIdForSpace`
 (`packages/runner/src/slugs.ts`) hashes `{ space, slug }`. No connection to the
 space is needed, so this stays synchronous however the rest evolves.
 
-- [ ] Register `cellFromUrl` in `packages/runner/src/builtins/`, and declare it
+- [x] Register `cellFromUrl` in `packages/runner/src/builtins/`, and declare it
       in `packages/api/index.ts` with the `Reactive<{ pending, … }>` shape the
       other builtins use.
-- [ ] Resolve synchronously to start with — a configured host list, a cached
+- [x] Resolve synchronously to start with — a configured host list, a cached
       space name, a slug hash. The point of landing it as a builtin now is that
       making any of those a real lookup later changes no caller.
-- [ ] Retire `extractFidPayloads` and `fidPayload` in topics onto it.
+- [ ] Retire `extractFidPayloads` and `fidPayload` in topics onto it. Deferred
+      deliberately: topics works, and rewriting it buys consistency rather than
+      capability. This is the one stage keeping the plan live.
 
 ## The filesystem round trip
 
@@ -126,14 +128,14 @@ subscription the editor already keeps; a label they did claim stays as they
 wrote it. That is the existing rule, reached from the filesystem instead of
 from a rename.
 
-- [ ] Mark the note's `[FS]` projection read-only.
-- [ ] Read the definition block back: added and changed definitions are the
+- [x] Mark the note's `[FS]` projection read-only.
+- [x] Read the definition block back: added and changed definitions are the
       user's edits, malformed lines are dropped.
-- [ ] An `editProjection`-shaped verb on the note: a handler that instantiates
+- [x] An `editProjection`-shaped verb on the note: a handler that instantiates
       the pattern above and writes what it produces.
-- [ ] Emit the reference definitions beneath the content, now that they survive
+- [x] Emit the reference definitions beneath the content, now that they survive
       a round trip.
-- [ ] Paste handling in `cf-code-editor`, once the builtin exists.
+- [x] Paste handling in `cf-code-editor`, once the builtin exists.
 
 ## Risks
 

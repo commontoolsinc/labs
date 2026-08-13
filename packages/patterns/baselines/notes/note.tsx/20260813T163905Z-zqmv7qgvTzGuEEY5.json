@@ -254,7 +254,7 @@
           "cell"
         ],
         "default": {},
-        "description": "The note's mentions in reference form. Stored beside `content` because it\nhas to stay in lockstep with it: the text carries keys, and this is what\nsays where they point.\n\nThe `Default<{}>` has to match the one `NoteOutput` declares. A map\npublished in the result under a different default than its input carries\ncannot be materialized, and a consumer that captures the note then gets\n`undefined` for the whole capture — which stops any action bound to it\nfrom running, rather than merely leaving this field empty."
+        "description": "The note's mentions in reference form. Stored beside `content` because it\nhas to stay in lockstep with it: the text carries keys, and this is what\nsays where they point.\n\nThe default has to be the same one `NoteOutput` declares. A map published\nin the result under a different default than its input carries cannot be\nmaterialized, and a consumer that captures the note then gets `undefined`\nfor the whole capture — which stops any action bound to it from running,\nrather than merely leaving this field empty."
       },
       "title": {
         "asCell": [
@@ -353,6 +353,28 @@
             "type": "object"
           }
         ]
+      },
+      "MentionRef": {
+        "properties": {
+          "destination": {
+            "type": "unknown"
+          },
+          "modifiedTitle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destination",
+          "modifiedTitle"
+        ],
+        "type": "object"
+      },
+      "MentionRefMap": {
+        "additionalProperties": {
+          "$ref": "#/$defs/MentionRef"
+        },
+        "properties": {},
+        "type": "object"
       },
       "MentionablePiece": {
         "properties": {
@@ -611,6 +633,21 @@
         ],
         "type": "object"
       },
+      "editProjection": {
+        "asCell": [
+          "stream"
+        ],
+        "description": "Take an edited filesystem projection, definitions and all.",
+        "properties": {
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
       "grep": {
         "properties": {
           "extraParams": {
@@ -655,20 +692,9 @@
         "description": "Parent notebook reference, null if not in a notebook"
       },
       "references": {
-        "additionalProperties": {
-          "properties": {
-            "modifiedTitle": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "modifiedTitle"
-          ],
-          "type": "object"
-        },
-        "description": "Where this note's `[Label][key]` mentions point.",
-        "properties": {},
-        "type": "object"
+        "$ref": "#/$defs/MentionRefMap",
+        "default": {},
+        "description": "Where this note's `[Label][key]` mentions point. The default matches the\ninput's; see `NoteInput.references` for why they have to."
       },
       "setTitle": {
         "asCell": [
@@ -738,6 +764,7 @@
       "grep",
       "translate",
       "editContent",
+      "editProjection",
       "setTitle",
       "appendLink",
       "createNewNote",

@@ -133,15 +133,32 @@ piece, and a mention persisted against that path would later name whatever moved
 into the slot; the older form's id comes from the same resolution, so falling
 back to it costs the form and not the target.
 
+## A pasted URL
+
+Pasting a piece's URL is how someone says "this one" when they have the link
+rather than the name, and left as a URL it is invisible to everything that reads
+mentions. In reference mode a paste that names a piece becomes one.
+
+Which URLs name a piece is `parseFabricUrl` (`@commonfabric/runner/fabric-url`),
+judged against this document's own host plus anything in `fabricHosts`. Two
+cases deliberately paste as text: a URL naming its space by name rather than by
+DID, which this side cannot resolve, and a slug, which addresses a redirect
+document and would need a read before it could name the piece.
+
+The label starts as the pasted text and becomes the destination's name when the
+subscription delivers it. Nothing special does that: `modifiedTitle` is false,
+so this is the same rewrite a rename gets.
+
 ## What the form gives up
 
 `[[Name (id)]]` survives being copied anywhere. `[Label][a3f9zz]` means nothing
 without the map, so text pasted into another document reads as ordinary text
 there, and a consumer reading raw content sees a label with no destination.
 
-Neither is recovered. Emitting the map as the markdown reference-definition
-block it resembles would make an exported document whole, but not through
-`[FS]`: `writeFsFile` (`packages/fuse/cell-bridge.ts`) writes the entire edited
-body back to `$FS.content`, so emitted definitions would return as note text on
-the first edit through the filesystem. That needs a read-only projection
-surface, or an `[FS]` write-back that strips a generated section.
+A paste between two live documents is not recovered. The exported file is:
+`note.tsx` emits the map as the markdown reference-definition block it
+resembles, so a projected note is self-contained. That projection is read-only —
+`writeFsFile` (`packages/fuse/cell-bridge.ts`) writes an entire edited body back
+to `$FS.content`, and a note that accepted it would take its own generated
+definitions in as text — and an edit arrives through the note's `editProjection`
+verb instead, which reads the block back as its mentions.

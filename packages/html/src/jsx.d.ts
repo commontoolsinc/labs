@@ -4027,6 +4027,7 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "$references"?: CellLike<
     Record<string, { destination: unknown; modifiedTitle: boolean }>
   >;
+  "fabricHosts"?: string[];
   "$pattern"?: CellLike<any>;
   "pattern"?: any;
   "wordWrap"?: boolean;

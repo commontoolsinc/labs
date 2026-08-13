@@ -16,6 +16,7 @@ import type {
   AsWriteonlyCell,
   ByRefFunction,
   Cell,
+  CellFromUrlFunction,
   CellScope,
   CellTypeConstructor,
   CfDataFunction,
@@ -389,6 +390,7 @@ export interface BuilderFunctionsAndConstants {
   generateObject: GenerateObjectFunction;
   generateText: GenerateTextFunction;
   fetchBinary: FetchBinaryFunction;
+  cellFromUrl: CellFromUrlFunction;
   fetchText: FetchTextFunction;
   fetchJson: FetchJsonFunction;
   fetchJsonUnchecked: FetchJsonUncheckedFunction;
