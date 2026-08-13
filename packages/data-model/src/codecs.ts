@@ -21,7 +21,7 @@ import type { ReconstructionContext } from "./codec-interface/interface.ts";
 import { EmptyReconstructionContext } from "./codec-interface/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
-import { JsonCodec } from "./codec-json/JsonCodec.ts";
+import { JsonCodecEngine } from "./codec-json/JsonCodecEngine.ts";
 import { createBaseJsonRegistry } from "./codec-json/createBaseJsonRegistry.ts";
 import { codecClasses as primitiveClasses } from "./fabric-primitives/index.ts";
 import { codecClasses as instanceClasses } from "./fabric-instances/index.ts";
@@ -51,21 +51,21 @@ export function createDefaultJsonRegistry(): CodecRegistry<JsonCodecValue> {
 }
 
 /**
- * Constructs a `JsonCodec` over {@link createDefaultJsonRegistry}, for a
+ * Constructs a `JsonCodecEngine` over {@link createDefaultJsonRegistry}, for a
  * caller that wants this package's classes rather than a set of its own.
  * `options.lenient` is passed through.
  */
-export function newDefaultJsonCodec(
+export function newDefaultJsonCodecEngine(
   options?: { lenient?: boolean },
-): JsonCodec {
-  return new JsonCodec({
+): JsonCodecEngine {
+  return new JsonCodecEngine({
     registry: createDefaultJsonRegistry(),
     lenient: options?.lenient ?? false,
   });
 }
 
 /** Shared JSON codec. */
-const jsonCodec = newDefaultJsonCodec();
+const jsonCodecEngine = newDefaultJsonCodecEngine();
 
 /**
  * Shared empty `ReconstructionContext` used when a JSON decode is requested
@@ -88,7 +88,7 @@ const JSON_DECODE_EMPTY_CONTEXT = Object.freeze(
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  */
 export function jsonFromValue(value: FabricValue): string {
-  return jsonCodec.encode(value);
+  return jsonCodecEngine.encode(value);
 }
 
 /**
@@ -131,7 +131,7 @@ export function valueFromJson(
   json: string,
   context?: ReconstructionContext | undefined,
 ): FabricValue {
-  return jsonCodec.decode(
+  return jsonCodecEngine.decode(
     json,
     context ?? JSON_DECODE_EMPTY_CONTEXT,
   );

@@ -8,7 +8,7 @@ import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
-import { JsonCodec } from "@commonfabric/data-model/codec-json";
+import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
 import {
   FabricPrimitive,
@@ -188,13 +188,13 @@ async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
  *
  * The encoding's prefix tag identifies it on the wire but is not part of the
  * JSON, so it cannot survive pretty-printing. Taking it off and putting it back
- * goes through `JsonCodec`'s test-only helpers, which is what keeps the tag
+ * goes through `JsonCodecEngine`'s test-only helpers, which is what keeps the tag
  * defined in exactly one place. Key order needs no help: a conforming encoder
  * emits plain-object keys in canonical order.
  */
 function encodeGolden(value: unknown): string {
   const body = JSON.parse(
-    JsonCodec.unwrapEncodedValueForTesting(
+    JsonCodecEngine.unwrapEncodedValueForTesting(
       jsonFromValue(value as FabricValue),
     ),
   );
@@ -204,7 +204,7 @@ function encodeGolden(value: unknown): string {
 /** Inverse of {@link encodeGolden}. */
 function decodeGolden(text: string): unknown {
   return valueFromJson(
-    JsonCodec.wrapEncodedValueForTesting(text.trim()),
+    JsonCodecEngine.wrapEncodedValueForTesting(text.trim()),
   );
 }
 

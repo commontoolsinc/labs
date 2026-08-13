@@ -15,7 +15,7 @@ import { expect } from "@std/expect";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { hashOf } from "@/value-hash.ts";
-import { newDefaultJsonCodec } from "@/codecs.ts";
+import { newDefaultJsonCodecEngine } from "@/codecs.ts";
 import { EmptyReconstructionContext } from "@/codec-common/index.ts";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
@@ -82,13 +82,13 @@ describe("message quoting", () => {
     });
   });
 
-  describe("`JsonCodec.decode()`", () => {
+  describe("`JsonCodecEngine.decode()`", () => {
     it("hands back the excerpt it refused", () => {
       const context = new EmptyReconstructionContext(false);
       for (const data of HOSTILE) {
         let message = "";
         try {
-          newDefaultJsonCodec().decode(data, context);
+          newDefaultJsonCodecEngine().decode(data, context);
         } catch (e) {
           message = (e as Error).message;
         }

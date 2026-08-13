@@ -7,7 +7,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JsonCodec } from "@commonfabric/data-model/codec-json";
+import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { jsonFromValue } from "@commonfabric/data-model/codecs";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
@@ -62,7 +62,7 @@ describe("attestation `load()` of `data:` URIs", () => {
   it("errors on an undecodable payload past the codec tag", () => {
     const { ok, error } = load({
       id: uriOf(
-        JsonCodec.wrapEncodedValueForTesting("{nope", true),
+        JsonCodecEngine.wrapEncodedValueForTesting("{nope", true),
       ),
     });
     expect(ok).toBeUndefined();
