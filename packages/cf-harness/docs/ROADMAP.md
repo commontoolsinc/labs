@@ -1,7 +1,7 @@
 # cf-harness Roadmap
 
 Status: live, non-normative\
-Last reviewed: 2026-07-22
+Last reviewed: 2026-08-13
 
 This document lists remaining work. Shipped milestones belong in
 [CURRENT_STATE.md](CURRENT_STATE.md), tests, and history rather than in a
@@ -51,7 +51,30 @@ permanently growing implementation plan.
 - Extend resume only where external side-effect replay semantics can be made
   explicit and testable.
 
-## 5. Evolve skills only from concrete needs
+## 5. Mediate file-based pattern sources for `run_pattern`
+
+- `run_pattern` accepts only inline `sourceText`; a workspace-file source (the
+  former `sourcePath`) is a trusted-host read channel whose compile diagnostics
+  can exfiltrate file content, so reintroduce it only as a mediated capability:
+  reads routed through the same policy surface as `read_file`, with CFC
+  observation metadata on the source bytes.
+
+## 6. Bound, retain, and check `run_pattern` side effects
+
+- Give each `run_pattern` invocation a resource ceiling and deadline, aligned
+  with the hosted-pattern-authoring prerequisite that an agent session runs
+  under configured limits on model tokens, tool invocations, CPU, memory, and
+  disk; today only the abort signal bounds an invocation.
+- Define a retention and deletion story for the unlisted pieces `run_pattern`
+  persists and for the run-state handle table. Each invocation leaves a
+  stopped-but-never-deleted piece whose source-history revision is a
+  storage-retention root invisible to the piece list, and handle-table entries
+  accumulate per run with no expiry.
+- Add an outbound CFC flow check on compiled pattern source. The current
+  space-equality gate covers inbound input links only; nothing checks what a
+  compiled pattern's own code sends out of the session space.
+
+## 7. Evolve skills only from concrete needs
 
 - Keep explicit caller preload and profile-scoped child skills as the stable
   path.

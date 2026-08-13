@@ -7,6 +7,10 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { createSession, Identity } from "@commonfabric/identity";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import { type Cell, isCell, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
@@ -751,5 +755,157 @@ describe("prompt-loop address handles", () => {
       request.command.includes("note ")
     );
     expect(dispatched?.command).toContain(command);
+  });
+
+  it("carries a `run_pattern` result ref to the model as a token and resolves that token in the next call's input back to the ref", async () => {
+    const runId = "run-handles-run-pattern";
+    const signer = await Identity.fromPassphrase("run-pattern handles");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `run-pattern-handles-${crypto.randomUUID()}`,
+      }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      // Record each deployment so the second call's converted input — the
+      // cell the tool resolved from the substituted ref — is observable.
+      // The tool persists through `runPersistent`, the single path that
+      // creates a piece.
+      const created: Array<{
+        input: Record<string, unknown> | undefined;
+        piece: Cell<unknown>;
+      }> = [];
+      const originalRunPersistent = pieces.runPersistent.bind(pieces);
+      pieces.runPersistent = (async (
+        ...args: Parameters<PiecesController["runPersistent"]>
+      ) => {
+        const piece = await originalRunPersistent(...args);
+        created.push({
+          input: args[1] as Record<string, unknown> | undefined,
+          piece,
+        });
+        return piece;
+      }) as PiecesController["runPersistent"];
+      const doublingSource = [
+        "import { computed, pattern } from 'commonfabric';",
+        "export default pattern<{ n: number }, { doubled: number }>(",
+        "  ({ n }) => ({ doubled: computed(() => n * 2) }),",
+        ");",
+      ].join("\n");
+      const echoSource = [
+        "import { computed, pattern } from 'commonfabric';",
+        "interface Source { doubled: number; }",
+        "export default pattern<{ src: Source }, { copied: number }>(",
+        "  ({ src }) => ({ copied: computed(() => src.doubled) }),",
+        ");",
+      ].join("\n");
+      const runPatternTurn = (
+        id: string,
+        args: Record<string, unknown>,
+      ) => ({
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [{
+              id,
+              type: "function",
+              function: {
+                name: "run_pattern",
+                arguments: JSON.stringify(args),
+              },
+            }],
+          },
+        }],
+      });
+      // The second call's argument depends on the token minted during the
+      // run, so the model side is scripted dynamically off the request
+      // transcript rather than as fixed payloads.
+      const requestBodies: unknown[] = [];
+      let firstToolContent: string | undefined;
+      const fetchFn: typeof fetch = (_input, init) => {
+        requestBodies.push(JSON.parse(String(init?.body)));
+        const turn = requestBodies.length;
+        let payload: unknown;
+        if (turn === 1) {
+          payload = runPatternTurn("call-1", {
+            sourceText: doublingSource,
+            inputs: { n: 3 },
+            resultSchema: {
+              type: "object",
+              properties: { doubled: { type: "number" } },
+            },
+          });
+        } else if (turn === 2) {
+          const chat = chatViewOfRequest(requestBodies[1]);
+          const toolMessage = [...chat.messages].reverse().find(
+            (message) => message.role === "tool",
+          );
+          firstToolContent = toolMessage?.content ?? "";
+          const token =
+            (JSON.parse(firstToolContent) as { resultRef: string }).resultRef;
+          payload = runPatternTurn("call-2", {
+            sourceText: echoSource,
+            inputs: { src: token },
+          });
+        } else {
+          payload = finalTurn("Done.");
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-5.4",
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces }),
+        }),
+        fetchFn,
+      });
+
+      await loop.runPrompt({ prompt: "Run the pattern twice." });
+
+      // Outbound: the model-facing tool message carries a token where the
+      // ref would be, and no raw address, raw result value, or bare piece
+      // id.
+      const firstOutput = JSON.parse(firstToolContent!) as {
+        resultRef: string;
+        value: { doubled: number };
+      };
+      expect(firstOutput.resultRef).toMatch(/^cfh:a:/);
+      expect(firstToolContent).not.toContain("of:");
+      expect(firstToolContent).not.toContain("fid1:");
+      expect(firstOutput.value.doubled).toBe(6);
+      expect(firstOutput).not.toHaveProperty("rawValue");
+      expect(firstOutput).not.toHaveProperty("pieceId");
+      // Inbound: the token the model wrote came back to the tool as the
+      // canonical ref, which the tool converted to a live cell aimed at the
+      // first piece's result — with zero handle code in the tool itself.
+      expect(created.length).toBe(2);
+      const src = created[1]?.input?.src;
+      expect(isCell(src)).toBe(true);
+      const firstResult = await new PieceController(pieces, created[0]!.piece)
+        .result.getCell();
+      expect((src as Cell<unknown>).getAsNormalizedFullLink().id).toBe(
+        firstResult.getAsNormalizedFullLink().id,
+      );
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
   });
 });
