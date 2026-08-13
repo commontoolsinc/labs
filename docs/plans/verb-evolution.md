@@ -284,24 +284,37 @@ not, and no gate catches it. This costs nothing to adopt and is the only
 protection available until Fabric-types records outputs in the shape — at
 which point the convention is replaced by a check.
 
-### A true break is a redeploy
+### A true break is a migration in place
 
 Some changes are genuinely incompatible, and no declaration discipline makes
-them compatible. Those are handled by deploying a new pattern and migrating
-the data, not by updating in place. Migration is a good bet to get cheaper —
-moving data between shapes is work a model can do, and the useful form is
-generated migration logic, not per-piece hand-holding — but it stays the
-exception. The default is to stay compatible, because most patterns are
-updated by models that will cheerfully jump through hoops to avoid a break,
-and because a compatible update keeps the piece's identity.
+them compatible. What handles them is a **migration**: the same piece,
+updated in place to the new shape, its stored data transformed by migration
+code — work a model can do, and the useful form is generated migration
+logic, not per-piece hand-holding. Nothing structural stands in the way. The
+update path already applies new source to an existing piece while keeping
+its identity and its state, and the gate that refuses an incompatible shape
+is our own check, with an all-or-nothing bypass
+(`dangerouslyAllowIncompatibleSchema`) that exists today. What is missing is
+the machinery that makes the break safe rather than nuclear: the scoped
+acknowledgment and blast-radius report under tooling, and the upgrade
+mechanisms of [the longer arc](#the-longer-arc). A migration still breaks
+callers whose expectations no longer hold — but because demands are
+recorded, that breakage is enumerable and answerable, migrated or adapted,
+rather than silent.
 
-Identity is the gap to know about. A redeploy mints a **new piece with a new
-identity**, and other pieces hold references to the old one — boards hold
-notes, topics hold cross-references. Nothing re-points those references;
-migrating the data does not move them. There is no forwarding mechanism — no
-way for an old identity to hand its callers on to its successor — and
-building one has not been scheduled. Until it exists, whoever redeploys a
-referenced pattern re-points the references themselves.
+The default is still to stay compatible. Most patterns are updated by models
+that will cheerfully jump through hoops to avoid a break, and a compatible
+update needs none of this machinery.
+
+**Redeploying as a new pattern is the special case, not the answer.** A
+redeploy mints a new piece with a new identity. What it buys is coexistence
+— the old piece keeps working for its callers — and unmanaged coexistence is
+the measured failure mode in the longer arc, not a free good. What it costs
+is every stored reference: boards hold notes, topics hold cross-references,
+and nothing re-points them at the successor. There is no forwarding
+mechanism, and building one has not been scheduled. That cost belongs to
+choosing a redeploy — a deliberately new thing, or a move across spaces,
+where identity genuinely cannot follow — not to every incompatible change.
 
 ## How the design holds up
 
@@ -533,10 +546,11 @@ gate should learn that removal beneath a demand marker is narrowing rather
 than breakage — decides how much of this design applies to what is already
 running.
 
-One mechanism is missing and unscheduled: **reference forwarding.** A true
-break mints a new piece identity, and nothing re-points stored references to
-the successor; until something does, a redeploy means re-pointing them by
-hand.
+One mechanism is missing and unscheduled: **reference forwarding.** A
+redeploy mints a new piece identity, and nothing re-points stored references
+to the successor; until something does, a redeploy means re-pointing them by
+hand. The migration-in-place path makes this rarer, not moot: anything that
+is genuinely a new pattern still forks its references.
 
 Three smaller calls belong to whoever does the work:
 
