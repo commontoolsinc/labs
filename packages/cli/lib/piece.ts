@@ -117,6 +117,13 @@ export interface PieceSearchResult {
 export interface PieceConfig extends SpaceConfig {
   piece: string;
   pieceScope?: CellScope;
+  /**
+   * Path segments embedded in an LLM-friendly `--piece` reference. A command
+   * that reads or writes at a path prepends these to its positional path
+   * argument; a command whose intake is id-only rejects a reference that
+   * carries them.
+   */
+  piecePath?: (string | number)[];
 }
 
 export interface SetPiecePatternOptions {

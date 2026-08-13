@@ -44,6 +44,7 @@ import type {
   InvocationPhase,
 } from "../lib/callable.ts";
 import { newSessionId } from "../lib/session.ts";
+import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
@@ -1086,7 +1087,7 @@ export const piece = new Command()
   .action(async (options, slug, sourceRef) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
-    const source = parseLink(sourceRef);
+    const source = parseLink(sourceRef, { space: spaceConfig.space });
     await setPieceSlug(
       spaceConfig,
       slug,
@@ -1460,7 +1461,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     // BEFORE parseLink (the sqlite: scheme is not a piece ref).
     const sqliteSource = parseSqliteSource(sourceRef);
     if (sqliteSource) {
-      const target = parseLink(targetRef);
+      const target = parseLink(targetRef, { space: spaceConfig.space });
       if (!target.path) {
         throw new ValidationError(
           `Target reference must include a path. Expected: pieceId/path/to/field`,
@@ -1481,8 +1482,11 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     }
 
     // Parse source and target references - handle both pieceId/path and well-known IDs
-    const source = parseLink(sourceRef, { allowWellKnown: true });
-    const target = parseLink(targetRef);
+    const source = parseLink(sourceRef, {
+      allowWellKnown: true,
+      space: spaceConfig.space,
+    });
+    const target = parseLink(targetRef, { space: spaceConfig.space });
 
     // For linking, sources can be either:
     // 1. pieceId (links entire result cell)
@@ -1618,10 +1622,10 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = {
-      ...parsePieceOptions(options),
+      ...parsePieceOptions(options, { acceptsPath: true }),
       jsonOutput: true,
     };
-    const pathSegments = pathString ? parseCellPath(pathString) : [];
+    const pathSegments = mergePiecePath(pieceConfig, pathString);
     try {
       const selection = await parseCellSelectionOptions(options);
       const value = await getCellValue(pieceConfig, pathSegments, {
@@ -1730,8 +1734,8 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   .arguments("<path:string>")
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    const pathSegments = parseCellPath(pathString);
+    const pieceConfig = parsePieceOptions(options, { acceptsPath: true });
+    const pathSegments = mergePiecePath(pieceConfig, pathString);
     const value = await drainStdin();
     await setCellValue(pieceConfig, pathSegments, value, {
       input: options.input,
@@ -2255,10 +2259,10 @@ export async function getCellCfcLabelFromCommand(
 ): Promise<void> {
   setQuietMode(!!options.quiet);
   const pieceConfig = {
-    ...parsePieceOptions(options),
+    ...parsePieceOptions(options, { acceptsPath: true }),
     jsonOutput: true,
   };
-  const pathSegments = pathString ? parseCellPath(pathString) : [];
+  const pathSegments = mergePiecePath(pieceConfig, pathString);
   const label = await (deps.getCellCfcLabel ?? getCellCfcLabel)(
     pieceConfig,
     pathSegments,
@@ -2274,10 +2278,10 @@ export async function setCellCfcLabelFromCommand(
 ): Promise<void> {
   setQuietMode(!!options.quiet);
   const pieceConfig = {
-    ...parsePieceOptions(options),
+    ...parsePieceOptions(options, { acceptsPath: true }),
     jsonOutput: true,
   };
-  const pathSegments = pathString ? parseCellPath(pathString) : [];
+  const pathSegments = mergePiecePath(pieceConfig, pathString);
   const update = await (deps.drainStdin ?? drainStdin)();
   const label = await (deps.setCellCfcLabel ?? setCellCfcLabel)(
     pieceConfig,
@@ -2433,7 +2437,10 @@ function parseSetHomeOptions(
   return { identity: absPath(input.identity), apiUrl };
 }
 
-export function parsePieceOptions(input: PieceCLIOptions): PieceConfig {
+export function parsePieceOptions(
+  input: PieceCLIOptions,
+  parseOptions?: { acceptsPath?: boolean },
+): PieceConfig {
   const options = parseSpaceOptions(input);
   if (!("piece" in options) || !options.piece) {
     throw new ValidationError(
@@ -2441,7 +2448,16 @@ export function parsePieceOptions(input: PieceCLIOptions): PieceConfig {
       { exitCode: 1 },
     );
   }
-  return options as PieceConfig;
+  const config = options as PieceConfig;
+  if (config.piecePath?.length && !parseOptions?.acceptsPath) {
+    throw new ValidationError(
+      `The piece reference embeds a path ("${
+        config.piecePath.join("/")
+      }") but this command takes a piece id only.`,
+      { exitCode: 1 },
+    );
+  }
+  return config;
 }
 
 // With args and env vars shadowing each other, and multiple
@@ -2495,9 +2511,18 @@ export function parseSpaceOptions(
   if (input.piece) {
     // Do not validate here -- piece is only
     // required via `parsePieceOptions`
-    const parsedPiece = parseScopedIdSegment(input.piece);
-    output.piece = parsedPiece.id;
-    if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
+    const llmRef = normalizeLLMFriendlyRef(input.piece, {
+      space: input.space,
+    });
+    if (llmRef) {
+      output.piece = llmRef.pieceId;
+      if (llmRef.scope) output.pieceScope = llmRef.scope;
+      if (llmRef.path.length > 0) output.piecePath = llmRef.path;
+    } else {
+      const parsedPiece = parseScopedIdSegment(input.piece);
+      output.piece = parsedPiece.id;
+      if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
+    }
   }
 
   output.apiUrl = normalizeApiUrl(input.apiUrl);
@@ -2512,10 +2537,33 @@ export function parseSpaceOptions(
   return output as PieceConfig;
 }
 
+/**
+ * The full path a piece data command addresses: any path embedded in an
+ * LLM-friendly `--piece` reference, followed by the positional path argument.
+ */
+export function mergePiecePath(
+  pieceConfig: PieceConfig,
+  pathString?: string,
+): (string | number)[] {
+  return [
+    ...(pieceConfig.piecePath ?? []),
+    ...(pathString ? parseCellPath(pathString) : []),
+  ];
+}
+
 export function parseLink(
   ref: string,
-  _options?: { allowWellKnown?: boolean },
+  options?: { allowWellKnown?: boolean; space?: string },
 ): { pieceId: string; scope?: CellScope; path?: (string | number)[] } {
+  const llmRef = normalizeLLMFriendlyRef(ref, { space: options?.space });
+  if (llmRef) {
+    return {
+      pieceId: llmRef.pieceId,
+      ...(llmRef.scope && { scope: llmRef.scope }),
+      ...(llmRef.path.length > 0 && { path: llmRef.path }),
+    };
+  }
+
   const parts = ref.split("/");
   if (parts.length < 1) {
     throw new ValidationError(

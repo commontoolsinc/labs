@@ -43,6 +43,7 @@ import {
   formatPatternIdentity,
   formatPatternRef,
   localPatternEntry,
+  mergePiecePath,
   normalizeApiUrl,
   parseLink,
   parsePieceOptions,
@@ -62,6 +63,10 @@ const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
 const PIECE = "abcdefghijklmnopqrstuvwxyz";
 const ID = "~/.my.key";
+// The 43-character id length matches the entity ids the runtime mints, and
+// clears the runner parser's handle-length threshold.
+const LLM_HANDLE = `of:fid1:${"baedreiabcdefghijklmnopqrstuvwxyz0123456789"}`;
+const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
 
@@ -313,6 +318,57 @@ describe("cli piece parsing", () => {
       pieceScope: "session",
     });
   });
+  it("parsePieceOptions() resolves an LLM-friendly --piece like the bare handle", () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    expect(parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}` })).toEqual(
+      parsePieceOptions({ ...base, piece: LLM_HANDLE }),
+    );
+    expect(
+      parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}@session` }),
+    ).toMatchObject({
+      piece: LLM_HANDLE,
+      pieceScope: "session",
+    });
+  });
+
+  it("parsePieceOptions() carries an embedded path only where the command accepts one", () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    const config = parsePieceOptions(
+      { ...base, piece: `/${LLM_HANDLE}/items/0` },
+      { acceptsPath: true },
+    );
+    expect(config).toMatchObject({
+      piece: LLM_HANDLE,
+      piecePath: ["items", 0],
+    });
+    expect(mergePiecePath(config, "title")).toEqual(["items", 0, "title"]);
+    expect(mergePiecePath(config)).toEqual(["items", 0]);
+    expect(() => parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}/items` }))
+      .toThrow(/takes a piece id only/);
+  });
+
+  it("parsePieceOptions() checks an embedded space DID against the target space", () => {
+    const base = { apiUrl: API_URL, identity: ID };
+    expect(parsePieceOptions({
+      ...base,
+      space: SPACE_DID,
+      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+    })).toMatchObject({
+      space: SPACE_DID,
+      piece: LLM_HANDLE,
+    });
+    expect(() =>
+      parsePieceOptions({
+        ...base,
+        space: SPACE,
+        piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+      })
+    ).toThrow(
+      `Reference names space "${SPACE_DID}" but the command targets ` +
+        `space "${SPACE}".`,
+    );
+  });
+
   it("parsePieceOptions() throws on incomplete input", () => {
     expect(() =>
       parsePieceOptions({
@@ -526,6 +582,30 @@ describe("cli piece parsing", () => {
       const result = parseLink("piece/field/");
       expect(result.pieceId).toBe("piece");
       expect(result.path).toEqual(["field", ""]);
+    });
+
+    it("parses an LLM-friendly reference like the bare form", () => {
+      expect(parseLink(`/${LLM_HANDLE}`)).toEqual({ pieceId: LLM_HANDLE });
+      expect(parseLink(`/${LLM_HANDLE}/data/items/0/title`)).toEqual(
+        parseLink(`${LLM_HANDLE}/data/items/0/title`),
+      );
+      expect(parseLink(`/${LLM_HANDLE}@user/field`)).toEqual({
+        pieceId: LLM_HANDLE,
+        scope: "user",
+        path: ["field"],
+      });
+    });
+
+    it("checks an embedded space DID against the target space", () => {
+      expect(
+        parseLink(`/@${SPACE_DID}/${LLM_HANDLE}/field`, { space: SPACE_DID }),
+      ).toEqual({
+        pieceId: LLM_HANDLE,
+        path: ["field"],
+      });
+      expect(() =>
+        parseLink(`/@${SPACE_DID}/${LLM_HANDLE}/field`, { space: SPACE })
+      ).toThrow(/names space/);
     });
   });
 
