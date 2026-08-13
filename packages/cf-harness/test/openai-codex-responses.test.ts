@@ -866,7 +866,10 @@ Deno.test("Codex Responses quota errors are concise and do not retain response b
           JSON.stringify({
             error: { message: "access-secret account acct-123" },
           }),
-          { status: 429 },
+          {
+            status: 429,
+            headers: { "retry-after": "retry-secret-sentinel" },
+          },
         ),
       ),
   });
@@ -890,6 +893,7 @@ Deno.test("Codex Responses quota errors are concise and do not retain response b
   const serialized = JSON.stringify(attempts);
   assertEquals(serialized.includes("access-secret"), false);
   assertEquals(serialized.includes("acct-123"), false);
+  assertEquals(serialized.includes("retry-secret-sentinel"), false);
   assertStringIncludes(serialized, '"httpStatus":429');
 });
 
@@ -951,6 +955,31 @@ Deno.test("Codex transport errors redact credential and account values", async (
   assertEquals(serialized.includes("refresh-secret"), false);
   assertEquals(serialized.includes("acct-123"), false);
   assertStringIncludes(serialized, "[redacted]");
+});
+
+Deno.test("Codex Responses bounds failures while reading provider error bodies", async () => {
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.error(new Error("provider-body-secret-sentinel"));
+    },
+  });
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () => Promise.resolve(new Response(body, { status: 503 })),
+  });
+
+  const error = await assertRejects(() =>
+    client.complete({
+      model: "gpt-5.4",
+      transcript: [{ role: "user", content: "hi" }],
+      tools: [],
+      nativeModelToolIds: [],
+      runId: "run-error-body",
+    })
+  );
+  assertEquals(error instanceof HarnessControlError, true);
+  assertEquals((error as HarnessControlError).code, "provider-unavailable");
+  assertEquals(errorGraphText(error).includes("secret-sentinel"), false);
 });
 
 Deno.test("Codex Responses abort cancels an active stream without retry", async () => {

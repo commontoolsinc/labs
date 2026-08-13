@@ -156,7 +156,6 @@ const selectedHeaders = (
     const name of [
       "x-request-id",
       "x-openai-request-id",
-      "retry-after",
       "content-type",
     ]
   ) {
@@ -447,18 +446,18 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         : {}),
     };
     if (!response.ok) {
-      const errorBody = await response.text();
+      let responseBodyBytes: number | undefined;
+      try {
+        responseBodyBytes = textBytes(await response.text());
+      } catch {
+        if (request.signal?.aborted) throw abortReason(request.signal);
+      }
       await emitAttempt(request.onAttempt, {
         ...baseAttempt,
-        responseBodyBytes: textBytes(errorBody),
+        ...(responseBodyBytes !== undefined ? { responseBodyBytes } : {}),
       });
       if (response.status === 429) {
-        const retryAfter = response.headers.get("retry-after");
-        throw providerUnavailable(
-          `OpenAI Codex usage limit reached${
-            retryAfter ? `; retry after ${retryAfter}` : ""
-          }`,
-        );
+        throw providerUnavailable("OpenAI Codex usage limit reached");
       }
       if (response.status === 401 || response.status === 403) {
         throw providerAuthRequired(
