@@ -2555,8 +2555,8 @@ function markersHeldBy(
  * projection cannot do that — it answers with the declaration's whole shape,
  * which for a caller who named one field is a projection handing back the
  * fields they did not name. Working off the value in hand also runs no pattern
- * graph and commits no transaction: bounding a readback costs the pattern load
- * the declaration sits behind, and nothing else.
+ * graph and commits no transaction; what remains is the address walk itself,
+ * which is the same one a hand-written `$link` is composed through.
  */
 export async function boundReadValue(
   sourceCell: Cell<unknown>,

@@ -367,9 +367,9 @@ describe("cf piece call on a piece that points back at its container", () => {
       await call("addChild", ["--title", "Unshaped"], {
         deriveSelectedValue: counted,
       });
-      // Nothing was asked of the selection step, and the bound is a walk over
+      // Nothing was asked of the selection step, and the bound is a cut into
       // the value the readback already holds: it runs no pattern graph and
-      // commits no transaction, so this call reads the receipt once.
+      // commits no transaction, so this call derives nothing at all.
       expect(reads).toBe(0);
 
       await call("addChild", ["--title", "Shaped"], {

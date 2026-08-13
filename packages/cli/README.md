@@ -439,8 +439,9 @@ Three things follow:
   closing position itself, and is answered with that one address alone.
 - **Nothing else pays for it.** A result that renders is written out exactly as
   it was read, and the compiled pattern a declared result is matched through is
-  loaded only where a readback cannot render. The bound itself is a walk over
-  the value already in hand: no second read, no pattern graph, no transaction.
+  loaded only where a readback cannot render. The bound itself is a cut into the
+  value already in hand — no pattern graph and no transaction — leaving the
+  address walk a written `$link` is composed through as the only work beside it.
 
 Where nothing bounds the circle — the verb declares no result, the declaration
 it made leaves the closing position wide, or a `--filter` is in play — the call
