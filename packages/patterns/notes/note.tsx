@@ -24,6 +24,7 @@ import {
 import NoteMd from "./note-md.tsx";
 import {
   type MentionablePiece,
+  type MentionRefMap,
   type MinimalPiece,
   type NotebookPiece,
   type NoteInput,
@@ -61,6 +62,12 @@ export interface NoteOutput extends NotePiece {
   summary: string;
   mentioned: MentionablePiece[] | Default<[]>;
   backlinks: MentionablePiece[];
+  /**
+   * Where this note's `[Label][key]` mentions point. The default matches the
+   * input's; see `NoteInput.references` for why they have to.
+   */
+  // deno-lint-ignore ban-types
+  references: MentionRefMap | Default<{}>;
   isHidden: boolean;
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;
@@ -163,6 +170,7 @@ const Note = pattern<NoteInput, NoteOutput>(
     isHidden,
     linkPattern,
     parentNotebook: _parentNotebook,
+    references,
     [SELF]: self,
   }) => {
     // Ensure parentNotebook is always a Writable (input is optional)
@@ -252,6 +260,7 @@ const Note = pattern<NoteInput, NoteOutput>(
           },
           sourceNoteRef: self as NotePiece,
           content,
+          references: references!,
         }),
       );
     });
@@ -393,6 +402,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         $value={content}
         $mentionable={mentionable!}
         $mentioned={mentioned}
+        $references={references!}
         $pattern={patternJson}
         onbacklink-click={handlePieceLinkClick}
         onbacklink-create={handleNewBacklink({
@@ -595,6 +605,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       summary,
       mentioned,
       backlinks,
+      references: references!,
       isHidden,
       parentNotebook,
       grep: patternTool(grepPattern, { content }),

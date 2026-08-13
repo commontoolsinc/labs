@@ -19,12 +19,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   remaining owner decisions and blocked stages for exchange rules.
 - [CFC TypeScript authoring](cfc_typescript_authoring.md) sequences the
   TypeScript and JSX authoring surface for CFC metadata.
-- [Editor mention references](editor-mention-references.md) moves a mention's
-  destination out of the note text and into a reference map the host pattern
-  owns, so the text carries a short local key and the destination is a live
-  cell rather than a stringified id. It also gives an edited label standing:
-  the map records that the user chose the wording, and an incoming title change
-  leaves it alone.
 - [First-class serializable factories](first-class-serializable-factories.md)
   sequences the implementation of durable pattern, module, and handler
   factories.

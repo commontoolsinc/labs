@@ -38,6 +38,19 @@ const backlinkStreamOf = (subject: { [UI]: unknown }): BacklinkStream => {
   return propsOf(editor)?.["onbacklink-create"] as BacklinkStream;
 };
 
+/**
+ * Whether the note's editor was given a reference map. Its presence is the
+ * whole switch: with it the editor mints `[Label][key]` and puts the
+ * destination in that cell, without it a `[[Name (id)]]` wiki-link.
+ */
+const editorHasReferences = (subject: { [UI]: unknown }): boolean => {
+  const editor = findNode(
+    subject[UI],
+    (node) => propsOf(node)?.["onbacklink-create"] !== undefined,
+  );
+  return propsOf(editor)?.["$references"] !== undefined;
+};
+
 export default pattern(() => {
   const pieceRegistry = wish<Writable<Array<{ title?: string }>>>({
     query: "#pieceRegistry",
@@ -186,6 +199,10 @@ export default pattern(() => {
   const assert_name = assert(
     () => note[NAME] === "📝 Test Note",
   );
+  const assert_editor_has_references = assert(
+    () => editorHasReferences(note),
+  );
+
   const assert_initial_title = assert(() => note.title === "Test Note");
   const assert_initial_content = assert(
     () => note.content === "Line one\nLine two\nLine three",
@@ -355,6 +372,9 @@ export default pattern(() => {
   // ==========================================================================
   return {
     [TESTS]: [
+      // The editor is given the note's reference map, which is what selects
+      // the reference form for mentions made from here.
+      { assertion: assert_editor_has_references },
       // === Initial state ===
       { assertion: assert_name },
       { assertion: assert_initial_title },

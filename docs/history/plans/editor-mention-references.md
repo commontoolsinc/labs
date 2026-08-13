@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-08-11
+archived: 2026-08-12
+reason: "Executed plan; the reference mention form shipped across cf-code-editor, note-md, and note."
+---
+
 # Editor mention references
 
 ## The short version
@@ -179,8 +186,17 @@ reference form.
 
 ## Stage 3 — the note pattern
 
-- [ ] `note.tsx` owns a `references` cell, passes it to the editor, and threads
-      it into `note-md`.
+- [x] `note.tsx` takes a `references` cell beside `content`, passes it to the
+      editor, and threads it into `note-md`.
+
+**The map is published in `NoteOutput`, and its default has to match the
+input's.** Declaring it in the result under a default the input does not carry
+— or under none — cannot be materialized, and a consumer that captures the
+note then gets `undefined` for the whole capture, which stops any action bound
+to it from running with `stream action argument is undefined`. The failure
+names a schema mismatch and looks like a problem with the unknown-typed
+`destination`; it is not, and typing that field does not fix it. Matching
+`Default<{}>` on both sides does.
 **`[FS]` is left alone, and that is a decision rather than an omission.** The
 appealing idea is to emit the map as the markdown reference-definition block it
 already resembles, so a projected note is self-contained standard markdown.
@@ -223,7 +239,7 @@ removed locally.
 **Reading a destination.** `destination` is a cell of `unknown`, and an object
 read under `{ type: "unknown" }` returns `undefined` while rendering the same
 path still works
-([`../development/debugging/gotchas/unknown-typed-field-reads-undefined.md`](../development/debugging/gotchas/unknown-typed-field-reads-undefined.md)).
+([`../../development/debugging/gotchas/unknown-typed-field-reads-undefined.md`](../../development/debugging/gotchas/unknown-typed-field-reads-undefined.md)).
 Reads of a destination's name go through `asSchema` first. This one type-checks
 and fails silently, which is the combination worth a test rather than a
 comment.
