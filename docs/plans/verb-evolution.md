@@ -219,10 +219,14 @@ is what names and versions are for.
 
 ### Named, versioned interfaces are where this goes
 
-An interface gets a name and a version of its own, separate from any one
-pattern: "Notes, version 2" is a first-class thing, patterns declare which
-interfaces they provide, and consumers declare the minimum version they
-accept. Binding checks once; after that the caller holds a guarantee.
+An interface here is a named set of field and verb contracts, carrying a
+version, separate from any one pattern: "Notes, version 2" is a
+first-class thing. A pattern declares which interfaces it provides —
+usually several, none of them the whole of its shape — and consumers
+declare the minimum version they accept. Binding checks once; after that
+the caller holds a guarantee. The name is what shape cannot be: a claim
+about meaning. Declaring "Notes v2" says `append` does what Notes means by
+it, which no structural demand can say.
 
 Interface versions layer over new verb names; they do not replace them. A
 piece's shape is one namespace, so when two generations coexist on one
@@ -238,9 +242,11 @@ let one author rely on another author's contract and know when it has moved.
 Without them, the honest advice to somebody building on a pattern they do
 not own is to fork it.
 
-It is also the most machinery of anything here — an identity, a registry, a
-compatibility rule of its own, a place in the shape — and Fabric-types is
-the natural vehicle. It is a design stream of its own (see
+It is also the most machinery of anything here — an identity, a registry,
+a place in the shape, and a compatibility rule of its own: what a version
+bump means, and how a declared minimum resolves against what a piece
+provides, are both still to be designed. Fabric-types is the natural
+vehicle. It is a design stream of its own (see
 [the longer arc](#the-longer-arc)), with everything else in this document
 standing as the interim until it lands.
 
