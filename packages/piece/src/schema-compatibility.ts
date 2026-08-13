@@ -54,6 +54,19 @@ interface CompatibilityContext {
    * must not read as a contract break.
    */
   verbEvent?: boolean;
+  /**
+   * True below a node BOTH contracts mark `demand: true` — a holder-side
+   * demand subtree (the `Demand<T>` marker). There, in the argument role,
+   * a property the candidate no longer names is a demand given up, not a
+   * contract broken: the holder asks less of the pieces it stores, which
+   * only widens what it accepts — plain subset logic, which the evolution
+   * removal rule is deliberately stricter than. Requiring the marker on
+   * BOTH sides means the deployed contract itself declared the subtree a
+   * demand before anything relaxes beneath it. The allowance never applies
+   * inside a verb event, and never to the result role: what a pattern
+   * re-exposes from a demand is still something its readers rely on.
+   */
+  demandSubtree?: boolean;
 }
 
 export interface SchemaSubsetOptions {
@@ -316,11 +329,19 @@ function schemaSubsetIssue(
   const entersVerbEvent = !context.verbEvent &&
     (declaresVerbStream(sourceInput) || declaresVerbStream(source)) &&
     (declaresVerbStream(targetInput) || declaresVerbStream(target));
+  // The demand marker rides the referencing node the same way. Both
+  // contracts must agree the subtree is a demand — the deployed shape
+  // declared it one and the candidate still does; a one-sided marker is a
+  // shape change the ordinary rules judge, not an exemption.
+  const entersDemandSubtree = !context.demandSubtree &&
+    (schemaMarksDemand(sourceInput) || schemaMarksDemand(source)) &&
+    (schemaMarksDemand(targetInput) || schemaMarksDemand(target));
   context = {
     ...context,
     sourceRoot: sourceResolution.root,
     targetRoot: targetResolution.root,
     ...(entersVerbEvent ? { verbEvent: true } : {}),
+    ...(entersDemandSubtree ? { demandSubtree: true } : {}),
   };
   if (
     context.defaultComparison === "target" &&
@@ -516,23 +537,40 @@ function objectSubsetIssue(
     ? source.patternProperties
     : target.patternProperties;
 
+  const allowEvolutionPolicy = context.allowEvolutionPolicy &&
+    !hasComplexSameInstanceConstraints(source) &&
+    !hasComplexSameInstanceConstraints(target);
+
   // Pattern evolution preserves named fields as part of the public contract,
   // even when the candidate object is otherwise open. A durable-link subset
   // proof is different: a source may name additional fields that an open
   // target accepts through patternProperties/additionalProperties. Treating
   // those fields as "removed" rejects valid Fabric projections such as $FS.
+  //
+  // Beneath a demand marker the argument role reads the other way: a
+  // property the candidate no longer names is a demand given up, which only
+  // widens what the holder accepts (see `demandSubtree`). The removed
+  // property may also BE the demand — its own referencing node carries the
+  // marker on the deployed side — and giving up a whole demand is the same
+  // narrowing. The result role keeps the strict rule, and verb events keep
+  // their own.
   if (context.defaultComparison === "evolution") {
     for (const property of Object.keys(previousProperties)) {
       if (Object.hasOwn(candidateProperties, property)) continue;
+      if (
+        context.role === "argument" && !context.verbEvent &&
+        allowEvolutionPolicy &&
+        (context.demandSubtree === true ||
+          schemaMarksDemand(previousProperties[property]))
+      ) {
+        continue;
+      }
       return `${path}.${property}: existing ${context.role} field was removed`;
     }
   }
 
   const sourceRequired = new Set(source.required ?? []);
   const targetRequired = new Set(target.required ?? []);
-  const allowEvolutionPolicy = context.allowEvolutionPolicy &&
-    !hasComplexSameInstanceConstraints(source) &&
-    !hasComplexSameInstanceConstraints(target);
   const allowEvolutionDefaults = allowEvolutionPolicy &&
     context.allowEvolutionDefaults;
   if (context.role === "argument") {
@@ -731,6 +769,12 @@ function declaresVerbStream(schema: JSONSchema): boolean {
   if (typeof schema !== "object" || schema === null) return false;
   const asCell = (schema as SchemaObject).asCell;
   return Array.isArray(asCell) && asCell.includes("stream");
+}
+
+/** The demand marker rides a referencing node, like the stream marker. */
+function schemaMarksDemand(schema: JSONSchema | undefined): boolean {
+  return typeof schema === "object" && schema !== null &&
+    (schema as SchemaObject).demand === true;
 }
 
 function additionalPropertiesSubsetIssue(
