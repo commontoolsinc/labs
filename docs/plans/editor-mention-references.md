@@ -116,7 +116,7 @@ reference form.
 
 ## Stage 1 — the editor
 
-- [ ] `packages/ui/src/v2/core/mention-refs.ts`: `MentionRef`,
+- [x] `packages/ui/src/v2/core/mention-refs.ts`: `MentionRef`,
       `MentionRefMap`, their schemas, and `mintRefKey`.
 
   ```typescript
@@ -142,37 +142,37 @@ reference form.
   than a fixed six: a key the mint can produce and the parser would not accept
   is a mention that reads as ordinary text.
 
-- [ ] `features/mention-refs.ts`: the structural twin of `backlinks.ts` —
+- [x] `features/mention-refs.ts`: the structural twin of `backlinks.ts` —
       `parseMentionRefs`, a `mentionRefField` that recomputes on `docChanged`
       **or** a `setKnownRefKeys` effect, `atomicMentionRefRanges` and
       `mentionRefEditFilter` over the `][key]` suffix, and a decoration plugin
       that renders a pill and reveals `[Label]` under the cursor. The label
       pattern excludes newlines, so a mention is a single-line range by
       construction rather than by a guard.
-- [ ] `cf-code-editor.ts`: the `references` property (`$references`), wrapped
+- [x] `cf-code-editor.ts`: the `references` property (`$references`), wrapped
       with `asSchema(MentionRefMapSchema)` and subscribed on change like
       `mentionable`; completion and novel-mention creation minting reference
       form when the map is present; `$mentioned` drawn from the union of both
       forms; label edits setting `modifiedTitle` instead of renaming;
       destination-title subscriptions honoring the flag.
-- [ ] Garbage collection: a map entry whose key has left the document is
+- [x] Garbage collection: a map entry whose key has left the document is
       removed — conservatively (see risks) and never against a document that
       has not loaded.
-- [ ] `packages/html/src/jsx.d.ts`: `$references` and the label-change event on
+- [x] `packages/html/src/jsx.d.ts`: `$references` and the label-change event on
       `CFCodeEditorAttributes`.
-- [ ] Unit tests mirroring `features/backlinks.test.ts`, plus key minting, plus
+- [x] Unit tests mirroring `features/backlinks.test.ts`, plus key minting, plus
       an integration case pinning that **no map means wiki-link output,
       unchanged**.
-- [ ] `components/cf-code-editor/docs/mention-refs.md`, and a pointer from
+- [x] `components/cf-code-editor/docs/mention-refs.md`, and a pointer from
       `docs/backlinks.md` naming the two coexisting forms.
 
 ## Stage 2 — the renderer
 
-- [ ] `note-md.tsx` takes the map as an input and extends `processedContent` to
+- [x] `note-md.tsx` takes the map as an input and extends `processedContent` to
       rewrite `[Label][key]` alongside the wiki-link form. A key with no entry
       keeps its literal text, so a broken reference degrades where a reader can
       see it.
-- [ ] Derive the link scheme from the resolved destination rather than
+- [x] Derive the link scheme from the resolved destination rather than
       prefixing `/of:`. That prefix is sound today only because the embed
       format rejects every other scheme; a cell-valued destination removes the
       guarantee along with the limitation.
