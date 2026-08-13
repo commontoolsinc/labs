@@ -97,22 +97,9 @@ export abstract class BaseFabricInstance extends FabricInstance {
   // Instance members
   //
 
-  /**
-   * Custom inspector, so that a `console.log()` or a debugger shows what this
-   * value IS. The default rendering is `{}`: state lives in private fields,
-   * which have no enumerable own properties for an inspector to find.
-   *
-   * Delegates to the canonical debug renderer rather than formatting here, so
-   * that this surface improves whenever that one does. Instance state is
-   * elided as `(...)`.
-   *
-   * Duplicated on `BaseFabricPrimitive`, unavoidably. There is no shared base
-   * class below `FabricSpecialObject`, and `FabricSpecialObject` itself is the
-   * runtime-import-free abstract contract, so it cannot reach `value-debug`.
-   */
-  [Symbol.for("Deno.customInspect")](): string {
-    return toCompactDebugString(this);
-  }
+  //
+  // Subclass contract
+  //
 
   /**
    * Deeply freezes this instance in place: freezes this instance's own
@@ -164,6 +151,36 @@ export abstract class BaseFabricInstance extends FabricInstance {
   protected abstract [SHALLOW_UNFROZEN_CLONE](): FabricInstance;
 
   /**
+   * Returns a new deep clone of this instance, cloning nested `FabricValue`s
+   * to the requested frozenness (see `[DEEP_CLONE_CORE]`'s symbol doc). The
+   * returned instance itself is not yet frozen: the `deepClone()` template
+   * method owns the identity optimization and the final freeze. Called by
+   * `deepClone()` when a fresh instance is needed.
+   */
+  protected abstract [DEEP_CLONE_CORE](frozen: boolean): FabricInstance;
+
+  //
+  // Instance members
+  //
+
+  /**
+   * Custom inspector, so that a `console.log()` or a debugger shows what this
+   * value IS. The default rendering is `{}`: state lives in private fields,
+   * which have no enumerable own properties for an inspector to find.
+   *
+   * Delegates to the canonical debug renderer rather than formatting here, so
+   * that this surface improves whenever that one does. Instance state is
+   * elided as `(...)`.
+   *
+   * Duplicated on `BaseFabricPrimitive`, unavoidably. There is no shared base
+   * class below `FabricSpecialObject`, and `FabricSpecialObject` itself is the
+   * runtime-import-free abstract contract, so it cannot reach `value-debug`.
+   */
+  [Symbol.for("Deno.customInspect")](): string {
+    return toCompactDebugString(this);
+  }
+
+  /**
    * Returns a shallow clone of this instance with the requested frozenness.
    *
    * When `frozen` is `true` and this instance is already frozen, returns
@@ -178,15 +195,6 @@ export abstract class BaseFabricInstance extends FabricInstance {
     // incompatible with abstract class types due to protected members.
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
   }
-
-  /**
-   * Returns a new deep clone of this instance, cloning nested `FabricValue`s
-   * to the requested frozenness (see `[DEEP_CLONE_CORE]`'s symbol doc). The
-   * returned instance itself is not yet frozen: the `deepClone()` template
-   * method owns the identity optimization and the final freeze. Called by
-   * `deepClone()` when a fresh instance is needed.
-   */
-  protected abstract [DEEP_CLONE_CORE](frozen: boolean): FabricInstance;
 
   /**
    * Returns a deep clone of this instance with the requested frozenness.
