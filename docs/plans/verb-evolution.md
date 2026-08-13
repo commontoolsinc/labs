@@ -228,6 +228,21 @@ the caller holds a guarantee. The name is what shape cannot be: a claim
 about meaning. Declaring "Notes v2" says `append` does what Notes means by
 it, which no structural demand can say.
 
+Who defines one is worth pinning down, because it is the consumer who
+knows what it needs. A demand stays the consumer's tool — structural,
+anonymous, needing nothing from the provider — and stays the default. A
+named interface is not an enumeration of consumers' subsets; it is a
+promise the provider opts into: the contract it commits to keeping stable
+and meaningful. The definition itself can come from either side, because
+an interface is separate from any pattern — a consumer, a community, or a
+provider may coin one, and providers adopt it by declaring they provide
+it. Go's `io.Reader` is the exhibit: defined once, owned by neither side,
+satisfied everywhere. Nor is the boundary guesswork here: demands are
+recorded, so a provider factors its interfaces from the clusters consumers
+actually demand. The demands are the evidence, the interface is the
+crystallization, and the registry is what carries it past the visibility
+horizon.
+
 Interface versions layer over new verb names; they do not replace them. A
 piece's shape is one namespace, so when two generations coexist on one
 piece the incompatible verb still lives under a fresh name — `append`
