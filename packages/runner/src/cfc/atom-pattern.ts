@@ -1,7 +1,7 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   commitmentAwareEquals,
   containsCfcFieldCommitment,
@@ -64,13 +64,13 @@ type VarPlaceholder = { readonly var: string };
 export const isAtomVarPlaceholder = (
   value: unknown,
 ): value is VarPlaceholder =>
-  isRecord(value) &&
+  isObjectOrArray(value) &&
   Object.keys(value).length === 1 &&
   typeof (value as { var?: unknown }).var === "string" &&
   (value as { var: string }).var.length > 0;
 
 const isMalformedVarBearingRecord = (value: unknown): boolean =>
-  isRecord(value) && Object.hasOwn(value, "var") &&
+  isObjectOrArray(value) && Object.hasOwn(value, "var") &&
   !isAtomVarPlaceholder(value);
 
 /**
@@ -82,7 +82,7 @@ const isMalformedVarBearingRecord = (value: unknown): boolean =>
  */
 const patternIsConcrete = (pattern: unknown): boolean => {
   if (Array.isArray(pattern)) return pattern.every(patternIsConcrete);
-  if (isRecord(pattern)) {
+  if (isObjectOrArray(pattern)) {
     if (Object.hasOwn(pattern, "var")) return false;
     // An explicit-`undefined` field is the absence-requirement form — a
     // shape constraint, not a value — so the pattern is not concrete.
@@ -171,11 +171,11 @@ const matchPatternValue = (
     }
     return current;
   }
-  if (isRecord(pattern)) {
+  if (isObjectOrArray(pattern)) {
     // A record pattern constrains records only. Arrays are records to
-    // `isRecord`, so exclude them explicitly — an array atom never matches a
+    // `isObjectOrArray`, so exclude them explicitly — an array atom never matches a
     // record pattern.
-    if (!isRecord(value) || Array.isArray(value)) {
+    if (!isObjectNotArray(value)) {
       return null;
     }
     let current: AtomPatternBindings | null = bindings;
@@ -316,7 +316,7 @@ const instantiateValue = (
     }
     return { value: items };
   }
-  if (isRecord(pattern)) {
+  if (isObjectOrArray(pattern)) {
     const record: Record<string, unknown> = {};
     for (const [key, fieldPattern] of Object.entries(pattern)) {
       if (fieldPattern === undefined) continue;
@@ -368,13 +368,13 @@ export const instantiateAtomPattern = (
 export const conceptGuard = (
   pattern: unknown,
 ): { uri: string | undefined } | undefined => {
-  // `isRecord` admits arrays (`typeof [] === "object"`), and an array can carry
+  // `isObjectOrArray` admits arrays (`typeof [] === "object"`), and an array can carry
   // own `type`/`uri` properties — exclude it explicitly so only the canonical
   // OBJECT shape `{ type, uri }` can route to trust-closure satisfaction. A
   // Concept-shaped array is not the canonical shape and fails closed to
   // ordinary matching, in keeping with the discipline below.
   if (
-    !isRecord(pattern) || Array.isArray(pattern) ||
+    !isObjectNotArray(pattern) ||
     isAtomVarPlaceholder(pattern) ||
     (pattern as { type?: unknown }).type !== CFC_ATOM_TYPE.Concept
   ) {
@@ -401,7 +401,7 @@ type ExpiresAtom = { type: string; timestamp: number };
 // it — silently bypassing the fail-closed intent. Non-canonical Expires
 // records therefore fall through to structural equality only (below).
 const isOrderedExpiresAtom = (value: unknown): value is ExpiresAtom =>
-  isRecord(value) &&
+  isObjectOrArray(value) &&
   Object.keys(value).length === 2 &&
   (value as { type?: unknown }).type === CFC_ATOM_TYPE.Expires &&
   typeof (value as { timestamp?: unknown }).timestamp === "number" &&

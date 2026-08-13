@@ -197,10 +197,11 @@ export function isFabricValue(value: unknown): value is FabricValue {
  * accepts, minus `null`. The name spells out the array case because "object"
  * alone reads as excluding it.
  *
- * The runtime behavior matches a bare `isRecord()` exactly. The difference is
- * static: `isRecord()` narrows to `Record<string | number | symbol, unknown>`,
- * which discards the fact that the value is a `FabricValue` -- so a guarded
- * value can no longer be handed to a `FabricValue` API. This keeps that half.
+ * The runtime behavior matches a bare `isObjectOrArray()` exactly. The
+ * difference is static: `isObjectOrArray()` narrows to
+ * `Record<string, unknown>`, which discards the fact that the value is a
+ * `FabricValue` -- so a guarded value can no longer be handed to a
+ * `FabricValue` API. This keeps that half.
  *
  * Contrast `isFabricPlainObject()`, which is strictly narrower at RUNTIME: it
  * accepts only plain objects, rejecting arrays and `FabricSpecialObject`s. The
@@ -216,7 +217,8 @@ export function isFabricObjectOrArray(
  * Narrows to the plain-record arm of `FabricValue` (`FabricPlainObject`): an
  * object whose prototype is `Object.prototype` or `null`. This rejects arrays,
  * `FabricSpecialObject`s, and other class instances (`Date`, `Map`, …), none of
- * which are representable as a `FabricPlainObject`. Unlike a bare `isRecord()`
+ * which are representable as a `FabricPlainObject`. Unlike a bare
+ * `isObjectOrArray()`
  * check, it preserves the value type — `FabricPlainObject`'s string index of
  * `FabricValue` keeps an indexed value typed as a `FabricValue`.
  *

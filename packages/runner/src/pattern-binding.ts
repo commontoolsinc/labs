@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   FabricInstance,
@@ -100,7 +100,9 @@ const foldDeclaredScopeIntoLinkSchema = (
   authoredRootSchema: JSONSchema | undefined,
   path: readonly string[],
 ): NormalizedFullLink => {
-  if (authoredRootSchema === undefined || !isRecord(link.schema)) return link;
+  if (authoredRootSchema === undefined || !isObjectOrArray(link.schema)) {
+    return link;
+  }
   if (ContextualFlowControl.getSchemaScopeCap(link.schema) !== undefined) {
     return link;
   }
@@ -130,7 +132,7 @@ const scopedLinkForPath = (
 
   for (const key of path) {
     childSchema = ContextualFlowControl.getSchemaAtPath(schema, [key]);
-    if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
+    if (isObjectOrArray(childSchema) && isCellScope(childSchema.scope)) {
       scope = childSchema.scope;
     }
     schema = childSchema;
@@ -140,7 +142,7 @@ const scopedLinkForPath = (
   const linkSchema = finalSchema === undefined
     ? undefined
     : sanitizeAliasSchemaForBinding(finalSchema);
-  if (isRecord(linkSchema)) {
+  if (isObjectOrArray(linkSchema)) {
     if (isCellScope(linkSchema.scope)) {
       scope = linkSchema.scope;
     }
@@ -357,7 +359,7 @@ function sendValueToBindingInner<T>(
     // guard-less walk keys a live `FabricValue` against the binding shape (a
     // `FabricPrimitive` is decomposed, a `FabricInstance` is walked by internal
     // slots rather than codec contents). Mark ahead of that.
-  } else if (isRecord(binding) && isRecord(value)) {
+  } else if (isObjectOrArray(binding) && isObjectOrArray(value)) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
         sendValueToBindingInner(
@@ -370,7 +372,7 @@ function sendValueToBindingInner<T>(
         );
       }
     }
-  } else if (!isRecord(binding) || Object.keys(binding).length !== 0) {
+  } else if (!isObjectOrArray(binding) || Object.keys(binding).length !== 0) {
     // `Object.is`, not `===`: a constant `NaN` binding legitimately matches a
     // produced `NaN`, and `0` vs `-0` is a genuine mismatch.
     if (!Object.is(binding, value)) {
@@ -570,7 +572,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       }
       // Nothing rebound, so the original is the answer.
       return converted ?? binding;
-    } else if (isRecord(binding)) {
+    } else if (isObjectOrArray(binding)) {
       // Copy lazily, as the array branch does: allocate only once a value
       // actually converts to something else, so the shared path — the common
       // one, and the majority of nodes — allocates nothing at all. (Compare
@@ -617,9 +619,9 @@ export function opaqueArgumentKeys(
   argumentSchema: JSONSchema | undefined,
 ): Set<string> {
   const keys = new Set<string>();
-  if (!isRecord(argumentSchema)) return keys;
+  if (!isObjectOrArray(argumentSchema)) return keys;
   const properties = argumentSchema.properties;
-  if (!isRecord(properties)) return keys;
+  if (!isObjectOrArray(properties)) return keys;
   for (const [key, propSchema] of Object.entries(properties)) {
     const isOpaque = ContextualFlowControl.getAsCellValues(
       propSchema as JSONSchema,
@@ -700,7 +702,7 @@ export function findAllWriteRedirectCells<T>(
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
       for (const value of binding) find(value, baseCell);
-      // A `FabricPrimitive` reaches the `isRecord` branch below, and is
+      // A `FabricPrimitive` reaches the `isObjectOrArray` branch below, and is
       // harmless there. This walk collects write-redirect links, and a
       // primitive is an opaque scalar: it can contain no redirect, and its
       // state lives in private fields, so `Object.values()` yields nothing and
@@ -710,14 +712,14 @@ export function findAllWriteRedirectCells<T>(
       // TODO(danfuzz): Latent — a `FabricInstance` is not harmless in the same
       // way. It is a container reached by its codec contents rather than by
       // property name, so a write redirect nested inside one is missed here.
-    } else if (isRecord(binding) && !isCellLink(binding)) {
+    } else if (isObjectOrArray(binding) && !isCellLink(binding)) {
       // If the binding is an object, recurse into each value.
       for (const value of Object.values(binding)) find(value, baseCell);
     }
   }
   if (
     skipTopLevelKeys !== undefined && skipTopLevelKeys.size > 0 &&
-    isRecord(binding) && !isCellLink(binding) && !isAliasBinding(binding)
+    isObjectOrArray(binding) && !isCellLink(binding) && !isAliasBinding(binding)
   ) {
     // Drop the named top-level argument keys (opaque forwarded references)
     // before traversing — they must not contribute to declared reads.

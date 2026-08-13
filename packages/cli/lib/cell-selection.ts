@@ -18,7 +18,7 @@ import {
   type Runtime,
   sanitizeSchemaForLinks,
 } from "@commonfabric/runner";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
 
 type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
@@ -630,7 +630,7 @@ function normalizeProjectionSchema(
       `Invalid --schema at ${path}: false cannot project a value`,
     );
   }
-  if (!isRecord(schema) || Array.isArray(schema)) {
+  if (!isObjectNotArray(schema)) {
     throw new CellSelectionError(
       `Invalid --schema at ${path}: expected a JSON Schema object`,
     );
@@ -667,7 +667,7 @@ function normalizeProjectionSchema(
     ? { ...declared }
     : { type: implied, ...declared };
   if (declared.properties !== undefined) {
-    if (!isRecord(declared.properties) || Array.isArray(declared.properties)) {
+    if (!isObjectNotArray(declared.properties)) {
       throw new CellSelectionError(
         `Invalid --schema at ${path}: "properties" must be an object`,
       );
@@ -1012,7 +1012,7 @@ export async function parseCellSelectionOptions(options: {
 }
 
 function schemaTypes(schema: JSONSchema | undefined): string[] {
-  if (!isRecord(schema)) return [];
+  if (!isObjectOrArray(schema)) return [];
   return Array.isArray(schema.type)
     ? schema.type.filter((value): value is string => typeof value === "string")
     : typeof schema.type === "string"
@@ -1040,7 +1040,9 @@ function walkSchemaRoot<T>(
   root: JSONSchema = schema ?? true,
   ancestors = new Set<object>(),
 ): T {
-  if (!isRecord(schema) || ancestors.has(schema)) return behavior.unknown;
+  if (!isObjectOrArray(schema) || ancestors.has(schema)) {
+    return behavior.unknown;
+  }
   ancestors.add(schema);
   const documentRoot = schema.$defs !== undefined ? schema : root;
   try {
@@ -1146,7 +1148,7 @@ function schemaAtArrayItem(
 function dereferencedElementSchema(
   schema: JSONSchema | undefined,
 ): JSONSchema {
-  if (!isRecord(schema) || schema.asCell === undefined) {
+  if (!isObjectOrArray(schema) || schema.asCell === undefined) {
     return schema ?? true;
   }
   const { asCell: _asCell, ...dereferenced } = schema;
@@ -1157,7 +1159,7 @@ function filteredOutputSchema(
   sourceSchema: JSONSchema | undefined,
   outputItemSchema: JSONSchema | undefined,
 ): JSONSchema {
-  if (!isRecord(sourceSchema)) {
+  if (!isObjectOrArray(sourceSchema)) {
     return { type: "array", items: true };
   }
   const { items: _items, prefixItems: _prefixItems, ...metadata } =
@@ -1260,7 +1262,7 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
   // source over a keyword that says nothing about that position.
   if (
     objectSchema.additionalProperties === true ||
-    isRecord(objectSchema.additionalProperties)
+    isObjectOrArray(objectSchema.additionalProperties)
   ) {
     return true;
   }
@@ -1416,7 +1418,7 @@ function projectValue(
       projectValue(item, itemSchema, implicitArrayTraversal)
     );
   }
-  if (!isRecord(value)) return value;
+  if (!isObjectOrArray(value)) return value;
   if (implicitArrayTraversal && schema.items !== undefined) {
     return projectValue(value, schema.items, implicitArrayTraversal);
   }
@@ -1518,7 +1520,7 @@ export function selectSourceSchema(
   // the same container shape as the current value. Keep that read permissive;
   // the materializing projector still applies the mask and drops siblings.
   if (source === undefined || source === true) return true;
-  if (source === false || mask === true || !isRecord(mask)) {
+  if (source === false || mask === true || !isObjectOrArray(mask)) {
     return source;
   }
   if (source.$ref !== undefined) {
@@ -1783,7 +1785,7 @@ function positionBelow(
   return walkedPosition(
     position.cell.key(key),
     { ...position.address, path: [...position.address.path, key] },
-    isRecord(container) ? { value: container[key] } : undefined,
+    isObjectOrArray(container) ? { value: container[key] } : undefined,
   );
 }
 
@@ -1899,9 +1901,7 @@ async function composeLinkAddresses(
       );
     }
   } else if (markers.properties !== undefined) {
-    const projectedRecord = isRecord(projected) && !Array.isArray(projected)
-      ? projected
-      : {};
+    const projectedRecord = isObjectNotArray(projected) ? projected : {};
     const record: Record<string, unknown> = { ...projectedRecord };
     for (const [key, child] of Object.entries(markers.properties)) {
       record[key] = await composeLinkAddresses(
@@ -1920,9 +1920,7 @@ async function composeLinkAddresses(
       path: [...position.address.path],
     },
   };
-  return isRecord(composed) && !Array.isArray(composed)
-    ? { ...address, ...composed }
-    : address;
+  return isObjectNotArray(composed) ? { ...address, ...composed } : address;
 }
 
 /**
@@ -1991,7 +1989,7 @@ export async function deriveSelectedValue(
     );
   }
   const declaredSourceSchema = sourceCell.schema;
-  const sourceSchema = isRecord(declaredSourceSchema) &&
+  const sourceSchema = isObjectOrArray(declaredSourceSchema) &&
       declaredSourceSchema.asCell !== undefined
     ? dereferencedElementSchema(declaredSourceSchema)
     : declaredSourceSchema;

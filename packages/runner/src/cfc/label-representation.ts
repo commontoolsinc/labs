@@ -1,7 +1,7 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { CfcConfClause } from "./clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   CLASSIFIED_KIND_FAMILIES,
@@ -41,7 +41,7 @@ export type CfcFieldCommitment = { readonly digestOf: string };
 export const isCfcFieldCommitment = (
   value: unknown,
 ): value is CfcFieldCommitment =>
-  isRecord(value) && !Array.isArray(value) &&
+  isObjectNotArray(value) &&
   Object.keys(value).length === 1 &&
   typeof (value as { digestOf?: unknown }).digestOf === "string";
 
@@ -76,7 +76,10 @@ export const commitmentAwareEquals = (a: unknown, b: unknown): boolean => {
     return a.length === b.length &&
       a.every((element, index) => commitmentAwareEquals(element, b[index]));
   }
-  if (isRecord(a) && isRecord(b) && !Array.isArray(a) && !Array.isArray(b)) {
+  if (
+    isObjectOrArray(a) && isObjectOrArray(b) && !Array.isArray(a) &&
+    !Array.isArray(b)
+  ) {
     const aKeys = Object.keys(a);
     if (aKeys.length !== Object.keys(b).length) return false;
     return aKeys.every((key) =>
@@ -98,7 +101,7 @@ export const commitmentAwareEquals = (a: unknown, b: unknown): boolean => {
 export const containsCfcFieldCommitment = (value: unknown): boolean => {
   if (isCfcFieldCommitment(value)) return true;
   if (Array.isArray(value)) return value.some(containsCfcFieldCommitment);
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     return Object.values(value).some(containsCfcFieldCommitment);
   }
   return false;
@@ -137,7 +140,7 @@ const transformValue = (
     });
     return changed ? out : value;
   }
-  if (!isRecord(value)) {
+  if (!isObjectOrArray(value)) {
     return value;
   }
   // A record is an ATOM (classification-context reset) when it carries a

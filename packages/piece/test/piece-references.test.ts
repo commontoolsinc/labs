@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   entityRefFromString,
   entityRefToString,
@@ -53,7 +53,8 @@ describe("Piece reference detection", () => {
 
       // Check if the value is a cell-link reference (EntityRef cell + path)
       if (
-        isRecord(value) && isEntityRef(value.cell) && value.path !== undefined
+        isObjectOrArray(value) && isEntityRef(value.cell) &&
+        value.path !== undefined
       ) {
         const addr = entityRefToString(value.cell);
         if (!foundRefs.includes(addr)) {
@@ -62,7 +63,7 @@ describe("Piece reference detection", () => {
       }
 
       // Recursively search objects and arrays
-      if (isRecord(value)) {
+      if (isObjectOrArray(value)) {
         // Check all properties of objects
         if (!Array.isArray(value)) {
           for (const key in value) {
@@ -148,7 +149,7 @@ describe("Piece reference detection", () => {
       const seenIds = new Set<string>();
 
       const traverse = (value: unknown): void => {
-        if (!isRecord(value)) return;
+        if (!isObjectOrArray(value)) return;
 
         // Check for direct cell reference
         if (isEntityRef(value.cell) && value.path !== undefined) {
@@ -160,7 +161,7 @@ describe("Piece reference detection", () => {
         }
 
         // Check for $alias reference
-        if (isRecord(value.$alias) && isEntityRef(value.$alias.cell)) {
+        if (isObjectOrArray(value.$alias) && isEntityRef(value.$alias.cell)) {
           const addr = entityRefToString(value.$alias.cell);
           if (!seenIds.has(addr)) {
             refs.push(addr);
@@ -281,12 +282,12 @@ describe("Piece reference detection", () => {
       const value = (doc as MockDoc).get?.();
 
       // If document has a metadata-linked result cell, follow it
-      if (isRecord(value) && value.resultCell) {
+      if (isObjectOrArray(value) && value.resultCell) {
         return followMetadataToResult(value.resultCell, visited, depth + 1);
       }
 
       // If we've reached the end and have result metadata, return it
-      if (isRecord(value) && isRecord(value.result)) {
+      if (isObjectOrArray(value) && isObjectOrArray(value.result)) {
         return value.result.cell;
       }
 

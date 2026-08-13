@@ -1,11 +1,11 @@
 import { expect } from "@std/expect";
 import type { Async, Expected } from "@std/expect";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * Strips all symbol properties from an object, recursively.
  *
- * TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and the
+ * TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and the
  * `Object.keys` rebuild renders one as `{}` — on BOTH sides of the matchers
  * below, so a test asserting on cell-read values judges any two same-shaped
  * values with differing fabric contents equal, and its failure diff prints
@@ -14,7 +14,7 @@ import { isRecord } from "@commonfabric/utils/types";
  * classes hold no own symbol properties to strip).
  */
 export function stripSymbols(obj: unknown): unknown {
-  if (!isRecord(obj)) return obj;
+  if (!isObjectOrArray(obj)) return obj;
 
   // Handle arrays
   if (Array.isArray(obj)) {

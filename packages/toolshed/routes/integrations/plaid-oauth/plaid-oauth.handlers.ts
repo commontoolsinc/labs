@@ -30,7 +30,7 @@ import {
   Transaction,
   TransactionsSyncRequest,
 } from "plaid";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * Plaid Create Link Token Handler
@@ -85,7 +85,10 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     logger.error({ error }, "Failed to create link token");
 
     // Extract Plaid error details if available
-    if (isRecord(error) && isRecord(error.response) && error.response.data) {
+    if (
+      isObjectOrArray(error) && isObjectOrArray(error.response) &&
+      error.response.data
+    ) {
       const plaidError = error.response.data as PlaidError;
       return c.json({
         error: plaidError.error_message || "Failed to create link token",
