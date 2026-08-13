@@ -6,7 +6,7 @@ import {
   cloneIfNecessary,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isInstance, isObject } from "@commonfabric/utils/types";
+import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
 import { type EntityDocument, isEntityDocument, type PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
@@ -495,7 +495,7 @@ const isArraySegment = (segment: string): boolean =>
   /^(0|[1-9]\d*)$/.test(segment);
 
 const isPatchObject = (value: FabricValue): value is PatchObject =>
-  isObject(value) && !isInstance(value);
+  isObjectNotArray(value) && !isInstance(value);
 
 const isContainer = (value: FabricValue): value is PatchContainer =>
   Array.isArray(value) || isPatchObject(value);

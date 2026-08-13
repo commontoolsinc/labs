@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import {
   type CellScope,
@@ -137,7 +137,7 @@ export function isPrimitiveCellLink(
 }
 
 export function isNormalizedLink(value: any): value is NormalizedLink {
-  if (!isRecord(value)) return false;
+  if (!isObjectOrArray(value)) return false;
   const { path, id, space, scope } = value;
   return Array.isArray(path) &&
     (typeof id === "string" || id === undefined) &&
@@ -158,7 +158,7 @@ export function isNormalizedLink(value: any): value is NormalizedLink {
  */
 export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
   return (
-    isRecord(value) &&
+    isObjectOrArray(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
     (value.scope === "space" || value.scope === "user" ||
@@ -193,7 +193,8 @@ export function isWriteRedirectLink(
  * to point to an actual cell. In data they are plain values.
  */
 export function isAliasBinding(value: any): value is AliasBinding {
-  return isRecord(value) && "$alias" in value && isRecord(value.$alias) &&
+  return isObjectOrArray(value) && "$alias" in value &&
+    isObjectOrArray(value.$alias) &&
     Array.isArray(value.$alias.path) &&
     (value.$alias.partialCause !== undefined ||
       value.$alias.cell === "result" || value.$alias.cell === "argument");

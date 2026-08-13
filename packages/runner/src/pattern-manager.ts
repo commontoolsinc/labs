@@ -58,7 +58,7 @@ import {
   pinnedIdentity,
 } from "./sandbox/fabric-import-specifier.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { interleaveCompileYield } from "./harness/compile-interleave.ts";
 
 const logger = getLogger("pattern-manager");
@@ -2219,7 +2219,7 @@ export class PatternManager {
       );
       const current = cell.get();
       const annotations = {
-        ...(isRecord(current?.annotations) ? current!.annotations : {}),
+        ...(isObjectOrArray(current?.annotations) ? current!.annotations : {}),
         [key]: link,
       };
       cell.key("annotations").set(annotations);

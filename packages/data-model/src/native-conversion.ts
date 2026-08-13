@@ -19,7 +19,7 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isInstance,
-  isRecord,
+  isObjectOrArray,
   isUnsafeObjectKey,
   unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
@@ -432,7 +432,7 @@ function fabricFromNativeValueInternal(
   converted: Map<object, FabricValue>,
   freeze: boolean,
 ): FabricValue {
-  const isOriginalRecord = isRecord(original);
+  const isOriginalRecord = isObjectOrArray(original);
 
   if (isOriginalRecord && converted.has(original)) {
     const cached = converted.get(original);
@@ -462,7 +462,7 @@ function fabricFromNativeValueInternal(
   }
 
   // Primitives, `null`, and `undefined` don't need recursion or freezing.
-  // Spelled as a `typeof` test rather than `!isRecord()` so the non-object
+  // Spelled as a `typeof` test rather than `!isObjectOrArray()` so the non-object
   // arms of `FabricValueLayer` narrow: every non-object layer value is
   // already a `FabricValue`.
   //

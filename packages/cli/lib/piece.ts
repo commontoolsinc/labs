@@ -57,7 +57,7 @@ import {
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isPlainObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { isHandlerCell, isStreamValue } from "../../fuse/callables.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
@@ -1821,9 +1821,11 @@ function listingMarks(
   rootSchema: unknown,
   name: string,
 ): { tier?: "wrapper"; deprecated?: boolean } {
-  if (!isRecord(rootSchema) || !isRecord(rootSchema.properties)) return {};
+  if (!isObjectOrArray(rootSchema) || !isObjectOrArray(rootSchema.properties)) {
+    return {};
+  }
   const property = (rootSchema.properties as Record<string, unknown>)[name];
-  if (!isRecord(property)) return {};
+  if (!isObjectOrArray(property)) return {};
   return {
     ...(property.tier === "wrapper" ? { tier: "wrapper" as const } : {}),
     ...(property.deprecated === true ? { deprecated: true } : {}),
@@ -1837,10 +1839,10 @@ function listingMarks(
  * of aliases falls back to whole-link equality, which can only miss — and a
  * miss costs a row its `outputSchema`, never gives it the wrong one. */
 function samePatternLink(left: unknown, right: unknown): boolean {
-  if (!isRecord(left) || !isRecord(right)) return false;
+  if (!isObjectOrArray(left) || !isObjectOrArray(right)) return false;
   const leftAlias = left.$alias;
   const rightAlias = right.$alias;
-  if (!isRecord(leftAlias) || !isRecord(rightAlias)) {
+  if (!isObjectOrArray(leftAlias) || !isObjectOrArray(rightAlias)) {
     return deepEqual(left, right);
   }
   return deepEqual(leftAlias.partialCause, rightAlias.partialCause) &&
@@ -1866,17 +1868,17 @@ function declaredVerbResults(
 ): Map<string, JSONSchema> {
   const declared = new Map<string, JSONSchema>();
   const result = pattern?.result;
-  if (!isRecord(result)) return declared;
+  if (!isObjectOrArray(result)) return declared;
   const nodes = Array.isArray(pattern?.nodes) ? pattern.nodes : [];
   for (const [name, link] of Object.entries(result)) {
     let resultSchema: JSONSchema | undefined;
     let matched = 0;
     for (const node of nodes) {
-      if (!isRecord(node) || !isRecord(node.inputs)) continue;
+      if (!isObjectOrArray(node) || !isObjectOrArray(node.inputs)) continue;
       if (!samePatternLink(link, node.inputs.$event)) continue;
       matched++;
       const module = node.module;
-      if (isRecord(module) && module.resultSchema !== undefined) {
+      if (isObjectOrArray(module) && module.resultSchema !== undefined) {
         resultSchema = module.resultSchema as JSONSchema;
       }
     }
@@ -1959,10 +1961,11 @@ export async function listPieceCallables(
     if (cellProp === "result") resultRoot = rootCell;
     const value = rootCell.get?.();
     const schema = rootCell.schema;
-    const schemaKeys = isRecord(schema) && isRecord(schema.properties)
-      ? Object.keys(schema.properties)
-      : [];
-    const valueKeys = isRecord(value) ? Object.keys(value) : [];
+    const schemaKeys =
+      isObjectOrArray(schema) && isObjectOrArray(schema.properties)
+        ? Object.keys(schema.properties)
+        : [];
+    const valueKeys = isObjectOrArray(value) ? Object.keys(value) : [];
     for (const name of new Set([...valueKeys, ...schemaKeys])) {
       if (listings.has(name)) continue; // result shadows input, like call
       const callableCell = rootCell.key(name).asSchemaFromLinks();
@@ -2013,7 +2016,7 @@ export async function listPieceCallables(
     : undefined;
   if (pieceCell) {
     const pieceValue = pieceCell.get?.();
-    if (isRecord(pieceValue)) {
+    if (isObjectOrArray(pieceValue)) {
       for (const name of Object.keys(pieceValue)) {
         if (!listings.has(name)) rejected.add(name);
       }
@@ -2541,7 +2544,7 @@ async function inspectSlugTargetCell(
   const target = await resolveSlugTargetCell(pieces, slug);
   await target.pull();
   const result = target.get() as Readonly<unknown>;
-  const name = isRecord(result) && typeof result[NAME] === "string"
+  const name = isObjectOrArray(result) && typeof result[NAME] === "string"
     ? result[NAME]
     : undefined;
   const identityRef = getPatternIdentityRef(target);
@@ -2744,8 +2747,8 @@ export async function setCellCfcLabel(
   }
 
   const { observes: requestedObserves, ...label } = update;
-  const schemaIfc = isRecord(targetCell.schema) &&
-      isRecord(targetCell.schema.ifc)
+  const schemaIfc = isObjectOrArray(targetCell.schema) &&
+      isObjectOrArray(targetCell.schema.ifc)
     ? targetCell.schema.ifc
     : undefined;
   const existingObservationClasses = new Set<
@@ -3059,7 +3062,7 @@ export async function recreateSpaceRootPattern(
 
 function isVNodeLike(value: unknown): value is VNode {
   const visited = new Set<object>();
-  while (isRecord(value) && UI in value) {
+  while (isObjectOrArray(value) && UI in value) {
     if (visited.has(value)) return false; // Cycle detected
     visited.add(value);
     value = value[UI];

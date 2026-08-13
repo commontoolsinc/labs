@@ -43,7 +43,11 @@
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import {
+  isBoolean,
+  isObjectNotArray,
+  isObjectOrArray,
+} from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
@@ -107,14 +111,15 @@ export type SubschemaKeyword =
 
 /**
  * Everything a schema can be: `true`, `false`, or an object that is not an
- * array. This is the test `validateSchemaDefinition` applies to a subschema,
- * which rejects the pre-2019 tuple spelling of `items` along with everything
- * else an array could mean there. See the module docstring for how the walk
- * treats a value that fails it.
+ * array. Rejecting the array rejects the pre-2019 tuple spelling of `items`
+ * along with everything else an array could mean in a subschema position. See
+ * the module docstring for how the walk treats a value that fails this.
+ *
+ * `validateSchemaDefinition` gates an authored schema on the same question and
+ * calls this to ask it, so what the two admit cannot drift apart.
  */
 export function isSubschema(value: unknown): value is JSONSchema {
-  return typeof value === "boolean" ||
-    (isRecord(value) && !Array.isArray(value));
+  return isBoolean(value) || isObjectNotArray(value);
 }
 
 export interface SchemaWalkOptions {
@@ -241,7 +246,7 @@ const holdsSubschemaRecord = (
   keyword: SubschemaKeyword,
   parent: JSONSchema,
 ): value is Readonly<Record<string, unknown>> => {
-  if (isRecord(value)) return true;
+  if (isObjectOrArray(value)) return true;
   warnNotSchema(
     "an object of named schemas",
     keyword,
@@ -268,7 +273,7 @@ export function forEachSubschema(
   visit: SubschemaVisitor,
   opts: SchemaWalkOptions = {},
 ): boolean {
-  if (!isRecord(schema)) return false;
+  if (!isObjectOrArray(schema)) return false;
   const node = schema as JSONSchemaObj;
   for (const keyword of singleKeywordsFor(opts)) {
     const child = node[keyword];
@@ -328,7 +333,7 @@ export function* subschemaEdges(
   schema: JSONSchema,
   opts: SchemaWalkOptions = {},
 ): Generator<SubschemaEdge> {
-  if (!isRecord(schema)) return;
+  if (!isObjectOrArray(schema)) return;
   const node = schema as JSONSchemaObj;
   for (const keyword of singleKeywordsFor(opts)) {
     const child = node[keyword];
@@ -488,7 +493,7 @@ export function walkSchema(
     // The root and a `resolveRef` result come straight from the caller; every
     // other node arrives already filtered by `forEachSubschema`.
     if (!isSubschema(schema)) return;
-    const record = isRecord(schema);
+    const record = isObjectOrArray(schema);
     if (!record && !opts.visitBooleans) return;
     const control = visit({ schema, path, ...edge, parent });
     if (control === "stop") {

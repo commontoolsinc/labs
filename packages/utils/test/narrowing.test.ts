@@ -17,6 +17,7 @@ import {
 } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
+  isObjectNotArray,
   isPlainContainer,
   isPlainObject,
   type ReadonlyRecord,
@@ -86,6 +87,20 @@ describe("structural predicate narrowing", () => {
         throw new Error("Expected an inert array.");
       }
       expect(array.length).toBe(1);
+    });
+
+    it("narrows `unknown` for `isObjectNotArray()`", () => {
+      // Narrowing is the whole reason this predicate is not just a `boolean`
+      // check. Without it a caller wanting the array case excluded has to
+      // reach for `isObjectOrArray()` and re-derive `!Array.isArray()` beside
+      // it, which is how the same test ends up written out in several places.
+      const value: unknown = { a: 1 };
+
+      if (isObjectNotArray(value)) {
+        expect(Object.keys(value)).toEqual(["a"]);
+      } else {
+        throw new Error("Expected a non-array object.");
+      }
     });
 
     it("narrows `unknown` for `isPlainContainer()`", () => {
@@ -177,6 +192,20 @@ describe("structural predicate narrowing", () => {
       expect(record.inherited).toBe(1);
     });
 
+    it("keeps a record usable after a `false` result from `isObjectNotArray()`", () => {
+      // An array reaching a caller whose declared type says record. The check
+      // rejects it for being an array, which is a fact about the value that
+      // `ReadonlyRecord` cannot carry, so the `false` branch has to keep the
+      // type the caller arrived with.
+      const record = [1, 2, 3] as unknown as ReadonlyRecord;
+
+      if (isObjectNotArray(record)) {
+        throw new Error("Expected an array to be rejected.");
+      }
+
+      expect(record.length).toBe(3);
+    });
+
     it("keeps a container usable after a `false` result", () => {
       const container: ReadonlyRecord = new Date() as unknown as ReadonlyRecord;
 
@@ -223,6 +252,21 @@ describe("structural predicate narrowing", () => {
       // `readonly` array is -- `ReadonlyRecord` assigns happily to
       // `Record<string, unknown>`. Only a write catches it, so the assertion
       // lives in a function that is never called, the value being frozen.
+      const _assertReadOnly = () => {
+        // @ts-expect-error The narrowed type confers read access, not write.
+        value.a = 2;
+      };
+
+      expect(value.a).toBe(1);
+    });
+
+    it("narrows `unknown` to a read-only record for `isObjectNotArray()` too", () => {
+      const value: unknown = Object.freeze({ a: 1 });
+
+      if (!isObjectNotArray(value)) {
+        throw new Error("Expected a frozen plain object to be a non-array.");
+      }
+
       const _assertReadOnly = () => {
         // @ts-expect-error The narrowed type confers read access, not write.
         value.a = 2;
