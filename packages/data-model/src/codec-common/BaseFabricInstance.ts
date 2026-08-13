@@ -47,7 +47,7 @@ export const DEEP_FREEZE: unique symbol = Symbol("data-model.deepFreeze");
  * concrete subclasses.
  *
  * Unlike `[DEEP_FREEZE]`, this method is side-effect-free and never throws:
- * a not-in-canonical-deep-frozen-form instance answers `false`, it does not
+ * an instance not in canonical deep-frozen form returns `false`, it does not
  * crash. (`[DEEP_FREEZE]` is a mutator and uses "death before confusion" on
  * a malformed internal slot; a status check must not.)
  */
@@ -225,7 +225,7 @@ export abstract class BaseFabricInstance extends FabricInstance {
    * actively enforced rather than silently skipped.
    *
    * This uses "death before confusion" on the mismatch: rather than quietly
-   * answer `false` for a direct `FabricInstance` subclass (which would let it
+   * return `false` for a direct `FabricInstance` subclass (which would let it
    * bypass its freeze protocol and be cached as deep-frozen while only
    * shallow-frozen), it throws, surfacing the broken subclass at the point of
    * use. The throw is intentional despite the predicate-style name.
