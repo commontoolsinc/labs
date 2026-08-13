@@ -22,6 +22,7 @@ import {
   downloadAndExtractArtifact,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
+  fetchIssueComments,
   fetchPRBody,
   fetchPRFiles,
   formatOverrideSuggestion,
@@ -673,6 +674,48 @@ Deno.test("fetchPRBody reads the live pull request body from the GitHub API", as
       requestedUrl,
       "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchIssueComments reads every page of a pull request's comments", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  try {
+    // A full page means there may be another, so the reader asks for one more.
+    // The second page comes back short and ends the walk. The comment with a
+    // null body is what the GitHub API returns for a comment whose text was
+    // deleted, and it reads back as empty rather than as null.
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      body: `comment ${index + 1}`,
+    }));
+    const secondPage = [{ id: 101, body: null }];
+
+    globalThis.fetch = ((input, _init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      requestedUrls.push(url);
+      // Read the page from the query rather than by searching the whole URL:
+      // `per_page=100` carries `page=1` inside it.
+      const page = new URL(url).searchParams.get("page");
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(page === "1" ? firstPage : secondPage),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    const comments = await fetchIssueComments(5727);
+
+    assertEquals(comments.length, 101);
+    assertEquals(comments[0], { id: 1, body: "comment 1" });
+    assertEquals(comments[100], { id: 101, body: "" });
+    assertEquals(requestedUrls, [
+      "https://api.github.com/repos/commontoolsinc/labs/issues/5727/comments?per_page=100&page=1",
+      "https://api.github.com/repos/commontoolsinc/labs/issues/5727/comments?per_page=100&page=2",
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }

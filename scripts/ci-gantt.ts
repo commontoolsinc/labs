@@ -22,7 +22,7 @@
 // phase by the marker emoji its name starts with; the segment widths are the
 // median time spent in each phase, scaled to fill the median bar. The marker
 // vocabulary lives in docs/development/CI_PERFORMANCE.md ("Step phase markers")
-// and is mirrored in PHASE_MARKERS below.
+// and is mirrored in PHASE_MARKERS in tasks/ci-step-phases.ts.
 //
 // Usage:
 //   scripts/ci-gantt.ts [options]
@@ -40,6 +40,8 @@
 //     --run-id ID           chart this workflow run ID, repeatable
 //     --theme NAME          color palette: "default" (light) or "dark"
 //     --colors JSON         override palette keys, e.g. '{"work":"#6ea8fe"}'
+
+import { type Phase, phaseOf } from "../tasks/ci-step-phases.ts";
 
 const args = Deno.args;
 function opt(name: string, def: string): string {
@@ -257,85 +259,20 @@ function latestJobsByName(jobs: Job[]): Job[] {
 //
 // Every step is placed into a phase from the marker emoji its name begins with.
 // The emoji is load-bearing: workflow and composite-action authors pick one from
-// the vocabulary below, and the chart splits each job bar into these phases
-// without having to recognise step wording. The authoritative table is
-// docs/development/CI_PERFORMANCE.md ("Step phase markers"); keep them in sync.
-// A step whose name carries no known marker lands in "other" and is reported to
-// stderr so a missing marker is easy to spot. In a normal run the only unmarked
-// steps are the ones the runner injects: "Set up job", "Post …" and "Complete
-// job" from GitHub, plus "Set up runner" and "Complete runner" from Blacksmith.
-// Those are classified below by name because their wording is not ours to set.
+// the vocabulary in tasks/ci-step-phases.ts, and the chart splits each job bar
+// into these phases without having to recognise step wording. The authoritative
+// table is docs/development/CI_PERFORMANCE.md ("Step phase markers"); keep them
+// in sync. A step whose name carries no known marker lands in "other" and is
+// reported to stderr so a missing marker is easy to spot. In a normal run the
+// only unmarked steps are the ones the runner injects: "Set up job", "Post …"
+// and "Complete job" from GitHub, plus "Set up runner" and "Complete runner"
+// from Blacksmith. Those are classified by name in that module, because their
+// wording is not ours to set.
 // ---------------------------------------------------------------------------
-
-type Phase = "setup" | "work" | "shutdown" | "other";
 
 // Chart order, left to right (matches the order steps run in). "other" trails so
 // an unmarked step stands out at the end of the bar.
 const PHASE_ORDER: Phase[] = ["setup", "work", "shutdown", "other"];
-
-// Marker emoji -> phase. Each emoji maps to exactly one phase; when a step's
-// natural emoji would land it in the wrong phase, the step name is changed to a
-// marker that fits (see docs/development/CI_PERFORMANCE.md). Matching ignores a
-// trailing variation selector, so the base emoji covers both the plain and the
-// selector-suffixed form of a glyph.
-const PHASE_MARKERS: [string, Phase][] = [
-  // setup: fetch code, install tools and dependencies, restore caches,
-  // authenticate, and bring test servers and devices up before the real work.
-  ["📥", "setup"], // checkout / download inputs
-  ["🦕", "setup"], // set up Deno
-  ["🔍", "setup"], // verify lock file & install, resolve refs
-  ["📦", "setup"], // install packages, cache dependencies
-  ["♻️", "setup"], // restore/save build caches
-  ["🛡️", "setup"], // relax sandbox for browser tests
-  ["🔧", "setup"], // enable devices
-  ["⚙️", "setup"], // set up external SDKs
-  ["🔑", "setup"], // authenticate to a cloud
-  ["🔌", "setup"], // start a local server for tests
-  ["⏳", "setup"], // wait for a service to be ready
-  ["💾", "setup"], // restore/save caches
-  ["🧮", "setup"], // compute a cache identity
-  // work: the job's actual purpose.
-  ["🔎", "work"], // checks (format, type, patterns, attestations)
-  ["🚧", "work"], // guard that fails the build on a banned pattern
-  ["🩹", "work"], // check for unresolved merge-conflict markers
-  ["✅", "work"], // validate an artifact a previous step produced
-  ["🧪", "work"], // run tests
-  ["🧩", "work"], // run integration tests
-  ["🔁", "work"], // replay captured fixtures under today's source
-  ["🧹", "work"], // lint
-  ["🧭", "work"], // check skill facts
-  ["📄", "work"], // type-check docs
-  ["🏗️", "work"], // build binaries/assets
-  ["🏋️", "work"], // run benchmarks
-  ["📊", "work"], // produce performance metrics / status reports
-  ["🧬", "work"], // combine coverage
-  ["📝", "work"], // generate attestations
-  ["🔐", "work"], // sign binaries
-  ["🚀", "work"], // deploy
-  ["💬", "work"], // post a PR comment
-  // shutdown: post-work reports, artifact uploads, log capture, teardown.
-  ["🧾", "shutdown"], // write coverage report
-  ["📤", "shutdown"], // upload artifacts
-  ["📋", "shutdown"], // capture logs on failure
-];
-
-const stripVS = (s: string) => s.replace(/\uFE0F/g, "");
-
-function phaseOf(stepName: string): Phase {
-  const name = stepName.trim();
-  // A leading marker wins, so a step named "💬 Post …" is classified by its
-  // marker rather than the "Post " rule below.
-  const norm = stripVS(name);
-  for (const [emoji, phase] of PHASE_MARKERS) {
-    if (norm.startsWith(stripVS(emoji))) return phase;
-  }
-  // Injected steps carry no marker; their wording is not ours to set. GitHub
-  // adds the "job" pair and the "Post …" steps, Blacksmith the "runner" pair.
-  if (name.startsWith("Post ")) return "shutdown";
-  if (name === "Set up job" || name === "Set up runner") return "setup";
-  if (name === "Complete job" || name === "Complete runner") return "shutdown";
-  return "other";
-}
 
 const JOBS_PER_PAGE = 100;
 async function fetchJobs(path: string): Promise<Job[]> {

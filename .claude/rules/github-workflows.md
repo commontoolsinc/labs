@@ -22,10 +22,30 @@ after.
 A step is placed into a phase — setup, build, test, upload — by the marker
 emoji its name begins with. The vocabulary is defined in
 `docs/development/CI_PERFORMANCE.md` under "Step phase markers" and mirrored in
-`PHASE_MARKERS` in `scripts/ci-gantt.ts`. A step whose name starts with a
+`PHASE_MARKERS` in `tasks/ci-step-phases.ts`. A step whose name starts with a
 marker that is in neither list is silently charted as "other", which is how
 setup time disappears from the timings people use to decide what to optimize.
-Adding a marker means editing the document and the script together.
+Adding a marker means editing the document and the module together.
+
+## A work step carries its own timeout
+
+In `.github/workflows/deno.yml`, every step whose marker puts it in the work
+phase carries `timeout-minutes: *work-timeout`, and its job carries
+`timeout-minutes: *job-timeout`, which is the ten minutes longer. GitHub
+cancels a job that runs past the bound on the job, so that job's conclusion is
+`cancelled` rather than `failure`, and a wedged test then looks like a run
+somebody stopped. A step that runs past the bound on the step fails, and the
+job fails with it.
+
+Both aliases point at YAML anchors declared in the `env:` block at the top of
+the file, which is where the minutes themselves are written. Add a work step
+and you add the alias, not a number; a job that needs its own bound adds a pair
+of anchors there, as the CLI integration suites have. The deploy jobs are the
+exception and carry no bound, because a deploy's duration is set by a script in
+another repository. `tasks/ci-workflow.test.ts` names those and holds every
+other job to the shape: it fails the `Check` job when a bound is missing, when
+it is written as a number rather than an alias, or when a step's anchor is
+fewer than ten minutes below its job's.
 
 ## Before splitting or rebalancing jobs
 
