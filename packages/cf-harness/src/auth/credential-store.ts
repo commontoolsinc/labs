@@ -50,6 +50,15 @@ export interface HarnessCredentialRecord {
   health?: HarnessCredentialHealth;
 }
 
+const assertValidCredentialRecord = (
+  record: HarnessCredentialRecord,
+): HarnessCredentialRecord => {
+  if (record.health !== undefined && record.credential === undefined) {
+    throw new Error("credential health requires a credential");
+  }
+  return record;
+};
+
 /**
  * Host-side Loom adapter contract. Implementations keep token material in
  * Loom's encrypted secret backend and resolve only opaque authenticated owner
@@ -145,10 +154,13 @@ export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
     ) => Promise<HarnessCredential | undefined> | HarnessCredential | undefined,
     signal?: AbortSignal,
   ): Promise<HarnessCredential | undefined> {
-    return this.updateRecord(ownerKey, providerId, async (current) => ({
-      credential: await updater(current.credential),
-      ...(current.health !== undefined ? { health: current.health } : {}),
-    }), signal).then((record) => record.credential);
+    return this.updateRecord(ownerKey, providerId, async (current) => {
+      const credential = await updater(current.credential);
+      return credential === undefined ? {} : {
+        credential,
+        ...(current.health !== undefined ? { health: current.health } : {}),
+      };
+    }, signal).then((record) => record.credential);
   }
 
   async delete(
@@ -172,14 +184,16 @@ export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
   ): Promise<HarnessCredentialRecord> {
     const key = credentialKey(ownerKey, providerId);
     return this.#queue.run(key, async () => {
-      const next = await updater({
-        ...(this.#credentials.get(key) !== undefined
-          ? { credential: structuredClone(this.#credentials.get(key)!) }
-          : {}),
-        ...(this.#health.get(key) !== undefined
-          ? { health: structuredClone(this.#health.get(key)!) }
-          : {}),
-      });
+      const next = assertValidCredentialRecord(
+        await updater({
+          ...(this.#credentials.get(key) !== undefined
+            ? { credential: structuredClone(this.#credentials.get(key)!) }
+            : {}),
+          ...(this.#health.get(key) !== undefined
+            ? { health: structuredClone(this.#health.get(key)!) }
+            : {}),
+        }),
+      );
       if (next.credential === undefined) this.#credentials.delete(key);
       else this.#credentials.set(key, structuredClone(next.credential));
       if (next.health === undefined) this.#health.delete(key);
@@ -543,10 +557,13 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
     ) => Promise<HarnessCredential | undefined> | HarnessCredential | undefined,
     signal?: AbortSignal,
   ): Promise<HarnessCredential | undefined> {
-    return this.updateRecord(ownerKey, providerId, async (current) => ({
-      credential: await updater(current.credential),
-      ...(current.health !== undefined ? { health: current.health } : {}),
-    }), signal).then((record) => record.credential);
+    return this.updateRecord(ownerKey, providerId, async (current) => {
+      const credential = await updater(current.credential);
+      return credential === undefined ? {} : {
+        credential,
+        ...(current.health !== undefined ? { health: current.health } : {}),
+      };
+    }, signal).then((record) => record.credential);
   }
 
   async delete(
@@ -584,14 +601,16 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
           const currentHealth = Object.hasOwn(document.health, ownerKey)
             ? document.health[ownerKey]
             : undefined;
-          const next = await updater({
-            ...(currentProviders?.[providerId] !== undefined
-              ? { credential: currentProviders[providerId] }
-              : {}),
-            ...(currentHealth?.[providerId] !== undefined
-              ? { health: currentHealth[providerId] }
-              : {}),
-          });
+          const next = assertValidCredentialRecord(
+            await updater({
+              ...(currentProviders?.[providerId] !== undefined
+                ? { credential: currentProviders[providerId] }
+                : {}),
+              ...(currentHealth?.[providerId] !== undefined
+                ? { health: currentHealth[providerId] }
+                : {}),
+            }),
+          );
           const providers = { ...(currentProviders ?? {}) };
           if (next.credential === undefined) delete providers[providerId];
           else providers[providerId] = next.credential;

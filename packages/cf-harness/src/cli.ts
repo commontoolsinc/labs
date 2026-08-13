@@ -2326,8 +2326,14 @@ const writeJsonControlFailure = (
   io: CfHarnessCliIO,
   command: string,
   error: unknown,
+  signal?: AbortSignal,
 ): void => {
-  const controlError = error instanceof HarnessControlError
+  const controlError = signal?.aborted
+    ? new HarnessControlError(
+      "operation-canceled",
+      "The cf-harness control operation was canceled",
+    )
+    : error instanceof HarnessControlError
     ? error
     : error instanceof DOMException && error.name === "AbortError"
     ? new HarnessControlError(
@@ -2389,28 +2395,55 @@ const runCfHarnessConfigCommand = async (
   const action = normalized[1];
   const json = normalized.includes("--json");
   const positional = normalized.slice(2).filter((value) => value !== "--json");
-  if (
-    (action !== "inspect" && action !== "init" && action !== "set") ||
-    (action === "inspect" ? positional.length !== 0 : positional.length !== 1)
-  ) {
-    throw new Error("usage: config inspect|init|set [provider] [--json]");
-  }
-  const command = `config.${action}`;
+  const command = action === undefined ? "config" : `config.${action}`;
   const store = deps.providerSettingsStore ??
     new FileHarnessProviderSettingsStore({
       path: defaultHarnessProviderSettingsPath(harnessHomeForControl(deps)),
     });
   try {
+    if (
+      (action !== "inspect" && action !== "init" && action !== "set") ||
+      (action === "inspect" ? positional.length !== 0 : positional.length !== 1)
+    ) {
+      throw new HarnessControlError(
+        "invalid-request",
+        "usage: config inspect|init|set [provider] [--json]",
+      );
+    }
     if (action === "inspect") {
       const state = await store.inspect();
       let effectiveProvider: HarnessModelProviderId | undefined;
-      let effectiveSource: "persistent" | "default" | undefined;
-      if (state.state === "configured") {
-        effectiveProvider = state.settings.modelProvider;
-        effectiveSource = "persistent";
-      } else if (state.state === "missing") {
-        effectiveProvider = "openai-compatible-gateway";
-        effectiveSource = "default";
+      let effectiveSource:
+        | "environment"
+        | "persistent"
+        | "default"
+        | undefined;
+      const rawEnvironment = nonEmptyEnvValue(
+        deps.env?.CF_HARNESS_MODEL_PROVIDER ??
+          (deps.env === undefined
+            ? Deno.env.get("CF_HARNESS_MODEL_PROVIDER")
+            : undefined),
+      );
+      const environment = parseModelProvider(rawEnvironment);
+      if (rawEnvironment !== undefined && environment === undefined) {
+        throw new HarnessControlError(
+          "invalid-request",
+          "CF_HARNESS_MODEL_PROVIDER must be openai-compatible-gateway or openai-codex",
+        );
+      }
+      if (
+        state.state === "configured" || state.state === "missing"
+      ) {
+        if (environment !== undefined) {
+          effectiveProvider = environment;
+          effectiveSource = "environment";
+        } else if (state.state === "configured") {
+          effectiveProvider = state.settings.modelProvider;
+          effectiveSource = "persistent";
+        } else {
+          effectiveProvider = "openai-compatible-gateway";
+          effectiveSource = "default";
+        }
       }
       const result = {
         state: state.state,
@@ -2419,9 +2452,6 @@ const runCfHarnessConfigCommand = async (
           : {}),
         ...(effectiveProvider !== undefined
           ? { effectiveProvider, effectiveSource }
-          : {}),
-        ...(state.state === "invalid" || state.state === "unreadable"
-          ? { detail: state.detail }
           : {}),
         ...(state.state === "unsupported-version"
           ? { version: state.version }
@@ -2442,8 +2472,8 @@ const runCfHarnessConfigCommand = async (
       );
     }
     const result = action === "init"
-      ? await store.initialize(provider)
-      : await store.set(provider);
+      ? await store.initialize(provider, deps.controlSignal)
+      : await store.set(provider, deps.controlSignal);
     if (json) writeJsonControlResult(io, command, result);
     else {
       io.stdout(
@@ -2455,7 +2485,7 @@ const runCfHarnessConfigCommand = async (
     return 0;
   } catch (error) {
     if (!json) throw error;
-    writeJsonControlFailure(io, command, error);
+    writeJsonControlFailure(io, command, error, deps.controlSignal);
     return 1;
   }
 };
@@ -2469,21 +2499,29 @@ const runCfHarnessAuthCommand = async (
   if (normalized[0] !== "auth") return undefined;
   const action = normalized[1];
   const provider = normalized[2];
-  if (
-    (action !== "login" && action !== "status" && action !== "logout") ||
-    provider !== "openai-codex"
-  ) {
-    throw new Error(
-      "usage: auth login|status|logout openai-codex [--device]",
-    );
-  }
   const json = normalized.includes("--json");
-  const command = `auth.${action}`;
+  const command = action === undefined ? "auth" : `auth.${action}`;
   const harnessHome = harnessHomeForControl(deps);
   const store = deps.credentialStore ?? new FileHarnessCredentialStore({
     path: defaultHarnessCredentialStorePath(harnessHome),
   });
   const auth = new OpenAICodexAuthService(store, "local");
+  const allowedArguments = action === "login"
+    ? new Set(["--device", "--json"])
+    : new Set(["--json"]);
+  if (
+    (action !== "login" && action !== "status" && action !== "logout") ||
+    provider !== "openai-codex" ||
+    normalized.slice(3).some((argument) => !allowedArguments.has(argument))
+  ) {
+    const error = new HarnessControlError(
+      "invalid-request",
+      "usage: auth login|status|logout openai-codex [--device] [--json]",
+    );
+    if (!json) throw error;
+    writeJsonControlFailure(io, command, error, deps.controlSignal);
+    return 1;
+  }
   if (action === "status") {
     try {
       const status = await auth.status();
@@ -2504,7 +2542,7 @@ const runCfHarnessAuthCommand = async (
       return status.status === "connected" ? 0 : 1;
     } catch (error) {
       if (!json) throw error;
-      writeJsonControlFailure(io, command, error);
+      writeJsonControlFailure(io, command, error, deps.controlSignal);
       return 1;
     }
   }
@@ -2517,16 +2555,9 @@ const runCfHarnessAuthCommand = async (
       return 0;
     } catch (error) {
       if (!json) throw error;
-      writeJsonControlFailure(io, command, error);
+      writeJsonControlFailure(io, command, error, deps.controlSignal);
       return 1;
     }
-  }
-  if (
-    normalized.slice(3).some((argument) =>
-      argument !== "--device" && argument !== "--json"
-    )
-  ) {
-    throw new Error("auth login openai-codex accepts only --device and --json");
   }
   const loginController = new AbortController();
   const signal = deps.controlSignal ?? loginController.signal;
@@ -2583,7 +2614,7 @@ const runCfHarnessAuthCommand = async (
     return 0;
   } catch (error) {
     if (!json) throw error;
-    writeJsonControlFailure(io, command, error);
+    writeJsonControlFailure(io, command, error, signal);
     return 1;
   } finally {
     cleanupSignal();

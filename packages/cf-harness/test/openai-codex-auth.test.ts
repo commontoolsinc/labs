@@ -5,6 +5,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { join } from "@std/path";
 import {
   completeOpenAICodexDeviceAuthorization,
   createOpenAICodexBrowserAuthorization,
@@ -18,6 +19,7 @@ import {
   startOpenAICodexDeviceAuthorization,
 } from "../src/auth/openai-codex.ts";
 import {
+  FileHarnessCredentialStore,
   InMemoryHarnessCredentialStore,
 } from "../src/auth/credential-store.ts";
 import type { OpenAICodexOAuthCredential } from "../src/auth/types.ts";
@@ -230,6 +232,51 @@ Deno.test("Codex credential resolution never falls back after revocation", async
   const error = await assertRejects(() => resolver.resolve()) as Error;
   assertEquals(error.message.includes("secret-refresh-token"), false);
   assertEquals(error.message, "OpenAI Codex token refresh failed (400)");
+});
+
+Deno.test("Codex credential resolution fails before traffic when disconnected or unhealthy", async () => {
+  const disconnected = new InMemoryHarnessCredentialStore();
+  let requests = 0;
+  const disconnectedResolver = new OpenAICodexCredentialResolver({
+    store: disconnected,
+    ownerKey: "local",
+    fetchFn: () => {
+      requests++;
+      return Promise.reject(new Error("unexpected request"));
+    },
+  });
+  await assertRejects(
+    () => disconnectedResolver.resolve(),
+    HarnessControlError,
+    "not connected",
+  );
+
+  const unhealthy = new InMemoryHarnessCredentialStore();
+  await unhealthy.updateRecord("local", "openai-codex", () => ({
+    credential: {
+      type: "oauth",
+      providerId: "openai-codex",
+      accessToken: "access",
+      refreshToken: "refresh",
+      expiresAt: 1,
+      accountId: "account",
+    },
+    health: { status: "reconnect-required", reason: "revoked" },
+  }));
+  const unhealthyResolver = new OpenAICodexCredentialResolver({
+    store: unhealthy,
+    ownerKey: "local",
+    fetchFn: () => {
+      requests++;
+      return Promise.reject(new Error("unexpected request"));
+    },
+  });
+  await assertRejects(
+    () => unhealthyResolver.resolve(),
+    HarnessControlError,
+    "must be reconnected",
+  );
+  assertEquals(requests, 0);
 });
 
 Deno.test("Codex browser login validates state and persists only after exchange", async () => {
@@ -764,6 +811,69 @@ Deno.test("Codex terminal refresh health persists and prevents another request",
   assertEquals(requests, 1);
 });
 
+Deno.test("Codex refresh rotation and terminal health survive file-store reopen", async () => {
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const store = new FileHarnessCredentialStore({ path });
+  await store.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "expired-access",
+    refreshToken: "refresh-old",
+    expiresAt: 1,
+    accountId: "acct-1",
+  });
+  const rotating = new OpenAICodexCredentialResolver({
+    store,
+    ownerKey: "local",
+    now: () => 10_000,
+    fetchFn: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: jwt({
+              "https://api.openai.com/auth": { chatgpt_account_id: "acct-1" },
+            }),
+            refresh_token: "refresh-new",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        ),
+      ),
+  });
+  await rotating.resolve();
+  assertEquals(
+    (await new FileHarnessCredentialStore({ path }).get(
+      "local",
+      "openai-codex",
+    ))?.refreshToken,
+    "refresh-new",
+  );
+
+  await store.updateRecord("local", "openai-codex", (record) => ({
+    credential: { ...record.credential!, expiresAt: 1 },
+  }));
+  const terminal = new OpenAICodexCredentialResolver({
+    store,
+    ownerKey: "local",
+    now: () => 10_000,
+    fetchFn: () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+        }),
+      ),
+  });
+  await assertRejects(() => terminal.resolve(), HarnessControlError);
+  assertEquals(
+    (await new FileHarnessCredentialStore({ path }).getRecord(
+      "local",
+      "openai-codex",
+    )).health,
+    { status: "reconnect-required", reason: "invalid-grant" },
+  );
+});
+
 Deno.test("Codex transient refresh failures leave credential health unchanged", async () => {
   const store = new InMemoryHarnessCredentialStore();
   await store.set("local", "openai-codex", {
@@ -869,6 +979,33 @@ Deno.test("Codex login cancellation while queued preserves prior auth", async ()
   releaseMutation();
   await holding;
   assertEquals(await store.get("local", "openai-codex"), previous);
+});
+
+Deno.test("Codex login reports late cancellation after its atomic save", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  const controller = new AbortController();
+  const reason = new Error("login canceled after commit");
+  const originalUpdateRecord = store.updateRecord.bind(store);
+  store.updateRecord = async (...args) => {
+    const result = await originalUpdateRecord(...args);
+    controller.abort(reason);
+    return result;
+  };
+  const auth = new OpenAICodexAuthService(store, "local");
+  const credential: OpenAICodexOAuthCredential = {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "new-access",
+    refreshToken: "new-refresh",
+    expiresAt: 4_000_000_000_000,
+    accountId: "new-account",
+  };
+
+  const error = await assertRejects(() =>
+    auth.save(credential, controller.signal)
+  );
+  assertStrictEquals(error, reason);
+  assertEquals(await store.get("local", "openai-codex"), credential);
 });
 
 Deno.test("Codex token exchange rejects malformed token responses before persistence", async () => {

@@ -1,5 +1,6 @@
 /** Stable failure codes exposed at cf-harness control boundaries. */
 export type HarnessControlErrorCode =
+  | "invalid-request"
   | "provider-configuration-required"
   | "provider-auth-required"
   | "provider-mismatch"

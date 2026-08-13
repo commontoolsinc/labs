@@ -16,7 +16,7 @@ export type HarnessProviderSettingsState =
   | { state: "missing" }
   | { state: "configured"; settings: HarnessProviderSettings }
   | { state: "invalid"; detail: string }
-  | { state: "unsupported-version"; version: number | string | null }
+  | { state: "unsupported-version"; version: number | null }
   | { state: "unreadable"; detail: string };
 
 export interface HarnessProviderResolution {
@@ -39,8 +39,8 @@ const parseDocument = (text: string): HarnessProviderSettingsState => {
   }
   const input = parsed as Record<string, unknown>;
   if (input.version !== HARNESS_PROVIDER_SETTINGS_VERSION) {
-    const version = typeof input.version === "number" ||
-        typeof input.version === "string" || input.version === null
+    const version = typeof input.version === "number" &&
+        Number.isSafeInteger(input.version)
       ? input.version
       : null;
     return { state: "unsupported-version", version };
@@ -266,7 +266,10 @@ export class FileHarnessProviderSettingsStore {
     }
   }
 
-  async #write(settings: HarnessProviderSettings): Promise<void> {
+  async #write(
+    settings: HarnessProviderSettings,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const temporaryPath = join(
       dirname(this.path),
       `.config-${crypto.randomUUID()}.tmp`,
@@ -279,6 +282,7 @@ export class FileHarnessProviderSettingsStore {
         { createNew: true, mode: 0o600 },
       );
       await Deno.chmod(temporaryPath, 0o600);
+      signal?.throwIfAborted();
       await Deno.rename(temporaryPath, this.path);
     } catch (error) {
       failure = error;
@@ -310,7 +314,7 @@ export class FileHarnessProviderSettingsStore {
             version: HARNESS_PROVIDER_SETTINGS_VERSION,
             modelProvider,
           } as const;
-          await this.#write(settings);
+          await this.#write(settings, signal);
           return { settings, changed: true };
         }, signal),
       signal,
@@ -337,7 +341,7 @@ export class FileHarnessProviderSettingsStore {
           } as const;
           const changed = state.state === "missing" ||
             state.settings.modelProvider !== modelProvider;
-          if (changed) await this.#write(settings);
+          if (changed) await this.#write(settings, signal);
           return { settings, changed };
         }, signal),
       signal,
@@ -353,11 +357,11 @@ const stateError = (
 ): HarnessControlError =>
   new HarnessControlError(
     "provider-configuration-required",
-    `Provider settings are ${state.state}: ${
-      state.state === "unsupported-version"
-        ? `version ${String(state.version)}`
-        : state.detail
-    }`,
+    state.state === "unsupported-version"
+      ? "Provider settings use an unsupported version"
+      : state.state === "unreadable"
+      ? "Provider settings are unreadable"
+      : "Provider settings are invalid",
   );
 
 /** Resolves the provider with manual CLI precedence. */

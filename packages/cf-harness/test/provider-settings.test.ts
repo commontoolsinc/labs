@@ -67,6 +67,8 @@ describe("provider-settings", () => {
       for (
         const document of [
           "{broken",
+          "[]",
+          '{"version":1,"modelProvider":"invalid"}',
           '{"version":99,"modelProvider":"openai-codex"}',
         ]
       ) {
@@ -145,6 +147,75 @@ describe("provider-settings", () => {
       await firstHeld;
       expect((await store.inspect()).state).toBe("missing");
     });
+
+    it("reports a symlinked settings home as unreadable", async () => {
+      if (Deno.build.os === "windows") return;
+      const root = await Deno.makeTempDir();
+      const realHome = join(root, "real");
+      const linkedHome = join(root, "linked");
+      await Deno.mkdir(realHome, { mode: 0o700 });
+      await Deno.symlink(realHome, linkedHome);
+      const store = new FileHarnessProviderSettingsStore({
+        path: join(linkedHome, "config.json"),
+      });
+      expect((await store.inspect()).state).toBe("unreadable");
+      await expect(store.set("openai-codex")).rejects.toThrow(
+        "must not be a symlink",
+      );
+    });
+
+    it("honors an advisory lock held by another process", async () => {
+      if (Deno.build.os === "windows") return;
+      const root = await Deno.makeTempDir();
+      const path = join(root, "config.json");
+      const lockPath = `${path}.lock`;
+      const holder = new Deno.Command(Deno.execPath(), {
+        args: [
+          "eval",
+          "--quiet",
+          `const file = await Deno.open(Deno.args[0], { create: true, read: true, write: true, mode: 0o600 });
+await file.lock(true);
+console.log("locked");
+await Deno.stdin.read(new Uint8Array(1));
+await file.unlock();
+file.close();`,
+          lockPath,
+        ],
+        cwd: root,
+        stdin: "piped",
+        stdout: "piped",
+        stderr: "null",
+      }).spawn();
+      const stdout = holder.stdout.getReader();
+      let output = "";
+      while (!output.includes("locked")) {
+        const { value, done } = await stdout.read();
+        if (done) throw new Error("lock holder exited before acquiring lock");
+        output += new TextDecoder().decode(value);
+      }
+      stdout.releaseLock();
+
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      const controller = new AbortController();
+      const store = new FileHarnessProviderSettingsStore({
+        path,
+        onLockAcquisitionStarted: markStarted,
+      });
+      const pending = store.set("openai-codex", controller.signal);
+      await started;
+      const reason = new Error("cross-process settings cancellation");
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+
+      const stdin = holder.stdin.getWriter();
+      await stdin.write(new Uint8Array([1]));
+      await stdin.close();
+      expect((await holder.status).success).toBe(true);
+      expect((await store.inspect()).state).toBe("missing");
+    });
   });
 
   describe("resolveHarnessModelProviderPreference()", () => {
@@ -197,6 +268,20 @@ describe("provider-settings", () => {
       });
       await expect(resolution).rejects.toMatchObject({
         code: "provider-configuration-required",
+      });
+      await expect(
+        resolveHarnessModelProviderPreference({
+          store: {
+            inspect: () =>
+              Promise.resolve({
+                state: "invalid" as const,
+                detail: "secret detail",
+              }),
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: "provider-configuration-required",
+        message: "Provider settings are invalid",
       });
     });
   });

@@ -674,6 +674,7 @@ export class OpenAICodexAuthService {
       },
       signal,
     );
+    signal?.throwIfAborted();
   }
 
   async status(now = Date.now()): Promise<HarnessCredentialStatus> {
