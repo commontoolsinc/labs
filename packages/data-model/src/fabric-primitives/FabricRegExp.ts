@@ -7,11 +7,14 @@ import type {
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import {
   type NonterminalCodec,
   type ReconstructionContext,
+  type TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC, REALM_CODEC } from "@/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
@@ -188,6 +191,74 @@ export class FabricRegExp extends BaseFabricPrimitive
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): NonterminalCodec {
     return this.#codec;
+  }
+
+  static #realmCodec = Object.freeze(
+    new (class RegExpCodec extends BaseTerminalCodec<RealmCodecValue> {
+      /** Constructs an instance. */
+      constructor() {
+        super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricRegExp): RealmCodecValue {
+        return {
+          source: value.#source,
+          flags: value.#flags,
+          flavor: value.#flavor,
+        };
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Reports a bad state by throwing rather than by returning a
+       * `ProblematicValue`. The two are equivalent to a caller -- the engine
+       * settles them against `lenient` -- so the choice is only about what can
+       * be expressed, and a `ProblematicValue` holds a `FabricValue` where
+       * this format's states need not be one.
+       *
+       * As on the JSON side, regex syntax is not enforced as part of wire
+       * participation beyond what the constructor validates eagerly for the
+       * `es2025` flavor.
+       */
+      decode(
+        typeTag: string,
+        state: RealmCodecValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        if (!isPlainObject(state)) {
+          throw new Error(
+            `\`${typeTag}\`: expected object state, got ${typeof state}`,
+          );
+        }
+
+        const flavor = (state.flavor as string) ?? DEFAULT_FLAVOR;
+        const source = (state.source as string) ?? "";
+        const flags = (state.flags as string) ?? "";
+        return new FabricRegExp(flavor, source, flags);
+      }
+    })(),
+  );
+
+  /**
+   * The codec for instances of this class in the realm-crossing format.
+   *
+   * Terminal, where JSON's is nonterminal, and the essential state is the same
+   * `{ source, flags, flavor }` either way. A record of strings sits in both
+   * domains at once -- it is a `FabricValue`, and it is also a value this
+   * format carries as it stands -- so the shape of the state does not decide
+   * the kind, and each format says which it means. Terminal is what this one
+   * has to gain by: the walk hands the record to the transport rather than
+   * descending into three strings whose shape it already knows.
+   *
+   * Structured cloning carrying a native `RegExp` is not the reason, and would
+   * not have been a good one. `flavor` has no native carrier, and a flavor
+   * other than `es2025` has no native `RegExp` at all, so a state of that
+   * shape would drop the first and be unreachable for the second.
+   */
+  static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
+    return this.#realmCodec;
   }
 }
 

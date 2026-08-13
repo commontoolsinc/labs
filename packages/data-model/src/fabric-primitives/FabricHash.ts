@@ -13,11 +13,14 @@ import { isPlainObject } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import {
   type NonterminalCodec,
   type ReconstructionContext,
+  type TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC, REALM_CODEC } from "@/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
@@ -184,6 +187,70 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): NonterminalCodec {
     return this.#codec;
+  }
+
+  static #realmCodec = Object.freeze(
+    new (class HashCodec extends BaseTerminalCodec<RealmCodecValue> {
+      /** Constructs an instance. */
+      constructor() {
+        super(CODEC_TYPE_TAGS.Hash, FabricHash);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricHash): RealmCodecValue {
+        return { tag: value.tag, hash: value.bytes };
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Reports a bad state by throwing rather than by returning a
+       * `ProblematicValue`. The two are equivalent to a caller -- the engine
+       * settles them against `lenient` -- so the choice is only about what can
+       * be expressed, and a `ProblematicValue` holds a `FabricValue` where
+       * this format's states need not be one.
+       */
+      decode(
+        typeTag: string,
+        state: RealmCodecValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        if (!isPlainObject(state)) {
+          throw new Error(
+            `\`${typeTag}\`: expected object state, got ${typeof state}`,
+          );
+        }
+
+        const { tag, hash } = state as { tag: unknown; hash: unknown };
+        if ((typeof tag !== "string") || !(hash instanceof Uint8Array)) {
+          throw new Error(
+            `\`${typeTag}\`: expected string \`tag\` and \`Uint8Array\` \`hash\``,
+          );
+        }
+
+        return new FabricHash(hash, tag);
+      }
+    })(),
+  );
+
+  /**
+   * The codec for instances of this class in the realm-crossing format.
+   *
+   * Terminal, and it is the hash bytes that make it so rather than the record
+   * around them. A `Uint8Array` is in this format's domain and is not a
+   * `FabricValue`, so a state holding one has no nonterminal reading. The
+   * record being a plain object decides nothing either way.
+   *
+   * TODO(danfuzz): A nonterminal state of `{ tag, hash: FabricBytes }` is
+   * available too, reaching the bytes through whichever codec this format
+   * binds for `FabricBytes` instead of naming `Uint8Array` here, and so
+   * keeping the spelling of bytes in one place per format rather than two. It
+   * is a different encoding rather than the same one reached differently: the
+   * bytes would arrive under their own tag nested inside this one, a level
+   * deeper than the state below puts them.
+   */
+  static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
+    return this.#realmCodec;
   }
 }
 

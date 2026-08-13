@@ -11,11 +11,12 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import {
   type ReconstructionContext,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC, REALM_CODEC } from "@/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
@@ -86,6 +87,52 @@ export class FabricEpochDays extends BaseFabricPrimitive
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
     return this.#codec;
+  }
+
+  static #realmCodec = Object.freeze(
+    new (class EpochDaysCodec extends BaseTerminalCodec<RealmCodecValue> {
+      /** Constructs an instance. */
+      constructor() {
+        super(CODEC_TYPE_TAGS.EpochDays, FabricEpochDays);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricEpochDays): RealmCodecValue {
+        return value.#value;
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Reports a bad state by throwing rather than by returning a
+       * `ProblematicValue`. The two are equivalent to a caller -- the engine
+       * settles them against `lenient` -- so the choice is only about what can
+       * be expressed, and a `ProblematicValue` holds a `FabricValue` where
+       * this format's states need not be one.
+       */
+      decode(
+        typeTag: string,
+        state: RealmCodecValue,
+        _context: ReconstructionContext,
+      ): FabricValue {
+        if (typeof state !== "bigint") {
+          throw new Error(
+            `\`${typeTag}\`: expected \`bigint\` state, got ${typeof state}`,
+          );
+        }
+
+        return new FabricEpochDays(state);
+      }
+    })(),
+  );
+
+  /**
+   * The codec for instances of this class in the realm-crossing format. The
+   * `bigint` travels as itself, where JSON has to spell it as base64url text
+   * over its two's-complement bytes.
+   */
+  static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
+    return this.#realmCodec;
   }
 }
 

@@ -23,6 +23,9 @@ import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodecEngine } from "./codec-json/JsonCodecEngine.ts";
 import { createBaseJsonRegistry } from "./codec-json/createBaseJsonRegistry.ts";
+import type { RealmCodecValue } from "./codec-realm/interface.ts";
+import { RealmCodecEngine } from "./codec-realm/RealmCodecEngine.ts";
+import { createBaseRealmRegistry } from "./codec-realm/createBaseRealmRegistry.ts";
 import { codecClasses as primitiveClasses } from "./fabric-primitives/index.ts";
 import { codecClasses as instanceClasses } from "./fabric-instances/index.ts";
 
@@ -135,4 +138,76 @@ export function valueFromJson(
     json,
     context ?? JSON_DECODE_EMPTY_CONTEXT,
   );
+}
+
+/**
+ * Creates a registry pairing the realm-crossing format with the fabric classes
+ * this package defines. The counterpart to {@link createDefaultJsonRegistry},
+ * drawing on the same two curated lists: which classes participate is a
+ * question about the classes rather than about the format, so both formats
+ * read the same roster and each class supplies whichever codec it has for the
+ * format asking.
+ */
+export function createDefaultRealmRegistry(): CodecRegistry<RealmCodecValue> {
+  return createBaseRealmRegistry().extend(
+    primitiveClasses(),
+    instanceClasses(),
+  );
+}
+
+/**
+ * Constructs a `RealmCodecEngine` over {@link createDefaultRealmRegistry}, for
+ * a caller that wants this package's classes rather than a set of its own.
+ * `options.lenient` is passed through.
+ */
+export function newDefaultRealmCodecEngine(
+  options?: { lenient?: boolean },
+): RealmCodecEngine {
+  return new RealmCodecEngine({
+    registry: createDefaultRealmRegistry(),
+    lenient: options?.lenient ?? false,
+  });
+}
+
+/** Shared realm-crossing codec engine. */
+const realmCodecEngine = newDefaultRealmCodecEngine();
+
+/**
+ * Shared empty `ReconstructionContext` used when a realm decode is requested
+ * without a runtime context. The realm-crossing counterpart to
+ * {@link JSON_DECODE_EMPTY_CONTEXT}; only the `getCell()` throw message
+ * differs, so that an unexpected cell reference names the situation it arose
+ * in.
+ */
+const REALM_DECODE_EMPTY_CONTEXT = Object.freeze(
+  new EmptyReconstructionContext(
+    true,
+    "no runtime context (realm decode); a cell reference cannot be reconstructed.",
+  ),
+);
+
+/**
+ * Encodes a fabric value into the realm-crossing transport form: a value that
+ * `structuredClone()` or `postMessage()` carries to another realm without
+ * loss, enveloped so that a receiver can recognize it.
+ *
+ * TODO(danfuzz): Settle this pair's names. These follow the family the rest of
+ * the format uses, but `valueFromRealm()` reads as "a value from a realm"
+ * where `valueFromJson()` reads as "a value from JSON" -- the JSON pair names
+ * a form and this one names a boundary.
+ */
+export function realmFromValue(value: FabricValue): RealmCodecValue {
+  return realmCodecEngine.encode(value);
+}
+
+/**
+ * Decodes a value in the realm-crossing transport form. If `context` is
+ * omitted, the shared decode-framed empty context is substituted, which throws
+ * if any reconstruction is needed.
+ */
+export function valueFromRealm(
+  data: RealmCodecValue,
+  context?: ReconstructionContext | undefined,
+): FabricValue {
+  return realmCodecEngine.decode(data, context ?? REALM_DECODE_EMPTY_CONTEXT);
 }

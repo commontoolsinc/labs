@@ -8,12 +8,13 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   ReconstructionContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC, REALM_CODEC } from "@/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
@@ -142,5 +143,56 @@ export class FabricBytes extends BaseFabricPrimitive {
   /** The codec for instances of this class. */
   static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
     return this.#codec;
+  }
+
+  static #realmCodec = Object.freeze(
+    new (class BytesCodec extends BaseTerminalCodec<RealmCodecValue> {
+      /** Constructs an instance. */
+      constructor() {
+        super(CODEC_TYPE_TAGS.Bytes, FabricBytes);
+      }
+
+      /** @inheritDoc */
+      encode(value: FabricBytes): RealmCodecValue {
+        // An unshared copy, so that a caller mutating the encoded tree before
+        // it crosses cannot reach into this instance. The transport copies
+        // again on its way out, which is the price of not being able to hand
+        // out an immutable view of the bytes.
+        return value.slice();
+      }
+
+      /**
+       * @inheritDoc
+       *
+       * Reports a bad state by throwing rather than by returning a
+       * `ProblematicValue`. The two are equivalent to a caller -- the engine
+       * settles them against `lenient` -- so the choice is only about what can
+       * be expressed, and a `ProblematicValue` holds a `FabricValue` where
+       * this format's states need not be one.
+       */
+      decode(
+        typeTag: string,
+        state: RealmCodecValue,
+        _context: ReconstructionContext,
+      ): FabricBytes {
+        if (!(state instanceof Uint8Array)) {
+          throw new Error(
+            `\`${typeTag}\`: expected \`Uint8Array\` state, got ${typeof state}`,
+          );
+        }
+
+        // Copied rather than taken over: the wire tree is the caller's
+        // argument, and nothing in this format's contract cedes its bytes.
+        return new FabricBytes(state);
+      }
+    })(),
+  );
+
+  /**
+   * The codec for instances of this class in the realm-crossing format. The
+   * bytes travel as bytes, where JSON has to spell them as base64url text.
+   */
+  static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
+    return this.#realmCodec;
   }
 }

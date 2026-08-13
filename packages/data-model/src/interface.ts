@@ -43,6 +43,24 @@
 export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodecEngine");
 
 /**
+ * Well-known symbol for binding the static getter `[REALM_CODEC]` on a
+ * `FabricPrimitive` class.
+ *
+ * The realm-crossing counterpart to {@link JSON_CODEC}, and the reason that
+ * one is bound per format rather than once. Structured cloning carries bytes,
+ * `bigint` and `RegExp` as themselves, so a class built on any of those has an
+ * answer here that JSON cannot express: `FabricBytes` terminates into a
+ * `Uint8Array` rather than base64url text, and both epoch types into a
+ * `bigint` rather than a base64url spelling of one.
+ *
+ * A class binding a format-neutral `[CODEC]` needs nothing here. Every
+ * `FabricInstance` is in that position, its codec expanding an instance into
+ * other `FabricValue`s and leaving every terminal decision to whatever walks
+ * the result.
+ */
+export const REALM_CODEC: unique symbol = Symbol("data-model.realmCodecEngine");
+
+/**
  * Abstract base class for all fabric-system value types. This is the common
  * superclass of `FabricInstance` (object-like protocol types) and
  * `FabricPrimitive` (immutable special primitives). It enables a single
