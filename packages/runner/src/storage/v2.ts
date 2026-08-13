@@ -1192,6 +1192,14 @@ export class StorageManager implements IStorageManager {
     return promise;
   }
 
+  async pullOpenSpacesToHead(): Promise<void> {
+    await Promise.all(
+      [...this.#providers.values()].map((provider) =>
+        provider.pullToServerHead()
+      ),
+    );
+  }
+
   /**
    * A throwable `AuthorizationError` when `space` is under a permanent
    * authorization denial (an ACL shortfall, an audience or protocol mismatch),
@@ -1857,6 +1865,10 @@ class Provider implements IStorageProvider {
     return this.followReplacement((replica) => replica.entityIdExists(id));
   }
 
+  pullToServerHead(): Promise<void> {
+    return this.followReplacement((replica) => replica.pullToServerHead());
+  }
+
   listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
@@ -2350,6 +2362,19 @@ class SpaceReplica implements ISpaceReplica {
       return undefined;
     }
     return (await session.entityIdExists(id))?.exists;
+  }
+
+  async pullToServerHead(): Promise<void> {
+    const { session } = await this.activeSessionHandle();
+    // An empty-root graph query fetches no document but still crosses the wire
+    // and returns the server's current sequence. Because a WebSocket delivers a
+    // connection's frames in order, any subscription fan-out the server has
+    // already sent on this connection has been received and applied by the time
+    // this response arrives — so the round trip doubles as a "this replica has
+    // caught up to everything the server had sent" barrier. `graph.query` is an
+    // unconditional round trip (it cannot be answered from the local replica),
+    // unlike the entity-id listing calls, which a server may decline by flag.
+    await session.queryGraph({ roots: [] });
   }
 
   /**
