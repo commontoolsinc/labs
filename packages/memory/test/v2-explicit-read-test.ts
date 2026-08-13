@@ -69,12 +69,13 @@ const nextRequestId = (label: string): string => `${label}-${++requestCounter}`;
 const openSession = async (
   harness: Harness,
   principal: string,
-): Promise<string> => {
+  session: { sessionId?: string; sessionToken?: string } = {},
+): Promise<{ sessionId: string; sessionToken: string; sync?: unknown }> => {
   await harness.connection.receive(encodeMemoryBoundary({
     type: "session.open",
     requestId: nextRequestId("open"),
     space: SPACE,
-    session: {},
+    session,
     invocation: {
       iss: principal,
       aud: harness.sessionOpen.audience,
@@ -82,11 +83,20 @@ const openSession = async (
     },
   }));
   const response = shiftMessage(harness.messages) as ResponseMessage<
-    { sessionId: string; sessionOpen: SessionOpenAuthMetadata }
+    {
+      sessionId: string;
+      sessionToken: string;
+      sessionOpen: SessionOpenAuthMetadata;
+      sync?: unknown;
+    }
   >;
   assertExists(response.ok, JSON.stringify(response.error));
   harness.sessionOpen = response.ok.sessionOpen;
-  return response.ok.sessionId;
+  return {
+    sessionId: response.ok.sessionId,
+    sessionToken: response.ok.sessionToken,
+    ...(response.ok.sync === undefined ? {} : { sync: response.ok.sync }),
+  };
 };
 
 const newServer = (store: string): Server =>
@@ -105,7 +115,7 @@ Deno.test("explicit entity_scope_key reads: lease holder admitted, non-holder an
   setServerExecutionConfig(true);
   try {
     const alice = await connect(server);
-    const aliceSession = await openSession(alice, ALICE);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
 
     // Alice writes her own user-scoped instance — the doc under
     // `user:<alice>` that only the read row lets another party name.
@@ -131,7 +141,7 @@ Deno.test("explicit entity_scope_key reads: lease holder admitted, non-holder an
     // The SpaceServer's loopback session: principal = the service
     // identity the DR1 holder was minted from, holding the live lease.
     const service = await connect(server);
-    const serviceSession = await openSession(service, SERVICE);
+    const { sessionId: serviceSession } = await openSession(service, SERVICE);
     const engine = await server.engineForSpace(SPACE);
     const holder = executionLeaseHolder(SERVICE);
     assertEquals(acquireExecutionLease(engine, { space: SPACE, holder }), true);
@@ -158,7 +168,7 @@ Deno.test("explicit entity_scope_key reads: lease holder admitted, non-holder an
     // A non-holder (bob's ordinary client session) naming a key is
     // REJECTED — the wire field exists now, so the refusal must too.
     const bob = await connect(server);
-    const bobSession = await openSession(bob, BOB);
+    const { sessionId: bobSession } = await openSession(bob, BOB);
     const refused = await server.graphQuery({
       type: "graph.query",
       requestId: nextRequestId("refused"),
@@ -297,6 +307,600 @@ Deno.test("explicit entity_scope_key reads: lease holder admitted, non-holder an
       offFlag.error?.message.includes("EXPERIMENTAL_SERVER_EXECUTION"),
       true,
     );
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The exemption LIFECYCLE (stage-F fix round, thread r3731191378 — P0):
+// `leaseHolderReads` is an authorization exemption tied to holding a LIVE
+// execution lease. The push path's applicable-set filter (protocol.md §3)
+// must key its bypass on CURRENT holdership, lease loss must clear the
+// exemption, and a session resume must revalidate rather than trust the
+// persisted bit. A former holder receives NOTHING foreign.
+// ---------------------------------------------------------------------------
+
+/** Doc-ids upserted by session/effect frames at or past `from`. */
+const effectUpsertIds = (
+  messages: ServerMessage[],
+  from: number,
+): string[] => {
+  const ids: string[] = [];
+  for (const message of messages.slice(from)) {
+    if ((message as { type?: string }).type !== "session/effect") continue;
+    const effect = (message as {
+      effect?: { upserts?: Array<{ id: string }> };
+    }).effect;
+    for (const upsert of effect?.upserts ?? []) ids.push(upsert.id);
+  }
+  return ids;
+};
+
+/** Drive delivery deterministically: each idle() drains the pending
+ * refresh pass (which may requeue once internally — hence the bounded
+ * loop, macrotask-yielding so a deferred requeue can arm before the next
+ * drain). Iteration-bounded, never wall-clock-bounded, so machine load
+ * cannot flake it. */
+const drainDelivery = async (
+  server: Server,
+  done: () => boolean,
+): Promise<void> => {
+  for (let pass = 0; pass < 50; pass++) {
+    if (done()) return;
+    await server.idle();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+};
+
+const expireLease = (
+  engine: Awaited<ReturnType<Server["engineForSpace"]>>,
+  holder: string,
+): void => {
+  releaseExecutionLease(engine, { space: SPACE, holder });
+  // Leave an EXPIRED row: liveness is judged by expiry, and an expired
+  // row must match nobody (serving-loop.md §2).
+  assertEquals(
+    acquireExecutionLease(engine, {
+      space: SPACE,
+      holder,
+      now: Date.now() - 60_000,
+      ttlMs: 1,
+    }),
+    true,
+  );
+};
+
+const watchAliceInstance = (
+  sessionId: string,
+  aliceKey: string,
+  watchId = "w-foreign",
+) => ({
+  type: "session.watch.set" as const,
+  requestId: nextRequestId("watch"),
+  space: SPACE,
+  sessionId,
+  watches: [{
+    id: watchId,
+    kind: "graph" as const,
+    query: {
+      roots: [{
+        id: "of:profile",
+        scope: "user" as const,
+        entityScopeKey: aliceKey as never,
+        selector: { path: [], schema: false as const },
+      }],
+    },
+  }],
+});
+
+const writeAliceProfile = async (
+  server: Server,
+  aliceSession: string,
+  localSeq: number,
+  value: Record<string, string>,
+): Promise<void> => {
+  const write = await server.transact({
+    type: "transact",
+    requestId: nextRequestId("write"),
+    space: SPACE,
+    sessionId: aliceSession,
+    commit: {
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:profile",
+        scope: "user",
+        value: { value },
+      }],
+    },
+  });
+  assertExists(write.ok, JSON.stringify(write.error));
+};
+
+Deno.test("lease-holder push exemption dies with the lease: a former holder receives no foreign scoped instances (P0)", async () => {
+  const server = newServer("memory://explicit-read-former-holder");
+  setServerExecutionConfig(true);
+  try {
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSession(service, SERVICE);
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      // Long TTL: a test lease is never renewed, and assertions about a
+      // LIVE holder must not race the wall clock.
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+
+    // Holder admitted: the watch response carries alice's instance.
+    const watch = await server.watchSet(
+      watchAliceInstance(serviceSession, aliceKey),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(watch.ok, JSON.stringify(watch.error));
+    assertEquals(
+      watch.ok.sync.upserts.map((upsert) => upsert.id),
+      ["of:profile"],
+    );
+
+    // While the lease is LIVE, pushes deliver the foreign instance.
+    const liveFrom = service.messages.length;
+    await writeAliceProfile(server, aliceSession, 2, { name: "alice-2" });
+    await drainDelivery(
+      server,
+      () => effectUpsertIds(service.messages, liveFrom).includes("of:profile"),
+    );
+    assertEquals(
+      effectUpsertIds(service.messages, liveFrom).includes("of:profile"),
+      true,
+      "a LIVE holder receives the foreign instance's refresh frame",
+    );
+
+    // The lease lapses. The cached exemption must die with it: the next
+    // foreign-instance write is ABSENT from the former holder's frames.
+    expireLease(engine, holder);
+    const lapsedFrom = service.messages.length;
+    await writeAliceProfile(server, aliceSession, 3, { name: "alice-3" });
+    // Drain until alice's own watcher-free delivery settles: bound the
+    // drain by the server going quiet rather than by seeing a frame.
+    await drainDelivery(server, () => false);
+    assertEquals(
+      effectUpsertIds(service.messages, lapsedFrom).filter(
+        (id) => id === "of:profile",
+      ),
+      [],
+      "a FORMER holder must not receive foreign scoped instances " +
+        "(protocol.md §2's read row is live-lease admission; §3's filter " +
+        "applies once the lease is gone)",
+    );
+
+    // Recovery is re-admission, not the stale bit: re-acquire the lease
+    // and RE-ISSUE the explicit watch — delivery resumes with current
+    // state, including the update the filter withheld above.
+    assertEquals(
+      // Long TTL: a test lease is never renewed, and assertions about a
+      // LIVE holder must not race the wall clock.
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const rewatch = await server.watchSet(
+      watchAliceInstance(serviceSession, aliceKey),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(rewatch.ok, JSON.stringify(rewatch.error));
+    const rewatchDocs = rewatch.ok.sync.upserts.filter(
+      (upsert) => upsert.id === "of:profile",
+    );
+    assertEquals(rewatchDocs.length, 1);
+    assertEquals(
+      (rewatchDocs[0] as { doc?: { value?: unknown } }).doc?.value,
+      { name: "alice-3" },
+      "re-admission redelivers the update the filter withheld " +
+        "(a filtered entry must never be cached as already-delivered)",
+    );
+
+    alice.connection.close();
+    service.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+Deno.test("the persisted lease-holder exemption does not survive session resume without a live lease", async () => {
+  const server = newServer("memory://explicit-read-resume");
+  setServerExecutionConfig(true);
+  try {
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+
+    const service = await connect(server);
+    const opened = await openSession(service, SERVICE);
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      // Long TTL: a test lease is never renewed, and assertions about a
+      // LIVE holder must not race the wall clock.
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const watch = await server.watchSet(
+      watchAliceInstance(opened.sessionId, aliceKey),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(watch.ok, JSON.stringify(watch.error));
+
+    // Connection dies; the lease lapses while the session is detached.
+    service.connection.close();
+    expireLease(engine, holder);
+
+    // Foreign state moves while detached.
+    await writeAliceProfile(server, aliceSession, 2, { name: "alice-2" });
+    await drainDelivery(server, () => false);
+
+    // Resume. The persisted `leaseHolderReads` bit must be revalidated
+    // against the (dead) lease: neither the resume catch-up nor any
+    // later push may deliver the foreign instance.
+    const resumedHarness = await connect(server);
+    const resumed = await openSession(resumedHarness, SERVICE, {
+      sessionId: opened.sessionId,
+      sessionToken: opened.sessionToken,
+    });
+    assertEquals(resumed.sessionId, opened.sessionId);
+    const resumeUpserts =
+      (resumed.sync as { upserts?: Array<{ id: string }> } | undefined)
+        ?.upserts ?? [];
+    assertEquals(
+      resumeUpserts.filter((upsert) => upsert.id === "of:profile"),
+      [],
+      "resume catch-up must not deliver foreign instances without a " +
+        "live lease (revalidate on resume, never trust the persisted bit)",
+    );
+
+    const pushFrom = resumedHarness.messages.length;
+    await writeAliceProfile(server, aliceSession, 3, { name: "alice-3" });
+    await drainDelivery(server, () => false);
+    assertEquals(
+      effectUpsertIds(resumedHarness.messages, pushFrom).filter(
+        (id) => id === "of:profile",
+      ),
+      [],
+      "post-resume pushes must stay filtered while no live lease is held",
+    );
+
+    alice.connection.close();
+    resumedHarness.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Instance identity across the wire seam (threads r3731191411 and
+// r3731191526): the wire strips scope KEYS (frames carry scope names), so
+// the server must refuse what the wire cannot express — one watch set (or
+// query) resolving TWO instances of one (branch, id, scope) — and must
+// treat a changed `entityScopeKey` on an existing watch id as a changed
+// spec, never silently the same watch.
+// ---------------------------------------------------------------------------
+
+Deno.test("a read resolving two instances of one (branch, id, scope) is refused: the wire cannot express the distinction", async () => {
+  const server = newServer("memory://explicit-read-ambiguous");
+  setServerExecutionConfig(true);
+  try {
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSession(service, SERVICE);
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      // Long TTL: a test lease is never renewed, and assertions about a
+      // LIVE holder must not race the wall clock.
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+    const bobKey = resolveScopeKey("user", { principal: BOB });
+
+    // Two explicit instances of the same (id, scope) in ONE watch set:
+    // both frames would serialize as (branch, id, scope: "user") and the
+    // client cache keeps only one. Refused loudly instead.
+    const ambiguous = await server.watchSet({
+      type: "session.watch.set",
+      requestId: nextRequestId("ambiguous"),
+      space: SPACE,
+      sessionId: serviceSession,
+      watches: [{
+        id: "w-ambiguous",
+        kind: "graph",
+        query: {
+          roots: [
+            {
+              id: "of:profile",
+              scope: "user",
+              entityScopeKey: aliceKey,
+              selector: { path: [], schema: false },
+            },
+            {
+              id: "of:profile",
+              scope: "user",
+              entityScopeKey: bobKey,
+              selector: { path: [], schema: false },
+            },
+          ],
+        },
+      }],
+    }) as ResponseMessage<WatchSetResult>;
+    assertEquals(ambiguous.error?.name, "ProtocolError");
+
+    // The same ambiguity split across an existing watch and a watch.add
+    // is refused too: the session's watch SET is the delivery unit.
+    const first = await server.watchSet(
+      watchAliceInstance(serviceSession, aliceKey, "w-first"),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(first.ok, JSON.stringify(first.error));
+    const added = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: nextRequestId("add-ambiguous"),
+      space: SPACE,
+      sessionId: serviceSession,
+      watches: [{
+        id: "w-second",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:profile",
+            scope: "user",
+            entityScopeKey: bobKey,
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    });
+    assertEquals(added.error?.name, "ProtocolError");
+
+    // A graph.query naming both instances at once is the same wire
+    // collapse (GraphQueryResult entities key by (branch, id, scope) in
+    // the client's WatchView) — refused identically.
+    const query = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("query-ambiguous"),
+      space: SPACE,
+      sessionId: serviceSession,
+      query: {
+        roots: [
+          {
+            id: "of:profile",
+            scope: "user",
+            entityScopeKey: aliceKey,
+            selector: { path: [], schema: false },
+          },
+          {
+            id: "of:profile",
+            scope: "user",
+            entityScopeKey: bobKey,
+            selector: { path: [], schema: false },
+          },
+        ],
+      },
+    });
+    assertEquals(query.error?.name, "ProtocolError");
+
+    service.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+Deno.test("watch.add with a changed entityScopeKey on an existing watch id is a changed spec, not silently the old instance", async () => {
+  const server = newServer("memory://explicit-read-changed-key");
+  setServerExecutionConfig(true);
+  try {
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSession(service, SERVICE);
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      // Long TTL: a test lease is never renewed, and assertions about a
+      // LIVE holder must not race the wall clock.
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+    const bobKey = resolveScopeKey("user", { principal: BOB });
+
+    const first = await server.watchSet(
+      watchAliceInstance(serviceSession, aliceKey, "w-keyed"),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(first.ok, JSON.stringify(first.error));
+
+    // Same watch id, DIFFERENT explicit instance: the spec changed, and
+    // pretending otherwise keeps tracking the old instance while the
+    // caller believes it watches the new one.
+    const changed = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: nextRequestId("changed-key"),
+      space: SPACE,
+      sessionId: serviceSession,
+      watches: [{
+        id: "w-keyed",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:profile",
+            scope: "user",
+            entityScopeKey: bobKey,
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    });
+    assertExists(
+      changed.error,
+      "a changed entityScopeKey must not be silently accepted as the " +
+        "same watch spec",
+    );
+
+    service.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Delivery-failure rollback for explicit foreign instances (thread
+// r3731191415): the wire frame carries scope NAMES, so rollback cannot
+// recover the instance from the frame alone — the server must retain the
+// frame's true instance keys. A lost foreign-instance frame must be
+// REDELIVERED once sends succeed again.
+// ---------------------------------------------------------------------------
+
+Deno.test("a failed delivery of an explicit foreign-instance frame is redelivered (rollback keys the exact instance)", async () => {
+  const server = newServer("memory://explicit-read-rollback");
+  setServerExecutionConfig(true);
+  try {
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+
+    // A connection whose callback can be made to throw: the send
+    // boundary is the delivery commit point, so a throwing callback is
+    // exactly an undelivered frame.
+    const serviceMessages: ServerMessage[] = [];
+    let effectFailuresRemaining = 0;
+    const serviceConnection = server.connect((message) => {
+      if (
+        effectFailuresRemaining > 0 &&
+        (message as { type?: string }).type === "session/effect"
+      ) {
+        effectFailuresRemaining -= 1;
+        throw new Error("socket died (test-induced)");
+      }
+      serviceMessages.push(message);
+    });
+    await serviceConnection.receive(encodeMemoryBoundary(HELLO));
+    const hello = serviceMessages.shift() as HelloOkMessage;
+    assertExists(hello.sessionOpen);
+    const service: Harness = {
+      messages: serviceMessages,
+      connection: serviceConnection,
+      sessionOpen: hello.sessionOpen!,
+    };
+    const { sessionId: serviceSession } = await openSession(service, SERVICE);
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      // Long TTL: a test lease is never renewed, and assertions about a
+      // LIVE holder must not race the wall clock.
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    const watch = await server.watchSet(
+      watchAliceInstance(serviceSession, aliceKey),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(watch.ok, JSON.stringify(watch.error));
+
+    // The foreign instance moves; the frame's FIRST send FAILS (one
+    // induced failure — the retry pass sends normally).
+    effectFailuresRemaining = 1;
+    const redeliverFrom = service.messages.length;
+    await writeAliceProfile(server, aliceSession, 2, { name: "alice-2" });
+
+    // The rolled-back delivery must recompute and REDELIVER the foreign
+    // upsert (a rollback that mapped the frame to the session's own
+    // instance leaves the foreign entry cached as current and never
+    // resends it).
+    await drainDelivery(
+      server,
+      () =>
+        effectUpsertIds(service.messages, redeliverFrom).includes("of:profile"),
+    );
+    const redelivered = service.messages.slice(redeliverFrom).some(
+      (message) => {
+        if ((message as { type?: string }).type !== "session/effect") {
+          return false;
+        }
+        const upserts = (message as {
+          effect?: { upserts?: Array<{ id: string; doc?: { value?: unknown } }> };
+        }).effect?.upserts ?? [];
+        return upserts.some((upsert) =>
+          upsert.id === "of:profile" &&
+          JSON.stringify(upsert.doc?.value) === JSON.stringify({
+            name: "alice-2",
+          })
+        );
+      },
+    );
+    assertEquals(
+      redelivered,
+      true,
+      "the lost foreign-instance frame must be redelivered once sends " +
+        "succeed (rollback must key the frame's true instance)",
+    );
+
+    alice.connection.close();
+    serviceConnection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+Deno.test("a non-canonical entity_scope_key (raw '/') is refused at admission — descendant composite keys never see it (thread r3731191505; the shared-validator fix)", async () => {
+  const server = newServer("memory://explicit-read-noncanonical");
+  setServerExecutionConfig(true);
+  try {
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSession(service, SERVICE);
+    const engine = await server.engineForSpace(SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      acquireExecutionLease(engine, { space: SPACE, holder, ttlMs: 600_000 }),
+      true,
+    );
+    // Even the LIVE HOLDER cannot name a merely prefix-shaped key: the
+    // tracker key vocabulary is `/`-delimited, so a raw '/' inside a
+    // scope key would corrupt addressing downstream. Refused up front by
+    // the canonical-grammar validator.
+    for (
+      const bad of ["user:a/b", "user:did:key:x", "session:a/b:c", "user:%2f"]
+    ) {
+      const refused = await server.graphQuery({
+        type: "graph.query",
+        requestId: nextRequestId("noncanonical"),
+        space: SPACE,
+        sessionId: serviceSession,
+        query: {
+          roots: [{
+            id: "of:profile",
+            scope: "user",
+            entityScopeKey: bad as never,
+            selector: { path: [], schema: false },
+          }],
+        },
+      });
+      assertEquals(
+        refused.error?.name,
+        "ProtocolError",
+        `expected refusal for ${JSON.stringify(bad)}`,
+      );
+      assertEquals(
+        refused.error?.message.includes("malformed entity_scope_key"),
+        true,
+        `expected the malformed-key refusal for ${JSON.stringify(bad)}`,
+      );
+    }
+    service.connection.close();
   } finally {
     resetServerExecutionConfig();
     await server.close();

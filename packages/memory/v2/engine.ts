@@ -1427,11 +1427,21 @@ export const entityIdExists = (
 
 export const read = (
   engine: Engine,
-  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }:
+  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId, scopeKey }:
     ReadOptions,
 ): EntityDocument | null => {
-  return readState(engine, { id, branch, seq, scope, principal, sessionId })
-    ?.document ?? null;
+  return readState(engine, {
+    id,
+    branch,
+    seq,
+    scope,
+    principal,
+    sessionId,
+    // Forward the explicit instance (protocol.md §2's read row): dropping
+    // it here would silently resolve the scope from (principal,
+    // sessionId) and read the WRONG document.
+    ...(scopeKey === undefined ? {} : { scopeKey }),
+  })?.document ?? null;
 };
 
 export const readState = (
@@ -2011,7 +2021,22 @@ const applyCommitTransaction = (
       delegated.actingSession === undefined || delegated.actingSession === ""
     ) {
       for (const operation of commit.operations) {
-        if (operation.op === "sqlite") continue;
+        if (operation.op === "sqlite") {
+          // The same rule for folded SQLite writes: a session-scoped
+          // cell-db resolves its on-disk file from a session identity a
+          // sessionless actor does not have — admitting it would key the
+          // file from the delegating ENVELOPE's session, the same
+          // chimera instance the entity-write refusal below prevents.
+          if (operation.db.scope === "session") {
+            throw new ProtocolError(
+              "delegated admission rejected: a sessionless delegated " +
+                "batch (no actingSession) carries a session-scoped " +
+                "SQLite write — a sessionless actor has no session " +
+                "instance (scopes.md §5, protocol.md §2's delegated row)",
+            );
+          }
+          continue;
+        }
         if (normalizeScope(operation.scope) === "session") {
           throw new ProtocolError(
             "delegated admission rejected: a sessionless delegated " +

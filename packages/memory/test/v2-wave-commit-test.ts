@@ -921,3 +921,39 @@ Deno.test("wave rebase input: selectWritePathsSince reports whole-doc rewrites a
     close(engine);
   }
 });
+
+Deno.test("delegated carriage: a sessionless delegated batch carrying a session-scoped SQLITE op is refused at admission (scopes.md §5 — the entity-write refusal's sqlite twin)", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:outbox",
+          space: SPACE,
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "sqlite",
+              db: {
+                id: "of:notes-db",
+                scope: "session",
+                tables: { notes: { columns: { body: "TEXT" } } },
+              },
+              sql: "INSERT INTO notes (body) VALUES ('x')",
+            }],
+          },
+          delegated: {
+            actingPrincipal: "did:key:alice",
+            capabilityRef: "cap:grant",
+          },
+        }),
+      ProtocolError,
+      "sessionless delegated",
+    );
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
