@@ -386,8 +386,9 @@ type NonterminalCodec = FabricCodec<FabricValue>;
 type TerminalCodec<Encoded> = FabricCodec<Encoded>;
 
 // The symbol a class binds under is a separate question from the kind.
-// `CODEC` is the claim that one codec serves every format, so only a
-// nonterminal codec can be bound there. A class the formats treat
+// `CODEC` is the claim that one codec serves every format, which a
+// terminal codec cannot truthfully make, so only a nonterminal codec
+// belongs there; nothing enforces that. A class the formats treat
 // differently binds per format instead, under that format's own symbol,
 // and what it supplies there may be of either kind.
 

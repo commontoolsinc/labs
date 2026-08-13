@@ -1692,7 +1692,9 @@ The kind belongs to the pair (class, format) rather than to the class, and the
 symbol a class binds under is a separate question from the kind. Binding
 `[CODEC]` is the class-level claim that **one codec serves every format**; a
 terminal codec can never make that claim, since its state is in one format's
-domain, so a class binding here supplies a nonterminal one. A class the formats
+domain, so a class binding here supplies a nonterminal one. Nothing enforces
+that: a registry refuses only a codec extending neither base, so a terminal
+codec bound here is accepted and its state reaches the wire unexpanded. A class the formats
 want to treat differently — in the state produced, in the kind of codec, or
 both — binds one per format under that format's own symbol instead, such as
 `JSON_CODEC` for the JSON wire format, and what it supplies there may be of
