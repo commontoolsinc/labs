@@ -64,7 +64,7 @@ type VarPlaceholder = { readonly var: string };
 export const isAtomVarPlaceholder = (
   value: unknown,
 ): value is VarPlaceholder =>
-  isObjectOrArray(value) &&
+  isObjectNotArray(value) &&
   Object.keys(value).length === 1 &&
   typeof (value as { var?: unknown }).var === "string" &&
   (value as { var: string }).var.length > 0;
@@ -401,7 +401,7 @@ type ExpiresAtom = { type: string; timestamp: number };
 // it — silently bypassing the fail-closed intent. Non-canonical Expires
 // records therefore fall through to structural equality only (below).
 const isOrderedExpiresAtom = (value: unknown): value is ExpiresAtom =>
-  isObjectOrArray(value) &&
+  isObjectNotArray(value) &&
   Object.keys(value).length === 2 &&
   (value as { type?: unknown }).type === CFC_ATOM_TYPE.Expires &&
   typeof (value as { timestamp?: unknown }).timestamp === "number" &&

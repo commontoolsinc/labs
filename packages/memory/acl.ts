@@ -1,4 +1,4 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { ACL, ACLUser, ANYONE, Capability, DID, DIDKey } from "./interface.ts";
 import { isDID } from "../identity/src/interface.ts";
 
@@ -30,7 +30,7 @@ export function isCapability(value: unknown): value is Capability {
 }
 
 export function isACL(value: unknown): value is ACL {
-  if (!isObjectOrArray(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   for (const [did, cap] of Object.entries(value)) {
     if (!isACLUser(did)) return false;
     if (!isCapability(cap)) return false;

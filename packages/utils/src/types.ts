@@ -53,8 +53,8 @@
  * `typeof [] === "object"`, so a predicate named only for "object" leaves a
  * reader guessing whether an array passes it, and a reader who guesses wrong
  * writes the wrong branch. Each name below settles the question in its own
- * final word. They are listed loosest test first, and each accepts a subset of
- * the one above it except where noted:
+ * final word. They are listed loosest test first, each accepting a subset of
+ * what the one above it accepts:
  *
  * * `isObjectOrArray()` -- any non-`null` value whose `typeof` is `"object"`.
  *   Arrays, `Date`s, `Map`s, other class instances, and null-prototype objects
