@@ -115,6 +115,11 @@ and recovered after a service restart. No stage can publish source yet.
 - [ ] Add provider-independent fixtures for compile failure, test failure,
   repair followed by success, cancellation, and process recovery.
 
+The harness fabric session
+(`packages/cf-harness/src/fabric-session.ts`) provides a host-side,
+authorization-verified runtime target with no fabric credential inside the
+sandbox; the adapter builds on it rather than constructing its own.
+
 Success means a server-hosted session can produce a candidate and objective
 verification evidence. The target remains unchanged.
 
@@ -147,6 +152,10 @@ verification evidence. The target remains unchanged.
 - [ ] Linearize cancellation against the transition to `publishing`. Test both
   race outcomes and report `too_late` when publication wins.
 
+`cf-harness` cancels at the tool level through request abort; reuse that
+mechanism when linearizing cancellation instead of adding a second
+interruption path.
+
 Success means an authorized compatible candidate changes the intended piece
 once and every failure leaves it unchanged.
 
@@ -177,6 +186,12 @@ once and every failure leaves it unchanged.
 - [ ] Route both clients through the shared start and session APIs.
 - [ ] Add one browser test and one CLI test that assert the same service request
   and final source revision.
+
+The harness handle table and diagnostic scrubber
+(`packages/cf-harness/src/handle-table.ts`) redact fabric identifiers at the
+model boundary; the identifier-free progress events here are a separate
+person-facing projection, but they reuse that scrubber rather than
+reimplementing identifier detection.
 
 Success means the menu and CLI complete the same existing-piece steel thread
 without either client running an agent or performing publication.
