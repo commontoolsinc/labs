@@ -533,6 +533,391 @@ Deno.test("discipline (C7b): without the in-process check the same-process stale
   }
 });
 
+// Idempotent replay vs. the lease (owner review on #5349, 2026-08-12): a
+// byte-identical retry of an ALREADY-ACCEPTED derived commit — same
+// session, same localSeq, same class + holder envelope — answers from the
+// store, never from current authority. The lease equality check admits NEW
+// derived commits; a network retry of an accepted one must return the
+// stored seq even after the producing lease was released, expired, or
+// succeeded by a new holder. Fresh (new-localSeq) derived commits keep the
+// full admission check in every one of those states, and a same-key
+// resubmission that differs — in bytes OR in its class/holder envelope —
+// is still refused as a replay mismatch.
+
+Deno.test("replay: a byte-identical retry answers from the store after the lease is RELEASED — fresh commits stay rejected", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = executionLeaseHolder(SERVICE);
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder,
+      now: LIVE_NOW(),
+    }));
+    const first = applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder,
+    });
+
+    releaseExecutionLease(engine, { space: SPACE, holder });
+    assertEquals(leaseRows(engine), []);
+
+    // The reviewer's repro: the retry of the accepted commit must not be
+    // re-admitted against the (now absent) live lease.
+    const replay = applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder,
+    });
+    assertEquals(replay.seq, first.seq);
+    assertEquals(replay.branch, first.branch);
+    // The stored answer carries the same revisions (the replay result is
+    // reconstructed from the store, so compare the load-bearing fields —
+    // the stored shape has always normalized e.g. the defaulted scope).
+    assertEquals(
+      replay.revisions.map(({ id, seq, opIndex, op }) => ({
+        id,
+        seq,
+        opIndex,
+        op,
+      })),
+      first.revisions.map(({ id, seq, opIndex, op }) => ({
+        id,
+        seq,
+        opIndex,
+        op,
+      })),
+    );
+    // Answered from the store: no second row was inserted.
+    assertEquals(commitRows(engine), [
+      { seq: first.seq, class: "derived", holder },
+    ]);
+
+    // A FRESH derived commit (new localSeq) still needs the live lease.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(2, "of:doc-2"),
+          commitClass: "derived",
+          holder,
+        }),
+      ProtocolError,
+      "execution_lease",
+    );
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("replay: a byte-identical retry answers from the store after the lease EXPIRED", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = executionLeaseHolder(SERVICE);
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder,
+      now: LIVE_NOW(),
+    }));
+    const first = applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder,
+    });
+
+    // Force the row into the past: a same-holder re-acquire rewrites
+    // expires_at from EPOCH ms 1, so the row now matches nobody by the
+    // admission clock (same construction as the expiry tests above).
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder,
+      now: EXPIRED_NOW,
+    }));
+
+    const replay = applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder,
+    });
+    assertEquals(replay.seq, first.seq);
+    assertEquals(commitRows(engine), [
+      { seq: first.seq, class: "derived", holder },
+    ]);
+
+    // Fresh work under the expired lease is still rejected — the expired
+    // row matches nobody for ADMISSION; it only stops mattering for the
+    // already-answered replay.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(2, "of:doc-2"),
+          commitClass: "derived",
+          holder,
+        }),
+      ProtocolError,
+      "execution_lease",
+    );
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("replay: after SUCCESSION the old holder's accepted commit still replays from the store — its fresh commits do not, the successor's do", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    // p0 holds the lease and lands a derived commit.
+    const p0 = executionLeaseHolder(SERVICE, "process-0");
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder: p0,
+      now: LIVE_NOW(),
+    }));
+    const first = applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder: p0,
+    });
+
+    // p0's lease lapses; p1 succeeds it (DR1: fresh process component).
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder: p0,
+      now: EXPIRED_NOW,
+    }));
+    const p1 = executionLeaseHolder(SERVICE, "process-1");
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder: p1,
+      now: LIVE_NOW(),
+    }));
+
+    // The byte-identical retry of p0's ACCEPTED commit answers from the
+    // store — the successor owning the lease is irrelevant to it.
+    const replay = applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder: p0,
+    });
+    assertEquals(replay.seq, first.seq);
+
+    // p0's FRESH derived commit is fenced by the equality check, exactly
+    // as before the reorder.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(2, "of:doc-2"),
+          commitClass: "derived",
+          holder: p0,
+        }),
+      ProtocolError,
+      "execution_lease",
+    );
+
+    // …and the successor's fresh derived commit is admitted.
+    applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(2, "of:doc-2"),
+      commitClass: "derived",
+      holder: p1,
+    });
+    assertEquals(commitRows(engine), [
+      { seq: first.seq, class: "derived", holder: p0 },
+      { seq: first.seq + 1, class: "derived", holder: p1 },
+    ]);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("replay: a same-key DIFFERENT-bytes resubmission is refused as a replay mismatch, not answered", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = executionLeaseHolder(SERVICE);
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder,
+      now: LIVE_NOW(),
+    }));
+    applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder,
+    });
+    releaseExecutionLease(engine, { space: SPACE, holder });
+
+    // Same session + localSeq, different payload bytes: the existing
+    // replay-mismatch semantics apply ahead of any admission answer.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(1, "of:doc-CHANGED"),
+          commitClass: "derived",
+          holder,
+        }),
+      ProtocolError,
+      "commit replay mismatch",
+    );
+    assertEquals(commitRows(engine).length, 1);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("replay: the stored class + holder are part of the replay identity — a same-bytes resubmission under a different envelope is refused", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = executionLeaseHolder(SERVICE);
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder,
+      now: LIVE_NOW(),
+    }));
+    applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder,
+    });
+    releaseExecutionLease(engine, { space: SPACE, holder });
+
+    // Same key + bytes, but claimed by a DIFFERENT holder: not the stored
+    // submission — refused, never answered with the stored seq.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(1, "of:doc-1"),
+          commitClass: "derived",
+          holder: executionLeaseHolder(SERVICE, "other-process"),
+        }),
+      ProtocolError,
+      "commit replay mismatch",
+    );
+
+    // Same key + bytes under a different CLASS: also not the stored
+    // submission (the class is admission-path identity, protocol.md §1).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(1, "of:doc-1"),
+          commitClass: "system",
+        }),
+      ProtocolError,
+      "commit replay mismatch",
+    );
+    assertEquals(commitRows(engine).length, 1);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("replay: authored replays are untouched — a stray holder stays inert on both the original and the retry", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    // Original authored commit with a stray holder (persisted as NULL —
+    // see "a stray holder never sticks" above).
+    const first = applyCommit(engine, {
+      sessionId: "session-a",
+      principal: "user:alice",
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "authored",
+      holder: executionLeaseHolder(SERVICE),
+    });
+    // Retry without the stray holder: same stored submission, stored seq.
+    const bare = applyCommit(engine, {
+      sessionId: "session-a",
+      principal: "user:alice",
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "authored",
+    });
+    assertEquals(bare.seq, first.seq);
+    // Retry with a (different) stray holder: still inert, still a replay.
+    const stray = applyCommit(engine, {
+      sessionId: "session-a",
+      principal: "user:alice",
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "authored",
+      holder: executionLeaseHolder(SERVICE, "other-process"),
+    });
+    assertEquals(stray.seq, first.seq);
+    assertEquals(commitRows(engine), [
+      { seq: first.seq, class: "authored", holder: null },
+    ]);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("replay: a retry while the lease is STILL LIVE keeps answering from the store", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = executionLeaseHolder(SERVICE);
+    assert(acquireExecutionLease(engine, {
+      space: SPACE,
+      holder,
+      now: LIVE_NOW(),
+    }));
+    const first = applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder,
+    });
+    const replay = applyCommit(engine, {
+      sessionId: "server:executor",
+      space: SPACE,
+      commit: setCommit(1, "of:doc-1"),
+      commitClass: "derived",
+      holder,
+    });
+    assertEquals(replay.seq, first.seq);
+    assertEquals(commitRows(engine).length, 1);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
 Deno.test("discipline (C7b): cross-process succession is fenced by the equality check alone — no discipline needed", async () => {
   const { engine } = await createEngine();
   setServerExecutionConfig(true);
