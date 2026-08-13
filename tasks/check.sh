@@ -84,6 +84,7 @@ DIRS=(
   "packages/cli/test"
   "packages/cli/commands"
   "packages/cli/support"
+  "packages/cli/lib"
   "packages/deno-web-test"
   "packages/html"
   "packages/identity"
