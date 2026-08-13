@@ -362,22 +362,34 @@ abstract class FabricInstance {
 
 // Codec protocol: each class hosts an encoder-decoder object -- the
 // single source of truth for how its instances serialize -- as a static
-// getter keyed by `CODEC`.
-interface FabricCodec {
+// getter keyed by a well-known symbol. `Encoded` is the domain the
+// essential state lives in.
+interface FabricCodec<Encoded> {
   get uniqueHandledClass(): Constructor | undefined;
   get recognizedTypeTag(): string | undefined;
   canEncode(value: FabricValue): boolean;
   tagForValue(value: FabricValue): string;
-  encode(value: FabricValue): FabricValue;   // shallow
+  encode(value: FabricValue): Encoded;       // shallow
   decode(                                    // shallow
     typeTag: string,
-    state: FabricValue,
+    state: Encoded,
     context: ReconstructionContext,
   ): FabricValue;
 }
 
-interface FabricClassWithCodec {
-  get [CODEC](): FabricCodec;
+// Nonterminal: state made of fabric values, which the walker expands in
+// turn. One instance serves every wire format, and binds to `CODEC`.
+type NonterminalCodec = FabricCodec<FabricValue>;
+
+// Terminal: state already in one format's own domain, which the walker
+// passes through. Bound per format, under that format's own symbol.
+type TerminalCodec<Encoded> = FabricCodec<Encoded>;
+
+// Which kind a codec is cannot be read off its signature -- the domains
+// overlap -- so a codec declares it by which base class it extends.
+
+interface FabricClassWithNonterminalCodec {
+  get [CODEC](): NonterminalCodec;
 }
 ```
 
@@ -414,7 +426,7 @@ Example implementation:
 ```typescript
 // Shown for illustration only.
 class Cell<T> extends FabricInstance {
-  static #codec = new (class extends BaseFabricCodec {
+  static #codec = new (class extends BaseNonterminalCodec {
     constructor() {
       super('Cell@1', Cell);
     }
@@ -432,7 +444,7 @@ class Cell<T> extends FabricInstance {
     }
   })();
 
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
@@ -492,7 +504,7 @@ class UnknownValue extends FabricInstance {
     readonly state: FabricValue,  // the raw state, already recursively processed
   ) { super(); }
 
-  static #codec = new (class extends BaseFabricCodec {
+  static #codec = new (class extends BaseNonterminalCodec {
     constructor() {
       // No recognized tag: the instance carries its own.
       super(undefined, UnknownValue);
@@ -511,7 +523,7 @@ class UnknownValue extends FabricInstance {
     }
   })();
 
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }
