@@ -10,7 +10,8 @@ export type BuiltinToolId =
   | "run_skill_script"
   | "edit_file"
   | "write_file"
-  | "delegate_task";
+  | "delegate_task"
+  | "run_pattern";
 
 export const DEFAULT_PARENT_TOOL_IDS = [
   "bash",

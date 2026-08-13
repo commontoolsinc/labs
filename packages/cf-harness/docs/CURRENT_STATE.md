@@ -61,7 +61,15 @@ The current package provides:
   run for cell addresses, recorded in `run-state.json`, and carried across
   resume; the prompt loop swaps addresses to tokens in model-bound tool output
   and resolves tokens in model-authored tool arguments before policy evaluation
-  and dispatch, `delegate_task` arguments excepted.
+  and dispatch, `delegate_task` arguments excepted;
+- an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
+  `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
+  environment fallbacks): compiles and runs a pattern against a deployed Fabric
+  space from the trusted host side over a lazy per-run session, passes
+  whole-string LLM-friendly link inputs as live cells, returns the result cell's
+  canonical reference plus an optionally schema-sanitized value, and leaves the
+  piece out of the space's registered piece list; without the session
+  configuration the tool is absent from the tool surface.
 
 Run the capability probe instead of copying this list into adapters:
 

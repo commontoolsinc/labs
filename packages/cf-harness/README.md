@@ -54,6 +54,8 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
+  - `run_pattern` (present only when the run configures a fabric session; see
+    [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
 - bounded public HTTP(S) fetches through `web_fetch`, with redirect validation,
@@ -119,6 +121,11 @@ network confinement model.
   cell addresses, minted per run, recorded in run state, and carried across
   `--resume-run`; see
   [Session-local address handles](#session-local-address-handles)
+- an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
+  `--fabric-space` together) that compiles and runs a pattern against a deployed
+  Fabric space from the trusted host side and returns a live result cell
+  reference; see
+  [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space)
 
 What is not done yet:
 
@@ -144,6 +151,8 @@ What is not done yet:
   - core execution engine, run state, tool execution
 - [src/handle-table.ts](src/handle-table.ts)
   - session-local address handle table: token minting and both swap directions
+- [src/fabric-session.ts](src/fabric-session.ts)
+  - lazy, cached trusted Fabric session behind the `run_pattern` tool
 - [src/prompt-loop.ts](src/prompt-loop.ts)
   - bounded prompt/tool loop
 - [src/model/](src/model)
@@ -542,6 +551,53 @@ object; the return's `linkedStringCount` counts only the positions still sealed.
 Denial-path tool messages are not swapped; that coverage, cross-agent handle
 semantics, value handles, and an explicit release/readback mechanism are listed
 in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+### Running patterns against a Fabric space
+
+Three flags configure one trusted Fabric session, and all of them go together:
+
+```bash
+cd packages/cf-harness
+deno task run -- \
+  --workspace /path/to/workspace \
+  --fabric-api-url https://toolshed.example/ \
+  --fabric-identity ~/.cf/agent.pkcs8 \
+  --fabric-space my-space \
+  --prompt "Deploy a pattern that doubles its input and report the result."
+```
+
+With all three present (`CF_HARNESS_FABRIC_API_URL`,
+`CF_HARNESS_FABRIC_IDENTITY`, and `CF_HARNESS_FABRIC_SPACE` are the environment
+fallbacks), the `run_pattern` tool joins the parent tool surface; with none, the
+tool is absent and runs behave exactly as before; a partial set is a
+configuration error naming the missing flags. `--fabric-space` accepts a space
+name or a `did:key`, and `--describe-capabilities` reports `runPattern` among
+its features.
+
+`run_pattern` executes on the trusted host side — it never enters the docker
+sandbox. The session (a `PiecesController` against the deployed API) is built
+lazily on the tool's first invocation and cached for the run; a session that
+fails to build surfaces as an ordinary tool-output error rather than a run
+failure.
+
+The tool takes exactly one of `sourceText` (inline pattern source) or
+`sourcePath` (a workspace-relative file, confined to the workspace root), an
+optional `inputs` object, and an optional `resultSchema`. An `inputs` string
+value that is a whole-string LLM-friendly link (`/of:fid1:.../path`) is passed
+to the pattern as a live cell reference; everything else passes through as plain
+JSON. The deployed piece is deliberately unregistered — it never appears in the
+space's piece list.
+
+A successful run returns `{ status: "ok", resultRef, pieceId }`, where
+`resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
+the schema-sanitized `value` (with `linkedStringCount`) when `resultSchema` was
+given. In `session` handle mode the ordinary outbound swap turns `resultRef`
+(and any link strings inside `value`) into `cfh:a:` tokens at the model
+boundary, and the ordinary inbound swap resolves such a token passed back
+through `inputs`; the tool itself carries no handle code. The persisted
+tool-output artifact keeps the raw reference and the raw result value. Compiler
+diagnostics come back raw as `{ status: "compile-error", message }` so the model
+can iterate on the source.
 
 Interactive chat stdio transport:
 

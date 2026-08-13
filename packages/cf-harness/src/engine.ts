@@ -120,9 +120,18 @@ import {
   type RunSkillScriptToolOutput,
 } from "./tools/run-skill-script.ts";
 import {
+  type RunPatternToolInput,
+  type RunPatternToolOutput,
+} from "./tools/run-pattern.ts";
+import {
   type WriteFileToolInput,
   type WriteFileToolOutput,
 } from "./tools/write-file.ts";
+import {
+  cacheHarnessFabricSessionFactory,
+  createHarnessFabricSessionFactory,
+  type HarnessFabricSessionFactory,
+} from "./fabric-session.ts";
 import { getBuiltinTool } from "./tools/registry.ts";
 
 export interface BuiltinToolInputMap {
@@ -136,6 +145,7 @@ export interface BuiltinToolInputMap {
   edit_file: EditFileToolInput;
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
+  run_pattern: RunPatternToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -149,6 +159,7 @@ export interface BuiltinToolOutputMap {
   edit_file: EditFileToolOutput;
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
+  run_pattern: RunPatternToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -170,6 +181,14 @@ export interface CreateHarnessEngineOptions
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
   processRunner?: ProcessRunner;
+  /**
+   * Injection seam for the `run_pattern` fabric session, mirroring how
+   * `sandboxRuntime` replaces the engine-built sandbox. When absent, a
+   * factory is built from `fabricSession` in the resolved config; when both
+   * are absent, `run_pattern` has no session and stays out of the parent
+   * tool surface.
+   */
+  fabricSessionFactory?: HarnessFabricSessionFactory;
   now?: () => string;
 }
 
@@ -290,6 +309,7 @@ export class CfHarnessEngine {
   #runState: HarnessRunState;
   #outputSequence: number;
   readonly #now: () => string;
+  readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   readonly #resumedRun: boolean;
@@ -370,6 +390,15 @@ export class CfHarnessEngine {
     });
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
+    // The session behind `run_pattern` is expensive and remote, so it is
+    // built lazily on the tool's first invocation and cached for the run.
+    const fabricSessionFactory = options.fabricSessionFactory ??
+      (this.config.fabricSession !== undefined
+        ? createHarnessFabricSessionFactory(this.config.fabricSession)
+        : undefined);
+    this.#fabricSessionFactory = fabricSessionFactory === undefined
+      ? undefined
+      : cacheHarnessFabricSessionFactory(fabricSessionFactory);
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
         workspaceHostPath: options.workspaceHostPath,
@@ -462,6 +491,16 @@ export class CfHarnessEngine {
 
   getRunState(): HarnessRunState {
     return structuredClone(this.#runState);
+  }
+
+  /**
+   * Whether the run can build a fabric session for `run_pattern` — either
+   * an injected factory or `fabricSession` connection config. The prompt
+   * loop offers `run_pattern` in the default parent tool surface exactly
+   * when this holds.
+   */
+  get fabricSessionAvailable(): boolean {
+    return this.#fabricSessionFactory !== undefined;
   }
 
   bindRunModel(model: string): HarnessRunState {
@@ -1289,6 +1328,9 @@ export class CfHarnessEngine {
       allowedSkillScripts: this.config.allowedSkillScripts,
       skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       browserAccess: this.config.browserAccess,
+      ...(this.#fabricSessionFactory !== undefined
+        ? { getFabricSession: this.#fabricSessionFactory }
+        : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,
       resolvePath: (path: string) =>

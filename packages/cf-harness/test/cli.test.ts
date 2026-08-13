@@ -314,6 +314,96 @@ Deno.test("parseCfHarnessCliArgs accepts CFC mode from environment", async () =>
   assertEquals(parsed.cfcEnforcementModeOverride, "enforce-strict");
 });
 
+Deno.test("parseCfHarnessCliArgs parses the three --fabric-* session flags together", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+  });
+
+  const unset = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in unset) {
+    throw new Error("expected config result");
+  }
+  assertEquals(unset.fabricSession, undefined);
+});
+
+Deno.test("parseCfHarnessCliArgs accepts fabric session settings from the environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: {
+        CF_HARNESS_FABRIC_API_URL: "https://toolshed.example/",
+        CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+        CF_HARNESS_FABRIC_SPACE: "did:key:z6MkfExample",
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "did:key:z6MkfExample",
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a partial fabric session naming the missing flags", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--fabric-space", "my-space"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --fabric-api-url, --fabric-identity",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects a fabric API URL that does not parse", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--fabric-api-url",
+          "not a url",
+          "--fabric-identity",
+          "keys/agent.pkcs8",
+          "--fabric-space",
+          "my-space",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--fabric-api-url must be a valid URL",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs resolves run manifest paths", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--run-manifest", "loom-run.json"],

@@ -84,6 +84,17 @@ export interface HarnessDelegateTaskToolInputSummary {
   maxModelTurns?: number;
 }
 
+export interface HarnessRunPatternToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "run_pattern";
+  sourcePath?: string;
+  sourceTextBytes?: number;
+  sourceTextDigest?: string;
+  inputCount?: number;
+  resultSchemaBytes?: number;
+  resultSchemaDigest?: string;
+}
+
 export type HarnessToolInputSummary =
   | HarnessBashToolInputSummary
   | HarnessReadFileToolInputSummary
@@ -93,6 +104,7 @@ export type HarnessToolInputSummary =
   | HarnessEditFileToolInputSummary
   | HarnessWriteFileToolInputSummary
   | HarnessDelegateTaskToolInputSummary
+  | HarnessRunPatternToolInputSummary
   | {
     type: "cf-harness.tool-input-summary";
     toolId: BuiltinToolId;

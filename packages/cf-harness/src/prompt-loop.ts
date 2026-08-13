@@ -564,6 +564,36 @@ const summarizeToolInput = async (
           : {}),
       };
     }
+    case "run_pattern": {
+      const sourceTextSummary = typeof input.sourceText === "string"
+        ? await summarizeSensitiveText(input.sourceText)
+        : undefined;
+      const resultSchemaSummary = input.resultSchema !== undefined
+        ? await summarizeSensitiveText(JSON.stringify(input.resultSchema))
+        : undefined;
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.sourcePath === "string"
+          ? { sourcePath: input.sourcePath }
+          : {}),
+        ...(sourceTextSummary !== undefined
+          ? {
+            sourceTextBytes: sourceTextSummary.bytes,
+            sourceTextDigest: sourceTextSummary.digest,
+          }
+          : {}),
+        ...(isObjectRecord(input.inputs)
+          ? { inputCount: Object.keys(input.inputs).length }
+          : {}),
+        ...(resultSchemaSummary !== undefined
+          ? {
+            resultSchemaBytes: resultSchemaSummary.bytes,
+            resultSchemaDigest: resultSchemaSummary.digest,
+          }
+          : {}),
+      };
+    }
   }
   return {
     type: "cf-harness.tool-input-summary",
@@ -1838,8 +1868,14 @@ export class CfHarnessPromptLoop {
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
+    // `run_pattern` joins the default parent tool surface exactly when the
+    // run can build a fabric session; without one the tool is absent rather
+    // than present-but-failing.
     this.#allowedToolIds = new Set(
-      options.allowedToolIds ?? DEFAULT_PROMPT_LOOP_TOOL_IDS,
+      options.allowedToolIds ??
+        (this.engine.fabricSessionAvailable
+          ? [...DEFAULT_PROMPT_LOOP_TOOL_IDS, "run_pattern" as const]
+          : DEFAULT_PROMPT_LOOP_TOOL_IDS),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -2754,6 +2790,12 @@ export class CfHarnessPromptLoop {
       return {
         output: toModelFacingWebFetchOutput(output as WebFetchToolOutput),
       };
+    }
+    if (toolId === "run_pattern" && isObjectRecord(output)) {
+      // The persisted artifact keeps the raw result value; the model sees
+      // only `resultRef` and the schema-sanitized `value`.
+      const { rawValue: _rawValue, ...publicOutput } = output;
+      return { output: stripInternalCfcFields(publicOutput) };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };
