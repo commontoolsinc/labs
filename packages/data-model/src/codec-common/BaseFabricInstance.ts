@@ -94,10 +94,6 @@ export const DEEP_CLONE_CORE: unique symbol = Symbol(
  */
 export abstract class BaseFabricInstance extends FabricInstance {
   //
-  // Instance members
-  //
-
-  //
   // Subclass contract
   //
 
