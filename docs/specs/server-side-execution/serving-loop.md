@@ -786,7 +786,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
 - **Miss rule**: enqueue the effect on the outbox with the key AND
   the run's identity carriage — the result-cell address including
   its instance `scope_key`, plus the run's acting identity where it
-  had one, plus the run's CFC LABEL BASIS (FP6, RULED 2026-08-03).
+  had one, plus the run's CFC LABEL BASIS (FP6, RULED 2026-08-03;
+  RULED 2026-08-05 STRUCTURAL: the carriage carries the basis
+  reference, and the completion's writeback re-reads the request
+  inputs so labels derive from the basis AS IT STANDS at writeback,
+  never from a frozen at-seal snapshot).
   The completion commit is derived-class, so it carries
   protocol.md §1's annotations like any other — but it never passes
   through §3d's sealing (the run is long over when the response
@@ -826,7 +830,9 @@ the durable rows of §5 carry APPENDS, never effect state).
   result-cell
   address with its `scope_key`, the acting identity where the
   run had one, and the run's CFC label basis (FP6, RULED
-  2026-08-03) so the completion write's labels derive from its
+  2026-08-03; structural per the 2026-08-05 ruling — the basis
+  reference rides the entry and labels re-derive at writeback)
+  so the completion write's labels derive from its
   request's — an external result inherits its request's
   confidentiality. Process-local is SOUND here: a crash re-misses
   the effect from memo keys (§4, §6; at-least-once, already ruled).

@@ -638,11 +638,16 @@ disabled (README §3.5).
 - The OUTBOX's identity carriage (serving-loop.md §4–§5: the
   result-cell address with its `scope_key`, the acting
   identity, AND — FP6, ruled 2026-08-03 — the run's CFC label
-  basis, captured at the original run's seal) is likewise
+  basis, carried STRUCTURALLY as the basis reference, never as
+  frozen label values: per the 2026-08-05 FP6 ruling the
+  completion's writeback transaction re-reads the request inputs,
+  so its labels derive from the basis AS IT STANDS at writeback —
+  a frozen at-seal snapshot would write stale labels over a
+  re-labeled basis) is likewise
   sanctioned NON-WIRE carriage: process-local, never a commit and
   never metadata — it exists so the completion commit can carry
-  §1's annotations and request-derived labels without re-deriving
-  them, and it does not
+  §1's IDENTITY annotations without re-deriving them (labels are
+  the re-derived half, by design), and it does not
   breach the closed list. The DURABLE exception (FP1, ruled
   2026-08-03): cross-space APPEND entries are engine-table rows
   inside the emitting wave's store transaction, deleted on
