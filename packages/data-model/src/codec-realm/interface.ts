@@ -1,5 +1,5 @@
 import type { WireFormat } from "@/codec-interface/interface.ts";
-import { REALM_CODEC } from "@/interface.ts";
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
 
 /**
  * Tag identifying the realm-crossing encoded form of a fabric value. It is the

@@ -12,7 +12,7 @@ import { expect } from "@std/expect";
 import { defer } from "@commonfabric/utils/defer";
 
 import type { FabricValue } from "@/interface.ts";
-import { REALM_CODEC } from "@/interface.ts";
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/index.ts";
 import {
   ENCODING_FORMAT_TAG,

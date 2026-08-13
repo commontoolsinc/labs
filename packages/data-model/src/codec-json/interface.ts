@@ -10,7 +10,7 @@
  */
 
 import type { WireFormat } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 
 /**
  * Tag prefix on the encoded form of a fabric value. The prefix is explicit so

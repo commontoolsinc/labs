@@ -11,10 +11,11 @@ import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
+  JSON_CODEC,
+  REALM_CODEC,
   ReconstructionContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC, REALM_CODEC } from "@/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.

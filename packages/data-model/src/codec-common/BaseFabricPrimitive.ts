@@ -12,7 +12,8 @@
 
 import type { CodecForFormat } from "@/codec-interface/interface.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
-import { FabricPrimitive, JSON_CODEC } from "@/interface.ts";
+import { FabricPrimitive } from "@/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 /**
