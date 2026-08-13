@@ -87,6 +87,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [verbs-codebase-review-2026-08-13.md](verbs-codebase-review-2026-08-13.md) —
+  resulting-codebase review of the landed verbs implementation, August 2026.
 - [cf-view-parser-adapter-spike-2026-08.md](packages/cli/cf-view-parser-adapter-spike-2026-08.md)
   — Python, Go, shell, and HTML parser-adapter measurements, August 2026.
 - [cf-view-parser-adapter-spike-2026-08-methodology.md](packages/cli/cf-view-parser-adapter-spike-2026-08-methodology.md)
