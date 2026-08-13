@@ -912,6 +912,11 @@ const EX_ID = `--identity ./my.key`;
 const EX_URL = `--url ${RAW_EX_URL}`;
 const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
+const PIECE_OPTION_HELP =
+  "The target piece: an id, slug, or LLM-friendly reference " +
+  "(/of:fid1:.../).";
+const PIECE_OPTION_PATH_HELP = `${PIECE_OPTION_HELP} A path embedded in ` +
+  `the reference prefixes the positional path.`;
 const PIECE_REGISTRY_LINK_EXAMPLE = [
   cliText(
     `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/pieceRegistry`,
@@ -1088,6 +1093,7 @@ export const piece = new Command()
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
     const source = parseLink(sourceRef, { space: spaceConfig.space });
+    collectEmbeddedSpace(spaceConfig, source);
     await setPieceSlug(
       spaceConfig,
       slug,
@@ -1109,7 +1115,7 @@ export const piece = new Command()
     cliText(`cf piece step ${EX_ID} ${EX_COMP_PIECE}`),
     `Start, wait for idle+synced, then stop piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     await stepPiece(pieceConfig);
@@ -1126,7 +1132,7 @@ export const piece = new Command()
     cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_URL}`),
     `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) =>
     applyPieceInput(parsePieceOptions(options), await drainStdin())
   )
@@ -1141,7 +1147,7 @@ export const piece = new Command()
     cliText(`cf piece getsrc ${EX_ID} ${EX_URL} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .arguments("<outpath:string>")
   .action((options, outPath) =>
     savePiecePattern(parsePieceOptions(options), absPath(outPath))
@@ -1157,7 +1163,7 @@ export const piece = new Command()
     cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option(
     "--main-export <export:string>",
     'Named export from entry for pattern definition. Defaults to "default".',
@@ -1217,7 +1223,7 @@ export const piece = new Command()
     cliText(`cf piece inspect ${EX_ID} ${EX_URL}`),
     `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output raw JSON data")
   .option(
     "--summary",
@@ -1312,7 +1318,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     cliText(`cf piece view ${EX_ID} ${EX_URL}`),
     `Display the view for piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output raw JSON data")
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
@@ -1343,7 +1349,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE} --watch`),
     `Watch and re-render piece "${RAW_EX_COMP.piece!}" when UI changes.`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output HTML as JSON")
   .option("-w,--watch", "Watch for changes and re-render")
   .option(
@@ -1462,6 +1468,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     const sqliteSource = parseSqliteSource(sourceRef);
     if (sqliteSource) {
       const target = parseLink(targetRef, { space: spaceConfig.space });
+      collectEmbeddedSpace(spaceConfig, target);
       if (!target.path) {
         throw new ValidationError(
           `Target reference must include a path. Expected: pieceId/path/to/field`,
@@ -1487,6 +1494,8 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
       space: spaceConfig.space,
     });
     const target = parseLink(targetRef, { space: spaceConfig.space });
+    collectEmbeddedSpace(spaceConfig, source);
+    collectEmbeddedSpace(spaceConfig, target);
 
     // For linking, sources can be either:
     // 1. pieceId (links entire result cell)
@@ -1591,7 +1600,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     ),
     "Return each item's address instead of its contents.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(
     "--step",
@@ -1664,7 +1673,7 @@ declared, derived, and link-carried labels. Omit path to inspect the root.`,
     cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} secret --input`),
     "Get the effective label on an input value.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(
     "--json",
@@ -1700,7 +1709,7 @@ updated effective label view.`),
     ),
     "Remove declared integrity claims from an input value.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
   .option("--input", "Write to the piece's input cell instead of result cell")
   .option(
     "--json",
@@ -1729,7 +1738,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     ),
     `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
   .option("--input", "Write to the piece's input cell instead of result cell")
   .arguments("<path:string>")
   .action(async (options, pathString) => {
@@ -1740,7 +1749,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     await setCellValue(pieceConfig, pathSegments, value, {
       input: options.input,
     });
-    render(`Set value at path: ${pathString}`);
+    render(`Set value at path: ${pathSegments.join("/")}`);
     hint(
       cliText(
         `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
@@ -1825,7 +1834,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     ),
     "Return the address of what the verb returned instead of its contents.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option(
     "--invocation <id:string>",
     "Idempotency key for a handler call (before the callable name), and " +
@@ -2033,7 +2042,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     cliText(`cf piece verbs ${EX_ID} ${EX_URL} --json`),
     "Machine-readable listing: name, kind, and input schema per verb.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output machine-readable JSON.")
   .option(
     "--all",
@@ -2113,7 +2122,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     cliText(`cf piece rm ${EX_ID} ${EX_URL}`),
     `Remove piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     await removePiece(pieceConfig);
@@ -2518,6 +2527,7 @@ export function parseSpaceOptions(
       output.piece = llmRef.pieceId;
       if (llmRef.scope) output.pieceScope = llmRef.scope;
       if (llmRef.path.length > 0) output.piecePath = llmRef.path;
+      if (llmRef.embeddedSpace) output.embeddedSpaces = [llmRef.embeddedSpace];
     } else {
       const parsedPiece = parseScopedIdSegment(input.piece);
       output.piece = parsedPiece.id;
@@ -2538,6 +2548,22 @@ export function parseSpaceOptions(
 }
 
 /**
+ * Fold the space DID embedded in a parsed link reference into the command's
+ * config, for the deferred check `loadPieces` runs once the session has
+ * resolved the target space to a DID.
+ */
+function collectEmbeddedSpace(
+  config: SpaceConfig,
+  ref: { embeddedSpace?: string },
+): void {
+  if (ref.embeddedSpace === undefined) return;
+  config.embeddedSpaces = [
+    ...(config.embeddedSpaces ?? []),
+    ref.embeddedSpace,
+  ];
+}
+
+/**
  * The full path a piece data command addresses: any path embedded in an
  * LLM-friendly `--piece` reference, followed by the positional path argument.
  */
@@ -2554,12 +2580,18 @@ export function mergePiecePath(
 export function parseLink(
   ref: string,
   options?: { allowWellKnown?: boolean; space?: string },
-): { pieceId: string; scope?: CellScope; path?: (string | number)[] } {
+): {
+  pieceId: string;
+  scope?: CellScope;
+  path?: (string | number)[];
+  embeddedSpace?: string;
+} {
   const llmRef = normalizeLLMFriendlyRef(ref, { space: options?.space });
   if (llmRef) {
     return {
       pieceId: llmRef.pieceId,
       ...(llmRef.scope && { scope: llmRef.scope }),
+      ...(llmRef.embeddedSpace && { embeddedSpace: llmRef.embeddedSpace }),
       ...(llmRef.path.length > 0 && { path: llmRef.path }),
     };
   }

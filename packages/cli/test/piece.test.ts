@@ -67,6 +67,8 @@ const ID = "~/.my.key";
 // clears the runner parser's handle-length threshold.
 const LLM_HANDLE = `of:fid1:${"baedreiabcdefghijklmnopqrstuvwxyz0123456789"}`;
 const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const OTHER_SPACE_DID =
+  "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
 const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
 
@@ -360,13 +362,25 @@ describe("cli piece parsing", () => {
     expect(() =>
       parsePieceOptions({
         ...base,
-        space: SPACE,
+        space: OTHER_SPACE_DID,
         piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
       })
     ).toThrow(
       `Reference names space "${SPACE_DID}" but the command targets ` +
-        `space "${SPACE}".`,
+        `space "${OTHER_SPACE_DID}".`,
     );
+    // A named space resolves to a DID only once the session opens, so the
+    // embedded DID is carried for loadPieces' deferred check rather than
+    // compared against the raw name here.
+    expect(parsePieceOptions({
+      ...base,
+      space: SPACE,
+      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+    })).toMatchObject({
+      space: SPACE,
+      piece: LLM_HANDLE,
+      embeddedSpaces: [SPACE_DID],
+    });
   });
 
   it("parsePieceOptions() throws on incomplete input", () => {
@@ -604,8 +618,19 @@ describe("cli piece parsing", () => {
         path: ["field"],
       });
       expect(() =>
-        parseLink(`/@${SPACE_DID}/${LLM_HANDLE}/field`, { space: SPACE })
+        parseLink(`/@${SPACE_DID}/${LLM_HANDLE}/field`, {
+          space: OTHER_SPACE_DID,
+        })
       ).toThrow(/names space/);
+      // With a named target space the DID rides along for the deferred
+      // check loadPieces runs against the session's resolved space.
+      expect(
+        parseLink(`/@${SPACE_DID}/${LLM_HANDLE}/field`, { space: SPACE }),
+      ).toEqual({
+        pieceId: LLM_HANDLE,
+        embeddedSpace: SPACE_DID,
+        path: ["field"],
+      });
     });
   });
 

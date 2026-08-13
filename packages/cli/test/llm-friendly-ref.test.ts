@@ -1,12 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
+import {
+  normalizeLLMFriendlyRef,
+  validateEmbeddedSpaces,
+} from "../lib/llm-friendly-ref.ts";
 
 // The 43-character id length matches the entity ids the runtime mints, and
 // clears the runner parser's handle-length threshold.
 const ID = "baedreiabcdefghijklmnopqrstuvwxyz0123456789";
 const HANDLE = `of:fid1:${ID}`;
 const DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const OTHER_DID = "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
 
 describe("llm-friendly-ref", () => {
   it("returns undefined for references outside the LLM-friendly form", () => {
@@ -37,6 +41,17 @@ describe("llm-friendly-ref", () => {
     });
   });
 
+  it("keeps canonical segments beyond the array-index range as strings", () => {
+    expect(
+      normalizeLLMFriendlyRef(
+        `/${HANDLE}/items/4294967294/4294967295/9007199254740993`,
+      ),
+    ).toEqual({
+      pieceId: HANDLE,
+      path: ["items", 4294967294, "4294967295", "9007199254740993"],
+    });
+  });
+
   it("parses a scope suffix on the id segment", () => {
     expect(normalizeLLMFriendlyRef(`/${HANDLE}@session/draft`)).toEqual({
       pieceId: HANDLE,
@@ -60,12 +75,36 @@ describe("llm-friendly-ref", () => {
     });
   });
 
-  it("rejects an embedded space DID that names another space", () => {
+  it("rejects an embedded DID that differs from a DID target space", () => {
     expect(() =>
-      normalizeLLMFriendlyRef(`/@${DID}/${HANDLE}`, { space: "other-space" })
+      normalizeLLMFriendlyRef(`/@${DID}/${HANDLE}`, { space: OTHER_DID })
     ).toThrow(
       `Reference names space "${DID}" but the command targets ` +
-        `space "other-space".`,
+        `space "${OTHER_DID}".`,
+    );
+  });
+
+  it("defers an embedded DID when the target space is a name", () => {
+    expect(
+      normalizeLLMFriendlyRef(`/@${DID}/${HANDLE}/value`, {
+        space: "my-space",
+      }),
+    ).toEqual({
+      pieceId: HANDLE,
+      embeddedSpace: DID,
+      path: ["value"],
+    });
+  });
+
+  it("passes a deferred embedded DID that matches the resolved space", () => {
+    expect(() => validateEmbeddedSpaces([DID], DID)).not.toThrow();
+    expect(() => validateEmbeddedSpaces(undefined, DID)).not.toThrow();
+  });
+
+  it("rejects a deferred embedded DID against another resolved space", () => {
+    expect(() => validateEmbeddedSpaces([DID], OTHER_DID)).toThrow(
+      `Reference names space "${DID}" but the command targets ` +
+        `space "${OTHER_DID}".`,
     );
   });
 
