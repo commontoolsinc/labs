@@ -30,6 +30,13 @@ describe("llm-friendly-ref", () => {
     });
   });
 
+  it("converts only canonical array-index segments to numbers", () => {
+    expect(normalizeLLMFriendlyRef(`/${HANDLE}/items/0/10/01/007`)).toEqual({
+      pieceId: HANDLE,
+      path: ["items", 0, 10, "01", "007"],
+    });
+  });
+
   it("parses a scope suffix on the id segment", () => {
     expect(normalizeLLMFriendlyRef(`/${HANDLE}@session/draft`)).toEqual({
       pieceId: HANDLE,

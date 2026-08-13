@@ -10,22 +10,30 @@ export interface NormalizedLLMFriendlyRef {
   pieceId: string;
   scope?: CellScope;
   /**
-   * Path segments embedded in the reference, in the segment form
-   * `parseCellPath` produces: a segment of digits is a number.
+   * Path segments embedded in the reference: a canonical array-index
+   * segment is a number, everything else stays a string.
    */
   path: (string | number)[];
 }
 
 /**
- * Convert a decoded link path segment to the form `parseCellPath` produces
- * for a positional path argument, so an embedded path and a positional path
- * address the same cells. Not `parseCellPath` itself, because that splits on
- * `/` and a JSON-pointer segment may contain one.
+ * A canonical array-index token: `0`, or digits without a leading zero.
+ * Only these convert to numbers; a non-canonical numeric-looking token
+ * such as `01`, `007`, `1.5`, or `-2` names a string property, and
+ * converting it would address a different cell than the pointer names.
+ */
+const canonicalArrayIndex = /^(0|[1-9][0-9]*)$/;
+
+/**
+ * Convert a decoded link path segment to the number-or-string form the
+ * CLI's cell traversal uses, so an embedded path and a positional path
+ * address the same cells. Not the runner's `parseCellPath`, because that
+ * splits on `/` (a JSON-pointer segment may contain one) and coerces any
+ * numeric-looking token — including non-canonical ones like `01` — to a
+ * number; here only canonical array indices convert, deliberately.
  */
 function toCellPathSegment(segment: string): string | number {
-  if (segment === "") return segment;
-  const num = Number(segment);
-  return Number.isInteger(num) && num >= 0 ? num : segment;
+  return canonicalArrayIndex.test(segment) ? Number(segment) : segment;
 }
 
 /**
