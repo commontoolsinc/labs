@@ -53,7 +53,7 @@ without reconstructing it.
 | 2. an unrecognized projection key is refused | not started; design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
 | 5. `cf wish` and `cf exec` take the read options | not started |
-| 11. a caller may name a reference | **decided** — the two routes are aliases; documentation in #5754, then #5632 closes |
+| 11. a caller may name a reference | **the CLI half is decided** — the two routes are aliases, so a statement rather than a fix; documentation in #5754, then #5632 closes. What a rendered address should *say* about indirection is #5760's |
 
 Item 9 is split because its two halves have different fates: the marks landed,
 the emission is parked.
@@ -124,8 +124,10 @@ honest one.
 
 ## Ready to build
 
-Unblocked and independent of the decision above. Not all small — items 2 and
-11 are both (M); what these share is that nothing gates them.
+Unblocked and independent of the decision above. Item 2 is (M). Item 11 was
+listed here as its equal and is no longer: its CLI half reduces to a
+documentation correction, and what remains of it belongs to #5760 rather than
+to this plan.
 
 **2. An unrecognized projection key is refused.** *(M)* Two denylists are
 consulted and every key in neither is accepted and carried onward. The design is
@@ -437,7 +439,7 @@ its own track.
 | 11 | One piece, one address | **decided — they are aliases**; the documentation half is #5754 | — | Measured: the two routes differ because one resolves the link chain and the other renders the link as stored. That is the read model working, not a defect, so the outcome is the statement rather than the fix. What remains is a doc correction and closing #5632 — no code changes, and step 13 is not gated on it |
 | 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](projection-key-classification.md) |
 | 12a | `cf` refuses an undeclared field on a call | item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says |
-| 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving |
+| 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12, **#5760** | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it has not. #5760 decides whether a caller can ask for resolution; either answer settles the grammar, but spreading it to two more commands first is the ordering this step exists to avoid |
 
 **`--show-links` is not redundant, and nothing should schedule its removal
 yet.** [Verb result selection](verb-result-selection.md) prices it as a stopgap
@@ -451,13 +453,20 @@ in-band spelling can produce a resolved address at any position. That makes
 `--show-links` the only way to resolve a whole result in one pass, and an
 in-band address cannot replace what it does not do.
 
-Whether a caller should ever need this is settled — addresses are many-to-one
-and comparing them is not a supported question, so `cf piece inspect` covers
-the occasional single case. What is *not* settled is whether that stays true,
-and retiring the only bulk route while the question is open buys nothing and
-costs the capability. Keep it. Retire it when a replacement exists or the need
-is confirmed dead, and note that `cf piece get` has never had an equivalent —
-so bulk resolution on a *read* is a gap that predates all of this.
+Whether a caller should be able to ask for resolution at all is **deferred to
+[#5760]**, not decided here. Measured: resolution is a fixed point over the
+locally materialized subgraph, so the same link answers differently as
+documents load, and `resolveAsCell` fires an un-awaited sync of its own — it
+both depends on and causes loading. A marker offering resolution over that
+would ship nondeterminism under a name promising determinism, which is why it
+is not on this plan. It becomes a coherent thing to add if #5760 makes
+resolution explicit and awaited, and pointless if #5760 decides equality should
+compare addresses as stored.
+
+Either way, retiring the only bulk route while the question is open buys
+nothing. Keep `--show-links`; retire it when a replacement exists or the need
+is confirmed dead. Note that `cf piece get` has never had an equivalent, so
+bulk resolution on a *read* is a gap that predates all of this.
 
 **Running beside all of the above.** A caller naming a reference (item 11, #5560) waits on confirming
 that a sigil resolves through a *declared* event field rather than an untyped
