@@ -24,8 +24,23 @@ import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
  * `FabricValue` -- which is what lets a test see whether a state was walked.
  */
 export class Tagged {
-  constructor(readonly tag: string, readonly state: ProbeValue) {
+  readonly #tag: string;
+  readonly #state: ProbeValue;
+
+  constructor(tag: string, state: ProbeValue) {
+    this.#tag = tag;
+    this.#state = state;
     Object.freeze(this);
+  }
+
+  /** The wire type tag. */
+  get tag(): string {
+    return this.#tag;
+  }
+
+  /** The state carried under it. */
+  get state(): ProbeValue {
+    return this.#state;
   }
 }
 
@@ -97,8 +112,16 @@ export function newRecord(): HostRecord {
  * terminal, that nested value is the engine's business to leave alone.
  */
 export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
-  constructor(readonly record: HostRecord) {
+  readonly #record: HostRecord;
+
+  constructor(record: HostRecord) {
     super("T@1", undefined);
+    this.#record = record;
+  }
+
+  /** What this codec has been handed. */
+  get record(): HostRecord {
+    return this.#record;
   }
 
   override canEncode(value: FabricValue): boolean {
@@ -106,7 +129,7 @@ export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
   }
 
   encode(value: FabricValue): ProbeValue {
-    this.record.encoded.push(value);
+    this.#record.encoded.push(value);
     return { inner: NESTED };
   }
 
@@ -115,7 +138,7 @@ export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
     state: ProbeValue,
     _context: ReconstructionContext,
   ): FabricValue {
-    this.record.decoded.push(state);
+    this.#record.decoded.push(state);
     return TERMINAL_HOST;
   }
 }
@@ -125,8 +148,16 @@ export class TerminalHostCodec extends BaseTerminalCodec<ProbeValue> {
  * same state. Everything the two do differently is the engine's doing.
  */
 export class NonterminalHostCodec extends BaseNonterminalCodec {
-  constructor(readonly record: HostRecord) {
+  readonly #record: HostRecord;
+
+  constructor(record: HostRecord) {
     super("N@1", undefined);
+    this.#record = record;
+  }
+
+  /** What this codec has been handed. */
+  get record(): HostRecord {
+    return this.#record;
   }
 
   override canEncode(value: FabricValue): boolean {
@@ -134,7 +165,7 @@ export class NonterminalHostCodec extends BaseNonterminalCodec {
   }
 
   encode(value: FabricValue): FabricValue {
-    this.record.encoded.push(value);
+    this.#record.encoded.push(value);
     return { inner: NESTED };
   }
 
@@ -143,7 +174,7 @@ export class NonterminalHostCodec extends BaseNonterminalCodec {
     state: FabricValue,
     _context: ReconstructionContext,
   ): FabricValue {
-    this.record.decoded.push(state);
+    this.#record.decoded.push(state);
     return NONTERMINAL_HOST;
   }
 }
@@ -154,8 +185,16 @@ export class NonterminalHostCodec extends BaseNonterminalCodec {
  * engages for an object, so nothing else reaches it.
  */
 export class Marker {
-  constructor(readonly note: string = "m") {
+  readonly #note: string;
+
+  constructor(note: string = "m") {
+    this.#note = note;
     Object.freeze(this);
+  }
+
+  /** A label, so that two markers can be told apart. */
+  get note(): string {
+    return this.#note;
   }
 }
 
