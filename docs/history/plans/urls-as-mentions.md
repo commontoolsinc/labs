@@ -1,10 +1,17 @@
+---
+status: historical
+created: 2026-08-12
+archived: 2026-08-12
+reason: "Executed plan; the cellFromUrl builtin, pasted mentions, the reference-definition block, and the read-only projection with its edit verb all shipped. The topics retirement was deliberately left undone."
+---
+
 # URLs as mentions
 
 ## The short version
 
 A mention made through the editor's completion becomes a reference: the text
 carries a short local key and
-[the note's reference map](../history/plans/editor-mention-references.md) says
+[the note's reference map](editor-mention-references.md) says
 where it points. Text that names a cell any *other* way stays inert. Paste a
 piece's URL into a note and it is a URL — not a mention, not a backlink, and
 not something `$mentioned` or the backlinks index can see.
