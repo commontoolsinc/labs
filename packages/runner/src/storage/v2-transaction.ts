@@ -855,8 +855,11 @@ export class V2StorageTransaction implements IStorageTransaction {
   // Authoritative-writes mode (see IStorageTransaction.markAuthoritativeWrites
   // and the F2 rationale there): value writes are recorded and committed even
   // when equal to the currently-visible state — the no-op elision in
-  // writeWithinBranch/writeBatchRun and the initial-vs-current diff in
-  // buildPatchOperation both yield to an unconditional full-cover assert.
+  // writeWithinBranch/writeBatchRun yields, the doc-level elision in
+  // getNativeCommit yields, and the commit is emitted as a WHOLE-DOC
+  // set/delete rather than patches (round-2 thread 17: a patch base
+  // extrapolated over a doomed sealed overlay can name ancestors durable
+  // state never had, and `replace` cannot create them).
   // Set by effect-completion writebacks under the serving posture; one-way.
   #authoritativeWrites = false;
   #commitOrder?: readonly MemorySpace[];
@@ -1183,33 +1186,56 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
 
       const { id, type, scope } = this.parseDocKey(key);
-      const mergeable = this.buildMergeableOps(doc);
-      const patch = this.buildPatchOperation(
-        id,
-        type,
-        scope,
-        doc,
-        mergeable.suppress,
-      );
-      if (mergeable.ops.length > 0) {
-        // Emit the mergeable ops even when there is no base to diff against
-        // (where buildPatchOperation returns null) so a stale-base write lands
-        // against durable state instead of clobbering it with a whole-value
-        // `set`.
-        const basePatches = patch?.op === "patch" ? patch.patches : [];
-        operations.push({
-          op: "patch",
+      // Authoritative transactions (markAuthoritativeWrites —
+      // effect-completion writebacks under the serving posture) commit
+      // WHOLE-DOC set/delete, never patches (round-2 thread 17): their
+      // patch base (`doc.initial`) is the tx-start OPTIMISTIC view,
+      // which can extrapolate over a DOOMED sealed overlay — including
+      // ancestors the overlay CREATED that durable state never had. A
+      // patch op against such a base fails engine-side with
+      // "missing path" (`replace` upserts only the terminal member),
+      // rejecting the completion commit; the retry re-reads the same
+      // poisoned view and burns its budget deterministically, wedging
+      // the claim (the F2 wedge through a different crack). The
+      // whole-doc set is the always-applicable full-cover assert — the
+      // earlier per-path forced-assert machinery this replaces could
+      // not create missing ancestors. Footprint: completion docs are
+      // the builtins' own result/pending/error/internal cells (one doc
+      // each, builtin-owned); completions already carry basisSeq=NOW
+      // (no per-doc CAS — the hash guards arbitrate), so doc-level
+      // last-writer-wins is the ruled posture, not a widening. The
+      // mergeable fast path is skipped too: no completion writeback
+      // records mergeable deltas, and folding them with a whole-doc
+      // set would double-apply.
+      if (!this.#authoritativeWrites) {
+        const mergeable = this.buildMergeableOps(doc);
+        const patch = this.buildPatchOperation(
           id,
           type,
           scope,
-          patches: [...mergeable.ops, ...basePatches],
-          value: doc.current.value,
-        });
-        continue;
-      }
-      if (patch) {
-        operations.push(patch);
-        continue;
+          doc,
+          mergeable.suppress,
+        );
+        if (mergeable.ops.length > 0) {
+          // Emit the mergeable ops even when there is no base to diff against
+          // (where buildPatchOperation returns null) so a stale-base write lands
+          // against durable state instead of clobbering it with a whole-value
+          // `set`.
+          const basePatches = patch?.op === "patch" ? patch.patches : [];
+          operations.push({
+            op: "patch",
+            id,
+            type,
+            scope,
+            patches: [...mergeable.ops, ...basePatches],
+            value: doc.current.value,
+          });
+          continue;
+        }
+        if (patch) {
+          operations.push(patch);
+          continue;
+        }
       }
 
       operations.push(
@@ -2613,9 +2639,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       previousPresent: boolean;
     }>();
     const arrayGroups = new Map<string, readonly string[]>();
-    // Authoritative full-cover re-asserts (markAuthoritativeWrites);
-    // merged into fullCoverCandidates below.
-    const forcedAsserts: PatchDraftCandidate[] = [];
     for (const detail of details) {
       const value = readValueAtPath(
         doc.current.value,
@@ -2643,42 +2666,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (
         valuePresent === previousPresent && valueEqual(value, previousValue)
       ) {
-        if (!this.#authoritativeWrites || !valuePresent) {
-          continue;
-        }
-        // Authoritative full-cover re-assert (markAuthoritativeWrites —
-        // effect-completion writebacks): `doc.initial` is the
-        // transaction-START view, an extrapolation that may layer a
-        // DOOMED sealed overlay over confirmed state, so "initial
-        // already equals current" is not evidence the STORE holds the
-        // value — the completion asserts it unconditionally. Emitted as
-        // a non-structural `replace` (upsert on object members, never
-        // shifts array siblings — the §"Array writes" invariant holds).
-        // Arrays anywhere on the path collapse to a whole-array replace
-        // at the deepest array prefix: per-index/splice diffing of two
-        // EQUAL arrays would emit nothing, and the whole-array replace
-        // is the always-legal fallback shape. The equal-and-both-ABSENT
-        // case still skips — there is no value to assert.
-        const arrayAssertPath = findDeepestArrayPath(
-          doc.initial.value,
-          doc.current.value,
-          detail.address.path,
-        );
-        const assertPath = arrayAssertPath ?? detail.address.path;
-        const assertValue = arrayAssertPath === null
-          ? value
-          : readValueAtPath(doc.current.value, arrayAssertPath, {
-            allowArrayLength: true,
-          });
-        forcedAsserts.push({
-          patch: {
-            op: "replace",
-            path: encodePointer(assertPath),
-            value: assertValue,
-          },
-          path: assertPath,
-          coversDescendants: true,
-        });
+        // Equal-value elision. Authoritative transactions never reach
+        // this builder (getNativeCommit routes them to whole-doc
+        // set/delete — round-2 thread 17: the per-path forced asserts
+        // that used to live here could not create ancestors a doomed
+        // overlay minted, failing the completion commit engine-side).
         continue;
       }
 
@@ -2701,7 +2693,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       });
     }
 
-    const fullCoverCandidates: PatchDraftCandidate[] = [...forcedAsserts];
+    const fullCoverCandidates: PatchDraftCandidate[] = [];
     for (const detail of patchDetails.values()) {
       const candidate = buildValuePatchCandidate(
         detail.path,
