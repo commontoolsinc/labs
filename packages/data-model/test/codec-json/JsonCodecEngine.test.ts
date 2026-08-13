@@ -1193,8 +1193,8 @@ describe("JsonCodecEngine", () => {
         expect(result["outer"]!["/inner"]).toBe(1);
       });
 
-      it("single-key `/`-prefixed object still routes through `unwrapTag()` (no regression)", () => {
-        // Single-key `/Tag@N` objects are handled by `unwrapTag()` rather than
+      it("single-key `/`-prefixed object still routes through `#unwrapTag()` (no regression)", () => {
+        // Single-key `/Tag@N` objects are handled by `#unwrapTag()` rather than
         // the plain-object path, so they produce an `UnknownValue` for the
         // unrecognized tag and never reach the multi-key guard's
         // `ProblematicValue`.
@@ -1641,10 +1641,10 @@ describe("JsonCodecEngine", () => {
     // Every `JsonCodecValue` handed to `deserialize()` must be deep-frozen, so
     // both `deserialize()` entry points must produce equally deep-frozen
     // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
-    // via `fromBytes()`).
+    // via `#fromBytes()`).
     //
     // The `/quote` arm does `return state`, handing back a node lifted straight
-    // out of the parsed codec-value tree (see `unwrapTag()`'s contract). That
+    // out of the parsed codec-value tree (see `#unwrapTag()`'s contract). That
     // shortcut is sound only because the parsed tree is deep-frozen at
     // construction, which both construction sites must therefore do. These
     // cases pin the symmetry, so that dropping the guarantee at either one
@@ -1699,7 +1699,7 @@ describe("JsonCodecEngine", () => {
       });
     }
 
-    it("string path deep-freezes `/quote` content at every depth (regression for `decode()` vs `fromBytes()`)", () => {
+    it("string path deep-freezes `/quote` content at every depth (regression for `decode()` vs `#fromBytes()`)", () => {
       const wire = {
         "/quote": { outer: { inner: [1, 2] } },
       } as JsonCodecValue;

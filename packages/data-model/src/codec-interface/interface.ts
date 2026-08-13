@@ -22,8 +22,16 @@ import type { FabricInstance, FabricValue } from "@/interface.ts";
 export const CODEC: unique symbol = Symbol("data-model.codec");
 
 /**
- * Well-known symbol for binding the static getter
- * `FabricClassWithJsonCodec[JSON_CODEC]` on a `FabricPrimitive` class.
+ * Well-known symbol for binding the static getter `[JSON_CODEC]` on a
+ * `FabricPrimitive` class.
+ *
+ * No interface declares that obligation, and none can: {@link CodecRegistry}
+ * reads a per-format codec through a symbol _variable_, so it must type a
+ * class as `Partial<Record<symbol, ...>>`, which no fixed-symbol interface
+ * satisfies. The obligation is enforced when a registry is built instead --
+ * `registerClass()` throws for a class supplying no codec for the format in
+ * play. {@link FabricClassWithNonterminalCodec} can exist only because
+ * {@link CODEC} is statically known.
  *
  * A `FabricPrimitive`'s codec is bound per wire format, not once for all of
  * them, because these classes are where the formats disagree. `FabricBytes`
