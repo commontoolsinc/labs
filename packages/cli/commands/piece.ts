@@ -913,7 +913,7 @@ const EX_URL = `--url ${RAW_EX_URL}`;
 const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
 const PIECE_OPTION_HELP =
-  "The target piece: an id, slug, or LLM-friendly reference " +
+  "The target piece: an id, slug, or canonical LLM-friendly reference " +
   "(/of:fid1:.../).";
 const PIECE_OPTION_PATH_HELP = `${PIECE_OPTION_HELP} A path embedded in ` +
   `the reference prefixes the positional path.`;

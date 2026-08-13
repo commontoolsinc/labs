@@ -1,3 +1,14 @@
+/**
+ * The LLM-friendly link form — `/[@did:.../]of:fid1:<id>[@scope][/path]`,
+ * the runner's `parseLLMFriendlyLink` grammar — is the canonical reference
+ * syntax of the fabric: the same string names the same cell in patterns, in
+ * the shell, and at this CLI's intake seams. The CLI's bare grammar
+ * (`pieceId[@scope]`, `pieceId[@scope]/path` at link endpoints, and slugs)
+ * is a convenience alias for interactive use. New reference-syntax
+ * capabilities land in the canonical form first, and the alias must not
+ * grow a capability the canonical form lacks.
+ */
+
 import { ValidationError } from "@cliffy/command";
 import type { CellScope } from "@commonfabric/api";
 import { isDID } from "@commonfabric/identity";
