@@ -42,6 +42,10 @@ import {
   selectSchedulerBasisRows,
 } from "../v2/scheduler-basis.ts";
 import {
+  deleteExecutionOutboxRow,
+  selectPendingExecutionOutboxRows,
+} from "../v2/execution-outbox.ts";
+import {
   type ClientCommit,
   decodeMemoryBoundary,
   resetServerExecutionConfig,
@@ -955,6 +959,72 @@ Deno.test("delegated carriage: a sessionless delegated batch carrying a session-
         }),
       ProtocolError,
       "sessionless delegated",
+    );
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("wave replay does not re-insert durable outbox rows: the stored result returns with replayed=true and FP1 carriage is skipped (stage-G round-2 thread 5)", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    const options = {
+      sessionId: holder,
+      space: SPACE,
+      commit: setCommit(1, [{ id: "of:replay-appends" }]),
+      commitClass: "derived" as const,
+      holder,
+      annotations: [],
+      consequenceOf: [],
+      waveBasis: { basisSeq: 0, rebasedHeads: [] },
+      outboxAppends: [{
+        targetSpace: "did:key:z6Mk-wave-test-target",
+        targetStream: "of:replay-stream",
+        eventId: "evt-replay-1",
+        payload: { n: 1 },
+        actingPrincipal: "did:key:alice",
+        actingSession: "sess-1",
+        capabilityRef: "cap:replay",
+      }],
+    };
+    const applied = applyWaveCommit(engine, options);
+    assertEquals(applied.seq, 1);
+    assertEquals(applied.replayed, undefined);
+    assertEquals(
+      selectPendingExecutionOutboxRows(engine, { branch: "" }).length,
+      1,
+    );
+
+    // Simulate the delivered-and-retired window: the drain delivered the
+    // row and deleted it BEFORE the replay arrives (crash between the
+    // sink's commit and its caller's ack, then a re-drive of the same
+    // wave with the same localSeq).
+    const [row] = selectPendingExecutionOutboxRows(engine, { branch: "" });
+    deleteExecutionOutboxRow(engine, row.rowId);
+    assertEquals(
+      selectPendingExecutionOutboxRows(engine, { branch: "" }).length,
+      0,
+    );
+
+    // The exact replay: same session, same localSeq, same commit — with
+    // a re-derived basis (a crash-replay re-runs the wave against
+    // CURRENT state, so its basisSeq is fresh; the stored original the
+    // replay matches on is the COMMIT, which carries no basis). The
+    // stored result returns — and the outbox insert must NOT re-run
+    // (pre-fix it did, resurrecting the delivered row as duplicate
+    // delivery work).
+    const replayed = applyWaveCommit(engine, {
+      ...options,
+      waveBasis: { basisSeq: applied.seq, rebasedHeads: [] },
+    });
+    assertEquals(replayed.seq, 1);
+    assertEquals(replayed.replayed, true);
+    assertEquals(
+      selectPendingExecutionOutboxRows(engine, { branch: "" }).length,
+      0,
     );
   } finally {
     resetServerExecutionConfig();

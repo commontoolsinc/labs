@@ -300,6 +300,13 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_basis_entity
 -- from memo keys). References nothing; nothing references it. The
 -- writer/reader module is execution-outbox.ts.
 CREATE TABLE IF NOT EXISTS execution_outbox (
+  id                INTEGER PRIMARY KEY, -- declared alias of rowid: the
+                                      --   delivery-ack handle. Declared so
+                                      --   it is STABLE across VACUUM —
+                                      --   an implicit rowid can be
+                                      --   renumbered by maintenance,
+                                      --   letting an ack delete the
+                                      --   wrong row (a lost append).
   branch            TEXT    NOT NULL,
   target_space      TEXT    NOT NULL,
   target_stream     TEXT    NOT NULL, -- the target stream doc id
@@ -922,6 +929,14 @@ export type AppliedCommit = {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
+  /** True when the commit was an exact REPLAY of one this session
+   * already applied — the stored result was returned and NOTHING was
+   * inserted. Side-effect carriage riding the apply (the wave commit's
+   * outbox rows, FP1) keys off this: a replay must not re-run inserts
+   * whose originals rode the first application (the rows may since
+   * have been delivered and retired — re-inserting resurrects
+   * delivered appends as duplicate delivery work). */
+  replayed?: true;
 };
 
 export type ReadOptions = {
@@ -1948,7 +1963,17 @@ export const applyWaveCommit = (
       // inside this same transaction — atomically with the wave commit,
       // so a crash either has both (rows re-sent, deduped at the
       // target's eventId horizon) or neither (the wave never happened).
-      if (outboxAppends !== undefined && outboxAppends.length > 0) {
+      // Gated on a NEWLY INSERTED commit: an exact replay returns the
+      // stored result without applying anything, and its original
+      // application already carried these rows — re-inserting would
+      // resurrect rows the drain may have delivered and retired,
+      // producing duplicate durable delivery work (the target's
+      // eventId horizon dedupes the duplicates, but each one costs a
+      // delegated-append round trip and a dedupe pass).
+      if (
+        applied.replayed !== true &&
+        outboxAppends !== undefined && outboxAppends.length > 0
+      ) {
         insertExecutionOutboxRows(txEngine, {
           branch,
           createdSeq: applied.seq,
@@ -2173,6 +2198,7 @@ const applyCommitTransaction = (
       seq: existing.seq,
       branch: existing.branch,
       revisions: selectCommitRevisions(engine, existing.seq),
+      replayed: true,
     };
   }
 
