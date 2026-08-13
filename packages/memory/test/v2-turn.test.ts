@@ -78,6 +78,45 @@ describe("turn", () => {
       expect(ran).toBe(1);
     });
 
+    it("runs the handler once when a cancelled claim fires anyway", async () => {
+      // Cancelling a claim does not everywhere stop it: a scheduler that
+      // dispatches a batch from a snapshot can call a callback cleared
+      // earlier in that same batch, which the fake-clock harness did until it
+      // was taught otherwise. This stands in for such a scheduler by ignoring
+      // `clearImmediate`, and fires the cancelled claim by hand.
+      const holder = globalThis as {
+        setImmediate?: (handler: () => void) => unknown;
+        clearImmediate?: (handle: unknown) => void;
+      };
+      const realSetImmediate = holder.setImmediate;
+      const realClearImmediate = holder.clearImmediate;
+      let cancelledClaim: (() => void) | undefined;
+      holder.setImmediate = (handler: () => void) => {
+        cancelledClaim = handler;
+        return 0;
+      };
+      holder.clearImmediate = () => {};
+
+      let ran = 0;
+      const arrived = Promise.withResolvers<void>();
+      try {
+        // The stubbed claim never fires on its own, so the timer takes the
+        // turn and cancels it.
+        armTurn(() => {
+          ran++;
+          arrived.resolve();
+        });
+      } finally {
+        holder.setImmediate = realSetImmediate;
+        holder.clearImmediate = realClearImmediate;
+      }
+      await arrived.promise;
+      expect(ran).toBe(1);
+
+      cancelledClaim!();
+      expect(ran).toBe(1);
+    });
+
     it("keeps a zero-delay timer armed until the turn arrives", async () => {
       await withTimerCensus(async (armed) => {
         const before = armed.size;
