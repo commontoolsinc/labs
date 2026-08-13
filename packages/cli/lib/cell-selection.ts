@@ -15,6 +15,7 @@ import {
   type MemorySpace,
   type NormalizedFullLink,
   parseLink,
+  type Pattern,
   type Runtime,
   sanitizeSchemaForLinks,
 } from "@commonfabric/runner";
@@ -2115,6 +2116,52 @@ function arrayItemProjectionError(flag: ProjectionFlag): CellSelectionError {
   );
 }
 
+/**
+ * What one runtime keeps for the transform reads it has already served.
+ *
+ * Both fields answer the same question — which pattern object a repeat of a
+ * read hands to `runtime.run`.
+ *
+ * `run` decides "the same pattern as last time" by comparing pattern pointers,
+ * and a hand-built pattern's pointer is minted per pattern OBJECT rather than
+ * per structure (#5756). A repeat that rebuilds a structurally identical
+ * pattern therefore reads as a pattern change, and a change re-stages the
+ * stored argument and validates it against the incoming argument schema. A
+ * projection has narrowed that schema, so the source's other fields come back
+ * as additional properties and the read fails with a schema error nothing in
+ * the request explains. Running the pattern the cell was set up with is the
+ * same setup instead, and answers.
+ *
+ * A pattern object does not cross runtimes: its pointer is indexed in the
+ * runtime that minted it, and the nested patterns behind it do not resolve
+ * elsewhere. A second runtime over one storage session therefore needs its own
+ * result cell rather than the setup stored on the first runtime's, which is
+ * what `discriminator` gives it.
+ */
+interface TransformReads {
+  /** Separates this runtime's transform cells from another runtime's. */
+  readonly discriminator: number;
+  /** The pattern each transform result cell runs, by space-qualified id. */
+  readonly patterns: Map<string, Pattern>;
+}
+
+const transformReads = new WeakMap<Runtime, TransformReads>();
+
+let nextTransformDiscriminator = 0;
+
+/** The reads `runtime` has served, minting the record on its first one. */
+function transformReadsFor(runtime: Runtime): TransformReads {
+  let reads = transformReads.get(runtime);
+  if (reads === undefined) {
+    reads = {
+      discriminator: ++nextTransformDiscriminator,
+      patterns: new Map(),
+    };
+    transformReads.set(runtime, reads);
+  }
+  return reads;
+}
+
 /** Optional hooks into {@link deriveSelectedValue}'s internals. */
 export interface DeriveSelectedValueDependencies {
   /** Called with the cell the returned value was read from. */
@@ -2403,24 +2450,38 @@ export async function deriveSelectedValue(
   );
 
   const tx = runtime.edit();
+  const reads = transformReadsFor(runtime);
   const resultCell = runtime.getCell(
     space,
     {
       pieceGetTransform: {
+        // A pattern graph belongs to the runtime that runs it, so two runtimes
+        // sharing one storage session read from separate cells.
+        runtime: reads.discriminator,
         source: sourceValueCell.getAsNormalizedFullLink(),
         filter: selection.filter?.source,
         schema: selection.projection?.source,
+        // The pattern's shape branches on this, and a source whose schema names
+        // no root kind reads it off the value — so a source that changes kind
+        // is a different read rather than the same one answered differently.
+        sourceIsArray,
       },
     },
     mainResultSchema,
     tx,
     "session",
   );
+  const resultLink = resultCell.getAsNormalizedFullLink();
+  const readKey = `${resultLink.space}/${resultLink.id}`;
+  // The repeat runs the pattern this cell was set up with; the first read of a
+  // selection is the one that installs it.
+  const installedPattern = reads.patterns.get(readKey);
+  if (installedPattern === undefined) reads.patterns.set(readKey, mainPattern);
   const errors = runtimeErrorLog(runtime);
   const errorCountBefore = errors.length;
   const result = runtime.run(
     tx,
-    mainPattern,
+    installedPattern ?? mainPattern,
     {
       value: sourceValueCell.asSchema(sourceReadSchema).getAsLink({
         includeSchema: true,
