@@ -289,9 +289,11 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
         );
     } catch (e: unknown) {
       if (!this.lenient) {
-        // Not rethrown as-is: what a codec throws is not guaranteed to be an
-        // `Error`, let alone one carrying the state it choked on. The original
-        // survives as `cause`.
+        // Normalized rather than rethrown: what a codec throws is not
+        // guaranteed to be an `Error`, let alone one naming the state it
+        // choked on. `fromThrown()` answers with one that does -- the thrown
+        // value itself where it already qualifies, and otherwise a fresh one
+        // holding it as `cause`.
         throw ProblematicStateError.fromThrown(tag, state, e);
       }
 
