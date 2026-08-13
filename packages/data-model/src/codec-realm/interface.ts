@@ -2,15 +2,6 @@ import type { WireFormat } from "@/codec-interface/interface.ts";
 import { REALM_CODEC } from "@/codec-interface/interface.ts";
 
 /**
- * Tag identifying the realm-crossing encoded form of a fabric value. It is the
- * key of the single-entry `Map` that envelopes every encoded value, so that a
- * receiver can tell an encoded fabric value from an arbitrary cloned payload
- * arriving on the same channel. The tag stands for "Fabric Value Realm,
- * version 1."
- */
-export const ENCODING_FORMAT_TAG = "fvr1:" as const;
-
-/**
  * The transport form of this format: a value that structured cloning carries
  * across a realm boundary without loss, and so what `RealmCodecEngine.encode()`
  * returns and `decode()` accepts.
@@ -29,7 +20,10 @@ export const ENCODING_FORMAT_TAG = "fvr1:" as const;
  *   of a second format: JSON has to spell a `FabricBytes` as base64url text,
  *   and a receiver that wants bytes back has to rebuild them.
  * * `RegExp` appears for the same reason, source and flags intact.
- * * `Map` is the tagged form (see {@link RealmTaggedValue}).
+ * * `Map` is the tagged form (see {@link RealmTaggedValue}). An encoded value
+ *   carries no envelope of its own: both ends of this format are the same
+ *   engine from the same build, so there is nothing for a format tag to
+ *   identify and no version for it to guard.
  *
  * `symbol` is absent: cloning refuses one outright, which is why this format
  * carries a `SymbolCodec` of its own.
@@ -49,8 +43,7 @@ export type RealmCodecValue =
 
 /**
  * The tagged form: a single-entry `Map` binding a wire type tag to the encoded
- * state under it. The outermost wrapper of a complete encoded value is one of
- * these, bound to {@link ENCODING_FORMAT_TAG}.
+ * state under it.
  *
  * A `Map` is what lets this format do without escaping entirely, where JSON
  * needs `/quote` and `/object` and a reserved-key rule to keep a tag apart

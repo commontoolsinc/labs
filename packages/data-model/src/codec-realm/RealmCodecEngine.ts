@@ -6,11 +6,7 @@ import { isFabricValue } from "@/type-check.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import type { ReconstructionContext } from "@/codec-interface/interface.ts";
-import {
-  ENCODING_FORMAT_TAG,
-  type RealmCodecValue,
-  type RealmTaggedValue,
-} from "./interface.ts";
+import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
 
 /**
  * Whole-value codec engine for the realm-crossing wire format: the form a
@@ -24,6 +20,19 @@ import {
  * escaped clear of the tags. Cloning carries all of those but `symbol`, and
  * carries them with their types intact, so most of a value passes through
  * untouched and tagging is reserved for what genuinely needs it.
+ *
+ * **This format assumes both ends are the same build**, and that assumption is
+ * load-bearing rather than incidental. It is what allows the absence of a
+ * format tag: JSON's `fvj1:` earns its keep because JSON text is persisted and
+ * read back by a build that did not write it, whereas a value in this form is
+ * constructed, cloned across, decoded, and gone. The boundary it exists for is
+ * worker IPC within one process.
+ *
+ * Nothing here enforces that. `postMessage()` also spans tabs, windows and
+ * frames, any of which could pair two different deployments -- and this format
+ * would not detect it, having nothing that identifies itself. Carrying fabric
+ * values across such a boundary needs a format tag reintroduced, or JSON,
+ * rather than this as it stands.
  *
  * Three pieces of `JsonCodecEngine` have no counterpart here, each because the
  * transport does the work directly:
@@ -39,8 +48,10 @@ import {
  *
  * Both walks are copy-on-write: a subtree in which nothing changed is returned
  * by identity rather than rebuilt. A payload holding no `FabricSpecialObject`
- * and no symbol is therefore handed to the transport exactly as it arrived,
- * and copied once by the transport instead of twice. That is the ordinary case
+ * and no symbol is therefore handed to the transport exactly as it arrived --
+ * the same object, not a reconstruction of it -- and copied once by the
+ * transport instead of twice. Emitting no envelope is what lets that reach the
+ * outermost value rather than stopping one layer in. That is the ordinary case
  * for plain data, and it makes the walk's cost proportional to what actually
  * needs encoding rather than to the size of the value. `JsonCodecEngine` never
  * faces the choice, having to reach text.
@@ -60,34 +71,28 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
   /**
    * @inheritDoc
    *
-   * Wraps the walked tree in the format-identifying envelope. There is no
-   * further reduction: what this returns is what crosses.
+   * The walked tree is what crosses: no envelope, and no further reduction.
+   * Copy-on-write therefore reaches all the way out, a payload needing no
+   * encoding being returned by identity rather than wrapped in a fresh
+   * container.
    */
   override encode(value: FabricValue): RealmCodecValue {
-    return this.wrapTag(ENCODING_FORMAT_TAG, this.encodeValue(value));
+    return this.encodeValue(value);
   }
 
   /**
    * @inheritDoc
    *
-   * Checks for the format-identifying envelope, then walks what is inside it.
+   * Walks the tree as it arrived. There is no envelope to check first: a
+   * receiver on this format's one boundary knows what it asked for, both ends
+   * being the same engine from the same build. What cloning carries but this
+   * format never emits is refused where it is met, by `decodeValue()`.
    */
   override decode(
     data: RealmCodecValue,
     context: ReconstructionContext,
   ): FabricValue {
-    if (!RealmCodecEngine.seemsLikeEncoded(data)) {
-      throw new Error(
-        `Not a realm-encoded \`FabricValue\`: ${
-          backtickQuote(toCompactDebugString(data, 50))
-        }`,
-      );
-    }
-
-    return this.decodeValue(
-      (data as RealmTaggedValue).get(ENCODING_FORMAT_TAG)!,
-      context,
-    );
+    return this.decodeValue(data, context);
   }
 
   /** @inheritDoc */
@@ -310,17 +315,6 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
   //
   // Static members
   //
-
-  /**
-   * Indicates if the given value has a "first-blush" appearance as a value
-   * encoded by this class -- that is, whether it carries the
-   * format-identifying envelope. Takes `unknown` because what arrives across
-   * the boundary is whatever the far side sent.
-   */
-  static seemsLikeEncoded(value: unknown): boolean {
-    return (value instanceof Map) && (value.size === 1) &&
-      value.has(ENCODING_FORMAT_TAG);
-  }
 
   /**
    * Renders a state for reporting, since `reportMalformed()` preserves what it

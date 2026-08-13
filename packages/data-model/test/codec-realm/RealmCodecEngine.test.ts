@@ -14,8 +14,8 @@ import { defer } from "@commonfabric/utils/defer";
 import type { FabricValue } from "@/interface.ts";
 import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/index.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import {
-  ENCODING_FORMAT_TAG,
   type RealmCodecValue,
   type RealmTaggedValue,
 } from "@/codec-realm/interface.ts";
@@ -27,11 +27,6 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { EchoReport } from "./realm-echo-worker.ts";
-
-/** Extracts the payload from an encoded value's envelope. */
-function payloadOf(encoded: RealmCodecValue): RealmCodecValue {
-  return (encoded as RealmTaggedValue).get(ENCODING_FORMAT_TAG)!;
-}
 
 /**
  * Encodes `value`, sends it to a real `Worker`, and returns what that worker
@@ -58,13 +53,13 @@ async function crossRealm(value: FabricValue): Promise<EchoReport> {
 
 describe("RealmCodecEngine", () => {
   describe("encode()", () => {
-    it("envelopes the result in a single-entry `Map` under the format tag", () => {
-      const encoded = realmFromFabricValue({ a: 1 });
+    it("emits the walked tree itself, with no envelope around it", () => {
+      const value = { a: 1 };
 
-      expect(encoded).toBeInstanceOf(Map);
-      expect([...(encoded as RealmTaggedValue).keys()]).toEqual([
-        ENCODING_FORMAT_TAG,
-      ]);
+      // Not merely equal: the same object. An envelope would make that
+      // impossible for any value at all, however little of it needed
+      // encoding.
+      expect(realmFromFabricValue(value)).toBe(value);
     });
 
     it("returns a payload holding no encodable value by identity", () => {
@@ -72,13 +67,13 @@ describe("RealmCodecEngine", () => {
 
       // Copy-on-write: nothing here needs encoding, so nothing is rebuilt and
       // the transport does the only copying.
-      expect(payloadOf(realmFromFabricValue(value))).toBe(value);
+      expect(realmFromFabricValue(value)).toBe(value);
     });
 
     it("rebuilds only the containers on the path to an encoded value", () => {
       const untouched = { c: "two" };
       const value = { a: new FabricBytes(new Uint8Array([1])), b: untouched };
-      const payload = payloadOf(realmFromFabricValue(value)) as Record<
+      const payload = (realmFromFabricValue(value)) as Record<
         string,
         RealmCodecValue
       >;
@@ -90,12 +85,12 @@ describe("RealmCodecEngine", () => {
     it("leaves a `/`-prefixed key untouched, this format reserving no key", () => {
       const value = { "/quote": "not a tag here", "/Bytes@1": "nor this" };
 
-      expect(payloadOf(realmFromFabricValue(value))).toBe(value);
+      expect(realmFromFabricValue(value)).toBe(value);
     });
 
     it("encodes a `FabricBytes` to the bytes themselves", () => {
-      const payload = payloadOf(
-        realmFromFabricValue(new FabricBytes(new Uint8Array([1, 2, 250]))),
+      const payload = realmFromFabricValue(
+        new FabricBytes(new Uint8Array([1, 2, 250])),
       );
       const state = (payload as RealmTaggedValue).get("Bytes@1");
 
@@ -104,8 +99,8 @@ describe("RealmCodecEngine", () => {
     });
 
     it("encodes a `FabricEpochNsec` to a `bigint`", () => {
-      const payload = payloadOf(
-        realmFromFabricValue(new FabricEpochNsec(1234567890123456789n)),
+      const payload = realmFromFabricValue(
+        new FabricEpochNsec(1234567890123456789n),
       );
 
       expect((payload as RealmTaggedValue).get("EpochNsec@1")).toBe(
@@ -115,7 +110,7 @@ describe("RealmCodecEngine", () => {
 
     it("does not hand out the bytes an encoded `FabricBytes` holds", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      const state = (payloadOf(realmFromFabricValue(bytes)) as RealmTaggedValue)
+      const state = ((realmFromFabricValue(bytes)) as RealmTaggedValue)
         .get("Bytes@1") as Uint8Array;
 
       state[0] = 99;
@@ -142,16 +137,32 @@ describe("RealmCodecEngine", () => {
   });
 
   describe("decode()", () => {
-    it("throws given a value carrying no envelope", () => {
-      expect(() => fabricFromRealmValue({ a: 1 })).toThrow(
-        /Not a realm-encoded/,
+    it("returns a plain payload as it stands", () => {
+      // With no envelope to strip, an ordinary value decodes to itself.
+      expect(fabricFromRealmValue({ a: 1 })).toEqual({ a: 1 });
+    });
+
+    it("refuses a form this format never emits", () => {
+      // Cloning carries a `Date`; this format has no codec that produces one,
+      // so it can only have come from something other than an `encode()`.
+      expect(() => fabricFromRealmValue(new Date() as never)).toThrow(
+        /not a form this format emits/,
       );
     });
 
-    it("throws given an envelope whose tag is not this format's", () => {
-      expect(() => fabricFromRealmValue(new Map([["nope", 1]]))).toThrow(
-        /Not a realm-encoded/,
-      );
+    it("refuses a multi-entry `Map`, the tagged form being single-entry", () => {
+      expect(() => fabricFromRealmValue(new Map([["a", 1], ["b", 2]]) as never))
+        .toThrow(/not a form this format emits/);
+    });
+
+    it("wraps an unclaimed tag in an `UnknownValue` rather than refusing", () => {
+      // A single-entry `Map` IS the tagged form, so this is a well-formed
+      // value carrying a tag no codec claims -- a different thing from a
+      // malformation.
+      const decoded = fabricFromRealmValue(new Map([["nope@1", 1]]));
+
+      expect(decoded).toBeInstanceOf(UnknownValue);
+      expect((decoded as UnknownValue).wireTypeTag).toBe("nope@1");
     });
   });
 

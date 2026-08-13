@@ -1,7 +1,4 @@
-export { seemsLikeRealmEncodedFabricValue } from "./impl.ts";
-
 export {
-  ENCODING_FORMAT_TAG,
   REALM_FORMAT,
   type RealmCodecValue,
   type RealmTaggedValue,
