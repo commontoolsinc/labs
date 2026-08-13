@@ -16,11 +16,9 @@ import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   type HarnessGatewayAuthMode,
-  type HarnessHandleMode,
   type HarnessModelProviderId,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
-  parseHarnessHandleMode,
 } from "./config.ts";
 import {
   createHarnessImageAttachment,
@@ -157,7 +155,6 @@ const CLI_STRING_FLAGS = [
   "cfc-enforcement-mode",
   "cfc-result-dir",
   "cfc-invocation-context-dir",
-  "handle-mode",
   "sandbox-image",
   "sandbox-docker-runtime",
   "max-model-turns",
@@ -223,7 +220,6 @@ export interface CfHarnessCliConfig {
   cfcEnforcementModeOverride?: CfcEnforcementMode;
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
-  handleMode?: HarnessHandleMode;
   browserAccess?: HarnessBrowserAccessLease;
   maxModelTurns: number;
   printTranscript: boolean;
@@ -276,7 +272,6 @@ export interface CfHarnessCliCapabilities {
     promptCacheControls: true;
     reasoningEffort: true;
     compactThreshold: true;
-    handleMode: true;
   };
 }
 
@@ -442,7 +437,6 @@ Options:
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --cfc-result-dir <path>       Host dir where runsc writes the CFC result sidecar (required for enforce-* modes)
   --cfc-invocation-context-dir <path> Host dir where the harness writes the CFC invocation-context sidecar (required for enforce-* modes)
-  --handle-mode <mode>          disabled | session — session-local address handle table (default: disabled)
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --sandbox-docker-runtime <n>  Docker runtime for the sandbox (default: runsc-cfc)
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
@@ -464,7 +458,6 @@ Environment:
   CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
-  CF_HARNESS_HANDLE_MODE        Default value for --handle-mode
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
@@ -557,7 +550,6 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     promptCacheControls: true,
     reasoningEffort: true,
     compactThreshold: true,
-    handleMode: true,
   },
 });
 
@@ -1309,7 +1301,6 @@ export const parseCfHarnessCliArgs = async (
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
       ),
       CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
-      CF_HARNESS_HANDLE_MODE: Deno.env.get("CF_HARNESS_HANDLE_MODE"),
       CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
       CF_HARNESS_SANDBOX_DOCKER_RUNTIME: Deno.env.get(
         "CF_HARNESS_SANDBOX_DOCKER_RUNTIME",
@@ -1452,19 +1443,6 @@ export const parseCfHarnessCliArgs = async (
       "cfc enforcement mode must be one of disabled, observe, enforce-explicit, enforce-strict",
     );
   }
-  const explicitHandleMode = typeof args["handle-mode"] === "string"
-    ? args["handle-mode"]
-    : undefined;
-  const envHandleMode = nonEmptyEnvValue(env.CF_HARNESS_HANDLE_MODE);
-  const handleMode = parseHarnessHandleMode(
-    explicitHandleMode ?? envHandleMode,
-  );
-  if (
-    (explicitHandleMode !== undefined || envHandleMode !== undefined) &&
-    handleMode === undefined
-  ) {
-    throw new Error("handle mode must be one of disabled, session");
-  }
   const cfcResultDir = resolveOptionalCfcDir(
     args["cfc-result-dir"],
     nonEmptyEnvValue(env[CFC_RESULT_DIR_ENV]),
@@ -1537,7 +1515,6 @@ export const parseCfHarnessCliArgs = async (
     ...(cfcInvocationContextDir !== undefined
       ? { cfcInvocationContextDir }
       : {}),
-    ...(handleMode !== undefined ? { handleMode } : {}),
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
@@ -2540,9 +2517,6 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        ...(parsed.handleMode !== undefined
-          ? { handleMode: parsed.handleMode }
-          : {}),
         ...(effectiveRunManifest !== undefined
           ? { runManifest: effectiveRunManifest }
           : {}),
@@ -2696,9 +2670,6 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        ...(parsed.handleMode !== undefined
-          ? { handleMode: parsed.handleMode }
-          : {}),
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }

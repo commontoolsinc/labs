@@ -115,9 +115,9 @@ network confinement model.
 - explicit `openai-codex` subscription provider with browser PKCE and headless
   device login, refresh-token rotation, live model discovery, resume, and
   owner-bound Loom integration
-- an opt-in session-local address handle table (`--handle-mode session`, default
-  `disabled`): deterministic short `cfh:a:` tokens for cell addresses, minted
-  per run, recorded in run state, and carried across `--resume-run`; see
+- a session-local address handle table: deterministic short `cfh:a:` tokens for
+  cell addresses, minted per run, recorded in run state, and carried across
+  `--resume-run`; see
   [Session-local address handles](#session-local-address-handles)
 
 What is not done yet:
@@ -476,12 +476,11 @@ report instead of being denied for missing trusted mediation metadata.
 
 ### Session-local address handles
 
-`--handle-mode session` (or `CF_HARNESS_HANDLE_MODE=session`; default
-`disabled`) gives the run a session-local handle table: short opaque tokens that
-stand in for cell addresses in model-visible text, so a transcript never has to
-carry a full LLM-friendly link. The flag accepts exactly `disabled` and
-`session`, the CLI flag takes precedence over the environment variable, and
-`--describe-capabilities` reports `handleMode` among its features.
+Every run keeps a session-local handle table: short opaque tokens that stand in
+for cell addresses in model-visible text, so a transcript never has to carry a
+full LLM-friendly link. This is how the harness renders references — there is no
+flag or environment variable governing it. Artifacts retain the raw bytes for
+operators, and the table itself is run state.
 
 An address token is `cfh:a:<suffix>`, where the suffix is exactly five
 characters drawn from a 30-character alphabet — the digits `2`–`9` and the
@@ -510,23 +509,19 @@ The table supports swapping in both directions:
 
 The table is per-run state: it is persisted in `run-state.json` alongside the
 transcript and policy evidence, and a resumed run (`--resume-run`) carries its
-table, so tokens stay stable across resume. The selected mode is recorded in the
-run state too: a resume without `--handle-mode` inherits the recorded mode (a
-legacy run state that carries a table but no recorded mode counts as `session`),
-and an explicit `--handle-mode` that conflicts with the recorded mode is refused
-rather than silently downgrading the run.
+table, so tokens stay stable across resume.
 
-In `session` mode the prompt/tool loop applies the swaps at three seams.
-Successful tool output bound for model context carries tokens, while the
-persisted tool-output artifact keeps the raw addresses. Model-authored tool
-arguments resolve tokens back to canonical references before policy evaluation,
-summarization, and dispatch — except for `delegate_task`, whose arguments reach
-the child verbatim, so a token there is inert text. And a sealed subagent
-structured-return string whose raw value names an address comes back as a token
-rather than an opaque `@link` object; the return's `linkedStringCount` counts
-only the positions still sealed. Denial-path tool messages are not swapped; that
-coverage, cross-agent handle semantics, value handles, and an explicit
-release/readback mechanism are listed in [docs/ROADMAP.md](docs/ROADMAP.md).
+The prompt/tool loop applies the swaps at three seams. Successful tool output
+bound for model context carries tokens, while the persisted tool-output artifact
+keeps the raw addresses. Model-authored tool arguments resolve tokens back to
+canonical references before policy evaluation, summarization, and dispatch —
+except for `delegate_task`, whose arguments reach the child verbatim, so a token
+there is inert text. And a sealed subagent structured-return string whose raw
+value names an address comes back as a token rather than an opaque `@link`
+object; the return's `linkedStringCount` counts only the positions still sealed.
+Denial-path tool messages are not swapped; that coverage, cross-agent handle
+semantics, value handles, and an explicit release/readback mechanism are listed
+in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Interactive chat stdio transport:
 

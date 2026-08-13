@@ -313,78 +313,6 @@ Deno.test("parseCfHarnessCliArgs accepts CFC mode from environment", async () =>
   assertEquals(parsed.cfcEnforcementModeOverride, "enforce-strict");
 });
 
-Deno.test("parseCfHarnessCliArgs parses --handle-mode and defaults it to absent", async () => {
-  const parsed = await parseCfHarnessCliArgs(
-    ["--prompt", "hi", "--handle-mode", "session"],
-    {
-      cwd: "/tmp/project",
-      env: {},
-    },
-  );
-
-  if ("help" in parsed) {
-    throw new Error("expected config result");
-  }
-  assertEquals(parsed.handleMode, "session");
-
-  const unset = await parseCfHarnessCliArgs(
-    ["--prompt", "hi"],
-    {
-      cwd: "/tmp/project",
-      env: {},
-    },
-  );
-  if ("help" in unset) {
-    throw new Error("expected config result");
-  }
-  assertEquals(unset.handleMode, undefined);
-});
-
-Deno.test("parseCfHarnessCliArgs rejects unknown handle modes", async () => {
-  await assertRejects(
-    () =>
-      parseCfHarnessCliArgs(
-        ["--prompt", "hi", "--handle-mode", "always"],
-        {
-          cwd: "/tmp/project",
-          env: {},
-        },
-      ),
-    Error,
-    "handle mode must be one of disabled, session",
-  );
-});
-
-Deno.test("parseCfHarnessCliArgs accepts handle mode from environment", async () => {
-  const parsed = await parseCfHarnessCliArgs(
-    ["--prompt", "hi"],
-    {
-      cwd: "/tmp/project",
-      env: { CF_HARNESS_HANDLE_MODE: "session" },
-    },
-  );
-
-  if ("help" in parsed) {
-    throw new Error("expected config result");
-  }
-  assertEquals(parsed.handleMode, "session");
-});
-
-Deno.test("parseCfHarnessCliArgs rejects a bare --handle-mode with no value", async () => {
-  await assertRejects(
-    () =>
-      parseCfHarnessCliArgs(
-        ["--prompt", "hi", "--handle-mode"],
-        {
-          cwd: "/tmp/project",
-          env: {},
-        },
-      ),
-    Error,
-    "handle mode must be one of disabled, session",
-  );
-});
-
 Deno.test("parseCfHarnessCliArgs resolves run manifest paths", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi", "--run-manifest", "loom-run.json"],
@@ -1975,38 +1903,6 @@ Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async (
   assertEquals(createdOptions?.compactThreshold, 12_000);
 });
 
-Deno.test("runCfHarnessCli forwards --handle-mode to a fresh run's engine", async () => {
-  const { io } = createIoBuffers();
-  let createdEngine: CfHarnessEngine | undefined;
-  const exitCode = await runCfHarnessCli(
-    [
-      "--workspace",
-      "/tmp/project",
-      "--prompt",
-      "Inspect the workspace",
-      "--model",
-      "gpt-5.4",
-      "--handle-mode",
-      "session",
-    ],
-    {
-      io,
-      env: { CF_HARNESS_API_KEY: "test-key" },
-      createPromptLoop: (options) => {
-        createdEngine = (options as { engine?: CfHarnessEngine }).engine;
-        return {
-          runPrompt: () => Promise.resolve(completedCliResult("run-handles")),
-          runTranscript: () =>
-            Promise.reject(new Error("unexpected resume path")),
-        };
-      },
-    },
-  );
-
-  assertEquals(exitCode, 0);
-  assertEquals(createdEngine?.getRunState().handleMode, "session");
-});
-
 Deno.test("runCfHarnessCli reads CF_HARNESS_COMPACT_THRESHOLD from the process environment", async () => {
   // Every other CLI test injects `env`, which bypasses the default projection
   // built from `Deno.env.get` — exactly where this variable was missing:
@@ -3546,7 +3442,6 @@ const resumeHandleRunState = (
   transcriptPath: "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
   policyEvents: [],
   toolOutputs: [],
-  handleMode: "session",
   handleTable: {
     type: "cf-harness.handle-table",
     version: 1,
@@ -3580,7 +3475,7 @@ const resumeHandleRunArtifacts = (
   );
 };
 
-Deno.test("runCfHarnessCli resume without --handle-mode inherits the recorded session mode", async () => {
+Deno.test("runCfHarnessCli resume rehydrates the recorded handle table", async () => {
   const { io, stderr } = createIoBuffers();
   let createdOptions: Record<string, unknown> | undefined;
   const exitCode = await runCfHarnessCli(
@@ -3619,75 +3514,7 @@ Deno.test("runCfHarnessCli resume without --handle-mode inherits the recorded se
   assertEquals(exitCode, 0);
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine;
-  assertEquals(engine.config.handleMode, "session");
-});
-
-Deno.test("runCfHarnessCli resume infers session mode from a legacy run state that has only a handle table", async () => {
-  const { io, stderr } = createIoBuffers();
-  let createdOptions: Record<string, unknown> | undefined;
-  const exitCode = await runCfHarnessCli(
-    [
-      "--resume-run",
-      "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
-    ],
-    {
-      io,
-      env: { CF_HARNESS_API_KEY: "test-key" },
-      readRunArtifacts: resumeHandleRunArtifacts({ handleMode: undefined }),
-      createPromptLoop: (options) => {
-        createdOptions = options as unknown as Record<string, unknown>;
-        return {
-          runPrompt: () => Promise.reject(new Error("unexpected prompt path")),
-          runTranscript: () =>
-            Promise.resolve(
-              {
-                model: "gpt-5.4",
-                finalAssistantText: "Resumed.",
-                transcript: [
-                  { role: "user", content: "Continue." },
-                  { role: "assistant", content: "Resumed." },
-                ],
-                modelTurns: 1,
-                runState: resumeHandleRunState({
-                  status: "completed",
-                }) as unknown as HarnessPromptLoopResult["runState"],
-              } satisfies HarnessPromptLoopResult,
-            ),
-        };
-      },
-    },
-  );
-
-  assertEquals(exitCode, 0);
-  assertEquals(stderr, []);
-  const engine = createdOptions?.engine as CfHarnessEngine;
-  assertEquals(engine.config.handleMode, "session");
-});
-
-Deno.test("runCfHarnessCli resume rejects an explicit --handle-mode that conflicts with the recorded mode", async () => {
-  const { io, stdout, stderr } = createIoBuffers();
-  const exitCode = await runCfHarnessCli(
-    [
-      "--resume-run",
-      "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
-      "--handle-mode",
-      "disabled",
-    ],
-    {
-      io,
-      env: { CF_HARNESS_API_KEY: "test-key" },
-      readRunArtifacts: resumeHandleRunArtifacts(),
-      createPromptLoop: () => {
-        throw new Error("prompt loop must not be created");
-      },
-    },
-  );
-
-  assertEquals(exitCode, 1);
-  assertEquals(stdout, []);
-  assertEquals(stderr, [
-    "resumed run handle mode session does not match requested handle mode disabled\n",
-  ]);
+  assertEquals(engine.handleTable?.entries[0]?.token, "cfh:a:22222");
 });
 
 Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {

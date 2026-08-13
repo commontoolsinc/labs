@@ -31,7 +31,6 @@ import type {
 } from "./diagnostics.ts";
 import { selectPrimaryHarnessFailure } from "./diagnostics.ts";
 import type {
-  HarnessHandleMode,
   HarnessModelAuthSource,
   HarnessModelProviderId,
 } from "./config.ts";
@@ -85,12 +84,6 @@ export interface HarnessRunState {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
-  /**
-   * The handle mode the run was created with, recorded so a resume inherits
-   * it instead of downgrading to the default. Absent on runs created in
-   * `disabled` mode.
-   */
-  handleMode?: HarnessHandleMode;
   handleTable?: HarnessHandleTable;
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
@@ -134,7 +127,6 @@ export interface CreateHarnessRunStateOptions {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
-  handleMode?: HarnessHandleMode;
   handleTable?: HarnessHandleTable;
   policyDecisions?: HarnessPolicyDecisionRecord[];
   lineage?: HarnessSubagentLineage;
@@ -232,9 +224,6 @@ export const createHarnessRunState = (
       : {}),
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
-      : {}),
-    ...(options.handleMode !== undefined
-      ? { handleMode: options.handleMode }
       : {}),
     ...(options.handleTable !== undefined
       ? { handleTable: structuredClone(options.handleTable) }

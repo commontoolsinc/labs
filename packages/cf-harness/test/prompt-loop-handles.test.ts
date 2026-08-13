@@ -2,8 +2,7 @@
  * Wiring of the session-local handle table into the prompt loop: address
  * occurrences in model-bound tool output become tokens, tokens in model-
  * written tool input resolve back to addresses, and sealed structured-return
- * strings that name addresses come back as tokens. Everything here is gated
- * on `handleMode: "session"`; the disabled default leaves the loop untouched.
+ * strings that name addresses come back as tokens.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -204,7 +203,6 @@ describe("prompt-loop address handles", () => {
         runId,
         model: "gpt-5.4",
         cfcEnforcementMode: "disabled",
-        handleMode: "session",
       }),
       fetchFn: scriptedFetch([
         bashCallTurn("call-1", "cat refs.txt"),
@@ -246,7 +244,6 @@ describe("prompt-loop address handles", () => {
         runId,
         model: "gpt-5.4",
         cfcEnforcementMode: "disabled",
-        handleMode: "session",
       }),
       fetchFn: scriptedFetch([
         bashCallTurn("call-1", "cat a.txt"),
@@ -282,7 +279,6 @@ describe("prompt-loop address handles", () => {
         runId,
         model: "gpt-5.4",
         cfcEnforcementMode: "disabled",
-        handleMode: "session",
       }),
       fetchFn: scriptedFetch([
         bashCallTurn("call-1", "cat a.txt"),
@@ -317,7 +313,6 @@ describe("prompt-loop address handles", () => {
       runId,
       model: "gpt-5.4",
       cfcEnforcementMode: "disabled",
-      handleMode: "session",
     });
     await engine.recordHandleTable(minted.table);
     const requestBodies: Array<{
@@ -375,7 +370,6 @@ describe("prompt-loop address handles", () => {
       runId,
       model: "gpt-5.4",
       cfcEnforcementMode: "disabled",
-      handleMode: "session",
     });
     await engine.recordHandleTable(minted.table);
     const loop = new CfHarnessPromptLoop({
@@ -445,7 +439,6 @@ describe("prompt-loop address handles", () => {
         runId,
         model: "gpt-5.4",
         cfcEnforcementMode: "disabled",
-        handleMode: "session",
       }),
       fetchFn: scriptedFetch([
         {
@@ -534,7 +527,6 @@ describe("prompt-loop address handles", () => {
         runId,
         model: "gpt-5.4",
         cfcEnforcementMode: "disabled",
-        handleMode: "session",
       }),
       fetchFn: scriptedFetch([
         {
@@ -618,7 +610,6 @@ describe("prompt-loop address handles", () => {
         runId,
         model: "gpt-5.4",
         cfcEnforcementMode: "disabled",
-        handleMode: "session",
       }),
       fetchFn: scriptedFetch([
         {
@@ -679,7 +670,6 @@ describe("prompt-loop address handles", () => {
         runId,
         model: "gpt-5.4",
         cfcEnforcementMode: "disabled",
-        handleMode: "session",
       }),
       fetchFn: scriptedFetch([
         bashCallTurn("call-1", "cat a.txt"),
@@ -693,8 +683,6 @@ describe("prompt-loop address handles", () => {
       { stdout: `again ${URI_A}`, stderr: "", exitCode: 0 },
       { stdout: "ok", stderr: "", exitCode: 0 },
     ]);
-    // No explicit handleMode here: the resumed engine inherits the recorded
-    // session mode from the run state.
     const resumedLoop = new CfHarnessPromptLoop({
       apiKey: "test-key",
       engine: new CfHarnessEngine({
@@ -733,31 +721,6 @@ describe("prompt-loop address handles", () => {
     expect(dispatched?.command).not.toContain(minted.token);
   });
 
-  it("leaves an address untouched and records no table when `handleMode` is unset", async () => {
-    const loop = new CfHarnessPromptLoop({
-      apiKey: "test-key",
-      engine: new CfHarnessEngine({
-        sandboxRuntime: new FakeSandboxRuntime([
-          { stdout: `see ${URI_A}`, stderr: "", exitCode: 0 },
-        ]),
-        runId: "run-handles-disabled",
-        model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
-      }),
-      fetchFn: scriptedFetch([
-        bashCallTurn("call-1", "cat a.txt"),
-        finalTurn("Done."),
-      ]),
-    });
-
-    const result = await loop.runPrompt({ prompt: "Read the ref." });
-
-    const toolContent = lastToolMessageContent(result.transcript);
-    expect(toolContent).toContain(URI_A);
-    expect(toolContent).not.toContain("cfh:a:");
-    expect(result.runState.handleTable).toBe(undefined);
-  });
-
   it("passes a token abutting alphabet characters through inbound substitution untouched", async () => {
     const runId = "run-handles-adjacency";
     const minted = await mintAddressHandle(
@@ -769,7 +732,6 @@ describe("prompt-loop address handles", () => {
       runId,
       model: "gpt-5.4",
       cfcEnforcementMode: "disabled",
-      handleMode: "session",
     });
     await engine.recordHandleTable(minted.table);
     const sandbox = engine.sandbox as FakeSandboxRuntime;

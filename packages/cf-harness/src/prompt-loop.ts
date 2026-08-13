@@ -2227,8 +2227,7 @@ export class CfHarnessPromptLoop {
 
   /**
    * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
-   * tool input with their canonical address strings. Applies only in
-   * `session` handle mode with a recorded table, and never to
+   * tool input with their canonical address strings. Never applies to
    * `delegate_task`, whose input reaches the child as the model wrote it.
    * Returns `input` itself when no substitution applies.
    */
@@ -2236,10 +2235,7 @@ export class CfHarnessPromptLoop {
     toolId: string,
     input: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (
-      this.engine.config.handleMode !== "session" ||
-      toolId === "delegate_task"
-    ) {
+    if (toolId === "delegate_task") {
       return input;
     }
     const table = this.engine.handleTable;
@@ -2252,12 +2248,8 @@ export class CfHarnessPromptLoop {
   /**
    * Helper for `#invokeToolCall()`, which applies the outbound handle swap
    * to a model-bound value, recording the table when minting extended it.
-   * Returns `value` itself outside `session` handle mode.
    */
   async #swapModelBoundValue(value: unknown): Promise<unknown> {
-    if (this.engine.config.handleMode !== "session") {
-      return value;
-    }
     const table = this.engine.handleTable ??
       createHarnessHandleTable(this.engine.getRunState().runId);
     const swapped = await swapLinksForTokens(table, value);
@@ -3087,16 +3079,14 @@ export class CfHarnessPromptLoop {
         delegateInput.returnSchema !== undefined &&
         subagentStatus === "completed"
       ) {
-        const handleTable = this.engine.config.handleMode === "session"
-          ? this.engine.handleTable ??
-            createHarnessHandleTable(parentRunState.runId)
-          : undefined;
+        const handleTable = this.engine.handleTable ??
+          createHarnessHandleTable(parentRunState.runId);
         const structured = await createStructuredSubagentReturn({
           childEngine,
           childRunId,
           rawFinalAssistantText: childResult.finalAssistantText,
           schema: delegateInput.returnSchema,
-          ...(handleTable !== undefined ? { handleTable } : {}),
+          handleTable,
         });
         summary = structured.summary;
         structuredReturn = structured.structuredReturn;

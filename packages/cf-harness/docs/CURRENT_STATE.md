@@ -55,12 +55,11 @@ The current package provides:
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;
-- an opt-in session-local address handle table (`--handle-mode session` or
-  `CF_HARNESS_HANDLE_MODE=session`, default `disabled`): deterministic `cfh:a:`
-  tokens minted per run for cell addresses, recorded in `run-state.json`, and
-  carried across resume; the prompt loop swaps addresses to tokens in
-  model-bound tool output and resolves tokens in model-authored tool arguments
-  before policy evaluation and dispatch, `delegate_task` arguments excepted.
+- a session-local address handle table: deterministic `cfh:a:` tokens minted per
+  run for cell addresses, recorded in `run-state.json`, and carried across
+  resume; the prompt loop swaps addresses to tokens in model-bound tool output
+  and resolves tokens in model-authored tool arguments before policy evaluation
+  and dispatch, `delegate_task` arguments excepted.
 
 Run the capability probe instead of copying this list into adapters:
 
@@ -110,9 +109,9 @@ mode.
 - Resume is transcript-oriented and does not recover an arbitrary partially
   executed tool or orchestration state machine.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
-  sanitized, and in `session` handle mode the prompt loop swaps model-bound tool
-  output and model-authored tool arguments through the address handle table;
-  denial-path tool messages are not swapped.
+  sanitized, and the prompt loop swaps model-bound tool output and
+  model-authored tool arguments through the address handle table; denial-path
+  tool messages are not swapped.
 - The session-local handle table covers cell addresses only. Value handles
   (`cfh:v:`) are reserved in the token grammar but not implemented, and there is
   no explicit dereference/release mechanism.
