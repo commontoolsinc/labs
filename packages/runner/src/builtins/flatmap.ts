@@ -118,9 +118,10 @@ export function flatMap(
   // next reconcile issues them again. See list-element-rollback.ts.
   const containerSetup: SetupRecord = { needsSetup: false };
 
-  // An element's link back to this coordinator's pattern. It is a setup write
-  // like the element's own run: issued when the element is created, and again
-  // when the transaction carrying it did not commit.
+  // An element's link naming the pattern this coordinator runs, written when
+  // the parent carries a pattern to name. It is a setup write like the
+  // element's own run: issued when the element is created, and again when the
+  // transaction carrying it did not commit.
   const linkElementCell = (cell: Cell<any>): void => {
     setPatternCell(cell, parentCell.key("pattern"));
   };

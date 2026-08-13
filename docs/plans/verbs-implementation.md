@@ -361,7 +361,7 @@ its own track.
 | # | Step | Delivers | After | Why here |
 | --- | --- | --- | --- | --- |
 | 1 | The doubly-linked tracker fixture and its walkthrough | **on main** (#5639, #5631) — repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none could be demonstrated until one existed. `verb-session-gaps.sh` is where they are asserted, and several of its assertions expect a gap and fail loudly the day it closes — so a capability arriving announces itself instead of quietly turning a check green. The script states its own count; repeating it here only creates a second place to be wrong |
-| 2 | A projected read survives a handler | #5633 — **handed off, owned by the runner** | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
+| 2 | A projected read survives a handler | #5633 — **in review** (#5764) | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
 | 3 | Listing rows carry a handler's declared result | **on main** (#5629) — item 10, #5619 | — | The consumer half of item 1 |
 | 4 | The forced-stream fallback stops inventing verbs | **on main** (#5683) — #5576, #5662 | 3 | Same file as step 3, which has landed, so this is the front of the queue. It narrows the listing, so sweep the open branches for writers first |
 | 5 | The help page stops claiming a verb returns nothing | **on main** (#5680) — #5558, first half | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
@@ -540,7 +540,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 
 | Issue | What | Attaches at |
 | --- | --- | --- |
-| #5633 | a projected read fails on the SECOND read of the same source and schema; the handler is a red herring | **owned by the runner** — the container's result link is not re-issued after a stale-basis retry. #5706 is why it reproduces every time |
+| #5633 | a projected read fails on the SECOND read of the same source and schema; the handler is a red herring | **in review** (#5764) — a list coordinator owes the setup writes a lost commit discarded, its result container's links among them. #5706, which is why it reproduces every time, stands |
 | #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | **fixed** by #5683, with #5662 |
 | #5698 | `cf piece verbs` returns nothing for a piece whose declared result type omits its verbs, though they are callable | the other direction of the same surface: 8 verbs invisible to the listing AND to tab-completion |
 | #5706 | a shaped read permanently writes to the user's space — per-element sub-patterns land at space scope | runner-owned, beside #5633 |
