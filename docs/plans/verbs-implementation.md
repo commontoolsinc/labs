@@ -53,7 +53,7 @@ without reconstructing it.
 | 2. an unrecognized projection key is refused | not started; design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
 | 5. `cf wish` and `cf exec` take the read options | not started |
-| 11. a caller may name a reference | not started; sequenced, gated on one measurement |
+| 11. a caller may name a reference | **decided** — the two routes are aliases; documentation in #5754, then #5632 closes |
 
 Item 9 is split because its two halves have different fates: the marks landed,
 the emission is parked.
@@ -434,10 +434,30 @@ its own track.
 | 8 | `receipt` as a top-level envelope field | **on main** (#5694) — item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
 | 9 | A rejection propagates up through what holds it | **on main** (#5701) — item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
 | 10 | Two identical projections stop colliding | **on main** (#5757) — #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
-| 11 | One piece, one address | #5632, #5498 | — | Trace where each id is minted; the outcome is a fix or a statement that they are aliases. Must precede step 13, which spreads the address vocabulary to two more commands |
+| 11 | One piece, one address | **decided — they are aliases**; the documentation half is #5754 | — | Measured: the two routes differ because one resolves the link chain and the other renders the link as stored. That is the read model working, not a defect, so the outcome is the statement rather than the fix. What remains is a doc correction and closing #5632 — no code changes, and step 13 is not gated on it |
 | 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](projection-key-classification.md) |
 | 12a | `cf` refuses an undeclared field on a call | item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says |
 | 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving |
+
+**`--show-links` is not redundant, and nothing should schedule its removal
+yet.** [Verb result selection](verb-result-selection.md) prices it as a stopgap
+that in-band rendering makes unnecessary. That is right about *addressing* — a
+caller wanting something to compose with reaches for a marker, which is the
+shorter road — and wrong about the job the flag has since acquired.
+
+A marker renders the link **as stored**; `--show-links` **resolves** the chain.
+`renderedLinkAddress` reshapes the link it is handed and follows nothing, so no
+in-band spelling can produce a resolved address at any position. That makes
+`--show-links` the only way to resolve a whole result in one pass, and an
+in-band address cannot replace what it does not do.
+
+Whether a caller should ever need this is settled — addresses are many-to-one
+and comparing them is not a supported question, so `cf piece inspect` covers
+the occasional single case. What is *not* settled is whether that stays true,
+and retiring the only bulk route while the question is open buys nothing and
+costs the capability. Keep it. Retire it when a replacement exists or the need
+is confirmed dead, and note that `cf piece get` has never had an equivalent —
+so bulk resolution on a *read* is a gap that predates all of this.
 
 **Running beside all of the above.** A caller naming a reference (item 11, #5560) waits on confirming
 that a sigil resolves through a *declared* event field rather than an untyped
@@ -612,7 +632,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5637 | an author's prose does not reach a caller: on a verb, on an event field, and on the event interface | step 5a — it absorbed #5559, which described one symptom and had its cause backwards |
 | #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | **fixed** by #5740 |
 | #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | **fixed** by #5757 |
-| #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 |
+| #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 — **working as designed**; closes once #5754 lands the documentation |
 | #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | step 11, if it proves to be the same root |
 | #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
 | #5560 | an address a call returns cannot be passed back as a verb argument | item 11 |

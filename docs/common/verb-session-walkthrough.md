@@ -340,9 +340,13 @@ of the item's contents.
 
 `--show-links` is the **[today]** spelling of the same move: it returns a
 dictionary of RFC 6901 pointers naming the document behind each result path, so
-the address is one `jq` hop further away but reachable. It exists to annotate
-identity back onto a payload that had destroyed it, so a rendered in-band
-address is the direction of travel and this flag is the stopgap.
+the address is one `jq` hop further away but reachable.
+
+It differs from a marker in one way that matters: it **resolves**. A marker
+renders the link as stored; `--show-links` follows the chain and names the
+document at the end of it. For getting an address to compose with, the two are
+interchangeable and an in-band marker is the shorter road. For asking which
+document a path really lands in, only the resolving one answers.
 
 **An address is not an identifier to compare.** Addresses are many-to-one over
 cells, and a holder of one cannot tell a canonical id from an alias. Two
