@@ -33,6 +33,7 @@ import {
   type EntityId,
   getServerExecutionConfig,
   isEntityDocument,
+  isScopeKey,
   type Operation,
   type PatchOp,
   ProtocolError,
@@ -1592,6 +1593,30 @@ export const applyWaveCommit = (
   return engine.database.transaction(
     (txEngine: Engine, txOptions: typeof options) => {
       const { waveBasis, basisInstances, ...applyOptions } = txOptions;
+      // Basis rows are ADDRESSING (recovery's re-mark scan matches
+      // storage rows against these instance values), so their keys meet
+      // the same admission bar as annotated scope keys: a non-canonical
+      // key would store rows no canonical key ever matches — a silent
+      // liveness hole rather than a loud one. Refused up front, before
+      // any head query runs.
+      for (const instance of basisInstances ?? []) {
+        if (!isScopeKey(instance.actionScopeKey)) {
+          throw new ProtocolError(
+            `wave commit rejected: basis action instance key ` +
+              `"${instance.actionScopeKey}" is not a canonical scope_key ` +
+              "(key-vocabulary.md §3)",
+          );
+        }
+        for (const row of instance.rows) {
+          if (!isScopeKey(row.entityScopeKey)) {
+            throw new ProtocolError(
+              `wave commit rejected: basis row entity instance key ` +
+                `"${row.entityScopeKey}" is not a canonical scope_key ` +
+                "(key-vocabulary.md §3)",
+            );
+          }
+        }
+      }
       const rebasedHeads = new Map(
         waveBasis.rebasedHeads.map(({ doc, head }) => [doc, head]),
       );
@@ -1793,6 +1818,18 @@ const applyCommitTransaction = (
           `derived-class commit rejected: scoped write (op ${opIndex}, ` +
             `scope "${declared}") carries no explicit scope_key ` +
             "annotation (protocol.md §1)",
+        );
+      }
+      // The annotated key becomes the row's key VERBATIM (writeOperation's
+      // scopeKeyOverride below), so admission requires the canonical
+      // grammar, not just the scope prefix: a raw delimiter or malformed
+      // escape here would store a row that corrupts delimited composite
+      // addressing or throws when a serving surface percent-decodes it.
+      if (!isScopeKey(annotated)) {
+        throw new ProtocolError(
+          `derived-class commit rejected: annotated scope_key ` +
+            `"${annotated}" (op ${opIndex}) is not a canonical scope_key ` +
+            "(key-vocabulary.md §3)",
         );
       }
       if (scopeOfScopeKey(annotated) !== declared) {

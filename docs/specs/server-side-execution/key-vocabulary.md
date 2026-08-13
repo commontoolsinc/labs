@@ -17,18 +17,28 @@ deliberately: §5 is their inventory, each with a disposition. This
 page is the inventory both lists are held to — §4's tripwires police
 it.
 
-## Anchors (re-verified at the stage-E review fix batch, 2026-08-05)
+## Anchors (re-verified at the stage-E review fix batch, 2026-08-12)
 
 Paths are relative to `packages/runner/src/` unless another package
 is named. The `scope_key` vocabulary lives in the wire-shape module
 (LD3, §3): `resolveScopeKey` plus the parse/inspect helpers
-(`packages/memory/v2.ts:35-196`, beside `CellScope` at `v2.ts:26`),
+(`packages/memory/v2.ts:39-232`, beside `CellScope` at `v2.ts:23`),
 producing `space`, `user:<principal>`,
 `session:<principal>:<sessionId>` (components
-encodeURIComponent-encoded, so `:` splits segments exactly); storage
-rows are keyed `(branch, id, scope_key)`
-(`packages/memory/v2/engine.ts:160`, `:177`), constructed at
-admission through the same shared definition (`engine.ts:2031-2032`).
+encodeURIComponent-encoded, so `:` splits segments exactly). The
+shared validator `isScopeKey` accepts exactly the constructor's
+image: every segment must be the CANONICAL encoding — no raw `/` or
+`:` inside a segment, no malformed or non-canonical percent escape —
+and malformed input refuses (false), never throws. Admission gates
+on it wherever an explicit key ARRIVES rather than being constructed
+(the derived-commit annotation check, `engine.ts:1828-1834`, and the
+wave basis-instance check, `engine.ts:1596-1619`), so a
+non-canonical key is refused at the door instead of keying a storage
+row that later corrupts `/`-delimited composite addressing or throws
+when a serving surface percent-decodes it. Storage rows are keyed
+`(branch, id, scope_key)` (`packages/memory/v2/engine.ts:162`,
+`:179`), constructed at admission through the same shared definition
+(`engine.ts:2069-2070`).
 
 ## 1. The nine sites
 
@@ -88,16 +98,16 @@ not coin flip:
   `packages/memory/v2.ts`, where `CellScope`, `SessionId`, and the
   other protocol types already live (`v2.ts:22-26`) — as ONE
   exported constructor `(scope, identity) → scope_key`
-  (`v2.ts:120-147`) plus the parse/inspect helpers, which
+  (`v2.ts:141-168`) plus the parse/inspect helpers, which
   `engine.ts` imports in place of private definitions
-  (`engine.ts:55-59` — it re-exports the same objects, so
+  (`engine.ts:57-61` — it re-exports the same objects, so
   `Engine.resolveScopeKey` IS the shared one, never a twin).
 - **What stays engine-owned is IDENTITY DERIVATION, not the
   format.** For `authored` traffic the memory server still derives
   the identity from the authenticated session at admission —
   `applyCommit` threads `session.principal` + `message.sessionId`
-  (`packages/memory/v2/server.ts:2060-2063`) into the engine's
-  write path, which constructs the key (`engine.ts:2031-2032`) —
+  (`packages/memory/v2/server.ts:2142-2152`) into the engine's
+  write path, which constructs the key (`engine.ts:2069-2070`) —
   via the shared definition. Clients never name keys — their
   identity rides the session, established at session open, never
   the commit (protocol.md §1) — so the derivation step is admission
