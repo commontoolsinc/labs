@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { detectCallKind } from "../ast/mod.ts";
+import { detectCallKind, getTypeFromTypeNodeWithFallback } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
 /**
@@ -51,22 +51,18 @@ function namedSymbolForTypeNode(
   checker: ts.TypeChecker,
 ): ts.Symbol | undefined {
   if (!ts.isTypeReferenceNode(node)) return undefined;
-  let type: ts.Type;
-  try {
-    type = checker.getTypeFromTypeNode(node);
-  } catch {
-    return undefined;
-  }
-  return namedSymbolForType(type);
+  return namedSymbolForType(getTypeFromTypeNodeWithFallback(node, checker));
 }
 
 function namedSymbolForType(type: ts.Type): ts.Symbol | undefined {
   const withInternals = type as ts.Type & { aliasSymbol?: ts.Symbol };
   const symbol = withInternals.aliasSymbol ?? type.getSymbol();
-  if (!symbol) return undefined;
-  // Anonymous shapes (inline literals) have no name to hold anyone to.
-  if (symbol.name === "__type" || symbol.name === "__object") return undefined;
-  if (!symbol.declarations || symbol.declarations.length === 0) {
+  // Anonymous shapes (inline literals, `__type`/`__object`) have no name to
+  // hold anyone to, and a symbol without declarations has no tag to read.
+  if (
+    !symbol || symbol.name === "__type" || symbol.name === "__object" ||
+    !symbol.declarations || symbol.declarations.length === 0
+  ) {
     return undefined;
   }
   return symbol;
@@ -78,17 +74,6 @@ function hasSharedContractTag(symbol: ts.Symbol): boolean {
       (tag) => tag.tagName.text === SHARED_CONTRACT_TAG,
     )
   );
-}
-
-/** The Output-position type argument of a pattern factory call. */
-function outputTypeArgument(
-  call: ts.CallExpression,
-): ts.TypeNode | undefined {
-  const typeArgs = call.typeArguments;
-  if (!typeArgs || typeArgs.length === 0) return undefined;
-  // `pattern<Input, Output>` — Output rides second; `pattern<T>` — T serves
-  // both positions.
-  return typeArgs[1] ?? typeArgs[0];
 }
 
 /**
@@ -115,10 +100,10 @@ function outputSymbolIndex(
         if (
           callKind?.kind === "builder" && callKind.builderName === "pattern"
         ) {
-          const outputNode = outputTypeArgument(node);
-          const symbol = outputNode
-            ? namedSymbolForTypeNode(outputNode, checker)
-            : undefined;
+          // `pattern<Input, Output>` — Output rides second; `pattern<T>` —
+          // T serves both positions. The guard above proves one exists.
+          const outputNode = node.typeArguments[1] ?? node.typeArguments[0]!;
+          const symbol = namedSymbolForTypeNode(outputNode, checker);
           if (symbol && !hasSharedContractTag(symbol)) {
             index.set(symbol, {
               typeName: symbol.name,
@@ -194,13 +179,7 @@ function collectEmbeddingHits(
 
     if ((type.flags & ts.TypeFlags.Object) !== 0) {
       for (const property of checker.getPropertiesOfType(type)) {
-        let propertyType: ts.Type;
-        try {
-          propertyType = checker.getTypeOfSymbolAtLocation(property, location);
-        } catch {
-          continue;
-        }
-        visit(propertyType, depth + 1);
+        visit(checker.getTypeOfSymbolAtLocation(property, location), depth + 1);
       }
     }
   };
@@ -211,11 +190,10 @@ function collectEmbeddingHits(
 
 /** Best-effort syntactic anchor: the reference node that names the symbol. */
 function referenceNodeForSymbol(
-  typeNode: ts.TypeNode | undefined,
+  typeNode: ts.TypeNode,
   symbol: ts.Symbol,
   checker: ts.TypeChecker,
 ): ts.Node | undefined {
-  if (!typeNode) return undefined;
   let found: ts.Node | undefined;
   const visit = (node: ts.Node): void => {
     if (found) return;
@@ -236,9 +214,9 @@ export interface ForeignOutputEmbeddingCheckInput {
   readonly context: TransformationContext;
   readonly callNode: ts.CallExpression;
   readonly inputType: ts.Type | undefined;
-  readonly inputTypeNode: ts.TypeNode | undefined;
+  readonly inputTypeNode: ts.TypeNode;
   readonly resultType: ts.Type | undefined;
-  readonly resultTypeNode: ts.TypeNode | undefined;
+  readonly resultTypeNode: ts.TypeNode;
 }
 
 /**
@@ -263,22 +241,15 @@ export function checkForeignOutputEmbedding(
   const sides: ReadonlyArray<{
     role: "argument" | "result";
     type: ts.Type | undefined;
-    typeNode: ts.TypeNode | undefined;
+    typeNode: ts.TypeNode;
   }> = [
     { role: "argument", type: input.inputType, typeNode: input.inputTypeNode },
     { role: "result", type: input.resultType, typeNode: input.resultTypeNode },
   ];
 
   for (const side of sides) {
-    let type = side.type;
-    if (!type && side.typeNode) {
-      try {
-        type = checker.getTypeFromTypeNode(side.typeNode);
-      } catch {
-        type = undefined;
-      }
-    }
-    if (!type) continue;
+    const type = side.type ??
+      getTypeFromTypeNodeWithFallback(side.typeNode, checker);
 
     const hits = collectEmbeddingHits(
       type,

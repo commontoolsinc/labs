@@ -104,6 +104,38 @@ Deno.test("Foreign-output embedding check", async (t) => {
   );
 
   await t.step(
+    "stays silent for inline-literal type arguments",
+    async () => {
+      // An anonymous output shape has no name to hold anyone to, so it is
+      // never indexed — and a holder embedding a plain literal is its own.
+      const source = [
+        'import { pattern } from "commonfabric";',
+        "",
+        "export const Note = pattern<{ title?: string }, { title: string }>(",
+        "  ({ title }) => ({ title }),",
+        ");",
+        "",
+        "interface BoardInput {",
+        "  notes?: { title?: string }[];",
+        "}",
+        "",
+        "interface BoardOutput {",
+        "  noteCount: number;",
+        "}",
+        "",
+        "export default pattern<BoardInput, BoardOutput>(() => ({",
+        "  noteCount: 0,",
+        "}));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      assertEquals(embeddingWarnings(diagnostics).length, 0);
+    },
+  );
+
+  await t.step(
     "stays silent for documented self-reference",
     async () => {
       const source = [

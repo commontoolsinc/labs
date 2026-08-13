@@ -151,11 +151,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       return true;
     }
 
-    if (isDemandWrapperName(aliasName)) {
-      return true;
-    }
-
-    if (resolveDemandWrapperNode(context.typeNode)) {
+    if (
+      isDemandWrapperName(aliasName) ||
+      resolveDemandWrapperNode(context.typeNode) !== undefined
+    ) {
       return true;
     }
 
@@ -245,9 +244,7 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     if (isDemandWrapperName(aliasType.aliasSymbol?.name)) {
       const innerType = aliasType.aliasTypeArguments?.[0];
-      if (!innerType) {
-        throw new Error(`Demand<T> requires type argument`);
-      }
+      if (!innerType) throw new Error(`Demand<T> requires type argument`);
       const innerSchema = this.schemaGenerator.formatChildType(
         innerType,
         context,
@@ -540,14 +537,20 @@ export class CommonFabricFormatter implements TypeFormatter {
     return this.applyWrapperSemantics(innerSchema, wrapperKind);
   }
 
-  private formatScopeWrapperTypeFromNode(
+  /**
+   * Inner schema of a single-argument marker wrapper node (`PerUser<T>`,
+   * `Demand<T>`): the registry's resolution when it has one, the checker's
+   * otherwise, degrading to `any` rather than aborting generation when the
+   * checker cannot resolve the node.
+   */
+  private formatMarkerWrapperInner(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
-    scope: SchemaScope,
+    wrapperLabel: string,
   ): MutableJSONSchema {
     const innerTypeNode = typeRefNode.typeArguments?.[0];
     if (!innerTypeNode) {
-      throw new Error(`Scoped wrapper requires type argument`);
+      throw new Error(`${wrapperLabel} requires type argument`);
     }
 
     let innerType: ts.Type;
@@ -558,39 +561,31 @@ export class CommonFabricFormatter implements TypeFormatter {
       innerType = context.typeChecker.getAnyType();
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    return this.schemaGenerator.formatChildType(
       innerType,
       context,
       innerTypeNode,
     );
+  }
 
-    return this.applyScopeWrapperSemantics(innerSchema, scope);
+  private formatScopeWrapperTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+    scope: SchemaScope,
+  ): MutableJSONSchema {
+    return this.applyScopeWrapperSemantics(
+      this.formatMarkerWrapperInner(typeRefNode, context, "Scoped wrapper"),
+      scope,
+    );
   }
 
   private formatDemandWrapperTypeFromNode(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
   ): MutableJSONSchema {
-    const innerTypeNode = typeRefNode.typeArguments?.[0];
-    if (!innerTypeNode) {
-      throw new Error(`Demand<T> requires type argument`);
-    }
-
-    let innerType: ts.Type;
-    try {
-      innerType = context.typeRegistry?.get(innerTypeNode) ??
-        context.typeChecker.getTypeFromTypeNode(innerTypeNode);
-    } catch {
-      innerType = context.typeChecker.getAnyType();
-    }
-
-    const innerSchema = this.schemaGenerator.formatChildType(
-      innerType,
-      context,
-      innerTypeNode,
+    return this.applyDemandWrapperSemantics(
+      this.formatMarkerWrapperInner(typeRefNode, context, "Demand<T>"),
     );
-
-    return this.applyDemandWrapperSemantics(innerSchema);
   }
 
   /**
@@ -602,10 +597,9 @@ export class CommonFabricFormatter implements TypeFormatter {
   private applyDemandWrapperSemantics(
     schema: MutableJSONSchema,
   ): MutableJSONSchema {
-    if (typeof schema === "boolean") {
-      return schema === false ? { not: true, demand: true } : { demand: true };
-    }
-    return { ...schema, demand: true };
+    return typeof schema === "boolean"
+      ? (schema === false ? { not: true, demand: true } : { demand: true })
+      : { ...schema, demand: true };
   }
 
   private applyScopeWrapperSemantics(

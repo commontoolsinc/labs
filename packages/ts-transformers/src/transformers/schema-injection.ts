@@ -2971,6 +2971,7 @@ function handlePatternSchemaInjection(
   }
 
   const originalInputTypeNode = inputTypeNode;
+  const originalInputType = inputType;
   inputTypeNode = applyCapabilitySummaryToArgument(
     builderFunction,
     inputTypeNode,
@@ -3022,13 +3023,14 @@ function handlePatternSchemaInjection(
     typeRegistry.set(resultSchemaCall, resultType);
   }
 
-  // Walk the ORIGINAL argument node: capability shrinking may have replaced
-  // `inputTypeNode` with a synthetic literal (and nulled `inputType`), and
-  // the embedding question is about the contract the author declared.
+  // Walk the ORIGINAL argument node and type: capability shrinking may have
+  // replaced `inputTypeNode` with a synthetic literal (and nulled
+  // `inputType`), and the embedding question is about the contract the
+  // author declared.
   checkForeignOutputEmbedding({
     context,
     callNode: node,
-    inputType,
+    inputType: originalInputType,
     inputTypeNode: originalInputTypeNode,
     resultType,
     resultTypeNode,

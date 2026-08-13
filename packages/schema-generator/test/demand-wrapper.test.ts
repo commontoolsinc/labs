@@ -64,6 +64,35 @@ interface SchemaRoot {
     expect((notes.items as JSONSchemaObj).demand).toBe(true);
   });
 
+  it("survives alias erasure through a generic instantiation", async () => {
+    // `Box<Demand<NotePreview>>`: the property's declared node says `T`, so
+    // the node path cannot see the wrapper — only the resolved type still
+    // carries `aliasSymbol === Demand`. This is the fallback that keeps the
+    // marker from silently vanishing wherever nodes are lost.
+    const schema = await schemaFor(`
+interface NotePreview {
+  title?: string;
+}
+
+interface Box<T> {
+  boxed: T;
+}
+
+interface SchemaRoot {
+  note: Box<Demand<NotePreview>>;
+}
+`);
+    const note = properties(schema).note!;
+    const target = note.$ref
+      ? (schema.$defs as Record<string, JSONSchemaObj>)[
+        (note.$ref as string).replace("#/$defs/", "")
+      ]!
+      : note;
+    expect(
+      (target.properties as Record<string, JSONSchemaObj>).boxed!.demand,
+    ).toBe(true);
+  });
+
   it("treats nested Demand as one demand", async () => {
     const schema = await schemaFor(`
 interface SchemaRoot {
