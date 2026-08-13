@@ -294,23 +294,59 @@ export type CloneForMutationErrorKind =
  * unsuitable for producing a mutable handle. Carries structured fields so
  * the caller can preserve typed error info rather than parsing the
  * message.
- *
- * - `kind` — categorical reason (see {@link CloneForMutationErrorKind}).
- * - `pathIndex` — the path index at which the error occurred, or `-1`
- *   for root-level errors.
- * - `valueKind` — debug-string kind of the offending value (matches
- *   `toDebugKindString()`).
  */
 export class CloneForMutationError extends Error {
-  /** Constructs an instance describing one clone-for-mutation failure. */
+  /** Value for {@link #kind}. */
+  readonly #kind: CloneForMutationErrorKind;
+
+  /** Value for {@link #pathIndex}. */
+  readonly #pathIndex: number;
+
+  /** Value for {@link #valueKind}. */
+  readonly #valueKind: string;
+
+  /**
+   * Constructs an instance describing one clone-for-mutation failure.
+   *
+   * @param kind - Categorical reason.
+   * @param pathIndex - The path index at which the error occurred, or `-1`
+   *   for a root-level error.
+   * @param valueKind - Debug-string kind of the offending value.
+   * @param message - What is wrong.
+   */
   constructor(
-    readonly kind: CloneForMutationErrorKind,
-    readonly pathIndex: number,
-    readonly valueKind: string,
+    kind: CloneForMutationErrorKind,
+    pathIndex: number,
+    valueKind: string,
     message: string,
   ) {
     super(message);
+
     this.name = "CloneForMutationError";
+    this.#kind = kind;
+    this.#pathIndex = pathIndex;
+    this.#valueKind = valueKind;
+  }
+
+  /** Categorical reason. See {@link CloneForMutationErrorKind}. */
+  get kind(): CloneForMutationErrorKind {
+    return this.#kind;
+  }
+
+  /**
+   * The path index at which the error occurred, or `-1` for a root-level
+   * error.
+   */
+  get pathIndex(): number {
+    return this.#pathIndex;
+  }
+
+  /**
+   * Debug-string kind of the offending value, matching
+   * `toDebugKindString()`.
+   */
+  get valueKind(): string {
+    return this.#valueKind;
   }
 }
 
