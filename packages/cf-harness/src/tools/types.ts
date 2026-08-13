@@ -36,6 +36,12 @@ export interface HarnessToolContext {
    * keeps `run_pattern` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
+  /**
+   * The prompt loop's run-level abort signal, when the invocation came
+   * through the loop. The only cancellation source a tool may honor — no
+   * tool-side timeout supplements it. Tools are free to ignore it.
+   */
+  signal?: AbortSignal;
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;

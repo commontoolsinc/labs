@@ -87,7 +87,6 @@ export interface HarnessDelegateTaskToolInputSummary {
 export interface HarnessRunPatternToolInputSummary {
   type: "cf-harness.tool-input-summary";
   toolId: "run_pattern";
-  sourcePath?: string;
   sourceTextBytes?: number;
   sourceTextDigest?: string;
   inputCount?: number;

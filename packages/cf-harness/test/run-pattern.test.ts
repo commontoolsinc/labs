@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -9,9 +8,10 @@ import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
-import type {
-  RunPatternToolErrorOutput,
-  RunPatternToolSuccessOutput,
+import {
+  RUN_PATTERN_MAX_SOURCE_TEXT_BYTES,
+  type RunPatternToolErrorOutput,
+  type RunPatternToolSuccessOutput,
 } from "../src/tools/run-pattern.ts";
 import type {
   SandboxCommandRequest,
@@ -38,6 +38,25 @@ const DOUBLED_RESULT_SCHEMA = {
   properties: { doubled: { type: "number" } },
   required: ["doubled"],
 } as const;
+
+/**
+ * A minimal default-pattern program exposing the piece registry, so the
+ * space has a REAL registry rather than the detached always-empty fallback.
+ */
+const DEFAULT_PATTERN_SOURCE = [
+  "/// <cf-disable-transform />",
+  "import { handler, pattern } from 'commonfabric';",
+  "const addPiece = handler<{ piece: unknown }, { pieceRegistry: unknown[] }>(",
+  "  ({ piece }, { pieceRegistry }) => {",
+  "    pieceRegistry.push(piece);",
+  "  },",
+  "  { proxy: true },",
+  ");",
+  "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
+  "  pieceRegistry,",
+  "  addPiece: addPiece({ pieceRegistry }),",
+  "}));",
+].join("\n");
 
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
@@ -106,16 +125,28 @@ describe("run-pattern", () => {
     await storageManager?.close();
   });
 
-  function createEngine(options: { workspaceHostPath?: string } = {}) {
+  function createEngine() {
     return new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `run-pattern-test-${crypto.randomUUID()}`,
       cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces }),
-      ...(options.workspaceHostPath !== undefined
-        ? { workspaceHostPath: options.workspaceHostPath }
-        : {}),
     });
+  }
+
+  /** Counts `runPersistent` calls, the single path that persists a piece. */
+  function spyOnRunPersistent(): { calls: number } {
+    const spy = { calls: 0 };
+    const original = pieces.runPersistent.bind(pieces);
+    pieces.runPersistent = ((
+      ...args: Parameters<
+        PiecesController["runPersistent"]
+      >
+    ) => {
+      spy.calls += 1;
+      return original(...args);
+    }) as PiecesController["runPersistent"];
+    return spy;
   }
 
   describe("runPatternTool", () => {
@@ -170,72 +201,145 @@ describe("run-pattern", () => {
       expect(result.runState.status).toBe("completed");
     });
 
-    it("returns an error when both `sourceText` and `sourcePath` are given", async () => {
-      const engine = createEngine();
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: DOUBLING_PATTERN_SOURCE,
-        sourcePath: "pattern.tsx",
-      });
-      const output = result.output as RunPatternToolErrorOutput;
-      expect(output.status).toBe("error");
-      expect(output.message).toContain("exactly one");
-    });
-
-    it("returns an error when neither `sourceText` nor `sourcePath` is given", async () => {
+    it("returns an error when `sourceText` is missing", async () => {
       const engine = createEngine();
       const result = await engine.invokeBuiltinTool("run_pattern", {});
       const output = result.output as RunPatternToolErrorOutput;
       expect(output.status).toBe("error");
-      expect(output.message).toContain("exactly one");
+      expect(output.message).toContain("requires sourceText");
     });
 
-    it("reads `sourcePath` from inside the workspace", async () => {
-      const workspace = await Deno.makeTempDir({
-        prefix: "cf-harness-run-pattern-",
+    it("returns an error for a `sourceText` over the size cap without creating a piece", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: "x".repeat(RUN_PATTERN_MAX_SOURCE_TEXT_BYTES + 1),
       });
-      try {
-        await Deno.writeTextFile(
-          join(workspace, "pattern.tsx"),
-          DOUBLING_PATTERN_SOURCE,
-        );
-        const engine = createEngine({ workspaceHostPath: workspace });
-        const result = await engine.invokeBuiltinTool("run_pattern", {
-          sourcePath: "pattern.tsx",
-          inputs: { n: 4 },
-          resultSchema: DOUBLED_RESULT_SCHEMA,
-        });
-        const output = result.output as RunPatternToolSuccessOutput;
-        expect(output.status).toBe("ok");
-        expect((output.value as { doubled: number }).doubled).toBe(8);
-      } finally {
-        await Deno.remove(workspace, { recursive: true });
-      }
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("256 KiB limit");
+      expect(spy.calls).toBe(0);
     });
 
-    it("returns an error for a `sourcePath` that resolves to an existing file outside the workspace", async () => {
-      const outer = await Deno.makeTempDir({
-        prefix: "cf-harness-run-pattern-",
+    it("returns an error for a link input targeting another space without creating a piece", async () => {
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const foreignRef = `/@did:key:z6MkforeignSpaceForRunPatternTest/of:fid1:${
+        "A".repeat(43)
+      }/`;
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: foreignRef },
       });
-      try {
-        const workspace = join(outer, "workspace");
-        await Deno.mkdir(workspace);
-        await Deno.writeTextFile(
-          join(outer, "escape.tsx"),
-          DOUBLING_PATTERN_SOURCE,
-        );
-        const engine = createEngine({ workspaceHostPath: workspace });
-        const result = await engine.invokeBuiltinTool("run_pattern", {
-          sourcePath: "../escape.tsx",
-        });
-        const output = result.output as RunPatternToolErrorOutput;
-        expect(output.status).toBe("error");
-        expect(output.message).toContain("outside the workspace");
-      } finally {
-        await Deno.remove(outer, { recursive: true });
-      }
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("targets another space");
+      expect(spy.calls).toBe(0);
     });
 
-    it("leaves the created piece out of the space's registered piece list", async () => {
+    it("returns an error for a live-cell input whose value does not match the argument schema, creating no piece", async () => {
+      const space = pieces.getSpace();
+      const seed = runtime.getCell(
+        space,
+        "run-pattern-shape-mismatch",
+        {
+          type: "object",
+          properties: { foo: { type: "number" } },
+        } as const,
+      );
+      const { error } = await runtime.editWithRetry((tx) => {
+        seed.withTx(tx).set({ foo: 1 });
+      });
+      expect(error).toBeUndefined();
+      await runtime.idle();
+      const seedRef = createLLMFriendlyLink(
+        seed.getAsNormalizedFullLink(),
+        space,
+      );
+      const spy = spyOnRunPersistent();
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: seedRef },
+      });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain('input "n"');
+      expect(output.message).toContain("argument schema");
+      expect(spy.calls).toBe(0);
+    });
+
+    it("returns a `cancelled` output and stops the piece when the signal aborts during the settle barrier", async () => {
+      const controller = new AbortController();
+      // Abort exactly when the tool reaches its post-create barrier, and
+      // hold the barrier open so only the signal can win the race.
+      const runtimeWithSettled = runtime as unknown as {
+        settled: () => Promise<void>;
+      };
+      runtimeWithSettled.settled = () => {
+        controller.abort();
+        return new Promise<void>(() => {});
+      };
+      const stopped: unknown[] = [];
+      const runner = runtime.runner as unknown as {
+        stop: (cell: unknown) => unknown;
+      };
+      const originalStop = runner.stop.bind(runtime.runner);
+      runner.stop = (cell) => {
+        stopped.push(cell);
+        return originalStop(cell);
+      };
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 1 },
+      }, { signal: controller.signal });
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("cancelled");
+      expect(output.message).toContain("cancelled");
+      expect(stopped.length).toBe(1);
+      expect(result.runState.status).toBe("completed");
+    });
+
+    it("surfaces a rejected session construction as a structured error and invokes the factory again on the next call", async () => {
+      let factoryCalls = 0;
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-pattern-test-${crypto.randomUUID()}`,
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => {
+          factoryCalls += 1;
+          return Promise.reject(
+            new Error("authorization denied for the configured space"),
+          );
+        },
+      });
+      const first = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+      });
+      const firstOutput = first.output as RunPatternToolErrorOutput;
+      expect(firstOutput.status).toBe("error");
+      expect(firstOutput.message).toContain("fabric session unavailable");
+      expect(firstOutput.message).toContain("authorization denied");
+      const second = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+      });
+      expect((second.output as RunPatternToolErrorOutput).status).toBe(
+        "error",
+      );
+      expect(factoryCalls).toBe(2);
+    });
+
+    it("leaves the created piece out of the space's real registered piece list", async () => {
+      // A real default pattern first: without one, `getRegisteredPieces()`
+      // reads a detached always-empty fallback and the assertion below
+      // holds vacuously.
+      const defaultRoot = await pieces.create(DEFAULT_PATTERN_SOURCE, {
+        input: { pieceRegistry: [] },
+      });
+      await pieces.linkDefaultPattern(defaultRoot.getCell());
+      await runtime.idle();
+      await pieces.synced();
       const engine = createEngine();
       const result = await engine.invokeBuiltinTool("run_pattern", {
         sourceText: DOUBLING_PATTERN_SOURCE,
@@ -244,6 +348,14 @@ describe("run-pattern", () => {
       expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
       const registered = await pieces.getRegisteredPieces();
       expect(registered.length).toBe(0);
+      // The registry observes registration, proving the zero above is a
+      // decision by the tool and not an inert list.
+      const control = await pieces.create(DOUBLING_PATTERN_SOURCE, {
+        input: { n: 2 },
+      });
+      await pieces.add([control.getCell()]);
+      const afterAdd = await pieces.getRegisteredPieces();
+      expect(afterAdd.length).toBe(1);
     });
   });
 });

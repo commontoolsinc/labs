@@ -8,7 +8,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PiecesController } from "@commonfabric/piece/ops";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { type Cell, isCell, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -776,23 +776,23 @@ describe("prompt-loop address handles", () => {
     try {
       // Record each deployment so the second call's converted input — the
       // cell the tool resolved from the substituted ref — is observable.
+      // The tool persists through `runPersistent`, the single path that
+      // creates a piece.
       const created: Array<{
         input: Record<string, unknown> | undefined;
-        piece: Awaited<ReturnType<PiecesController["create"]>>;
+        piece: Cell<unknown>;
       }> = [];
-      const originalCreate = pieces.create.bind(pieces);
-      pieces.create = (async (
-        program: Parameters<PiecesController["create"]>[0],
-        options?: Parameters<PiecesController["create"]>[1],
-        cause?: Parameters<PiecesController["create"]>[2],
+      const originalRunPersistent = pieces.runPersistent.bind(pieces);
+      pieces.runPersistent = (async (
+        ...args: Parameters<PiecesController["runPersistent"]>
       ) => {
-        const piece = await originalCreate(program, options, cause);
+        const piece = await originalRunPersistent(...args);
         created.push({
-          input: options?.input as Record<string, unknown> | undefined,
+          input: args[1] as Record<string, unknown> | undefined,
           piece,
         });
         return piece;
-      }) as PiecesController["create"];
+      }) as PiecesController["runPersistent"];
       const doublingSource = [
         "import { computed, pattern } from 'commonfabric';",
         "export default pattern<{ n: number }, { doubled: number }>(",
@@ -899,7 +899,8 @@ describe("prompt-loop address handles", () => {
       expect(created.length).toBe(2);
       const src = created[1]?.input?.src;
       expect(isCell(src)).toBe(true);
-      const firstResult = await created[0]!.piece.result.getCell();
+      const firstResult = await new PieceController(pieces, created[0]!.piece)
+        .result.getCell();
       expect((src as Cell<unknown>).getAsNormalizedFullLink().id).toBe(
         firstResult.getAsNormalizedFullLink().id,
       );

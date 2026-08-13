@@ -1,7 +1,7 @@
 # cf-harness Roadmap
 
 Status: live, non-normative\
-Last reviewed: 2026-07-22
+Last reviewed: 2026-08-13
 
 This document lists remaining work. Shipped milestones belong in
 [CURRENT_STATE.md](CURRENT_STATE.md), tests, and history rather than in a
@@ -51,7 +51,15 @@ permanently growing implementation plan.
 - Extend resume only where external side-effect replay semantics can be made
   explicit and testable.
 
-## 5. Evolve skills only from concrete needs
+## 5. Mediate file-based pattern sources for `run_pattern`
+
+- `run_pattern` accepts only inline `sourceText`; a workspace-file source (the
+  former `sourcePath`) is a trusted-host read channel whose compile diagnostics
+  can exfiltrate file content, so reintroduce it only as a mediated capability:
+  reads routed through the same policy surface as `read_file`, with CFC
+  observation metadata on the source bytes.
+
+## 6. Evolve skills only from concrete needs
 
 - Keep explicit caller preload and profile-scoped child skills as the stable
   path.

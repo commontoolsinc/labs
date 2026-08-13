@@ -578,17 +578,25 @@ session. `--fabric-space` accepts a space name or a `did:key`, and
 
 `run_pattern` executes on the trusted host side — it never enters the docker
 sandbox. The session (a `PiecesController` against the deployed API) is built
-lazily on the tool's first invocation and cached for the run; a session that
-fails to build surfaces as an ordinary tool-output error rather than a run
-failure.
+lazily on the tool's first invocation; construction verifies the configured
+space's authorization, and only a healthy session is cached for the run. A
+session that fails to build surfaces as an ordinary tool-output error rather
+than a run failure, and the next tool call retries the construction.
 
-The tool takes exactly one of `sourceText` (inline pattern source) or
-`sourcePath` (a workspace-relative file, confined to the workspace root), an
-optional `inputs` object, and an optional `resultSchema`. An `inputs` string
-value that is a whole-string LLM-friendly link (`/of:fid1:.../path`) is passed
-to the pattern as a live cell reference; everything else passes through as plain
-JSON. The deployed piece is deliberately unregistered — it never appears in the
-space's piece list.
+The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
+over-cap source is a structured tool error), an optional `inputs` object, and an
+optional `resultSchema`. An `inputs` string value that is a whole-string
+LLM-friendly link (`/of:fid1:.../path`) is passed to the pattern as a live cell
+reference; everything else passes through as plain JSON. A link that resolves
+into a space other than the configured session space is refused with a
+structured error before anything is created, and a live-cell input whose current
+value does not match the compiled pattern's argument schema for its key is
+refused the same way — named after the offending key, with no piece persisted.
+The deployed piece is deliberately unregistered — it never appears in the
+space's piece list. When the run's abort signal fires while the tool is waiting
+for the pattern to settle, the tool stops the created piece and returns a
+structured `cancelled` error; the signal is the only cancellation source — there
+is no timeout.
 
 A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
@@ -599,8 +607,11 @@ boundary, and the ordinary inbound swap resolves such a token passed back
 through `inputs`; the tool itself carries no handle code. The persisted
 tool-output artifact keeps the raw reference, the raw result value, and the
 `pieceId` — a bare fabric identifier the handle boundary never swaps, so it
-stays out of the model-facing rendering. Compiler diagnostics come back raw as
-`{ status: "compile-error", message }` so the model can iterate on the source.
+stays out of the model-facing rendering. Compiler diagnostics come back as
+`{ status: "compile-error", message }` so the model can iterate on the source;
+bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
+module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder
+in the model-facing message, while the persisted artifact keeps the raw text.
 
 Interactive chat stdio transport:
 

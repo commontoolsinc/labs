@@ -391,7 +391,8 @@ export class CfHarnessEngine {
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
     // The session behind `run_pattern` is expensive and remote, so it is
-    // built lazily on the tool's first invocation and cached for the run.
+    // built lazily on the tool's first invocation and cached for the run
+    // while healthy; a failed construction is retried on the next call.
     const fabricSessionFactory = options.fabricSessionFactory ??
       (this.config.fabricSession !== undefined
         ? createHarnessFabricSessionFactory(this.config.fabricSession)
@@ -960,6 +961,7 @@ export class CfHarnessEngine {
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
+    options: { signal?: AbortSignal } = {},
   ): Promise<BuiltinToolInvocationResult<TToolId>> {
     const tool = getBuiltinTool(toolId);
     if (tool === undefined) {
@@ -974,7 +976,7 @@ export class CfHarnessEngine {
     );
     try {
       const output = await tool.invoke(
-        this.#createToolContext(),
+        this.#createToolContext(options.signal),
         input,
       ) as BuiltinToolOutputMap[TToolId];
       return await this.recordBuiltinToolOutput(toolId, input, output);
@@ -1317,12 +1319,13 @@ export class CfHarnessEngine {
     return invocation;
   }
 
-  #createToolContext() {
+  #createToolContext(signal?: AbortSignal) {
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
       currentDir: this.#runState.currentDir,
       workspaceHostPath: this.workspaceHostPath,
+      ...(signal !== undefined ? { signal } : {}),
       skillRegistry: this.#runState.skillRegistry,
       skillActivations: this.#runState.skillActivations,
       allowedSkillScripts: this.config.allowedSkillScripts,

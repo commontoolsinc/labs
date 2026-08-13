@@ -1,13 +1,15 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { matchLLMFriendlyLink } from "@commonfabric/runner";
+import {
+  type Cell,
+  compileAndSavePattern,
+  matchLLMFriendlyLink,
+} from "@commonfabric/runner";
+import { validateAgainstSchema } from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import {
-  join as joinHostPath,
-  normalize as normalizeHostPath,
-} from "@std/path";
+import { PieceController } from "@commonfabric/piece/ops";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { defineOwnEntry } from "../handle-table.ts";
 import {
@@ -18,10 +20,12 @@ import type { HarnessToolDefinition } from "./types.ts";
 
 export interface RunPatternToolInput {
   sourceText?: string;
-  sourcePath?: string;
   inputs?: Record<string, unknown>;
   resultSchema?: JSONSchema;
 }
+
+/** Upper bound on `sourceText`, enforced with a structured tool error. */
+export const RUN_PATTERN_MAX_SOURCE_TEXT_BYTES = 256 * 1024;
 
 export interface RunPatternToolSuccessOutput {
   outputId: string;
@@ -51,7 +55,7 @@ export interface RunPatternToolSuccessOutput {
 
 export interface RunPatternToolErrorOutput {
   outputId: string;
-  status: "compile-error" | "error";
+  status: "compile-error" | "error" | "cancelled";
   message: string;
 }
 
@@ -77,13 +81,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
     properties: {
       sourceText: {
         type: "string",
-        description:
-          "Pattern source (TypeScript/TSX). Exactly one of sourceText and sourcePath must be given.",
-      },
-      sourcePath: {
-        type: "string",
-        description:
-          "Workspace-relative path to a pattern source file. Exactly one of sourceText and sourcePath must be given.",
+        description: "Pattern source (TypeScript/TSX). At most 256 KiB.",
       },
       inputs: {
         type: "object",
@@ -100,6 +98,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           "Optional JSON Schema for the result value. When provided, the sanitized result value is returned alongside resultRef.",
       },
     },
+    required: ["sourceText"],
     additionalProperties: false,
   } satisfies JSONSchema,
   outputSchema: {
@@ -120,7 +119,10 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
       type: "object",
       properties: {
         outputId: { type: "string" },
-        status: { type: "string", enum: ["compile-error", "error"] },
+        status: {
+          type: "string",
+          enum: ["compile-error", "error", "cancelled"],
+        },
         message: { type: "string" },
       },
       required: ["outputId", "status", "message"],
@@ -132,6 +134,25 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/**
+ * Replaces bare fabric identifiers in model-facing diagnostic text with a
+ * fixed placeholder. Compiler diagnostics can embed compiler-generated bare
+ * tagged hashes (e.g. the `/fid1:.../` virtual module roots), DIDs, and
+ * `data:` URIs — none of which the handle boundary swaps, since it only
+ * handles the `of:`/`computed:` schemed link forms. A negative lookbehind
+ * leaves those schemed forms (and `cfh:` handle tokens) alone: their embedded
+ * hash is always preceded by a colon. Raw text stays in the persisted
+ * artifact; only the model-facing rendering is scrubbed.
+ */
+export const scrubBareFabricIdentifiers = (text: string): string =>
+  text
+    .replaceAll(/\bdata:[^\s"'`)\]}]+/g, "[fabric-id]")
+    .replaceAll(/\bdid:[a-z0-9]+:[A-Za-z0-9._%-]+/g, "[fabric-id]")
+    .replaceAll(
+      /(?<![A-Za-z0-9:])[A-Za-z0-9]+:[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g,
+      "[fabric-id]",
+    );
 
 /**
  * A raw result may hold values `JSON.stringify` cannot carry into the
@@ -149,6 +170,43 @@ const asSerializableValue = (value: unknown): unknown => {
   }
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Awaits `work` unless `signal` aborts first. Resolution (not rejection)
+ * signals the abort so the losing promise never surfaces as an unhandled
+ * rejection; the signal is the only cancellation source — no timeout puts an
+ * upper bound on `work` completing.
+ */
+const raceWithAbort = async (
+  work: Promise<void>,
+  signal: AbortSignal | undefined,
+): Promise<"completed" | "aborted"> => {
+  if (signal === undefined) {
+    await work;
+    return "completed";
+  }
+  if (signal.aborted) {
+    work.catch(() => {});
+    return "aborted";
+  }
+  let onAbort!: () => void;
+  const aborted = new Promise<"aborted">((resolve) => {
+    onAbort = () => resolve("aborted");
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([
+      work.then(() => "completed" as const),
+      aborted,
+    ]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    work.catch(() => {});
+  }
+};
+
 export const runPatternTool: HarnessToolDefinition<
   RunPatternToolInput,
   RunPatternToolOutput
@@ -160,18 +218,25 @@ export const runPatternTool: HarnessToolDefinition<
       status: RunPatternToolErrorOutput["status"],
       message: string,
     ): RunPatternToolErrorOutput => ({ outputId, status, message });
+    const cancelledOutput = (): RunPatternToolErrorOutput =>
+      errorOutput("cancelled", "run_pattern was cancelled");
     if (context.getFabricSession === undefined) {
       return errorOutput(
         "error",
         "run_pattern requires a fabric session; configure --fabric-api-url, --fabric-identity, and --fabric-space",
       );
     }
-    if (
-      (input.sourceText === undefined) === (input.sourcePath === undefined)
-    ) {
+    if (input.sourceText === undefined) {
+      return errorOutput("error", "run_pattern requires sourceText");
+    }
+    const sourceText = input.sourceText;
+    const sourceTextBytes = new TextEncoder().encode(sourceText).length;
+    if (sourceTextBytes > RUN_PATTERN_MAX_SOURCE_TEXT_BYTES) {
       return errorOutput(
         "error",
-        "run_pattern requires exactly one of sourceText and sourcePath",
+        `run_pattern sourceText exceeds the ${
+          RUN_PATTERN_MAX_SOURCE_TEXT_BYTES / 1024
+        } KiB limit (${sourceTextBytes} bytes)`,
       );
     }
     let parsedResultSchema;
@@ -181,37 +246,6 @@ export const runPatternTool: HarnessToolDefinition<
       });
     } catch (error) {
       return errorOutput("error", errorMessage(error));
-    }
-    let sourceText: string;
-    if (input.sourcePath !== undefined) {
-      const workspaceRoot = context.workspaceHostPath;
-      if (workspaceRoot === undefined) {
-        return errorOutput(
-          "error",
-          "run_pattern sourcePath requires a workspace",
-        );
-      }
-      const resolved = normalizeHostPath(
-        joinHostPath(workspaceRoot, input.sourcePath),
-      );
-      if (!await context.isHostPathWithinWorkspace(resolved)) {
-        return errorOutput(
-          "error",
-          `run_pattern sourcePath resolves outside the workspace: ${input.sourcePath}`,
-        );
-      }
-      try {
-        sourceText = await Deno.readTextFile(resolved);
-      } catch (error) {
-        return errorOutput(
-          "error",
-          `run_pattern could not read sourcePath ${input.sourcePath}: ${
-            errorMessage(error)
-          }`,
-        );
-      }
-    } else {
-      sourceText = input.sourceText!;
     }
     let session;
     try {
@@ -224,11 +258,18 @@ export const runPatternTool: HarnessToolDefinition<
     }
     const { pieces } = session;
     const space = pieces.getSpace();
+    const signal = context.signal;
+    if (signal?.aborted) {
+      return cancelledOutput();
+    }
     // Whole-string LLM-friendly links become live cell references; the
     // prompt loop has already resolved any handle tokens, so the strings
     // seen here carry canonical addresses. Non-link strings and non-strings
-    // pass through as plain JSON.
+    // pass through as plain JSON. A link that resolves outside the session's
+    // configured space is refused before anything is created: the session's
+    // authority ends at its own space.
     let pieceInput: Record<string, unknown> | undefined;
+    const liveCellInputs: Array<{ key: string; cell: Cell<unknown> }> = [];
     if (input.inputs !== undefined) {
       const converted: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(input.inputs)) {
@@ -236,35 +277,98 @@ export const runPatternTool: HarnessToolDefinition<
         if (
           typeof value === "string" && matchLLMFriendlyLink.test(value.trim())
         ) {
+          let link;
           try {
-            entry = pieces.runtime.getCellFromLink(
-              parseLLMFriendlyLink(value, space),
-            );
+            link = parseLLMFriendlyLink(value, space);
           } catch {
             // Not a parseable link after all — keep the plain string.
+          }
+          if (link !== undefined) {
+            if (link.space !== space) {
+              return errorOutput(
+                "error",
+                `run_pattern input "${key}" reference targets another space; only references into the configured session space are allowed`,
+              );
+            }
+            const cell = pieces.runtime.getCellFromLink(link);
+            liveCellInputs.push({ key, cell });
+            entry = cell;
           }
         }
         defineOwnEntry(converted, key, entry);
       }
       pieceInput = converted;
     }
-    let piece;
+    let pattern;
+    try {
+      pattern = await compileAndSavePattern(pieces.runtime, sourceText, {
+        space,
+      });
+    } catch (error) {
+      // Compiler diagnostics are the model's feedback loop, so the full
+      // message goes into the artifact; the prompt loop scrubs bare fabric
+      // identifiers from the model-facing rendering.
+      return errorOutput("compile-error", errorMessage(error));
+    }
+    // A live-cell input's current value must match the compiled pattern's
+    // argument schema for its key before any piece exists, so a mismatch is
+    // a model-correctable error rather than a persisted broken piece.
+    const argumentProperties = isRecord(pattern.argumentSchema) &&
+        isRecord(pattern.argumentSchema.properties)
+      ? pattern.argumentSchema.properties
+      : undefined;
+    if (argumentProperties !== undefined) {
+      for (const { key, cell } of liveCellInputs) {
+        const propertySchema = argumentProperties[key];
+        if (propertySchema === undefined) {
+          continue;
+        }
+        await cell.sync();
+        const failure = validateAgainstSchema(
+          propertySchema as JSONSchema,
+          cell.get(),
+          pattern.argumentSchema,
+        );
+        if (failure !== undefined) {
+          return errorOutput(
+            "error",
+            `run_pattern input "${key}" does not match the pattern's argument schema: ${failure}`,
+          );
+        }
+      }
+    }
+    let piece: PieceController<unknown>;
     try {
       // Deliberately unregistered: no `pieces.add()` and no default-pattern
       // touch, so the piece never appears in the space's piece list. The
       // origin must be URL-shaped or the piece renders as detached.
-      piece = await pieces.create(sourceText, {
-        ...(pieceInput !== undefined ? { input: pieceInput } : {}),
-        start: true,
-        origin: `https://cf-harness.invalid/run/${context.runId}`,
-      });
+      const pieceCell = await pieces.runPersistent(
+        pattern,
+        pieceInput ?? {},
+        undefined,
+        {
+          start: true,
+          origin: `https://cf-harness.invalid/run/${context.runId}`,
+        },
+      );
+      piece = new PieceController(pieces, pieceCell);
     } catch (error) {
-      // Compiler diagnostics are the model's feedback loop, so the raw
-      // message goes back unredacted.
-      return errorOutput("compile-error", errorMessage(error));
+      return errorOutput("error", errorMessage(error));
     }
-    await pieces.runtime.settled();
-    await pieces.synced();
+    const barrier = (async () => {
+      await pieces.runtime.settled();
+      await pieces.synced();
+    })();
+    if (await raceWithAbort(barrier, signal) === "aborted") {
+      // Stop without the usual `stopPiece` idle wait: the abort path must
+      // not wait on the very scheduler the signal is escaping.
+      try {
+        pieces.runtime.runner.stop(piece.getCell());
+      } catch {
+        // Best-effort: the cancelled output stands either way.
+      }
+      return cancelledOutput();
+    }
     const resultCell = await piece.result.getCell();
     const resultRef = createLLMFriendlyLink(
       resultCell.getAsNormalizedFullLink(),

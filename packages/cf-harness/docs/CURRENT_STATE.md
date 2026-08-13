@@ -64,12 +64,17 @@ The current package provides:
   and dispatch, `delegate_task` arguments excepted;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
-  environment fallbacks): compiles and runs a pattern against a deployed Fabric
-  space from the trusted host side over a lazy per-run session, passes
-  whole-string LLM-friendly link inputs as live cells, returns the result cell's
-  canonical reference plus an optionally schema-sanitized value, and leaves the
-  piece out of the space's registered piece list; without the session
-  configuration the tool is absent from the tool surface.
+  environment fallbacks): compiles and runs an inline `sourceText` pattern
+  (capped at 256 KiB) against a deployed Fabric space from the trusted host side
+  over a lazy per-run session that caches only a healthy, authorized
+  construction; passes whole-string LLM-friendly link inputs as live cells,
+  refusing links into another space and live-cell values that mismatch the
+  compiled argument schema before any piece exists; honors the run's abort
+  signal by stopping the created piece and returning a structured `cancelled`
+  error; scrubs bare fabric identifiers from model-facing diagnostics; returns
+  the result cell's canonical reference plus an optionally schema-sanitized
+  value, and leaves the piece out of the space's registered piece list; without
+  the session configuration the tool is absent from the tool surface.
 
 Run the capability probe instead of copying this list into adapters:
 
