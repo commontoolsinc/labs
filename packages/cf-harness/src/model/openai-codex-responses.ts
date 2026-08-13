@@ -456,6 +456,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         ...baseAttempt,
         ...(responseBodyBytes !== undefined ? { responseBodyBytes } : {}),
       });
+      if (request.signal?.aborted) throw abortReason(request.signal);
       if (response.status === 429) {
         throw providerUnavailable("OpenAI Codex usage limit reached");
       }

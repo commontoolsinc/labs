@@ -982,6 +982,31 @@ Deno.test("Codex Responses bounds failures while reading provider error bodies",
   assertEquals(errorGraphText(error).includes("secret-sentinel"), false);
 });
 
+Deno.test("Codex Responses preserves abort during provider error diagnostics", async () => {
+  const controller = new AbortController();
+  const reason = new Error("abort during provider diagnostics");
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(new Response("unavailable", { status: 503 })),
+  });
+
+  const error = await assertRejects(() =>
+    client.complete({
+      model: "gpt-5.4",
+      transcript: [{ role: "user", content: "hi" }],
+      tools: [],
+      nativeModelToolIds: [],
+      runId: "run-abort-error-diagnostics",
+      signal: controller.signal,
+      onAttempt: () => {
+        controller.abort(reason);
+      },
+    })
+  );
+  assertStrictEquals(error, reason);
+});
+
 Deno.test("Codex Responses abort cancels an active stream without retry", async () => {
   let canceled = false;
   let requests = 0;
