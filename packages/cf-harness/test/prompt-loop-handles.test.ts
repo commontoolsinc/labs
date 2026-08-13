@@ -881,16 +881,18 @@ describe("prompt-loop address handles", () => {
       await loop.runPrompt({ prompt: "Run the pattern twice." });
 
       // Outbound: the model-facing tool message carries a token where the
-      // ref would be, and no raw address or raw result value.
+      // ref would be, and no raw address, raw result value, or bare piece
+      // id.
       const firstOutput = JSON.parse(firstToolContent!) as {
         resultRef: string;
         value: { doubled: number };
-        rawValue?: unknown;
       };
       expect(firstOutput.resultRef).toMatch(/^cfh:a:/);
       expect(firstToolContent).not.toContain("of:");
+      expect(firstToolContent).not.toContain("fid1:");
       expect(firstOutput.value.doubled).toBe(6);
-      expect(firstOutput.rawValue).toBeUndefined();
+      expect(firstOutput).not.toHaveProperty("rawValue");
+      expect(firstOutput).not.toHaveProperty("pieceId");
       // Inbound: the token the model wrote came back to the tool as the
       // canonical ref, which the tool converted to a live cell aimed at the
       // first piece's result — with zero handle code in the tool itself.

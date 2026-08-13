@@ -570,9 +570,11 @@ With all three present (`CF_HARNESS_FABRIC_API_URL`,
 `CF_HARNESS_FABRIC_IDENTITY`, and `CF_HARNESS_FABRIC_SPACE` are the environment
 fallbacks), the `run_pattern` tool joins the parent tool surface; with none, the
 tool is absent and runs behave exactly as before; a partial set is a
-configuration error naming the missing flags. `--fabric-space` accepts a space
-name or a `did:key`, and `--describe-capabilities` reports `runPattern` among
-its features.
+configuration error naming the missing flags. The same holds under an explicit
+allowlist: `--allow-tool run_pattern` without the three session flags is a
+configuration error, and the tool is never offered to the model without a
+session. `--fabric-space` accepts a space name or a `did:key`, and
+`--describe-capabilities` reports `runPattern` among its features.
 
 `run_pattern` executes on the trusted host side — it never enters the docker
 sandbox. The session (a `PiecesController` against the deployed API) is built
@@ -588,16 +590,17 @@ to the pattern as a live cell reference; everything else passes through as plain
 JSON. The deployed piece is deliberately unregistered — it never appears in the
 space's piece list.
 
-A successful run returns `{ status: "ok", resultRef, pieceId }`, where
+A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
 the schema-sanitized `value` (with `linkedStringCount`) when `resultSchema` was
 given. In `session` handle mode the ordinary outbound swap turns `resultRef`
 (and any link strings inside `value`) into `cfh:a:` tokens at the model
 boundary, and the ordinary inbound swap resolves such a token passed back
 through `inputs`; the tool itself carries no handle code. The persisted
-tool-output artifact keeps the raw reference and the raw result value. Compiler
-diagnostics come back raw as `{ status: "compile-error", message }` so the model
-can iterate on the source.
+tool-output artifact keeps the raw reference, the raw result value, and the
+`pieceId` — a bare fabric identifier the handle boundary never swaps, so it
+stays out of the model-facing rendering. Compiler diagnostics come back raw as
+`{ status: "compile-error", message }` so the model can iterate on the source.
 
 Interactive chat stdio transport:
 

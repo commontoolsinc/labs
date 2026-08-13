@@ -28,6 +28,12 @@ export interface RunPatternToolSuccessOutput {
   status: "ok";
   /** Canonical LLM-friendly link to the piece's result cell. */
   resultRef: string;
+  /**
+   * Piece id for the persisted tool-output artifact. A bare fabric
+   * identifier the handle boundary never swaps, and the piece cell is the
+   * result cell, so the prompt loop strips it from the model-facing
+   * rendering; only `resultRef` reaches model context.
+   */
   pieceId: string;
   /** Sanitized result value; present only when `resultSchema` was given. */
   value?: unknown;

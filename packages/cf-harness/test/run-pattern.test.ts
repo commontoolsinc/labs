@@ -212,11 +212,17 @@ describe("run-pattern", () => {
       }
     });
 
-    it("returns an error for a `sourcePath` that resolves outside the workspace", async () => {
-      const workspace = await Deno.makeTempDir({
+    it("returns an error for a `sourcePath` that resolves to an existing file outside the workspace", async () => {
+      const outer = await Deno.makeTempDir({
         prefix: "cf-harness-run-pattern-",
       });
       try {
+        const workspace = join(outer, "workspace");
+        await Deno.mkdir(workspace);
+        await Deno.writeTextFile(
+          join(outer, "escape.tsx"),
+          DOUBLING_PATTERN_SOURCE,
+        );
         const engine = createEngine({ workspaceHostPath: workspace });
         const result = await engine.invokeBuiltinTool("run_pattern", {
           sourcePath: "../escape.tsx",
@@ -225,7 +231,7 @@ describe("run-pattern", () => {
         expect(output.status).toBe("error");
         expect(output.message).toContain("outside the workspace");
       } finally {
-        await Deno.remove(workspace, { recursive: true });
+        await Deno.remove(outer, { recursive: true });
       }
     });
 

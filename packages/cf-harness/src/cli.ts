@@ -431,7 +431,8 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | run_pattern);
+                                run_pattern additionally requires the three --fabric-* session flags
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -551,6 +552,7 @@ const CLI_PARENT_TOOL_IDS = [
   "edit_file",
   "write_file",
   "delegate_task",
+  "run_pattern",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -1579,6 +1581,17 @@ export const parseCfHarnessCliArgs = async (
       identityKeyPath: resolve(cwd, fabricIdentity!),
       space: fabricSpace!,
     };
+  }
+  // An allowlisted `run_pattern` with no session to run it against is a
+  // configuration contradiction, surfaced here rather than as a tool that is
+  // silently absent from the run.
+  if (
+    allowedToolIds?.includes("run_pattern") === true &&
+    fabricSession === undefined
+  ) {
+    throw new Error(
+      "--allow-tool run_pattern requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space",
+    );
   }
   const apiKey = env.CF_HARNESS_API_KEY ?? env.OPENAI_API_KEY;
   const apiKeySource = env.CF_HARNESS_API_KEY !== undefined

@@ -1868,14 +1868,17 @@ export class CfHarnessPromptLoop {
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
-    // `run_pattern` joins the default parent tool surface exactly when the
-    // run can build a fabric session; without one the tool is absent rather
-    // than present-but-failing.
+    // `run_pattern` joins the tool surface exactly when the run can build a
+    // fabric session; without one the tool is absent rather than
+    // present-but-failing, even when an explicit allowlist names it.
+    const requestedToolIds = options.allowedToolIds ??
+      (this.engine.fabricSessionAvailable
+        ? [...DEFAULT_PROMPT_LOOP_TOOL_IDS, "run_pattern" as const]
+        : DEFAULT_PROMPT_LOOP_TOOL_IDS);
     this.#allowedToolIds = new Set(
-      options.allowedToolIds ??
-        (this.engine.fabricSessionAvailable
-          ? [...DEFAULT_PROMPT_LOOP_TOOL_IDS, "run_pattern" as const]
-          : DEFAULT_PROMPT_LOOP_TOOL_IDS),
+      this.engine.fabricSessionAvailable
+        ? requestedToolIds
+        : requestedToolIds.filter((toolId) => toolId !== "run_pattern"),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -2792,9 +2795,12 @@ export class CfHarnessPromptLoop {
       };
     }
     if (toolId === "run_pattern" && isObjectRecord(output)) {
-      // The persisted artifact keeps the raw result value; the model sees
-      // only `resultRef` and the schema-sanitized `value`.
-      const { rawValue: _rawValue, ...publicOutput } = output;
+      // The persisted artifact keeps the raw result value and the piece id
+      // — a bare fabric identifier the handle boundary never swaps, and
+      // redundant with `resultRef` since the piece cell is the result cell.
+      // The model sees only `resultRef` and the schema-sanitized `value`.
+      const { rawValue: _rawValue, pieceId: _pieceId, ...publicOutput } =
+        output;
       return { output: stripInternalCfcFields(publicOutput) };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {

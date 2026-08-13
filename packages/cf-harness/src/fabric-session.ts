@@ -76,11 +76,12 @@ async () => {
  * Wraps `factory` so the session is built once and shared by every
  * invocation in the run. A rejected construction is cached too: the run
  * carries no reconnect logic, so a session that failed to build stays
- * failed.
+ * failed. A synchronous throw from the factory folds into that cached
+ * rejection, so the factory is never invoked twice.
  */
 export const cacheHarnessFabricSessionFactory = (
   factory: HarnessFabricSessionFactory,
 ): HarnessFabricSessionFactory => {
   let session: Promise<HarnessFabricSession> | undefined;
-  return () => session ??= factory();
+  return () => session ??= Promise.resolve().then(factory);
 };

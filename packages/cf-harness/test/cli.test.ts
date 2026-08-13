@@ -383,6 +383,46 @@ Deno.test("parseCfHarnessCliArgs rejects a partial fabric session naming the mis
   );
 });
 
+Deno.test("parseCfHarnessCliArgs rejects --allow-tool run_pattern without the fabric session flags", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--allow-tool", "run_pattern"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "missing --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs accepts --allow-tool run_pattern alongside the fabric session flags", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "run_pattern",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.allowedToolIds, ["run_pattern"]);
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+  });
+});
+
 Deno.test("parseCfHarnessCliArgs rejects a fabric API URL that does not parse", async () => {
   await assertRejects(
     () =>
@@ -1672,7 +1712,10 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.type, "cf-harness.capabilities");
   assertEquals(capabilities.version, 1);
   assertEquals(capabilities.parentToolIds.includes("web_fetch"), true);
+  assertEquals(capabilities.parentToolIds.includes("run_pattern"), true);
   assertEquals(capabilities.parentToolIds.includes("bash-no-sandbox"), false);
+  assertEquals(capabilities.builtinToolIds.includes("run_pattern"), true);
+  assertEquals(capabilities.features.runPattern, true);
   assertEquals(capabilities.builtinToolIds.includes("bash-no-sandbox"), true);
   assertEquals(capabilities.subagentProfiles.includes("web_search"), true);
   assertEquals(capabilities.nativeModelToolIds.includes("google_search"), true);
