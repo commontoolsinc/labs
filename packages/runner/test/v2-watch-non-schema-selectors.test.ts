@@ -73,10 +73,15 @@ describe("v2-watch", () => {
       // Pruning removes definitions the schema cannot reach and leaves the
       // rest as it arrived, malformed keyword and all.
       expect(normalized.schema).toEqual(schema);
-      // The watch id is a hash of the same selector, so it has to survive the
-      // schema too.
+      // Two reads asking with the same schema watch one entry, not two: the
+      // id hashes the selector's content, so it has to reach a value the
+      // hash cannot be keyed on by identity.
+      const separate = normalizeSyncSelector({
+        path: ["value"],
+        schema: structuredClone(schema),
+      });
       expect(watchIdForEntry(address, normalized, "main")).toBe(
-        watchIdForEntry(address, normalized, "main"),
+        watchIdForEntry(address, separate, "main"),
       );
     });
   }

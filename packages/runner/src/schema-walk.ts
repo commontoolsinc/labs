@@ -33,13 +33,13 @@
  *
  * A schema reaching the runtime has not necessarily come from the schema
  * generator — it may have been written into a space by anything — so a keyword
- * here can hold a value that is not a schema at all, and a keyword taking
- * several subschemas can hold something that is not an array or an object. Such
- * a value has no subschemas and cannot be rewritten into one, so the walk treats
- * the edge as leading nowhere: the value is not visited, not descended into, and
- * not rewritten, and it stays in place in a mapped result. Each one is reported
- * once per walk that reaches it, at warn level, naming the keyword, the value,
- * and the schema holding it.
+ * here can hold a value that is not a schema at all (see {@link isSubschema}),
+ * and a keyword taking several subschemas can hold something that is not the
+ * array or the object it needs. Such a value has no subschemas and cannot be
+ * rewritten into one, so the walk treats the edge as leading nowhere: the value
+ * is not visited, not descended into, and not rewritten, and it stays in place
+ * in a mapped result. Each one is reported once per walk that reaches it, at
+ * warn level, naming the keyword, the value, and the schema holding it.
  */
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
@@ -106,13 +106,15 @@ export type SubschemaKeyword =
   | (typeof UNUSED_RECORD_SUBSCHEMA_KEYS)[number];
 
 /**
- * Everything a schema can be: `true`, `false`, or an object. `null`, a string
- * and a number are the values a stored schema document has been seen to hold
- * where a subschema belongs; see the module docstring for how the walk treats
- * one. An array satisfies this, as it does every object test in this module.
+ * Everything a schema can be: `true`, `false`, or an object that is not an
+ * array. This is the test `validateSchemaDefinition` applies to a subschema,
+ * which rejects the pre-2019 tuple spelling of `items` along with everything
+ * else an array could mean there. See the module docstring for how the walk
+ * treats a value that fails it.
  */
 export function isSubschema(value: unknown): value is JSONSchema {
-  return typeof value === "boolean" || isRecord(value);
+  return typeof value === "boolean" ||
+    (isRecord(value) && !Array.isArray(value));
 }
 
 export interface SchemaWalkOptions {
@@ -224,7 +226,14 @@ const holdsSubschemaArray = (
   return false;
 };
 
-/** Whether a record-valued keyword holds an object, reporting it when not. */
+/**
+ * Whether a record-valued keyword holds an object, reporting it when not.
+ *
+ * An array counts, unlike in a subschema position: validation enumerates these
+ * keywords with `Object.entries` and asks `Object.hasOwn`, both of which read
+ * an array's indices as names, so a walk that answered "no subschemas here"
+ * would answer for keys the validation does read.
+ */
 const holdsSubschemaRecord = (
   value: unknown,
   keyword: SubschemaKeyword,

@@ -726,6 +726,35 @@ describe("CFC schema reference discovery", () => {
     );
   });
 
+  it("carries a boolean subschema through a namespaced ref site", () => {
+    // A ref site whose target opens its own definition scope has its siblings
+    // namespaced, which walks and rewrites every subschema beside the `$ref`.
+    // `true` and `false` are schemas with nothing to rename, and the walk hands
+    // them to that rewrite like any other.
+    const schema: JSONSchemaObj = {
+      $ref: "#/$defs/Target",
+      properties: { flag: true },
+      $defs: {
+        Target: {
+          type: "object",
+          $defs: { Inner: { type: "string" } },
+          additionalProperties: { $ref: "#/$defs/Inner" },
+        },
+      },
+    };
+
+    const resolved = resolveCfcSchemaRefs(schema) as JSONSchemaObj;
+
+    expect(resolved.properties?.flag).toBe(true);
+    // The ref site's own `Target` name is renamed out of the way of the
+    // target's scope, which keeps `Inner` for itself.
+    expect(Object.keys(resolved.$defs!).toSorted()).toEqual([
+      "Inner",
+      "__cfc_ref_site_0_Target",
+    ]);
+    expect(resolved.additionalProperties).toEqual({ $ref: "#/$defs/Inner" });
+  });
+
   // A schema reaching the runtime has not necessarily come from the schema
   // generator, so a keyword can hold a value no schema can be. Pruning walks
   // every subschema-bearing keyword, so each one is a way in.

@@ -449,6 +449,43 @@ describe("values that are not schemas", () => {
     expect(isSubschema({ type: "string" })).toBe(true);
     for (const [, value] of NON_SCHEMAS) expect(isSubschema(value)).toBe(false);
     expect(isSubschema(undefined)).toBe(false);
+    // An array is an object to every other test in the module, and a schema to
+    // none: `validateSchemaDefinition` rejects one where a subschema belongs,
+    // the tuple spelling of `items` included.
+    expect(isSubschema([])).toBe(false);
+    expect(isSubschema([{ type: "string" }])).toBe(false);
+  });
+
+  it("ignores an array where a subschema belongs, at every shape", () => {
+    const tuple = [{ type: "string" }];
+    const single = withWarnings(() =>
+      edgesOf({ items: tuple } as unknown as JSONSchema)
+    );
+    expect(single.result).toEqual([]);
+    expect(single.warnings[0]).toContain("items");
+    const entry = withWarnings(() =>
+      edgesOf({ properties: { a: tuple } } as unknown as JSONSchema)
+    );
+    expect(entry.result).toEqual([]);
+    expect(entry.warnings[0]).toContain("properties/a");
+    const element = withWarnings(() =>
+      edgesOf({ allOf: [tuple] } as unknown as JSONSchema)
+    );
+    expect(element.result).toEqual([]);
+    expect(element.warnings[0]).toContain("allOf/0");
+  });
+
+  it("still reads a record keyword written as an array, by index", () => {
+    // Validation enumerates `properties` with `Object.entries`, which names an
+    // array's indices, so the walk has to see the same subschemas it does.
+    const { result, warnings } = withWarnings(() =>
+      edgesOf({ properties: [{ type: "string" }] } as unknown as JSONSchema)
+    );
+    expect(result.length).toBe(1);
+    expect(result[0].keyword).toBe("properties");
+    expect(result[0].key).toBe("0");
+    expect(result[0].schema).toEqual({ type: "string" });
+    expect(warnings).toEqual([]);
   });
 
   it("visits no edge for one under any keyword, in any tier", () => {
@@ -517,19 +554,25 @@ describe("values that are not schemas", () => {
   });
 
   it("yields the same edges from the generator form", () => {
-    const { result: edges } = withWarnings(() => [
+    const { result: edges, warnings } = withWarnings(() => [
       ...subschemaEdges(
         {
+          // One of each shape the walk can refuse: a subschema position, an
+          // array container, an array entry, and a record container.
           additionalProperties: "ab",
-          properties: { bad: 7, good: { type: "string" } },
           allOf: null,
+          anyOf: [7, { type: "number" }],
+          patternProperties: "ab",
+          properties: { bad: null, good: { type: "string" } },
         } as unknown as JSONSchema,
         ALL_TIERS,
       ),
     ]);
     expect(edges).toEqual([
+      { schema: { type: "number" }, keyword: "anyOf", index: 1 },
       { schema: { type: "string" }, keyword: "properties", key: "good" },
     ]);
+    expect(warnings.length).toBe(5);
   });
 
   it("leaves one in place when mapping, and maps around it", () => {
