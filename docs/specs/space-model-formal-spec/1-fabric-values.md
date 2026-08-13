@@ -1870,15 +1870,13 @@ Key contracts:
 - **Codecs are shallow.** `encode()` returns one layer of essential state
   without recursing into nested values; `decode()` receives state whose
   nested values have already been decoded. The serialization context owns
-  recursion and tag-wrapping (Section 4.5) — under the earlier
-  type-handler design each handler did both itself, which smeared the
-  format mechanics across every handler.
-- **`decode()` is codec-side, not constructor-side**, for the same two
-  reasons the earlier design used a separate static method: it receives a
-  `ReconstructionContext` (Section 2.5) which shouldn't be mandated in a
-  constructor signature, and it may return an existing instance
-  (interning) rather than creating a new one — essential for types like
-  `Cell` where identity matters.
+  recursion and tag-wrapping (Section 4.5), which keeps the format
+  mechanics in one place rather than spread across every codec.
+- **`decode()` is codec-side, not constructor-side**, for two reasons: it
+  receives a `ReconstructionContext` (Section 2.5) which shouldn't be
+  mandated in a constructor signature, and it may return an existing
+  instance (interning) rather than creating a new one — essential for
+  types like `Cell` where identity matters.
 - **`recognizedTypeTag` vs. `decode()`'s `typeTag` parameter.** The former
   is the single tag a codec is *registered* under; the latter is whatever
   tag the value *actually carried* on the wire. They usually agree, but
