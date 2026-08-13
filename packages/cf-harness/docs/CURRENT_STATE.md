@@ -34,6 +34,8 @@ The current package provides:
 
 - batch CLI execution with bounded model turns and optional streamed events;
 - machine-readable capability discovery with `--describe-capabilities`;
+- persistent provider configuration and structured config/auth control, with
+  durable bounded Codex refresh health;
 - workspace, Fabric, and explicit host mounts with path containment;
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
@@ -54,7 +56,12 @@ The current package provides:
   replay, cancellation, and restore state;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
-  evidence.
+  evidence;
+- a session-local address handle table: deterministic `cfh:a:` tokens minted per
+  run for cell addresses, recorded in `run-state.json`, and carried across
+  resume; the prompt loop swaps addresses to tokens in model-bound tool output
+  and resolves tokens in model-authored tool arguments before policy evaluation
+  and dispatch, `delegate_task` arguments excepted.
 
 Run the capability probe instead of copying this list into adapters:
 
@@ -104,8 +111,12 @@ mode.
 - Resume is transcript-oriented and does not recover an arbitrary partially
   executed tool or orchestration state machine.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
-  sanitized, but a future opaque artifact-handle layer would further reduce path
-  and placement coupling.
+  sanitized, and the prompt loop swaps model-bound tool output and
+  model-authored tool arguments through the address handle table; denial-path
+  tool messages are not swapped.
+- The session-local handle table covers cell addresses only. Value handles
+  (`cfh:v:`) are reserved in the token grammar but not implemented, and there is
+  no explicit dereference/release mechanism.
 - `estimatedCostUsd` is available only for known GPT-5.6 gateway models when the
   response includes cache reads and writes. It uses public OpenAI pricing;
   gateway markup, subscription quota accounting, and provider invoices remain

@@ -7,7 +7,7 @@
 // items:{$ref:T}}` (the populated branch). Both branches can match a
 // populated array. Before the fix in `packages/runner/src/traverse.ts`,
 // `mergeAnyOfMatches` ran `Object.assign({}, …branches)` for multi-match
-// anyOf results because arrays satisfy `isRecord`; two array branches
+// anyOf results because arrays satisfy `isObjectOrArray`; two array branches
 // collapsed to `{ "0": …, "1": … }`, dropping `.map` and crashing the
 // derive callback with `TypeError: rooms.map is not a function`. Fix
 // preserves array-ness when all matches are arrays.

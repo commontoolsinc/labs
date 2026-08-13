@@ -63,6 +63,29 @@ describe("buffers", () => {
       );
     });
 
+    it("returns an exact-sized buffer, whichever path it takes", () => {
+      // Load-bearing beyond sole ownership: a caller reaching past the view
+      // to the buffer -- to transfer it, say -- must get exactly these bytes.
+      // Both a window onto a larger buffer (copied) and a whole-buffer source
+      // (taken over) have to come back exact-sized.
+      const window = new Uint8Array(new ArrayBuffer(16), 4, 3);
+      window.set([1, 2, 3]);
+
+      for (
+        const [label, source, transfer] of [
+          ["window, copied", window, false],
+          ["window, transfer requested", window, true],
+          ["whole buffer, copied", new Uint8Array([1, 2, 3]), false],
+          ["whole buffer, taken over", new Uint8Array([1, 2, 3]), true],
+        ] as [string, Uint8Array, boolean][]
+      ) {
+        const result = toOwnedUint8Array(source, transfer);
+
+        expect(`${label}: ${result.byteOffset}`).toBe(`${label}: 0`);
+        expect(`${label}: ${result.buffer.byteLength}`).toBe(`${label}: 3`);
+      }
+    });
+
     it("returns an empty array for an empty source", () => {
       expect(toOwnedUint8Array(new Uint8Array(), true).length).toBe(0);
       expect(toOwnedUint8Array(new Uint8Array(), false).length).toBe(0);

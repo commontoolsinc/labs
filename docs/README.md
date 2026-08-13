@@ -43,7 +43,9 @@ or abandoned plans, and superseded designs. Their value is as a record of
 what happened or what was known at a moment, so their content is **never
 updated**. Each one carries a metadata header giving at least its creation
 date. The rules and the header format are in
-[`history/README.md`](history/README.md).
+[`history/README.md`](history/README.md), and
+[`history/INDEX.md`](history/INDEX.md) lists every document in the tree with a
+line saying what it records.
 
 ## Moving a document from live to historical
 
@@ -64,13 +66,19 @@ because your own change is what completed the plan — archive the document:
    that, an archived document receives only the edits
    [`history/README.md`](history/README.md) permits: mechanical link fixes
    and metadata-header corrections.
-4. Add a one-line entry for it to the index in
-   [`history/README.md`](history/README.md).
+4. Add an entry for it to [`history/INDEX.md`](history/INDEX.md). An entry is
+   a single line, however long it runs, and that file holds nothing but its
+   preamble, its section headings, and the entries. Both rules are what let
+   git merge concurrent additions to the index without a conflict;
+   [`history/README.md`](history/README.md) explains the mechanism.
 
-Steps 3 and 4 are the ones that go wrong quietly, and `deno task docs-links`
-checks both: `--orphan` names every document nothing links to, which is what a
-missed index entry looks like from the outside. It is worth running whenever
-you move or rename more than one document at a time — see
+Step 4 is checked by `deno task check-docs-history-index`, which runs in
+continuous integration: it enforces the shape of the index, and it names any
+document in the tree that no entry covers.
+
+Step 3 goes wrong quietly, and `deno task docs-links --orphan` names every
+document nothing links to. It is worth running whenever you move or rename
+more than one document at a time — see
 [`development/README.md`](development/README.md#tools) for its other modes.
 
 ## Creating a new historical document
@@ -138,7 +146,7 @@ it as the code change it is.
 - [`plans/`](plans/README.md) — pending implementation plans
 - [`tutorial/`](tutorial/README.md) — the two-part system tutorial
 - [`history/`](history/README.md) — archived point-in-time records (see
-  above)
+  above), listed in [`history/INDEX.md`](history/INDEX.md)
 - [`check.md`](check.md) — how the TypeScript code blocks embedded in these
   documents are type-checked in CI (`deno task check-docs`); `history/` is
   exempt

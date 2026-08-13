@@ -115,12 +115,19 @@ network confinement model.
 - explicit `openai-codex` subscription provider with browser PKCE and headless
   device login, refresh-token rotation, live model discovery, resume, and
   owner-bound Loom integration
+- a session-local address handle table: deterministic short `cfh:a:` tokens for
+  cell addresses, minted per run, recorded in run state, and carried across
+  `--resume-run`; see
+  [Session-local address handles](#session-local-address-handles)
 
 What is not done yet:
 
 - real runner-driven CFC feedback integration
+- session handle coverage beyond the wired seams: denial-path tool messages,
+  cross-agent handle semantics for `delegate_task` arguments, and value handles
+  (`cfh:v:`)
 - richer opaque-handle/pass-through behavior outside schema-validated subagent
-  returns
+  returns, including an explicit release/readback mechanism
 - first-class browser operation policy on top of the provisional browser
   subagent profile
 - dynamic/model-driven Agent Skills activation
@@ -135,12 +142,15 @@ What is not done yet:
   - harness config, CFC mode resolution, gateway auth mode
 - [src/engine.ts](src/engine.ts)
   - core execution engine, run state, tool execution
+- [src/handle-table.ts](src/handle-table.ts)
+  - session-local address handle table: token minting and both swap directions
 - [src/prompt-loop.ts](src/prompt-loop.ts)
   - bounded prompt/tool loop
 - [src/model/](src/model)
   - provider-neutral model client, gateway adapter, and Codex Responses adapter
 - [src/auth/](src/auth)
-  - owner-keyed credential store and OpenAI Codex OAuth flows
+  - persistent provider settings, owner-keyed credential storage, bounded
+    credential health, and OpenAI Codex OAuth flows
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
 - [src/provenance.ts](src/provenance.ts)
@@ -156,7 +166,7 @@ What is not done yet:
   - Agent Skills registry scanning, validation, and explicit preload context
 - [src/contracts/](src/contracts/)
   - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
-    transcript, and tool-result contracts
+    transcript, tool-result, and handle-table contracts
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
 - [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
@@ -238,6 +248,11 @@ cd packages/cf-harness
 deno task run -- auth login openai-codex
 deno task run -- auth login openai-codex --device
 
+# Inspect or persist the provider preference used by new direct runs.
+deno task run -- config inspect --json
+deno task run -- config init openai-compatible-gateway --json
+deno task run -- config set openai-codex --json
+
 # Inspect local credential status and the live, subscription-scoped model catalog.
 deno task run -- auth status openai-codex
 deno task run -- models openai-codex
@@ -252,11 +267,25 @@ deno task run -- \
 deno task run -- auth logout openai-codex
 ```
 
-Local credentials live under `CF_HARNESS_HOME` (by default
-`~/.cf-harness/auth.json`). The directory and file are created with modes `0700`
-and `0600`, and updates replace the file atomically. `cf-harness` never imports
-or shares `~/.codex/auth.json`. A failed refresh does not fall back to
-`OPENAI_API_KEY`, the Common Tools gateway, or unauthenticated mode.
+The provider preference lives in `CF_HARNESS_HOME/config.json`; local
+credentials and bounded refresh health live in `CF_HARNESS_HOME/auth.json` (by
+default under `~/.cf-harness`). The home and files use private permissions, and
+mutations serialize through advisory locks before atomic replacement. The
+canonical home path and its ancestor chain are a trusted host configuration; the
+stores reject a symlink at the home, target, or lock path but do not claim
+descriptor-relative protection against an attacker who can replace trusted
+ancestors concurrently. `cf-harness` never imports or shares
+`~/.codex/auth.json`. A failed refresh does not fall back to `OPENAI_API_KEY`,
+the Common Tools gateway, or unauthenticated mode.
+
+Direct runs resolve a provider from explicit CLI, environment, persistent
+preference, then the historical gateway default. Provider resolution does not
+resolve or rewrite model aliases. Resume retains the recorded provider and
+ignores the persistent preference; an explicit conflicting provider is a
+`provider-mismatch` failure. Structured config and auth commands use versioned
+JSON result envelopes. Login emits a versioned NDJSON authorization event before
+its terminal result. These responses expose connection health but no tokens,
+full account identifiers, expiries, or raw provider errors.
 
 Resume a root run with `--resume-run <run-root-or-run-state.json>`. Codex resume
 keeps the recorded provider, model, exact credential owner, and encrypted
@@ -464,6 +493,55 @@ export CF_HARNESS_CFC_ENFORCEMENT_MODE=observe
 
 Tool outputs are then exposed raw with policy warnings recorded in the run
 report instead of being denied for missing trusted mediation metadata.
+
+### Session-local address handles
+
+Every run keeps a session-local handle table: short opaque tokens that stand in
+for cell addresses in model-visible text, so a transcript never has to carry a
+full LLM-friendly link. This is how the harness renders references — there is no
+flag or environment variable governing it. Artifacts retain the raw bytes for
+operators, and the table itself is run state.
+
+An address token is `cfh:a:<suffix>`, where the suffix is exactly five
+characters drawn from a 30-character alphabet — the digits `2`–`9` and the
+lowercase letters minus `i`, `l`, `o`, and `u` — chosen so a token survives
+being retyped. The `cfh:v:` prefix is reserved for a future value-handle kind
+and is not implemented. Token derivation is deterministic: the suffix is
+computed from the table's salt (the run id) and the normalized address, so the
+same referent yields the same token within a run and two spellings of one
+address (an LLM-friendly link and the bare entity URI, say) share one token. A
+suffix collision re-derives a fresh five-character suffix with a counter mixed
+into the hash, so no token is ever a prefix of another.
+
+The table supports swapping in both directions:
+
+- Outbound, positively-marked address forms become tokens: LLM-friendly link
+  strings, standalone `of:`/`computed:`-schemed entity URIs (any tagged hash
+  after the scheme, `fid1:` among them), and whole single-key
+  `{"@link": "<address>"}` objects. A bare tagged hash without a scheme is never
+  treated as an address — schema hashes, blob ids, and slugs share that
+  encoding, so only the schemed forms are positively an address. Occurrences the
+  runner cannot parse, and `@link` strings that are not entity addresses
+  (`opaque:` handles among them), pass through unchanged.
+- Inbound, every token the table holds becomes its canonical LLM-friendly
+  reference string; a well-formed token the table does not hold is left
+  untouched.
+
+The table is per-run state: it is persisted in `run-state.json` alongside the
+transcript and policy evidence, and a resumed run (`--resume-run`) carries its
+table, so tokens stay stable across resume.
+
+The prompt/tool loop applies the swaps at three seams. Successful tool output
+bound for model context carries tokens, while the persisted tool-output artifact
+keeps the raw addresses. Model-authored tool arguments resolve tokens back to
+canonical references before policy evaluation, summarization, and dispatch —
+except for `delegate_task`, whose arguments reach the child verbatim, so a token
+there is inert text. And a sealed subagent structured-return string whose raw
+value names an address comes back as a token rather than an opaque `@link`
+object; the return's `linkedStringCount` counts only the positions still sealed.
+Denial-path tool messages are not swapped; that coverage, cross-agent handle
+semantics, value handles, and an explicit release/readback mechanism are listed
+in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Interactive chat stdio transport:
 

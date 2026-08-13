@@ -3,7 +3,7 @@
  * (same shape as packages/patterns/test/non-idempotent/accumulator.test.tsx).
  * The detected violation satisfies the expectation, so this test must PASS.
  */
-import { computed, pattern, TESTS, Writable } from "commonfabric";
+import { assert, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const value = new Writable("hello");
@@ -15,7 +15,7 @@ export default pattern(() => {
     log.set([...current, `${value.get()} at run #${current.length + 1}`]);
   });
 
-  const hasEntries = computed(() => log.get().length > 0);
+  const hasEntries = assert(() => log.get().length > 0);
 
   return {
     [TESTS]: [{ assertion: hasEntries }],

@@ -12,7 +12,7 @@ import {
   entityRefFromString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isReactive } from "./builder/types.ts";
 import {
   getCellOrThrow,
@@ -180,7 +180,7 @@ export function createRef(
       // answer. Two cells of one document derive two ids.
       return traverse(encodableFormOf(obj));
     } else if (Array.isArray(obj)) return obj.map(traverse);
-    else if (isRecord(obj)) {
+    else if (isObjectOrArray(obj)) {
       return Object.fromEntries(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );

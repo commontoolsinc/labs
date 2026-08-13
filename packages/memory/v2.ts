@@ -10,7 +10,7 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 export const MEMORY_PROTOCOL = "memory" as const;
@@ -979,7 +979,7 @@ export const compatibleMemoryProtocolFlags = (
 export const parseMemoryProtocolFlags = (
   value: unknown,
 ): MemoryProtocolFlags | null => {
-  if (!isRecord(value) || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return null;
   }
 
@@ -1152,7 +1152,7 @@ export const toDocumentSelector = (
 
 export const isEntityDocument = (
   value: unknown,
-): value is EntityDocument => isObject(value);
+): value is EntityDocument => isObjectNotArray(value);
 
 export const getEntityDocumentMetadata = (
   document: EntityDocument,

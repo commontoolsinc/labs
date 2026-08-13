@@ -1,6 +1,6 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
@@ -259,7 +259,7 @@ function createViewProxy<T>(
   // check depends on a specific field's VALUE. Register an explicit read of
   // `$stream` when present, so a value flipping into/out of a stream marker
   // re-triggers consumers. [review: ubik2]
-  if (isRecord(value) && "$stream" in value) {
+  if (isObjectOrArray(value) && "$stream" in value) {
     viewTx.readValueOrThrow({ ...link, path: [...link.path, "$stream"] });
   }
 
@@ -277,7 +277,7 @@ function createViewProxy<T>(
   // directly, exactly as for JS primitives above; wrapping one in a live proxy
   // serves no purpose and would leak that proxy into any consumer that
   // deep-clones or freezes the surrounding value (e.g. schema interning).
-  if (!isRecord(value) || value instanceof FabricPrimitive) {
+  if (!isObjectOrArray(value) || value instanceof FabricPrimitive) {
     // The SHAPE_READ above tracks only the container's shape, but a
     // FabricPrimitive is an atomic VALUE the consumer materializes here (handed
     // back directly, like a JS primitive), not a container whose shape it
@@ -688,7 +688,7 @@ function createViewProxy<T>(
     },
     ownKeys: () => {
       const current = readTx().readValueOrThrow(link, SHAPE_READ);
-      const keys = isRecord(current) || Array.isArray(current)
+      const keys = isObjectOrArray(current) || Array.isArray(current)
         ? Reflect.ownKeys(current)
         : Reflect.ownKeys(value);
       if (Array.isArray(proxyTarget)) {
@@ -771,7 +771,7 @@ function createViewProxy<T>(
       // (loom CT-1949). The `has` trap below keeps `in` -- there it is correct,
       // being the `in` operator's own trap.
       if (
-        (isRecord(current) || Array.isArray(current)) &&
+        (isObjectOrArray(current) || Array.isArray(current)) &&
         Object.hasOwn(current, prop)
       ) {
         return {
@@ -797,7 +797,7 @@ function createViewProxy<T>(
         return prop in value;
       }
       const current = readTx().readValueOrThrow(link, SHAPE_READ);
-      if (isRecord(current) || Array.isArray(current)) {
+      if (isObjectOrArray(current) || Array.isArray(current)) {
         // Probing whether a numeric index is present (`n in arr`) observes the
         // array's key set: for a dense array the answer is `n < length`, but a
         // sparse array has holes, so the answer depends on whether index `n` is
@@ -901,7 +901,7 @@ const createProxyForArrayValue = (
 };
 
 function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
-  return isRecord(value) && originalIndex in value;
+  return isObjectOrArray(value) && originalIndex in value;
 }
 
 /**
@@ -923,7 +923,7 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
  * @returns {boolean}
  */
 export function isCellResult(value: any): value is CellResult<any> {
-  return isRecord(value) &&
+  return isObjectOrArray(value) &&
     typeof (value as Partial<BackToCellInternals>)[toCell] === "function";
 }
 

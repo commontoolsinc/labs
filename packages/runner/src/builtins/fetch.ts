@@ -3,7 +3,7 @@ import type {
   JSONSchema,
   JSONSchemaObj,
 } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -180,7 +180,7 @@ const asTypeArray = (type: unknown): string[] =>
  * Exported for unit testing only — not part of the fetch builtin surface.
  */
 export function schemaWithOpenObjects(schema: JSONSchema): JSONSchema {
-  if (!isRecord(schema)) return schema;
+  if (!isObjectOrArray(schema)) return schema;
   // Default-tier walk plus `$defs`. The never-emitted keywords (`contains`,
   // `if`/`then`/`else`, ...) are deliberately NOT rewritten — opening objects
   // under them would make those paths look supported; if one becomes emitted,

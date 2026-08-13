@@ -5,6 +5,8 @@
  */
 
 export {
+  addressKey,
+  createLLMFriendlyLink,
   isAliasBinding,
   isSigilLink,
   type NormalizedFullLink,

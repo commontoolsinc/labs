@@ -40,7 +40,7 @@ import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   ChildNodeState,
   NodeState,
@@ -1340,7 +1340,7 @@ export class WorkerReconciler {
     const kinds = policy.caveatKindAllow;
     if (
       kinds !== undefined && kinds.length > 0 &&
-      isRecord(atom) && atom.type === CFC_CAVEAT_ATOM_TYPE &&
+      isObjectOrArray(atom) && atom.type === CFC_CAVEAT_ATOM_TYPE &&
       typeof atom.kind === "string" && kinds.includes(atom.kind)
     ) {
       return true;

@@ -1,5 +1,6 @@
 import {
   action,
+  assert,
   computed,
   multiUserTest,
   pattern,
@@ -21,7 +22,7 @@ const alice = pattern(() => {
       )}
     </div>
   );
-  const isLate = computed(() => phase.get() === "late");
+  const isLate = assert(() => phase.get() === "late");
 
   return {
     [UI]: view,
