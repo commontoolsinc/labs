@@ -84,10 +84,16 @@ describe("stage G SpaceServer recovery seams", () => {
     await server.close();
   });
 
+  let lastStats = emptyServingLoopStats();
+
   const newSpaceServer = (
-    options: { serverFacade?: MemoryV2Server.Server } = {},
+    options: {
+      serverFacade?: MemoryV2Server.Server;
+      policy?: ConstructorParameters<typeof SpaceServer>[0]["policy"];
+    } = {},
   ): SpaceServer => {
     const stats = emptyServingLoopStats();
+    lastStats = stats;
     const created = new SpaceServer({
       space,
       server: options.serverFacade ?? server,
@@ -113,7 +119,7 @@ describe("stage G SpaceServer recovery seams", () => {
       },
       localSeqRef: { value: 0 },
       stats,
-      policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+      policy: options.policy ?? { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
     });
     spaceServer = created;
     return created;
@@ -266,5 +272,112 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(created.deferSealedEffects(probeTx, [effect])).toBe(true);
     expect(created.deferredEffectWaveCount).toBe(0);
     expect(flushed).toBe(0);
+  });
+
+  it("fires an EFFECT-ONLY batch on a quiet space: an all-no-op tx's deferred effects close a vacuous wave instead of starving until park (round-2 thread 1)", async () => {
+    // The §6-step-3 recovery shape: an activation re-run of an
+    // effectful node whose claim is already durable seals an ALL-NO-OP
+    // transaction (its claim writes elide) that carries only the
+    // effect. It mints NO contribution, so the pre-fix loop — which
+    // closed waves only for contributions or watermark movement —
+    // never closed the wave holding the batch: on a quiet space the
+    // effect starved, and the eventual idle park dropped it.
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    const runtime = servingRuntime!;
+    let flushed = 0;
+    const seqBefore = Engine.serverSeq(engine);
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "test/effect-only-reissue",
+      kind: "derivation",
+    });
+    // NO writes: the tx seals empty (contributes nothing) and carries
+    // one deferred effect.
+    tx.enqueuePostCommitEffect({
+      id: "fetchTest:effect-only",
+      kind: "fetchTest-start",
+      flush: () => {
+        flushed += 1;
+      },
+    });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // The effect must FIRE with no further input: the loop counts the
+    // deferred batch as work, closes the (vacuous, zero-contribution)
+    // wave, and admits the batch to the outbox.
+    await waitUntil(
+      () => flushed === 1,
+      "the effect-only batch to fire on the quiet space",
+    );
+    // Vacuous close: nothing was committed for it.
+    expect(Engine.serverSeq(engine)).toBe(seqBefore);
+    expect(created.deferredEffectWaveCount).toBe(0);
+  });
+
+  it("discards a REJECTED wave's effects: a terminal engine-side rejection withdraws the claims, so the batch must not egress (round-2 thread 3)", async () => {
+    const created = newSpaceServer({
+      // Renewals must not repair the lease mid-test: the rejection is
+      // staged by deleting the engine-side lease row while the
+      // in-process tenure stays valid.
+      policy: {
+        flushDeadlineMs: 2_000,
+        idleParkMs: 600_000,
+        renewIntervalMs: 600_000,
+      },
+    });
+    expect(await created.activate()).toBe(true);
+    const runtime = servingRuntime!;
+
+    // Pull the engine-side lease row out from under the ACTIVE server:
+    // the in-process tenure check still passes (no renew ran), so the
+    // wave proceeds to its commit — where the engine's derived-class
+    // admission (holder must hold the LIVE execution_lease) refuses it
+    // with a conflict-less rejection: the accumulator's terminal
+    // `aborted: "rejected"` arm, exactly the failed-wave shape the
+    // admission gate must discard effects for.
+    engine.database.prepare(
+      `DELETE FROM execution_lease WHERE space = :space`,
+    ).run({ space });
+
+    let flushed = 0;
+    const probe = runtime.getCell<{ n: number }>(
+      space,
+      "rejected-wave-probe",
+      undefined,
+    );
+    await probe.sync();
+    const seqBefore = Engine.serverSeq(engine);
+    const wavesBefore = lastStats.waves;
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "test/rejected-wave",
+      kind: "derivation",
+    });
+    probe.withTx(tx).set({ n: 1 });
+    tx.enqueuePostCommitEffect({
+      id: "fetchTest:rejected-wave",
+      kind: "fetchTest-start",
+      flush: () => {
+        flushed += 1;
+      },
+    });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // The wave closes (counted) but commits nothing and — the pin —
+    // its effects are DISCARDED, not admitted: the sealed claim writes
+    // were withdrawn with the rejection, so firing would egress work
+    // whose claim never became durable (pre-fix, every non-lease-lost
+    // abort admitted the batch).
+    await waitUntil(
+      () => lastStats.waves > wavesBefore,
+      "the rejected wave to be counted",
+    );
+    // Give a wrongly-admitted flush every chance to run before the
+    // negative assertion.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(flushed).toBe(0);
+    expect(Engine.serverSeq(engine)).toBe(seqBefore);
   });
 });

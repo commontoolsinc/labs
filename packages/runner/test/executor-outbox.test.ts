@@ -548,7 +548,7 @@ describe("stage G outbox + sqlite discharge", () => {
     // A fresh outbox instance (the recovering process — §6 step 5's
     // re-send): the durable row survived, the effect half did not need
     // to.
-    const { outbox: recovered } = newOutbox();
+    const { outbox: recovered, stats: recoveredStats } = newOutbox();
     await recovered.deliverPendingAppends();
     const after = Engine.read(targetEngine, { id: "of:deliver-stream" });
     const afterEntries =
@@ -556,9 +556,83 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(afterEntries.length).toBe(1);
     expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
       .toBe(0);
+    // Both deliveries clean: the first outbox's AND — the assertion
+    // that actually guards the re-send this leg is about (round-2
+    // thread 11; the old check read the FIRST outbox's counter, which
+    // the re-send never touches) — the RECOVERED outbox's.
     expect(stats.outbox.failed).toBe(0);
+    expect(recoveredStats.outbox.failed).toBe(0);
     lease.release();
     lease2.release();
+  });
+
+  it("stops the drain at a transport failure: the failed row AND its successors stay, preserving per-stream FIFO; the re-drain delivers in order (round-2 thread 7)", async () => {
+    // Three rows to ONE target stream, inserted directly (the crashed-
+    // before-delivery shape the drain recovers).
+    insertExecutionOutboxRows(engine, {
+      branch: "",
+      createdSeq: 1,
+      rows: [1, 2, 3].map((n) => ({
+        targetSpace,
+        targetStream: "of:fifo-stream",
+        eventId: `evt-fifo-${n}`,
+        payload: { n },
+        actingPrincipal: "user:alice",
+        actingSession: "sess-1",
+        capabilityRef: "cap-fifo",
+      })),
+    });
+
+    // A transport that fails the FIRST delivery attempt only.
+    let failuresLeft = 1;
+    const flakyOnce = new Proxy(server, {
+      get(target, prop, receiver) {
+        if (prop === "commitDelegatedAppend" && failuresLeft > 0) {
+          return () => {
+            failuresLeft -= 1;
+            return Promise.reject(new Error("transport down"));
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const flakyOutbox = new SpaceOutbox({
+      stats: emptyServingLoopStats(),
+      server: flakyOnce as typeof server,
+      engine,
+      sessionId: holder,
+      localSeqRef,
+    });
+
+    // The failed first row STOPS the drain: nothing delivered, ALL
+    // three rows kept (pre-fix, rows 2 and 3 delivered past the
+    // retained row 1 — the per-stream FIFO break the re-send then
+    // completes: 2, 3, 1).
+    const first = await flakyOutbox.deliverPendingAppends();
+    expect(first.remaining).toBe(3);
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(3);
+    const targetEngine = await server.engineForSpace(targetSpace);
+    const empty = Engine.read(targetEngine, { id: "of:fifo-stream" });
+    expect(
+      ((empty?.value as { entries?: Array<unknown> })?.entries ?? []).length,
+    ).toBe(0);
+
+    // The healthy re-drain delivers everything IN INSERTION ORDER.
+    const second = await flakyOutbox.deliverPendingAppends();
+    expect(second.remaining).toBe(0);
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(0);
+    const after = Engine.read(targetEngine, { id: "of:fifo-stream" });
+    const entries =
+      (after?.value as { entries?: Array<{ eventId?: string }> })?.entries ??
+        [];
+    expect(entries.map((entry) => entry.eventId)).toEqual([
+      "evt-fifo-1",
+      "evt-fifo-2",
+      "evt-fifo-3",
+    ]);
   });
 
   it("folds a FOREIGN-only-seal survivor's appends into the home batch's outbox rows (FP1 fold completeness; the stage-G review's M-A)", async () => {

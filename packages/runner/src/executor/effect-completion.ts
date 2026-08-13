@@ -35,22 +35,73 @@
 //   completion-visibility wedge, F2).
 
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { Cell } from "../cell.ts";
 
 const effectCompletionKeys = new WeakMap<object, string>();
 
 /**
+ * The per-target effect key: `<builtin>:<inputHash>` widened by the
+ * requesting node's result-cell identity (entity id + scope). This is
+ * the OUTBOX in-flight/dedupe key and the completion-routing key — the
+ * `idempotencyKey` the builtins enqueue with, and the key every
+ * `markEffectCompletion` of that request must use.
+ *
+ * Why the target rides in the key (the stage-G round-2 headline): two
+ * DISTINCT recipe nodes can issue byte-identical inputs, colliding on
+ * `<kind>:<inputHash>` alone. Each node's effect closure writes only
+ * ITS OWN pending/result/error cells, so in-flight dedupe across nodes
+ * dropped the second closure and its cells stayed pending forever —
+ * the "one completion serves both result cells" assumption was false
+ * (the cells are per-node; no shared result store exists). Scoping the
+ * key by the result-cell identity keeps §4's in-flight dedupe where it
+ * is sound — re-admits of the SAME node (wave re-runs, stale-snapshot
+ * re-admits, crash re-misses), the production storm the B-1 barrier
+ * bounds — while distinct nodes each run their own effect. N nodes
+ * with identical inputs cost N egresses, exactly the OFF arm's
+ * behavior (its claim mutex lives on per-node cells too; nothing ever
+ * deduped across nodes). The deviation from serving-loop.md §4's "one
+ * outstanding effect per key per space" AS WRITTEN is flagged in the
+ * stage-G round-2 report: §4's own miss rule carries ONE result-cell
+ * address per entry, so the sentence was already inconsistent with
+ * itself for the multi-node case.
+ *
+ * The CFC sink-request `effectId` deliberately stays the UNSCOPED
+ * `<kind>:<inputHash>` — policy-input strings are request-identity
+ * vocabulary, unchanged by this fix.
+ */
+export function effectTargetKey(
+  base: string,
+  targetCell: Cell<unknown>,
+): string {
+  const link = targetCell.getAsNormalizedFullLink();
+  const scope = link.scope !== undefined && link.scope !== "space"
+    ? `:${String(link.scope)}`
+    : "";
+  return `${base}@${link.id}${scope}`;
+}
+
+/**
  * Mark a writeback transaction as the completion of the served effect
- * `effectKey` (the builtin's memo/outbox id, e.g. `fetchJson:<hash>`).
- * Call it FIRST inside the writeback's transaction callback, before any
+ * `effectKey` (the builtin's outbox key — {@link effectTargetKey} of
+ * the memo id, e.g. `fetchJson:<hash>@<result-cell id>`). Call it
+ * FIRST inside the writeback's transaction callback, before any
  * writes — the marker must be present when the transaction closes, and
  * the authoritative-writes mode must cover every write the callback
  * makes.
+ *
+ * The marker is keyed on the INNER storage transaction (`tx.tx`), not
+ * the extended wrapper: `TransactionWrapper`s share the inner tx with
+ * what they wrap, so a completion marked through a wrapper still
+ * routes when the seal destination reads the key off the transaction
+ * that actually commits (round-2 thread 18 — a wrapper-marked
+ * completion previously lost both the marker and, via the wrapper's
+ * missing forward, the authoritative mode).
  */
 export function markEffectCompletion(
   tx: IExtendedStorageTransaction,
   effectKey: string,
 ): void {
-  effectCompletionKeys.set(tx, effectKey);
+  effectCompletionKeys.set(tx.tx, effectKey);
   // Completion writebacks are authoritative (F2): under the serving
   // posture (seal destination configured — the gate lives in
   // ExtendedStorageTransaction) their writes commit even where the
@@ -62,5 +113,5 @@ export function markEffectCompletion(
 export function effectCompletionKeyOf(
   tx: IExtendedStorageTransaction,
 ): string | undefined {
-  return effectCompletionKeys.get(tx);
+  return effectCompletionKeys.get(tx.tx);
 }

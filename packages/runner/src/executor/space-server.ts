@@ -448,6 +448,11 @@ export class SpaceServer implements TransactionSealDestination {
       this.#pendingEffectsByWave.set(wave, pending);
     }
     pending.push({ tx, effects, context: waveRunContextOf(tx) });
+    // Wake the loop: an effect-only batch (all-no-op tx — no
+    // contribution) is otherwise invisible to it, and a handoff that
+    // lands while the loop sits in #waitForInput would sleep out the
+    // full idle window before the wave closes (round-2 thread 1).
+    this.#feedArrived?.resolve();
     return true;
   }
 
@@ -780,7 +785,19 @@ export class SpaceServer implements TransactionSealDestination {
 
   #hasWork(): boolean {
     return this.#feed.length > 0 ||
-      (this.#currentWave?.contributionCount ?? 0) > 0;
+      (this.#currentWave?.contributionCount ?? 0) > 0 ||
+      // Deferred effect batches of the OPEN wave are work (round-2
+      // thread 1): an effect-only tx (an all-no-op claim re-issue —
+      // the §6 step 3 recovery shape) seals no contribution, so
+      // without this the loop would sleep on a quiet space while the
+      // batch starves, and an idle park would drop it.
+      this.#currentWavePendingEffectCount() > 0;
+  }
+
+  #currentWavePendingEffectCount(): number {
+    const wave = this.#currentWave;
+    if (wave === undefined) return 0;
+    return this.#pendingEffectsByWave.get(wave)?.length ?? 0;
   }
 
   async #waitForInput(maxMs: number): Promise<void> {
@@ -985,6 +1002,17 @@ export class SpaceServer implements TransactionSealDestination {
 
     const wave = this.#currentWave;
     const haveContributions = (wave?.contributionCount ?? 0) > 0;
+    // Effect-only work (round-2 thread 1): deferred batches whose
+    // transactions sealed NOTHING (all-no-op claim re-issues — the §6
+    // step 3 recovery shape: activation re-runs a fetch whose claim is
+    // already durable, the claim writes elide, only the effect
+    // remains). They ride no contribution, so a quiet space would
+    // never close the wave holding them — the batch starves, and the
+    // eventual idle park drops it. Closing the wave for them commits
+    // nothing (a zero-contribution commitWave is vacuous) and hands
+    // the batches to the outbox below.
+    const havePendingEffects = wave !== undefined &&
+      (this.#pendingEffectsByWave.get(wave)?.length ?? 0) > 0;
     // W jumps to the top of the input batch at TRUE quiescence
     // (serving-loop.md §3): everything at or below batchHead has its
     // consequences committed and its demanded derivations current —
@@ -995,7 +1023,7 @@ export class SpaceServer implements TransactionSealDestination {
     const advanceTo = exhausted ? this.#watermark : batchHead;
     const shouldAdvance = !exhausted && advanceTo > this.#watermark;
 
-    if (!haveContributions && !shouldAdvance) {
+    if (!haveContributions && !shouldAdvance && !havePendingEffects) {
       // Nothing sealed and no watermark movement: no commit (the
       // zero-delta case — light cycles cost nothing). An EXHAUSTED
       // empty cycle is still counted: a wedged never-quiescing settle
@@ -1008,6 +1036,10 @@ export class SpaceServer implements TransactionSealDestination {
           `total ${this.#options.stats.wavesBudgetExhausted}`,
         ]);
       }
+      // The owed re-drain rides quiet cycles too (round-2 thread 9): a
+      // transport-failed delivery must retry on the NEXT loop cycle,
+      // not wait for a new input wave or a re-activation.
+      await this.#drainOutboxAppends(false);
       return;
     }
 
@@ -1088,15 +1120,25 @@ export class SpaceServer implements TransactionSealDestination {
     // Stage G, post-commit: hand the wave's sealed effects to the
     // outbox BEFORE anything below can throw (a failed commit-record
     // fetch must not leak effects with the runtime still alive) — but
-    // never on the lease-lost arm, whose park below discards them with
-    // the dying runtime (the crash-equivalent path memo re-miss
-    // covers). Fired for every other outcome — a withdrawn
-    // contribution's action re-runs and re-enqueues (deduped in
-    // flight), and completion writes are hash-guarded against current
-    // inputs, so a superseded request's writeback is inert
-    // (at-least-once, serving-loop.md §4).
+    // ONLY when the wave did not ABORT (round-2 thread 3:
+    // `outcome.aborted === undefined`, which is a committed wave OR a
+    // vacuous zero-contribution one — the effect-only batches of
+    // thread 1 ride the latter; their claim writes were no-ops against
+    // already-durable state, so nothing was withdrawn). A REJECTED or
+    // FOREIGN-FAILED wave discards its batches instead: its sealed
+    // claim writes (pending/requestHash) were WITHDRAWN, so firing
+    // would egress network work for claims that never became durable,
+    // and the completion would write result cells whose pending state
+    // rolled back — the input-driven retry (the re-run re-seals and
+    // re-enqueues into a later wave) is the sanctioned path. The
+    // lease-lost arm parks below and discards with the dying runtime
+    // (crash-equivalent, memo re-miss covers). Within a COMMITTED
+    // wave, per-contribution withdrawals keep the ruled at-least-once
+    // posture: the withdrawn action re-runs and re-enqueues (deduped
+    // in flight), and completion writes are hash-guarded against
+    // current inputs (serving-loop.md §4).
     if (
-      outcome.aborted !== "lease-lost" &&
+      outcome.aborted === undefined &&
       pendingEffects !== undefined && pendingEffects.length > 0
     ) {
       this.#outbox?.admitSealedEffects(pendingEffects);
@@ -1149,22 +1191,30 @@ export class SpaceServer implements TransactionSealDestination {
     // Drain the durable append rows (FP1): after a wave that landed
     // appends, and after any earlier drain left rows behind (a
     // transport-failed delivery on a long-lived active space must not
-    // wait for the next appends-carrying wave or a re-activation).
+    // wait for the next appends-carrying wave or a re-activation —
+    // quiet cycles re-drain too, see the early return above).
     // Co-hosted delivery is an engine commit, not a network await.
-    if (
-      (closing.hasOutboundAppends && outcome.seq !== undefined) ||
-      this.#outboxDrainOwed
-    ) {
-      try {
-        const drained = await this.#outbox?.deliverPendingAppends();
-        this.#outboxDrainOwed = (drained?.remaining ?? 0) > 0;
-      } catch (error) {
-        this.#outboxDrainOwed = true;
-        logger.warn("append-drain-failed", () => [
-          "post-wave outbox drain failed; rows kept for re-send",
-          error,
-        ]);
-      }
+    await this.#drainOutboxAppends(
+      closing.hasOutboundAppends && outcome.seq !== undefined,
+    );
+  }
+
+  /** The FP1 drain step, shared by the post-commit path and the
+   * quiet-cycle owed retry (round-2 thread 9): deliver pending durable
+   * append rows when this wave landed new ones or an earlier drain
+   * left rows behind; remember `remaining > 0` so the next cycle
+   * retries without fresh input. */
+  async #drainOutboxAppends(hasNewAppends: boolean): Promise<void> {
+    if (!hasNewAppends && !this.#outboxDrainOwed) return;
+    try {
+      const drained = await this.#outbox?.deliverPendingAppends();
+      this.#outboxDrainOwed = (drained?.remaining ?? 0) > 0;
+    } catch (error) {
+      this.#outboxDrainOwed = true;
+      logger.warn("append-drain-failed", () => [
+        "outbox drain failed; rows kept for re-send",
+        error,
+      ]);
     }
   }
 

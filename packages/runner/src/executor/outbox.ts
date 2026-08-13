@@ -6,8 +6,11 @@
 //   work of `fetch*`, `generate*`, `sqlite*` — handed over by the wave
 //   cycle AFTER the wave commit (never at seal: §3's "hand external
 //   effects to the outbox (post-commit)"), deduped in flight per effect
-//   id (`${kind}:${inputHash}` — the memo key basis; §4's "one
-//   outstanding effect per key per space; a second miss attaches").
+//   key (`${kind}:${inputHash}@<result-cell id>` — the memo key basis
+//   widened by the requesting node's target identity, see
+//   effect-completion.ts `effectTargetKey`; §4's in-flight dedupe,
+//   scoped per (key, target) because each effect's closure writes only
+//   its OWN node's cells — the round-2 headline).
 //   Crash-soundness needs no durability here: a crash re-misses the
 //   effect from memo keys (§4, §6 step 3 — RULED, at-least-once
 //   accepted). Per-entry run-context CARRIAGE (§4's miss rule: the
@@ -59,8 +62,14 @@ export class SpaceOutbox {
   readonly #engine: Engine;
   readonly #sessionId: string;
   readonly #localSeqRef: { value: number };
-  /** In-flight effect entries per effect id — §4's in-flight dedupe: a
-   * second admit of a live id attaches to (is served by) the first. The
+  /** In-flight effect entries per effect key — §4's in-flight dedupe,
+   * scoped per (memo key, result target): a second admit of a live key
+   * is the SAME node's request re-issued (a wave re-run, a
+   * stale-snapshot re-admit, a crash re-miss) and is served by the
+   * first entry's completion writing that node's cells. Distinct nodes
+   * never share a key (effectTargetKey widens the memo key by the
+   * result-cell identity — the round-2 headline: their closures write
+   * different cells, so cross-node dedupe dropped real work). The
    * stored promise is the entry's RETIREMENT (work settled AND every
    * completion commit readable — see #retireBarriers), which is what
    * `settle()` awaits. */
@@ -166,9 +175,14 @@ export class SpaceOutbox {
       for (const effect of batch.effects) {
         const key = effect.idempotencyKey ?? effect.id;
         if (this.#inflight.has(key)) {
-          // §4's in-flight dedupe: the second miss attaches — the live
-          // effect's completion serves both requesters (same key ⇒ same
-          // result cells).
+          // §4's in-flight dedupe, per (memo key, result target): a
+          // live key means THIS NODE's identical request is already
+          // running, and its completion writes this node's cells —
+          // the re-admit attaches. Keys carry the result-cell identity
+          // (effectTargetKey), so this branch can never drop a
+          // DIFFERENT node's closure (the round-2 headline bug: with
+          // bare `kind:inputHash` keys, "one completion serves both
+          // result cells" was false — the cells are per-node).
           continue;
         }
         this.#stats.outbox.queued += 1;
@@ -285,15 +299,21 @@ export class SpaceOutbox {
    * entries to annotate yet. When that machinery lands, the notice
    * must be written BEFORE the row delete (verification-coverage
    * OW14 — today the delete discards eventId/target/reason beyond
-   * the warn log). Transport-class failures keep the row for
-   * the next drain (at-least-once, no timers).
+   * the warn log). A TRANSPORT-class failure STOPS the drain: the
+   * failed row and every later row stay for the next drain
+   * (at-least-once, no timers). Continuing past a retained row would
+   * deliver later rows of the same target stream ahead of it, and the
+   * re-send would then violate per-stream append order — FIFO per
+   * (source wave → target stream) is the §2b guarantee the insertion
+   * order exists to carry. The cost is one drain cycle of latency for
+   * rows behind the failure aimed at OTHER streams; correctness over
+   * throughput here.
    */
   async deliverPendingAppends(): Promise<{ remaining: number }> {
     const rows = selectPendingExecutionOutboxRows(this.#engine, {
       branch: "",
     });
-    let remaining = 0;
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
       try {
         await this.#server.commitDelegatedAppend({
           targetSpace: row.targetSpace,
@@ -316,17 +336,22 @@ export class SpaceOutbox {
       } catch (error) {
         if (error instanceof ProtocolError) {
           // LT4: a deterministic admission rejection does not retry.
+          // Retiring the row keeps FIFO intact (nothing is delivered
+          // out of order by REMOVING a row — later rows were always
+          // going to follow it), so the drain continues.
           this.#stats.outbox.failed += 1;
           try {
             deleteExecutionOutboxRow(this.#engine, row.rowId);
           } catch (deleteError) {
-            // A failed retirement must not abort the drain; the row
-            // re-sends and hits the same deterministic rejection.
-            remaining += 1;
+            // The row could not be retired: stop here too — leaving it
+            // pending while delivering later rows would reorder its
+            // stream on the re-send, the same FIFO break as the
+            // transport arm.
             logger.warn("append-retire-failed", () => [
               `retiring rejected append ${row.eventId} failed; row kept`,
               deleteError,
             ]);
+            return { remaining: rows.length - index };
           }
           logger.warn("append-rejected", () => [
             `outbox append ${row.eventId} → ${row.targetSpace} rejected ` +
@@ -336,16 +361,18 @@ export class SpaceOutbox {
           ]);
           continue;
         }
-        // Transport-class failure: keep the row; the next drain (or the
-        // next activation's §6 step 5) re-sends. No timers.
-        remaining += 1;
+        // Transport-class failure: STOP the drain — the failed row and
+        // every row behind it stay for the next drain (or the next
+        // activation's §6 step 5 re-send), preserving per-stream
+        // append order. No timers.
         logger.warn("append-delivery-failed", () => [
           `outbox append ${row.eventId} → ${row.targetSpace} failed; ` +
-          "row kept for re-send",
+          "drain stopped, row and successors kept for re-send",
           error,
         ]);
+        return { remaining: rows.length - index };
       }
     }
-    return { remaining };
+    return { remaining: 0 };
   }
 }

@@ -1128,9 +1128,35 @@ describe("stage F serving loop", () => {
       30_000,
     );
     expect(calls.filter((url) => url.endsWith("/fails")).length).toBe(1);
-    // No timer retry: give any (forbidden) retry loop time to betray
-    // itself, then re-check the count.
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // No timer retry, pinned DETERMINISTICALLY (round-2 thread 10): a
+    // fixed wall-clock sleep proves nothing about a forbidden retry
+    // armed on a longer interval or delayed by scheduling. Drive the
+    // loop through additional full waves instead — input-driven
+    // activity on an UNRELATED doc, each claimed by the watermark —
+    // and assert the failed key still did not re-fire after the loop
+    // demonstrably cycled several times.
+    const retryProbe = clientRuntime.getCell<{ n: number }>(
+      space,
+      "no-timer-retry-probe",
+      undefined,
+    );
+    for (let i = 1; i <= 3; i++) {
+      // Head captured BEFORE the probe commit: a post-commit read can
+      // capture the loop's own derived commit's seq, which W never
+      // covers (self-echo is not coverage-owed input — the same trap
+      // the recovery leg's poke documents). The probe's authored seq
+      // is > seqBefore, and the only coverage-owed input in this quiet
+      // phase, so W > seqBefore proves the loop claimed it.
+      const seqBefore = Engine.serverSeq(engine);
+      const probeTx = clientRuntime.edit();
+      retryProbe.withTx(probeTx).set({ n: i });
+      expect((await probeTx.commit()).error).toBeUndefined();
+      await waitUntil(
+        () => readWatermarkSeq(engine) > seqBefore,
+        `the loop to claim no-timer-retry probe ${i}`,
+        30_000,
+      );
+    }
     expect(calls.filter((url) => url.endsWith("/fails")).length).toBe(1);
 
     // The input-driven retry: a THIRD url re-fires (fresh key), and the
@@ -1261,10 +1287,20 @@ describe("stage F serving loop", () => {
     await waitUntil(() => observes("a"), "client to re-observe leg A", 30_000);
 
     // The returning leg is a genuine re-miss (B's completion overwrote
-    // the stored request hash), so A fired exactly twice and B exactly
-    // once — bounded, never zero (starvation) and never runaway.
-    expect(calls.filter((url) => url.endsWith("/a")).length).toBe(2);
-    expect(calls.filter((url) => url.endsWith("/b")).length).toBe(1);
+    // the stored request hash), so A fired at least twice — the lower
+    // bound IS the regression pin (a starving re-admit leaves it at 1)
+    // — and B at least once. The upper bounds carry the same
+    // at-least-once allowance the memo test's recovery leg documents
+    // (round-2 thread 19): under load-degraded deadline-paced waves a
+    // stale evaluation may legitimately re-miss ONCE per leg before
+    // the completion becomes readable, so exact counts flake; bounded,
+    // never zero (starvation) and never runaway.
+    const aCalls = calls.filter((url) => url.endsWith("/a")).length;
+    const bCalls = calls.filter((url) => url.endsWith("/b")).length;
+    expect(aCalls).toBeGreaterThanOrEqual(2);
+    expect(aCalls).toBeLessThanOrEqual(3);
+    expect(bCalls).toBeGreaterThanOrEqual(1);
+    expect(bCalls).toBeLessThanOrEqual(2);
 
     // And the served value STAYS: no post-arrival destroyer wipe (the
     // F2 half — a torn hash would wipe it on the next wave). The
@@ -1275,6 +1311,122 @@ describe("stage F serving loop", () => {
       15_000,
     );
     expect(observes("a")).toBe(true);
+  });
+
+  it("serves BOTH result cells when two DISTINCT nodes issue byte-identical inputs: per-target keys keep every requester's closure (round-2 headline)", async () => {
+    // The round-2 headline regression: with the outbox key = kind +
+    // input hash ONLY, two distinct recipe nodes issuing identical
+    // inputs collided — the first node's closure ran (writing ITS OWN
+    // pending/result/error cells) and the second's was dropped at
+    // admit, so the second node's cells stayed pending forever. The
+    // key now carries the result-cell identity (effectTargetKey), so
+    // each node keeps its own effect while same-node re-admits still
+    // dedupe.
+    const calls: string[] = [];
+    servingFetch = (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      calls.push(url);
+      return Promise.resolve(
+        new Response(JSON.stringify({ from: url }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+
+    onServingRuntime = async (runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { fetchJsonUnchecked, pattern } from 'commonfabric';",
+            "export default pattern<{ url: string }, { one: any; two: any }>(",
+            "  ({ url }) => ({",
+            "    one: fetchJsonUnchecked({ url }),",
+            "    two: fetchJsonUnchecked({ url }),",
+            "  }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const argument = runtime.getCell<{ url: string }>(
+        space,
+        "two-node-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ one: unknown; two: unknown }>(
+        space,
+        "two-node-result",
+        compiled.resultSchema,
+      );
+      for (let attempt = 0;; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, compiled, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    openClient();
+    const clientResult = clientRuntime.getCell<{
+      one: { result?: { from?: string } };
+      two: { result?: { from?: string } };
+    }>(
+      space,
+      "two-node-result",
+      undefined,
+    );
+    await clientResult.sync();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate before the url write",
+    );
+    const clientArg = clientRuntime.getCell<{ url: string }>(
+      space,
+      "two-node-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const tx = clientRuntime.edit();
+    clientArg.withTx(tx).set({ url: "https://stage-g.test/shared" });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // BOTH nodes' cells serve. The pre-fix tree wedges exactly one of
+    // these waits (whichever node's closure was admitted second).
+    const served = (key: "one" | "two") =>
+      (clientResult.key(key).key("result").get() as
+        | { from?: string }
+        | undefined)
+        ?.from === "https://stage-g.test/shared";
+    await waitUntil(
+      () => served("one"),
+      "node one to observe the result",
+      30_000,
+    );
+    await waitUntil(
+      () => served("two"),
+      "node two to observe the result",
+      30_000,
+    );
+
+    // Egress bounded: the contract pinned here is per-requester
+    // DELIVERY with bounded calls — >=1 (a future response-sharing
+    // fan-out may serve both nodes from one egress without breaking
+    // this test) and <=4 (one per node plus the documented
+    // at-least-once re-miss allowance per node).
+    const shared = calls.filter((url) => url.endsWith("/shared")).length;
+    expect(shared).toBeGreaterThanOrEqual(1);
+    expect(shared).toBeLessThanOrEqual(4);
   });
 
   it("retires every served effect: the in-flight count returns to baseline after each completion settles — no monotonic leak (completion-visibility F1a)", async () => {
