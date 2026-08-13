@@ -2010,43 +2010,6 @@ const applyCommitTransaction = (
           "row) — partial carriage is refused, never defaulted",
       );
     }
-    // A sessionless delegated chain has NO session instance (scopes.md
-    // §5: a sessionless actor's session-scoped write is an ERROR —
-    // neither falling back to another identity nor minting a session is
-    // permitted). Without this refusal the writeOperation fallback
-    // below would key such a write from the DELEGATING envelope's
-    // session — `session:<actingPrincipal>:<sink session>`, a chimera
-    // instance no party ever acted as. Refused at admission, loudly.
-    if (
-      delegated.actingSession === undefined || delegated.actingSession === ""
-    ) {
-      for (const operation of commit.operations) {
-        if (operation.op === "sqlite") {
-          // The same rule for folded SQLite writes: a session-scoped
-          // cell-db resolves its on-disk file from a session identity a
-          // sessionless actor does not have — admitting it would key the
-          // file from the delegating ENVELOPE's session, the same
-          // chimera instance the entity-write refusal below prevents.
-          if (operation.db.scope === "session") {
-            throw new ProtocolError(
-              "delegated admission rejected: a sessionless delegated " +
-                "batch (no actingSession) carries a session-scoped " +
-                "SQLite write — a sessionless actor has no session " +
-                "instance (scopes.md §5, protocol.md §2's delegated row)",
-            );
-          }
-          continue;
-        }
-        if (normalizeScope(operation.scope) === "session") {
-          throw new ProtocolError(
-            "delegated admission rejected: a sessionless delegated " +
-              "batch (no actingSession) carries a session-scoped write " +
-              "— a sessionless actor has no session instance " +
-              "(scopes.md §5, protocol.md §2's delegated row)",
-          );
-        }
-      }
-    }
   }
 
   // Derived commits key scoped writes by their EXPLICIT annotation
@@ -2139,6 +2102,49 @@ const applyCommitTransaction = (
       branch: existing.branch,
       revisions: selectCommitRevisions(engine, existing.seq),
     };
+  }
+
+  // A sessionless delegated chain has NO session instance (scopes.md
+  // §5: a sessionless actor's session-scoped write is an ERROR —
+  // neither falling back to another identity nor minting a session is
+  // permitted). Without this refusal the writeOperation fallback
+  // below would key such a write from the DELEGATING envelope's
+  // session — `session:<actingPrincipal>:<sink session>`, a chimera
+  // instance no party ever acted as. Refused at admission, loudly.
+  // Placed AFTER the replay return (the stage-B ordering rule): the
+  // check is payload-pure, so a first attempt refuses identically, and
+  // a replay of a commit the store already admitted returns its stored
+  // result rather than being re-adjudicated.
+  if (
+    delegated !== undefined &&
+    (delegated.actingSession === undefined || delegated.actingSession === "")
+  ) {
+    for (const operation of commit.operations) {
+      if (operation.op === "sqlite") {
+        // The same rule for folded SQLite writes: a session-scoped
+        // cell-db resolves its on-disk file from a session identity a
+        // sessionless actor does not have — admitting it would key the
+        // file from the delegating ENVELOPE's session, the same
+        // chimera instance the entity-write refusal below prevents.
+        if (operation.db.scope === "session") {
+          throw new ProtocolError(
+            "delegated admission rejected: a sessionless delegated " +
+              "batch (no actingSession) carries a session-scoped " +
+              "SQLite write — a sessionless actor has no session " +
+              "instance (scopes.md §5, protocol.md §2's delegated row)",
+          );
+        }
+        continue;
+      }
+      if (normalizeScope(operation.scope) === "session") {
+        throw new ProtocolError(
+          "delegated admission rejected: a sessionless delegated " +
+            "batch (no actingSession) carries a session-scoped write " +
+            "— a sessionless actor has no session instance " +
+            "(scopes.md §5, protocol.md §2's delegated row)",
+        );
+      }
+    }
   }
 
   validateCommitPreconditions(engine, sessionKey, branch, commit, {

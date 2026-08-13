@@ -510,7 +510,11 @@ Deno.test("wave carriage: a non-canonical annotated scope_key is refused at ADMI
       assertThrows(
         () =>
           applyCommit(engine, {
-            sessionId: "server:executor",
+            // The holder's OWN service session: stage F's derived-envelope
+            // check (producing session must BE the holder) runs before the
+            // annotation validation, so the canonical refusal must be
+            // probed from an envelope that passes it.
+            sessionId: holder,
             space: SPACE,
             commit: setCommit(localSeq++, [{
               id: "of:scoped",
@@ -529,7 +533,7 @@ Deno.test("wave carriage: a non-canonical annotated scope_key is refused at ADMI
     assertThrows(
       () =>
         applyWaveCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(localSeq, [{ id: "of:scoped", scope: "user" }]),
           commitClass: "derived",
