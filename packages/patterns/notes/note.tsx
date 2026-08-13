@@ -62,10 +62,12 @@ export interface NoteOutput extends NotePiece {
   summary: string;
   mentioned: MentionablePiece[] | Default<[]>;
   backlinks: MentionablePiece[];
-  /** Where this note's `[Label][key]` mentions point. */
-  references:
-    | Record<string, { modifiedTitle: boolean }>
-    | Default<Record<never, never>>;
+  /**
+   * Where this note's `[Label][key]` mentions point. The default matches the
+   * input's; see `NoteInput.references` for why they have to.
+   */
+  // deno-lint-ignore ban-types
+  references: MentionRefMap | Default<{}>;
   isHidden: boolean;
   grep: PatternToolResult<{ content: string }>;
   translate: PatternToolResult<{ content: string }>;

@@ -106,12 +106,17 @@ export interface NoteInput {
    * has to stay in lockstep with it: the text carries keys, and this is what
    * says where they point.
    *
-   * The `Default<{}>` has to match the one `NoteOutput` declares. A map
-   * published in the result under a different default than its input carries
-   * cannot be materialized, and a consumer that captures the note then gets
-   * `undefined` for the whole capture — which stops any action bound to it
-   * from running, rather than merely leaving this field empty.
+   * The default has to be the same one `NoteOutput` declares. A map published
+   * in the result under a different default than its input carries cannot be
+   * materialized, and a consumer that captures the note then gets `undefined`
+   * for the whole capture — which stops any action bound to it from running,
+   * rather than merely leaving this field empty.
    */
+  // `{}` is the default VALUE here, in the same spirit as `Default<"">` and
+  // `Default<[]>` elsewhere in this file, and its permissiveness as a type is
+  // exactly what is wanted: `Record<PropertyKey, never>` would say the map may
+  // hold no entries, and a populated one then fails to materialize.
+  // deno-lint-ignore ban-types
   references?: Writable<MentionRefMap | Default<{}>>;
 }
 
