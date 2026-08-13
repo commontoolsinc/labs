@@ -13,7 +13,7 @@ import {
   ReconstructionContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.

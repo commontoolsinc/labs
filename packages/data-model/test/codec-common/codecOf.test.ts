@@ -16,7 +16,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricSpecialObject, JSON_CODEC } from "@/interface.ts";
+import { FabricSpecialObject } from "@/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import {
   CODEC,
   codecOf,
