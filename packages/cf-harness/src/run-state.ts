@@ -6,6 +6,7 @@ import {
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
+import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
   HarnessPolicyDecisionRecord,
@@ -83,6 +84,7 @@ export interface HarnessRunState {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+  handleTable?: HarnessHandleTable;
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
@@ -125,6 +127,7 @@ export interface CreateHarnessRunStateOptions {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+  handleTable?: HarnessHandleTable;
   policyDecisions?: HarnessPolicyDecisionRecord[];
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
@@ -221,6 +224,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
+      : {}),
+    ...(options.handleTable !== undefined
+      ? { handleTable: structuredClone(options.handleTable) }
       : {}),
     ...(options.lineage !== undefined
       ? { lineage: structuredClone(options.lineage) }

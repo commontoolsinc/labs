@@ -39,6 +39,8 @@ export type {
   HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
 export * from "./contracts/cfc-policy-snapshot.ts";
+export * from "./contracts/handle-table.ts";
+export * from "./handle-table.ts";
 export * from "./contracts/browser-access.ts";
 export * from "./contracts/run-manifest.ts";
 export * from "./contracts/observation.ts";
