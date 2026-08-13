@@ -2,7 +2,7 @@
  * A non-idempotent accumulator WITHOUT expectNonIdempotent. The detected
  * violation must FAIL the test (the long-standing default behavior).
  */
-import { computed, pattern, TESTS, Writable } from "commonfabric";
+import { assert, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const value = new Writable("hello");
@@ -14,7 +14,7 @@ export default pattern(() => {
     log.set([...current, `${value.get()} at run #${current.length + 1}`]);
   });
 
-  const hasEntries = computed(() => log.get().length > 0);
+  const hasEntries = assert(() => log.get().length > 0);
 
   return {
     [TESTS]: [{ assertion: hasEntries }],

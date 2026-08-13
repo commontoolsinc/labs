@@ -1,4 +1,4 @@
-import { computed, pattern, TESTS } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 
 export default pattern(() => ({
   [TESTS]: [
@@ -6,6 +6,6 @@ export default pattern(() => ({
     { render: "text" },
     { render: 1 },
     { render: true },
-    { assertion: computed(() => true) },
+    { assertion: assert(() => true) },
   ],
 }));
