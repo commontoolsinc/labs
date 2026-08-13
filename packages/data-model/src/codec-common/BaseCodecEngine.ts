@@ -312,7 +312,11 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // nothing about what a caller wants. `lenient` is what says that, so
       // this instance settles both into the same answer: a strict decode
       // fails, whichever way the codec spelled it.
-      throw new Error(`\`${tag}\`: ${decoded.error}`);
+      throw new ProblematicStateError(
+        tag,
+        decoded.state,
+        `\`${tag}\`: ${decoded.error}`,
+      );
     }
 
     // A codec's `decode()` promises deep-frozen results rather than relying on

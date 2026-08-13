@@ -72,9 +72,21 @@ export class ProblematicStateError extends Error {
     state: any,
     thrown: unknown,
   ): ProblematicStateError {
+    const reportable = toReportableState(state);
+
+    if (
+      (thrown instanceof ProblematicStateError) &&
+      (thrown.wireTypeTag === wireTypeTag) && (thrown.state === reportable)
+    ) {
+      // Already an account of this same failure. Wrapping it would say
+      // nothing the original does not, at the cost of a `cause` chain a
+      // reader has to walk to reach the message that matters.
+      return thrown;
+    }
+
     return new ProblematicStateError(
       wireTypeTag,
-      state,
+      reportable,
       (thrown instanceof Error) ? thrown.message : toCompactDebugString(thrown),
       { cause: thrown },
     );
