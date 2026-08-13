@@ -611,17 +611,17 @@ pieces yet.
 A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
 the schema-sanitized `value` (with `linkedStringCount`) when `resultSchema` was
-given. In `session` handle mode the ordinary outbound swap turns `resultRef`
-(and any link strings inside `value`) into `cfh:a:` tokens at the model
-boundary, and the ordinary inbound swap resolves such a token passed back
-through `inputs`; the tool itself carries no handle code. The persisted
-tool-output artifact keeps the raw reference, the raw result value, and the
-`pieceId` — a bare fabric identifier the handle boundary never swaps, so it
-stays out of the model-facing rendering. Compiler diagnostics come back as
-`{ status: "compile-error", message }` so the model can iterate on the source;
-bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
-module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder
-in the model-facing message, while the persisted artifact keeps the raw text.
+given. The ordinary outbound swap turns `resultRef` (and any link strings inside
+`value`) into `cfh:a:` tokens at the model boundary, and the ordinary inbound
+swap resolves such a token passed back through `inputs`; the tool itself carries
+no handle code. The persisted tool-output artifact keeps the raw reference, the
+raw result value, and the `pieceId` — a bare fabric identifier the handle
+boundary never swaps, so it stays out of the model-facing rendering. Compiler
+diagnostics come back as `{ status: "compile-error", message }` so the model can
+iterate on the source; bare fabric identifiers a diagnostic can embed
+(compiler-generated `fid1:` module roots, DIDs, `data:` URIs) are replaced with
+a `[fabric-id]` placeholder in the model-facing message, while the persisted
+artifact keeps the raw text.
 
 Interactive chat stdio transport:
 

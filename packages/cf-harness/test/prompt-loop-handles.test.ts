@@ -872,7 +872,6 @@ describe("prompt-loop address handles", () => {
           runId,
           model: "gpt-5.4",
           cfcEnforcementMode: "disabled",
-          handleMode: "session",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
