@@ -44,6 +44,12 @@ const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 const realSetInterval = globalThis.setInterval;
 const realClearInterval = globalThis.clearInterval;
+// Not on `globalThis` in the ambient types, and absent altogether in a
+// browser, so these read back `undefined` rather than a function there.
+const realSetImmediate = (globalThis as { setImmediate?: unknown })
+  .setImmediate;
+const realClearImmediate = (globalThis as { clearImmediate?: unknown })
+  .clearImmediate;
 const realDateNow = Date.now;
 const realPerformanceNow = performance.now.bind(performance);
 
@@ -440,6 +446,8 @@ function freezeAround(
       timers.clear();
       Reflect.set(globalThis, "setTimeout", realSetTimeout);
       Reflect.set(globalThis, "clearTimeout", realClearTimeout);
+      Reflect.set(globalThis, "setImmediate", realSetImmediate);
+      Reflect.set(globalThis, "clearImmediate", realClearImmediate);
       if (config.fakeInterval) {
         Reflect.set(globalThis, "setInterval", realSetInterval);
         Reflect.set(globalThis, "clearInterval", realClearInterval);
