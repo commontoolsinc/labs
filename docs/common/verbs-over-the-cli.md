@@ -505,12 +505,17 @@ below it — `notes[0].title`, where `notes` holds links, renders the note's own
 records; the slot that holds it stops naming the same value the moment the
 collection is reordered.
 
-It is not, though, the piece's canonical address. A piece created inside a
-handler and pushed into a collection is held through a wrapper that redirects to
-it, so a marker names the wrapper, and two positions holding one piece render
-two different `id`s. `cf piece call --show-links` follows the redirect and names
-the canonical result cell, which is what the runtime compares on. Use a marker
-address to read a position; use the resolved one to say which piece.
+**What comes back is a link to read next, not a claim about canonical
+identity.** Addresses are many-to-one over cells: a holder of one cannot tell a
+canonical id from an alias, and normal use does not require it. Two positions
+holding one piece can render two different `id`s, and a marker and
+`cf piece call --show-links` can disagree about the same piece, because a piece
+created inside a handler and pushed into a collection is held through a link
+that redirects to it and the two stop at different points along that redirect.
+
+Both read back the same contents. So feed an address into the next command
+rather than comparing it to another — two ids differing is not evidence of two
+pieces.
 
 The marker sits beside a projection when both are wanted, and the answer
 carries both:
