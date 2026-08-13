@@ -136,3 +136,105 @@ describe("CFCodeEditor backlink disposal handling", () => {
     expect(spy.calls.length).toBe(0);
   });
 });
+
+describe("CFCodeEditor reference-map housekeeping", () => {
+  // The map lives beside the document and has to stay in step with it. Both
+  // behaviors below are about NOT losing something: a key another editor
+  // minted, and a deletion still sitting in the debounce. Exercised against a
+  // minimal `this`, so no CodeMirror or DOM is constructed.
+
+  const KEY = "a3f9zz";
+  const OTHER = "b7k2m1";
+
+  function editorThis(doc: string, map: Record<string, unknown>) {
+    const deleted: string[] = [];
+    let flushed = 0;
+    return {
+      deleted,
+      flushes: () => flushed,
+      self: {
+        _editorView: { state: { doc: { toString: () => doc } } },
+        references: {
+          get: () => map,
+          key: (k: string) => ({
+            set: (v: unknown) => {
+              if (v === undefined) deleted.push(k);
+            },
+          }),
+        },
+        _refKeysAtLoad: new Set<string>(),
+        _cellController: { flush: () => flushed++ },
+        _refMap() {
+          return map;
+        },
+      } as Record<string, unknown>,
+    };
+  }
+
+  function call(name: string, self: unknown, ...args: unknown[]): unknown {
+    const fn = (CFCodeEditor.prototype as unknown as Record<
+      string,
+      (this: unknown, ...a: unknown[]) => unknown
+    >)[name];
+    return fn.call(self, ...args);
+  }
+
+  describe("_takenRefKeys()", () => {
+    it("returns the map's keys and the document's together", () => {
+      // A key pasted into the text is spoken for even before the map has it,
+      // and minting over it would point two mentions at one entry.
+      const { self } = editorThis(`[A][${OTHER}]`, { [KEY]: {} });
+      expect(call("_takenRefKeys", self)).toEqual(new Set([KEY, OTHER]));
+    });
+  });
+
+  describe("_collectUnreferencedRefEntries()", () => {
+    it("removes an entry whose token has left the document", () => {
+      const t = editorThis("no tokens left", { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.deleted).toEqual([KEY]);
+    });
+
+    it("keeps a key it never saw at load", () => {
+      // Another editor added it while this one was open; this editor has no
+      // reason to believe it was ever in its document.
+      const t = editorThis("no tokens left", { [KEY]: {} });
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.deleted).toEqual([]);
+    });
+
+    it("keeps every entry while the token is still there", () => {
+      const t = editorThis(`[A][${KEY}]`, { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.deleted).toEqual([]);
+    });
+
+    it("collects nothing against a document that has not loaded", () => {
+      // An empty document names nothing, which is not the same as a document
+      // that names nothing — reading it as the latter empties the map.
+      const t = editorThis("", { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.deleted).toEqual([]);
+    });
+
+    it("flushes the pending document write before removing anything", () => {
+      // The deletion that made the entry collectable is still in the
+      // debounce; losing it after the entry is gone leaves a token with no
+      // destination in the durable document.
+      const t = editorThis("no tokens left", { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.flushes()).toBe(1);
+    });
+
+    it("does not flush when there is nothing to collect", () => {
+      const t = editorThis(`[A][${KEY}]`, { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.flushes()).toBe(0);
+    });
+  });
+});
