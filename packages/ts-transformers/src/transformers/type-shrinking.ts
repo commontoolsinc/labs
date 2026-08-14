@@ -1708,7 +1708,7 @@ function getArrayElementTypeNode(
 
 /**
  * After shrinking, validates that the requested property paths were actually
- * materialised. Reports a diagnostic when the base type is too narrow or
+ * materialized. Reports a diagnostic when the base type is too narrow or
  * `unknown`/`any` and property accesses cannot resolve.
  */
 export function validateShrinkCoverage(

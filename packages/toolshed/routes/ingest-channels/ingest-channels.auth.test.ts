@@ -78,7 +78,7 @@ describe("Ingest channels route (authenticated)", () => {
     }
   });
 
-  // The revoke replay defence is only as strong as the request id being part
+  // The revoke replay defense is only as strong as the request id being part
   // of what was signed. If the field were optional, a captured revoke would
   // carry no id to spend and the middle box could add its own.
   it("rejects a signed revoke that omits requestId", async () => {

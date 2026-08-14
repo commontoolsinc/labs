@@ -82,7 +82,7 @@ Deno.test("in-process render - piece UI to HTML", async (t) => {
       const tx = runtime.edit();
       const label = runtime.getCell<unknown>(space, "label", undefined, tx);
       label.set("first");
-      const vdom = runtime.getCell<unknown>(space, "labelled", undefined, tx);
+      const vdom = runtime.getCell<unknown>(space, "labeled", undefined, tx);
       vdom.set({
         type: "vnode",
         name: "div",

@@ -78,7 +78,7 @@ export abstract class RetiredElement extends BaseElement {
    * call it directly. Warning from render rather than `connectedCallback`
    * keeps the signal on the path that proves the element was actually used,
    * and keeps this class free of anything needing a live document — so the
-   * behaviour is unit-testable instead of reachable only from a browser lane.
+   * behavior is unit-testable instead of reachable only from a browser lane.
    */
   notifyRetiredUsage(): void {
     warnRetiredElementUsed(this.retiredTag, this.retiredReplacement);

@@ -131,7 +131,7 @@ const LIFT_BUILDER: HoistableBuilderSpec = {
   resolveHoistable: (call, context) => {
     // The lift-applied shape is `__cfHelpers.lift(...)(captures)`: an applied
     // call whose callee is itself the inner `lift(...)` call. detectCallKind
-    // is the single source of truth for recognising it (it guards against
+    // is the single source of truth for recognizing it (it guards against
     // over-application chains like `lift(cb)(x)(y)`).
     if (detectCallKind(call, context.checker)?.kind !== "lift-applied") {
       return undefined;
@@ -149,7 +149,7 @@ const HANDLER_BUILDER: HoistableBuilderSpec = {
     // mechanic applies: relocate the inner `handler(...)` call, leave
     // `__cfHandler_N(captures)` at the site (the `.for(...)` tail stays
     // anchored on the outer call). Unlike lift this is NOT a `lift-applied`
-    // CallKind — `isHandlerAppliedCall` recognises it while keeping the applied
+    // CallKind — `isHandlerAppliedCall` recognizes it while keeping the applied
     // call classifying as `{ kind: "builder", builderName: "handler" }`, so
     // handler-specific downstream dispatchers are untouched (CT-1655).
     if (!isHandlerAppliedCall(call, context.checker)) {

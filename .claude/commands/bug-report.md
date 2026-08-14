@@ -19,7 +19,7 @@ Scan the current conversation for existing evidence:
 - Hypotheses tested and their outcomes
 - Any debugging steps already taken
 
-Summarise what you have in 2-3 bullet points. If the user provided a description via `$ARGUMENTS`, incorporate that.
+Summarize what you have in 2-3 bullet points. If the user provided a description via `$ARGUMENTS`, incorporate that.
 
 ### Step 2: Ask the User What Additional Evidence to Capture
 

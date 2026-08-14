@@ -153,7 +153,7 @@ async function createProviderRouter(
 
   // The generic factory handlers return broader types than the route schemas
   // declare (e.g. Record<string, unknown> vs specific fields). We cast to the
-  // route-specific handler types here; runtime behaviour is correct.
+  // route-specific handler types here; runtime behavior is correct.
   let router = createRouter()
     .openapi(routes.login, handlers.login as AppRouteHandler<OAuth2LoginRoute>)
     .openapi(

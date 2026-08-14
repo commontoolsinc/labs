@@ -140,7 +140,7 @@ the setup and a stored rendering never matches a fresh one, so comparing them
 would red every pattern edit while saying nothing about data. Every other key
 is compared, `$NAME` included. Excluding those names is not sufficient on its
 own — a `map`-body hoist is a recorded instantiation whose whole result is a
-vnode under no `$UI` — so a rendering is also recognised by shape, wherever it
+vnode under no `$UI` — so a rendering is also recognized by shape, wherever it
 sits.
 
 What a root holds at a cell or stream position is compared as the **document it
@@ -240,7 +240,7 @@ the current generation, and once no fixture for a key reports zero the next is
 due. A fixture with no targets proved nothing and a failed fixture is the gate's
 own red, so neither counts as evidence of currency.
 
-Unrecognised flags are rejected. An unknown flag matches no command, so the run
+Unrecognized flags are rejected. An unknown flag matches no command, so the run
 would otherwise fall through to the plain gate, replay everything and exit 0 —
 reporting the tree healthy to someone who asked for something else.
 

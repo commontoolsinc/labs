@@ -63,7 +63,7 @@ poll picking a place that's closed when you walk over.
   `hours: PerWeekday<{ open, close } | "closed">` if we want open/close times
   later). Editable host-side when an option is added or via a per-option editor.
 - Filter the live ballot by the **current weekday**: an option closed today is
-  hidden from voting (or shown greyed-out and non-votable, "closed Mondays").
+  hidden from voting (or shown grayed-out and non-votable, "closed Mondays").
   Derive the weekday in a handler-fed cell, not inside a `computed`/`derive` —
   reading the clock in a derive is non-idempotent (same lesson as the history
   visit labels in feature #1).
@@ -189,7 +189,7 @@ nobody suggests the same place three days running.
   goes with the entry — no separate cascade to keep aligned.
 - ✅ Shown as a **"Recently eaten" list below the options** (8 most recent,
   newest first), a `computed` over `visits` rendered with the plain-JSX `.map`
-  idiom, labelled with each visit's own date ("Tuesday, May 20").
+  idiom, labeled with each visit's own date ("Tuesday, May 20").
 - Implementation notes (hard-won):
   - Visit labels derive **only from the stored `wentAt`**, never from the
     current clock — `Date.now()` inside a `derive`/`computed` is non-idempotent

@@ -120,7 +120,7 @@ function narrowedOutputProgram(): RuntimeProgram {
 }
 
 /**
- * The CFC-labelled variants below exist because the three rules above all
+ * The CFC-labeled variants below exist because the three rules above all
  * reason about DECLARED types, and a fourth thing decides whether the setup
  * commit lands: the CFC schema envelope physically stored on the piece's
  * argument document. That envelope accumulates across every write the document
@@ -158,7 +158,7 @@ const EXTRA_ATOM = {
 } as const;
 
 /**
- * A CFC-labelled piece, in two revisions whose declared contracts are
+ * A CFC-labeled piece, in two revisions whose declared contracts are
  * IDENTICAL down to the label. Keeping them identical is what isolates the
  * envelope: any ifc difference between the two patterns is caught by the
  * contract proof instead (`argument.seed: ifc changed`), which would make a
@@ -322,7 +322,7 @@ describe("setsrc compatibility preflight", () => {
   });
 
   /**
-   * A live CFC-labelled piece whose stored argument envelope has been widened
+   * A live CFC-labeled piece whose stored argument envelope has been widened
    * past what any revision of the pattern declares.
    *
    * This is not a contrived shape: an envelope is the union of every write's
@@ -382,10 +382,10 @@ describe("setsrc compatibility preflight", () => {
     expect(report.issues.schema ?? "").not.toContain("envelope");
   });
 
-  it("clears a CFC-labelled piece whose stored envelope still matches", async () => {
+  it("clears a CFC-labeled piece whose stored envelope still matches", async () => {
     // The control for the two cases below. Carrying a CFC envelope at all must
     // not make a piece un-swappable — otherwise the new rule reads as "any
-    // labelled piece is incompatible" and operators learn to ignore it.
+    // labeled piece is incompatible" and operators learn to ignore it.
     const piece = await pieces.create(labelledBase(), {
       input: { seed: "hello" },
     });
@@ -476,7 +476,7 @@ describe("setsrc compatibility preflight", () => {
     });
     expect(
       metadata?.schemaHash,
-      "the labelled fixture stored no CFC envelope, so there is nothing for " +
+      "the labeled fixture stored no CFC envelope, so there is nothing for " +
         "this case to poison",
     ).toBeDefined();
     const { error } = await runtime.editWithRetry((tx) => {

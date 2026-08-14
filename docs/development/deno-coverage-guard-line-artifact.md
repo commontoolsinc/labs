@@ -16,7 +16,7 @@ onto lines, and the blog does not specify how that projection should work; it is
 the coverage tool's job. When a single line holds both the executed condition and
 the un-taken body, projecting it to 0 is a defensible choice, not a bug.
 
-This note records the behaviour because several deliberately-unreachable
+This note records the behavior because several deliberately-unreachable
 invariant guards in the runtime are marked uncovered by it.
 
 ## Where it bites us

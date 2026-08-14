@@ -27,7 +27,7 @@ import {
 
 // The menu renders through Lit templates rather than into a real DOM here: the
 // assertions read the template a render produced, which is enough to say what
-// the menu shows and when. Its behaviour against a live piece — the portalled
+// the menu shows and when. Its behavior against a live piece — the portalled
 // overlay, positioning, the click path — is driven end to end by
 // packages/shell/integration/piece-menu.test.ts.
 
