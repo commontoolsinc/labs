@@ -589,8 +589,8 @@ export class Scheduler {
   // Depth of the initial-rehydration apply window (the rehydration barrier reads
   // this, NOT backgroundTasks — see createPullSchedulingState). Phase 7 made
   // resume a synchronous snapshot apply at registration, so this is >0 only
-  // inside applyPreloadedInitialActionRehydration; backgroundTasks now holds
-  // only event-driven piece-start tasks, which must not pause pull scheduling.
+  // inside applyPreloadedInitialActionRehydration; backgroundTasks holds work
+  // that must not pause pull scheduling, such as an event-driven piece start.
   private initialRehydrationInFlight = 0;
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
@@ -806,10 +806,7 @@ export class Scheduler {
         this.gates.releaseInitialRunHold(action);
       }
     });
-    this.backgroundTasks.add(task);
-    task.finally(() => {
-      this.backgroundTasks.delete(task);
-    });
+    this.trackBackgroundTask(task);
   }
 
   /**
@@ -1207,6 +1204,44 @@ export class Scheduler {
 
   async run(action: Action): Promise<any> {
     return await runSchedulerAction(this.actionRunState, action);
+  }
+
+  /**
+   * Count `work` as outstanding scheduler work until it settles: `idle()` waits
+   * for it and then re-checks every quiescence condition from scratch, so work
+   * that schedules actions or issues commits as it lands is covered as well.
+   *
+   * This is for work the runtime has already undertaken and whose result the
+   * reactive graph is waiting on — a system pattern being fetched so the
+   * surface a builtin has already emitted into the view can be filled in, a
+   * piece being started so a queued event can be delivered. While such work is
+   * in flight the graph is quiet because it is waiting, not because it is
+   * finished, and a caller that reads quiet as finished reads it wrongly.
+   *
+   * It is not for work whose result the graph does not depend on. An LLM call
+   * or an outbound fetch a pattern kicked off leaves the view interactive while
+   * it runs, and holding `idle()` open for it would put every caller behind the
+   * network; `Runtime.trackAsyncWork` and `Runtime.settled()` are that barrier.
+   *
+   * A rejection ends the work as surely as a result does, so it releases the
+   * barrier rather than propagating. Observing it is what makes it this
+   * method's to report: attaching a handler is the only way to learn that the
+   * work settled, and it is also what stops the runtime from reporting the
+   * rejection as unhandled, so the warning below is the account of a failure
+   * that would otherwise vanish. The entry is dropped once the work settles, so
+   * nothing accumulates.
+   */
+  trackBackgroundTask(work: Promise<unknown>): void {
+    const task = work.then(() => {}, (error) => {
+      logger.warn("scheduler-background-task", () => [
+        "A tracked background task failed",
+        error,
+      ]);
+    });
+    this.backgroundTasks.add(task);
+    task.finally(() => {
+      this.backgroundTasks.delete(task);
+    });
   }
 
   idle(): Promise<void> {
@@ -2368,9 +2403,9 @@ export class Scheduler {
         this.gates.hasActiveDebounceTimer(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
       // Engaged only while an initial rehydration is being applied (synchronous
-      // post-phase-7). MUST NOT read backgroundTasks: its sole populator is now
-      // the event-driven piece-start task (events.ts), so gating on it would
-      // pause all pull scheduling on every piece-start.
+      // post-phase-7). MUST NOT read backgroundTasks: that set holds work such
+      // as an event-driven piece start (events.ts) or a sidecar pattern launch,
+      // so gating on it would pause all pull scheduling on every one of them.
       hasPendingInitialRehydrations: () => this.initialRehydrationInFlight > 0,
       // Per-node convergence episode state prevents one exhausted subgraph
       // from releasing idle for unrelated work.

@@ -1905,6 +1905,23 @@ export function wish(
     sendResult(tx, scoped);
   }
 
+  /**
+   * Counts a sidecar pattern's deferred launch — the fetch, and the run that
+   * follows it — as outstanding scheduler work.
+   *
+   * A wish emits a sidecar's surface into the view before the pattern behind it
+   * exists: the `[UI]` it sends is a `cf-render` bound to a result cell that
+   * only the launch fills. Between the send and the landing the scheduler has
+   * nothing to run, so without this the runtime reports itself idle while a
+   * surface the page is about to grow is still on its way. Anything read off
+   * the layout in that window is read off a page that has not finished
+   * arriving — a click point most of all, since content appearing above a
+   * control moves it out from under the point the click was aimed at.
+   */
+  function trackSidecarLaunch(launch: Promise<unknown>): void {
+    runtime.scheduler.trackBackgroundTask(launch);
+  }
+
   function launchSuggestionPattern(
     input: {
       situation: string;
@@ -1928,7 +1945,7 @@ export function wish(
     const cachedSuggestionPattern = suggestionPatternCache.cached();
     if (!cachedSuggestionPattern) {
       // Once fetch completes, run the pattern without a tx (it creates its own)
-      void suggestionPatternCache.fetch(runtime).then(
+      const launch = suggestionPatternCache.fetch(runtime).then(
         (pattern) => {
           if (!cancelled && pattern && suggestionPatternResultCell) {
             runtime.run(
@@ -1940,6 +1957,7 @@ export function wish(
           }
         },
       );
+      trackSidecarLaunch(launch);
     } else {
       if (!cancelled && suggestionPatternResultCell) {
         runtime.run(
@@ -2053,7 +2071,7 @@ export function wish(
 
     const cachedProfileCreatePattern = profileCreatePatternCache.cached();
     if (!cachedProfileCreatePattern) {
-      void profileCreatePatternCache.fetch(runtime, () => {
+      const launch = profileCreatePatternCache.fetch(runtime, () => {
         if (profileCreatePatternReadyCell) {
           const readyTx = runtime.edit();
           profileCreatePatternReadyCell.withTx(readyTx).set(true);
@@ -2061,14 +2079,27 @@ export function wish(
           readyTx.commit();
         }
       }).then((pattern) => {
-        if (!cancelled && pattern && profileCreatePatternResultCell) {
+        if (cancelled || !profileCreatePatternResultCell) return;
+        if (pattern) {
           runSidecarInOwnTx(
             profileCreatePatternResultCell,
             pattern,
             profileCreateInputForTx,
           );
+        } else {
+          // Fetch/compile failed, or a later fetch for a changed apiUrl
+          // superseded this one (createSidecarPatternCache swallows the error
+          // and resolves to undefined in both cases). The create surface is the
+          // only way a user with no profile gets one, and nothing re-triggers
+          // this launch, so a silent undefined leaves that surface blank for the
+          // life of the piece. Say so in the cell the surface renders from.
+          commitPatternErrorUI(
+            profileCreatePatternResultCell,
+            `Can't load profile-create.tsx`,
+          );
         }
       });
+      trackSidecarLaunch(launch);
     } else if (!cancelled && profileCreatePatternResultCell) {
       runtime.run(
         tx,
@@ -2157,7 +2188,7 @@ export function wish(
 
     const cachedProfilePickerPattern = profilePickerPatternCache.cached();
     if (!cachedProfilePickerPattern) {
-      void profilePickerPatternCache.fetch(runtime).then(
+      const launch = profilePickerPatternCache.fetch(runtime).then(
         (pattern) => {
           if (cancelled || !profilePickerPatternResultCell) return;
           if (pattern) {
@@ -2189,6 +2220,7 @@ export function wish(
           );
         }
       });
+      trackSidecarLaunch(launch);
     } else if (!cancelled && profilePickerPatternResultCell) {
       runtime.run(
         tx,
