@@ -35,6 +35,13 @@ export const BUILTIN_TOOL_REGISTRY = new Map<
   BUILTIN_TOOLS.map((tool) => [tool.descriptor.toolId, tool]),
 );
 
+/**
+ * The builtin tool registered under `toolId`, or `undefined` when no tool
+ * answers to that name. Takes any string: a name a model wrote is a candidate
+ * id until this lookup says otherwise, and the registry is the only authority
+ * on which names are builtin tool ids.
+ */
 export const getBuiltinTool = (
-  toolId: BuiltinToolId,
-): HarnessToolDefinition | undefined => BUILTIN_TOOL_REGISTRY.get(toolId);
+  toolId: string,
+): HarnessToolDefinition | undefined =>
+  BUILTIN_TOOL_REGISTRY.get(toolId as BuiltinToolId);

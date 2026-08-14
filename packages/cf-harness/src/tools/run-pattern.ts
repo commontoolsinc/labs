@@ -37,9 +37,10 @@ export interface RunPatternToolSuccessOutput {
    * `describe_handle` can answer what the reference is without reading it.
    * Stripped from the model-facing rendering by the prompt loop: the model
    * wrote the pattern this describes, and asks for the shape by token when
-   * it wants it back.
+   * it wants it back. Always present: a compiled pattern carries a result
+   * schema.
    */
-  resultRefSchema?: JSONSchema;
+  resultRefSchema: JSONSchema;
   /**
    * Piece id for the persisted tool-output artifact. A bare fabric
    * identifier the handle boundary never swaps, and the piece cell is the
@@ -76,7 +77,8 @@ export const isRunPatternToolSuccessOutput = (
 ): output is RunPatternToolSuccessOutput =>
   typeof output === "object" && output !== null &&
   "status" in output && output.status === "ok" &&
-  "resultRef" in output && typeof output.resultRef === "string";
+  "resultRef" in output && typeof output.resultRef === "string" &&
+  "resultRefSchema" in output;
 
 export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
@@ -122,7 +124,13 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
       },
-      required: ["outputId", "status", "resultRef", "pieceId"],
+      required: [
+        "outputId",
+        "status",
+        "resultRef",
+        "resultRefSchema",
+        "pieceId",
+      ],
       additionalProperties: false,
     }, {
       type: "object",
@@ -412,12 +420,7 @@ export const runPatternTool: HarnessToolDefinition<
       outputId,
       status: "ok",
       resultRef,
-      // `resultSchema` on a compiled pattern is always present; the guard is
-      // for a pattern shape that declares nothing useful, where recording an
-      // empty schema would claim more than compilation knows.
-      ...(pattern.resultSchema !== undefined
-        ? { resultRefSchema: pattern.resultSchema }
-        : {}),
+      resultRefSchema: pattern.resultSchema,
       pieceId: piece.id,
       ...(value !== undefined ? { value } : {}),
       ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),

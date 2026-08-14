@@ -202,7 +202,7 @@ export interface HarnessPromptLoopResult {
 }
 
 const isBuiltinToolId = (input: string): input is BuiltinToolId =>
-  getBuiltinTool(input as BuiltinToolId) !== undefined;
+  getBuiltinTool(input) !== undefined;
 
 /**
  * The outcome of decoding the arguments string a model wrote for a tool call:
@@ -237,13 +237,6 @@ const parseToolArguments = (
     };
   }
   return { input: parsed as Record<string, unknown> };
-};
-
-const tryParseToolArguments = (
-  toolCall: HarnessToolCall,
-): Record<string, unknown> | undefined => {
-  const parsed = parseToolArguments(toolCall);
-  return "input" in parsed ? parsed.input : undefined;
 };
 
 const TRUSTED_ONLY_TOOL_INPUT_FIELDS = ["cfcInputLabels"];
@@ -2559,8 +2552,10 @@ export class CfHarnessPromptLoop {
    * result schema on the handle for a `run_pattern` result reference. The
    * outbound swap that follows mints the same address and so returns this
    * entry, shape already attached — which is what lets `describe_handle`
-   * answer what the reference is without any fabric read. A ref that does not
-   * parse as an address is skipped, exactly as the outbound swap skips it.
+   * answer what the reference is without any fabric read. `resultRef` is the
+   * LLM-friendly rendering of a live cell's link, so it names an address and
+   * the mint below succeeds; a mint that throws here is a harness bug and is
+   * left to travel as one.
    */
   async #recordRunPatternResultShape(
     toolId: BuiltinToolId,
@@ -2569,18 +2564,11 @@ export class CfHarnessPromptLoop {
     if (toolId !== "run_pattern" || !isRunPatternToolSuccessOutput(output)) {
       return;
     }
-    const schema = output.resultRefSchema;
-    if (schema === undefined) {
-      return;
-    }
     const table = this.engine.handleTable ??
       createHarnessHandleTable(this.engine.getRunState().runId);
-    let minted;
-    try {
-      minted = await mintAddressHandle(table, output.resultRef, { schema });
-    } catch {
-      return;
-    }
+    const minted = await mintAddressHandle(table, output.resultRef, {
+      schema: output.resultRefSchema,
+    });
     if (minted.table !== table) {
       await this.engine.recordHandleTable(minted.table);
     }
@@ -2704,23 +2692,24 @@ export class CfHarnessPromptLoop {
         ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
         recordActivity,
       });
-    if (!isBuiltinToolId(toolCall.function.name)) {
-      return await rejectUnknownTool();
-    }
+    // The lookup is the check: a name the registry does not answer to is not
+    // a tool id. What it returns carries the canonical id, so the rest of the
+    // call works from `toolId` rather than from the string the model wrote.
     const tool = getBuiltinTool(toolCall.function.name);
     if (tool === undefined) {
       return await rejectUnknownTool();
     }
-    const parsedInput = tryParseToolArguments(toolCall);
-    const parsedInputForDeniedTool = parsedInput === undefined
-      ? undefined
-      : stripTrustedOnlyToolInputFields(parsedInput);
-    const deniedToolInputSummary = parsedInputForDeniedTool === undefined
-      ? undefined
-      : await summarizeToolInput(
-        toolCall.function.name,
-        parsedInputForDeniedTool,
-      );
+    const toolId = tool.descriptor.toolId;
+    // Decoded once, here: what the arguments string yields is the same either
+    // way this call ends, and a tool denied before it runs still gets its
+    // input summarized for the denial record.
+    const parsedArguments = parseToolArguments(toolCall);
+    const toolInput: ParsedToolArguments = "input" in parsedArguments
+      ? { input: stripTrustedOnlyToolInputFields(parsedArguments.input) }
+      : { invalid: parsedArguments.invalid };
+    const deniedToolInputSummary = "input" in toolInput
+      ? await summarizeToolInput(toolId, toolInput.input)
+      : undefined;
     const policyEventIndexes: number[] = [];
     const activityStartedAt = this.engine.getRunState().updatedAt;
     const activityEndedAt = (): string => this.engine.getRunState().updatedAt;
@@ -2733,7 +2722,7 @@ export class CfHarnessPromptLoop {
       startedAt: activityStartedAt,
       endedAt: activityEndedAt(),
       toolCallId: toolCall.id,
-      toolId: toolCall.function.name,
+      toolId,
       effectClass: tool.descriptor.effectClass,
       cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
       policyDecision,
@@ -2749,14 +2738,14 @@ export class CfHarnessPromptLoop {
       await this.engine.recordPolicyEvent(event);
       policyEventIndexes.push(index);
     };
-    if (!this.#allowedToolIds.has(toolCall.function.name)) {
+    if (!this.#allowedToolIds.has(toolId)) {
       const denial = makeObservationDenied("not-authorized", {
-        detail: `${toolCall.function.name} is not allowed in this run`,
+        detail: `${toolId} is not allowed in this run`,
       });
       await recordPolicyEvent({
         severity: "denied",
         mode: this.engine.getRunState().cfcEnforcementMode,
-        toolId: toolCall.function.name,
+        toolId,
         toolCallId: toolCall.id,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
@@ -2764,7 +2753,7 @@ export class CfHarnessPromptLoop {
         ...(deniedToolInputSummary !== undefined
           ? { toolInputSummary: deniedToolInputSummary }
           : {}),
-        detail: denial.detail ?? `${toolCall.function.name} is not allowed`,
+        detail: denial.detail ?? `${toolId} is not allowed`,
         observationDenied: denial,
       });
       recordActivity({
@@ -2778,12 +2767,12 @@ export class CfHarnessPromptLoop {
       await this.engine.recordPolicyDecision({
         toolActivitySequence: sequence,
         toolCallId: toolCall.id,
-        toolId: toolCall.function.name,
+        toolId,
         effectClass: tool.descriptor.effectClass,
         cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
         decision: "denied",
         reasonCodes: ["tool_not_allowed"],
-        detail: denial.detail ?? `${toolCall.function.name} is not allowed`,
+        detail: denial.detail ?? `${toolId} is not allowed`,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
           : {}),
@@ -2796,43 +2785,39 @@ export class CfHarnessPromptLoop {
         toolMessage: {
           role: "tool",
           toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
+          toolName: toolId,
           content: JSON.stringify(denial),
         },
       };
     }
-    let parsedAllowedInput = parsedInputForDeniedTool;
-    if (parsedAllowedInput === undefined) {
-      // Only arguments that failed to decode reach here, and a model that
-      // mistyped them reads the complaint and writes the call again.
-      const reparsed = parseToolArguments(toolCall);
-      if ("invalid" in reparsed) {
-        return await this.#rejectInvalidToolCall({
-          toolCall,
-          invalid: { ...reparsed.invalid, toolId: tool.descriptor.toolId },
-          sequence,
-          startedAt: activityStartedAt,
-          effectClass: tool.descriptor.effectClass,
-          ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
-          policyEventIndexes,
-          recordActivity,
-        });
-      }
-      parsedAllowedInput = stripTrustedOnlyToolInputFields(reparsed.input);
+    if ("invalid" in toolInput) {
+      // Arguments that failed to decode: a model that mistyped them reads the
+      // complaint and writes the call again.
+      return await this.#rejectInvalidToolCall({
+        toolCall,
+        invalid: { ...toolInput.invalid, toolId },
+        sequence,
+        startedAt: activityStartedAt,
+        effectClass: tool.descriptor.effectClass,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+        policyEventIndexes,
+        recordActivity,
+      });
     }
+    const parsedAllowedInput = toolInput.input;
     // Handle tokens resolve to their referents here, so policy evaluation,
     // summarization, and the tool itself all see the real addresses. Denial
     // summaries recorded above keep the tokens the model wrote. A
     // `delegate_task` input is exempt: tokens in its goal and context reach
     // the child verbatim as inert text.
     const input = this.#resolveHandleTokensInToolInput(
-      toolCall.function.name,
+      toolId,
       parsedAllowedInput,
     );
     const toolInputSummary = input === parsedAllowedInput
       ? deniedToolInputSummary ??
-        await summarizeToolInput(toolCall.function.name, input)
-      : await summarizeToolInput(toolCall.function.name, input);
+        await summarizeToolInput(toolId, input)
+      : await summarizeToolInput(toolId, input);
     const decision = evaluateToolPolicy(
       this.engine.getRunState().cfcEnforcementMode,
       tool.descriptor,
@@ -2846,7 +2831,7 @@ export class CfHarnessPromptLoop {
       await recordPolicyEvent({
         severity: "warning",
         mode: this.engine.getRunState().cfcEnforcementMode,
-        toolId: toolCall.function.name,
+        toolId,
         toolCallId: toolCall.id,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
@@ -2860,18 +2845,18 @@ export class CfHarnessPromptLoop {
     if (!decision.allowed) {
       const denial = decision.denial ??
         makeObservationDenied("not-authorized", {
-          detail: `${toolCall.function.name} was denied`,
+          detail: `${toolId} was denied`,
         });
       await recordPolicyEvent({
         severity: "denied",
         mode: this.engine.getRunState().cfcEnforcementMode,
-        toolId: toolCall.function.name,
+        toolId,
         toolCallId: toolCall.id,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
           : {}),
         toolInputSummary,
-        detail: denial.detail ?? `${toolCall.function.name} was denied`,
+        detail: denial.detail ?? `${toolId} was denied`,
         observationDenied: denial,
       });
       recordActivity({
@@ -2883,12 +2868,12 @@ export class CfHarnessPromptLoop {
       await this.engine.recordPolicyDecision({
         toolActivitySequence: sequence,
         toolCallId: toolCall.id,
-        toolId: toolCall.function.name,
+        toolId,
         effectClass: tool.descriptor.effectClass,
         cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
         decision: "denied",
         reasonCodes: policyDecisionReasonCodes,
-        detail: denial.detail ?? `${toolCall.function.name} was denied`,
+        detail: denial.detail ?? `${toolId} was denied`,
         ...(promptSlotBinding !== undefined
           ? { promptSlot: promptSlotBinding }
           : {}),
@@ -2899,13 +2884,13 @@ export class CfHarnessPromptLoop {
         toolMessage: {
           role: "tool",
           toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
+          toolName: toolId,
           content: JSON.stringify(denial),
         },
       };
     }
     let delegateInput: DelegateTaskToolInput | undefined;
-    if (toolCall.function.name === "delegate_task") {
+    if (toolId === "delegate_task") {
       const parsedDelegateInput = parseDelegateTaskInput(input);
       if ("invalid" in parsedDelegateInput) {
         return await this.#rejectInvalidToolCall({
@@ -2932,7 +2917,7 @@ export class CfHarnessPromptLoop {
         await recordPolicyEvent({
           severity: "denied",
           mode: this.engine.getRunState().cfcEnforcementMode,
-          toolId: toolCall.function.name,
+          toolId,
           toolCallId: toolCall.id,
           ...(promptSlotBinding !== undefined
             ? { promptSlot: promptSlotBinding }
@@ -2950,7 +2935,7 @@ export class CfHarnessPromptLoop {
         await this.engine.recordPolicyDecision({
           toolActivitySequence: sequence,
           toolCallId: toolCall.id,
-          toolId: toolCall.function.name,
+          toolId,
           effectClass: tool.descriptor.effectClass,
           cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
           decision: "denied",
@@ -2970,7 +2955,7 @@ export class CfHarnessPromptLoop {
           toolMessage: {
             role: "tool",
             toolCallId: toolCall.id,
-            toolName: toolCall.function.name,
+            toolName: toolId,
             content: JSON.stringify(denial),
           },
         };
@@ -2980,7 +2965,7 @@ export class CfHarnessPromptLoop {
     await this.engine.recordPolicyDecision({
       toolActivitySequence: sequence,
       toolCallId: toolCall.id,
-      toolId: toolCall.function.name,
+      toolId,
       effectClass: tool.descriptor.effectClass,
       cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
       decision: policyDecision,
@@ -3004,7 +2989,7 @@ export class CfHarnessPromptLoop {
       resultRef: ToolResultRef;
     };
     try {
-      result = toolCall.function.name === "delegate_task"
+      result = toolId === "delegate_task"
         ? await this.#invokeDelegateTaskTool({
           toolCall,
           input: delegateInput!,
@@ -3015,7 +3000,7 @@ export class CfHarnessPromptLoop {
           recordDescendantUsage,
         })
         : await this.#invokeBuiltinTool(
-          toolCall.function.name,
+          toolId,
           input,
           signal,
         );
@@ -3044,11 +3029,11 @@ export class CfHarnessPromptLoop {
     // Before the outbound swap, so the token it mints for the result cell
     // already carries the shape the compiler knew.
     await this.#recordRunPatternResultShape(
-      toolCall.function.name,
+      toolId,
       result.output,
     );
     const modelOutputResult = await this.#modelFacingToolOutput(
-      toolCall.function.name,
+      toolId,
       result.output,
       result.resultRef,
       toolCall.id,
@@ -3082,7 +3067,7 @@ export class CfHarnessPromptLoop {
     const toolMessage: HarnessToolTranscriptMessage = {
       role: "tool",
       toolCallId: toolCall.id,
-      toolName: toolCall.function.name,
+      toolName: toolId,
       content: JSON.stringify(modelOutput),
       resultRef: result.resultRef,
     };
