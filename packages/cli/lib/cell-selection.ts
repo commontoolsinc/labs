@@ -2504,7 +2504,7 @@ export async function deriveSelectedValue(
     // runtime — but a shaped `piece call` readback arrives here right after
     // its handler ran, so the selection waits on whatever derived
     // recomputation that handler triggered elsewhere, a coupling the plain
-    // call's transaction-local acknowledgement deliberately avoids.
+    // call's transaction-local acknowledgment deliberately avoids.
     // Documented as a known cost of shaping at the call (decided
     // 2026-08-14; packages/cli/README.md names the shape-the-collect
     // alternative); scoping this wait to the transform's own computation is

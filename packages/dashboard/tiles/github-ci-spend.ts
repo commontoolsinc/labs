@@ -419,7 +419,7 @@ async function blacksmithSpend(
   // The daily endpoint answers for a range of days, a record per day it has
   // runner cost to report. Past its newest record a quiet day and an unwritten
   // day read the same, so the tile stops there rather than charging the days
-  // after it at $0. The invoice is left out of that judgement: it is a running
+  // after it at $0. The invoice is left out of that judgment: it is a running
   // total with no date on it, so it cannot show that Blacksmith's billing is
   // still moving.
   const { byDay, reportedThrough } = parseBlacksmithDaily(daily);

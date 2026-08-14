@@ -422,7 +422,7 @@ describe("CFC cross-space integrity", () => {
   // -------------------------------------------------------------------------
   // GAP (remaining): the spec's reference annotation (§8.2 `passThrough`) is
   // unimplemented; a write through a schema declaring it FAILS CLOSED rather
-  // than being silently ignored. Reference behaviours stay reachable via
+  // than being silently ignored. Reference behaviors stay reachable via
   // per-path labels and links (scenarios 1c / 3).
   // -------------------------------------------------------------------------
   it("scenario 3a [GAP] — the passThrough ifc annotation fails closed (unimplemented)", async () => {

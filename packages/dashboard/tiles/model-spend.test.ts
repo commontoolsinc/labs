@@ -125,7 +125,7 @@ Deno.test("model spend: all three providers read -> green, combined MTD, a line 
         `<p class="sub">${themedSwatch("#10a37f")} OpenAI • ` +
           `${themedSwatch("#d97757")} Anthropic • OR $5</p>`,
       );
-      // Each line is drawn in its provider's color and labelled with its own MTD.
+      // Each line is drawn in its provider's color and labeled with its own MTD.
       assertStringIncludes(v.extra ?? "", `pointer-events:none">$${DOM}</span>`);
       assertStringIncludes(v.extra ?? "", `pointer-events:none">$${2 * DOM}</span>`);
       assertStringIncludes(v.extra ?? "", "#10a37f");
@@ -211,7 +211,7 @@ Deno.test("model spend: a provider with no bucket at all draws no line of $0", a
     const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa", ANTHROPIC_ADMIN_KEY: "an" }));
     assertEquals(v.status, "good");
     assertEquals(v.aside, `<span class="hmtd">$${2 * DOM} MTD</span>`); // Anthropic's $2/day alone
-    // OpenAI's colour survives in the key's swatch and nowhere in the chart.
+    // OpenAI's color survives in the key's swatch and nowhere in the chart.
     assertEquals((v.extra ?? "").match(/#10a37f/gi)?.length, 1);
     assertStringIncludes(v.extra ?? "", "#d97757");
   });

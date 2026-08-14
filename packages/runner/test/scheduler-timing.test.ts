@@ -395,7 +395,7 @@ describe("debounce and throttling", () => {
 
       expect(runCount).toBe(0);
     } finally {
-      // The scheduler is disposed above as the behaviour under test, and the
+      // The scheduler is disposed above as the behavior under test, and the
       // real teardown still runs over it — see scheduler-dispose-idle.test.ts
       // for the contract that makes the two compose.
       await disposeSchedulerTestRuntime(local);

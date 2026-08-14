@@ -2,7 +2,7 @@
  * The TypeScript (and TSX/JS) language for the pager. It handles named files in
  * that language family. The selection layer also uses it for filename-free
  * transformed compiler output. Highlighting, structure, incremental editing
- * and the semantic layer all live in the neighbouring {@link ./parse.ts} and
+ * and the semantic layer all live in the neighboring {@link ./parse.ts} and
  * {@link ./semantics.ts}; this module only adapts them to the {@link Language}
  * contract.
  */

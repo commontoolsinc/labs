@@ -271,7 +271,7 @@ new file mode 100644
 
 // --- document -------------------------------------------------------------------
 
-Deno.test("diff doc: verbatim text, tints, markers and syntax colour", () => {
+Deno.test("diff doc: verbatim text, tints, markers and syntax color", () => {
   const { ws, done } = tempWorkspace();
   try {
     const model = parseDiff(DIFF)!;
@@ -288,7 +288,7 @@ Deno.test("diff doc: verbatim text, tints, markers and syntax colour", () => {
     // Markers classified.
     assertEquals(doc.lines[9].spans[0].cls, "diffAdd");
     assertEquals(doc.lines[8].spans[0].cls, "diffDel");
-    // Syntax colour under the diff: both complete file parses classify the
+    // Syntax color under the diff: both complete file parses classify the
     // `export` keyword as a storage keyword.
     const cls = (line: number, text: string) =>
       doc.lines[line].spans.find((s) => s.text === text)?.cls;
@@ -685,7 +685,7 @@ Deno.test("diff doc: a stale diff shifted against the workspace maps nothing", (
 Deno.test("diff doc: a shifted coincidental match cannot answer about the wrong occurrence", () => {
   // The reviewer's repro: function b was inserted above function a after the
   // diff was taken; the added `log(x)` coincides textually with b's body at
-  // the diff's stated line numbers, but neighbouring lines do not match, so
+  // the diff's stated line numbers, but neighboring lines do not match, so
   // the hunk fails verification and maps nothing (instead of answering with
   // function b's types).
   const root = Deno.makeTempDirSync();
@@ -805,7 +805,7 @@ Deno.test("diff semantics: a definition outside the diff opens as a file", () =>
 
 // --- rendering ------------------------------------------------------------------
 
-Deno.test("diff render: added lines carry the add tint under the syntax colour", () => {
+Deno.test("diff render: added lines carry the add tint under the syntax color", () => {
   const { ws, done } = tempWorkspace();
   try {
     const model = parseDiff(DIFF)!;

@@ -267,7 +267,7 @@ describe("to-encodable-form", () => {
     });
 
     it("throws given an array that is not inert, rather than laundering it", () => {
-      // The array analogue of the plain-object case above, and it matters for
+      // The array analog of the plain-object case above, and it matters for
       // the same reason: `.map()` rebuilds by index, so a named property is
       // dropped and an accessor-backed index is EVALUATED into a data
       // property, each yielding an array that satisfies `isFabricValue()`

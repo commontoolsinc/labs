@@ -658,7 +658,7 @@ export function invocationPhaseReporter(
  * wall-clock span per observed phase transition (verb contract WS-D, phase
  * timings). Spans are bounded by the phases the `onPhase` callback already
  * observes — initial sync up to dispatch, the dispatched handler run up to
- * its transaction-local commit acknowledgement, the receipt classification,
+ * its transaction-local commit acknowledgment, the receipt classification,
  * and the receipt readback up to settlement — because those boundaries are
  * what the invocation actually reports; nothing new is instrumented inside
  * the runner. Every line goes to stderr so stdout stays exactly the settled
@@ -666,7 +666,7 @@ export function invocationPhaseReporter(
  * a failure exit keeps every span observed before the failure — `finish`
  * closes the in-flight span with the outcome that ended it: `settled`,
  * `failed`, or `detached` for a `--no-wait` exit that stopped at the commit
- * acknowledgement and skipped the readback.
+ * acknowledgment and skipped the readback.
  */
 export function pieceCallPhaseObserver(
   verbose: boolean,
@@ -835,10 +835,10 @@ export function invocationJson(
 
 /** How long `cf piece call` waits for a handler invocation (verb contract
  * WS-F, F3). `settle` is the default: await this handling's commit
- * acknowledgement plus receipt readback, optionally bounded by the caller's
+ * acknowledgment plus receipt readback, optionally bounded by the caller's
  * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
- * transaction-local commit acknowledgement — the durable point; the handler
- * runs in THIS process, so the acknowledgement is not skippable — and skips
+ * transaction-local commit acknowledgment — the durable point; the handler
+ * runs in THIS process, so the acknowledgment is not skippable — and skips
  * only the receipt readback. */
 export interface PieceCallWaitControl {
   mode: "settle" | "commit";

@@ -1363,7 +1363,7 @@ function createPieceCallableHarness(options: {
    * original receipt. */
   receiptExists?: boolean;
   /** Hold settlement open: `send` records the dispatch but never invokes the
-   * commit callback, so anything awaiting acknowledgement waits forever.
+   * commit callback, so anything awaiting acknowledgment waits forever.
    * This is how a test proves a path does NOT await the commit — the path
    * completes anyway — or exercises a wait bound against a call that can
    * never beat it. */
@@ -2659,7 +2659,7 @@ describe("piece call wait control", () => {
     });
   });
 
-  it("still awaits the commit acknowledgement under --no-wait", async () => {
+  it("still awaits the commit acknowledgment under --no-wait", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "addComment",
@@ -2671,7 +2671,7 @@ describe("piece call wait control", () => {
         required: ["message"],
       },
       // The commit callback never fires. --no-wait must NOT return: exiting
-      // before the acknowledgement would abandon the invocation un-executed
+      // before the acknowledgment would abandon the invocation un-executed
       // (the handler runs in this process), not leave it settling elsewhere.
       neverCommit: true,
     });
@@ -2689,7 +2689,7 @@ describe("piece call wait control", () => {
     ).catch((e) => e);
 
     // Only the deadline got us out — the skip-readback path was still
-    // parked on the commit acknowledgement, exactly where it must wait.
+    // parked on the commit acknowledgment, exactly where it must wait.
     expect(error).toBeInstanceOf(WaitBoundExpired);
     expect(phases).toEqual(["dispatched"]);
     expect(harness.tracker.receiptLinkRequested).toBeUndefined();
@@ -2883,7 +2883,7 @@ describe("piece call wait control", () => {
     observer.finish("detached");
     // "settled" would be a lie here — the readback was skipped, so nobody
     // observed a settlement. The span sequence also documents where
-    // --no-wait stops: after the commit acknowledgement, never before it.
+    // --no-wait stops: after the commit acknowledgment, never before it.
     expect(lines).toEqual([
       "timing: initial_sync → dispatched 20.0ms",
       "timing: dispatched → committed 30.0ms",
@@ -4516,7 +4516,7 @@ describe("reportVerbInputErrorOrRethrow", () => {
     expect(printed[1]).toMatch(/<piece>/);
   });
 
-  // Anything that is not an input rejection has to keep travelling: a network
+  // Anything that is not an input rejection has to keep traveling: a network
   // failure reported as a payload problem would send an agent to fix a payload
   // that was fine.
   it("re-throws an unrelated failure untouched", () => {

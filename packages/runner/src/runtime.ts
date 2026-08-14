@@ -2103,7 +2103,7 @@ export class Runtime {
    * NOTE(#1): The derivation is intentionally name-based for now — `createSession`
    * derives the space key from the name alone (the identity is ignored on the
    * `spaceName` path), so equal names map to the same shared space across users.
-   * This is the deliberate "shared profile space" behaviour today; revisit once
+   * This is the deliberate "shared profile space" behavior today; revisit once
    * we can derive unique space DIDs from a string.
    */
   async resolveSpaceName(name: string): Promise<MemorySpace> {
@@ -2232,7 +2232,7 @@ export class Runtime {
   /**
    * The host that serves a space's space-bound work (LLM, fetch, blob).
    * A mapped space resolves to its host; everything else to the
-   * default `apiUrl`. The single compute-side analogue of the storage
+   * default `apiUrl`. The single compute-side analog of the storage
    * layer's per-space address resolver.
    */
   hostForSpace(space: MemorySpace): URL {

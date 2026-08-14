@@ -38,7 +38,7 @@ const STATUS_DOT: Record<Status, string> = {
   good: "green",
   warn: "amber",
   bad: "red",
-  unknown: "grey",
+  unknown: "gray",
 };
 const STATUS_RANK: Record<Status, number> = {
   good: 0,

@@ -2045,7 +2045,7 @@ export class Runner {
       });
       // Same condition as the durable stamp, deliberately: an observer that
       // saw instantiations the store does not label would report update
-      // targets that cannot be found again, and one that missed a labelled
+      // targets that cannot be found again, and one that missed a labeled
       // root would under-report. That includes the KEYLESS case —
       // `entryRefForPattern` always yields a ref, minting a `keyless:<hash>`
       // session pointer when there is no content-addressed one, and that

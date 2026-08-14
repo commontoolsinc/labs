@@ -39,7 +39,7 @@ import type { TrustResolver } from "./trust.ts";
 /**
  * The guarded-rewrite evaluator (spec §4.4.5, Epic B4 of
  * docs/history/plans/cfc-future-work-implementation.md §3): runs a policy snapshot's
- * exchange rules over one label to a fuelled fixpoint. The ONLY things a
+ * exchange rules over one label to a fueled fixpoint. The ONLY things a
  * firing may do:
  *
  * - ADD instantiated alternatives to the clause whose alternative the rule's
@@ -70,7 +70,7 @@ import type { TrustResolver } from "./trust.ts";
  * federation soundness (docs/specs/cfc-spec-changes.md SC-28).
  *
  * Termination (spec §4.4.5): add-only rule sets converge by monotonicity;
- * add+drop sets can cycle, so the evaluator is fuelled and FAILS CLOSED on
+ * add+drop sets can cycle, so the evaluator is fueled and FAILS CLOSED on
  * exhaustion — `exhausted: true` with the ORIGINAL label, never a partial
  * rewrite (invariant 6: violating a policy disables exchange, it never
  * silently downgrades).
@@ -759,7 +759,7 @@ const applyRuleMatch = (
 };
 
 /**
- * Runs every snapshot rule over `label` to a fuelled fixpoint and returns
+ * Runs every snapshot rule over `label` to a fueled fixpoint and returns
  * the rewritten label (or the ORIGINAL on fuel exhaustion, flagged).
  *
  * Determinism: records and rules evaluate in canonical (id) order; matches

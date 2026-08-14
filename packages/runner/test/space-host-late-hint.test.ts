@@ -1116,15 +1116,15 @@ describe("late space host hints", () => {
     }
   });
 
-  it("keeps the route when a committed write loses its acknowledgement", async () => {
+  it("keeps the route when a committed write loses its acknowledgment", async () => {
     const signer = await Identity.fromPassphrase(
-      "lost-acknowledgement-route-write",
+      "lost-acknowledgment-route-write",
     );
     const targetSpace = (await Identity.fromPassphrase(
-      "lost-acknowledgement-route-write-target",
+      "lost-acknowledgment-route-write-target",
     )).did();
-    const targetId = "of:lost-acknowledgement-route-write-target" as URI;
-    const defaultServer = makeServer("lost-acknowledgement-route-default");
+    const targetId = "of:lost-acknowledgment-route-write-target" as URI;
+    const defaultServer = makeServer("lost-acknowledgment-route-default");
     const factory = new LoopbackSessionFactory(() => defaultServer);
     const manager = TestStorageManager.create(
       signer,
@@ -1140,7 +1140,7 @@ describe("late space host hints", () => {
           );
           connection.session.transact = async (commit, beforeIssue) => {
             await transact(commit, beforeIssue);
-            throw new Error("write acknowledgement lost");
+            throw new Error("write acknowledgment lost");
           };
           return connection;
         },

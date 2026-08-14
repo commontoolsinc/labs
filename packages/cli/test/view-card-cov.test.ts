@@ -16,7 +16,7 @@ function infoText(doc: Document, node: StructureNode, semantics?: Semantics) {
 
 function findByLabel(doc: Document, label: string): StructureNode {
   const node = doc.flatStructure.find((n) => n.label === label);
-  assert(node, `no node labelled "${label}"`);
+  assert(node, `no node labeled "${label}"`);
   return node!;
 }
 
@@ -91,7 +91,7 @@ Deno.test("card: a node with no AST kinds falls back to its structure kind", () 
 
 // --- detail sections by meta kind --------------------------------------------
 
-Deno.test("card: a schema node renders its labelled type", () => {
+Deno.test("card: a schema node renders its labeled type", () => {
   const doc = parseDocument(`// transformed: /app.ts
 const __cfLift_1 = lift({
     type: "object",
@@ -475,7 +475,7 @@ Deno.test("card: a deferred dependency does not use a same-named local jump", ()
   );
   assert(
     collapsedText.includes("1 possible dependency"),
-    `the syntactic match is labelled as unresolved: ${collapsedText}`,
+    `the syntactic match is labeled as unresolved: ${collapsedText}`,
   );
 
   const expanded = buildPeekCard(doc, consumer, semantics, true);
@@ -704,7 +704,7 @@ Deno.test("card: a short scalar-root schema renders inline", () => {
 });
 
 Deno.test("card: a wide scalar-root schema renders on its own indented line", () => {
-  // A root type long enough to exceed the inline budget pushes the labelled
+  // A root type long enough to exceed the inline budget pushes the labeled
   // schema onto a heading plus a multiline body, whose scalar-root branch
   // emits a single indented type line.
   const longType =

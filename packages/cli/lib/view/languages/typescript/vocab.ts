@@ -1,10 +1,10 @@
 /**
  * Common Fabric naming vocabulary used to give the transformed output its
- * domain-aware colouring (highlighting `pattern`/`lift`/`handler` builders and
+ * domain-aware coloring (highlighting `pattern`/`lift`/`handler` builders and
  * the synthetic helpers the transformer injects).
  *
  * The builder/call name sets are imported from the transformer's own registry
- * so new builders are recognised automatically and we never drift out of sync.
+ * so new builders are recognized automatically and we never drift out of sync.
  * The synthetic-name prefixes are stable internal strings declared alongside
  * the transformer that emits them; they are mirrored here (with citations) to
  * avoid pulling the heavy `ast/call-kind.ts` graph into the pager. A unit test
@@ -54,7 +54,7 @@ const SYNTHETIC_PREFIXES = [
 /**
  * Names the transformer emits for the module wrapper itself. These are ordinary
  * identifiers (no `__cf` prefix), so they are listed by exact name rather than
- * recognised by prefix.
+ * recognized by prefix.
  */
 const SCAFFOLDING_NAMES: ReadonlySet<string> = new Set([
   "define",

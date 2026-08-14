@@ -1,6 +1,6 @@
 /**
  * Coverage-driving tests for `lib/view/languages/typescript/parse.ts`. These exercise the parser's
- * less-travelled branches: the incremental highlighter's no-op and walk-back
+ * less-traveled branches: the incremental highlighter's no-op and walk-back
  * paths, the full set of identifier classifications, every structure-tree
  * classification (methods, enums, namespaces, control flow, labels), the schema
  * and type metadata extractors, and the syntactic type-inference branches.
@@ -218,7 +218,7 @@ Deno.test("createHighlighter: an edit near a JSDoc comment stays one whole comme
 
 // --- classifyToken: null is a boolean-class literal (line 803) ---------------
 
-Deno.test("parse: null, true and false are coloured as boolean literals", () => {
+Deno.test("parse: null, true and false are colored as boolean literals", () => {
   const doc = parseDocument(
     "const a = null;\nconst b = true;\nconst c = false;\n",
   );
@@ -239,7 +239,7 @@ Deno.test("parse: function, method and interface declaration names are classifie
     "class C { method() {} field = 1; }",
     "const ce = class Named {};",
     "type Ali = number;",
-    "enum Colour { Red, Green }",
+    "enum Color { Red, Green }",
   ].join("\n");
   const doc = parseDocument(src, "m.ts");
   assert(classesOf(doc, "topFn").has("functionName"), "function name");
@@ -249,7 +249,7 @@ Deno.test("parse: function, method and interface declaration names are classifie
   assert(classesOf(doc, "C").has("typeName"), "class declaration name");
   assert(classesOf(doc, "Named").has("typeName"), "class expression name");
   assert(classesOf(doc, "Ali").has("typeName"), "type alias name");
-  assert(classesOf(doc, "Colour").has("typeName"), "enum name");
+  assert(classesOf(doc, "Color").has("typeName"), "enum name");
   assert(classesOf(doc, "field").has("propertyName"), "class property");
   assert(classesOf(doc, "p").has("propertyName"), "property signature");
   assert(classesOf(doc, "Red").has("propertyName"), "enum member");
@@ -363,7 +363,7 @@ Deno.test("parse: comments are merged into the structure tree in source order", 
 
 Deno.test("parse: an element-access expression gets a […] generic label", () => {
   const doc = parseDocument("const e = arr[index];\n", "m.ts");
-  // The element-access node is labelled `arr[…]`.
+  // The element-access node is labeled `arr[…]`.
   assert(
     findNode(doc, (n) => n.label === "arr[…]"),
     `expected an element-access node, got ${labels(doc).join(" | ")}`,
@@ -502,16 +502,16 @@ Deno.test("parse: an unusual statement still becomes a reachable statement node"
 
 // --- bindingDesc: no initializer (lines 1496-1505) ---------------------------
 
-Deno.test("parse: an uninitialised binding becomes a variable node with no init meta", () => {
+Deno.test("parse: an uninitialized binding becomes a variable node with no init meta", () => {
   const doc = parseDocument("let pending: number;\n", "m.ts");
   const node = findNode(doc, (n) => n.name === "pending");
-  assert(node, "the uninitialised binding is a node");
+  assert(node, "the uninitialized binding is a node");
   assertEquals(node!.kind, "variable");
   assertEquals(node!.label, "pending");
-  // Its variable meta reports an uninitialised binding and the annotated type.
+  // Its variable meta reports an uninitialized binding and the annotated type.
   assert(node!.meta && node!.meta.kind === "variable");
   if (node!.meta && node!.meta.kind === "variable") {
-    assertEquals(node!.meta.bindsTo, "(uninitialised)");
+    assertEquals(node!.meta.bindsTo, "(uninitialized)");
     assertEquals(node!.meta.typeText, "number");
   }
 });
@@ -616,7 +616,7 @@ Deno.test("parse: every control-flow shape gets its distinct label", () => {
 
 // --- calleeName: a non-identifier non-property callee (line 1708) ------------
 
-Deno.test("parse: a computed-callee call is labelled by its first source line", () => {
+Deno.test("parse: a computed-callee call is labeled by its first source line", () => {
   // `(obj["m"])(…)` — the callee is neither a plain identifier nor a property
   // access, so calleeName falls back to nodeFirstLine.
   const doc = parseDocument(`const r = (table["run"])(1);\n`, "m.ts");

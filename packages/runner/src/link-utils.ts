@@ -186,7 +186,7 @@ export function areMaybeLinkAndNormalizedLinkSame(
   return areNormalizedLinksSame(normalizedLink, normalizedLink2);
 }
 
-// Link identity (`areNormalizedLinksSame` and neighbours) lives in
+// Link identity (`areNormalizedLinksSame` and neighbors) lives in
 // ./link-types.ts — one canonical implementation — and reaches importers of
 // this module through the `export *` above.
 

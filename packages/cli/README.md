@@ -39,7 +39,7 @@ explicit selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped
 source is not guessed from its syntax.
 
 A diff shows its whole-diff change totals at the top right corner of its first
-line: the added line count and the removed line count, coloured like additions
+line: the added line count and the removed line count, colored like additions
 and removals.
 
 Markdown files can switch between the source and a rendered terminal view with
@@ -62,7 +62,7 @@ rendered view returns to source first.
 ```bash
 cf check pattern.tsx --show-transformed --no-run | cf view
 cf view .github/workflows/deno.yml
-cf view scripts/analyse.py
+cf view scripts/analyze.py
 git diff upstream/main | cf view
 cf view --rendered README.md
 generate-source | cf view --filename generated.py

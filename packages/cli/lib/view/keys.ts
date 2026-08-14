@@ -1,5 +1,5 @@
 /**
- * Decodes raw terminal bytes into normalised {@link Key} events.
+ * Decodes raw terminal bytes into normalized {@link Key} events.
  *
  * Pure and incremental: {@link decodeKeys} returns the keys it could fully
  * parse plus any trailing bytes that form an incomplete escape sequence, which
@@ -12,7 +12,7 @@
 
 export interface Key {
   /**
-   * Normalised name: an arrow/nav name ("up", "down", "left", "right",
+   * Normalized name: an arrow/nav name ("up", "down", "left", "right",
    * "pageup", "pagedown", "home", "end"), a function key ("f1".."f12"), an
    * editing name ("enter", "escape", "backspace", "delete", "tab", "space"), a
    * control combo ("ctrl-c", "ctrl-d", …), or the literal character for a

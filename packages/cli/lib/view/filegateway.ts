@@ -33,7 +33,7 @@ export interface FileGateway {
   list(absDir: string): DirEntry[] | null;
   /** Open a file: its source and decoded buffer, or null on failure. */
   open(absPath: string): { source: EditableSource; text: string } | null;
-  /** Join a directory and a path segment, normalised. */
+  /** Join a directory and a path segment, normalized. */
   join(dir: string, segment: string): string;
   /** The parent directory of a path. */
   parent(path: string): string;
