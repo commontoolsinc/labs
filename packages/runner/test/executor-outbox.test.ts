@@ -576,7 +576,7 @@ describe("stage G outbox + sqlite discharge", () => {
       createdSeq: 1,
       rows: [1, 2, 3].map((n) => ({
         targetSpace,
-        targetStream: "of:fifo-stream",
+        targetStream: "of:stream-events:fifo",
         eventId: `evt-fifo-${n}`,
         payload: { n },
         actingPrincipal: "user:alice",
@@ -616,7 +616,7 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
       .toBe(3);
     const targetEngine = await server.engineForSpace(targetSpace);
-    const empty = Engine.read(targetEngine, { id: "of:fifo-stream" });
+    const empty = Engine.read(targetEngine, { id: "of:stream-events:fifo" });
     expect(
       ((empty?.value as { entries?: Array<unknown> })?.entries ?? []).length,
     ).toBe(0);
@@ -626,7 +626,7 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(second.remaining).toBe(0);
     expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
       .toBe(0);
-    const after = Engine.read(targetEngine, { id: "of:fifo-stream" });
+    const after = Engine.read(targetEngine, { id: "of:stream-events:fifo" });
     const entries =
       (after?.value as { entries?: Array<{ eventId?: string }> })?.entries ??
         [];

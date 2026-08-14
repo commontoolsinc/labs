@@ -630,11 +630,16 @@ describe("Phase 2 speculation overlay", () => {
     cancelDemand();
   });
 
-  it("a handler that read a speculative echo fails terminal on the FIRST attempt — no convergence-retry loop against a dependency that is never coming (leg-C 1b)", async () => {
+  it("a handler that read a speculative echo runs ONCE — no convergence-retry loop against a dependency that is never coming (leg-C 1b; events-down diverts the write)", async () => {
     // Pre-fix: 17+ re-runs in a 5s window (observed), each re-reading
     // the live echo, until CommitConvergenceError after the full 30s
-    // retry window. Post-fix: the terminal refusal classifies the
-    // commit `terminal` at the scheduler, so the handler runs ONCE.
+    // retry window. Post-fix the loop is structurally absent, by TWO
+    // layered mechanisms: leg-C's terminal refusal classifies any
+    // authored export naming a speculative layer `terminal` (1a pins
+    // it), and Phase 3's events-down DIVERTS the client handler write
+    // into the overlay echo altogether (F10 deleted; events.md §7) —
+    // the handler authors no wire commit, so there is no doomed
+    // dependency to retry against. Either way: the handler runs ONCE.
     clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -707,16 +712,32 @@ describe("Phase 2 speculation overlay", () => {
       "the speculative echo to render",
     );
 
+    const engine = await server.engineForSpace(space);
+    const commitsBefore =
+      Engine.selectCommitsSince(engine, { fromSeq: 0 }).length;
     handlerRuns = 0;
     clientResult.key("copy").send({});
     await clientRuntime.idle();
-    // Observation window: with the terminal refusal the handler runs
-    // exactly once; the pre-fix backoff loop re-ran it 10+ times here.
+    // Observation window: the handler runs exactly once; the pre-fix
+    // backoff loop re-ran it 10+ times here.
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     await clientRuntime.idle();
     expect(handlerRuns).toBe(1);
-    // The refused write dropped (never committed, never rendered).
-    expect(clientArg.key("copied").get()).toBe(0);
+    // Events-down (F10 deleted): the handler's write DIVERTED to the
+    // overlay echo — it renders locally against the speculative total,
+    // but the handler authored no wire commit carrying the doomed
+    // speculative dependency. The STORE's argument doc keeps the
+    // seeded value; the only new wire commit is the event append.
+    expect(clientArg.key("copied").get()).toBe(42);
+    const argDoc = Engine.read(engine, {
+      id: clientArg.getAsNormalizedFullLink().id,
+    });
+    expect(argDoc).not.toBeNull();
+    expect((argDoc?.value as { copied?: number } | undefined)?.copied).toBe(0);
+    const newCommits = Engine.selectCommitsSince(engine, { fromSeq: 0 })
+      .slice(commitsBefore);
+    expect(newCommits.length).toBe(1);
+    expect(newCommits[0].class).toBe("authored");
     cancelDemand();
   });
 
