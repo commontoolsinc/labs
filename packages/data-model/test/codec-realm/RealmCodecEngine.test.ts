@@ -178,6 +178,29 @@ describe("RealmCodecEngine", () => {
         .toThrow(/not a form this format emits/);
     });
 
+    it("refuses a single-entry `Map` whose key is not a string", () => {
+      // A tag is a string, and a key off the wire is not taken on the type's
+      // word. Cloning carries a `Map` keyed by anything, so both of these
+      // arrive intact and neither can name a wire type.
+      expect(() => fabricFromRealmValue(new Map([[42, "x"]]) as never))
+        .toThrow(/not a form this format emits/);
+      expect(() => fabricFromRealmValue(new Map([[Symbol("s"), "x"]]) as never))
+        .toThrow(/not a form this format emits/);
+    });
+
+    it("returns a non-string key's refusal as a `ProblematicValue` when lenient", () => {
+      const engine = newDefaultRealmCodecEngine({ lenient: true });
+      const decoded = engine.decode(
+        new Map([[42, "x"]]) as never,
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      );
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect((decoded as ProblematicValue).error).toMatch(
+        /not a form this format emits/,
+      );
+    });
+
     it("raises a codec's rejection as a `ProblematicStateError`", () => {
       // A codec's own rejection rather than the walk's: the tag is claimed,
       // and `FabricBytes` wants an `ArrayBuffer` where this carries a string.
@@ -210,6 +233,22 @@ describe("RealmCodecEngine", () => {
       expect((decoded as ProblematicValue).error).toMatch(/ArrayBuffer/);
     });
 
+    it("raises a symbol's bad state without naming the tag twice", () => {
+      // `SymbolCodec` reports by returning a `ProblematicValue`, as the rest
+      // of this format's codecs do. The tag rides on the error whichever way a
+      // codec reports, so one throwing an `Error` of its own that named the
+      // tag would have the message say it a second time.
+      try {
+        fabricFromRealmValue(new Map([["Symbol@1", 42]]));
+        throw new Error("Should have thrown.");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProblematicStateError);
+        expect((e as ProblematicStateError).wireTypeTag).toBe("Symbol@1");
+        expect((e as ProblematicStateError).state).toBe(42);
+        expect((e as Error).message).not.toMatch(/Symbol@1/);
+      }
+    });
+
     it("wraps an unclaimed tag in an `UnknownValue` rather than refusing", () => {
       // A single-entry `Map` IS the tagged form, so this is a well-formed
       // value carrying a tag no codec claims -- a different thing from a
@@ -218,6 +257,59 @@ describe("RealmCodecEngine", () => {
 
       expect(decoded).toBeInstanceOf(UnknownValue);
       expect((decoded as UnknownValue).wireTypeTag).toBe("nope@1");
+    });
+
+    it("returns an object needing no decoding by identity", () => {
+      const data = { a: 1, b: { c: "two" }, d: [3, 4] };
+
+      // Copy-on-write on the decode side, as on the encode side. Each format
+      // writes its own `decodeValue()`, so this is not covered by any test of
+      // the shared engine.
+      expect(fabricFromRealmValue(data)).toBe(data);
+    });
+
+    it("returns an array needing no decoding by identity", () => {
+      const data = [1, "two", { three: 3 }];
+
+      expect(fabricFromRealmValue(data)).toBe(data);
+    });
+
+    it("rebuilds only the objects on the path to a decoded value", () => {
+      const untouched = { c: "two" };
+      const data = { a: new Map([["EpochNsec@1", 7n]]), b: untouched };
+      const decoded = fabricFromRealmValue(data as never) as Record<
+        string,
+        FabricValue
+      >;
+
+      expect(decoded).not.toBe(data);
+      expect(decoded.b).toBe(untouched);
+    });
+
+    it("rebuilds only the arrays on the path to a decoded value", () => {
+      const untouched = [1, 2];
+      const data = [new Map([["EpochNsec@1", 7n]]), untouched];
+      const decoded = fabricFromRealmValue(data as never) as FabricValue[];
+
+      expect(decoded).not.toBe(data);
+      expect(decoded[1]).toBe(untouched);
+    });
+
+    it("freezes what it retains from the value ceded to it", () => {
+      const inner = { c: "two" };
+      const innerArray = [1, 2];
+      const data = {
+        a: new Map([["EpochNsec@1", 7n]]),
+        b: inner,
+        d: innerArray,
+      };
+
+      fabricFromRealmValue(data as never);
+
+      // Both came back by identity rather than rebuilt, so freezing them is
+      // the whole of what keeps the result immutable.
+      expect(Object.isFrozen(inner)).toBe(true);
+      expect(Object.isFrozen(innerArray)).toBe(true);
     });
   });
 

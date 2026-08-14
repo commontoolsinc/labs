@@ -2,9 +2,10 @@ import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import type { RealmCodecValue } from "./interface.ts";
 import type { ReconstructionContext } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import type { RealmCodecValue } from "./interface.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
  * Codec for registry-interned symbols. Encodes the registry key as a string,
@@ -49,11 +50,11 @@ export class SymbolCodec extends BaseTerminalCodec<RealmCodecValue> {
   /**
    * @inheritDoc
    *
-   * Reports a bad state by throwing rather than by returning a
-   * `ProblematicValue`. The two are equivalent to a caller -- the engine
-   * settles them against `lenient` -- so the choice is only about what can be
-   * expressed, and a `ProblematicValue` holds a `FabricValue` where this
-   * format's states need not be one.
+   * Reports a bad state by returning a `ProblematicValue`, as this format's
+   * other codecs and this codec's JSON counterpart do. The two ways a codec
+   * can reject -- this and throwing -- are equivalent to a caller, the engine
+   * settling them against `lenient`, so what decides between them is
+   * consistency across the codecs a reader meets together.
    */
   decode(
     typeTag: string,
@@ -61,8 +62,10 @@ export class SymbolCodec extends BaseTerminalCodec<RealmCodecValue> {
     _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {
-      throw new Error(
-        `\`${typeTag}\`: expected string state, got ${typeof state}`,
+      return new ProblematicValue(
+        typeTag,
+        state,
+        `Symbol: expected string state, got ${typeof state}`,
       );
     }
 

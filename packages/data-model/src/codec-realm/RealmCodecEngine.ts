@@ -86,6 +86,20 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * receiver on this format's one boundary knows what it asked for, both ends
    * being the same engine from the same build. What cloning carries but this
    * format never emits is refused where it is met, by `decodeValue()`.
+   *
+   * **`data` is ceded to this method**, which retains whatever parts of it it
+   * likes, so a caller must not use it afterwards. Two retentions are
+   * deliberate: a subtree needing no decoding comes back by identity rather
+   * than rebuilt, and a `FabricBytes` takes over the buffer it arrived in.
+   * Everything retained that can be frozen is frozen before it is returned;
+   * the byte buffer cannot be, which is what makes the cession a requirement
+   * rather than a courtesy.
+   *
+   * Across the boundary the cession costs nothing, the tree being the
+   * receiver's own clone of a sender's value. Same-realm it is visible:
+   * `encode()` returns unchanged subtrees by identity too, so
+   * `decode(encode(value))` can hand back the very objects that went in, and
+   * `value` is frozen as deeply as the walk reached.
    */
   override decode(
     data: RealmCodecValue,
@@ -239,6 +253,9 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * Decodes an array. Holes arrive as holes and are left alone, so there is no
    * run-length form to validate, and so no count off the wire that could name
    * a length an array cannot hold.
+   *
+   * Frozen on the way out whether it was rebuilt or passed through, per the
+   * cession {@link #decode} requires.
    */
   #decodeArray(
     data: readonly RealmCodecValue[],
@@ -275,6 +292,9 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * Decodes a plain object. A `/`-prefixed key needs no attention, unlike
    * under JSON: this format reserves no key at all, its tags living in a
    * container a payload cannot produce.
+   *
+   * Frozen on the way out whether it was rebuilt or passed through, per the
+   * cession {@link #decode} requires.
    */
   #decodePlainObject(
     data: Record<string, RealmCodecValue>,
@@ -319,6 +339,13 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * Unwraps a tagged wire representation. Returns `{ tag, state }`, or `null`
    * if `data` is not a tagged value. The `state` is extracted directly from
    * `data`.
+   *
+   * The key's type is checked rather than taken on the declaration's word.
+   * {@link RealmTaggedValue} says a tag is a `string`, but that describes what
+   * this format _emits_, and decoding is exactly where data that came from
+   * somewhere else arrives. A `Map` keyed by anything else is a form this
+   * format never produces, and is refused as one alongside a multi-entry
+   * `Map`, rather than being let through to name a wire type it cannot name.
    */
   static #unwrapTag(
     data: RealmCodecValue,
@@ -328,6 +355,6 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     }
 
     const [tag, state] = data.entries().next().value!;
-    return { tag, state };
+    return (typeof tag === "string") ? { tag, state } : null;
   }
 }

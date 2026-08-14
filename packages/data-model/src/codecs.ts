@@ -189,7 +189,8 @@ const REALM_DECODE_EMPTY_CONTEXT = Object.freeze(
 /**
  * Encodes a fabric value into the realm-crossing transport form: a value that
  * `structuredClone()` or `postMessage()` carries to another realm without
- * loss, enveloped so that a receiver can recognize it.
+ * loss. The result carries no envelope, and shares whatever structure of
+ * `value` needed no encoding.
  *
  * Named for the `<target>From<Source>Value` family that
  * `fabricFromNativeValue()` and `nativeFromFabricValue()` establish. Both
@@ -205,6 +206,10 @@ export function realmFromFabricValue(value: FabricValue): RealmCodecValue {
  * Decodes a value in the realm-crossing transport form. If `context` is
  * omitted, the shared decode-framed empty context is substituted, which throws
  * if any reconstruction is needed.
+ *
+ * `data` is ceded to this function, which retains what it likes of it and
+ * freezes whatever it retains; a caller must not use it afterwards.
+ * `RealmCodecEngine.decode()` states the whole of that contract.
  */
 export function fabricFromRealmValue(
   data: RealmCodecValue,
