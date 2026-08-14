@@ -166,11 +166,15 @@ function collectEmbeddingHits(
   let capTripped = false;
 
   const visit = (type: ts.Type, depth: number): void => {
+    // Visited wins over the depth cap: a type first explored at a shallow
+    // depth expanded to the absolute cap from there, which is strictly
+    // more than a deeper re-encounter could reach — so meeting it again
+    // past the cap truncates nothing, and must not count as truncation.
+    if (visited.has(type)) return;
     if (depth > WALK_DEPTH_LIMIT) {
       capTripped = true;
       return;
     }
-    if (visited.has(type)) return;
     visited.add(type);
 
     const symbol = namedSymbolForType(type);

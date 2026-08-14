@@ -395,4 +395,62 @@ Deno.test("Foreign-output embedding check", async (t) => {
       );
     },
   );
+
+  await t.step(
+    "does not report truncation for a deep re-encounter of an explored type",
+    async () => {
+      const capCount = () =>
+        getLoggerCountsBreakdown()["contract-lints"]?.["walk-depth-cap"]
+          ?.debug ?? 0;
+      const before = capCount();
+
+      // `Tail` is fully explored at depth 1 through `a` (finding the
+      // foreign Output at depth 2), then re-encountered at depth 9 at the
+      // end of the eight-link chain under `b`. Nothing reachable goes
+      // unscanned, so the walk-depth note must not fire.
+      const source = [
+        'import { pattern } from "commonfabric";',
+        "",
+        "export interface NoteOutput {",
+        "  title: string;",
+        "}",
+        "",
+        "interface NoteInput {",
+        "  title?: string;",
+        "}",
+        "",
+        "export const Note = pattern<NoteInput, NoteOutput>(({ title }) => ({",
+        "  title,",
+        "}));",
+        "",
+        "interface Tail {",
+        "  note: NoteOutput;",
+        "}",
+        "",
+        ...chainTo(8, "Tail"),
+        "interface BoardInput {",
+        "  a: Tail;",
+        "  b: L1;",
+        "}",
+        "",
+        "interface BoardOutput {",
+        "  noteCount: number;",
+        "}",
+        "",
+        "export default pattern<BoardInput, BoardOutput>(() => ({",
+        "  noteCount: 0,",
+        "}));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      assertEquals(embeddingWarnings(diagnostics).length, 1);
+      assertEquals(
+        capCount(),
+        before,
+        "a re-encounter of an already-explored type is not a truncation",
+      );
+    },
+  );
 });
