@@ -40,7 +40,9 @@ Checkers referenced below:
   validator (`packages/memory/test/naive-admission.ts`);
 - the **TLA+ model**: `docs/specs/memory-v2/tla/PendingStacks.tla`, which
   model-checks INV-1/INV-3/INV-4/INV-5 over all small interleavings for each
-  dependency-recording and staleness-basis variant.
+  dependency-recording and staleness-basis variant, and — in its
+  delayed-verdict-delivery mode (the `PendingStacks_Channel*.cfg` configs) —
+  INV-6 over the decided-but-not-yet-processed window.
 
 ## The invariants
 
@@ -157,13 +159,15 @@ view); it imposes per-element resolution on what is named and nothing on
 what is not, so the soundness burden for an omission sits entirely with the
 client, in the same trust class as a fabricated read. The interleaving this
 permits — rejections honored eagerly while an accept's promotion is still
-parked — is already reachable in the TLA+ model's existing `fullstack`
-recording mode: `Reject` removes the doomed layers from the pending stack at
-the verdict, an accepted layer stays pending until `Integrate`, and a later
-`Build` records only the survivors — a sparse set relative to session
-history. What stays outside the model is verdict DELIVERY timing, the
-client-side window between the server deciding and the client learning it,
-recorded as the standing refinement under INV-6.
+parked — is reachable in the TLA+ model's `fullstack` recording mode:
+rejection removes the doomed layers from the pending stack, an accepted
+layer stays pending until `Integrate`, and a later `Build` records only the
+survivors — a sparse set relative to session history. The delayed-delivery
+mode (the `PendingStacks_Channel*.cfg` configs) additionally certifies the
+window where a rejection is decided but not yet processed: a commit built
+there still names the dead layer and is refused by the dead-dependency
+admission rule, while a commit built after the processed drop records the
+sparse survivor set and is admitted.
 
 Layer: client dependency recording (`packages/runner/src/storage/v2.ts`
 pending-stack bookkeeping); server resolution (`resolvePendingReads`).
@@ -178,7 +182,8 @@ exclude only true predecessor own-session commits (localSeq below the
 reader's — an own write accepted out of submission order conflicts like a
 foreign write).
 
-Checked by: the TLA+ model (all three recording modes); stacked-commit unit
+Checked by: the TLA+ model (both recording modes, under atomic and
+delayed-delivery configs); stacked-commit unit
 tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`).
 
 ### INV-4 — Cascade totality
@@ -244,13 +249,20 @@ Soundness direction: MAY hold a send longer than necessary; MUST NOT send a
 commit whose local doom is still possible, and MUST NOT locally drop a
 commit whose acceptance is still possible without confirming its fate.
 
-Checked by: currently only example-based tests (reconnect-race,
-pending-commit-durability). The TLA+ model treats verdict delivery as atomic
-with admission and therefore does NOT cover this invariant. That area has
-churned — under CT-1927 the client parks an accept's promotion until a
-frame's `caughtUpLocalSeq` marker covers it, a decided-but-not-yet-applied
-window — so extending the model with delayed verdict delivery is the
-standing refinement that would bring this invariant into scope.
+Checked by: the TLA+ model's delayed-delivery mode
+(the `PendingStacks_Channel*.cfg` configs, invariant
+`AcceptedVersusDropped`), which splits the server's decision from the
+client's processing, runs the rejection drop-and-cascade at the
+processing point, and checks that a locally
+cascade-dropped commit is never durably accepted — the guarantee rests on
+FIFO admission plus the dead-dependency rule, and the model checks that
+composition rather than assuming it. The CT-1927 parking window is in
+scope (promotion waits for `Integrate`, and a covering frame cannot
+precede its verdict). What the model still does NOT cover is connection
+loss and replay — the scalar-downgrade hold and reconnect races remain
+covered only by example-based tests (reconnect-race,
+pending-commit-durability); extending the channel with loss and re-send is
+the remaining refinement.
 
 ### INV-7 — Committed writes are never silently dropped
 
