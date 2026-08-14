@@ -16,13 +16,21 @@ export interface SchemaOpaqueLinkSanitizationResult {
 const NO_RESERVED_KEYS: ReadonlySet<string> = new Set<string>();
 
 /**
- * Property names excused from the unmodeled-key rules everywhere in one
+ * Property names excused from the unmodeled-key rules at the ROOT of one
  * sanitization: the reserved keys of whatever produced the value, whose
  * spellings are fixed by a framework rather than chosen by the value's author.
  * A reserved key the schema models is measured normally; a reserved key it
  * does not model neither fails validation nor seals the object — it is simply
  * dropped from the sanitized value, because a key the schema never asked for
  * carries nothing the caller can read.
+ *
+ * The exemption is the root's alone. The framework fixes the spelling of the
+ * keys it puts on the value it produced, and of nothing inside that value: a
+ * nested object carrying an unmodeled `$NAME` is an object with an unmodeled
+ * key, and it seals like any other, because a key nobody modeled is a key
+ * whose name may itself be data. Excusing it at depth would drop the name and
+ * release the object's modeled siblings — author data leaving on the strength
+ * of a spelling the author chose.
  */
 export interface StructuredResultReservedKeys {
   reservedKeys?: readonly string[];
@@ -417,7 +425,8 @@ const sanitizeValueWithOpaqueLinks = (
         fullSchema,
         opaqueHandleId,
         [...path, index],
-        reserved,
+        // Reserved names are the root's exemption; an item is not the root.
+        NO_RESERVED_KEYS,
       );
       linkedStringCount += sanitized.linkedStringCount;
       return sanitized.value;
@@ -454,7 +463,9 @@ const sanitizeValueWithOpaqueLinks = (
           fullSchema,
           opaqueHandleId,
           [...path, key],
-          reserved,
+          // Reserved names are the root's exemption; a property of the root
+          // holds whatever its author put there, reserved-looking or not.
+          NO_RESERVED_KEYS,
         );
         linkedStringCount += sanitized.linkedStringCount;
         return [key, sanitized.value] as const;

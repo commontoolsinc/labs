@@ -1242,9 +1242,35 @@ interface SchemaValidationOptions {
    * set that the schema DOES model is measured against what the schema says
    * about it, exactly as it would be otherwise: excusing a key from the
    * unmodeled-key policy is not a licence to skip its constraints.
+   *
+   * The exemption reaches the ROOT value of one validation and no further —
+   * see {@link nestedValueValidationOptions}.
    */
   reservedAdditionalProperties?: ReadonlySet<string>;
 }
+
+/**
+ * `options` as they apply to a value nested INSIDE the value being measured.
+ *
+ * A reserved name is reserved because the framework that produced THIS value
+ * fixed its spelling — a pattern result carries `$NAME` and `$UI` at its top
+ * level whatever the caller's schema says. Nothing fixes the spelling of a key
+ * one level down: that key was chosen by whoever wrote the data there, and its
+ * NAME may itself be data. So the exemption stops at the root, and a nested
+ * object carrying an unmodeled `$NAME` is simply an object with an unmodeled
+ * key, answered by the unmodeled-key rules like any other.
+ *
+ * Only a recursion that changes the VALUE takes this. A combinator branch, a
+ * resolved `$ref`, `not`/`if`/`then`/`else` and `dependentSchemas` all measure
+ * the SAME value against another schema, so they keep the options they were
+ * given — the root is still the root however many schemas describe it.
+ */
+const nestedValueValidationOptions = (
+  options: SchemaValidationOptions,
+): SchemaValidationOptions =>
+  options.reservedAdditionalProperties === undefined
+    ? options
+    : { ...options, reservedAdditionalProperties: undefined };
 
 export interface SchemaValueValidationOptions {
   /**
@@ -1688,6 +1714,7 @@ const validateAgainstSchemaInternal = (
     if (options.acceptOpaqueValue?.(value, schema, schemaRoot)) {
       return undefined;
     }
+    const nestedOptions = nestedValueValidationOptions(options);
 
     if (Array.isArray(schema.allOf)) {
       // `optionalUndefinedIsAbsent` is dropped for the branches. It decides
@@ -1851,7 +1878,7 @@ const validateAgainstSchemaInternal = (
             child,
             value[key],
             schemaRoot,
-            options,
+            nestedOptions,
             context,
           );
           if (failure !== undefined) return atValidationPath(key, failure);
@@ -1904,7 +1931,7 @@ const validateAgainstSchemaInternal = (
               schema.additionalProperties,
               value[key],
               schemaRoot,
-              options,
+              nestedOptions,
               context,
             );
             if (failure !== undefined) return atValidationPath(key, failure);
@@ -1923,7 +1950,7 @@ const validateAgainstSchemaInternal = (
           schema.items,
           value[index],
           schemaRoot,
-          options,
+          nestedOptions,
           context,
         );
         if (failure !== undefined) return atValidationPath(index, failure);
@@ -1945,6 +1972,7 @@ function validateStrictSchemaConstraints(
 ): SchemaValidationFailure | undefined {
   const definitionIssue = strictConstraintDefinitionIssue(schema);
   if (definitionIssue !== undefined) return indeterminate(definitionIssue);
+  const nestedOptions = nestedValueValidationOptions(options);
 
   if (schema.not !== undefined) {
     const failure = validateAgainstSchemaInternal(
@@ -2063,7 +2091,7 @@ function validateStrictSchemaConstraints(
         schema.prefixItems![index],
         value[index],
         fullSchema,
-        options,
+        nestedOptions,
         context,
       );
       if (failure !== undefined) return atValidationPath(index, failure);
@@ -2076,7 +2104,7 @@ function validateStrictSchemaConstraints(
           schema.items,
           value[index],
           fullSchema,
-          options,
+          nestedOptions,
           context,
         );
         if (failure !== undefined) return atValidationPath(index, failure);
@@ -2092,7 +2120,7 @@ function validateStrictSchemaConstraints(
           schema.contains,
           value[index],
           fullSchema,
-          options,
+          nestedOptions,
           context,
         );
         if (failure === undefined) matches++;
@@ -2173,7 +2201,7 @@ function validateStrictSchemaConstraints(
           schema.propertyNames,
           key,
           fullSchema,
-          options,
+          nestedOptions,
           context,
         );
         if (failure !== undefined) return atValidationPath(key, failure);
@@ -2192,7 +2220,7 @@ function validateStrictSchemaConstraints(
             childSchema,
             child,
             fullSchema,
-            options,
+            nestedOptions,
             context,
           );
           if (failure !== undefined) return atValidationPath(key, failure);

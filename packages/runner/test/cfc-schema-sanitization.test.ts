@@ -2036,6 +2036,61 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     });
   });
 
+  it("seals a nested object carrying an unmodeled reserved name instead of dropping it", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        total: { type: "number" },
+        nested: {
+          type: "object",
+          properties: { kept: { type: "number" } },
+          additionalProperties: true,
+        },
+      },
+      required: ["total"],
+    } as const satisfies JSONSchema;
+
+    // The framework names the keys of the result it produced, and nothing
+    // inside it: one level down, `$NAME` was chosen by whoever wrote the data
+    // there, so the object seals like any other object with a key the schema
+    // does not model. Dropping the name and releasing `kept` would be author
+    // data leaving on the strength of a spelling the author chose.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: {
+        total: 42,
+        $NAME: "Doubler",
+        nested: { kept: 7, $NAME: "sibling" },
+      },
+      opaqueHandleId: "run-1",
+      reservedKeys: ["$NAME", "$UI"],
+    })).toEqual({
+      // The top level keeps its exemption: the reserved key is dropped and
+      // the modeled number beside it survives.
+      value: { total: 42, nested: { "@link": "opaque:run-1#/nested" } },
+      linkedStringCount: 0,
+    });
+
+    // Where the nested object is CLOSED, the same unmodeled key is a
+    // validation failure, exactly as an unreserved name would be.
+    expect(() =>
+      validateAndSanitizeSchemaValueWithOpaqueLinks({
+        schema: {
+          type: "object",
+          properties: {
+            nested: {
+              type: "object",
+              properties: { kept: { type: "number" } },
+            },
+          },
+        } as const satisfies JSONSchema,
+        value: { $NAME: "Doubler", nested: { kept: 7, $NAME: "sibling" } },
+        opaqueHandleId: "run-1",
+        reservedKeys: ["$NAME", "$UI"],
+      })
+    ).toThrow("additional property $NAME");
+  });
+
   it("sanitizes against a self-recursive union without walking the call stack", () => {
     const schema = {
       type: "object",
