@@ -681,6 +681,15 @@ a new entry in the parent's table and reaches the parent as a token the parent
 can pass straight back into its own tools. The child's raw tokens never appear
 in parent-facing text.
 
+Whatever still looks like a token after that resolution is scrubbed to fixed
+inert text, irreversibly. The two tables share a token grammar but not a salt,
+and the parent's table is the larger one, so token-shaped text a child writes
+for itself would otherwise cross the boundary untouched — the child's table
+resolves nothing, and the parent's outbound pass swaps addresses rather than
+tokens — and then resolve in the PARENT's table, naming an entry the delegation
+deliberately withheld. A token the child holds legitimately has already become
+an address by that point, so the scrub costs nothing real.
+
 A `default`- or `pattern-author`-profile subagent inherits the parent's fabric
 session, so it can call `run_pattern` itself, under the same gate as the parent:
 with no session configured the tool is absent from the child's surface rather

@@ -808,18 +808,41 @@ const seedSubagentHandleTable = (
 };
 
 /**
+ * What a token-shaped string a child emitted becomes once the child's own
+ * table has had its say. Fixed harness text, and deliberately not itself a
+ * token: the parent must not be able to resolve it either.
+ */
+const SCRUBBED_CHILD_HANDLE_TOKEN = "[handle-token-removed]";
+
+/**
  * The child's final text with its own tokens resolved back to canonical
  * references, which is how a reference the child produced reaches the parent.
  * The parent's own outbound boundary mints what comes back: a seeded address
  * mints to the token the parent already holds, and an address the child
  * discovered for itself becomes a fresh parent token.
+ *
+ * Whatever still looks like a token after that is scrubbed, irreversibly. The
+ * two tables share a token grammar but not a salt, and the parent's table is
+ * the larger one: a token the child was never handed resolves to nothing in
+ * the child's table, and the parent's outbound pass swaps addresses rather
+ * than tokens, so token-shaped text would cross the boundary untouched and
+ * then resolve in the PARENT's table — naming an entry the delegation
+ * deliberately withheld. Replacing it with inert text closes that, and costs
+ * nothing real: a token the child holds legitimately has already become an
+ * address by this line.
  */
 const resolveChildHandleTokens = (
   childEngine: CfHarnessEngine,
   text: string,
 ): string => {
   const table = childEngine.handleTable;
-  return table === undefined ? text : swapTokensForRefs(table, text) as string;
+  const resolved = table === undefined
+    ? text
+    : swapTokensForRefs(table, text) as string;
+  return resolved.replace(
+    new RegExp(HANDLE_TOKEN_PATTERN.source, "g"),
+    SCRUBBED_CHILD_HANDLE_TOKEN,
+  );
 };
 
 /**

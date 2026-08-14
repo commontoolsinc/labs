@@ -75,7 +75,9 @@ The current package provides:
   nothing else, so a child resolves exactly the references the delegation handed
   it while the tokens stay identical across the hierarchy; a reference the child
   produces is resolved through the child's table and minted through the parent's
-  boundary, reaching the parent as a parent-resolvable token;
+  boundary, reaching the parent as a parent-resolvable token, and any
+  token-shaped text still standing after that resolution is scrubbed to fixed
+  inert text so it cannot resolve later in the parent's own table;
 - shape captured where it is free and read back by token: a handle entry may
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, and a tokenized link records a schema it

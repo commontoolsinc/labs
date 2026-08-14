@@ -365,6 +365,65 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(command).not.toContain(parentTokenC);
   });
 
+  it("scrubs a token-shaped string a child returns rather than letting the parent resolve it", async () => {
+    const runId = "run-subagent-handles-crossing";
+    const table = await parentTableOf(runId, [URI_A, URI_B]);
+    const sharedToken = table.entries[0]!.token;
+    const withheldToken = table.entries[1]!.token;
+    const sandbox = new FakeSandboxRuntime();
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: sandbox,
+      runId,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    });
+    await engine.recordHandleTable(table);
+    const requestBodies: unknown[] = [];
+    // The parent works on whatever token the child's report carries, so the
+    // crossing is scripted off the transcript rather than as fixed text.
+    const fetchFn: typeof fetch = (_input, init) => {
+      requestBodies.push(JSON.parse(String(init?.body)));
+      const turn = requestBodies.length;
+      const delegateOutput = (): string => {
+        const messages = chatViewOfRequest(requestBodies[2]).messages;
+        return [...messages].reverse().find((candidate) =>
+          candidate.role === "tool"
+        )?.content ?? "";
+      };
+      const payload = turn === 1
+        ? delegateCallTurn("call-delegate", { goal: `Inspect ${sharedToken}.` })
+        // The child names a token it was never handed. It resolves to nothing
+        // in the child's own table, so it would otherwise cross unchanged.
+        : turn === 2
+        ? finalTurn(`Also look at ${withheldToken}.`)
+        : turn === 3
+        ? bashCallTurn("call-parent", `cf get ${firstToken(delegateOutput())}`)
+        : finalTurn("Parent done.");
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn,
+    });
+
+    await loop.runPrompt({ prompt: "Delegate the inspection." });
+
+    const delegateOutput = chatViewOfRequest(requestBodies[2]).messages
+      .filter((message) => message.role === "tool")
+      .at(-1)?.content ?? "";
+    expect(delegateOutput).not.toContain(withheldToken);
+    expect(delegateOutput).toContain("[handle-token-removed]");
+    // The parent has nothing to pick up from the report, so the address the
+    // delegation withheld never reaches the parent's own tool call.
+    const command = dispatchedCommand(sandbox, "cf get ");
+    expect(command).not.toContain(HASH_B);
+  });
+
   it("keeps `run_pattern` out of the child tool surface when no fabric session is configured", async () => {
     const requestBodies: unknown[] = [];
     const loop = new CfHarnessPromptLoop({
