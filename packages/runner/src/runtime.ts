@@ -6,6 +6,7 @@ import {
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   commitPreconditionValueHash,
@@ -595,10 +596,24 @@ export const spaceCellSchema = internSchema(
   },
 );
 
-const CFC_POLICY_MANIFEST_DOC_SCHEMA = {
+const cfcPolicyManifestDocSchema = (
+  moduleIdentity: string,
+  symbol: string,
+  policyDigest: string,
+): JSONSchema => ({
   type: "object",
   additionalProperties: true,
-} as const satisfies JSONSchema;
+  ifc: {
+    confidentiality: [{
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity,
+      symbol,
+      policyDigest,
+      subject: { __ctOwningSpace: true },
+    }],
+  },
+});
 
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
@@ -870,11 +885,16 @@ export class Runtime {
         : this.#readCfcPolicyManifest(space, reference, tx));
     if (artifact === undefined) return false;
     if (tx !== undefined) {
+      const manifestSchema = cfcPolicyManifestDocSchema(
+        artifact.manifest.moduleIdentity,
+        artifact.manifest.symbol,
+        artifact.policyDigest,
+      );
       const cell = this.getCellFromEntityId(
         space,
         cfcPolicyManifestDocId(artifact.policyDigest),
         [],
-        CFC_POLICY_MANIFEST_DOC_SCHEMA,
+        manifestSchema,
         tx,
       );
       const existing = snapshotQueryResult(cell.get());
@@ -915,12 +935,20 @@ export class Runtime {
       !reference || typeof reference !== "object" || Array.isArray(reference)
     ) return undefined;
     const candidate = reference as Record<string, unknown>;
-    if (typeof candidate.policyDigest !== "string") return undefined;
+    if (
+      typeof candidate.moduleIdentity !== "string" ||
+      typeof candidate.symbol !== "string" ||
+      typeof candidate.policyDigest !== "string"
+    ) return undefined;
     const cell = this.getCellFromEntityId(
       space,
       cfcPolicyManifestDocId(candidate.policyDigest),
       [],
-      CFC_POLICY_MANIFEST_DOC_SCHEMA,
+      cfcPolicyManifestDocSchema(
+        candidate.moduleIdentity,
+        candidate.symbol,
+        candidate.policyDigest,
+      ),
       tx,
     );
     const stored = snapshotQueryResult(cell.get());

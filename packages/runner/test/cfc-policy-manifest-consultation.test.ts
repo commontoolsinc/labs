@@ -189,7 +189,11 @@ describe("module-policy manifest consultation", () => {
         state: "absent",
       });
       install.prepareCfc();
-      expect((await install.commit()).ok).toBeDefined();
+      const installResult = await install.commit();
+      expect(
+        installResult.ok,
+        (installResult.error as Error | undefined)?.message,
+      ).toBeDefined();
 
       const scan = runtime.edit();
       runtime.getCell(signer.did(), "manifest-scan-probe", undefined, scan)
