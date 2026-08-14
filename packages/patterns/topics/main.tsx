@@ -258,40 +258,28 @@ const crossrefTable = lift(
     },
   ): TopicCrossrefRow[] => {
     const rows: unknown[] = [];
-    // Plain loops rather than forEach/filter/some, and that is load-bearing
-    // rather than a style choice: the schema generated from this parameter
-    // carries only the properties read in the OUTER body, so `mentions` read
-    // inside a callback is dropped from it and arrives undefined.
-    for (let index = 0; index < sources.length; index++) {
-      const topic = sources[index];
+    sources.forEach((topic, index) => {
       // An entry with nothing behind it yet (mid-sync) has no identity to
       // address a row by, and `Writable.for(undefined)` is not a cause. It gets
       // no row rather than a junk one — the lookup is by identity, not by
       // position, so a shorter table costs nothing.
-      if (!topic) continue;
+      if (!topic) return;
       // A linear scan, deliberately. A cell reference is the identity, so there
       // is no id to key a map by — and nothing to mint, keep in step, or
       // migrate when a piece moves. At board scale this is a few hundred
       // comparisons of already-resolved links.
-      const mentionedBy: unknown[] = [];
-      for (let from = 0; from < sources.length; from++) {
+      const mentionedBy = sources.filter((other, from) =>
         // A topic mentioning itself is not an edge, the rule a self-link has
         // always had here.
-        if (from === index) continue;
-        const other = sources[from];
-        if (!other) continue;
-        const mentions = other.get().mentions;
-        for (let at = 0; at < mentions.length; at++) {
-          // `equals` resolves BOTH sides before comparing, so it answers "do
-          // these name the same document" whether each side arrived as a cell
-          // or as the raw link a read left behind. A method call on the value
-          // would depend on which of those it happens to be.
-          if (equals(mentions[at] as object, topic)) {
-            mentionedBy.push(other);
-            break;
-          }
-        }
-      }
+        from !== index &&
+        // `equals` resolves BOTH sides before comparing, so it returns "do
+        // these name the same document" whether each side arrived as a cell or
+        // as the raw link a read left behind. A method call on the value would
+        // depend on which of those it happens to be.
+        other?.get().mentions.some((mention) =>
+          equals(mention as object, topic)
+        )
+      );
       // Addressed by the topic it describes, so a row keeps its identity
       // wherever it sits and however the board is reordered. That is what lets
       // every topic's lookup re-run freely on any board change and still write
@@ -300,7 +288,7 @@ const crossrefTable = lift(
       rows.push(
         Writable.for<TopicCrossrefRow>(topic).set({ topic, mentionedBy }),
       );
-    }
+    });
     return rows as TopicCrossrefRow[];
   },
 );
