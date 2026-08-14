@@ -501,8 +501,23 @@ carry an entire one, and what was asked for is where the value lives.
 
 Marking a position deeper than a link names the linked document and the path
 below it — `notes[0].title`, where `notes` holds links, renders the note's own
-`id` with `path` `["title"]`. A link is a durable identity; the slot that holds
-it stops naming the same value the moment the collection is reordered.
+`id` with `path` `["title"]`. A link is a durable identity for the edge it
+records; the slot that holds it stops naming the same value the moment the
+collection is reordered.
+
+**What comes back is a link to read next, not a claim about canonical
+identity.** Addresses are many-to-one over cells: a holder of one cannot tell a
+canonical id from an alias, and normal use does not require it. Two positions
+holding one piece can render two different `id`s, and a marker and
+`cf piece call --show-links` can disagree about the same piece, because a piece
+created inside a handler and pushed into a collection is held through a link
+that redirects to it and the two stop at different points along that redirect.
+
+So feed an address into the next command rather than comparing it to another:
+two ids differing is not evidence of two pieces. Comparing contents answers a
+different question — distinct pieces can hold identical contents, and one
+piece's contents change under it. **Whether two addresses name the same
+piece is not a question the CLI answers today.**
 
 The marker sits beside a projection when both are wanted, and the answer
 carries both:
