@@ -1371,35 +1371,23 @@ Section 4.5.
 
 ### 1.6 Circular References and Shared References
 
-A `FabricValue` may hold a cycle, and may hold the same object at more than one
-position. Whether either survives serialization is a property of the **wire
-format and the engine carrying it**, not of the value model, and the two are
-separate questions: an engine may preserve shared references while refusing
-cycles.
+Within a single document, circular references are detected and throw an error.
+The system does not support storing cyclic data within a document's value.
 
-**A conforming engine may support either, both, or neither, and must say
-which.** Its documentation states, for cycles and for shared references
-separately, whether it reproduces the graph as it stands, flattens it to a
-tree, or refuses the value. Silence is underspecification rather than
-permission: a caller cannot read the answer off the value, and must not have to
-read it off an implementation.
+**Shared references** (the same object instance appearing multiple times within
+a value tree) are handled correctly during conversion: the converted form for a
+given original object is cached and reused, so structural sharing is maintained
+in the output. Note that this preserves _structural_ sharing (the same converted
+subtree appears at multiple positions), not JS _identity_ sharing (the converted
+objects may not be `===` to each other in all serialization paths).
 
-What no engine may do is any of the three silently. A refusal is raised at
-encode time, and a flattening is documented — because a cycle quietly
-expanded, or a shared subtree quietly copied in two, is a value that decodes
-to a different graph than the one encoded, with nothing at either end saying
-so.
+Cycles *across* documents are supported via explicit links (fabric instances
+that reference other documents). Two cells can reference each other, forming a
+cycle in the broader data graph. The no-cycles constraint applies only to the
+serializable content of a single cell.
 
-Note that preserving shared references means preserving _structure_: the same
-encoded subtree appears at each position it appeared at. Whether the decoded
-objects are `===` to each other is a further promise, which an engine states
-only if it makes it.
-
-Cycles *across* documents are a separate matter, and are supported whatever an
-engine does within one. They are written as explicit links (fabric instances
-referencing other documents), so two cells may reference each other and form a
-cycle in the broader data graph without any single cell's content containing
-one.
+The within-document prohibition is inherited from JSON's tree structure and could
+be relaxed if a future storage format supports cyclic references natively.
 
 ---
 

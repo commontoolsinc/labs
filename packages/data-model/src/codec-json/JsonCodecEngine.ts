@@ -29,13 +29,6 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  * All internal machinery (tag wrapping, tree walking, byte conversion) is
  * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
  * the `CodecRegistry`.
- *
- * **Cycles are refused** and **shared references are flattened**, per Section
- * 1.6 of the formal spec, which requires an engine to say which of these it
- * does. Both follow from reaching text: JSON cannot represent a reference,
- * so a cycle has no encoding at all and is raised at the walk, and a value
- * held at two positions is written out twice, arriving as two objects that a
- * receiver cannot tell from two that were always distinct.
  */
 export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   //
