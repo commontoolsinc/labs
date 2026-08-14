@@ -2891,17 +2891,24 @@ export async function getCellValue(
           options.selection,
         );
       } catch (error) {
+        // The verb refusal wins over every selection error, not only the
+        // "Cannot access path" family: a real `--filter` against a handler
+        // fails inside the selector with a shape error that sends the caller
+        // to their schema, when the answer is `cf piece call`. Classification
+        // fails open, so an uncertain path keeps its original error.
+        const verbRefusal = await verbReadRefusalOrNull(
+          piece,
+          prop,
+          path,
+          resolvedConfig.piece,
+        );
+        if (verbRefusal) throw verbRefusal;
         if (
           !options.input && error instanceof Error &&
           error.message.startsWith("Cannot access path") &&
           await resultProjectionFailedAtPath(piece, path)
         ) {
-          throw await verbReadRefusalOrNull(
-            piece,
-            prop,
-            path,
-            resolvedConfig.piece,
-          ) ?? new PieceResultProjectionError(path, shouldStep);
+          throw new PieceResultProjectionError(path, shouldStep);
         }
         throw error;
       }

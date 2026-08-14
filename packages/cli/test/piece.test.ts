@@ -901,6 +901,41 @@ describe("cli piece parsing", () => {
     )).rejects.toBe(selectionError);
   });
 
+  it("prefers the verb refusal over a selection error on a stream path", async () => {
+    // A --filter against a handler fails inside the selector with a shape
+    // error ("--filter can only be applied to an array") that sends the
+    // caller to their schema, when the answer is `cf piece call`. The stored
+    // {$stream: true} sentinel is a definite signal, so the verb refusal
+    // wins over whatever the selector threw.
+    const targetCell = {};
+    const rootCell = {
+      key: () => targetCell,
+      get: () => ({ addNote: { $stream: true } }),
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: { getCell: () => Promise.resolve(rootCell) },
+        }),
+      runtime: {},
+      getSpace: () => "did:key:test-space",
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["addNote"],
+      { selection: { filter: parseSelectionFilter(".active") } },
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+        deriveSelectedValue: () =>
+          Promise.reject(
+            new CellSelectionError("--filter can only be applied to an array"),
+          ),
+      },
+    )).rejects.toThrow(PieceVerbReadError);
+  });
+
   it("reports projection failures encountered during a selection read", async () => {
     const targetCell = {
       schema: { type: "number" },
