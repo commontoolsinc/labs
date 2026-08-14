@@ -481,6 +481,13 @@ resolve on their own. `t.settle` resolves once every zero-delay timer and
 microtask has run to a fixpoint, so it covers both the mock-cell and
 runtime-cell trees these tests mix, and needs no runtime argument.
 
+A `setImmediate` counts as one of those zero-delay timers. The harness replaces
+it too, and registers what it schedules exactly as it registers a
+`setTimeout(fn, 0)`, so a turn taken through `setImmediate` fires in the same
+batch and is counted by the same census. Without that it would run beside the
+harness rather than under it, ahead of every turn the harness was holding, and
+neither `settle()` nor `tick(ms)` could hold it back.
+
 `t.settle` is an ordering guarantee rather than a deadline, so it cannot lose a
 race under load. It also holds for a test asserting that an op is *absent*: once
 it returns, every op the change was going to produce has been delivered, so no
@@ -601,11 +608,19 @@ the earliest pending `src/`-armed timer regardless of its nominal delay, so a
 only ever worked by accident. Manual mode has no timer to fire, on any clock.
 
 Single-manager `StorageManager.emulate()` harnesses need none of this: their
-private server flushes on a zero-delay timer, so awaited round trips deliver
+private server flushes on a zero-delay turn, so awaited round trips deliver
 their own fan-out and there is no second session to keep stale. The loopback
-transport itself delivers each server frame on its own zero-delay timer turn,
-so `clock.settle()` drains in-flight deliveries without letting any coalescing
+transport itself delivers each server frame on its own turn, so
+`clock.settle()` drains in-flight deliveries without letting any coalescing
 window elapse.
+
+Both take that turn through `armTurn` in `packages/memory/v2/turn.ts`, which
+claims it twice over: a zero-delay timer, which is what `settle()` counts, and
+a `setImmediate`, which is the same turn for a fraction of the cost. Whichever
+arrives first runs the handler and cancels the other. So an outstanding turn
+is always an armed zero-delay timer that `settle()` can see, while the waiting
+itself costs microseconds rather than the two milliseconds Deno takes to wake
+its event loop for a timer.
 
 ## The background-piece-service suite: the same clock for a polling loop
 
