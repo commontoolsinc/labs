@@ -960,6 +960,17 @@ function buildCoverageSuggestionPrompt(
   lines.push(...formatTargetList(input.groups));
   lines.push("");
   lines.push(
+    "The test run must finish and pass for these numbers to mean anything:",
+    "the runner stops launching packages after the first failure, and a",
+    "package that never ran scores as fully uncovered. (The metrics command",
+    "refuses a profile whose run failed or never finished.) To measure one",
+    "package instead of the whole workspace:",
+    "",
+    "  cd packages/<name>",
+    "  rm -rf /tmp/pkg-cov && DENO_COVERAGE_DIR=/tmp/pkg-cov deno task test",
+    "",
+    "and compare that group's number before and after your change.",
+    "",
     "The local run omits the integration suites, so its counts are conservative:",
     "if every metric meets its target locally, CI will pass too.",
   );

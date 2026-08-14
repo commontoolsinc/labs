@@ -6,6 +6,7 @@ import * as path from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
 import { decode, encode } from "@commonfabric/utils/encoding";
 import { parseShard, type Shard } from "./shard-utils.ts";
+import { writeCoverageRunManifest } from "./coverage-run-manifest.ts";
 import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
 import { assignWeightedShards } from "./weighted-shards.ts";
 
@@ -235,6 +236,20 @@ export async function runTests(
     ? path.resolve(workspaceCwd, coverageRootRaw)
     : undefined;
 
+  // Written incomplete up front and rewritten with the outcome at the end,
+  // so a crash leaves the incomplete record for coverage-metrics to refuse:
+  // a partial profile scores every package that never ran as fully
+  // uncovered, and nothing inside the profile itself records that.
+  if (coverageRoot) {
+    await writeCoverageRunManifest(coverageRoot, {
+      complete: false,
+      success: false,
+      unitsPlanned: units.length,
+      unitsCompleted: 0,
+      failedPackages: [],
+    });
+  }
+
   const results: PackageResult[] = [];
   let nextUnit = 0;
   let failureSeen = false;
@@ -282,6 +297,16 @@ export async function runTests(
     for (const result of failedPackages) {
       console.error(`- ${result.packageName} (${result.packagePath})`);
     }
+  }
+
+  if (coverageRoot) {
+    await writeCoverageRunManifest(coverageRoot, {
+      complete: true,
+      success: failedPackages.length === 0,
+      unitsPlanned: units.length,
+      unitsCompleted: results.length,
+      failedPackages: failedPackages.map((result) => result.packageName),
+    });
   }
 
   return failedPackages.length === 0;

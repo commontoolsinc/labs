@@ -1,5 +1,9 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env
 import * as path from "@std/path";
+import {
+  assessCoverageRunManifest,
+  readCoverageRunManifest,
+} from "./coverage-run-manifest.ts";
 import { hasExecutableCode } from "./executable-source.ts";
 import { type LcovFileCoverage, parseLcovReports } from "./lcov.ts";
 import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
@@ -474,6 +478,20 @@ if (import.meta.main) {
   if (!coverageProfileDir) {
     console.error("--profile-dir is required.");
     Deno.exit(1);
+  }
+
+  // A profile from a failed or unfinished test run scores every package
+  // that never ran as fully uncovered; refuse to report numbers known to
+  // be that kind of wrong.
+  const assessment = assessCoverageRunManifest(
+    await readCoverageRunManifest(coverageProfileDir),
+  );
+  if (assessment.level === "refuse") {
+    console.error(assessment.message);
+    Deno.exit(1);
+  }
+  if (assessment.level === "warn") {
+    console.error(assessment.message);
   }
 
   const metrics = await collectCoverageDebtMetrics({
