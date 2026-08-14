@@ -39,6 +39,7 @@ import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import {
   HARNESS_CREDENTIAL_OWNER_REF_TYPE,
   harnessCredentialOwnersEqual,
+  LOOM_LOCAL_CFC_ENFORCEMENT_MODE,
   type LoomLocalHostBinding,
   type LoomRunManifest,
 } from "./contracts/run-manifest.ts";
@@ -167,6 +168,20 @@ const parseBindingArgs = (argv: readonly string[]): ParsedBindingArgs => {
       continue;
     }
     if (
+      argument === "--cfc-enforcement-mode" ||
+      argument.startsWith("--cfc-enforcement-mode=")
+    ) {
+      const parsed = optionValue(argv, index, "--cfc-enforcement-mode");
+      index += parsed.consumed;
+      if (parsed.value !== LOOM_LOCAL_CFC_ENFORCEMENT_MODE) {
+        throw new Error(
+          `local Loom runs require --cfc-enforcement-mode ` +
+            LOOM_LOCAL_CFC_ENFORCEMENT_MODE,
+        );
+      }
+      continue;
+    }
+    if (
       argument === "--gateway-auth-mode" ||
       argument.startsWith("--gateway-auth-mode=")
     ) {
@@ -248,6 +263,8 @@ const bindingFromRecordedRun = (
   const manifestHome = manifest?.harnessHomeIdentity;
   if (
     manifest?.source !== "loom" ||
+    state.cfcEnforcementMode !== LOOM_LOCAL_CFC_ENFORCEMENT_MODE ||
+    manifest.cfc?.enforcementMode !== LOOM_LOCAL_CFC_ENFORCEMENT_MODE ||
     (provider !== "openai-compatible-gateway" &&
       provider !== "openai-codex") ||
     manifestProvider !== provider ||
@@ -483,6 +500,8 @@ export const createLoomLocalCfHarnessHost = async (
     provider: HarnessModelProviderId,
   ): Record<string, string | undefined> => {
     const env = { ...processEnv };
+    env.CF_HARNESS_CFC_ENFORCEMENT_MODE = undefined;
+    env.CF_CFC_MODE = undefined;
     if (provider === "openai-codex") {
       for (const key of CODEX_INCOMPATIBLE_ENV_KEYS) env[key] = undefined;
     }
@@ -582,6 +601,7 @@ export const createLoomLocalCfHarnessHost = async (
         type: "cf-harness.loom-run-manifest",
         version: 1,
         ...binding,
+        cfc: { enforcementMode: LOOM_LOCAL_CFC_ENFORCEMENT_MODE },
       };
       const modelClient = resolver === undefined
         ? undefined
@@ -599,6 +619,7 @@ export const createLoomLocalCfHarnessHost = async (
           : {}),
         credentialOwner: LOOM_LOCAL_CREDENTIAL_OWNER,
         basePromptLoopOptions: {
+          cfcEnforcementMode: LOOM_LOCAL_CFC_ENFORCEMENT_MODE,
           modelProvider: provider,
           modelAuthSource: binding.modelAuthSource,
           credentialOwner: LOOM_LOCAL_CREDENTIAL_OWNER,

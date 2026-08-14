@@ -8,9 +8,11 @@
 
 import { createSession, Identity, isDID } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   experimentalOptionsFromEnv,
   Runtime,
+  type RuntimeOptions,
   runtimePresets,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
@@ -19,6 +21,55 @@ import type { HarnessFabricSessionConfig } from "./config.ts";
 export interface HarnessFabricSession {
   pieces: PiecesController;
 }
+
+export type HarnessFabricCfcOptions = Pick<
+  RuntimeOptions,
+  | "cfcEnforcementMode"
+  | "cfcFlowLabels"
+  | "cfcWriteFloor"
+  | "cfcTriggerReadGating"
+  | "cfcPolicyEvaluation"
+  | "cfcLabelMetadataProtection"
+  | "cfcDeclaredMonotonicity"
+>;
+
+export const harnessFabricCfcOptions = (
+  enforcementMode: CfcEnforcementMode,
+): HarnessFabricCfcOptions => {
+  switch (enforcementMode) {
+    case "enforce-strict":
+      return {
+        cfcEnforcementMode: enforcementMode,
+        cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
+        cfcTriggerReadGating: true,
+        cfcPolicyEvaluation: "enforce",
+        cfcLabelMetadataProtection: "enforce",
+        cfcDeclaredMonotonicity: "enforce",
+      };
+    case "observe":
+      return {
+        cfcEnforcementMode: enforcementMode,
+        cfcFlowLabels: "observe",
+        cfcWriteFloor: "observe",
+        cfcTriggerReadGating: false,
+        cfcPolicyEvaluation: "observe",
+        cfcLabelMetadataProtection: "observe",
+        cfcDeclaredMonotonicity: "observe",
+      };
+    case "enforce-explicit":
+    case "disabled":
+      return {
+        cfcEnforcementMode: enforcementMode,
+        cfcFlowLabels: "off",
+        cfcWriteFloor: "off",
+        cfcTriggerReadGating: false,
+        cfcPolicyEvaluation: "off",
+        cfcLabelMetadataProtection: "off",
+        cfcDeclaredMonotonicity: "off",
+      };
+  }
+};
 
 /**
  * Builds the run's Fabric session. The engine caches a healthy result so a
@@ -55,26 +106,19 @@ const assertSpaceAuthorized = (pieces: PiecesController): void => {
  */
 export const createHarnessFabricSessionFactory = (
   config: HarnessFabricSessionConfig,
+  cfcOptions: HarnessFabricCfcOptions,
 ): HarnessFabricSessionFactory =>
 async () => {
   const identity = await Identity.fromPkcs8(
     await Deno.readFile(config.identityKeyPath),
   );
   const apiUrl = new URL(config.apiUrl);
-  const cfcDials = {
-    ...(config.cfcEnforcementMode !== undefined
-      ? { cfcEnforcementMode: config.cfcEnforcementMode }
-      : {}),
-    ...(config.cfcFlowLabels !== undefined
-      ? { cfcFlowLabels: config.cfcFlowLabels }
-      : {}),
-  };
   if (!isDID(config.space)) {
     const pieces = await PiecesController.initialize({
       apiUrl,
       identity,
       spaceName: config.space,
-      ...cfcDials,
+      cfcOptions,
     });
     assertSpaceAuthorized(pieces);
     return { pieces };
@@ -91,7 +135,7 @@ async () => {
       spaceIdentity: session.spaceIdentity,
     }),
     experimental: experimentalOptionsFromEnv((key) => Deno.env.get(key)),
-    ...cfcDials,
+    ...cfcOptions,
     trustSnapshotProvider: () => ({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

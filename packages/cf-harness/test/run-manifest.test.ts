@@ -279,6 +279,13 @@ Deno.test("bindLoomLocalRunManifest rejects every conflicting caller binding", (
       manifest: { ...baseManifest, model: "gpt-a" },
       model: "gpt-b",
     },
+    {
+      label: "CFC enforcement mode",
+      manifest: {
+        ...baseManifest,
+        cfc: { enforcementMode: "enforce-strict" },
+      },
+    },
   ];
 
   for (const testCase of cases) {
@@ -303,6 +310,7 @@ Deno.test("bindLoomLocalRunManifest rejects every conflicting caller binding", (
   assertEquals(bound.wishId, "W-coverage");
   assertEquals(bound.model, "gpt-a");
   assertEquals(bound.credentialOwner, binding.credentialOwner);
+  assertEquals(bound.cfc?.enforcementMode, "observe");
   owner.ownerKey = "mutated-after-bind";
   assertEquals(bound.credentialOwner?.ownerKey, "local");
 });

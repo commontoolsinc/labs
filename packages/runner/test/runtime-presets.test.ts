@@ -108,6 +108,24 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
 };
 
 describe("runtimePresets conformance (CT-1814)", () => {
+  it("lets every preset roll every CFC dial back", () => {
+    const rollback = {
+      cfcEnforcementMode: "observe" as const,
+      cfcFlowLabels: "off" as const,
+      cfcWriteFloor: "off" as const,
+      cfcTriggerReadGating: false,
+      cfcPolicyEvaluation: "off" as const,
+      cfcLabelMetadataProtection: "off" as const,
+      cfcDeclaredMonotonicity: "off" as const,
+    };
+    for (const preset of PRESET_NAMES) {
+      const output = preset === "unitTest"
+        ? runtimePresets.unitTest({ apiUrl, storageManager, ...rollback })
+        : runtimePresets[preset]({ ...minimalCore, ...rollback });
+      expect(output, preset).toMatchObject(rollback);
+    }
+  });
+
   it("every registered option key gets its declared treatment in every preset", () => {
     for (const key of RUNTIME_OPTION_KEYS) {
       const treatment = MINIMAL_TREATMENT[key];

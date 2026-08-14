@@ -26,15 +26,27 @@ describe("CFC runtime options", () => {
     await storageManager.close();
   });
 
-  it("respects an explicit CFC enforcement override", async () => {
+  it("respects explicit rollback values for every CFC policy dial", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
+      cfcWriteFloor: "off",
+      cfcTriggerReadGating: false,
+      cfcPolicyEvaluation: "off",
+      cfcLabelMetadataProtection: "off",
+      cfcDeclaredMonotonicity: "off",
     });
 
-    expect(runtime.cfcEnforcementMode).toBe("disabled");
+    expect(runtime.cfcEnforcementMode).toBe("observe");
+    expect(runtime.cfcFlowLabels).toBe("off");
+    expect(runtime.cfcWriteFloor).toBe("off");
+    expect(runtime.cfcTriggerReadGating).toBe(false);
+    expect(runtime.cfcPolicyEvaluation).toBe("off");
+    expect(runtime.cfcLabelMetadataProtection).toBe("off");
+    expect(runtime.cfcDeclaredMonotonicity).toBe("off");
 
     await runtime.dispose();
     await storageManager.close();

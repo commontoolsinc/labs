@@ -175,6 +175,12 @@ const providerMismatchError = (
     message,
   });
 
+const loomCfcPolicyError = (requestId: string): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "invalid_request",
+    message: "local Loom chat sessions require CFC observe mode",
+  });
+
 const isLoomLocalHostBinding = (
   value: unknown,
 ): value is LoomLocalHostBinding => {
@@ -807,6 +813,20 @@ export class HarnessInteractiveChatService {
         "local Loom chat sessions require a durable model binding",
       );
     }
+    const requestedPolicy = resolveHarnessChatPolicy(
+      params.policy,
+      params.context,
+    );
+    if (
+      this.#loomLocalHostBinding !== undefined &&
+      requestedPolicy.cfcEnforcementMode !== undefined &&
+      requestedPolicy.cfcEnforcementMode !== "observe"
+    ) {
+      return loomCfcPolicyError(requestId);
+    }
+    const policy: HarnessChatPolicy = this.#loomLocalHostBinding === undefined
+      ? requestedPolicy
+      : { ...requestedPolicy, cfcEnforcementMode: "observe" };
     const session = createHarnessChatSessionStatus({
       sessionId,
       createdAt: this.#now(),
@@ -816,7 +836,7 @@ export class HarnessInteractiveChatService {
       loomLocalHostBinding: this.#loomLocalHostBinding,
       artifactRoot: params.artifactRoot,
       capabilities: params.capabilities,
-      policy: resolveHarnessChatPolicy(params.policy, params.context),
+      policy,
       browserAccess: params.browserAccess,
       metadata: params.metadata,
     });
@@ -889,10 +909,20 @@ export class HarnessInteractiveChatService {
       return activeTurnError(requestId, record.status, record.startingTurnId);
     }
     const context = params.context ?? record.status.context;
-    const policy = resolveHarnessChatPolicy(
+    const requestedPolicy = resolveHarnessChatPolicy(
       params.policy ?? record.status.policy,
       context,
     );
+    if (
+      this.#loomLocalHostBinding !== undefined &&
+      requestedPolicy.cfcEnforcementMode !== undefined &&
+      requestedPolicy.cfcEnforcementMode !== "observe"
+    ) {
+      return loomCfcPolicyError(requestId);
+    }
+    const policy: HarnessChatPolicy = this.#loomLocalHostBinding === undefined
+      ? requestedPolicy
+      : { ...requestedPolicy, cfcEnforcementMode: "observe" };
     const browserAccess = params.browserAccess ?? record.status.browserAccess;
     if (
       policy.allowedSubagentProfiles.includes(BROWSER_SUBAGENT_PROFILE) &&
@@ -1162,7 +1192,8 @@ export class HarnessInteractiveChatService {
       allowedToolIds: policy.allowedToolIds,
       allowedSubagentProfiles: policy.allowedSubagentProfiles,
       ...(browserAccess !== undefined ? { browserAccess } : {}),
-      ...(policy.cfcEnforcementMode !== undefined
+      ...(this.#loomLocalHostBinding === undefined &&
+          policy.cfcEnforcementMode !== undefined
         ? { cfcEnforcementModeOverride: policy.cfcEnforcementMode }
         : {}),
     };

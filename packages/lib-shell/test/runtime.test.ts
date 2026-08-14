@@ -321,7 +321,7 @@ describe("RuntimeInternals", () => {
     expect(errors.length).toBe(0);
   });
 
-  it("defaults worker runtime options to shell-compatible CFC policy and principal trust", async () => {
+  it("leaves CFC defaults to the worker preset and supplies principal trust", async () => {
     const { createRuntimeClientOptions } = await import(
       "@commonfabric/lib-shell"
     );
@@ -345,12 +345,13 @@ describe("RuntimeInternals", () => {
       experimental,
     });
 
-    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
-    // Epic H2: shell hosts run the flow-label dial at "persist" by default —
-    // derived label components are written on every value write, activating
-    // inv-9. H1 shipped "observe" (measurement); H2 flips to "persist" now that
-    // re-derivation is idempotent (SC-11).
-    expect(options.cfcFlowLabels).toBe("persist");
+    expect(options.cfcEnforcementMode).toBeUndefined();
+    expect(options.cfcFlowLabels).toBeUndefined();
+    expect(options.cfcWriteFloor).toBeUndefined();
+    expect(options.cfcTriggerReadGating).toBeUndefined();
+    expect(options.cfcPolicyEvaluation).toBeUndefined();
+    expect(options.cfcLabelMetadataProtection).toBeUndefined();
+    expect(options.cfcDeclaredMonotonicity).toBeUndefined();
     expect(options.trustSnapshot).toEqual({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),
@@ -449,11 +450,21 @@ describe("RuntimeInternals", () => {
       apiUrl: new URL("http://shell.test/"),
       cfcEnforcementMode: "observe",
       cfcFlowLabels: "off",
+      cfcWriteFloor: "off",
+      cfcTriggerReadGating: false,
+      cfcPolicyEvaluation: "off",
+      cfcLabelMetadataProtection: "off",
+      cfcDeclaredMonotonicity: "off",
       trustSnapshot,
     });
 
     expect(options.cfcEnforcementMode).toBe("observe");
     expect(options.cfcFlowLabels).toBe("off");
+    expect(options.cfcWriteFloor).toBe("off");
+    expect(options.cfcTriggerReadGating).toBe(false);
+    expect(options.cfcPolicyEvaluation).toBe("off");
+    expect(options.cfcLabelMetadataProtection).toBe("off");
+    expect(options.cfcDeclaredMonotonicity).toBe("off");
     expect(options.trustSnapshot).toBe(trustSnapshot);
 
     const withoutTrust = createRuntimeClientOptions({
@@ -498,6 +509,11 @@ describe("RuntimeInternals", () => {
     type CapturedInitData = {
       forwardWorkerConsole?: boolean;
       concurrentWatchRefresh?: boolean;
+      cfcWriteFloor?: string;
+      cfcTriggerReadGating?: boolean;
+      cfcPolicyEvaluation?: string;
+      cfcLabelMetadataProtection?: string;
+      cfcDeclaredMonotonicity?: string;
       renderDeclassificationPolicy?: string;
       renderConfidentialityCeiling?: {
         atoms?: unknown[];
@@ -550,6 +566,11 @@ describe("RuntimeInternals", () => {
             getBuildHash: () => Promise.resolve(undefined),
             forwardWorkerConsole: true,
             concurrentWatchRefresh: true,
+            cfcWriteFloor: "off",
+            cfcTriggerReadGating: false,
+            cfcPolicyEvaluation: "off",
+            cfcLabelMetadataProtection: "off",
+            cfcDeclaredMonotonicity: "off",
             cfcRenderCeiling: true,
           }),
         ).rejects.toThrow("stub init failure");
@@ -562,6 +583,11 @@ describe("RuntimeInternals", () => {
       // The dogfood storage toggle rides the same InitializationData path; the
       // worker maps it into StorageManager.open's experimentalConcurrentWatchRefresh.
       expect(initRequests[0].data.concurrentWatchRefresh).toBe(true);
+      expect(initRequests[0].data.cfcWriteFloor).toBe("off");
+      expect(initRequests[0].data.cfcTriggerReadGating).toBe(false);
+      expect(initRequests[0].data.cfcPolicyEvaluation).toBe("off");
+      expect(initRequests[0].data.cfcLabelMetadataProtection).toBe("off");
+      expect(initRequests[0].data.cfcDeclaredMonotonicity).toBe("off");
       // Epic H3a: the ceiling crosses the worker IPC as InitializationData —
       // exactly the fields the worker-side reconciler consumes.
       expect(initRequests[0].data.renderDeclassificationPolicy).toBe("deny");

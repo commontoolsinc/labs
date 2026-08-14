@@ -2,10 +2,23 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   cacheHarnessFabricSessionFactory,
+  harnessFabricCfcOptions,
   type HarnessFabricSession,
 } from "../src/fabric-session.ts";
 
 describe("fabric-session", () => {
+  it("maps observe mode to a complete warn-only runtime posture", () => {
+    expect(harnessFabricCfcOptions("observe")).toEqual({
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "observe",
+      cfcWriteFloor: "observe",
+      cfcTriggerReadGating: false,
+      cfcPolicyEvaluation: "observe",
+      cfcLabelMetadataProtection: "observe",
+      cfcDeclaredMonotonicity: "observe",
+    });
+  });
+
   describe("cacheHarnessFabricSessionFactory()", () => {
     it("returns the same session promise for every call", async () => {
       let calls = 0;

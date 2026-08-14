@@ -244,6 +244,21 @@ export function browserWorkerParamsFromInitializationData(
     ...(data.cfcFlowLabels !== undefined
       ? { cfcFlowLabels: data.cfcFlowLabels }
       : {}),
+    ...(data.cfcWriteFloor !== undefined
+      ? { cfcWriteFloor: data.cfcWriteFloor }
+      : {}),
+    ...(data.cfcTriggerReadGating !== undefined
+      ? { cfcTriggerReadGating: data.cfcTriggerReadGating }
+      : {}),
+    ...(data.cfcPolicyEvaluation !== undefined
+      ? { cfcPolicyEvaluation: data.cfcPolicyEvaluation }
+      : {}),
+    ...(data.cfcLabelMetadataProtection !== undefined
+      ? { cfcLabelMetadataProtection: data.cfcLabelMetadataProtection }
+      : {}),
+    ...(data.cfcDeclaredMonotonicity !== undefined
+      ? { cfcDeclaredMonotonicity: data.cfcDeclaredMonotonicity }
+      : {}),
     ...(data.trustSnapshot
       ? { trustSnapshotProvider: () => data.trustSnapshot }
       : {}),

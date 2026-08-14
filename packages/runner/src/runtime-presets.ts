@@ -45,13 +45,13 @@
  * | experimental               | per-site (required param — pass                  |
  * |                            | `experimentalOptionsFromEnv(...)`, host data, or |
  * |                            | an explicit `{}`; requiredness is the seal)      |
- * | cfcEnforcementMode         | core-pinned `"enforce-strict"`                  |
- * | cfcFlowLabels              | core-pinned `"persist"`                         |
- * | cfcWriteFloor              | core-pinned `"enforce"`                         |
- * | cfcTriggerReadGating       | core-pinned `true`                               |
- * | cfcPolicyEvaluation        | core-pinned `"enforce"`                         |
- * | cfcLabelMetadataProtection | core-pinned `"enforce"`                         |
- * | cfcDeclaredMonotonicity    | core-pinned `"enforce"`                         |
+ * | cfcEnforcementMode         | core default `"enforce-strict"`; host override  |
+ * | cfcFlowLabels              | core default `"persist"`; host override         |
+ * | cfcWriteFloor              | core default `"enforce"`; host override         |
+ * | cfcTriggerReadGating       | core default `true`; host override               |
+ * | cfcPolicyEvaluation        | core default `"enforce"`; host override         |
+ * | cfcLabelMetadataProtection | core default `"enforce"`; host override         |
+ * | cfcDeclaredMonotonicity    | core default `"enforce"`; host override         |
  * | cfcPolicyRecords           | core-default (none declared) — same              |
  * | cfcPrefixProvenanceStats   | core-default (off) — measurement opt-in, per     |
  * |                            | deployment (value-level provenance Stage 0)      |
@@ -246,28 +246,35 @@ interface CoreParams {
    * where an omitted field was silent drift.
    */
   experimental: ExperimentalOptions;
+  /** Host override for the product CFC enforcement posture. */
+  cfcEnforcementMode?: RuntimeOptions["cfcEnforcementMode"];
+  cfcFlowLabels?: RuntimeOptions["cfcFlowLabels"];
+  cfcWriteFloor?: RuntimeOptions["cfcWriteFloor"];
+  cfcTriggerReadGating?: RuntimeOptions["cfcTriggerReadGating"];
+  cfcPolicyEvaluation?: RuntimeOptions["cfcPolicyEvaluation"];
+  cfcLabelMetadataProtection?: RuntimeOptions["cfcLabelMetadataProtection"];
+  cfcDeclaredMonotonicity?: RuntimeOptions["cfcDeclaredMonotonicity"];
 }
 
 /**
- * The invariant first-party posture, written once. Rollout dials (the CFC
- * modes) get flipped HERE, in one reviewed place, for every preset user at
- * once — the constructor defaults then only govern non-preset constructions.
+ * The first-party default posture, written once. Rollout dials (the CFC modes)
+ * get flipped here for every preset user at once. Each parameter remains a
+ * host-controlled rollback seam.
  */
 function coreOptions(params: CoreParams): RuntimeOptions {
   return {
     apiUrl: params.apiUrl,
     storageManager: params.storageManager,
     experimental: params.experimental,
-    // Pinned, not defaulted: several sites pinned this individually so that a
-    // changed constructor default could not silently relax them; the pin now
-    // lives once. Same value as the constructor default today.
-    cfcEnforcementMode: "enforce-strict",
-    cfcFlowLabels: "persist",
-    cfcWriteFloor: "enforce",
-    cfcTriggerReadGating: true,
-    cfcPolicyEvaluation: "enforce",
-    cfcLabelMetadataProtection: "enforce",
-    cfcDeclaredMonotonicity: "enforce",
+    // Pin the fleet posture independently of the constructor defaults. Each
+    // option remains overridable by callers that need an earlier rollout rung.
+    cfcEnforcementMode: params.cfcEnforcementMode ?? "enforce-strict",
+    cfcFlowLabels: params.cfcFlowLabels ?? "persist",
+    cfcWriteFloor: params.cfcWriteFloor ?? "enforce",
+    cfcTriggerReadGating: params.cfcTriggerReadGating ?? true,
+    cfcPolicyEvaluation: params.cfcPolicyEvaluation ?? "enforce",
+    cfcLabelMetadataProtection: params.cfcLabelMetadataProtection ?? "enforce",
+    cfcDeclaredMonotonicity: params.cfcDeclaredMonotonicity ?? "enforce",
     // cfcPolicyRecords / cfcTrustConfig / cfcSinkMaxConfidentiality ride the
     // constructor defaults because they contain deployment-specific policy.
   };
@@ -314,8 +321,6 @@ export interface PatternTestPresetParams extends CoreParams {
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   moduleByteCache?: ModuleByteCache;
-  /** Per-test laxer mode; defaults to the shared core pin. */
-  cfcEnforcementMode?: CfcEnforcementMode;
   /** Statement-coverage collector for `cf test` and the pattern harnesses. */
   patternCoverage?: PatternCoverageCollector;
   /** Records what a run materializes; see the vintage capture. */
@@ -325,9 +330,6 @@ export interface PatternTestPresetParams extends CoreParams {
 export interface BrowserWorkerPresetParams extends CoreParams {
   /** Map from space DIDs to HTTP or HTTPS origins selected by the shell host. */
   spaceHostMap?: Record<string, string>;
-  /** Host-controlled rollout dials, from `InitializationData`. */
-  cfcEnforcementMode?: CfcEnforcementMode;
-  cfcFlowLabels?: CfcFlowLabelsMode;
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   telemetry?: RuntimeTelemetry;
   consoleHandler?: ConsoleHandler;
@@ -344,7 +346,6 @@ export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
   fetch?: RuntimeFetch;
   errorHandlers?: ErrorHandler[];
   moduleByteCache?: ModuleByteCache;
-  cfcEnforcementMode?: CfcEnforcementMode;
   /** Scheduler tests shrink the backoff/retry window. */
   commitBackpressure?: Partial<CommitBackpressurePolicy>;
 }
@@ -411,12 +412,8 @@ export const runtimePresets = {
    * relative fetches keep today's local-dev fall-through.
    */
   patternTest(params: PatternTestPresetParams): RuntimeOptions {
-    const core = coreOptions(params);
     return {
-      ...core,
-      ...(params.cfcEnforcementMode !== undefined
-        ? { cfcEnforcementMode: params.cfcEnforcementMode }
-        : {}),
+      ...coreOptions(params),
       ...(params.fetch !== undefined ? { fetch: params.fetch } : {}),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }
@@ -454,12 +451,6 @@ export const runtimePresets = {
       ...(params.spaceHostMap !== undefined
         ? { spaceHostMap: params.spaceHostMap }
         : {}),
-      ...(params.cfcEnforcementMode !== undefined
-        ? { cfcEnforcementMode: params.cfcEnforcementMode }
-        : {}),
-      ...(params.cfcFlowLabels !== undefined
-        ? { cfcFlowLabels: params.cfcFlowLabels }
-        : {}),
       ...(params.trustSnapshotProvider !== undefined
         ? { trustSnapshotProvider: params.trustSnapshotProvider }
         : {}),
@@ -493,9 +484,6 @@ export const runtimePresets = {
   unitTest(params: UnitTestPresetParams): RuntimeOptions {
     return {
       ...coreOptions({ ...params, experimental: params.experimental ?? {} }),
-      ...(params.cfcEnforcementMode !== undefined
-        ? { cfcEnforcementMode: params.cfcEnforcementMode }
-        : {}),
       ...(params.fetch !== undefined ? { fetch: params.fetch } : {}),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }

@@ -96,6 +96,8 @@ const localRunArtifacts = (options: {
   authSource?: "api-key" | "none" | typeof LOOM_LOCAL_AUTH_SOURCE;
   model?: string;
   source?: string;
+  cfcEnforcementMode?: "observe" | "enforce-strict";
+  manifestCfcEnforcementMode?: "observe" | "enforce-strict";
 }): HarnessRunArtifacts => {
   const provider = options.provider ?? "openai-compatible-gateway";
   const authSource = options.authSource ??
@@ -109,7 +111,7 @@ const localRunArtifacts = (options: {
       status: "completed",
       createdAt: "2026-08-13T00:00:00Z",
       updatedAt: "2026-08-13T00:00:01Z",
-      cfcEnforcementMode: "disabled",
+      cfcEnforcementMode: options.cfcEnforcementMode ?? "observe",
       currentDir: "/workspace",
       model,
       modelProvider: provider,
@@ -126,6 +128,9 @@ const localRunArtifacts = (options: {
         modelAuthSource: authSource,
         credentialOwner: LOOM_LOCAL_CREDENTIAL_OWNER,
         harnessHomeIdentity: options.harnessHomeIdentity,
+        cfc: {
+          enforcementMode: options.manifestCfcEnforcementMode ?? "observe",
+        },
       },
       policyEvents: [],
       toolOutputs: [],
@@ -158,6 +163,8 @@ Deno.test("local Loom host sends authenticated Codex traffic and never gateway t
       CF_HARNESS_GATEWAY_AUTH_MODE: "none",
       CF_HARNESS_API_KEY: "gateway-secret",
       CF_HARNESS_PROMPT_CACHE_MODE: "explicit",
+      CF_HARNESS_CFC_ENFORCEMENT_MODE: "enforce-strict",
+      CF_CFC_MODE: "enforce-strict",
     },
     credentialStore: credentials,
     providerSettingsStore: configured("openai-codex"),
@@ -199,6 +206,8 @@ Deno.test("local Loom host sends authenticated Codex traffic and never gateway t
     await host.runBatch([
       "--prompt",
       "hello",
+      "--cfc-enforcement-mode",
+      "observe",
       "--result-json-path",
       "result.json",
     ]),
@@ -208,6 +217,7 @@ Deno.test("local Loom host sends authenticated Codex traffic and never gateway t
   assertEquals(gatewayRequests, 0);
   assertEquals(observed?.promptCacheMode, undefined);
   assertEquals(observed?.engine?.getRunState().modelProvider, "openai-codex");
+  assertEquals(observed?.engine?.getRunState().cfcEnforcementMode, "observe");
   assertEquals(
     observed?.engine?.getRunState().modelAuthSource,
     LOOM_LOCAL_AUTH_SOURCE,
@@ -225,6 +235,40 @@ Deno.test("local Loom host sends authenticated Codex traffic and never gateway t
   assertEquals(batchResult.model_auth_source, LOOM_LOCAL_AUTH_SOURCE);
   assertEquals(batchResult.credential_owner, LOOM_LOCAL_CREDENTIAL_OWNER);
   assertEquals(io.stderr, []);
+});
+
+Deno.test("local Loom host rejects non-observe CFC overrides", async () => {
+  const home = await Deno.makeTempDir();
+  const io = ioBuffers();
+  let promptLoops = 0;
+  const host = await createLoomLocalCfHarnessHost({
+    harnessHome: home,
+    env: {},
+    providerSettingsStore: configured("openai-compatible-gateway"),
+    cliDependencies: {
+      cwd: home,
+      io: io.io,
+      createPromptLoop: () => {
+        promptLoops += 1;
+        throw new Error("unexpected prompt loop");
+      },
+    },
+  });
+
+  for (const mode of ["disabled", "enforce-strict"]) {
+    io.stderr.length = 0;
+    assertEquals(
+      await host.runBatch([
+        "--cfc-enforcement-mode",
+        mode,
+        "--prompt",
+        "hello",
+      ]),
+      1,
+    );
+    assertEquals(JSON.parse(io.stderr.join("")).error.code, "invalid-request");
+  }
+  assertEquals(promptLoops, 0);
 });
 
 Deno.test("local Loom host rejects explicit gateway cache options for Codex before traffic", async () => {
@@ -538,6 +582,7 @@ Deno.test("local Loom interactive host uses the same fixed Codex binding", async
 
   await host.runInteractive([]);
   assertEquals(observed?.basePromptLoopOptions?.modelProvider, "openai-codex");
+  assertEquals(observed?.basePromptLoopOptions?.cfcEnforcementMode, "observe");
   assertEquals(
     observed?.basePromptLoopOptions?.modelAuthSource,
     LOOM_LOCAL_AUTH_SOURCE,
@@ -577,7 +622,7 @@ Deno.test("local Loom host rejects resume binding switches before provider traff
           status: "completed",
           createdAt: "2026-08-13T00:00:00Z",
           updatedAt: "2026-08-13T00:00:01Z",
-          cfcEnforcementMode: "disabled",
+          cfcEnforcementMode: "observe",
           currentDir: "/workspace",
           model: "gpt-5.6-terra",
           modelProvider: "openai-codex",
@@ -594,6 +639,7 @@ Deno.test("local Loom host rejects resume binding switches before provider traff
             modelAuthSource: LOOM_LOCAL_AUTH_SOURCE,
             credentialOwner: LOOM_LOCAL_CREDENTIAL_OWNER,
             harnessHomeIdentity: identityHost.harnessHomeIdentity,
+            cfc: { enforcementMode: "observe" },
           },
           policyEvents: [],
           toolOutputs: [],
@@ -676,6 +722,41 @@ Deno.test("local Loom host resumes one exact artifact snapshot with its recorded
   assertEquals(observed?.gatewayAuthMode, "none");
   assertEquals(observed?.engine?.getRunState().modelAuthSource, "none");
   assertEquals(io.stderr, []);
+});
+
+Deno.test("local Loom host rejects resumed CFC postures other than observe", async () => {
+  const home = await Deno.makeTempDir();
+  const identityHost = await createLoomLocalCfHarnessHost({
+    harnessHome: home,
+    env: {},
+    providerSettingsStore: configured("openai-compatible-gateway"),
+  });
+
+  for (
+    const cfc of [
+      { cfcEnforcementMode: "enforce-strict" as const },
+      { manifestCfcEnforcementMode: "enforce-strict" as const },
+    ]
+  ) {
+    const io = ioBuffers();
+    const host = await createLoomLocalCfHarnessHost({
+      harnessHome: home,
+      env: {},
+      providerSettingsStore: configured("openai-compatible-gateway"),
+      readRunArtifacts: () =>
+        Promise.resolve(localRunArtifacts({
+          harnessHomeIdentity: identityHost.harnessHomeIdentity,
+          ...cfc,
+        })),
+      cliDependencies: { cwd: home, io: io.io },
+    });
+
+    assertEquals(await host.runBatch(["--resume-run", "run-one"]), 1);
+    assertEquals(
+      JSON.parse(io.stderr.join("")).error.code,
+      "provider-mismatch",
+    );
+  }
 });
 
 Deno.test("local Loom host positively resumes an authenticated Codex binding", async () => {
@@ -1232,7 +1313,7 @@ Deno.test("local Loom host classifies invalid, internal, and unavailable failure
       "--prompt",
       "hello",
       "--cfc-enforcement-mode",
-      "disabled",
+      "observe",
     ]),
     1,
   );

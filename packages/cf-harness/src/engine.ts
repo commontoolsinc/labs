@@ -74,6 +74,7 @@ import {
 import {
   cacheHarnessFabricSessionFactory,
   createHarnessFabricSessionFactory,
+  harnessFabricCfcOptions,
   type HarnessFabricSessionFactory,
 } from "./fabric-session.ts";
 import { assertValidHarnessHandleTable } from "./handle-table.ts";
@@ -140,7 +141,6 @@ import {
   type WriteFileToolInput,
   type WriteFileToolOutput,
 } from "./tools/write-file.ts";
-
 export interface BuiltinToolInputMap {
   bash: BashToolInput;
   "bash-no-sandbox": BashToolInput;
@@ -452,7 +452,10 @@ export class CfHarnessEngine {
     // while healthy; a failed construction is retried on the next call.
     const fabricSessionFactory = options.fabricSessionFactory ??
       (this.config.fabricSession !== undefined
-        ? createHarnessFabricSessionFactory(this.config.fabricSession)
+        ? createHarnessFabricSessionFactory(
+          this.config.fabricSession,
+          harnessFabricCfcOptions(this.config.cfcEnforcementMode),
+        )
         : undefined);
     this.#fabricSessionFactory = fabricSessionFactory === undefined
       ? undefined

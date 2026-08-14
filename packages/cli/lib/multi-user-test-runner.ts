@@ -235,6 +235,7 @@ export async function runMultiUserTestPattern(
           root: options.root,
           patternCoverageDir: options.patternCoverageDir,
           continuousUI: options.continuousUI,
+          cfcEnforcementMode: options.cfcEnforcementMode,
           participant: spec.name,
           participants: meta.participants.map((p) => p.name),
           seedDefaults: index === 0,

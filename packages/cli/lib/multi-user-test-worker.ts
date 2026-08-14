@@ -47,6 +47,7 @@ import {
   TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import { defer } from "@commonfabric/utils/defer";
 
 import { assertionOutcome } from "./assert-record.ts";
@@ -296,6 +297,11 @@ const handlers: Record<
       experimental: experimentalOptionsFromEnv(Deno.env.get),
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
       moduleByteCache: getDefaultModuleByteCache(),
+      ...(typeof args.cfcEnforcementMode === "string"
+        ? {
+          cfcEnforcementMode: args.cfcEnforcementMode as CfcEnforcementMode,
+        }
+        : {}),
     }));
     runtime.enableIdempotencyCheck();
     // Channel 1: capture pattern-code console.error / console.warn calls.

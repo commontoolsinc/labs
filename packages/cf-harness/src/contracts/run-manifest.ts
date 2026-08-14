@@ -9,6 +9,7 @@ import {
 } from "./prompt-slot.ts";
 
 export const LOOM_RUN_MANIFEST_TYPE = "cf-harness.loom-run-manifest" as const;
+export const LOOM_LOCAL_CFC_ENFORCEMENT_MODE = "observe" as const;
 
 export interface LoomRunManifestWorkspace {
   hostPath?: string;
@@ -117,6 +118,11 @@ export const bindLoomLocalRunManifest = (
   if (model !== undefined) {
     assertOptionalBindingField("model", input?.model, model);
   }
+  assertOptionalBindingField(
+    "CFC enforcement mode",
+    input?.cfc?.enforcementMode,
+    LOOM_LOCAL_CFC_ENFORCEMENT_MODE,
+  );
   return {
     ...(input ?? {}),
     type: LOOM_RUN_MANIFEST_TYPE,
@@ -126,6 +132,10 @@ export const bindLoomLocalRunManifest = (
     modelAuthSource: binding.modelAuthSource,
     credentialOwner: structuredClone(binding.credentialOwner),
     harnessHomeIdentity: binding.harnessHomeIdentity,
+    cfc: {
+      ...input?.cfc,
+      enforcementMode: LOOM_LOCAL_CFC_ENFORCEMENT_MODE,
+    },
     ...(model !== undefined ? { model } : {}),
   };
 };

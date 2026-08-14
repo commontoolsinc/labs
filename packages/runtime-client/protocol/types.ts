@@ -197,6 +197,11 @@ export interface InitializationData {
   // label components. Propagation never rejects by itself. Absent =
   // the runner's default ("off").
   cfcFlowLabels?: "off" | "observe" | "persist";
+  cfcWriteFloor?: "off" | "observe" | "enforce";
+  cfcTriggerReadGating?: boolean;
+  cfcPolicyEvaluation?: "off" | "observe" | "enforce";
+  cfcLabelMetadataProtection?: "off" | "observe" | "enforce";
+  cfcDeclaredMonotonicity?: "off" | "observe" | "enforce";
   // Whether author-supplied render-boundary declassification is honored.
   // Defaults to "allow" (current behavior). "deny" ignores author-supplied
   // `declassifyConfidentiality` so a pattern can't release a secret upward

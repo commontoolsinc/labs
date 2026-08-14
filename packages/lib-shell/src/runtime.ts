@@ -43,6 +43,22 @@ export type RuntimeCfcFlowLabelsMode = NonNullable<
   RuntimeClientOptions["cfcFlowLabels"]
 >;
 
+export type RuntimeCfcWriteFloorMode = NonNullable<
+  RuntimeClientOptions["cfcWriteFloor"]
+>;
+
+export type RuntimeCfcPolicyEvaluationMode = NonNullable<
+  RuntimeClientOptions["cfcPolicyEvaluation"]
+>;
+
+export type RuntimeCfcLabelMetadataProtectionMode = NonNullable<
+  RuntimeClientOptions["cfcLabelMetadataProtection"]
+>;
+
+export type RuntimeCfcDeclaredMonotonicityMode = NonNullable<
+  RuntimeClientOptions["cfcDeclaredMonotonicity"]
+>;
+
 export type RuntimeTrustSnapshot = NonNullable<
   RuntimeClientOptions["trustSnapshot"]
 >;
@@ -130,6 +146,11 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * persisting nothing — the measurement stage before "persist".
    */
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
+  cfcWriteFloor?: RuntimeCfcWriteFloorMode;
+  cfcTriggerReadGating?: boolean;
+  cfcPolicyEvaluation?: RuntimeCfcPolicyEvaluationMode;
+  cfcLabelMetadataProtection?: RuntimeCfcLabelMetadataProtectionMode;
+  cfcDeclaredMonotonicity?: RuntimeCfcDeclaredMonotonicityMode;
   /**
    * Populate the default render confidentiality ceiling (Epic H3a). When
    * true, the worker's display sinks gate labeled values against the
@@ -227,18 +248,13 @@ export function createRuntimeClientOptions({
   apiUrl,
   spaceHostMap,
   experimental,
-  cfcEnforcementMode = "enforce-strict",
-  // Epic H2 (docs/history/plans/cfc-future-work-implementation.md): shell hosts run the
-  // flow-label dial at "persist" — the per-tx conservative join is derived AND
-  // written as a `derived` label component on every value write. This
-  // activates inv-9 (flow-path confidentiality) in real shell deployments:
-  // reading labeled data and writing a derived value no longer launders the
-  // label away. Safe to persist because re-derivation is idempotent (SC-11:
-  // an unchanged label writes no envelope — see prepare.ts) so a rerun that
-  // reads the same inputs does not churn the ["cfc"] doc; replace-on-overwrite
-  // (§8.12.8) keeps the derived component tracking the current value rather
-  // than ratcheting forever. H1 shipped "observe" as the measurement stage.
-  cfcFlowLabels = "persist",
+  cfcEnforcementMode,
+  cfcFlowLabels,
+  cfcWriteFloor,
+  cfcTriggerReadGating,
+  cfcPolicyEvaluation,
+  cfcLabelMetadataProtection,
+  cfcDeclaredMonotonicity,
   // Epic H3a: populate the render confidentiality ceiling. Off by default —
   // a deployment-posture change to what the shell renders, enabled
   // deliberately per host (shell dogfood flag). When on, display sinks
@@ -260,6 +276,11 @@ export function createRuntimeClientOptions({
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
+  cfcWriteFloor?: RuntimeCfcWriteFloorMode;
+  cfcTriggerReadGating?: boolean;
+  cfcPolicyEvaluation?: RuntimeCfcPolicyEvaluationMode;
+  cfcLabelMetadataProtection?: RuntimeCfcLabelMetadataProtectionMode;
+  cfcDeclaredMonotonicity?: RuntimeCfcDeclaredMonotonicityMode;
   cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   forwardWorkerConsole?: boolean;
@@ -283,6 +304,11 @@ export function createRuntimeClientOptions({
     experimental,
     cfcEnforcementMode,
     cfcFlowLabels,
+    cfcWriteFloor,
+    cfcTriggerReadGating,
+    cfcPolicyEvaluation,
+    cfcLabelMetadataProtection,
+    cfcDeclaredMonotonicity,
     ...(cfcRenderCeiling
       ? {
         renderDeclassificationPolicy: "deny" as const,
@@ -665,6 +691,11 @@ export class RuntimeInternals extends EventTarget {
     experimental,
     cfcEnforcementMode,
     cfcFlowLabels,
+    cfcWriteFloor,
+    cfcTriggerReadGating,
+    cfcPolicyEvaluation,
+    cfcLabelMetadataProtection,
+    cfcDeclaredMonotonicity,
     cfcRenderCeiling,
     trustSnapshot,
     clientVersion,
@@ -725,6 +756,11 @@ export class RuntimeInternals extends EventTarget {
         experimental,
         cfcEnforcementMode,
         cfcFlowLabels,
+        cfcWriteFloor,
+        cfcTriggerReadGating,
+        cfcPolicyEvaluation,
+        cfcLabelMetadataProtection,
+        cfcDeclaredMonotonicity,
         cfcRenderCeiling,
         trustSnapshot,
         forwardWorkerConsole,

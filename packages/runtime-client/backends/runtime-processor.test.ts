@@ -2965,6 +2965,11 @@ describe("browserWorkerParamsFromInitializationData", () => {
           spaceDid: "did:key:space",
           cfcEnforcementMode: "enforce-explicit",
           cfcFlowLabels: "observe",
+          cfcWriteFloor: "off",
+          cfcTriggerReadGating: false,
+          cfcPolicyEvaluation: "off",
+          cfcLabelMetadataProtection: "off",
+          cfcDeclaredMonotonicity: "off",
           trustSnapshot: {
             id: "principal:did:key:worker",
             actingPrincipal: "did:key:worker",
@@ -2977,6 +2982,11 @@ describe("browserWorkerParamsFromInitializationData", () => {
 
     expect(options.cfcEnforcementMode).toBe("enforce-explicit");
     expect(options.cfcFlowLabels).toBe("observe");
+    expect(options.cfcWriteFloor).toBe("off");
+    expect(options.cfcTriggerReadGating).toBe(false);
+    expect(options.cfcPolicyEvaluation).toBe("off");
+    expect(options.cfcLabelMetadataProtection).toBe("off");
+    expect(options.cfcDeclaredMonotonicity).toBe("off");
     expect(options.trustSnapshotProvider?.()).toEqual({
       id: "principal:did:key:worker",
       actingPrincipal: "did:key:worker",

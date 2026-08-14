@@ -72,7 +72,11 @@ const statusRequest = (requestId: string): string =>
     params: {},
   });
 
-const turnRequests = (workspace: string, artifactRoot?: string): string[] => [
+const turnRequests = (
+  workspace: string,
+  artifactRoot?: string,
+  cfcEnforcementMode: "observe" | "enforce-strict" = "observe",
+): string[] => [
   JSON.stringify({
     type: HARNESS_CHAT_REQUEST_TYPE,
     protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
@@ -88,7 +92,7 @@ const turnRequests = (workspace: string, artifactRoot?: string): string[] => [
         toolMode: "workspace-write",
         allowedToolIds: [],
         allowedSubagentProfiles: [],
-        cfcEnforcementMode: "disabled",
+        cfcEnforcementMode,
       },
     },
   }),
@@ -211,6 +215,57 @@ Deno.test("local Loom interactive stdio sends Codex traffic without gateway fall
   assertEquals(codexRequests, 1);
   assertEquals(gatewayRequests, 0);
   assertEquals(completedTurn(capture.envelopes()), true);
+});
+
+Deno.test("local Loom interactive stdio rejects enforcing CFC policies", async () => {
+  const workspace = await Deno.makeTempDir();
+  for (const boundary of ["session", "turn"] as const) {
+    const home = await Deno.makeTempDir();
+    const capture = captureOutput();
+    let providerRequests = 0;
+    const requests = turnRequests(
+      workspace,
+      undefined,
+      boundary === "session" ? "enforce-strict" : "observe",
+    );
+    if (boundary === "session") {
+      requests.splice(1);
+    } else {
+      const startTurn = JSON.parse(requests[1]);
+      startTurn.params.policy = {
+        type: "cf-harness.chat-policy",
+        toolMode: "workspace-write",
+        allowedToolIds: [],
+        allowedSubagentProfiles: [],
+        cfcEnforcementMode: "enforce-strict",
+      };
+      requests[1] = JSON.stringify(startTurn);
+    }
+    const host = await createLoomLocalCfHarnessHost({
+      harnessHome: home,
+      env: {
+        CF_HARNESS_GATEWAY_BASE_URL: "https://gateway.example/",
+        CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+      },
+      providerSettingsStore: configured("openai-compatible-gateway"),
+      fetchFn: () => {
+        providerRequests += 1;
+        return Promise.reject(new Error("must not request"));
+      },
+      interactiveStdioRunner: protocolRunner(requests, capture),
+    });
+
+    await host.runInteractive([]);
+
+    const errors = capture.envelopes().flatMap((envelope) =>
+      "error" in envelope ? [envelope.error] : []
+    );
+    assertEquals(errors.at(-1), {
+      code: "invalid_request",
+      message: "local Loom chat sessions require CFC observe mode",
+    }, boundary);
+    assertEquals(providerRequests, 0, boundary);
+  }
 });
 
 Deno.test("local Loom interactive stdio reports credential loss after preflight before traffic", async () => {
@@ -338,6 +393,13 @@ Deno.test("local Loom interactive artifacts bind their selected model and resume
       provider,
       provider,
     );
+    assertEquals(artifacts.runState.cfcEnforcementMode, "observe", provider);
+    assertEquals(
+      artifacts.runState.runManifest?.cfc?.enforcementMode,
+      "observe",
+      provider,
+    );
+    assertEquals(persistedManifest.cfc.enforcementMode, "observe", provider);
 
     const resumeStdout: string[] = [];
     const resumeStderr: string[] = [];
