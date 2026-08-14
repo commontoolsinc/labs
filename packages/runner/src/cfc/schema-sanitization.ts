@@ -1666,10 +1666,12 @@ const validateAgainstSchemaInternal = (
       if (typeAllowsObject && Array.isArray(schema.required)) {
         for (const key of schema.required) {
           // The nominal brand key has no runtime existence; a fabric value
-          // satisfies it by construction. Removable with the other brand
-          // exemptions (see opaqueLeafMissesRequired in traverse.ts) once
-          // the schema-generator skips the brand and stored schemas that
-          // carry it have cycled out.
+          // satisfies it by construction. Only schemas from pre-vocabulary
+          // compilations carry it (current emissions skip it everywhere).
+          // Removable with the other brand exemptions (see
+          // opaqueLeafMissesRequired in traverse.ts) once those stored
+          // schemas have cycled out — a redeploy-gated horizon, since
+          // pattern update refuses the structural-to-vocabulary transition.
           if (key === FABRIC_SPECIAL_OBJECT_BRAND) continue;
           if (!(key in value)) {
             return mismatch(`missing required property ${key}`);

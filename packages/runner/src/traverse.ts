@@ -4755,13 +4755,16 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * — prototype chain included, the same check the anyOf prefilters apply —
  * so a class accessor such as `FabricBytes.length` satisfies
  * `required: ["length"]` while a key the primitive lacks rejects it. The
- * nominal brand key generated schemas require has no runtime existence and
- * is satisfied by the instance itself; that exemption (here and at the
- * other brand-aware check sites) exists because the schema-generator's
- * object formatter currently emits the brand into `required`, and it can
- * be removed once the generator skips the brand and stored schemas that
- * carry it have cycled out. A fabric-primitive-typed schema is not gated
- * here (its type never includes "object").
+ * nominal brand key that schemas from pre-vocabulary compilations require
+ * has no runtime existence and is satisfied by the instance itself; that
+ * exemption (here and at the other brand-aware check sites) exists for
+ * those stored schemas — current generator emissions carry the brand
+ * nowhere — and it can be removed once they have cycled out. That horizon
+ * is redeploy-gated: pattern update refuses the structural-to-vocabulary
+ * transition (`packages/piece/src/schema-compatibility.ts`), so such a
+ * schema persists until its piece is redeployed. A
+ * fabric-primitive-typed schema is not gated here (its type never
+ * includes "object").
  *
  * Presence is the whole check: property sub-schemas are NOT enforced
  * against a primitive's accessor values, so
