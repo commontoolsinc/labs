@@ -93,9 +93,6 @@ export const COVERAGE_LOCAL_CHECK_COMMAND = [
   '  --profile-dir="$(pwd)/coverage/raw/local" --root="$(pwd)"',
 ].join("\n");
 
-/** Concurrency limit for API calls. */
-export const API_CONCURRENCY = 5;
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -121,16 +118,29 @@ interface ArtifactsResponse {
   artifacts: Artifact[];
 }
 
-export interface TimingSample {
+/** What one `main` run measured for one coverage-debt metric. */
+export interface BaselineSample {
+  runId: number;
+  sha: string;
+  createdAt: string;
+  uncoveredLines: number;
+}
+
+/**
+ * One metric as the baseline artifact stores it. The `durationSeconds` and
+ * `runUrl` keys are the ones that file has always carried: `durationSeconds`
+ * holds the uncovered-line count, and `runUrl` is the run's GitHub page. Both
+ * are kept so a file written before the performance gate was removed still
+ * parses, and a file written now still parses in a checkout that predates this
+ * shape.
+ */
+export interface MetricRecord {
+  name: string;
   runId: number;
   runUrl: string;
   sha: string;
   createdAt: string;
   durationSeconds: number;
-}
-
-export interface MetricRecord extends TimingSample {
-  name: string;
 }
 
 /**
@@ -186,11 +196,6 @@ export interface CoverageBaselineFile {
    * when no cache-state artifact recorded for the run.
    */
   compileCacheStates?: CompileCacheStates;
-}
-
-export interface MetricTimeline {
-  name: string;
-  samples: TimingSample[];
 }
 
 export interface PRInfo {
@@ -265,10 +270,18 @@ function retryAfterDelayMs(value: string | null): number | undefined {
   return undefined;
 }
 
-function githubRetryDelayMs(resp: Response, attempt: number): number {
+/**
+ * How long to wait before the attempt after `attempt`. A `Retry-After` header
+ * on the response that failed sets the delay when GitHub sends one; without a
+ * response, or without that header, the delay doubles with each attempt. Both
+ * are capped.
+ */
+function githubRetryDelayMs(attempt: number, resp?: Response): number {
+  const retryAfter = resp
+    ? retryAfterDelayMs(resp.headers.get("retry-after"))
+    : undefined;
   return Math.min(
-    retryAfterDelayMs(resp.headers.get("retry-after")) ??
-      GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+    retryAfter ?? GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
     GITHUB_GET_RETRY_MAX_DELAY_MS,
   );
 }
@@ -304,32 +317,22 @@ export async function githubGet<T>(path: string): Promise<T> {
     try {
       resp = await fetch(url, { headers: apiHeaders() });
     } catch (error) {
-      if (attempt === GITHUB_GET_MAX_ATTEMPTS) {
-        throw error;
-      }
-      await sleep(
-        Math.min(
-          GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
-          GITHUB_GET_RETRY_MAX_DELAY_MS,
-        ),
-      );
+      if (attempt === GITHUB_GET_MAX_ATTEMPTS) throw error;
+      await sleep(githubRetryDelayMs(attempt));
       continue;
     }
 
-    if (resp.ok) {
-      return resp.json();
-    }
+    if (resp.ok) return resp.json();
 
+    await cancelResponseBody(resp);
     if (
       !RETRYABLE_GITHUB_STATUSES.has(resp.status) ||
       attempt === GITHUB_GET_MAX_ATTEMPTS
     ) {
-      await cancelResponseBody(resp);
       throw githubApiError(resp, path, "GET");
     }
 
-    await cancelResponseBody(resp);
-    await sleep(githubRetryDelayMs(resp, attempt));
+    await sleep(githubRetryDelayMs(attempt, resp));
   }
 
   throw new Error(`GitHub API GET retry loop exhausted unexpectedly: ${path}`);
@@ -365,31 +368,6 @@ export async function githubPatch<T>(
     throw githubApiError(resp, path, "PATCH");
   }
   return resp.json();
-}
-
-// ---------------------------------------------------------------------------
-// Concurrency limiter
-// ---------------------------------------------------------------------------
-
-export async function mapConcurrent<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-
-  async function worker() {
-    while (next < items.length) {
-      const idx = next++;
-      results[idx] = await fn(items[idx]);
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, worker),
-  );
-  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -441,8 +419,13 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
   return [...byName.values()];
 }
 
+/** The GitHub page of a workflow run, as the baseline file records it. */
+function workflowRunUrl(runId: number): string {
+  return `https://github.com/${REPO}/actions/runs/${runId}`;
+}
+
 export function serializeCoverageBaseline(
-  metrics: Map<string, TimingSample>,
+  metrics: Map<string, BaselineSample>,
   compileCacheStates?: CompileCacheStates,
 ): CoverageBaselineFile {
   const file: CoverageBaselineFile = {
@@ -457,48 +440,23 @@ export function serializeCoverageBaseline(
 }
 
 function metricsToRecords(
-  metrics: Map<string, TimingSample>,
+  metrics: Map<string, BaselineSample>,
 ): MetricRecord[] {
   return [...metrics.entries()]
-    .map(([name, sample]) => ({ name, ...sample }))
+    .map(([name, sample]) => ({
+      name,
+      runId: sample.runId,
+      runUrl: workflowRunUrl(sample.runId),
+      sha: sample.sha,
+      createdAt: sample.createdAt,
+      durationSeconds: sample.uncoveredLines,
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-export function parseCoverageBaseline(
-  content: string,
-): Map<string, TimingSample> {
-  const parsed = JSON.parse(content) as Partial<CoverageBaselineFile>;
-  if (parsed.version !== 1 || !Array.isArray(parsed.metrics)) {
-    throw new Error("Unsupported coverage baseline file format.");
-  }
-
-  const metrics = new Map<string, TimingSample>();
-  for (const metric of parsed.metrics) {
-    if (
-      typeof metric.name !== "string" ||
-      typeof metric.runId !== "number" ||
-      typeof metric.runUrl !== "string" ||
-      typeof metric.sha !== "string" ||
-      typeof metric.createdAt !== "string" ||
-      typeof metric.durationSeconds !== "number"
-    ) {
-      throw new Error("Invalid coverage baseline metric record.");
-    }
-
-    metrics.set(metric.name, {
-      runId: metric.runId,
-      runUrl: metric.runUrl,
-      sha: metric.sha,
-      createdAt: metric.createdAt,
-      durationSeconds: metric.durationSeconds,
-    });
-  }
-  return metrics;
 }
 
 /** Parsed coverage baseline plus the run's compile cache states, when tagged. */
 export interface CoverageBaselineDetailed {
-  metrics: Map<string, TimingSample>;
+  metrics: Map<string, BaselineSample>;
   /** Null when the file recorded no compile cache states. */
   compileCacheStates: CompileCacheStates | null;
 }
@@ -508,16 +466,40 @@ const COMPILE_CACHE_FAMILY_SET: ReadonlySet<string> = new Set(
 );
 
 /**
- * Parse a perf metrics file, also surfacing its optional compile cache
- * states. Metric validation matches {@link parseCoverageBaseline}; unknown
- * families and invalid state values are dropped rather than failing, so a
- * malformed tag degrades to "unknown" instead of losing the run's metrics.
+ * Parse a baseline artifact file into its metrics and its optional compile
+ * cache states. A metric record missing a field the ratchet reads fails the
+ * whole file, because a baseline that silently lost a metric would read as a
+ * group with no debt to beat. Unknown cache families and invalid state values
+ * are dropped instead, so a malformed tag degrades to "unknown" rather than
+ * losing the run's metrics.
  */
 export function parseCoverageBaselineDetailed(
   content: string,
 ): CoverageBaselineDetailed {
-  const metrics = parseCoverageBaseline(content);
   const parsed = JSON.parse(content) as Partial<CoverageBaselineFile>;
+  if (parsed.version !== 1 || !Array.isArray(parsed.metrics)) {
+    throw new Error("Unsupported coverage baseline file format.");
+  }
+
+  const metrics = new Map<string, BaselineSample>();
+  for (const metric of parsed.metrics) {
+    if (
+      typeof metric.name !== "string" ||
+      typeof metric.runId !== "number" ||
+      typeof metric.sha !== "string" ||
+      typeof metric.createdAt !== "string" ||
+      typeof metric.durationSeconds !== "number"
+    ) {
+      throw new Error("Invalid coverage baseline metric record.");
+    }
+
+    metrics.set(metric.name, {
+      runId: metric.runId,
+      sha: metric.sha,
+      createdAt: metric.createdAt,
+      uncoveredLines: metric.durationSeconds,
+    });
+  }
 
   const rawStates = parsed.compileCacheStates;
   if (rawStates === undefined || rawStates === null) {
@@ -537,7 +519,7 @@ export function parseCoverageBaselineDetailed(
 
 export async function writeCoverageBaselineFile(
   path: string,
-  metrics: Map<string, TimingSample>,
+  metrics: Map<string, BaselineSample>,
   compileCacheStates?: CompileCacheStates,
 ): Promise<void> {
   await Deno.writeTextFile(
@@ -552,6 +534,53 @@ export async function writeCoverageBaselineFile(
   );
 }
 
+/** What extracting one downloaded artifact zip produced. */
+type ArtifactExtraction =
+  | { extracted: true; tmpDir: string }
+  | { extracted: false; error: string };
+
+/**
+ * Write the artifact zip carried by `resp` into a fresh temporary directory and
+ * unzip it there, returning the directory. When either step fails the directory
+ * is removed again and the failure is described for the caller's attempt log.
+ */
+async function extractArtifactZip(
+  resp: Response,
+  tmpPrefix: string,
+): Promise<ArtifactExtraction> {
+  const tmpDir = await Deno.makeTempDir({ prefix: tmpPrefix });
+  const zipPath = `${tmpDir}/artifact.zip`;
+
+  let error: string;
+  try {
+    const data = new Uint8Array(await resp.arrayBuffer());
+    await Deno.writeFile(zipPath, data);
+
+    const unzip = new Deno.Command("unzip", {
+      args: ["-o", zipPath, "-d", tmpDir],
+      stdout: "null",
+      stderr: "piped",
+    });
+    const result = await unzip.output();
+    if (result.success) {
+      return { extracted: true, tmpDir };
+    }
+
+    const stderr = new TextDecoder().decode(result.stderr).trim();
+    error = `unzip failed with exit code ${result.code}${
+      stderr ? `: ${stderr}` : ""
+    }`;
+  } catch (caught) {
+    error = `${caught}`;
+  }
+
+  try {
+    await Deno.remove(tmpDir, { recursive: true });
+  } catch { /* ignore cleanup errors */ }
+
+  return { extracted: false, error };
+}
+
 export async function downloadAndExtractArtifact(
   artifactId: number,
   tmpPrefix: string,
@@ -560,79 +589,45 @@ export async function downloadAndExtractArtifact(
   const url = `https://api.github.com${artifactPath}`;
   let lastError = "unknown error";
   const attemptErrors: string[] = [];
+  const recordFailure = (attempt: number, message: string) => {
+    lastError = message;
+    attemptErrors.push(`attempt ${attempt}: ${message}`);
+  };
 
   for (let attempt = 1; attempt <= GITHUB_GET_MAX_ATTEMPTS; attempt++) {
     let resp: Response;
     try {
       resp = await fetch(url, { headers: apiHeaders() });
     } catch (error) {
-      lastError = `fetch failed: ${error}`;
-      attemptErrors.push(`attempt ${attempt}: ${lastError}`);
-      if (attempt < GITHUB_GET_MAX_ATTEMPTS) {
-        await sleep(
-          Math.min(
-            GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
-            GITHUB_GET_RETRY_MAX_DELAY_MS,
-          ),
-        );
-        continue;
-      }
-      break;
+      recordFailure(attempt, `fetch failed: ${error}`);
+      if (attempt === GITHUB_GET_MAX_ATTEMPTS) break;
+      await sleep(githubRetryDelayMs(attempt));
+      continue;
     }
 
     if (!resp.ok) {
       const statusText = resp.statusText ? ` ${resp.statusText}` : "";
-      lastError =
-        `GitHub artifact download ${resp.status}${statusText}: ${artifactPath}`;
-      attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+      recordFailure(
+        attempt,
+        `GitHub artifact download ${resp.status}${statusText}: ${artifactPath}`,
+      );
       await cancelResponseBody(resp);
       if (
-        attempt < GITHUB_GET_MAX_ATTEMPTS &&
-        RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES.has(resp.status)
+        attempt === GITHUB_GET_MAX_ATTEMPTS ||
+        !RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES.has(resp.status)
       ) {
-        await sleep(githubRetryDelayMs(resp, attempt));
-        continue;
+        break;
       }
-      break;
+      await sleep(githubRetryDelayMs(attempt, resp));
+      continue;
     }
 
-    const tmpDir = await Deno.makeTempDir({ prefix: tmpPrefix });
-    const zipPath = `${tmpDir}/artifact.zip`;
-
-    try {
-      const data = new Uint8Array(await resp.arrayBuffer());
-      await Deno.writeFile(zipPath, data);
-
-      const unzip = new Deno.Command("unzip", {
-        args: ["-o", zipPath, "-d", tmpDir],
-        stdout: "null",
-        stderr: "piped",
-      });
-      const result = await unzip.output();
-      if (result.success) {
-        return tmpDir;
-      }
-
-      const stderr = new TextDecoder().decode(result.stderr).trim();
-      lastError = `unzip failed with exit code ${result.code}${
-        stderr ? `: ${stderr}` : ""
-      }`;
-    } catch (error) {
-      lastError = `${error}`;
-    }
-    attemptErrors.push(`attempt ${attempt}: ${lastError}`);
-
-    try {
-      await Deno.remove(tmpDir, { recursive: true });
-    } catch { /* ignore cleanup errors */ }
+    const extraction = await extractArtifactZip(resp, tmpPrefix);
+    if (extraction.extracted) return extraction.tmpDir;
+    recordFailure(attempt, extraction.error);
 
     if (attempt < GITHUB_GET_MAX_ATTEMPTS) {
-      await sleep(
-        Math.min(
-          GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
-          GITHUB_GET_RETRY_MAX_DELAY_MS,
-        ),
-      );
+      await sleep(githubRetryDelayMs(attempt));
     }
   }
 
@@ -664,14 +659,6 @@ export async function downloadAndParseCoverageBaseline(
     try {
       await Deno.remove(tmpDir, { recursive: true });
     } catch { /* ignore cleanup errors */ }
-  }
-}
-
-export async function* walkFiles(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
-    const full = `${dir}/${entry.name}`;
-    if (entry.isDirectory) yield* walkFiles(full);
-    else yield full;
   }
 }
 
@@ -1055,6 +1042,169 @@ export function buildCoverageDebtSuggestionComment(
   return out.join("\n");
 }
 
+/** One file's lines that this PR leaves uncovered and the baseline covered. */
+export interface CoverageUnattributedFile {
+  relativePath: string;
+  lines: number[];
+}
+
+export interface CoverageDebtUnattributedInput {
+  groups: CoverageSuggestionGroup[];
+  files: CoverageUnattributedFile[];
+}
+
+/** How many affected files the comment names before it starts counting. */
+const MAX_UNATTRIBUTED_FILES = 20;
+/** How many line numbers one file contributes before the rest are counted. */
+const MAX_UNATTRIBUTED_LINES_PER_FILE = 20;
+
+/** `a.ts:3, 4, 5` — one file's affected lines, capped and counted. */
+function formatUnattributedFile(file: CoverageUnattributedFile): string {
+  const shown = file.lines.slice(0, MAX_UNATTRIBUTED_LINES_PER_FILE);
+  const rest = file.lines.length - shown.length;
+  const lines = shown.join(", ") + (rest > 0 ? `, …and ${rest} more` : "");
+  return `\`${file.relativePath}\`: ${lines}`;
+}
+
+/** The `ACCEPT_COVERAGE_DEBT:` line that takes one group off the ratchet. */
+export function coverageOverrideLine(group: CoverageSuggestionGroup): string {
+  return `ACCEPT_COVERAGE_DEBT: ${COVERAGE_METRIC_PREFIX} ${group.group} ` +
+    `uncovered lines = ${uncoveredLineCount(group.current)}`;
+}
+
+/**
+ * Build the prompt for an agent asked to make the affected lines cover the same
+ * way on every run. The work is on the lines themselves, not on this pull
+ * request, so the prompt is written to be pasted into a fresh session.
+ */
+function buildUnattributedPrompt(
+  files: CoverageUnattributedFile[],
+  omitted: number,
+): string[] {
+  const lines: string[] = [
+    "The lines below are covered on some runs of the CI test suite and not on",
+    "others, with no change to their source. That makes the coverage-debt gate",
+    "fail on pull requests that did not touch them, because the gate compares",
+    "one measurement of a source group against another.",
+    "",
+    "Find out what each line's coverage depends on, and add or extend a test so",
+    "the line is executed on every run and under every configuration. Common",
+    "causes: a branch taken only when an operation happens twice in one process,",
+    "a guard on elapsed wall-clock time, a path reached only when work lands in",
+    "a particular order, and a file that only some shards load. Write real",
+    "tests: do not delete assertions, mark lines ignored, or weaken the gate.",
+    "",
+    "Affected lines:",
+    "",
+  ];
+
+  for (const file of files) {
+    const shown = file.lines.slice(0, MAX_UNATTRIBUTED_LINES_PER_FILE);
+    const rest = file.lines.length - shown.length;
+    lines.push(
+      `  ${file.relativePath}: ${shown.join(", ")}${
+        rest > 0 ? `, and ${rest} more` : ""
+      }`,
+    );
+  }
+  if (omitted > 0) lines.push(`  ...and ${omitted} more file(s).`);
+
+  lines.push(
+    "",
+    'docs/development/COVERAGE.md, under "Coverage must not depend on the',
+    'execution environment", states the policy and works through examples of',
+    "each cause. Read it first.",
+    "",
+    "Do not try to establish that a line is fixed by running the suite several",
+    "times and finding it covered each time. A line covered on most runs looks",
+    "settled in any number of runs you have the patience for, and a run that",
+    "covers it by luck reads exactly like one that covers it by design. What",
+    "makes a line deterministic is a test that drives the condition the line",
+    "needs, so that reaching the line is what the test is for.",
+    "",
+    "Confirm that by measuring the test you added on its own. Run it the way",
+    "its package runs tests — the package's deno.jsonc gives the flags — with a",
+    "clean profile directory:",
+    "",
+    "  rm -rf coverage/raw/line-check",
+    '  DENO_COVERAGE_DIR="$(pwd)/coverage/raw/line-check" \\',
+    "    deno test <flags> <the test file you added>",
+    "  deno coverage --lcov coverage/raw/line-check > line-check.lcov",
+    "",
+    "Find the file's SF: record in line-check.lcov and read the DA:<line>,<hits>",
+    "entry for each affected line. Every one of them must show a nonzero hit",
+    "count from that test alone. A line still covered only when the rest of the",
+    "suite runs is a line still covered by accident.",
+  );
+
+  return lines;
+}
+
+/**
+ * Build the Markdown body for a regression none of the pull request's own added
+ * lines account for: every affected line is in a file the pull request left
+ * alone, and the baseline run covered it. Carries the same hidden marker as the
+ * other coverage comments, so the poster keeps updating the one comment.
+ */
+export function buildCoverageDebtUnattributedComment(
+  input: CoverageDebtUnattributedInput,
+): string {
+  const files = input.files.slice(0, MAX_UNATTRIBUTED_FILES);
+  const omitted = input.files.length - files.length;
+  const overBy = input.groups.reduce(
+    (sum, group) => sum + (group.current - group.target),
+    0,
+  );
+
+  const out: string[] = [COVERAGE_SUGGESTION_MARKER];
+  out.push("<details open>");
+  out.push(
+    coverageSummary(`Test coverage regressed by ${uncoveredLineCount(overBy)}`),
+  );
+  out.push("");
+  out.push(
+    "For some reason there are lines marked as uncovered in this PR that are " +
+      "not introduced by this PR and that were previously covered on `main`. " +
+      "This is likely because there are lines that are inconsistently covered " +
+      "on `main`.",
+  );
+  out.push("");
+  out.push("The following lines are affected:");
+  out.push("");
+  for (const file of files) {
+    out.push(`- ${formatUnattributedFile(file)}`);
+  }
+  if (omitted > 0) {
+    out.push(`- _…and ${omitted} more file(s)._`);
+  }
+  out.push("");
+  out.push(
+    "To skip coverage checking for this PR, add the following to the PR's " +
+      "description:",
+  );
+  out.push("");
+  out.push("```text");
+  for (const group of input.groups) {
+    out.push(coverageOverrideLine(group));
+  }
+  out.push("```");
+  out.push("");
+  out.push("### Prompt for an AI coding agent");
+  out.push("");
+  out.push(
+    "Copy the block below into a new AI coding agent session to improve our " +
+      "coverage and reduce this kind of flakiness in the future:",
+  );
+  out.push("");
+  out.push("````text");
+  out.push(...buildUnattributedPrompt(files, omitted));
+  out.push("````");
+  out.push("");
+  out.push("</details>");
+
+  return out.join("\n");
+}
+
 /**
  * Describe how a group's uncovered-line count moved between its `main` baseline
  * and this PR, for the "Change" column of the resolved comment's table.
@@ -1309,76 +1459,14 @@ export function formatOverrideSuggestion(value: number): string {
   return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
 }
 
-// ---------------------------------------------------------------------------
-// Timeline helpers
-// ---------------------------------------------------------------------------
-
-/** Add a sample to a timeline map, creating the timeline if necessary. */
-export function addSample(
-  timelines: Map<string, MetricTimeline>,
-  name: string,
-  sample: TimingSample,
-): void {
-  let timeline = timelines.get(name);
-  if (!timeline) {
-    timeline = { name, samples: [] };
-    timelines.set(name, timeline);
-  }
-  timeline.samples.push(sample);
-}
-
 /**
- * Apply baseline overrides to timelines by truncating samples before the
- * latest override point.
- *
- * `overridesBySha` maps commit SHA -> BaselineOverrides parsed from the
- * merged PR for that commit.  When a commit has a per-metric override, or a
- * whole-coverage reset for coverage-debt metrics, we discard all samples for
- * the affected metrics that precede that commit (keeping the override commit's
- * sample and everything after).
+ * Whether a merged PR's overrides accept the debt one metric carries, either
+ * with a per-metric acceptance or with the whole-coverage reset marker.
  */
-export function applyBaselineOverrides(
-  timelines: Map<string, MetricTimeline>,
-  overridesBySha: Map<string, BaselineOverrides>,
-): void {
-  // Find the latest override commit index for each metric
-  for (const [metricName, timeline] of timelines) {
-    let latestOverrideIdx = -1;
-
-    for (let i = 0; i < timeline.samples.length; i++) {
-      const sha = timeline.samples[i].sha;
-      const overrides = overridesBySha.get(sha);
-      if (!overrides) continue;
-
-      if (
-        overrides.metrics.has(metricName) ||
-        (overrides.coverageBaselineReset &&
-          isCoverageDebtMetric(metricName))
-      ) {
-        latestOverrideIdx = i;
-      }
-    }
-
-    if (latestOverrideIdx > 0) {
-      timeline.samples = timeline.samples.slice(latestOverrideIdx);
-    }
-  }
-}
-
-/**
- * The latest sample whose run is not known-cold, for the coverage-debt ratchet
- * that compares against the most recent baseline. A cold main run covers
- * cold-compile-only branches, so ratcheting against its lower debt would fail
- * later warm PRs with phantom regressions. Falls back to the last sample when
- * every sample is known-cold, preserving the override-truncation reset
- * semantics of `samples.at(-1)`.
- */
-export function latestNonColdSample(
-  samples: TimingSample[],
-  isRunCold: (runId: number) => boolean,
-): TimingSample | undefined {
-  for (let i = samples.length - 1; i >= 0; i--) {
-    if (!isRunCold(samples[i].runId)) return samples[i];
-  }
-  return samples.at(-1);
+export function acceptsCoverageDebt(
+  overrides: BaselineOverrides,
+  metric: string,
+): boolean {
+  return overrides.metrics.has(metric) ||
+    (overrides.coverageBaselineReset && isCoverageDebtMetric(metric));
 }

@@ -1,7 +1,7 @@
-import { computed, pattern } from "commonfabric";
+import { computed, pattern, TESTS } from "commonfabric";
 
 export default pattern(() => ({
-  tests: [
+  [TESTS]: [
     { assertion: computed(() => true) },
   ],
 }));

@@ -1,4 +1,4 @@
-import { action, assert, NAME, pattern, Writable } from "commonfabric";
+import { action, assert, NAME, pattern, TESTS, Writable } from "commonfabric";
 import Home from "./home.tsx";
 
 export default pattern(() => {
@@ -64,7 +64,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_profile_missing },
       { action: action_add_favorite },
       { action: action_remove_favorite },

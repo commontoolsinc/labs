@@ -322,19 +322,21 @@ export function resolveSourceLocationFromStack(
   return { location: null };
 }
 
-/** Declare a module
+/**
+ * Declare a module
+ *
+ * Function-first form, matching pattern()/handler() convention: the callback
+ * leads, schemas trail and are optional. The argument/result schemas are plain
+ * JSONSchema values that are NOT materialized into the callback input type —
+ * the callback's own (or transformer-inferred) type stands. The no-input form
+ * is `lift(fn, false)`: argumentSchema:false makes the no-arg application valid
+ * (the runner's isValidArgument check passes on `argumentSchema === false`),
+ * which is how computed-origin (zero-capture) lifts lower.
  *
  * @param implementation A function that takes an input and returns a result
  *
  * @returns A module node factory that also serializes as module.
  */
-// Function-first form, matching pattern()/handler() convention: the callback
-// leads, schemas trail and are optional. The argument/result schemas are plain
-// JSONSchema values that are NOT materialized into the callback input type — the
-// callback's own (or transformer-inferred) type stands. The no-input form is
-// `lift(fn, false)`: argumentSchema:false makes the no-arg application valid
-// (the runner's isValidArgument check passes on `argumentSchema === false`),
-// which is how computed-origin (zero-capture) lifts lower.
 export function lift<T, R>(
   implementation: (input: T) => R,
   argumentSchema?: JSONSchema,
@@ -392,6 +394,22 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
+/**
+ * The options a `handler(...)` call carries in its trailing slot.
+ *
+ * `resultSchema` is the verb's declared result — `action<E, R>` /
+ * `handler<E, T, R>` — lowered here by the CTS schema-injection stage. It is
+ * absent for a value-less verb, and the module then carries no result schema
+ * at all, which is what keeps a declared result opt-in.
+ *
+ * The schema-injected call spreads any options the author wrote into this same
+ * object, so a member here may be one this builder does not read: the writable
+ * proxy is asked for in the state-schema slot above.
+ */
+export interface HandlerOptions {
+  resultSchema?: JSONSchema;
+}
+
 function handlerInternal<E, T>(
   eventSchema:
     | JSONSchema
@@ -399,6 +417,7 @@ function handlerInternal<E, T>(
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
+  options?: HandlerOptions,
 ): HandlerFactory<E, T> {
   let writableProxy = false;
   if (typeof eventSchema === "function") {
@@ -430,6 +449,14 @@ function handlerInternal<E, T>(
     stateSchema as JSONSchema | undefined,
   );
 
+  // Carry the argument schema's ifc confidentiality through to the declared
+  // result, as `createNodeFactory` does for a lift. Only a declared result is
+  // joined: absence stays absence, so a verb that declares nothing keeps a
+  // module with no result schema rather than acquiring the join's `true`.
+  const resultSchema = options?.resultSchema === undefined
+    ? undefined
+    : applyArgumentIfcToResult(schema, options.resultSchema);
+
   const module: Handler<E, T> & toEncodableForm & toJSON & {
     bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
   } = {
@@ -443,6 +470,7 @@ function handlerInternal<E, T>(
     toJSON: toJSONMethod,
     toEncodableForm: () => moduleToEncodableForm(module),
     ...(schema !== undefined && { argumentSchema: schema }),
+    ...(resultSchema !== undefined && { resultSchema }),
     ...(writableProxy && { writableProxy: true }),
   };
 
@@ -521,6 +549,9 @@ export function handler<E, T, R>(
 export function handler<E, T, R>(
   handler: (event: E, props: T) => R,
 ): HandlerFactory<E, T, R>;
+// The trailing options slot is not part of the authored surface: a pattern
+// declares its result with the type argument above, and the schema-injection
+// stage lowers that declaration into `options.resultSchema` here.
 export function handler<E, T, R = void>(
   eventSchema:
     | JSONSchema
@@ -528,12 +559,14 @@ export function handler<E, T, R = void>(
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
+  options?: HandlerOptions,
 ): HandlerFactory<E, T, R> {
-  return handlerInternal(eventSchema, stateSchema, handler) as HandlerFactory<
-    E,
-    T,
-    R
-  >;
+  return handlerInternal(
+    eventSchema,
+    stateSchema,
+    handler,
+    options,
+  ) as HandlerFactory<E, T, R>;
 }
 
 // unsafe closures: doesn't need any arguments.
@@ -627,9 +660,7 @@ export const assert: (fn: () => boolean) => Reactive<AssertRecord> = (
  * @param _event - A function that receives an event and performs side effects
  * @throws Error if called directly (CTS must be enabled for action() to work)
  */
-// Overload 1: Zero-parameter callback returns Stream<void>
 export function action(_event: () => void): Stream<void>;
-// Overload 2: Parameterized callback returns Stream<E>
 export function action<E>(_event: (event: E) => void): Stream<E>;
 // Overload 3: a declared result, reached only by supplying both type arguments
 // explicitly — `action<AddTopic, TopicRef>((e) => { ...; return ref })`.

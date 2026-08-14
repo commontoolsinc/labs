@@ -1,4 +1,4 @@
-import { assert, computed, pattern, Writable } from "commonfabric";
+import { assert, computed, pattern, TESTS, Writable } from "commonfabric";
 import { migratePieceRegistry } from "./piece-registry-migration.ts";
 
 export default pattern(() => {
@@ -39,7 +39,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_legacy_registry_is_copied },
       { assertion: assert_canonical_registry_wins },
       { assertion: assert_completed_migration_does_not_run },

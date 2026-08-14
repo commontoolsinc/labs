@@ -205,6 +205,7 @@ export const EXPERIMENTAL_ENV_VARS = {
   plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
+  lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
   // Server-execution v2 (docs/specs/server-side-execution/): OFF is today
   // byte-for-byte; the ON arm is the CI second arm from Phase 1 stage A on
   // (testing.md §2), so every server-side process must be reachable by env.

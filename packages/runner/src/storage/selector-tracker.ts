@@ -9,7 +9,7 @@ import {
   type ScopeKeyIdentity,
   scopeOfScopeKey,
 } from "@commonfabric/memory/v2";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
@@ -151,7 +151,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       ? SelectorTracker.getStandardSchema(selector.schema)
       : false;
     const newSchemaHash = newSchema === false ? false : hashSchema(newSchema);
-    const newSchemaObj = isRecord(newSchema) ? newSchema : undefined;
+    const newSchemaObj = isObjectOrArray(newSchema) ? newSchema : undefined;
     // Constant across the candidate loop; hoisted so the $defs-insensitive
     // comparison below doesn't recompute it per tracked selector.
     let newSchemaRefCount: number | undefined;
@@ -186,7 +186,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           const promiseKey = `${this.toKey(address)}?${selectorRef}`;
           return [existingSelector, this.selectorPromises.get(promiseKey)!];
         } else {
-          const sortedSubSchemaObj = isRecord(sortedSubSchema)
+          const sortedSubSchemaObj = isObjectOrArray(sortedSubSchema)
             ? sortedSubSchema
             : undefined;
           if (newSchemaObj && sortedSubSchemaObj) {
@@ -265,7 +265,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     schema: JSONSchema,
     schemaHash: string | false,
   ): boolean {
-    return isRecord(schema) && Array.isArray(schema.anyOf) &&
+    return isObjectOrArray(schema) && Array.isArray(schema.anyOf) &&
       (schema.anyOf.some((item) =>
         SelectorTracker.#anyOfItemHashes(schema, item).includes(
           schemaHash as string,
@@ -307,7 +307,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       );
       hashes.push(hashSchema(current));
     }
-    if (isRecord(current) && current.$ref !== undefined) {
+    if (isObjectOrArray(current) && current.$ref !== undefined) {
       hashes.push(
         hashSchema(
           SelectorTracker.getStandardSchema(
@@ -353,7 +353,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       return byContent;
     }
     // TODO(danfuzz): this rebuild filters by key name only, so it also
-    // rebuilds `default`/`examples` VALUES: `isRecord` admits a
+    // rebuilds `default`/`examples` VALUES: `isObjectOrArray` admits a
     // `FabricSpecialObject` and `Object.entries` sees none of its state, so
     // a fabric-valued default standardizes to `{}` — losing the value in the
     // interned schema and making two schemas that differ only in such a
@@ -362,7 +362,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     const traverse = (
       value: Readonly<any>,
     ): FabricValue => {
-      if (isRecord(value)) {
+      if (isObjectOrArray(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
         } else {

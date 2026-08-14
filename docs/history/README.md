@@ -12,8 +12,9 @@ The test for which is which: if the system changed, would someone edit this
 document, or write a new one and leave this one alone? Edit it — it is live.
 Write a new one — it is historical.
 
-This README is the one live document in the tree: it states the rules, must
-be kept accurate as they evolve, and carries no metadata header.
+This README and [`INDEX.md`](INDEX.md) are the two live documents in the tree.
+This one states the rules and must be kept accurate as they evolve; the index
+lists every archived document. Neither carries a metadata header.
 
 ## Rules
 
@@ -82,292 +83,32 @@ add these keys at the top of that block instead of adding a second block.
 
 ## Index
 
-One line per archived document; each document's header carries the fuller
-`reason`. When you archive a document, add its line here.
+[`INDEX.md`](INDEX.md) lists every archived document, one line each, grouped by
+what kind of record it is. When you archive a document, or create one here,
+add its line there.
 
-### Audits and reports
+Two constraints on that file are worth knowing before you edit it, because a
+check enforces both and neither is guessable from looking at it:
 
-- [estuary-source-migration-2026-08-04.md](packages/patterns/lunch-poll/estuary-source-migration-2026-08-04.md)
-  — rehearsal and live `setsrc` moving the Estuary lunch poll onto the mainline
-  pattern, August 2026.
-- [two-toolchain-vintage-rehearsal.md](two-toolchain-vintage-rehearsal.md)
-  — first old-toolchain vintage capture (2026-06-18 `home.tsx`): procedure,
-  capture script, and measurements, August 2026.
-- [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
-  — active-repository syntax inventory and `cf view` support snapshot, July
-  2026.
-- [cf-view-rendered-markdown-impact-2026-07.md](packages/cli/cf-view-rendered-markdown-impact-2026-07.md)
-  — source/rendered pager and Markdown feature impact report, July 2026.
-- [cf-json-argument-audit-2026-07.md](packages/cli/cf-json-argument-audit-2026-07.md)
-  — command-by-command audit of `cf --json` behavior, July 2026.
-- [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
-  ts-transformers/schema-generator documentation audit, July 2026.
-- [cfc-spec-audit.md](cfc-spec-audit.md) — the CFC spec versus the
-  packages/runner implementation, June 2026.
-- [invalid-state-representations-report.md](future-tasks/code-quality-tasks/invalid-state-representations-report.md)
-  and
-  [module-graph-import-issues-report.md](future-tasks/code-quality-tasks/module-graph-import-issues-report.md)
-  — code-quality audits, June 2025.
-- [scheduler-v2/current-system-inventory.md](specs/scheduler-v2/current-system-inventory.md)
-  — the v1 scheduler's mechanisms and their v2 dispositions, June 2026.
-- [PREEXISTING_BUGS.md](packages/patterns/PREEXISTING_BUGS.md) — pattern
-  runtime bug survey, December 2025.
-- [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
-  — why the CLI tool-result poll was replaced event-driven and why the
-  piece-start and sync bounds could not be removed at the CLI layer, July 2026.
-- [2026-07-27-session-paging-out-of-memory.md](packages/patterns/agent-sessions-debug/2026-07-27-session-paging-out-of-memory.md)
-  — paging the agent-sessions debug table exhausts the browser runtime's heap,
-  July 2026.
-- [2026-07-28-list-window-child-retention.md](packages/runner/2026-07-28-list-window-child-retention.md)
-  — why a moving list window retained every child run it started, and what the
-  fix covered, July 2026.
-- [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md)
-  — a completed transaction kept the activity of everything it read, and the
-  unbounded document cache that still exhausts a browser tab, July 2026.
-- [2026-08-04-coverage-gate-base-branch-drift.md](development/2026-08-04-coverage-gate-base-branch-drift.md)
-  — why Coverage Check failed `packages/runner` at random: the ratchet graded a
-  pull request merged with a newer `main` against an older `main` baseline,
-  August 2026.
-- [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md)
-  — why the open-argument update class went unvalidated on the repair path, and
-  the correction of an earlier measurement that named the wrong mechanism,
-  July 2026.
+- An entry is a single line, however long it runs. It is never wrapped, even
+  though every other document in this repository wraps at 80 columns.
+- The file holds nothing but its preamble, its section headings, and the
+  entries. Notes, caveats, and explanations go in this README instead.
 
-### Executed plans and work orders
+Both exist so that git can merge the index without a conflict. `.gitattributes`
+gives it the built-in `union` merge driver, which combines what two branches
+each added rather than stopping to ask. The driver works a line at a time, so a
+wrapped entry can lose one of its lines to an identically worded line in
+another entry, and a paragraph two branches both edit is kept twice. Restricting
+the file to one-line entries takes both failures off the table: a line either
+belongs to exactly one entry or is one of the fixed headings.
 
-- [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
-  — April 2026 package bootstrap plan and implementation checkpoint.
-- [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
-  and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
-  `cf exec` and mounted callable files.
-- [pattern-update-state-continuity.md](plans/pattern-update-state-continuity.md)
-  — the Tier 2 state-continuity gate: capture and replay machinery,
-  test-populated vintages, and value comparison, executed 2026-07/08. Records
-  the measurements that decided the design, including the ones that reversed
-  it (raw beats gzipped storage; a cross-DID restore reads fine).
-- [assertion-diagnostics.md](plans/assertion-diagnostics.md) — power-assert
-  operand reporting for pattern-test assertions, with the compile-time
-  constraints that shaped it, executed 2026-07.
-- [cfc-future-work-implementation.md](plans/cfc-future-work-implementation.md)
-  — the CFC future-work epics (clause core, exchange rules/policy,
-  observation classes, integrity floors, sqlite row-set, deployment flips),
-  executed 2026-07.
-- [pattern-verb-contract-implementation.md](plans/pattern-verb-contract-implementation.md)
-  — the verb-contract workstreams as built: the `topics` Part 1 rework, the
-  `Stream<E, R>` authoring surface, the invocation protocol with caller-supplied
-  ids and receipt readback, and the client affordances. Records the C3
-  result-schema withdrawal, the closed-world event-emission migration the update
-  gate forced, and the measurements behind each, July–August 2026.
-- [shaped-reads-implementation.md](plans/shaped-reads-implementation.md) — the
-  read-layer stages, the reasoning for ordering session-scoped invocation ids
-  ahead of anything that publishes a receipt address, and the descriptive-receipt
-  decision, August 2026.
-- [retiring-llm-tool-call-deadlines.md](development/proposals/retiring-llm-tool-call-deadlines.md)
-  — replacing the LLM tool-call deadline with a run-scoped quiescence barrier,
-  and narrowing the dialog message-drop heuristic the deadline's argument did
-  not reach, executed 2026-07.
-- [STANDARD_DECORATORS_MIGRATION_PLAN.md](development/STANDARD_DECORATORS_MIGRATION_PLAN.md)
-  — the cutover to standard decorators.
-- [content-addressed-action-identity-implementation-plan.md](specs/content-addressed-action-identity-implementation-plan.md)
-  — the action-identity migration.
-- [module-loading-implementation-plan.md](specs/module-loading-implementation-plan.md)
-  — the ESM module-record loader rollout.
-- [pattern-id-retirement.md](specs/pattern-id-retirement.md) — retiring
-  pattern ids (work orders W0–W4).
-- [scheduler-v2/migration-plan.md](specs/scheduler-v2/migration-plan.md) — the
-  v1→v2 scheduler migration phases, as executed (#4288).
-- [scheduler-v2/implementation/00-README.md](specs/scheduler-v2/implementation/00-README.md)
-  — the scheduler-v2 work-order index and reading order.
-- [01-phase0-remove-push-mode.md](specs/scheduler-v2/implementation/01-phase0-remove-push-mode.md)
-  — scheduler-v2 work order: remove push mode.
-- [02-phaseE0-event-identity.md](specs/scheduler-v2/implementation/02-phaseE0-event-identity.md)
-  — scheduler-v2 work order: event identity and rejection taxonomy.
-- [03-phaseE1-speculation-lineage.md](specs/scheduler-v2/implementation/03-phaseE1-speculation-lineage.md)
-  — scheduler-v2 work order: speculation lineage.
-- [04-phaseE2-receipts.md](specs/scheduler-v2/implementation/04-phaseE2-receipts.md)
-  — scheduler-v2 work order: receipts as result cells.
-- [05-phase1-static-write-surface.md](specs/scheduler-v2/implementation/05-phase1-static-write-surface.md)
-  — scheduler-v2 work order: static write surface.
-- [06-phase2-tx-identity.md](specs/scheduler-v2/implementation/06-phase2-tx-identity.md)
-  — scheduler-v2 work order: transaction-carried identity.
-- [07-phase3-cutover.md](specs/scheduler-v2/implementation/07-phase3-cutover.md)
-  — scheduler-v2 work order: node records, liveness, the new settle pass (the
-  cutover).
-- [08-later-phases.md](specs/scheduler-v2/implementation/08-later-phases.md) —
-  scheduler-v2 work order: post-cutover phases 4, 5, 7.
-- [PROGRESS.md](specs/scheduler-v2/implementation/PROGRESS.md) — the
-  scheduler-v2 implementation progress log.
-- [persistent-scheduler-state/implementation_notes.md](specs/persistent-scheduler-state/implementation_notes.md)
-  — implementation journal for the persistent scheduler-state rollout.
-- [system-pattern-updates-implementation-plan.md](specs/pattern-imports/system-pattern-updates-implementation-plan.md)
-  — system-pattern auto-update (M0 toolshed `?identity`, M1 version gate, M2
-  `patternSource`, M3 in-place swap, M4 flag rollout), shipped 2026-07.
-- [sqlite-builtin/implementation-plan.md](specs/sqlite-builtin/implementation-plan.md)
-  — the SQLite builtin workstreams, as built.
-- [PLANNED_FIXES.md](packages/cli/PLANNED_FIXES.md) — cli fix batches.
-- [AUTOSAVE-PLAN.md](packages/ui/src/v2/components/cf-file-download/AUTOSAVE-PLAN.md)
-  — cf-file-download auto-save.
+`deno task check-docs-history-index` checks the format, that every entry points
+at something that exists, that no document is indexed twice, and that no
+document in the tree is missing from the index. It runs in continuous
+integration. An entry may point at a directory, which covers everything
+beneath it — that is how the retired tutorial site and the server-side-execution
+learning run are each carried by one line.
 
-### Shipped or superseded designs and decision records
-
-- [action-id-per-instance-decision.md](specs/action-id-per-instance-decision.md)
-  — per-instance action identity.
-- [per-doc-rehydration-persisted-form.md](specs/scheduler-v2/per-doc-rehydration-persisted-form.md)
-  — the per-doc restore design for the deleted persisted-observation form.
-- [persistent-scheduler-state.md](specs/persistent-scheduler-state.md) — the
-  persisted scheduler-observation form, reduced to the v2 basis index by
-  server-execution v2 stage C.
-- [cfc-render-membership-lookup.md](specs/cfc-render-membership-lookup.md) —
-  render-time space-membership lookup.
-- [cfc-s16-default-transition-design.md](specs/cfc-s16-default-transition-design.md)
-  — S16 default-label transition.
-- [cfc-trusted-agent-tool-integrity.md](specs/cfc-trusted-agent-tool-integrity.md)
-  — trusted-agent tool-input integrity scoping.
-- [compilation-cache.md](specs/compilation-cache.md) — the removed AMD
-  compilation cache.
-- [incremental-observation-adoption.md](specs/scheduler-v2/incremental-observation-adoption.md)
-  — the subscription-carried observation adoption the stage-C reduction
-  deleted.
-- [module-loading-amd-bundle-identity.md](specs/module-loading-amd-bundle-identity.md)
-  — the removed AMD bundle pipeline and the bundle-grained identity defect that
-  motivated content-addressed module loading.
-- [module-loading-verifier-and-engine-design.md](specs/module-loading-verifier-and-engine-design.md)
-  — verifier port and engine integration.
-- [capability-wrappers.md](specs/pattern-construction/capability-wrappers.md)
-  — superseded pattern-construction exploration.
-- [pattern-integration-tests.md](specs/pattern-construction/pattern-integration-tests.md)
-  — early harness design the shipped harness diverged from.
-- [pull-based-scheduler/README.md](specs/pull-based-scheduler/README.md) —
-  redirect stub for the retired v1 scheduler behavior reference, superseded by
-  scheduler-v2.
-- [federation-pr5-design.md](development/federation-pr5-design.md) — earlier
-  federation auth design, replaced by memory-v2 auth.
-- [DESIGN_ifelse_schema_injection.md](packages/ts-transformers/DESIGN_ifelse_schema_injection.md),
-  [LITERAL_WIDENING_DESIGN.md](packages/ts-transformers/docs/LITERAL_WIDENING_DESIGN.md),
-  and
-  [SAFE_CONTEXT_TRANSFORMS_DESIGN.md](packages/ts-transformers/docs/SAFE_CONTEXT_TRANSFORMS_DESIGN.md)
-  — transformer design records.
-- [MIGRATION_SUMMARY.md](packages/ui/src/v2/MIGRATION_SUMMARY.md) — the ui v2
-  migration.
-- [CELL_CONTROLLER_DESIGN.md](packages/ui/src/v2/core/CELL_CONTROLLER_DESIGN.md)
-  — the pitch for the ui v2 CellController, July 2025. The controller shipped;
-  the transaction strategies, change grouping, batching, validation and
-  undo/redo it proposes did not.
-- [unified-storage-stack.md](future-tasks/unified-storage-stack.md) —
-  DocImpl-era storage-unification plan, superseded by the v2 stack.
-- [hierarchical-params-spec.md](packages/ts-transformers/docs/hierarchical-params-spec.md)
-  — hierarchical-capture implementation rationale, superseded by the behavior
-  spec.
-- [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) —
-  reviewer entrypoint for the shipped PR-3154 transformer architecture.
-
-### Investigations, journals, and working notes
-
-- [2026-08-lunch-poll-join-name-fill-timeout.md](development/debugging/2026-08-lunch-poll-join-name-fill-timeout.md)
-  — why the lunch poll's intermittent `#lp-join-name` fill timeout is not a
-  fill-helper problem: the field never renders because the "Continue as guest"
-  handler's write does not reach the rendered view, and settling the view before
-  the fill does not change it. Includes a local reproduction, August 2026.
-- [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
-  — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
-- [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
-  — verification that the December 2025 survey's Bug 3 (Counter values
-  rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`)
-  does not reproduce; the dynamically-compiled render path resolves reactive and
-  computed values correctly, July 2026.
-- [reverse-invalidation-deadlock.md](packages/fuse/reverse-invalidation-deadlock.md)
-  — root cause of the FUSE daemon hang that flaked the CLI FUSE integration
-  suite: synchronous reverse invalidation deadlocking the request thread,
-  July 2026.
-- [2026-07-fuse-t-integration-flake-accumulated-nfs-state.md](packages/fuse/2026-07-fuse-t-integration-flake-accumulated-nfs-state.md)
-  — a FUSE-T integration-suite failure that looked like a #4811 daemon
-  regression but was accumulated stale kernel NFS mounts from SIGKILL churn;
-  directory visibility works via mtime plus the NFS attribute-cache bound, not
-  `notify_inval_entry`, July 2026.
-- [settle-wave-2026-03-findings.md](development/debugging/settle-wave-2026-03-findings.md)
-  — March 2026 settle-wave measurements.
-- [2026-07-cf-profile-capture-exit-130.md](development/debugging/2026-07-cf-profile-capture-exit-130.md)
-  — root cause of the cf-profile capture exit-130 CI flake, July 2026.
-- [2026-07-group-chat-idempotency-false-positive.md](development/debugging/2026-07-group-chat-idempotency-false-positive.md)
-  — root cause of the group-chat idempotency false-positive CI flake, July 2026.
-- [default-app-note-create.md](development/performance/default-app-note-create.md),
-  [two-browsers-cold-start.md](development/performance/two-browsers-cold-start.md),
-  and
-  [pattern-integration-compile-bound.md](development/performance/pattern-integration-compile-bound.md)
-  — June 2026 profiling snapshots.
-- [2026-07-pattern-capability-ci-duration-increase.md](development/performance/2026-07-pattern-capability-ci-duration-increase.md)
-  — root cause of the July 2026 labs CI duration increase: two unsharded
-  pattern time-capability sweeps, especially the 56-pattern sweep on shard 3.
-- [2026-07-ci-duration-profile.md](development/performance/2026-07-ci-duration-profile.md)
-  — July 2026 Deno Workflow profile, including compile-cache validation,
-  duplicate work, workspace shard balance, and follow-up experiments.
-- [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
-  — binary artifact file and byte transfer snapshot before the per-binary
-  workflow split, July 2026.
-- [2026-08-scheduler-liveness-maintenance.md](development/performance/2026-08-scheduler-liveness-maintenance.md)
-  — why deriving demand refcounts from the roots on every change cost a growing
-  list cubic work, and what incremental maintenance measured instead, August
-  2026.
-- [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
-  — why a rename-only pull request owed coverage debt: a wall-clock-guarded
-  diagnostic and a shard re-partition each moved the `packages/runner`
-  uncovered-line count with no change to that package, July 2026.
-- [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
-  field journal from the first scoped-cell patterns.
-- [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)
-  — convergence-investigation evidence.
-- [cellset-lww-context.md](specs/memory-v2/cellset-lww-context.md) — working
-  context for the cellset LWW fix.
-- [scheduler-v2/addenda/00-README.md](specs/scheduler-v2/addenda/00-README.md)
-  — index of the scheduler-v2 performance-investigation addenda, June–July
-  2026.
-- [01-headline-and-node-multiplication.md](specs/scheduler-v2/addenda/01-headline-and-node-multiplication.md)
-  — scheduler-v2 addendum: the headline A/B regression root-caused to node
-  multiplication.
-- [02-multi-runtime-amplification-and-commit-cost.md](specs/scheduler-v2/addenda/02-multi-runtime-amplification-and-commit-cost.md)
-  — scheduler-v2 addendum: multi-runtime commit/push amplification and
-  per-commit cost.
-- [03-transaction-census.md](specs/scheduler-v2/addenda/03-transaction-census.md)
-  — scheduler-v2 addendum: census of what the extra commits are.
-- [04-refuted-free-fixes.md](specs/scheduler-v2/addenda/04-refuted-free-fixes.md)
-  — scheduler-v2 addendum: refuted free fixes (declared reads, asCell
-  read-depth).
-- [05-serialized-scheduler-state-is-reload-only.md](specs/scheduler-v2/addenda/05-serialized-scheduler-state-is-reload-only.md)
-  — scheduler-v2 addendum: serialized scheduler state is reload-only, not a
-  version skip.
-- [06-cross-runtime-adoption-what-would-be-needed.md](specs/scheduler-v2/addenda/06-cross-runtime-adoption-what-would-be-needed.md)
-  — scheduler-v2 addendum: what cross-runtime derivation adoption would need.
-- [07-pull-side-gate-no-go.md](specs/scheduler-v2/addenda/07-pull-side-gate-no-go.md)
-  — scheduler-v2 addendum: the pull-side gate measured as a structural no-go.
-- [08-effect-defer-neutral.md](specs/scheduler-v2/addenda/08-effect-defer-neutral.md)
-  — scheduler-v2 addendum: per-wave effect coalescing measured neutral.
-- [09-remediation-direction.md](specs/scheduler-v2/addenda/09-remediation-direction.md)
-  — scheduler-v2 addendum: remediation direction — coalesce/dedup, not
-  version-skip.
-- [server-side-execution/](specs/server-side-execution/README.md) — the v1
-  server-primary execution learning run (2026-07-07 → 2026-08-02): original
-  design, implementation plan, context-lattice claims, client-passivity
-  design, claim-deletion scoping, and the orchestration log carrying the
-  full lesson record. Superseded by the live
-  [server-primary execution v2 spec](../specs/server-side-execution/README.md).
-- [OPTIMIZATION-JOURNAL.md](packages/runner/test/traverse-replay/OPTIMIZATION-JOURNAL.md)
-  — traverse optimization log.
-- [SCHEMA_INJECTION_NOTES.md](packages/ts-transformers/SCHEMA_INJECTION_NOTES.md),
-  [TEST_PLAN_schema_injection.md](packages/ts-transformers/TEST_PLAN_schema_injection.md),
-  [FALLBACK_POLICY_EXAMPLES.md](packages/ts-transformers/docs/FALLBACK_POLICY_EXAMPLES.md),
-  and
-  [outstanding-questions-for-manager.md](packages/ts-transformers/docs/outstanding-questions-for-manager.md)
-  — schema-injection working notes.
-- [parking-coordinator/summary.md](packages/patterns/factory-outputs/parking-coordinator/summary.md)
-  — factory-run summary.
-- [DRAG-DROP-MULTI-TAB-FIX.md](packages/patterns/record/design/DRAG-DROP-MULTI-TAB-FIX.md)
-  and
-  [EXTRACTION-IMPROVEMENTS.md](packages/patterns/record/design/EXTRACTION-IMPROVEMENTS.md)
-  — record-pattern investigation and improvement notes.
-
-### The retired tutorial site
-
-- [tutorials/](tutorials/index.md) — the complete MyST source of the retired
-  docs.commontools.dev site: nine chapters, example code and images, and the
-  build scaffolding. Its state chapters and LLM tour teach the retired
-  `cell()` API.
+A directory covered that way still needs a way in for a reader, so its entry
+links the document to start from as well.

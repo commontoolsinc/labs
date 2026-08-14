@@ -417,6 +417,31 @@ sentences, one recorded acceptance, three owed entries):
   (inline flushing already made in-process ordering safe). (A SECOND
   recorded acceptance — Phase 2's R4 written-subtree narrowing — is
   recorded in the Phase-2 independent-review delta below.)
+- FIVE MORE recorded rows ride stage G's 2026-08-12 review round
+  (ALL RATIFIED by the owner 2026-08-13, alongside the §4
+  per-(key, result target) amendment):
+  (1) per-target idempotency keys make the OFF arm's tx-level
+  outbox dedupe (`outboxIdempotencyKeys`) finer — two distinct
+  nodes enqueueing byte-identical inputs in ONE transaction now
+  BOTH flush where the second was silently dropped (reachable
+  only when one tx runs multiple actions; a bug-fix delta);
+  (2) OFF-arm fetch writebacks whose commit fails terminally now
+  REJECT the tracked-work promise (previously silent), and the
+  error-shaped-result conversion applies OFF-arm too;
+  (3) tryClaimMutex marker placement is OFF-inert (a WeakMap
+  write plus a destination-gated authoritative call) — listed
+  for completeness;
+  (4) the authoritative-write completion path (container
+  assertions + whole-doc set/delete) is gated on the serving
+  posture — OFF byte-identical — with ONE ratified ON-arm
+  widening: a serving completion's whole-doc write of a builtin
+  `internal` doc can stomp a concurrent CLIENT replica's mutex
+  claim fields (requestId/lastActivity); it self-heals via the
+  5s staleness bound and is strictly better than the wedged
+  completion it replaces;
+  (5) llm hit-observer gating shifts OFF-arm counters only
+  (settled re-evaluations now count as hits; no behavioral
+  consumer today).
 - FP6's register row (field-provenance.md): the label basis is
   STRUCTURAL, not frozen (RULED 2026-08-05) — tightening mid-flight
   yields the stricter label, loosening matches the OFF arm's

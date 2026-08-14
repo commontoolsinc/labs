@@ -26,14 +26,14 @@ const __cfLift_1 = __cfHelpers.lift<{
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: cell-get-binding-autowrap
-// Verifies: a bare `cell.get()` that feeds a computation at a variable-initializer
-//   binding is auto-wrapped into a lift, the same way it is in a JSX expression.
-//   Previously the validator rejected top-level cell .get() with
-//   `pattern-context:get-call`; that restriction was legacy (the rewriter already
-//   lowers the computation). A bare *terminal* `cell.get()` (no enclosing
-//   computation) is still rejected elsewhere, since it has no lowerable site.
-// Context: enabled migrating `cell.get()`-wrapped reads to drop the wrapper and
-//   write a plain expression even when the input is a Writable/Cell.
+// Verifies: a `cell.get()` that feeds a chained computation at a
+//   variable-initializer binding is auto-wrapped into a lift, the same way it is
+//   in a JSX expression. A read with no lowerable container site at all — a bare
+//   `cell.get();` statement — is still rejected with `pattern-context:get-call`.
+// Context: lets an author drop a `computed()` wrapper and write the plain
+//   expression even when the input is a Writable/Cell. The terminal-read
+//   spellings of the same binding are covered by
+//   `cell-get-terminal-binding-autowrap`.
 export default pattern((__cf_pattern_input) => {
     const layout = __cf_pattern_input.key("layout");
     const len = __cfLift_1({ layout: layout }).for("len", true);

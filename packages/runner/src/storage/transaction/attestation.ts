@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   type FabricPlainObject,
   type FabricValue,
@@ -194,13 +194,13 @@ export const resolve = (
 
   while (++at < path.length) {
     const key = path[at];
-    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, so descending
+    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, so descending
     // into one lands in this arm and reads `undefined` instead of reaching
     // the `TypeMismatchError` arm below the way a scalar does. The caller
     // then treats the slot as absent-but-writable, and a path into a
     // `FabricInstance`'s codec contents reads as missing rather than being
     // refused or resolved.
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       const record = value as FabricPlainObject;
       value = Object.hasOwn(record, key) ? record[key] : undefined;
     } else {

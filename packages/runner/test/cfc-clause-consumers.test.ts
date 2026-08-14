@@ -28,7 +28,8 @@ const B = {
 
 const PROMPT_RISK = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
-  kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+  kind:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
 };
 
 // An instruction-inert schema: an enum of primitives. Sanitizing it strips

@@ -8,7 +8,7 @@
  * composer wrappers, whose silent guards are correct behavior (an empty draft
  * is a non-event in a composer, not a headless mutation).
  */
-import { action, assert } from "commonfabric";
+import { action, assert, TESTS } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics from "./main.tsx";
 
@@ -100,7 +100,7 @@ export default pattern(() => {
     // verb quietly reverting to a silent early-return fails this suite; the
     // no-write assertions then prove the throw also blocked the write.
     expectRuntimeErrors: 9,
-    tests: [
+    [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
       { action: action_add_blank_title },

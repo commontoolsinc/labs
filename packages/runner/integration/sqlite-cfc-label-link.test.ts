@@ -14,8 +14,6 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
 
-const TIMEOUT_MS = 180000;
-
 async function runTest(base: URL) {
   const account = await Identity.fromPassphrase(
     "sqlite-cfc-label-link " + crypto.randomUUID(),
@@ -130,17 +128,9 @@ Deno.test({
   fn: async () => {
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`)),
-        TIMEOUT_MS,
-      );
-    });
     try {
-      await Promise.race([runTest(base), timeoutPromise]);
+      await runTest(base);
     } finally {
-      clearTimeout(timeoutHandle!);
       await server.shutdown();
     }
   },

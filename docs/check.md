@@ -43,6 +43,32 @@ Pick whichever applies:
   identifier to `others` in `check.vocabulary.json`.
 - The snippet is illustrative pseudocode (placeholders, `...`, a wrong-then-right
   pair) — mark it `// Shown for illustration only.`
+- The snippet is a verbatim citation of repository source, in a document whose
+  purpose is to quote source — see the next section.
+
+## Documents that quote source verbatim
+
+A few documents exist to show what the repository actually contains: they cite
+real declarations from real files so a reader can go check them. Their blocks
+are excerpts, not examples. An excerpt of a function body has no imports and no
+surrounding scope, so it cannot compile in isolation and no context marker can
+rescue it. Such a document opts out as a whole by putting
+
+```text
+<!-- check-docs: excerpts -->
+```
+
+on its own line, anywhere in the file.
+
+This is not a lighter form of `// Shown for illustration only.`, and it is not
+counted by the TODO below. An illustrative block has no source of truth and can
+drift into fiction unnoticed; an excerpt has one named file behind it and is
+wrong the moment it stops matching that file. The failure mode is real but
+different, and the fix is different too — reread the source, not the scaffold.
+
+Use the declaration only when a document's blocks really are citations. If a
+block is your own example that merely needs surrounding scope, give it a context
+marker instead.
 
 ## TODO: drive the skipped count to zero
 

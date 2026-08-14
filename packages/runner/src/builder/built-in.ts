@@ -33,7 +33,7 @@ import type {
   WishState,
 } from "commonfabric";
 import { h } from "@commonfabric/html";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isCell } from "../cell.ts";
 import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
 import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
@@ -171,6 +171,16 @@ export const fetchJson = createNodeFactory({
     result?: T;
   }>,
 ) => Reactive<{ pending: boolean; result: T; error?: unknown }>;
+
+export const cellFromUrl = createNodeFactory({
+  type: "ref",
+  implementation: "cellFromUrl",
+}) as (
+  params: FactoryInput<{
+    url: string;
+    hosts?: string[];
+  }>,
+) => Reactive<{ pending: boolean; cell?: unknown }>;
 
 export const fetchJsonUnchecked = createNodeFactory({
   type: "ref",
@@ -450,7 +460,7 @@ export function wish<T = unknown>(
   let param;
   let resultSchema;
 
-  if (schema !== undefined && isRecord(target) && !isCell(target)) {
+  if (schema !== undefined && isObjectOrArray(target) && !isCell(target)) {
     param = {
       schema,
       ...target, // Pass in after, so schema here overrides any schema in target

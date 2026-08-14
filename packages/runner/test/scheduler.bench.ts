@@ -15,6 +15,7 @@ import {
   sortAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { benchDiagnostic } from "./bench-diagnostics.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -658,9 +659,8 @@ Deno.bench(
     await tx.commit();
     const commitTime = performance.now() - start;
 
-    // Log commit time (won't show in bench output but useful for debugging)
     if (commitTime > 100 && Deno.env.get("BENCH_DIAGNOSTICS") === "1") {
-      console.error(`Commit took ${commitTime.toFixed(1)}ms`);
+      benchDiagnostic(`Commit took ${commitTime.toFixed(1)}ms`);
     }
 
     await runtime.dispose();

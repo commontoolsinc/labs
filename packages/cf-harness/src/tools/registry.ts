@@ -5,6 +5,7 @@ import { delegateTaskTool } from "./delegate-task.ts";
 import { editFileTool } from "./edit-file.ts";
 import { readFileTool } from "./read-file.ts";
 import { readSkillResourceTool } from "./read-skill-resource.ts";
+import { runPatternTool } from "./run-pattern.ts";
 import { runSkillScriptTool } from "./run-skill-script.ts";
 import { webFetchTool } from "./web-fetch.ts";
 import { viewImageTool } from "./view-image.ts";
@@ -22,6 +23,7 @@ export const BUILTIN_TOOLS = [
   editFileTool,
   writeFileTool,
   delegateTaskTool,
+  runPatternTool,
 ] as const;
 
 export const BUILTIN_TOOL_REGISTRY = new Map<

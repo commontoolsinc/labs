@@ -1,7 +1,9 @@
-// What `formatTree()` does with a `FabricSpecialObject`. Such a value keeps
-// its state in private fields and has zero enumerable own properties, so
-// `JSON.stringify()` renders one as `{}` -- silently, since it does not throw
-// on one and the `catch` around it never fires. Both arms are named instead.
+/**
+ * What `formatTree()` does with a `FabricSpecialObject`. Such a value keeps
+ * its state in private fields and has zero enumerable own properties, so
+ * `JSON.stringify()` renders one as `{}` -- silently, since it does not throw
+ * on one and the `catch` around it never fires. Both arms are named instead.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

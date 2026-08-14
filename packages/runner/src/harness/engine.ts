@@ -53,6 +53,7 @@ import {
   computeFabricModuleIdentities,
   FABRIC_MOUNT_ROOT,
   type FabricMount,
+  sourceRootSpecifier,
 } from "../sandbox/module-record-compiler.ts";
 import {
   composeBundleSourceMap,
@@ -148,6 +149,65 @@ export class EngineProgramResolver extends InMemoryProgram {
   }
 }
 
+class RootedProgramResolver implements ProgramResolver {
+  constructor(
+    private readonly inner: ProgramResolver,
+    private readonly root: string,
+  ) {}
+
+  async main(): Promise<Source> {
+    const source = await this.inner.resolveSource(this.root);
+    if (source === undefined) {
+      throw new Error(`Source root "${this.root}" could not be resolved.`);
+    }
+    return source;
+  }
+
+  resolveSource(identifier: string): Promise<Source | undefined> {
+    return this.inner.resolveSource(identifier);
+  }
+}
+
+function reachableModuleSpecifiers(
+  records: ReadonlyMap<string, VirtualModuleRecord>,
+  mainSpecifier: string,
+): Set<string> {
+  const reachable = new Set<string>();
+  const pending = [mainSpecifier];
+  while (pending.length > 0) {
+    const specifier = pending.pop()!;
+    if (reachable.has(specifier)) continue;
+    reachable.add(specifier);
+    const record = records.get(specifier);
+    if (record === undefined) continue;
+    for (const importSpecifier of record.imports) {
+      const resolutions = record.resolutions;
+      pending.push(
+        resolutions !== undefined &&
+          Object.hasOwn(resolutions, importSpecifier)
+          ? resolutions[importSpecifier]
+          : importSpecifier,
+      );
+    }
+  }
+  return reachable;
+}
+
+function canonicalSourceRoots(
+  main: string,
+  roots: readonly string[] | undefined,
+): string[] {
+  return [...new Set(roots ?? [])]
+    .filter((root) => root !== main)
+    .sort();
+}
+
+function persistableSourceFiles(files: readonly Source[]): Source[] {
+  return files.filter((file) =>
+    !file.name.endsWith(".d.ts") || file.name.startsWith("/")
+  );
+}
+
 interface RuntimeInternals {
   runtime: SESRuntime;
   runtimeExports: Record<string, any> | undefined;
@@ -233,6 +293,34 @@ export class Engine extends EventTarget {
     }
   }
 
+  private async resolveWithSourceRoots(
+    resolver: ProgramResolver,
+    sourceRoots: readonly string[],
+  ): Promise<RuntimeProgram> {
+    const programs = [await this.resolve(resolver)];
+    for (const root of new Set(sourceRoots)) {
+      if (root === programs[0].main) continue;
+      programs.push(
+        await this.resolve(new RootedProgramResolver(resolver, root)),
+      );
+    }
+
+    const files = new Map<string, Source>();
+    for (const program of programs) {
+      for (const file of program.files) {
+        const existing = files.get(file.name);
+        if (existing !== undefined && existing.contents !== file.contents) {
+          throw new Error(
+            `Resolved source roots produced conflicting files named ` +
+              `"${file.name}".`,
+          );
+        }
+        files.set(file.name, file);
+      }
+    }
+    return { main: programs[0].main, files: [...files.values()] };
+  }
+
   /**
    * Compile a program to a verified ESM module-record graph. Runs the program
    * resolution + CF transformer pipeline, emits per-module CommonJS via
@@ -261,6 +349,10 @@ export class Engine extends EventTarget {
       const id = options.identifier ?? computeId(program);
       assertNoReservedFabricPaths(program.files);
       const mappedProgram = pretransformProgramForModules(program, id);
+      const sourceRoots = canonicalSourceRoots(
+        mappedProgram.main,
+        mappedProgram.sourceRoots,
+      );
       assertFabricImportsHaveSpace(mappedProgram.files, options);
       const engineResolver = new EngineProgramResolver(
         mappedProgram,
@@ -274,7 +366,10 @@ export class Engine extends EventTarget {
         })
         : undefined;
       const resolver = fabricResolver ?? engineResolver;
-      const resolvedProgram = await this.resolve(resolver);
+      const resolvedProgram = await this.resolveWithSourceRoots(
+        resolver,
+        sourceRoots,
+      );
       const mounts = fabricResolver?.mounts() ?? [];
       const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
       const resolvedPins = fabricResolver?.resolvedPins() ?? [];
@@ -313,8 +408,8 @@ export class Engine extends EventTarget {
           ],
         },
       );
-      const pristineModuleFiles = pristineModuleSources(
-        moduleFiles,
+      const pristineSourceFiles = pristineModuleSources(
+        persistableSourceFiles(resolvedFiles),
         authoredByStoredName,
         (name) => storedFilenameFor(name, id, mounts),
       );
@@ -323,10 +418,18 @@ export class Engine extends EventTarget {
       // (cheap, no TS compile) so the cache-hit check and the write-back
       // descriptors agree with the graph's `cf:module/<hash>` specifiers.
       const identityByPath = computeFabricModuleIdentities(
-        pristineModuleFiles,
+        pristineSourceFiles,
         mounts,
         {
           idPrefix: `/${id}`,
+          ...(sourceRoots.length
+            ? {
+              sourcePackage: {
+                entryPath: mappedProgram.main,
+                rootPaths: sourceRoots,
+              },
+            }
+            : {}),
         },
       );
       const entryIdentity = identityByPath.get(mappedProgram.main)!;
@@ -341,7 +444,11 @@ export class Engine extends EventTarget {
         (options.precompiledModulesFor
           ? await options.precompiledModulesFor({
             entryIdentity,
-            identities: [...new Set(identityByPath.values())],
+            identities: [
+              ...new Set(
+                moduleFiles.map((file) => identityByPath.get(file.name)!),
+              ),
+            ],
           })
           : undefined);
       const cached = patternCoverage !== undefined &&
@@ -545,12 +652,14 @@ export class Engine extends EventTarget {
       // pristine module set so `source` and the edges are over authored bytes.
       const importEdges = resolveModuleImports({
         main: "",
-        files: pristineModuleFiles,
+        files: pristineSourceFiles,
       });
-      const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
+      const modules: CacheableModule[] = pristineSourceFiles.map((file) => {
         const identity = identityByPath.get(file.name)!;
         const sourceMap = precompiledSourceMaps.get(file.name);
-        const patternCoverageSpans = patternCoverage === undefined
+        const emittedBody = precompiledBodies.get(file.name);
+        const patternCoverageSpans = patternCoverage === undefined ||
+            emittedBody === undefined
           ? undefined
           : options.patternCoverage?.spansForFile(
             coverageFilenameFor(file.name, id, mounts),
@@ -561,15 +670,33 @@ export class Engine extends EventTarget {
           identityByPath,
           specifierAliases,
         );
-        const policyManifests = validatePolicyManifestsForModule(
-          identity,
-          precompiledPolicyManifests.get(file.name),
-        );
+        if (file.name === mappedProgram.main) {
+          for (const rootPath of sourceRoots) {
+            const rootIdentity = identityByPath.get(rootPath);
+            if (rootIdentity === undefined) {
+              throw new Error(
+                `Source root '${rootPath}' has no module identity.`,
+              );
+            }
+            imports.push({
+              specifier: sourceRootSpecifier(
+                storedFilenameFor(rootPath, id, mounts),
+              ),
+              targetIdentity: rootIdentity,
+            });
+          }
+        }
+        const policyManifests = emittedBody === undefined
+          ? undefined
+          : validatePolicyManifestsForModule(
+            identity,
+            precompiledPolicyManifests.get(file.name),
+          );
         return {
           identity,
           filename: storedFilenameFor(file.name, id, mounts),
           source: file.contents,
-          js: precompiledBodies.get(file.name)!,
+          js: emittedBody ?? "",
           ...(sourceMap === undefined ? {} : { sourceMap }),
           ...(patternCoverageSpans === undefined
             ? {}
@@ -641,7 +768,10 @@ export class Engine extends EventTarget {
         mapped,
         this.ctRuntime.staticCache,
       );
-      const resolved = await this.resolve(resolver);
+      const resolved = await this.resolveWithSourceRoots(
+        resolver,
+        mapped.sourceRoots ?? [],
+      );
       for (const file of uniqueSourcesByName(resolved.files)) {
         if (!unioned.has(file.name)) unioned.set(file.name, file);
       }
@@ -737,6 +867,7 @@ export class Engine extends EventTarget {
     options: {
       fabricImports?: TypeScriptHarnessProcessOptions["fabricImports"];
       patternCoverage?: PatternCoverageCollector;
+      sourceRoots?: readonly string[];
     } = {},
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }> {
     const { compiler } = await this.getCompilerInternals();
@@ -759,7 +890,14 @@ export class Engine extends EventTarget {
     const injectedInput = transformInjectHelperModule({
       main: entryFilename,
       files: resolvedFiles,
+      ...(options.sourceRoots === undefined
+        ? {}
+        : { sourceRoots: [...options.sourceRoots] }),
     }, { tolerateStoredLegacyEnvelope: true });
+    const sourceRoots = canonicalSourceRoots(
+      entryFilename,
+      injectedInput.sourceRoots,
+    );
     const engineResolver = new EngineProgramResolver(
       { main: entryFilename, files: injectedInput.files },
       this.ctRuntime.staticCache,
@@ -772,7 +910,10 @@ export class Engine extends EventTarget {
       })
       : undefined;
     const resolver = fabricResolver ?? engineResolver;
-    const resolvedProgram = await this.resolve(resolver);
+    const resolvedProgram = await this.resolveWithSourceRoots(
+      resolver,
+      sourceRoots,
+    );
     const mounts = fabricResolver?.mounts() ?? [];
     const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
     const resolvedProgramFiles = uniqueSourcesByName(resolvedProgram.files);
@@ -793,14 +934,22 @@ export class Engine extends EventTarget {
     const authoredByStoredName = new Map(
       resolvedFiles.map((f) => [f.name, f.contents]),
     );
-    const pristineModuleFiles = pristineModuleSources(
-      moduleFiles,
+    const pristineSourceFiles = pristineModuleSources(
+      persistableSourceFiles(resolvedProgramFiles),
       authoredByStoredName,
       (name) => storedFilenameFor(name, undefined, mounts),
     );
     const identityByPath = computeFabricModuleIdentities(
-      pristineModuleFiles,
+      pristineSourceFiles,
       mounts,
+      sourceRoots.length
+        ? {
+          sourcePackage: {
+            entryPath: entryFilename,
+            rootPaths: sourceRoots,
+          },
+        }
+        : {},
     );
 
     // Instrumenting does not disturb the identity check below: identity hashes
@@ -811,7 +960,7 @@ export class Engine extends EventTarget {
       {
         id: undefined,
         mounts,
-        sourceFiles: pristineModuleFiles,
+        sourceFiles: pristineSourceFiles,
       },
     );
 
@@ -849,12 +998,13 @@ export class Engine extends EventTarget {
 
     const importEdges = resolveModuleImports({
       main: "",
-      files: pristineModuleFiles,
+      files: pristineSourceFiles,
     });
-    const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
-      const out = emitted.get(file.name)!;
+    const modules: CacheableModule[] = pristineSourceFiles.map((file) => {
+      const out = emitted.get(file.name);
       const identity = identityByPath.get(file.name)!;
-      const patternCoverageSpans = patternCoverage === undefined
+      const patternCoverageSpans = patternCoverage === undefined ||
+          out === undefined
         ? undefined
         : options.patternCoverage?.spansForFile(
           coverageFilenameFor(file.name, undefined, mounts),
@@ -865,16 +1015,31 @@ export class Engine extends EventTarget {
         identityByPath,
         specifierAliases,
       );
-      const policyManifests = validatePolicyManifestsForModule(
-        identity,
-        out.policyManifests,
-      );
+      if (file.name === entryFilename) {
+        for (const rootPath of sourceRoots) {
+          const rootIdentity = identityByPath.get(rootPath);
+          if (rootIdentity === undefined) {
+            throw new Error(
+              `Source root '${rootPath}' has no module identity.`,
+            );
+          }
+          imports.push({
+            specifier: sourceRootSpecifier(
+              storedFilenameFor(rootPath, undefined, mounts),
+            ),
+            targetIdentity: rootIdentity,
+          });
+        }
+      }
+      const policyManifests = out === undefined
+        ? undefined
+        : validatePolicyManifestsForModule(identity, out.policyManifests);
       return {
         identity,
         filename: storedFilenameFor(file.name, undefined, mounts),
         source: file.contents,
-        js: out.js,
-        ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        js: out?.js ?? "",
+        ...(out?.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
         ...(patternCoverageSpans === undefined ? {} : { patternCoverageSpans }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
         imports,
@@ -915,14 +1080,6 @@ export class Engine extends EventTarget {
     return this.evaluateRecordGraph(id, graph, mainSpecifier, program.files);
   }
 
-  /**
-   * Evaluate a verified ESM record graph: load it synchronously via `importNow`
-   * in a locked-down compartment whose globals are the hardened runtime globals
-   * (runtime-module records, already in the graph, supply the trusted host
-   * APIs), and return the entry namespace as `main` plus the per-module export
-   * map. The graph was security-verified at compile time, so verification is
-   * not repeated.
-   */
   /**
    * Evaluate a verified ESM record graph (public so the PatternManager can run
    * compile → cache write-back → evaluate as discrete steps). Thin wrapper over
@@ -966,6 +1123,11 @@ export class Engine extends EventTarget {
    * ({@link evaluateCachedModules}); `ctx` supplies the path/identity handling
    * that differs between them (prefixed authored paths vs prefix-free cached
    * identities). The graph is assumed already security-verified.
+   *
+   * The graph loads synchronously via `importNow` in a locked-down compartment
+   * whose globals are the hardened runtime globals (runtime-module records,
+   * already in the graph, supply the trusted host APIs). The entry namespace
+   * comes back as `main`, alongside the per-module export map.
    */
   private evaluateGraph(
     graph: CompiledModuleGraph,
@@ -1149,7 +1311,12 @@ export class Engine extends EventTarget {
       // information exists right here and was simply not written down.
       const sourcePathByIdentity = new Map<string, string>();
       const MODULE_SPECIFIER_PREFIX = "cf:module/";
+      const reachableSpecifiers = reachableModuleSpecifiers(
+        graph.records,
+        mainSpecifier,
+      );
       for (const [path, specifier] of graph.specifierByPath) {
+        if (!reachableSpecifiers.has(specifier)) continue;
         const namespace = loaded.importNow(specifier) as Exports;
         const fileName = ctx.fileNameForPath(path);
         exportMap[fileName] = namespace;
@@ -1589,10 +1756,12 @@ function validatePolicyManifestsForModule(
   });
 }
 
-function computeId(program: Program): string {
+function computeId(program: RuntimeProgram): string {
+  const sourceRoots = canonicalSourceRoots(program.main, program.sourceRoots);
   const source = [
     program.main,
-    ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
+    ...(sourceRoots.length === 0 ? [] : [{ sourceRoots }]),
+    ...persistableSourceFiles(program.files),
   ];
   return hashOf(source).toString();
 }

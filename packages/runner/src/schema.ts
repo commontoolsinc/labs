@@ -1,7 +1,11 @@
 import { AnyCellWrapping } from "@commonfabric/api";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isReadonlyObjectOrArray,
+} from "@commonfabric/utils/types";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
@@ -43,8 +47,10 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
+import { materializeSchemaView } from "./schema-view.ts";
 import {
   canBranchMatch,
+  combineOptionalSchema,
   combineSchema,
   createDefaultTraversalContext,
   IObjectCreator,
@@ -130,7 +136,7 @@ const asCellCompoundCandidates = (
       const resolved = resolveSchema(branchWithDefs) ?? branchWithDefs;
       const merged = combineSchema(baseSchema as JSONSchemaObj, resolved);
       if (
-        isRecord(merged) &&
+        isObjectOrArray(merged) &&
         ContextualFlowControl.getAsCellValues(merged).length > 0
       ) {
         candidates.push(merged as JSONSchemaObj);
@@ -185,7 +191,7 @@ export type CellViewRef = {
 
 const isCellViewRef = (
   ref: NormalizedFullLink | CellViewRef,
-): ref is CellViewRef => isRecord(ref) && "link" in ref;
+): ref is CellViewRef => isObjectOrArray(ref) && "link" in ref;
 
 const isPrefix = (
   prefix: readonly string[],
@@ -213,7 +219,7 @@ const containsLocalRef = (
   schema: JSONSchema,
   seen: Set<JSONSchema> = new Set(),
 ): boolean => {
-  if (!isRecord(schema) || seen.has(schema)) {
+  if (!isObjectOrArray(schema) || seen.has(schema)) {
     return false;
   }
   seen.add(schema);
@@ -236,9 +242,9 @@ const branchWithParentDefs = (
   branch: JSONSchema,
 ): JSONSchema => {
   if (
-    !isRecord(branch) ||
+    !isObjectOrArray(branch) ||
     branch.$defs !== undefined ||
-    !isRecord(parent.$defs) ||
+    !isObjectOrArray(parent.$defs) ||
     !containsLocalRef(branch)
   ) {
     return branch;
@@ -309,7 +315,7 @@ const matchesConcreteValue = (
     ).length === 1;
   }
 
-  if (isRecord(value) && isRecord(resolved.properties)) {
+  if (isObjectOrArray(value) && isObjectOrArray(resolved.properties)) {
     return Object.entries(resolved.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       matchesConcreteValue(
@@ -406,7 +412,20 @@ export function resolveSchema(
   let resolvedSchema = schema;
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
-    if (!isRecord(resolved)) {
+    if (resolved === undefined) {
+      // The ref names a definition this schema does not carry. That is not the
+      // same as no schema, which lets every value through untouched — it is a
+      // schema the runtime cannot read, and a value cannot be shown to match
+      // one of those. `false` selects nothing, which is the answer traversal
+      // already gives a top-level ref it fails to resolve; returning
+      // `undefined` here instead handed the reader the raw value.
+      logger.warn(
+        "unresolvable $ref in a schema; nothing matches it",
+        schema.$ref,
+      );
+      return false;
+    }
+    if (!isObjectOrArray(resolved)) {
       // For boolean schema or the default `{}` schema, we don't have any
       // meaningful information in the schema, so just return undefined.
       return undefined;
@@ -453,7 +472,7 @@ export function resolveSchemaForValue(
   const resolved = resolveSchema(schema);
   if (
     resolved === undefined || typeof resolved === "boolean" ||
-    !isRecord(resolved)
+    !isObjectOrArray(resolved)
   ) {
     return resolved;
   }
@@ -467,11 +486,11 @@ export function resolveSchemaForValue(
       resolved;
   }
 
-  if (!isRecord(narrowed)) {
+  if (!isObjectOrArray(narrowed)) {
     return narrowed;
   }
 
-  if (!isRecord(value) || !isRecord(narrowed.properties)) {
+  if (!isObjectOrArray(value) || !isObjectOrArray(narrowed.properties)) {
     return narrowed;
   }
 
@@ -533,10 +552,10 @@ export function schemaHasIfc(
   const context: SchemaHasIfcContext = { seenByRoot: new WeakMap() };
   if (seen.size > 0) {
     const initialRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
-    const rootKey = isRecord(initialRoot) ? initialRoot : schema;
+    const rootKey = isObjectOrArray(initialRoot) ? initialRoot : schema;
     const initialSeen = new WeakSet<object>();
     for (const item of seen) {
-      if (isRecord(item)) initialSeen.add(item);
+      if (isObjectOrArray(item)) initialSeen.add(item);
     }
     context.seenByRoot.set(rootKey, initialSeen);
   }
@@ -555,7 +574,7 @@ function _schemaHasIfcUncached(
   context: SchemaHasIfcContext,
 ): boolean {
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
-  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   let seen = context.seenByRoot.get(rootKey);
   if (seen?.has(schema)) return false;
   if (!seen) {
@@ -567,7 +586,7 @@ function _schemaHasIfcUncached(
   const resolved = typeof schema.$ref === "string"
     ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
     : schema;
-  if (resolved === true || resolved === false || !isRecord(resolved)) {
+  if (resolved === true || resolved === false || !isObjectOrArray(resolved)) {
     return false;
   }
   const childFullSchema = cfcSchemaChildRoot(
@@ -589,7 +608,8 @@ function _schemaHasIfcUncached(
   return forEachSubschema(
     resolved,
     (child) =>
-      isRecord(child) && _schemaHasIfcUncached(child, childFullSchema, context),
+      isObjectOrArray(child) &&
+      _schemaHasIfcUncached(child, childFullSchema, context),
   );
 }
 
@@ -645,7 +665,7 @@ export function processDefaultValue(
   if (!schema) return defaultValue;
 
   let resolvedSchema = resolveSchema(schema);
-  if (!isRecord(resolvedSchema)) {
+  if (!isObjectOrArray(resolvedSchema)) {
     // For primitive types, return as is
     return annotateWithBackToCellSymbols(
       defaultValue,
@@ -732,8 +752,7 @@ export function processDefaultValue(
 
   // Handle object type defaults
   if (
-    resolvedSchema?.type === "object" && isRecord(defaultValue) &&
-    !Array.isArray(defaultValue)
+    resolvedSchema?.type === "object" && isObjectNotArray(defaultValue)
   ) {
     const result: Record<string, any> = {};
     const processedKeys = new Set<string>();
@@ -745,13 +764,13 @@ export function processDefaultValue(
           resolvedSchema,
           [key],
         );
-        const propSchema =
-          (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
-            ? ContextualFlowControl.resolveSchemaRefs(
-              rawPropSchema,
-              resolvedSchema,
-            )
-            : rawPropSchema;
+        const propSchema = (isObjectOrArray(rawPropSchema) &&
+            typeof rawPropSchema.$ref === "string")
+          ? ContextualFlowControl.resolveSchemaRefs(
+            rawPropSchema,
+            resolvedSchema,
+          )
+          : rawPropSchema;
         // `Object.hasOwn`, not `in`: `key` is a schema-declared property NAME,
         // and `defaultValue` is data. `in` walks the prototype chain, so a
         // schema property called `toString` or `valueOf` matched every object
@@ -766,7 +785,7 @@ export function processDefaultValue(
             rebaseCfcLabelView(cfcLabelView, [key]),
           );
           processedKeys.add(key);
-        } else if (isRecord(propSchema)) {
+        } else if (isObjectOrArray(propSchema)) {
           const asCellValues = ContextualFlowControl.getAsCellValues(
             propSchema,
           );
@@ -923,7 +942,7 @@ export function mergeDefaults(
 
   // TODO(seefeld): What's the right thing to do for arrays?
   //
-  // TODO(danfuzz): `isReadonlyRecord` admits a `FabricSpecialObject` on
+  // TODO(danfuzz): `isReadonlyObjectOrArray` admits a `FabricSpecialObject` on
   // either side, and the spread copies zero properties from one, so a
   // fabric-valued default here merges to `{}` (or silently drops the other
   // side's contribution). Reachable: the schema generator emits
@@ -932,7 +951,8 @@ export function mergeDefaults(
   // schema takes the spread arm. Wants a `FabricSpecialObject` test choosing
   // the `defaultValue` arm.
   const mergedDefault = base.type === "object" &&
-      isReadonlyRecord(base.default) && isReadonlyRecord(defaultValue)
+      isReadonlyObjectOrArray(base.default) &&
+      isReadonlyObjectOrArray(defaultValue)
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 
@@ -958,7 +978,7 @@ function annotateWithBackToCellSymbols(
   cfcLabelView?: CfcLabelView,
 ) {
   if (
-    !isRecord(value) || isCell(value) ||
+    !isObjectOrArray(value) || isCell(value) ||
     value instanceof FabricPrimitive
   ) {
     // We only possibly annotate plain objects or arrays that _aren't_ cells.
@@ -1007,11 +1027,93 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+/**
+ * Derive the label view for the dereferences made since `traceStart`.
+ *
+ * The derivation reads each involved document's `cfc` path. Those are
+ * runtime-internal verifier reads — the runtime made them to check a label, not
+ * the reader on its own behalf — and an eager read makes them once, for the
+ * document it was handed, never for the documents its traversal reaches.
+ *
+ * A view re-enters here per property, so the same reads would land once per
+ * child. They are kept out of the scheduler's view of what the ACTION read:
+ * addresses the declared scope summary does not cover drop the action's
+ * execution-context floor to `session`, which stops its observations being
+ * adopted across users. The labels themselves are still derived and still
+ * applied — CFC's own prepare pass reads the raw activity list and skips
+ * internal verifier reads there regardless.
+ */
+function deriveDereferenceLabelView(
+  tx: IExtendedStorageTransaction,
+  traceStart: number,
+  viewChild: boolean,
+): CfcLabelView | undefined {
+  const derive = () =>
+    cfcLabelViewForDereferenceTraces(
+      tx,
+      tx.getCfcState().dereferenceTraces.slice(traceStart),
+    );
+  return viewChild
+    ? tx.runWithAmbientReadMeta(ignoreReadForScheduling, derive)
+    : derive();
+}
+
+/**
+ * The value a resolved link points at, including the one address that is
+ * computed rather than stored.
+ *
+ * A string's `length` is not a path the store holds. Traversal answers it from
+ * the string it sits on (`getAtPath` in `traverse.ts`), so a link ending there
+ * — `subject.key("label", "length")` where `label` is a string — resolves to
+ * an address the store cannot serve, and a bare read of it yields `undefined`.
+ * Answering it from the string applies traversal's rule where a link is
+ * followed rather than where a value is walked, so both routes agree on what
+ * `<string>/length` is worth. An array's `length` needs none of this; the store
+ * reads that segment itself.
+ *
+ * The read of the string is the dependency: a string's length changes only when
+ * the string is replaced, and it is replaced at the parent's own path.
+ */
+function readValueAtResolvedLink(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  address: IMemorySpaceValueAddress,
+): FabricValue | undefined {
+  // Read without telling the scheduler. Whatever materializes this value —
+  // the traverser or a view — registers its own reads as it walks.
+  const meta = {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  };
+  const value = tx.readOrThrow(address, meta);
+  if (value !== undefined || link.path.at(-1) !== "length") return value;
+  const parentLink = { ...link, path: link.path.slice(0, -1) };
+  const parent = tx.readOrThrow(toMemorySpaceAddress(parentLink), meta);
+  // Register the parent read whichever way it turns out. A string's length
+  // changes only when the string is replaced, which happens at the parent's own
+  // path; and a parent that is not there yet — a computed that has not produced
+  // — has to bring the reader back when it arrives. Non-recursive: nothing
+  // below the parent decides this.
+  tx.readValueOrThrow(parentLink, { nonRecursive: true });
+  return typeof parent === "string" ? parent.length : value;
+}
+
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
+  /**
+   * Set by a schema view reading one of its children: a mismatch there is a
+   * refusal the reader must be told about, not the `undefined` a root read
+   * yields, which a reader cannot tell from an absent value.
+   */
+  mismatchThrows?: boolean;
+  /**
+   * Set by a schema view reading one of its children: this is a step inside a
+   * read the entry point already began, so the entry-point-only work — the
+   * stored CFC metadata probe — does not run again per property.
+   */
+  viewChild?: boolean;
 }
 
 export function validateAndTransform(
@@ -1024,7 +1126,12 @@ export function validateAndTransform(
   // If the transaction is no longer open, read through the runtime's ambient
   // read path instead. Open transactions still take precedence so reads can see
   // their own uncommitted state.
-  tx = runtime.readTx(tx);
+  //
+  // A transaction marked for lazy materialization is kept whatever its state:
+  // a view reads the state ITS transaction saw, and swapping a finished one for
+  // a fresh read would answer from newer state where the view's contract is to
+  // refuse. The refusal comes from the marked transaction's own guard below.
+  if (tx?.isLazyMaterialize() !== true) tx = runtime.readTx(tx);
 
   // Reconstruct doc, path, schema from link and runtime
   let link = isCellViewRef(sourceRef) ? sourceRef.link : sourceRef;
@@ -1059,9 +1166,10 @@ export function validateAndTransform(
   const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
-    cfcLabelViewForDereferenceTraces(
+    deriveDereferenceLabelView(
       tx,
-      tx.getCfcState().dereferenceTraces.slice(writeRedirectTraceStart),
+      writeRedirectTraceStart,
+      options?.viewChild === true,
     ),
   ]);
 
@@ -1072,9 +1180,18 @@ export function validateAndTransform(
       : resolvedSchema
     : resolvedLinkSchema;
   const filteredSchema = filterAsCell(effectiveSchema);
+  // The stored-metadata probe reads `<doc>/cfc`, and it belongs to the entry
+  // point: an eager read runs it once for the document it was handed and never
+  // for the documents its traversal reaches through links. A view re-enters
+  // here for every property it resolves, so without this gate it probes every
+  // linked document too — reads outside any declared scope envelope, which
+  // drops the action's execution-context floor to `session` and stops its
+  // observations being adopted across users. The schema check costs no read
+  // and stays.
   if (
     schemaHasIfc(effectiveSchema) ||
-    storedCfcMetadataAppliesToPath(tx, resolvedLink)
+    (options?.viewChild !== true &&
+      storedCfcMetadataAppliesToPath(tx, resolvedLink))
   ) {
     tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
   }
@@ -1110,9 +1227,10 @@ export function validateAndTransform(
   const resolvedValueLink = resolveLink(runtime, tx, link);
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
-    cfcLabelViewForDereferenceTraces(
+    deriveDereferenceLabelView(
       tx,
-      tx.getCfcState().dereferenceTraces.slice(valueTraceStart),
+      valueTraceStart,
+      options?.viewChild === true,
     ),
   ]);
   objectCreator.setBase(resolvedValueLink, cfcLabelView);
@@ -1166,11 +1284,9 @@ export function validateAndTransform(
   );
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
-  const value = tx.readOrThrow(address, {
-    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-  });
+  const value = readValueAtResolvedLink(tx, resolvedValueLink, address);
   const doc = { address, value: value };
-  const valueSelectedSchema = isRecord(effectiveSchema)
+  const valueSelectedSchema = isObjectOrArray(effectiveSchema)
     ? asCellCompoundSchemaForValue(effectiveSchema, value)
     : undefined;
   // If we have a ref with a schema, use that; otherwise, use the link's schema
@@ -1178,6 +1294,41 @@ export function validateAndTransform(
     path: doc.address.path,
     schema: valueSelectedSchema ?? resolvedValueLink.schema ?? link.schema!,
   };
+  // A marked transaction takes the lazy route from here. Everything above has
+  // run either way — link resolution, the `asCell` dispatch, schema
+  // combination — so a view and an eager read start from the same link and the
+  // same schema; only the materialization differs.
+  //
+  // Not once the transaction has written, though. A view resolves each path
+  // when the reader touches it, so a view taken before a write reports the
+  // value after it, where an eager read hands back a value detached at the
+  // moment it was taken. Falling back keeps every read describing one instant,
+  // which is what a reader iterating a list while writing into it depends on.
+  // Nothing is lost where the win is: a lift reads its argument before it
+  // writes anything, so that read is still lazy.
+  if (tx.isLazyMaterialize() && !tx.hasWrites()) {
+    // Crossing the last link is a hop the eager traverser combines schemas
+    // across (`linkHopSelector`), because a link's own schema describes the
+    // value at its target while the reader's schema describes what the reader
+    // asked for, and both apply. A view re-enters here for that hop instead of
+    // walking through it, so it has to do the same combining: the selector
+    // alone is the link's schema, and a reader asking for a property the link's
+    // schema does not name — `title` off a piece typed by its own
+    // registration — would read as a property the schema does not select.
+    const viewSchema = valueSelectedSchema ??
+      combineOptionalSchema(effectiveSchema, resolvedValueLink.schema) ??
+      selector.schema;
+    return materializeSchemaView(
+      runtime,
+      tx,
+      { ...resolvedValueLink, schema: viewSchema },
+      value,
+      cfcLabelView,
+      options?.synced ?? false,
+      options?.mismatchThrows !== true,
+    );
+  }
+
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
   const traverser = new SchemaObjectTraverser<any>(
@@ -1383,7 +1534,7 @@ class TransformObjectCreator
         false,
         this.labelViewFor(link),
       );
-    } else if (isRecord(link.schema)) {
+    } else if (isObjectOrArray(link.schema)) {
       const schema = asCellCompoundSchemaForValue(link.schema, value) ??
         link.schema;
       const asCellValues = ContextualFlowControl.getAsCellValues(schema);
@@ -1450,7 +1601,7 @@ class TransformObjectCreator
       // If we're an object, we may be missing some properties that have a
       // default.
       if (
-        isRecord(value) && !Array.isArray(value) &&
+        isObjectNotArray(value) &&
         schema.properties !== undefined
       ) {
         // Ensure value is mutable before injecting default properties.
@@ -1466,7 +1617,7 @@ class TransformObjectCreator
           JSONSchema,
         ][];
         for (const [propName, propSchema] of propertyEntries) {
-          if (isRecord(propSchema) && propSchema.default !== undefined) {
+          if (isObjectOrArray(propSchema) && propSchema.default !== undefined) {
             const valueObj = value as Record<string, any>;
             if (valueObj[propName] === undefined) {
               valueObj[propName] = processDefaultValue(
@@ -1503,24 +1654,24 @@ class TransformObjectCreator
  * This assumes that there will not be a conflict in definitions between the
  * eventSchema and the stateSchema.
  */
-// TODO(@ubik2): We also need to re-write any relative refs
 export function generateHandlerSchema(
   eventSchema?: JSONSchema,
   stateSchema?: JSONSchema,
 ): JSONSchema | undefined {
+  // TODO(@ubik2): We also need to re-write any relative refs
   if (eventSchema === undefined && stateSchema === undefined) {
     return undefined;
   }
   const mergedDefs: Record<string, JSONSchema> = {};
   const mergedDefinitions: Record<string, JSONSchema> = {};
-  if (isRecord(eventSchema)) {
+  if (isObjectOrArray(eventSchema)) {
     // extract $defs and definitions and remove them from eventSchema
     const { $defs, definitions, ...rest } = eventSchema;
     eventSchema = rest;
     Object.assign(mergedDefs, $defs);
     Object.assign(mergedDefinitions, definitions);
   }
-  if (isRecord(stateSchema)) {
+  if (isObjectOrArray(stateSchema)) {
     // extract $defs and definitions and remove them from stateSchema
     const { $defs, definitions, ...rest } = stateSchema;
     stateSchema = rest;
@@ -1569,7 +1720,7 @@ function unwrapAsCellSchema(schema: JSONSchemaObj): JSONSchemaObj {
 }
 
 function removeAsCellFromSchema(schema: JSONSchema): JSONSchema {
-  if (isRecord(schema)) {
+  if (isObjectOrArray(schema)) {
     const { asCell: _c, ...restSchema } = schema;
     return restSchema;
   }

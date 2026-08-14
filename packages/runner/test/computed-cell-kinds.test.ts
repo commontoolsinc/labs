@@ -905,6 +905,7 @@ describe("computed cell kinds", () => {
         "wish",
         "sqliteQuery",
         "inspectConfLabel",
+        "cellFromUrl",
       ]);
 
       // Every registered builtin must be recorded in the replayability

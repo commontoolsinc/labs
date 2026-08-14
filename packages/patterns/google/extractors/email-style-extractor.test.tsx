@@ -5,7 +5,7 @@
  *
  * Run: deno task cf test packages/patterns/google/extractors/email-style-extractor.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern, UI } from "commonfabric";
+import { assert, pattern, TESTS, UI } from "commonfabric";
 import { hasText } from "../../test/vnode-helpers.ts";
 import EmailStyleExtractor from "./email-style-extractor.tsx";
 
@@ -25,7 +25,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_state_empty },
       { assertion: assert_waiting_for_auth },
     ],

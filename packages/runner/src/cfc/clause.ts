@@ -1,6 +1,6 @@
 import { CFC_ATOM_TYPE, type CfcAtom } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { atomEntails } from "./atom-pattern.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
@@ -28,7 +28,7 @@ export type CfcOrClause = { readonly anyOf: readonly CfcAtom[] };
 export type CfcConfClause = CfcAtom | CfcOrClause;
 
 export const isOrClause = (value: unknown): value is CfcOrClause =>
-  isRecord(value) &&
+  isObjectOrArray(value) &&
   Array.isArray((value as { anyOf?: unknown }).anyOf) &&
   Object.keys(value).length === 1;
 

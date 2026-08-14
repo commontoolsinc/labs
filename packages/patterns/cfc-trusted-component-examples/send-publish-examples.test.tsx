@@ -1,4 +1,4 @@
-import { assert, handler, pattern } from "commonfabric";
+import { assert, handler, pattern, TESTS } from "commonfabric";
 import {
   ChatThreadSendExample,
   DirectMessageSendExample,
@@ -77,7 +77,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: runChatThread({ suite: chatThread }) },
       { assertion: assertChatThread },
       { action: runProjectUpdate({ suite: projectUpdate }) },

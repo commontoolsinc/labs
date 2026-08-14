@@ -127,7 +127,7 @@ Deno.test("openapi reference", async (t) => {
 
       for (
         const [path, params] of [
-          ["/api/health/llm", ["verbose", "alert", "models", "forceAlert"]],
+          ["/api/ai/img", ["prompt", "width", "height"]],
           ["/api/ai/llm/models", ["search", "capability", "task"]],
         ] as const
       ) {

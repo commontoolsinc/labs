@@ -1,14 +1,15 @@
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import type { JsonCodecValue } from "./interface.ts";
+import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
 /**
  * Codec for `undefined`. Encodes to the `Undefined@1` tag with `null` state.
  * `undefined` has no corresponding class, so there is no `uniqueHandledClass`;
  * matching is by `canEncode()`. See Section 1.4.1 of the formal spec.
  */
-export class UndefinedCodec extends BaseFabricCodec {
+export class UndefinedCodec extends BaseTerminalCodec<JsonCodecValue> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.Undefined, undefined);
@@ -20,14 +21,14 @@ export class UndefinedCodec extends BaseFabricCodec {
   }
 
   /** @inheritDoc */
-  encode(_value: FabricValue): FabricValue {
+  encode(_value: FabricValue): JsonCodecValue {
     return null;
   }
 
   /** @inheritDoc */
   decode(
     typeTag: string,
-    state: FabricValue,
+    state: JsonCodecValue,
     _context: ReconstructionContext,
   ): FabricValue {
     if (state !== null) {

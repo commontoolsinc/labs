@@ -1,11 +1,14 @@
+/**
+ * `valueEqual` is exposed to pattern code through the `commonfabric` builder
+ * surface (declared in `api/index.ts`, bound in `builder/factory.ts`). These
+ * tests pin that it is present and is the real `data-model` `valueEqual` — the
+ * `Object.is`-leading, content-hash comparison — rather than a stand-in.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBuilder } from "../src/builder/factory.ts";
 
-// `valueEqual` is exposed to pattern code through the `commonfabric` builder
-// surface (declared in `api/index.ts`, bound in `builder/factory.ts`). These
-// tests pin that it is present and is the real `data-model` `valueEqual` — the
-// `Object.is`-leading, content-hash comparison — rather than a stand-in.
 describe("commonfabric valueEqual builtin", () => {
   const { valueEqual } = createBuilder().commonfabric;
 

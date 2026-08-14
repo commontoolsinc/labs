@@ -53,7 +53,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -131,11 +131,11 @@ function setStampedModelOutput(
 function mergeLlmDerivedIntoNode(
   node: Record<string, unknown>,
 ): Record<string, unknown> {
-  const ifc = isRecord(node.ifc) ? node.ifc : {};
+  const ifc = isObjectOrArray(node.ifc) ? node.ifc : {};
   const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
   const stamp = cfcAtom.llmDerived();
   const already = addIntegrity.some((atom) =>
-    isRecord(atom) && isRecord(stamp) && atom.type === stamp.type
+    isObjectOrArray(atom) && isObjectOrArray(stamp) && atom.type === stamp.type
   );
   return {
     ...node,
@@ -179,11 +179,11 @@ function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
   const stampNode = (node: Record<string, unknown>): JSONSchema =>
     mapSubschemas(
       mergeLlmDerivedIntoNode(node) as JSONSchemaObj,
-      (child) => (isRecord(child) ? stampNode(child) : child),
+      (child) => (isObjectOrArray(child) ? stampNode(child) : child),
       { includeDefs: true, includeUnused: true },
     );
 
-  const base: Record<string, unknown> = isRecord(schema)
+  const base: Record<string, unknown> = isObjectOrArray(schema)
     ? schema
     : { type: "object" };
   return internSchema(stampNode(base));
@@ -622,7 +622,7 @@ async function pullContextCells(
         ? getCellOrThrow(value).resolveAsCell()
         : isCell(value)
         ? value.resolveAsCell()
-        : isRecord(value) && typeof value.resolveAsCell === "function"
+        : isObjectOrArray(value) && typeof value.resolveAsCell === "function"
         ? value.resolveAsCell()
         : undefined;
       await resolved?.pull?.();
@@ -925,25 +925,6 @@ export function llm(
 }
 
 /**
- * Generate text via an LLM.
- *
- * A simplified alternative to `llm` that takes a single prompt string and
- * optional system message, returning plain text rather than a structured
- * content array.
- *
- * Returns the complete result as `result` (string) and the incremental result
- * as `partial` (string). `pending` is true while a request is pending.
- *
- * @param prompt - The user prompt/message to send to the LLM.
- * @param system - Optional system message.
- * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
- * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
- *
- * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
- *   As individual docs, representing `pending` state, final `result` and
- *   incrementally updating `partial` result.
- */
-/**
  * Resolve the effective native-model-tool ids for a request from the friendly
  * `search` flag (shorthand for Google Search grounding) plus any explicit
  * `nativeModelToolIds`. Returns undefined when none are requested.
@@ -998,6 +979,25 @@ function extractGroundingSources(
   return out.length > 0 ? out : undefined;
 }
 
+/**
+ * Generate text via an LLM.
+ *
+ * A simplified alternative to `llm` that takes a single prompt string and
+ * optional system message, returning plain text rather than a structured
+ * content array.
+ *
+ * Returns the complete result as `result` (string) and the incremental result
+ * as `partial` (string). `pending` is true while a request is pending.
+ *
+ * @param prompt - The user prompt/message to send to the LLM.
+ * @param system - Optional system message.
+ * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
+ * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
+ *
+ * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
+ *   As individual docs, representing `pending` state, final `result` and
+ *   incrementally updating `partial` result.
+ */
 export function generateText(
   inputsCell: Cell<BuiltInGenerateTextParams>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
@@ -1422,7 +1422,7 @@ export function generateObject<T extends Record<string, unknown>>(
         observedConfidentiality: [],
       };
     // Determine whether to use the tool-calling path or the direct generateObject path
-    const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const hasTools = isObjectNotArray(tools) && Object.keys(tools).length > 0;
     const validationSchema = schemaSanitizePromptInjection
       ? toDeepFrozenSchema(schema)
       : undefined;

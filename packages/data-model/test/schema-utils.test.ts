@@ -1,3 +1,21 @@
+/**
+ * The operations that build one schema from another, where the recurring
+ * question is what may be shared.
+ *
+ * Freezing a schema deeply can reuse subtrees that are already frozen, or
+ * decline to, and which of those a caller gets is an explicit choice rather
+ * than an optimization applied behind its back -- so the same operation is run
+ * both ways.
+ *
+ * Deriving from an interned schema carries interning into the result, and two
+ * groups follow that consequence: adding properties and removing them each
+ * have to say what becomes of the interning the input arrived with.
+ *
+ * The remainder are smaller answers about a schema -- whether it constrains
+ * anything, what shape a given value type calls for, how one is turned into a
+ * key -- kept together here because they share that vocabulary.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

@@ -1,5 +1,5 @@
 import { isKeyPairRaw, KeyPairRaw } from "@commonfabric/identity";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export enum WorkerIPCMessageType {
   Initialize = "initialize",
@@ -19,7 +19,7 @@ export type InitializationData = {
 export function isInitializationData(
   value: unknown,
 ): value is InitializationData {
-  return !!(isRecord(value) &&
+  return !!(isObjectOrArray(value) &&
     typeof value.did === "string" &&
     typeof value.toolshedUrl === "string" &&
     isKeyPairRaw(value.rawIdentity));
@@ -30,7 +30,7 @@ export type RunData = {
 };
 
 export function isRunData(value: unknown): value is RunData {
-  return !!(isRecord(value) &&
+  return !!(isObjectOrArray(value) &&
     typeof value.pieceId === "string");
 }
 
@@ -48,7 +48,7 @@ export type WorkerIPCRequest = {
 };
 
 export function isWorkerIPCRequest(value: unknown): value is WorkerIPCRequest {
-  if (!isRecord(value) || typeof value.msgId !== "number") {
+  if (!isObjectOrArray(value) || typeof value.msgId !== "number") {
     return false;
   }
   if (value.type === WorkerIPCMessageType.Cleanup) {
@@ -72,7 +72,7 @@ export type WorkerIPCResponse = {
 export function isWorkerIPCResponse(
   value: unknown,
 ): value is WorkerIPCResponse {
-  return !!(isRecord(value) &&
+  return !!(isObjectOrArray(value) &&
     typeof value.msgId === "number" &&
     ("error" in value ? typeof value.error === "string" : true) &&
     ("type" in value ? typeof value.type === "string" : true));
