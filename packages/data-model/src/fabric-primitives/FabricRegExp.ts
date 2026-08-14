@@ -134,6 +134,35 @@ export class FabricRegExp extends BaseFabricPrimitive
   // Static members
   //
 
+  /**
+   * Reads the three fields a wire state carries, or `null` if any of them is
+   * present with a type it cannot have.
+   *
+   * A missing field takes its default, which is what lets a narrower encoder
+   * omit one. A field that is present and not a string is a different thing
+   * entirely: the constructor stores a non-`es2025` flavor's `source` and
+   * `flags` without touching them, so an unchecked object here reaches the
+   * public getters, which are typed `string`, and takes an unfrozen reference
+   * into a frozen instance with it.
+   */
+  static #stateFields(
+    state: Record<string, unknown>,
+  ): { flavor: string; source: string; flags: string } | null {
+    const { flavor, source, flags } = state;
+
+    for (const one of [flavor, source, flags]) {
+      if ((one !== undefined) && (typeof one !== "string")) {
+        return null;
+      }
+    }
+
+    return {
+      flavor: (flavor as string | undefined) ?? DEFAULT_FLAVOR,
+      source: (source as string | undefined) ?? "",
+      flags: (flags as string | undefined) ?? "",
+    };
+  }
+
   static #jsonCodec = Object.freeze(
     new (class RegExpCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
@@ -163,15 +192,22 @@ export class FabricRegExp extends BaseFabricPrimitive
             `RegExp: expected object state, got ${typeof state}`,
           );
         }
-        // Beyond requiring an object, this class does not enforce regex
-        // syntax as part of its wire participation: only the `es2025` flavor
-        // is validated (eagerly, by the constructor building a native
-        // `RegExp`); other flavors are stored faithfully and may carry
-        // arbitrary `source`/`flags`. So a malformed non-`es2025` wire object
-        // is accepted as-is rather than becoming a `ProblematicValue`.
-        const flavor = (state.flavor as string) ?? DEFAULT_FLAVOR;
-        const source = (state.source as string) ?? "";
-        const flags = (state.flags as string) ?? "";
+        // Beyond the three fields being strings, this class does not enforce
+        // regex syntax as part of its wire participation: only the `es2025`
+        // flavor is validated, eagerly, by the constructor building a native
+        // `RegExp`. Another flavor's `source` and `flags` are stored
+        // faithfully and may be any strings at all, that dialect being one
+        // this runtime cannot check.
+        const fields = FabricRegExp.#stateFields(state);
+        if (fields === null) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            "RegExp: expected string `flavor`, `source` and `flags`",
+          );
+        }
+
+        const { flavor, source, flags } = fields;
         try {
           return new FabricRegExp(flavor, source, flags);
         } catch (e) {
