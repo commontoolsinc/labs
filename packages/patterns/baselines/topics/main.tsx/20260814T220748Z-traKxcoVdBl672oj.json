@@ -116,33 +116,6 @@
         ],
         "type": "object"
       },
-      "TopicCrossrefRow": {
-        "properties": {
-          "mentionedBy": {
-            "items": {
-              "type": "unknown"
-            },
-            "type": "array"
-          },
-          "topic": {
-            "anyOf": [
-              {
-                "type": "undefined"
-              },
-              {
-                "additionalProperties": true,
-                "type": "object"
-              }
-            ],
-            "description": "The topic this row is about. `object` rather than a cell type because it\nis written as a reference and only ever compared: `equals` takes the raw\nlink, and declaring a cell wrapper on a field nested inside an array does\nnot survive the read."
-          }
-        },
-        "required": [
-          "topic",
-          "mentionedBy"
-        ],
-        "type": "object"
-      },
       "TopicLink": {
         "properties": {
           "addedAt": {
@@ -173,9 +146,9 @@
       },
       "TopicLinkKind": {
         "enum": [
+          "session",
           "pr",
           "topic",
-          "session",
           "web"
         ]
       },
@@ -296,22 +269,12 @@
             "description": "Reference another piece from this topic, and stop referencing it. The\nbrowser equivalent is picking a completion in the body editor, which writes\nthe same map.\n\nOPTIONAL, unlike the verbs beside them, and for the reason every added path\non this projection is: a topic deployed before these existed carries\nneither, and a required property it cannot produce refuses its update\noutright. The older verbs predate every deployed generation, so they can\nstay required; these cannot."
           },
           "mentions": {
-            "anyOf": [
-              {
-                "items": {
-                  "asCell": [
-                    "comparable"
-                  ],
-                  "type": "unknown"
-                },
-                "type": "array"
-              },
-              {
-                "type": "undefined"
-              }
-            ],
             "default": [],
-            "description": "Every piece this topic's prose and links point at, as references.\n\nThe board's pivot is declared over this and nothing else, so what one topic\ncosts a full-board scan is exactly this list of identities. Declared\n`unknown[]` for the same reason the pivot is: these are references, and\ncomparing them never reads what is behind them. Declared as cells, because\nthat is what a consumer has to read them as to compare them at all.\n\n`undefined` is declared alongside the default for the reason `commentCount`\ndeclares it: a topic deployed before this path existed materializes it as a\npresent undefined through a retained list link, and the projection has to\naccept that rather than fail argument validation."
+            "description": "Every piece this topic's prose and links point at, as references.\n\nThe board's pivot is declared over this and nothing else, so what one topic\ncosts a full-board scan is exactly this list of identities. Declared\n`unknown[]` for the same reason the pivot is: these are references, and\ncomparing them never reads what is behind them. Declared as cells, because\nthat is what a consumer has to read them as to compare them at all.\n\nThe default stands alone: a declared default and `| undefined` collide,\nand the default is what a topic deployed before this path existed\nmaterializes against.",
+            "items": {
+              "type": "unknown"
+            },
+            "type": "array"
           },
           "referencedBy": {
             "anyOf": [
@@ -329,14 +292,7 @@
             "description": "The topics that mention this one, read out of the board's pivot.\n\nDeclared through `TopicSummary` rather than `TopicPiece`, and that is\nload-bearing rather than stingy: a topic whose backlinks were topics would\nbe a type that contains itself, and resolving one from a list would walk\nthe graph. The summary carries no reference of its own, so it terminates.\nA reader that wants more follows the link, which resolves whole."
           },
           "references": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/TopicMentionRefMap"
-              },
-              {
-                "type": "undefined"
-              }
-            ],
+            "$ref": "#/$defs/TopicMentionRefMap",
             "default": {},
             "description": "Where this topic's `[Label][key]` mentions point. Durable content, like\n`links` — the editor writes it, and it is what `mentions` is derived from."
           },
@@ -436,84 +392,6 @@
       }
     },
     "properties": {
-      "boardCrossrefs": {
-        "asCell": [
-          "cell"
-        ],
-        "default": [],
-        "description": "The board's mention pivot, one row per topic. A topic reads its own row\nout of it and nothing else; see `backlinksOf`. Absent, a topic simply shows\nno inbound references.",
-        "items": {
-          "$ref": "#/$defs/TopicCrossrefRow"
-        },
-        "type": "array"
-      },
-      "body": {
-        "asCell": [
-          "cell"
-        ],
-        "default": "",
-        "description": "The topic's living document: durable conclusions get folded up into the\nbody; the comment thread below holds the deliberation.",
-        "type": "string"
-      },
-      "bodyUpdatedAt": {
-        "asCell": [
-          "cell"
-        ],
-        "default": 0,
-        "type": "number"
-      },
-      "bodyUpdatedBy": {
-        "$ref": "#/$defs/TopicAuthor",
-        "asCell": [
-          "cell"
-        ],
-        "default": {
-          "kind": "person",
-          "name": ""
-        }
-      },
-      "comments": {
-        "asCell": [
-          "cell"
-        ],
-        "default": [],
-        "items": {
-          "$ref": "#/$defs/TopicComment"
-        },
-        "type": "array"
-      },
-      "createdAt": {
-        "default": 0,
-        "type": "number"
-      },
-      "createdBy": {
-        "$ref": "#/$defs/TopicAuthor"
-      },
-      "createdByName": {
-        "default": "",
-        "type": "string"
-      },
-      "links": {
-        "asCell": [
-          "cell"
-        ],
-        "default": [],
-        "items": {
-          "$ref": "#/$defs/TopicLink"
-        },
-        "type": "array"
-      },
-      "mentionable": {
-        "asCell": [
-          "cell"
-        ],
-        "default": [],
-        "description": "The board's own topics list — the mention universe the body editor\nautocompletes over. A reference to the tracker's array, wired at creation\nlike `myName` (and backfillable as a one-time link-bind on pieces created\nbefore it existed). Absent, the editor simply offers no completions.",
-        "items": {
-          "$ref": "#/$defs/TopicPiece"
-        },
-        "type": "array"
-      },
       "myName": {
         "asCell": [
           {
@@ -524,25 +402,20 @@
         "default": "",
         "type": "string"
       },
-      "references": {
-        "$ref": "#/$defs/TopicMentionRefMap",
+      "topics": {
         "asCell": [
           "cell"
         ],
-        "default": {},
-        "description": "Where this topic's `[Label][key]` mentions point, keyed by the token that\nappears in the body. The editor owns the contents; this pattern owns the\ncell, which is what makes a mention durable and — because each entry holds\nthe destination as a REFERENCE — what makes the reference graph a question\nabout cell identity rather than about text.\n\nThe default has to match the one `TopicOutput` publishes. A map published\nunder a different default than its input carries cannot be materialized."
-      },
-      "title": {
-        "asCell": [
-          "cell"
-        ],
-        "default": "",
-        "type": "string"
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TopicPiece"
+        },
+        "type": "array"
       }
     },
     "type": "object"
   },
-  "pattern": "topics/topic.tsx",
+  "pattern": "topics/main.tsx",
   "resultSchema": {
     "$defs": {
       "AddCommentEvent": {
@@ -580,6 +453,25 @@
           "kind",
           "url",
           "label"
+        ],
+        "type": "object"
+      },
+      "AddTopicEvent": {
+        "properties": {
+          "agentName": {
+            "description": "The agent making this mutation. The authenticated principal remains the\nhuman whose identity key invoked the stream; this is the agent's explicit\ncontent-level signature under that shared principal. Optional only so\ncallers of the previous deployed schema remain valid; new callers must\nprovide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The topic's initial living-document body. A topic born with a body\nappears with it atomically — no reader observes the title-only halfway\nstate, and no follow-up `setBody` call is needed to finish a create\n(verb contract: the atomic-unit rule).",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
         ],
         "type": "object"
       },
@@ -657,6 +549,82 @@
         ],
         "type": "object"
       },
+      "TopicCrossrefRow": {
+        "properties": {
+          "mentionedBy": {
+            "items": {
+              "type": "unknown"
+            },
+            "type": "array"
+          },
+          "topic": {
+            "description": "The topic this row is about. `unknown` because it is written as a\nreference and only ever compared — `equals` takes the raw link. Anything\nwider retrieves the piece instead of pointing at it: declared `object`,\nthis field reads back as the whole expanded topic, `$UI` tree included.",
+            "type": "unknown"
+          }
+        },
+        "required": [
+          "topic",
+          "mentionedBy"
+        ],
+        "type": "object"
+      },
+      "TopicIndexRef": {
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "TopicIndexRow": {
+        "properties": {
+          "commentCount": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "fid": {
+            "description": "The topic's canonical address in tagged form (`fid1:…`); \"\" until known.\n\nThe row's `topic` is the reference itself, and `cf piece get --select\ntopic@` resolves that reference's own address — so this field is a\nconvenience rather than the only way through. It earns its place by\ncomposing with `--filter`, which `@` does not: a filtered array's survivors\nno longer say which positions they came from, so finding one topic by title\nand learning its address is one read with this field and two without.\n\nDerived from runtime-only cell surface, so it reads \"\" for a topic whose\nown entity has not resolved yet.",
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "topic": {
+            "$ref": "#/$defs/TopicIndexRef"
+          }
+        },
+        "required": [
+          "fid",
+          "topic",
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt"
+        ],
+        "type": "object"
+      },
       "TopicLink": {
         "properties": {
           "addedAt": {
@@ -687,9 +655,9 @@
       },
       "TopicLinkKind": {
         "enum": [
+          "session",
           "pr",
           "topic",
-          "session",
           "web"
         ]
       },
@@ -713,6 +681,163 @@
           "$ref": "#/$defs/TopicMentionRef"
         },
         "properties": {},
+        "type": "object"
+      },
+      "TopicPiece": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "The topic's display name. Like the other derived display fields, a cold\nretained topic may not have produced this path yet; its persisted title\nremains authoritative until it does.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "createdByName": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "mention": {
+            "$ref": "#/$defs/MentionEvent",
+            "asCell": [
+              "stream"
+            ],
+            "description": "Reference another piece from this topic, and stop referencing it. The\nbrowser equivalent is picking a completion in the body editor, which writes\nthe same map.\n\nOPTIONAL, unlike the verbs beside them, and for the reason every added path\non this projection is: a topic deployed before these existed carries\nneither, and a required property it cannot produce refuses its update\noutright. The older verbs predate every deployed generation, so they can\nstay required; these cannot."
+          },
+          "mentions": {
+            "default": [],
+            "description": "Every piece this topic's prose and links point at, as references.\n\nThe board's pivot is declared over this and nothing else, so what one topic\ncosts a full-board scan is exactly this list of identities. Declared\n`unknown[]` for the same reason the pivot is: these are references, and\ncomparing them never reads what is behind them. Declared as cells, because\nthat is what a consumer has to read them as to compare them at all.\n\nThe default stands alone: a declared default and `| undefined` collide,\nand the default is what a topic deployed before this path existed\nmaterializes against.",
+            "items": {
+              "type": "unknown"
+            },
+            "type": "array"
+          },
+          "referencedBy": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/$defs/TopicSummary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": [],
+            "description": "The topics that mention this one, read out of the board's pivot.\n\nDeclared through `TopicSummary` rather than `TopicPiece`, and that is\nload-bearing rather than stingy: a topic whose backlinks were topics would\nbe a type that contains itself, and resolving one from a list would walk\nthe graph. The summary carries no reference of its own, so it terminates.\nA reader that wants more follows the link, which resolves whole."
+          },
+          "references": {
+            "$ref": "#/$defs/TopicMentionRefMap",
+            "default": {},
+            "description": "Where this topic's `[Label][key]` mentions point. Durable content, like\n`links` — the editor writes it, and it is what `mentions` is derived from."
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "unmention": {
+            "$ref": "#/$defs/UnmentionEvent",
+            "asCell": [
+              "stream"
+            ]
+          }
+        },
+        "required": [
+          "createdByName",
+          "body",
+          "comments",
+          "links",
+          "mentions",
+          "references",
+          "referencedBy",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME",
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt"
+        ],
         "type": "object"
       },
       "TopicSummary": {
@@ -772,245 +897,98 @@
         "type": "object"
       }
     },
-    "description": "The complete result available when a Topic is instantiated directly.",
+    "description": "Topics — a tracker over #topic pieces: durable units of shared attention\n(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\nsort by last activity. Replaces Linear / GitHub issues / loose process docs\nfor the team; PR workflows stay in GitHub and arrive here as links.",
     "properties": {
       "$NAME": {
-        "default": "",
-        "description": "The topic's display name. Like the other derived display fields, a cold\nretained topic may not have produced this path yet; its persisted title\nremains authoritative until it does.",
-        "type": [
-          "string",
-          "undefined"
-        ]
+        "type": "string"
       },
       "$UI": {
         "$ref": "https://commonfabric.org/schemas/vnode.json"
       },
-      "addComment": {
-        "$ref": "#/$defs/AddCommentEvent",
+      "addTopic": {
+        "$ref": "#/$defs/AddTopicEvent",
         "asCell": [
           "stream"
         ]
       },
-      "addLink": {
-        "$ref": "#/$defs/AddLinkEvent",
+      "crossrefs": {
+        "default": [],
+        "description": "The board's mention pivot, one row per topic: the topic, and the topics\nthat mention it. Published so a topic composed outside `addTopic` can be\nwired to the same table the board's own children read — the graph is\nderived once, here, and never per topic.",
+        "items": {
+          "$ref": "#/$defs/TopicCrossrefRow"
+        },
+        "type": "array"
+      },
+      "index": {
+        "default": [],
+        "description": "The full-board survey surface: one bounded row per topic, carrying its\ncanonical address, its reference, and the scalars a survey reads. Rows\ncarry their own `fid`, so consumers never correlate by position — an index\ninto this array is not a stable address.",
+        "items": {
+          "$ref": "#/$defs/TopicIndexRow"
+        },
+        "type": "array"
+      },
+      "mentionable": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TopicPiece"
+        },
+        "type": "array"
+      },
+      "myName": {
+        "type": "string"
+      },
+      "newTitle": {
+        "description": "Session-local draft for the footer composer (exposed for embedding and\nheadless driving, like the chat exemplar's drafts).",
+        "type": "string"
+      },
+      "setMyName": {
         "asCell": [
           "stream"
-        ]
-      },
-      "body": {
-        "type": "string"
-      },
-      "bodyDraft": {
-        "type": "string"
-      },
-      "bodyUpdatedAt": {
-        "type": [
-          "number",
-          "undefined"
-        ]
-      },
-      "bodyUpdatedBy": {
-        "anyOf": [
-          {
-            "type": "undefined"
-          },
-          {
-            "$ref": "#/$defs/TopicAuthor"
+        ],
+        "deprecated": true,
+        "properties": {
+          "name": {
+            "type": "string"
           }
-        ]
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
       },
-      "cancelEditBody": {
+      "submitTopic": {
         "asCell": [
           "stream",
           "opaque"
         ],
+        "description": "Submit the footer composer as the current viewer's canonical Profile.",
         "tier": "wrapper"
       },
-      "commentCount": {
-        "default": 0,
-        "type": [
-          "number",
-          "undefined"
-        ]
-      },
-      "commentDraft": {
-        "description": "Session-local composer/edit state. These controls belong to a direct Topic\ninstance, not the shared TopicPiece projection used by the tracker's list.",
-        "type": "string"
-      },
-      "comments": {
-        "items": {
-          "$ref": "#/$defs/TopicComment"
-        },
-        "type": "array"
-      },
-      "createdAt": {
+      "topicCount": {
         "type": "number"
       },
-      "createdBy": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/TopicAuthor"
-          },
-          {
-            "type": "undefined"
-          }
-        ],
-        "default": {
-          "kind": "person",
-          "name": ""
-        }
-      },
-      "createdByName": {
-        "type": "string"
-      },
-      "editingBody": {
-        "scope": "session",
-        "type": "boolean"
-      },
-      "lastActivityAt": {
-        "default": 0,
-        "type": [
-          "number",
-          "undefined"
-        ]
-      },
-      "linkKindDraft": {
-        "$ref": "#/$defs/TopicLinkKind"
-      },
-      "linkLabelDraft": {
-        "type": "string"
-      },
-      "linkUrlDraft": {
-        "type": "string"
-      },
-      "links": {
+      "topics": {
         "items": {
-          "$ref": "#/$defs/TopicLink"
+          "$ref": "#/$defs/TopicPiece"
         },
         "type": "array"
-      },
-      "mention": {
-        "$ref": "#/$defs/MentionEvent",
-        "asCell": [
-          "stream"
-        ],
-        "description": "Reference another piece from this topic, and stop referencing it. The\nbrowser equivalent is picking a completion in the body editor, which writes\nthe same map.\n\nOPTIONAL, unlike the verbs beside them, and for the reason every added path\non this projection is: a topic deployed before these existed carries\nneither, and a required property it cannot produce refuses its update\noutright. The older verbs predate every deployed generation, so they can\nstay required; these cannot."
-      },
-      "mentions": {
-        "anyOf": [
-          {
-            "items": {
-              "type": "unknown"
-            },
-            "type": "array"
-          },
-          {
-            "type": "undefined"
-          }
-        ],
-        "default": [],
-        "description": "Every piece this topic's prose and links point at, as references.\n\nThe board's pivot is declared over this and nothing else, so what one topic\ncosts a full-board scan is exactly this list of identities. Declared\n`unknown[]` for the same reason the pivot is: these are references, and\ncomparing them never reads what is behind them. Declared as cells, because\nthat is what a consumer has to read them as to compare them at all.\n\n`undefined` is declared alongside the default for the reason `commentCount`\ndeclares it: a topic deployed before this path existed materializes it as a\npresent undefined through a retained list link, and the projection has to\naccept that rather than fail argument validation."
-      },
-      "referencedBy": {
-        "anyOf": [
-          {
-            "items": {
-              "$ref": "#/$defs/TopicSummary"
-            },
-            "type": "array"
-          },
-          {
-            "type": "undefined"
-          }
-        ],
-        "default": [],
-        "description": "The topics that mention this one, read out of the board's pivot.\n\nDeclared through `TopicSummary` rather than `TopicPiece`, and that is\nload-bearing rather than stingy: a topic whose backlinks were topics would\nbe a type that contains itself, and resolving one from a list would walk\nthe graph. The summary carries no reference of its own, so it terminates.\nA reader that wants more follows the link, which resolves whole."
-      },
-      "references": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/TopicMentionRefMap"
-          },
-          {
-            "type": "undefined"
-          }
-        ],
-        "default": {},
-        "description": "Where this topic's `[Label][key]` mentions point. Durable content, like\n`links` — the editor writes it, and it is what `mentions` is derived from."
-      },
-      "saveBody": {
-        "asCell": [
-          "stream",
-          "opaque"
-        ],
-        "tier": "wrapper"
-      },
-      "setBody": {
-        "$ref": "#/$defs/SetBodyEvent",
-        "asCell": [
-          "stream"
-        ]
-      },
-      "startEditBody": {
-        "asCell": [
-          "stream",
-          "opaque"
-        ],
-        "tier": "wrapper"
-      },
-      "submitComment": {
-        "asCell": [
-          "stream",
-          "opaque"
-        ],
-        "description": "UI affordances as streams: composer submit, body edit lifecycle.",
-        "tier": "wrapper"
-      },
-      "submitLink": {
-        "asCell": [
-          "stream",
-          "opaque"
-        ],
-        "tier": "wrapper"
-      },
-      "title": {
-        "type": "string"
-      },
-      "unmention": {
-        "$ref": "#/$defs/UnmentionEvent",
-        "asCell": [
-          "stream"
-        ]
       }
     },
     "required": [
-      "commentDraft",
-      "bodyDraft",
-      "editingBody",
-      "linkUrlDraft",
-      "linkLabelDraft",
-      "linkKindDraft",
-      "submitComment",
-      "startEditBody",
-      "saveBody",
-      "cancelEditBody",
-      "submitLink",
-      "$UI",
-      "createdByName",
-      "body",
-      "comments",
-      "links",
-      "mentions",
-      "references",
-      "referencedBy",
-      "addComment",
-      "addLink",
-      "setBody",
+      "topics",
+      "mentionable",
+      "topicCount",
+      "crossrefs",
+      "index",
+      "addTopic",
+      "myName",
+      "setMyName",
+      "submitTopic",
       "$NAME",
-      "title",
-      "createdAt",
-      "commentCount",
-      "lastActivityAt"
+      "$UI"
+    ],
+    "tags": [
+      "topic"
     ],
     "type": "object"
   }
