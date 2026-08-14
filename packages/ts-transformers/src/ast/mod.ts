@@ -1,4 +1,8 @@
 export {
+  type CallArgumentPosition,
+  getCallArgumentPosition,
+} from "./call-arguments.ts";
+export {
   type ArrayCallbackContainerCallKind,
   type ArrayMethodAccessKind,
   type ArrayMethodCallSiteInfo,

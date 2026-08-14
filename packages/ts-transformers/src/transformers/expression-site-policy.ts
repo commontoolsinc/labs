@@ -3,6 +3,7 @@ import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
   detectCallKind,
+  getCallArgumentPosition,
   getTypeAtLocationWithFallback,
   hasAuthoredSourceSite,
   isCollectionType,
@@ -464,12 +465,9 @@ function hasEnclosingComputeLikeCallback(
   let current: ts.Node | undefined = callbackContext.call.parent;
   while (current) {
     if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
-      const parent: ts.Node | undefined = current.parent;
-      if (
-        parent && ts.isCallExpression(parent) &&
-        parent.arguments.includes(current)
-      ) {
-        const callKind = detectCallKind(parent, context.checker);
+      const position = getCallArgumentPosition(current);
+      if (position) {
+        const callKind = detectCallKind(position.call, context.checker);
         if (callKind?.kind === "lift-applied") {
           return true;
         }
@@ -618,6 +616,12 @@ function isReactiveRuntimeCallTaggedTemplateSpan(
   return isReactiveOriginTaggedTemplate(tagged, context.checker);
 }
 
+/**
+ * Deliberately parent-literal, unlike `getCallArgumentPosition`: visitors
+ * classify a parenthesized expression at its paren node (the inner expression
+ * reports no container), so looking through parens here would classify the
+ * same site at two nesting levels and lower it twice.
+ */
 export function getExpressionContainerKind(
   expression: ts.Expression,
 ): ExpressionContainerKind | undefined {
@@ -1394,32 +1398,21 @@ export function findInlineCallbackCarrierSite(
 
   while (current) {
     if (ts.isFunctionLike(current)) {
-      // Parentheses around the callback are transparent, here as everywhere
-      // in the site rules: `toSorted(((a, b) => ...))` carries like
-      // `toSorted((a, b) => ...)`.
-      let argument: ts.Node = current;
-      let parent: ts.Node | undefined = current.parent;
-      while (parent && ts.isParenthesizedExpression(parent)) {
-        argument = parent;
-        parent = parent.parent;
-      }
-      if (
-        !parent || !ts.isCallExpression(parent) ||
-        !ts.isExpression(argument) || !parent.arguments.includes(argument)
-      ) {
+      const position = getCallArgumentPosition(current);
+      if (!position) {
         return undefined;
       }
 
-      if (classifyArrayMethodCall(parent)) {
+      if (classifyArrayMethodCall(position.call)) {
         return undefined;
       }
 
-      const site = findLowerableExpressionSite(parent, context, analyze);
+      const site = findLowerableExpressionSite(position.call, context, analyze);
       if (site) {
         return site;
       }
 
-      current = parent.parent;
+      current = position.call.parent;
       continue;
     }
 
