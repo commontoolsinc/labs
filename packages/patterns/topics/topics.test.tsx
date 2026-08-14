@@ -13,6 +13,7 @@ import {
   action,
   assert,
   Default,
+  equals,
   NAME,
   Stream,
   TESTS,
@@ -29,6 +30,7 @@ import Topics, {
 import Topic, {
   type AddCommentResult,
   type AddLinkResult,
+  dropMention,
   fidPayload,
   isSafeLinkUrl,
   type MentionEvent,
@@ -725,6 +727,27 @@ export default pattern(() => {
     (graphBoard.topics?.[0]?.referencedBy ?? []).length === 0
   );
 
+  // The browser affordance for the same retraction the verb performs. Bound to
+  // a test-owned list, like the Profile handlers above, so the control is
+  // exercised without reaching into a board child's inputs.
+  const uiMentioned = new Writable<(object | undefined)[] | Default<[]>>([]);
+  const action_ui_mentions_two = action(() => {
+    uiMentioned.push(graphBoard.topics?.[0]);
+    uiMentioned.push(graphBoard.topics?.[2]);
+  });
+  const uiDropMention = dropMention({
+    mentioned: uiMentioned,
+    topic: graphBoard.topics?.[0],
+  });
+  const action_drop_one_from_ui = action(() => {
+    uiDropMention.send();
+  });
+  const assert_ui_dropped_only_that_one = assert(() =>
+    uiMentioned.get().length === 1 &&
+    // The survivor is still the piece it was, not a flattened copy of it.
+    equals(uiMentioned.get()[0], graphBoard.topics?.[2])
+  );
+
   // A piece with no board wired in shows no inbound references rather than
   // failing: `boardCrossrefs` is optional, as `mentionable` is.
   const assert_boardless_topic_has_no_backlinks = assert(() =>
@@ -843,6 +866,9 @@ export default pattern(() => {
       { assertion: assert_self_reference_ignored },
       { action: action_source_retracts_mention },
       { assertion: assert_reference_retracted },
+      { action: action_ui_mentions_two },
+      { action: action_drop_one_from_ui },
+      { assertion: assert_ui_dropped_only_that_one },
       { assertion: assert_boardless_topic_has_no_backlinks },
       { action: action_source_mentions_both },
       { assertion: assert_two_mentions },

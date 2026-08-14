@@ -303,9 +303,9 @@ export interface TopicPiece extends TopicSummary {
   /** Where this topic's `[Label][key]` mentions point. Durable content, like
    * `links`. Written by the body editor; this pattern only ever reads it. */
   // deno-lint-ignore ban-types
-  references: TopicMentionRefMap | Default<{}> | undefined;
+  references: TopicMentionRefMap | Default<{}>;
   /** Pieces referenced outside the prose, recorded by `mention`. */
-  mentioned: unknown[] | Default<[]> | undefined;
+  mentioned: unknown[] | Default<[]>;
   /** The topics that mention this one, read out of the board's pivot.
    *
    * Declared through `TopicSummary` rather than `TopicPiece`, and that is
@@ -313,7 +313,7 @@ export interface TopicPiece extends TopicSummary {
    * be a type that contains itself, and resolving one from a list would walk
    * the graph. The summary carries no reference of its own, so it terminates.
    * A reader that wants more follows the link, which resolves whole. */
-  referencedBy: TopicSummary[] | Default<[]> | undefined;
+  referencedBy: TopicSummary[] | Default<[]>;
   bodyUpdatedBy?: TopicAuthor | undefined;
   bodyUpdatedAt?: number | undefined;
   addComment: Stream<AddCommentEvent, AddCommentResult>;
@@ -538,6 +538,24 @@ export const saveProfileBody = handler<void, {
   bodyUpdatedBy.set(author);
   bodyUpdatedAt.set(Date.now());
   editingBody.set(false);
+});
+
+/**
+ * Drop one verb-made reference from the browser.
+ *
+ * A handler rather than an inline closure because the card renders one control
+ * per entry, and each has to carry the piece it removes. Retracting is
+ * `removeByValue` here for the same reason it is in `unmention`: it resolves
+ * against durable state instead of rewriting the list.
+ */
+export const dropMention = handler<void, {
+  mentioned: Writable<unknown[] | Default<[]>>;
+  // A CELL, because `removeByValue` matches a cell by its link. Bound as a
+  // plain value it would arrive resolved, match nothing, and remove nothing.
+  topic: Writable<unknown>;
+}>((_, { mentioned, topic }) => {
+  if (!topic) return;
+  mentioned.removeByValue(topic);
 });
 
 /** Browser link submit under the current Profile snapshot. */
@@ -895,6 +913,12 @@ export default pattern<TopicInput, TopicOutput>(
       self,
     });
     const hasReferences = referencedBy.length > 0;
+    // Only what THIS pattern owns is offered for removal. The union `mentions`
+    // also carries the editor's map and the link resolutions, and a control
+    // here could not honestly retract either: a mention in the prose is removed
+    // by editing the prose, and a link's reference belongs to the link.
+    const mentionedView = computed(() => mentioned.get());
+    const hasMentioned = mentionedView.length > 0;
 
     const topicName = title.get().trim() || "(untitled topic)";
 
@@ -1151,6 +1175,34 @@ export default pattern<TopicInput, TopicOutput>(
                     <cf-vstack gap="1">
                       {referencedBy.map((topic) => (
                         <cf-cell-link $cell={topic} />
+                      ))}
+                    </cf-vstack>
+                  </cf-vstack>
+                </cf-card>
+              )
+              : null}
+
+            {/* ── References made outside the prose (the `mention` verb) ── */}
+            {hasMentioned
+              ? (
+                <cf-card>
+                  <cf-vstack gap="2">
+                    <cf-heading level={5}>References</cf-heading>
+                    <cf-text variant="caption" tone="muted">
+                      Added directly rather than written into the body. A
+                      mention inside the text is removed by editing the text.
+                    </cf-text>
+                    <cf-vstack gap="1">
+                      {mentionedView.map((topic) => (
+                        <cf-hstack gap="2" align="center">
+                          <cf-cell-link $cell={topic} />
+                          <cf-button
+                            variant="ghost"
+                            onClick={dropMention({ mentioned, topic })}
+                          >
+                            Remove
+                          </cf-button>
+                        </cf-hstack>
                       ))}
                     </cf-vstack>
                   </cf-vstack>

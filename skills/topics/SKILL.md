@@ -232,13 +232,15 @@ deno task cf piece call --url "$TOPIC_URL" unmention '{"topic":"<other topic>"}'
 ```
 
 `mention` appends the reference; `unmention` removes every entry naming that
-piece. Both are mergeable, so concurrent callers all land, and mentioning the
-same piece twice is still one edge — the graph asks whether anything names a
-topic, not how often. Each Topic publishes what it points at as `mentions`, and
-who points at it as `referencedBy` — both derived, so retracting a mention
-removes the edge and nothing is left behind in the target. An `addLink` whose
-URL names a piece also becomes a reference; one that names a web page stays a
-web page.
+piece. A person can retract one from the topic's own page too — the References
+card lists what was added this way, each row with a remove control. A mention
+written into the prose is not listed there: it is removed by editing the prose.
+Both are mergeable, so concurrent callers all land, and mentioning the same
+piece twice is still one edge — the graph asks whether anything names a topic,
+not how often. Each Topic publishes what it points at as `mentions`, and who
+points at it as `referencedBy` — both derived, so retracting a mention removes
+the edge and nothing is left behind in the target. An `addLink` whose URL names
+a piece also becomes a reference; one that names a web page stays a web page.
 
 ## Persistence and computed results
 
