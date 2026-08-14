@@ -1,5 +1,5 @@
 import { backtickQuote } from "@commonfabric/utils/markdown";
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
@@ -246,6 +246,28 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   }
 
   /**
+   * Reports a key this runtime reserves, found in wire data, settled against
+   * {@link #lenient} like any other malformation.
+   *
+   * The names are `__proto__` and `constructor`, and what makes them a
+   * boundary concern is that the walks rebuild an object by assignment: the
+   * first routes through an inherited setter on a host that has one, and both
+   * are refused rather than silently reshaped.
+   *
+   * @param key The reserved key.
+   * @param state The object it was found in, preserved so a lenient result
+   *   round-trips.
+   * @throws If this engine is not lenient.
+   */
+  protected reportReservedKey(key: string, state: any): FabricValue {
+    return this.reportMalformed(
+      key,
+      state,
+      `object contains a key this runtime reserves: "${key}"`,
+    );
+  }
+
+  /**
    * Decodes one tagged value, dispatching on the tag through the registry. A
    * subclass calls this once it has recognized a tagged form and taken off
    * whatever meta-tags this format defines for itself.
@@ -384,6 +406,28 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   //
   // Static members
   //
+
+  /**
+   * Refuses a key this runtime reserves on the way out.
+   *
+   * Encoding one cannot be made faithful. A rebuild by assignment drops
+   * `__proto__` where the host routes it through an inherited setter, and
+   * where it does not, the result is text a decoder refuses on the way back --
+   * so a value carrying one is either quietly damaged or written and never
+   * readable. Both are worse than a refusal, and the caller is local code
+   * whose value this is, rather than a channel handing over data.
+   *
+   * @throws If `key` is one this runtime reserves.
+   */
+  protected static assertEncodableKey(key: string): void {
+    if (isUnsafeObjectKey(key)) {
+      throw new Error(
+        `Cannot encode an object with a key this runtime reserves: ${
+          backtickQuote(key)
+        }`,
+      );
+    }
+  }
 
   /**
    * Adds a value to the in-progress set, refusing a repeat visit.
