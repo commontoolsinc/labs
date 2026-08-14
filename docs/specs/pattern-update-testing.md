@@ -427,7 +427,7 @@ specification:
   load failures — it has no eyes on them — so a path that *depends* on such a
   load succeeding is outside what a green run asserts. Two consequences worth
   naming: the replay runtime leaves `systemPatternAutoUpdate` off (CFC
-  enforcement stays at its `enforce-explicit` default), so the heal above is
+  enforcement stays at its `enforce-strict` default), so the heal above is
   the parent re-creating children, not the production roll-forward repair —
   that path has its own flags-on assertion in
   `packages/runner/test/pattern-pointer-unloadable-swap.test.ts`;

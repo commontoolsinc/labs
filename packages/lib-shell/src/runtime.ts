@@ -141,9 +141,9 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
   /**
-   * Flow-label propagation dial (S16). Shell hosts default to "observe"
-   * (Epic H1): derive the per-tx conservative join and emit diagnostics,
-   * persisting nothing — the measurement stage before "persist".
+   * Flow-label propagation dial (S16). When omitted, the worker preset uses
+   * "persist". Hosts can select "observe" to derive the per-transaction
+   * conservative join and emit diagnostics without persisting it.
    */
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
   cfcWriteFloor?: RuntimeCfcWriteFloorMode;

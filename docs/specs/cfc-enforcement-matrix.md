@@ -1,26 +1,26 @@
-# CFC enforcement × propagation × write-floor × trigger gating — the deployment mode matrix
+# CFC deployment mode matrix
 
 _Epic H, stage H4 (first sub-step), of
 [`docs/history/plans/cfc-future-work-implementation.md`](../history/plans/cfc-future-work-implementation.md).
 Spec residual: SC-13 in [`cfc-spec-changes.md`](./cfc-spec-changes.md) (§18) and
-the `enforce-strict` differentiation (SC-13 / §18.6.3). This section settles
-**which combinations of the five CFC dials are conforming deployment states and
-in what order a deployment may advance them**, before H4 lands `enforce-strict`
-behavior and before H3a flips any shipped host — so the rollout ordering is
-written down first._
+the `enforce-strict` differentiation (SC-13 / §18.6.3). This section records
+**which combinations of the seven CFC dials are conforming deployment states and
+in what order a deployment may advance or roll them back**._
 
-## 1. The five dials (all runtime-configured, all orthogonal)
+## 1. The seven dials (all runtime-configured, all orthogonal)
 
-CFC has five independent runtime dials. Each is a monotone ladder; none
+CFC has seven independent runtime dials. Each is a monotone ladder; none
 subsumes another. Their current homes and defaults:
 
 | Dial | Values (weak → strict) | `Runtime` default | Governs |
 |---|---|---|---|
-| `cfcEnforcementMode` | `disabled` · `observe` · `enforce-explicit` · `enforce-strict` | `enforce-explicit` | whether a boundary **reason rejects** the commit ([types.ts](../../packages/runner/src/cfc/types.ts) `cfcEnforcementStrictness`) |
-| `cfcFlowLabels` | `off` · `observe` · `persist` | `off` | whether the per-tx **flow join is derived and persisted** as `derived` label components (S16) |
-| `cfcWriteFloor` | `off` · `observe` · `enforce` | `off` | whether the **write-side `requiredIntegrity` floor** (SC-18, Epic D3) is checked against the written value's integrity |
-| `cfcTriggerReadGating` | `false` · `true` | `false` | whether the **§8.9.2 trigger reads** — the addresses whose invalidating writes scheduled this run — join the enforcement consumed sets: the sink-request ceiling and the `requiredIntegrity` input gate (SC-3 / H5; [runtime.ts](../../packages/runner/src/runtime.ts) `cfcTriggerReadGating`, [types.ts](../../packages/runner/src/cfc/types.ts) `CfcTriggerReadGating`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `triggerReadSources`) |
-| `cfcPolicyEvaluation` | `off` · `observe` · `enforce` | `off` | whether the **exchange-rule evaluator** (spec §4.4.5, Epic B5) rewrites gated labels to a fueled fixpoint before the sink-request ceiling and `requiredIntegrity` input gates fit them. `observe` evaluates + diagnoses divergence but decides on the *un-rewritten* label; `enforce` decides on the *rewritten* label and **fails closed on fuel exhaustion or policy-lookup failure**. ([runtime.ts](../../packages/runner/src/runtime.ts) `cfcPolicyEvaluation` + `cfcPolicyRecords`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `evaluateGatedConfidentiality`) |
+| `cfcEnforcementMode` | `disabled` · `observe` · `enforce-explicit` · `enforce-strict` | `enforce-strict` | whether a boundary **reason rejects** the commit ([types.ts](../../packages/runner/src/cfc/types.ts) `cfcEnforcementStrictness`) |
+| `cfcFlowLabels` | `off` · `observe` · `persist` | `persist` | whether the per-tx **flow join is derived and persisted** as `derived` label components (S16) |
+| `cfcWriteFloor` | `off` · `observe` · `enforce` | `enforce` | whether the **write-side `requiredIntegrity` floor** (SC-18, Epic D3) is checked against the written value's integrity |
+| `cfcTriggerReadGating` | `false` · `true` | `true` | whether the **§8.9.2 trigger reads** — the addresses whose invalidating writes scheduled this run — join the enforcement consumed sets: the sink-request ceiling and the `requiredIntegrity` input gate (SC-3 / H5; [runtime.ts](../../packages/runner/src/runtime.ts) `cfcTriggerReadGating`, [types.ts](../../packages/runner/src/cfc/types.ts) `CfcTriggerReadGating`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `triggerReadSources`) |
+| `cfcPolicyEvaluation` | `off` · `observe` · `enforce` | `enforce` | whether the **exchange-rule evaluator** (spec §4.4.5, Epic B5) rewrites gated labels to a fueled fixpoint before the sink-request ceiling and `requiredIntegrity` input gates fit them. `observe` evaluates + diagnoses divergence but decides on the *un-rewritten* label; `enforce` decides on the *rewritten* label and **fails closed on fuel exhaustion or policy-lookup failure**. ([runtime.ts](../../packages/runner/src/runtime.ts) `cfcPolicyEvaluation` + `cfcPolicyRecords`, consumed in [prepare.ts](../../packages/runner/src/cfc/prepare.ts) `evaluateGatedConfidentiality`) |
+| `cfcLabelMetadataProtection` | `off` · `observe` · `enforce` | `enforce` | whether cross-space label metadata is stored verbatim, measured for protected representation, or persisted in its protected form |
+| `cfcDeclaredMonotonicity` | `off` · `observe` · `enforce` | `enforce` | whether a non-monotone change to a declared store-policy label is ignored, diagnosed, or rejected |
 
 They are orthogonal because they gate different things: the **enforcement mode**
 decides what happens to a recorded reason (ignore / diagnose / reject); the
@@ -31,8 +31,11 @@ it rejects; **trigger gating** widens what the existing gates count as consumed
 its executed branch never re-reads it); **policy evaluation** rewrites the label
 a gate fits *before* the fit, so a discharge/exchange rule can admit a flow the
 raw label would refuse (and, in `enforce`, a fuel-exhausted or unresolvable
-rewrite becomes a fail-closed reason rather than a silent pass-through). A
-deployment picks a point in the 4 × 3 × 3 × 2 × 3 cube — but most points are not
+rewrite becomes a fail-closed reason rather than a silent pass-through);
+**label-metadata protection** controls the persisted representation of
+cross-space label data; and **declared monotonicity** preserves the store-policy
+label invariant. A deployment picks a point in the seven-dial configuration
+space, but most points are not
 conforming, and the conforming ones are reachable only along a partial order.
 
 ### What each enforcement level means
@@ -40,9 +43,9 @@ conforming, and the conforming ones are reachable only along a partial order.
 - **`disabled`** — the boundary pass does not run as a gate; runtime-authored
   provenance mints still run (e.g. the external-ingest mark), but no reason ever
   rejects. CFC is descriptive only. This posture exists only by **explicitly
-  passing** `cfcEnforcementMode: "disabled"` — no shipped host does today
-  (toolshed constructs its `Runtime` with no CFC options and therefore runs the
-  `enforce-explicit` default; see §3).
+  passing** `cfcEnforcementMode: "disabled"`. No shipped host does this by
+  default. A host can explicitly request `observe` to retain
+  warn-without-enforcement behavior; see §3.
 - **`observe`** — the boundary pass runs and records reasons as **diagnostics**;
   the commit still succeeds. Used to measure reason volume before enforcing.
 - **`enforce-explicit`** — a recorded reason **rejects** the commit, and that
@@ -143,26 +146,20 @@ cfcPolicyEvaluation: off ──▶ observe ──▶ enforce  (independent; only
 A **conforming state** is one where no enforcement consumes a label the flow
 dial is not yet producing. The states a deployment is expected to pass through:
 
-| State | enforcement | flow | write-floor | trigger | Meaning |
-|---|---|---|---|---|---|
-| **Operator (explicitly disabled)** | `disabled` | `off` | `off` | `false` | CFC descriptive only; provenance mints run, nothing rejects. Requires explicitly passing `cfcEnforcementMode: "disabled"` — no shipped host does today. |
-| **Server hosts today (toolshed, background-piece-service)** | `enforce-explicit` | `off` | `off` | `false` | Neither host passes any CFC option ([toolshed/index.ts](../../packages/toolshed/index.ts), [background-piece-service main.ts](../../packages/background-piece-service/src/main.ts)), so both inherit the `Runtime` defaults. Conforming: explicit checks consume no derived labels. |
-| **Shell today** | `enforce-explicit` | `persist` | `off` | `false` | Explicit checks enforce; flow labels persisted (H2, inv-9 active); floor not yet dialed. |
-| **Shell + floor observe** | `enforce-explicit` | `persist` | `observe` | `false` | Add the write floor as diagnostics (D3 dial-up step). |
-| **Shell + floor enforce** | `enforce-explicit` | `persist` | `enforce` | `false` | Floor rejects; complete on flow-endorsed writes (flow persists). |
-| **Strict** | `enforce-strict` | `persist` | `enforce` | `true` | Writer-fit fail-closed (H4); render ceiling consumes derived labels (H3b); trigger reads gated, multi-hop complete since flow persists. The end state. |
+| State | enforcement | flow | write-floor | trigger | policy | metadata | monotonicity | Meaning |
+|---|---|---|---|---|---|---|---|---|
+| **Explicit rollback** | `disabled` | `off` | `off` | `false` | `off` | `off` | `off` | CFC descriptive only; provenance mints run, nothing rejects. |
+| **Minimal warning** | `observe` | `off` | `off` | `false` | `off` | `off` | `off` | Boundary diagnostics are recorded without rejecting or persisting flow labels. |
+| **Loom warning** | `observe` | `observe` | `observe` | `false` | `observe` | `observe` | `observe` | Loom runs every staged diagnostic without rejecting commits, gating trigger reads, or persisting flow labels. Its harness and host boundaries pin this posture explicitly. |
+| **Platform default** | `enforce-strict` | `persist` | `enforce` | `true` | `enforce` | `enforce` | `enforce` | Strict boundary enforcement, persisted flow labels, write-floor checks, trigger-read gating, policy evaluation, protected metadata, and declared-label monotonicity are active. |
 
 Trigger gating may flip to `true` at any of these states (ordering constraint
 #4: it is sound anywhere) — the table shows it flipping at the end state
 because before `cfcFlowLabels: persist` it closes only the one-hop channel.
 
-`cfcPolicyEvaluation` is omitted from the state columns above because it is
-`off` in every shipped host today (no host passes `cfcPolicyRecords`, so the
-evaluator has no rules to run). It advances on its own schedule (ordering
-constraint #5: sound anywhere, only loosening save fail-closed exhaustion), so
-a deployment adds `observe` then `enforce` alongside whichever of the states
-above it is in, once it configures a policy set (e.g. the §10.1 standard
-prompt-caveat profile).
+`cfcPolicyEvaluation: "enforce"` is a no-op when a host configures no policy
+records. Keeping it enabled by default means adding policy records does not
+silently leave their evaluator disabled.
 
 **Non-conforming** examples (a linter/deploy-check should reject): any
 `enforce-strict` with `cfcFlowLabels ≠ persist` (strict consumes derived labels
@@ -235,12 +232,11 @@ Tracked in [`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-13.
 
 ## Provenance
 
-Grounded in the four implemented dials — `cfcEnforcementMode`
+Grounded in the seven implemented dials — `cfcEnforcementMode`
 ([types.ts](../../packages/runner/src/cfc/types.ts)), `cfcFlowLabels` (H1),
 `cfcWriteFloor` (D3, #4479), and `cfcTriggerReadGating` (H5, #4488) — plus the
-SC-13 rollout constraint in `cfc-spec-changes.md` and the current host
-postures: shell
-([lib-shell/src/runtime.ts](../../packages/lib-shell/src/runtime.ts):
-`enforce-explicit` + flow `persist`, H2); toolshed and
-background-piece-service (no CFC options passed → `Runtime` defaults,
-`enforce-explicit` + flow `off`).
+policy-evaluation, label-metadata-protection, and declared-monotonicity dials;
+the SC-13 rollout constraint in `cfc-spec-changes.md`; and the current shared
+defaults in [runtime-presets.ts](../../packages/runner/src/runtime-presets.ts).
+The shell forwards explicit enforcement and flow overrides to the worker, so a
+host can retain a weaker diagnostic posture without weakening platform defaults.

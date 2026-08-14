@@ -358,24 +358,19 @@ SES-verified on every pull request — 413 authored entry files across four
 CI shards (`deno task cfcheck`). A second gate replays each pattern
 against 112 recorded contract baselines, because the updater performs no
 structural check before swapping a pattern onto a running piece. Pattern
-tests run at `enforce-explicit`, the same mode the servers run, rather
-than in an observe mode that would let violations pass. That is the
-runtime's default and both server hosts are pinned to it
-(`packages/runner/src/runtime.ts`, `runtime-presets.ts`). A grep will
-also turn up `DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in
-`cfc/types.ts`, which is the transaction-level default, not this one.
+tests and server hosts run at `enforce-strict`, the runtime and first-party
+preset default, rather than in an observe mode that would let violations pass
+(`packages/runner/src/runtime.ts`, `runtime-presets.ts`).
 
 ## What is not here yet
 
-The semantics are built; most of the dials are not on. Label propagation
-defaults to `off` and the default sink ceiling is empty, so the machinery
-above is exercised by tests and by patterns that opt in rather than
-gating egress in a default deployment. The render ceiling is off too, and
-that boundary is held by the label and contract layer rather than by DOM
-sanitization, which has an open gap.
-`docs/development/EXPERIMENTAL_OPTIONS.md` carries every dial and where
-it is headed. Turning them on without wedging the patterns already
-running on them is the work.
+The enforcement, label propagation, write floor, trigger-read gating, policy
+evaluation, label-metadata protection, and declared-label monotonicity dials
+are on by default. The default sink ceiling is still empty, and the render
+ceiling remains an opt-in dogfood control. That boundary is held by the label
+and contract layer rather than by DOM sanitization, which has an open gap.
+`docs/development/EXPERIMENTAL_OPTIONS.md` carries every dial and its rollback
+controls.
 
 Attestation — what would let a machine prove which runtime it is running
 before your data arrives — is specified rather than built.

@@ -575,7 +575,8 @@ export const DEFAULT_CFC_WRITE_FLOOR_MODE: CfcWriteFloorMode = "enforce";
  * derivation. Closes the residual "dep changed" channel (~1 bit/change event)
  * where a handler scheduled by a secret write egresses without re-reading the
  * secret. Adds reads to the gate (fail-closed direction) at the cost of extra
- * metadata resolution per prepare, so it ships behind a flag (default OFF).
+ * metadata resolution per prepare. It is enabled by default and remains
+ * independently configurable for rollback.
  */
 export type CfcTriggerReadGating = boolean;
 

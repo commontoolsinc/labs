@@ -78,14 +78,12 @@ exits are. [The full argument](./inverting-the-physics-of-trust.md)
 is the physics and the hardware.
 
 Most of what is here is early, and all of it is readable. What runs
-today: the compiler, the checker — rejecting at explicit boundaries, the
-third of four rungs — a hundred-odd patterns, and machines that prove
-which runtime they are before your data arrives. What does not: label
-propagation defaults to off and is rolling out, strict-by-default is the
-current work, a space still has a host that can revoke a participant,
-and robustness and performance are not there yet. The people who came
-before us settled arguments like this one by writing code rather than
-papers, and we would rather be judged the same way.
+today: the compiler, label propagation and strict enforcement by default,
+a hundred-odd patterns, and machines that prove which runtime they are
+before your data arrives. A space still has a host that can revoke a
+participant, and robustness and performance are not there yet. The people
+who came before us settled arguments like this one by writing code rather
+than papers, and we would rather be judged the same way.
 
 Nothing here needs a token, a chain, or a consensus mechanism — only
 that trust be checkable by anyone, from evidence.

@@ -39,16 +39,13 @@ facet of that one representational distance. Most of the flat model's narrowness
 holes, called out explicitly.
 
 **Default posture.** The commit gate is on by default: the Runtime constructor
-defaults `cfcEnforcementMode` to `enforce-explicit`
-([`runtime.ts:495`](../../packages/runner/src/runtime.ts)), as does lib-shell's
-`createRuntimeClientOptions` — the types-level
-`DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"`
-([`types.ts:42`](../../packages/runner/src/cfc/types.ts)) is only the
-bare-transaction fallback. What *is* dormant: flow-labels default `off`
-([`types.ts:331`](../../packages/runner/src/cfc/types.ts)) everywhere, the render
-confidentiality ceiling is plumbed end-to-end but no host populates it, and
-`enforce-strict` has no distinct behavior. So the flow-taint and display
-protections below are *built but dormant* until a host turns them on — see Epic H.
+and first-party runtime presets default `cfcEnforcementMode` to
+`enforce-strict`. Lib-shell leaves CFC options unset so its worker uses the
+browser-worker preset. Flow labels default to `persist`; the write floor,
+trigger-read gating, policy evaluation, label-metadata protection, and declared
+monotonicity checks also default to their enforced states. The render
+confidentiality ceiling is plumbed end-to-end but no host populates it. Hosts
+retain explicit weaker settings for rollback and diagnostic use — see Epic H.
 
 ---
 
@@ -240,22 +237,20 @@ semantic quantifier ("every surviving part is covered by ≥1 signer"), only a f
 atom set. Expressiveness (over-restricts, safe), and the spec itself marks the full
 collaborative-doc model as a downgraded/future area. Ref: §14.4.8, §3.1.6.
 
-## Epic H — Enforcement & flow activation (smaller than the engines, high leverage)
+## Epic H — Enforcement & flow activation (partly completed)
 
-**Size: medium. Partly just flipping defaults + finishing the ladder — do early.**
+The rollout defaults now persist flow labels and enforce the strict rung. Each
+control remains independently configurable so hosts can select an earlier
+rollout posture. The display ceiling remains dormant until a host enables it.
 
 Not new machinery so much as turning the system on:
 
-- **Flow-labels default `off` → inv-9 dormant.** The router-attack flow-taint
-  (§10's own worked example) is not stamped by default. Move deployments to
-  propagation `persist`; note trigger-read confidentiality (SC-3) currently never
-  reaches the enforcement side or the egress ceiling even when the dial is on.
-- **`enforce-strict` undifferentiated.** The effective deployment default is
-  already `enforce-explicit` (Runtime + lib-shell; the types-level `disabled` is
-  the bare-transaction fallback), but the strict rung is rankable with no
-  additional reject behavior in the commit gate (SC-13). Finish the ladder and
-  pick conforming default deployment states.
-- **Display-ceiling "shell flip."** The render ceiling is built and fail-closed but
+- **Flow labels persist by default.** Trigger-read confidentiality participates
+  in enforcement and the egress ceiling when its independently configurable
+  gate is enabled.
+- **Strict enforcement is the deployment default.** Relevant transactions are
+  prepared before commit, and policy failures reject the commit.
+- **The display ceiling remains host-enabled.** The render ceiling is built and fail-closed but
   **no host populates it**, and it admits atoms by raw structural equality rather
   than §15.2 acting-user shapes (`User`/`PersonalSpace`/`Space`-via-`HasRole`).
   Atom-shaping needs Epic B's exchange resolution; activation does not. (SC-16;

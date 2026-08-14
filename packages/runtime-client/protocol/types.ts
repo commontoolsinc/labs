@@ -195,7 +195,7 @@ export interface InitializationData {
   // "off" = no derivation; "observe" = compute the per-tx conservative
   // join and emit diagnostics, persist nothing; "persist" = write derived
   // label components. Propagation never rejects by itself. Absent =
-  // the runner's default ("off").
+  // the runner's default ("persist").
   cfcFlowLabels?: "off" | "observe" | "persist";
   cfcWriteFloor?: "off" | "observe" | "enforce";
   cfcTriggerReadGating?: boolean;

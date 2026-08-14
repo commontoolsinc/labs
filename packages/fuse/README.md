@@ -341,9 +341,10 @@ workloads.
 
 `cf fuse mount --cfc-mode=<mode>` selects the FUSE-side CFC guardrail mode:
 `disabled`, `observe`, `enforce-explicit`, or `enforce-strict`. When no mode is
-provided, FUSE uses the runner default (`disabled` today). `observe` and both
-enforcing modes publish annotations automatically. `--cfc-annotations` still
-forces annotation output for local debugging even when the mode is `disabled`.
+provided, FUSE uses the runner default (`enforce-strict` today). `observe` and
+both enforcing modes publish annotations automatically. `--cfc-annotations`
+still forces annotation output for local debugging even when the mode is
+`disabled`.
 
 By default the local mount exposes both the protected namespace `trusted.cfc.*`
 and the compatibility namespace `user.commonfabric.cfc.*`. Use
