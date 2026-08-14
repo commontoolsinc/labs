@@ -17,6 +17,7 @@ import {
   IS_DEEP_FROZEN,
 } from "@/codec-common/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
+import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
@@ -39,19 +40,36 @@ describe("UnknownValue", () => {
     it("throws given a tag that is not a codec type tag", () => {
       // This class encodes back to the tag it holds, so a tag a decoder would
       // refuse would make an instance that encodes and cannot be read back.
-      expect(() => new UnknownValue("", "state")).toThrow(/not a codec type/);
-      expect(() => new UnknownValue("hole", "state")).toThrow(
-        /not a codec type/,
-      );
-      expect(() => new UnknownValue("Bytes", "state")).toThrow(
-        /not a codec type/,
-      );
+      for (const tag of ["", "hole", "Bytes"]) {
+        expect(() => new UnknownValue(tag, "state")).toThrow(
+          /Not a codec type tag/,
+        );
+      }
+    });
+
+    it("throws a `ProblematicStateError` carrying the tag and state", () => {
+      // The same vocabulary a strict decode fails in, so a caller gets the
+      // offending tag and state structurally rather than out of prose.
+      try {
+        new UnknownValue("hole", "state");
+        throw new Error("Should have thrown.");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProblematicStateError);
+        expect((e as ProblematicStateError).wireTypeTag).toBe("hole");
+        expect((e as ProblematicStateError).state).toBe("state");
+      }
     });
 
     it("throws given a tag that is not a string", () => {
-      expect(() => new UnknownValue(42 as never, "state")).toThrow(
-        /not a codec type/,
-      );
+      // The thrown error renders what it was handed, so building the report
+      // cannot itself fail on a tag that is not a string.
+      try {
+        new UnknownValue(42 as never, "state");
+        throw new Error("Should have thrown.");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProblematicStateError);
+        expect((e as ProblematicStateError).wireTypeTag).toBe("42");
+      }
     });
   });
 

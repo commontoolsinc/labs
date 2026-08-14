@@ -1,5 +1,3 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
-
 import type { FabricValue } from "@/interface.ts";
 import {
   BaseFabricInstance,
@@ -16,7 +14,7 @@ import {
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
-import { toReportableTag } from "./toReportableTag.ts";
+import { ProblematicStateError } from "./ProblematicStateError.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When the
@@ -49,13 +47,10 @@ export class UnknownValue extends BaseFabricInstance {
     super();
 
     if (!isCodecTypeTag(wireTypeTag)) {
-      // Rendered rather than quoted directly: what fails this check is
-      // whatever sat in tag position, which need not be a string, and a
-      // message that cannot be built is worse than the fault it describes.
-      throw new Error(
-        `Cannot make an \`UnknownValue\` for ${
-          backtickQuote(toReportableTag(wireTypeTag))
-        }: not a codec type tag, so nothing encoded under it could be ` +
+      throw new ProblematicStateError(
+        wireTypeTag,
+        state,
+        "Not a codec type tag, so nothing encoded under it could be " +
           "decoded. Use a `ProblematicValue`.",
       );
     }

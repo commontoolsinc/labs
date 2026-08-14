@@ -2172,10 +2172,15 @@ fixed tag of its own**, `Problematic@1`, carrying the preserved tag as data
 beside the state and the error. A value whose whole content is "this tag was
 not a tag" cannot go back out under that tag.
 
-Both normalize what they keep rather than refusing it, so that reporting a
-failure cannot itself fail: a state that is not a `FabricValue`, and a tag that
-is not a string, are each replaced by a debug rendering of themselves. A
-rendering is deliberately not a conversion — a string plainly reads as a
+They differ again in what they do with something they cannot keep, and the two
+answers follow from the same split. `ProblematicValue` **normalizes**: a state
+that is not a `FabricValue`, and a tag that is not a string, are each replaced
+by a debug rendering of themselves, so that reporting a failure cannot itself
+fail. `UnknownValue` **refuses**: a tag that is not a tag makes construction
+throw, because there is no such thing as an unknown type that has no name, and
+an instance holding one could not be encoded to anything readable.
+
+A rendering is deliberately not a conversion — a string plainly reads as a
 description of a value rather than the value, which is the honest answer where
 fidelity is not on offer.
 Each class hosts its own `[CODEC]`, and the two are shaped differently for the

@@ -191,12 +191,19 @@ export class ProblematicValue extends BaseFabricInstance {
             error: any;
           };
 
-          result = ((typeof tag === "string") && (typeof error === "string"))
+          // `state` is checked for presence rather than for type, unlike the
+          // other two. Every `FabricValue` is a valid state, `undefined`
+          // among them, so an absent property is the only thing that marks a
+          // record this codec did not write -- and accepting one would put it
+          // back on the wire with the property filled in, which is a silent
+          // reshaping rather than a report.
+          result = ((typeof tag === "string") && (typeof error === "string") &&
+              Object.hasOwn(state, "state"))
             ? new ProblematicValue(tag, inner, error)
             : new ProblematicValue(
               CODEC_TYPE_TAGS.Problematic,
               state,
-              "expected string `tag` and `error`",
+              "expected string `tag` and `error`, and a `state` property",
             );
         }
 
