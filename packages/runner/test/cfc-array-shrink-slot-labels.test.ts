@@ -104,6 +104,9 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
     const listSchema = {
       type: "array",
       items: { asCell: ["cell"] },
+      ifc: {
+        confidentiality: ["alice-secret", "bob-secret", "carol-secret"],
+      },
     } as const;
 
     const setup = runtime.edit();

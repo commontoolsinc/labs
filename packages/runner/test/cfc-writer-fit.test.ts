@@ -4,8 +4,9 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import { declaredPolicyPathForWrite } from "../src/cfc/prepare.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-writer-fit");
 
@@ -375,6 +376,152 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+
+  it("uses an array container ceiling for its synthetic length write", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    const listSchema = {
+      type: "array",
+      items: { type: "string" },
+      ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+    } as const;
+    try {
+      await seedSpaceSource(runtime, "writer-fit-length-source", signer.did());
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "writer-fit-length-target",
+        listSchema,
+        seed,
+      ).set([]);
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(
+        signer.did(),
+        "writer-fit-length-source",
+        undefined,
+        tx,
+      );
+      const secret = (source.getRaw() as { secret: string }).secret;
+      runtime.getCell(
+        signer.did(),
+        "writer-fit-length-target",
+        listSchema,
+        tx,
+      ).set([secret]);
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          ...runtime.getCell(
+            signer.did(),
+            "writer-fit-length-target",
+          ).getAsNormalizedFullLink(),
+          path: ["length"],
+        },
+        schema: {
+          ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+        },
+        schemaRole: "output",
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          ...runtime.getCell(
+            signer.did(),
+            "writer-fit-length-target",
+          ).getAsNormalizedFullLink(),
+          path: ["0"],
+        },
+        schema: {
+          ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+        },
+        schemaRole: "output",
+      });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          ...runtime.getCell(
+            signer.did(),
+            "writer-fit-length-target",
+          ).getAsNormalizedFullLink(),
+          path: ["4294967294"],
+        },
+        schema: {
+          ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+        },
+        schemaRole: "output",
+      });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps numeric object keys in object schema envelopes", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    const objectSchema = {
+      type: "object",
+      properties: { "0": { type: "string" } },
+      ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+    } as const;
+    try {
+      const seed = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "writer-fit-numeric-object-key",
+        objectSchema,
+        seed,
+      ).set({ "0": "first" });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const target = runtime.getCell<{ "0": string }>(
+        signer.did(),
+        "writer-fit-numeric-object-key",
+        objectSchema,
+        tx,
+      );
+      target.set({ "0": "second" });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          ...target.getAsNormalizedFullLink(),
+          path: ["0"],
+        },
+        schema: {
+          ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+        },
+        schemaRole: "output",
+      });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("uses the container ceiling only for array length writes", () => {
+    expect(declaredPolicyPathForWrite({ type: "array" }, ["length"]))
+      .toEqual([]);
+    expect(
+      declaredPolicyPathForWrite(
+        {
+          type: "object",
+          properties: { length: { type: "string" } },
+        },
+        ["length"],
+      ),
+    ).toEqual(["length"]);
   });
 
   it("initializes an absent user-scoped destination with its space ceiling", async () => {

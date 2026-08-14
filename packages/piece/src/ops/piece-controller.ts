@@ -32,6 +32,7 @@ import {
   type PieceSourceTransition,
   type PieceSourceTransitionBaseline,
   preparePieceSourceTransitionBaseline,
+  recordRelevantSchemaWritePolicyInput,
   resolveCellPath,
   resolveLink,
   type RuntimeProgram,
@@ -2802,8 +2803,27 @@ class PiecePropIo implements PieceCellIo {
             txCell.getAsNormalizedFullLink(),
             "writeRedirect",
           );
-          pieces.runtime.getCellFromLink(rawTarget, undefined, tx)
-            .setRawUntyped(undefined);
+          const policyTarget = resolveLink(
+            pieces.runtime,
+            pieces.runtime.readTx(tx),
+            txCell.getAsNormalizedFullLink(),
+          );
+          const policyPath = [...policyTarget.path];
+          const policySuffixStart = policyPath.length - writePath.length;
+          // CFC schema paths use `*` for homogeneous array items while
+          // storage addresses use the concrete numeric index.
+          for (let index = 0; index < writePath.length; index++) {
+            if (typeof writePath[index] === "number") {
+              policyPath[policySuffixStart + index] = "*";
+            }
+          }
+          recordRelevantSchemaWritePolicyInput(
+            tx,
+            { ...policyTarget, path: policyPath },
+            policyTarget.schema ?? txCell.getAsNormalizedFullLink().schema,
+          );
+          tx.writeValueOrThrow(rawTarget, undefined);
+          tx.poisonMergeableOp?.(rawTarget);
         } else {
           txCell.set(nextValue);
         }

@@ -76,6 +76,7 @@ export {
   isCell,
   isReadableCell,
   isStream,
+  recordRelevantSchemaWritePolicyInput,
 } from "./cell.ts";
 export {
   getCellOrThrow,

@@ -986,6 +986,8 @@ const candidateSchemasByTarget = (
       ? schemaEnvelopeForTargetPath(
         schema,
         input.target.path,
+        existing,
+        stored,
       )
       : schema;
     if (
@@ -1158,14 +1160,50 @@ const pathsOverlap = (
 ): boolean =>
   pathPatternsOverlap(left, right) || pathPatternsOverlap(right, left);
 
+const schemaTypesAtPath = (
+  path: readonly string[],
+  shapes: readonly (JSONSchema | undefined)[],
+): readonly unknown[] => {
+  for (const shape of shapes) {
+    if (shape === undefined) continue;
+    const schema = ContextualFlowControl.getSchemaAtPath(
+      shape,
+      [...path],
+    );
+    if (!isObjectOrArray(schema) || schema.type === undefined) {
+      continue;
+    }
+    return Array.isArray(schema.type) ? schema.type : [schema.type];
+  }
+  return [];
+};
+
+const schemaPathHasArrayParent = (
+  path: readonly string[],
+  shapes: readonly (JSONSchema | undefined)[],
+): boolean => schemaTypesAtPath(path.slice(0, -1), shapes).includes("array");
+
+export const declaredPolicyPathForWrite = (
+  schema: JSONSchema,
+  path: readonly string[],
+): readonly string[] =>
+  path.at(-1) === "length" && schemaPathHasArrayParent(path, [schema])
+    ? path.slice(0, -1)
+    : path;
+
 const linkWriteCoversAffectedPath = (
   writePath: readonly string[],
   entryPath: readonly string[],
   inputs: readonly LinkWritePolicyInput[],
+  shapeSchemas: readonly (JSONSchema | undefined)[],
 ): boolean =>
   inputs.some((input) => {
     const linkPath = canonicalizeLogicalPath(input.target.path);
-    return pathsOverlap(linkPath, writePath) &&
+    const coversArrayLength = writePath.at(-1) === "length" &&
+      schemaPathHasArrayParent(writePath, shapeSchemas) &&
+      /^\d+$/.test(linkPath.at(-1) ?? "") &&
+      arraysEqual(linkPath.slice(0, -1), writePath.slice(0, -1));
+    return (pathsOverlap(linkPath, writePath) || coversArrayLength) &&
       pathsOverlap(linkPath, entryPath);
   });
 
@@ -1173,12 +1211,18 @@ const linkWritesCoverCfcAffectedPaths = (
   metadata: CfcMetadata,
   writePaths: readonly (readonly string[])[],
   inputs: readonly LinkWritePolicyInput[],
+  shapeSchemas: readonly (JSONSchema | undefined)[],
 ): boolean =>
   writePaths.every((writePath) =>
     metadata.labelMap.entries.every((entry) => {
       const entryPath = canonicalizeLogicalPath(entry.path);
       return !pathsOverlap(entryPath, writePath) ||
-        linkWriteCoversAffectedPath(writePath, entryPath, inputs);
+        linkWriteCoversAffectedPath(
+          writePath,
+          entryPath,
+          inputs,
+          shapeSchemas,
+        );
     })
   );
 
@@ -1457,10 +1501,29 @@ const rebindWriteAuthorizedByClaimsInner = (
 const schemaEnvelopeForTargetPath = (
   schema: JSONSchema,
   path: readonly string[],
+  candidateShape?: JSONSchema,
+  storedShape?: JSONSchema,
 ): JSONSchema => {
+  let effectivePath = [...path];
+  if (effectivePath.at(-1) === "length") {
+    const parentPath = effectivePath.slice(0, -1);
+    if (
+      schemaTypesAtPath(parentPath, [candidateShape, storedShape]).includes(
+        "array",
+      )
+    ) {
+      effectivePath = parentPath;
+    }
+  }
+
   let envelope = schema;
-  for (const segment of [...canonicalizeLogicalPath(path)].reverse()) {
-    envelope = segment === "*"
+  for (let index = effectivePath.length - 1; index >= 0; index--) {
+    const segment = effectivePath[index];
+    const arrayItem = schemaTypesAtPath(
+      effectivePath.slice(0, index),
+      [candidateShape, storedShape],
+    ).includes("array") && /^(0|[1-9]\d*)$/.test(segment);
+    envelope = segment === "*" || arrayItem
       ? {
         type: "array",
         items: envelope,
@@ -5439,6 +5502,11 @@ export const prepareBoundaryCommit = (
     ) {
       continue;
     }
+    const storedEnvelope = storedEnvelopeForTarget({ ...target, path: [] });
+    const storedSchema = storedEnvelope.status === "loaded"
+      ? storedEnvelope.schema
+      : undefined;
+    const shapeSchemas = [candidates.get(key), storedSchema];
     const linkWriteInputs = linkWrites.get(key) ?? [];
     if (
       linkWriteInputs.length > 0 &&
@@ -5446,6 +5514,7 @@ export const prepareBoundaryCommit = (
         existing,
         target.paths,
         linkWriteInputs,
+        shapeSchemas,
       )
     ) {
       continue;
@@ -5581,7 +5650,7 @@ export const prepareBoundaryCommit = (
     // cannot drift apart on whether an unreadable envelope counts as "nothing
     // stored". `unreadable` records the load failure as a rejection reason
     // exactly as the inline catches here always did.
-    const stored = loadStoredCfcEnvelope(tx, { space, id, scope });
+    const stored = storedEnvelopeForTarget({ space, id, scope, path: [] });
     if (stored.status === "unreadable") {
       reasons.push(stored.reason);
       continue;
@@ -6466,8 +6535,12 @@ export const prepareBoundaryCommit = (
           // is checking. Other absent declarations remain public stores.
           const generatedOutputCoversPath = generatedOutputPaths.get(key)
             ?.some((outputPath) => isPrefix(outputPath, path)) === true;
+          const declaredPolicyPath = declaredPolicyPathForWrite(
+            mergedSchema,
+            path,
+          );
           const declaredCeiling =
-            labelForEntriesAtPath(declaredPolicyEntries, path)
+            labelForEntriesAtPath(declaredPolicyEntries, declaredPolicyPath)
               ?.confidentiality ??
               (generatedOutputCoversPath ? [cfcAtom.space(target.space)] : []);
           const offending = atomsOutsideCeiling(

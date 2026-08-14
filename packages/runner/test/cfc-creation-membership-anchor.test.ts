@@ -92,6 +92,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     const listSchema = {
       type: "array",
       items: { asCell: ["cell"] },
+      ifc: { confidentiality: ["alice-secret"] },
     } as const;
 
     // The creating transaction: a content read (alice joins the flow join)
@@ -145,7 +146,12 @@ describe("CFC: creation anchors membership at the canonical container path", () 
       type: "application/json",
       path: ["value"],
     }, { nonRecursive: true });
-    const out = runtime!.getCell(space, "anchor-out", undefined, readTx);
+    const out = runtime!.getCell(
+      space,
+      "anchor-out",
+      { ifc: { confidentiality: ["alice-secret"] } },
+      readTx,
+    );
     out.set({ copied: true });
     expect((await readTx.commit()).ok).toBeDefined();
 
