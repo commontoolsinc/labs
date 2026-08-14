@@ -103,7 +103,7 @@ describe("cfc render policy demo integration test", () => {
       () =>
         clickTrustedActionAndWaitForText(
           page,
-          "TrustedRevealHealthData",
+          "TrustedToggleHealthDataVisibility",
           "#trusted-health-visible",
           "Sensitive health data: migraine treatment plan",
         ),

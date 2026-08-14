@@ -1,9 +1,21 @@
 import { assert, handler, pattern, Stream, TESTS } from "commonfabric";
+import {
+  AUTHORIZE_SEND_ACTION,
+  CAPTURE_COMMAND_ACTION,
+  PREPARE_BRIEF_ACTION,
+  TRUSTED_DIRECT_COMMAND_SURFACE,
+} from "../cfc/trusted-surfaces/direct-command.tsx";
+import {
+  FORWARD_NOTE_ACTION,
+  PREPARE_FORWARD_ACTION,
+  TRUSTED_FORWARD_SURFACE,
+} from "../cfc/trusted-surfaces/forward.tsx";
+import {
+  PREPARE_SAFE_LINK_ACTION,
+  RELEASE_SAFE_LINK_ACTION,
+  TRUSTED_SAFE_LINK_SURFACE,
+} from "../cfc/trusted-surfaces/safe-link.tsx";
 import Gallery from "./main.tsx";
-
-const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
-  stream.send();
-});
 
 const sendString = handler<void, { stream: Stream<string>; next: string }>((
   _,
@@ -15,37 +27,17 @@ const sendString = handler<void, { stream: Stream<string>; next: string }>((
 export default pattern(() => {
   const instance = Gallery({});
 
-  const action_prepare_forward = trigger({
-    stream: instance.prepareForwardHotelNote,
-  });
-  const action_forward_note = trigger({ stream: instance.runForwardHotelNote });
-  const action_capture_command = trigger({
-    stream: instance.runCaptureDirectCommand,
-  });
-  const action_prepare_brief = trigger({
-    stream: instance.runPreviewResearchBrief,
-  });
-  const action_authorize_send = trigger({
-    stream: instance.runAuthorizeResearchSend,
-  });
-  const action_prepare_safe_link = trigger({
-    stream: instance.prepareSafeLinkRelease,
-  });
-  const action_release_safe_link = trigger({
-    stream: instance.runReleaseSafeLink,
-  });
-  const action_membership = trigger({
-    stream: instance.runHotelMembershipReturn,
-  });
-  const action_select_search_result = trigger({
-    stream: instance.runSelectSearchResult,
-  });
-  const action_finalize_checklist = trigger({
-    stream: instance.runFinalizeChecklist,
-  });
-  const action_confirm_receipt = trigger({
-    stream: instance.runConfirmReceipt,
-  });
+  const action_prepare_forward = instance.prepareForwardHotelNote;
+  const action_forward_note = instance.runForwardHotelNote;
+  const action_capture_command = instance.runCaptureDirectCommand;
+  const action_prepare_brief = instance.runPreviewResearchBrief;
+  const action_authorize_send = instance.runAuthorizeResearchSend;
+  const action_prepare_safe_link = instance.prepareSafeLinkRelease;
+  const action_release_safe_link = instance.runReleaseSafeLink;
+  const action_membership = instance.runHotelMembershipReturn;
+  const action_select_search_result = instance.runSelectSearchResult;
+  const action_finalize_checklist = instance.runFinalizeChecklist;
+  const action_confirm_receipt = instance.runConfirmReceipt;
 
   const action_change_forward_recipient = sendString({
     stream: instance.setForwardRecipient,
@@ -55,6 +47,10 @@ export default pattern(() => {
     stream: instance.setResearchCommand,
     next:
       "Research the product launch and email a short briefing to launch@example.com",
+  });
+  const action_replace_command = sendString({
+    stream: instance.setResearchCommand,
+    next: "Research the replacement launch plan",
   });
   const action_change_source_url = sendString({
     stream: instance.setSafeLinkSource,
@@ -73,6 +69,10 @@ export default pattern(() => {
     instance.lastCompleted === "forward-hotel-note"
   );
   const assert_research_prepared = assert(() => instance.completedCount === 1);
+  const assert_stale_research_brief_not_sent = assert(() =>
+    instance.completedCount === 1 &&
+    instance.lastCompleted === "forward-hotel-note"
+  );
   const assert_research_sent = assert(() =>
     instance.completedCount === 2 &&
     instance.lastCompleted === "authorize-research-send"
@@ -94,21 +94,86 @@ export default pattern(() => {
     [TESTS]: [
       { assertion: assert_count },
       { action: action_change_forward_recipient },
-      { action: action_prepare_forward },
+      {
+        action: action_prepare_forward,
+        trustedUi: {
+          surface: TRUSTED_FORWARD_SURFACE,
+          action: PREPARE_FORWARD_ACTION,
+        },
+      },
       { assertion: assert_forward_prepared },
-      { action: action_forward_note },
+      {
+        action: action_forward_note,
+        trustedUi: {
+          surface: TRUSTED_FORWARD_SURFACE,
+          action: FORWARD_NOTE_ACTION,
+        },
+      },
       { assertion: assert_forward_committed },
       { action: action_change_command },
-      { action: action_capture_command },
+      {
+        action: action_capture_command,
+        trustedUi: {
+          surface: TRUSTED_DIRECT_COMMAND_SURFACE,
+          action: CAPTURE_COMMAND_ACTION,
+        },
+      },
       { assertion: assert_research_captured },
-      { action: action_prepare_brief },
+      {
+        action: action_prepare_brief,
+        trustedUi: {
+          surface: TRUSTED_DIRECT_COMMAND_SURFACE,
+          action: PREPARE_BRIEF_ACTION,
+        },
+      },
       { assertion: assert_research_prepared },
-      { action: action_authorize_send },
+      { action: action_replace_command },
+      {
+        action: action_capture_command,
+        trustedUi: {
+          surface: TRUSTED_DIRECT_COMMAND_SURFACE,
+          action: CAPTURE_COMMAND_ACTION,
+        },
+      },
+      {
+        action: action_authorize_send,
+        trustedUi: {
+          surface: TRUSTED_DIRECT_COMMAND_SURFACE,
+          action: AUTHORIZE_SEND_ACTION,
+        },
+      },
+      { assertion: assert_stale_research_brief_not_sent },
+      {
+        action: action_prepare_brief,
+        trustedUi: {
+          surface: TRUSTED_DIRECT_COMMAND_SURFACE,
+          action: PREPARE_BRIEF_ACTION,
+        },
+      },
+      {
+        action: action_authorize_send,
+        trustedUi: {
+          surface: TRUSTED_DIRECT_COMMAND_SURFACE,
+          action: AUTHORIZE_SEND_ACTION,
+        },
+      },
       { assertion: assert_research_sent },
       { action: action_change_source_url },
-      { action: action_prepare_safe_link },
+      {
+        action: action_prepare_safe_link,
+        trustedUi: {
+          surface: TRUSTED_SAFE_LINK_SURFACE,
+          action: PREPARE_SAFE_LINK_ACTION,
+        },
+      },
       { assertion: assert_safe_link_prepared },
-      { action: action_release_safe_link },
+      {
+        action: action_release_safe_link,
+        trustedUi: {
+          surface: TRUSTED_SAFE_LINK_SURFACE,
+          action: RELEASE_SAFE_LINK_ACTION,
+        },
+      },
       { assertion: assert_safe_link_released },
       { action: action_membership },
       { action: action_select_search_result },

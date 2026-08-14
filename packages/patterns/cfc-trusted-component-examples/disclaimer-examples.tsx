@@ -134,6 +134,43 @@ const setLookalikeStatus = handler<
   fakeStatus.set(fakeMessage.get());
 });
 
+type LookalikeStatusControlInput = {
+  label: string;
+  fakeButton: Writable<string>;
+  fakeMessage: Writable<string>;
+  fakeStatus: Writable<string>;
+};
+
+type LookalikeStatusControlOutput = {
+  [UI]: VNode;
+  fakeStatus: string;
+  triggerLookalike: Stream<void>;
+};
+
+const LookalikeStatusControl = pattern<
+  LookalikeStatusControlInput,
+  LookalikeStatusControlOutput
+>(({ label, fakeButton, fakeMessage, fakeStatus }) => {
+  const triggerLookalike = setLookalikeStatus({
+    fakeStatus,
+    fakeMessage,
+  });
+
+  return {
+    [UI]: (
+      <cf-card>
+        <cf-vstack slot="content" gap="2">
+          <cf-label>{label}</cf-label>
+          <cf-button onClick={triggerLookalike}>{fakeButton}</cf-button>
+          <div>{fakeStatus}</div>
+        </cf-vstack>
+      </cf-card>
+    ),
+    fakeStatus,
+    triggerLookalike,
+  };
+});
+
 export const TrustedDisclaimerAckHost = pattern<
   DisclaimerHostInput,
   DisclosureExampleOutput
@@ -148,9 +185,11 @@ export const TrustedDisclaimerAckHost = pattern<
     fakeMessage,
     fakeStatus,
   }) => {
-    const triggerLookalike = setLookalikeStatus({
-      fakeStatus,
+    const lookalike = LookalikeStatusControl({
+      label: "Lookalike host control",
+      fakeButton,
       fakeMessage,
+      fakeStatus,
     });
 
     return {
@@ -185,15 +224,7 @@ export const TrustedDisclaimerAckHost = pattern<
                     />
                   </cf-vstack>
                 </cf-card>
-                <cf-card>
-                  <cf-vstack slot="content" gap="2">
-                    <cf-label>Lookalike host control</cf-label>
-                    <cf-button onClick={triggerLookalike}>
-                      {fakeButton}
-                    </cf-button>
-                    <div>{fakeStatus}</div>
-                  </cf-vstack>
-                </cf-card>
+                {lookalike[UI]}
               </cf-vstack>
             </cf-card>
           </cf-vstack>
@@ -202,8 +233,8 @@ export const TrustedDisclaimerAckHost = pattern<
       content,
       disclaimerText,
       acknowledgedDisclaimer,
-      fakeStatus,
-      triggerLookalike,
+      fakeStatus: lookalike.fakeStatus,
+      triggerLookalike: lookalike.triggerLookalike,
     };
   },
 );
@@ -222,9 +253,11 @@ export const TrustedProvenanceReviewHost = pattern<
     fakeMessage,
     fakeStatus,
   }) => {
-    const triggerLookalike = setLookalikeStatus({
-      fakeStatus,
+    const lookalike = LookalikeStatusControl({
+      label: "Lookalike host provenance card",
+      fakeButton,
       fakeMessage,
+      fakeStatus,
     });
 
     return {
@@ -259,15 +292,7 @@ export const TrustedProvenanceReviewHost = pattern<
                     />
                   </cf-vstack>
                 </cf-card>
-                <cf-card>
-                  <cf-vstack slot="content" gap="2">
-                    <cf-label>Lookalike host provenance card</cf-label>
-                    <cf-button onClick={triggerLookalike}>
-                      {fakeButton}
-                    </cf-button>
-                    <div>{fakeStatus}</div>
-                  </cf-vstack>
-                </cf-card>
+                {lookalike[UI]}
               </cf-vstack>
             </cf-card>
           </cf-vstack>
@@ -276,8 +301,8 @@ export const TrustedProvenanceReviewHost = pattern<
       content,
       provenanceText,
       reviewedProvenance,
-      fakeStatus,
-      triggerLookalike,
+      fakeStatus: lookalike.fakeStatus,
+      triggerLookalike: lookalike.triggerLookalike,
     };
   },
 );
@@ -296,9 +321,11 @@ export const TrustedFactCheckGateHost = pattern<
     fakeMessage,
     fakeStatus,
   }) => {
-    const triggerLookalike = setLookalikeStatus({
-      fakeStatus,
+    const lookalike = LookalikeStatusControl({
+      label: "Lookalike host fact-check card",
+      fakeButton,
       fakeMessage,
+      fakeStatus,
     });
 
     return {
@@ -333,15 +360,7 @@ export const TrustedFactCheckGateHost = pattern<
                     />
                   </cf-vstack>
                 </cf-card>
-                <cf-card>
-                  <cf-vstack slot="content" gap="2">
-                    <cf-label>Lookalike host fact-check card</cf-label>
-                    <cf-button onClick={triggerLookalike}>
-                      {fakeButton}
-                    </cf-button>
-                    <div>{fakeStatus}</div>
-                  </cf-vstack>
-                </cf-card>
+                {lookalike[UI]}
               </cf-vstack>
             </cf-card>
           </cf-vstack>
@@ -350,8 +369,8 @@ export const TrustedFactCheckGateHost = pattern<
       content,
       factCheckClaim,
       factCheckResult,
-      fakeStatus,
-      triggerLookalike,
+      fakeStatus: lookalike.fakeStatus,
+      triggerLookalike: lookalike.triggerLookalike,
     };
   },
 );

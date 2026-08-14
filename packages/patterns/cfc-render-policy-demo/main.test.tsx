@@ -1,27 +1,15 @@
-import {
-  assert,
-  handler,
-  pattern,
-  Stream,
-  TESTS,
-  Writable,
-} from "commonfabric";
-import RenderPolicyDemo, { TrustedHealthDisclosureSurface } from "./main.tsx";
-
-const trigger = handler<void, { stream: Stream<unknown> }>((_, { stream }) => {
-  stream.send(undefined);
-});
+import { assert, pattern, TESTS, Writable } from "commonfabric";
+import RenderPolicyDemo, {
+  TRUSTED_CONCEAL_HEALTH_DATA_ACTION,
+  TRUSTED_HEALTH_DISCLOSURE_SURFACE,
+  TRUSTED_REVEAL_HEALTH_DATA_ACTION,
+  TrustedHealthDisclosureControls,
+} from "./main.tsx";
 
 export default pattern(() => {
   const demo = RenderPolicyDemo({});
   const revealSensitive = new Writable(false);
-  const trustedDisclosure = TrustedHealthDisclosureSurface({
-    content: new Writable("Sensitive health data") as never,
-    revealSensitive,
-  });
-
-  const action_reveal = trigger({ stream: trustedDisclosure.reveal });
-  const action_conceal = trigger({ stream: trustedDisclosure.conceal });
+  const controls = TrustedHealthDisclosureControls({ revealSensitive });
 
   const assert_initially_hidden = assert(() => revealSensitive.get() === false);
   const assert_revealed = assert(() => revealSensitive.get() === true);
@@ -30,12 +18,24 @@ export default pattern(() => {
   return {
     [TESTS]: [
       { assertion: assert_initially_hidden },
-      { action: action_reveal },
+      {
+        action: controls.reveal,
+        trustedUi: {
+          surface: TRUSTED_HEALTH_DISCLOSURE_SURFACE,
+          action: TRUSTED_REVEAL_HEALTH_DATA_ACTION,
+        },
+      },
       { assertion: assert_revealed },
-      { action: action_conceal },
+      {
+        action: controls.conceal,
+        trustedUi: {
+          surface: TRUSTED_HEALTH_DISCLOSURE_SURFACE,
+          action: TRUSTED_CONCEAL_HEALTH_DATA_ACTION,
+        },
+      },
       { assertion: assert_concealed },
     ],
+    controls,
     demo,
-    trustedDisclosure,
   };
 });

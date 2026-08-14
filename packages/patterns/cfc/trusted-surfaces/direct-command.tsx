@@ -12,20 +12,23 @@ import {
 
 export const TRUSTED_DIRECT_COMMAND_SURFACE = "TrustedDirectCommandSurface";
 
-const CAPTURE_COMMAND_ACTION = "TrustedCaptureDirectCommand";
-const PREPARE_BRIEF_ACTION = "TrustedPrepareResearchBrief";
-const AUTHORIZE_SEND_ACTION = "TrustedAuthorizeResearchSend";
+export const CAPTURE_COMMAND_ACTION = "TrustedCaptureDirectCommand";
+export const PREPARE_BRIEF_ACTION = "TrustedPrepareResearchBrief";
+export const AUTHORIZE_SEND_ACTION = "TrustedAuthorizeResearchSend";
+
+const researchBriefFor = (command: string): string =>
+  command
+    ? `Prepared outbound draft: concise summary for "${command}". The send action stays separately gated.`
+    : "";
 
 export const captureTrustedDirectCommand = handler<
   void,
   {
     commandInput: Writable<string>;
     capturedCommand: Writable<string>;
-    preparedBrief: Writable<string>;
   }
->((_, { commandInput, capturedCommand, preparedBrief }) => {
+>((_, { commandInput, capturedCommand }) => {
   capturedCommand.set(commandInput.get().trim());
-  preparedBrief.set("");
 });
 
 export const prepareTrustedResearchBrief = handler<
@@ -36,11 +39,7 @@ export const prepareTrustedResearchBrief = handler<
   }
 >((_, { capturedCommand, preparedBrief }) => {
   const command = capturedCommand.get().trim();
-  preparedBrief.set(
-    command
-      ? `Prepared outbound draft: concise summary for "${command}". The send action stays separately gated.`
-      : "",
-  );
+  preparedBrief.set(researchBriefFor(command));
 });
 
 export const commitTrustedResearchSend = handler<
@@ -53,8 +52,11 @@ export const commitTrustedResearchSend = handler<
 >((_, { capturedCommand, preparedBrief, authorizedSend }) => {
   const command = capturedCommand.get().trim();
   const preview = preparedBrief.get().trim();
+  const expectedPreview = researchBriefFor(command);
   authorizedSend.set(
-    preview ? `Authorized outbound message for "${command}": ${preview}` : "",
+    command && preview === expectedPreview
+      ? `Authorized outbound message for "${command}": ${preview}`
+      : "",
   );
 });
 
@@ -99,7 +101,6 @@ export const TrustedDirectCommandSurface = pattern<
   const captureCommand = captureTrustedDirectCommand({
     commandInput,
     capturedCommand,
-    preparedBrief,
   });
   const prepareBrief = prepareTrustedResearchBrief({
     capturedCommand,

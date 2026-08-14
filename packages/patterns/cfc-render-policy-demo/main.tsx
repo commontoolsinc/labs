@@ -9,12 +9,14 @@ import {
   Stream,
   type TrustedActionWrite,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
-const TRUSTED_HEALTH_DISCLOSURE_SURFACE = "TrustedHealthDisclosureSurface";
-const TRUSTED_REVEAL_HEALTH_DATA_ACTION = "TrustedRevealHealthData";
-const TRUSTED_CONCEAL_HEALTH_DATA_ACTION = "TrustedConcealHealthData";
+export const TRUSTED_HEALTH_DISCLOSURE_SURFACE =
+  "TrustedHealthDisclosureSurface";
+export const TRUSTED_REVEAL_HEALTH_DATA_ACTION = "TrustedRevealHealthData";
+export const TRUSTED_CONCEAL_HEALTH_DATA_ACTION = "TrustedConcealHealthData";
 
 const HEALTH_RECORD_CONFIDENTIALITY = {
   type: "https://commonfabric.org/cfc/atom/Resource",
@@ -40,28 +42,27 @@ type LabelledContentArgument = {
   content: string;
 };
 
+type TrustedHealthVisibility = TrustedActionWrite<
+  boolean,
+  typeof setRevealSensitive,
+  typeof TRUSTED_REVEAL_HEALTH_DATA_ACTION,
+  typeof TRUSTED_HEALTH_DISCLOSURE_SURFACE
+>;
+
 export type TrustedHealthDisclosureOutput = {
   [NAME]: string;
-  [UI]: unknown;
-  revealSensitive: TrustedActionWrite<
-    boolean,
-    typeof setRevealSensitive,
-    typeof TRUSTED_REVEAL_HEALTH_DATA_ACTION,
-    typeof TRUSTED_HEALTH_DISCLOSURE_SURFACE
-  >;
+  [UI]: VNode;
+  revealSensitive: TrustedHealthVisibility;
+  revealState: string;
   reveal: Stream<unknown>;
   conceal: Stream<unknown>;
 };
 
 export type RenderPolicyDemoOutput = {
   [NAME]: string;
-  [UI]: unknown;
-  revealSensitive: TrustedActionWrite<
-    boolean,
-    typeof setRevealSensitive,
-    typeof TRUSTED_REVEAL_HEALTH_DATA_ACTION,
-    typeof TRUSTED_HEALTH_DISCLOSURE_SURFACE
-  >;
+  [UI]: VNode;
+  revealSensitive: TrustedHealthVisibility;
+  revealState: string;
   reveal: Stream<unknown>;
   conceal: Stream<unknown>;
 };
@@ -89,9 +90,60 @@ const makeConfidentialHealthText = lift<
   )
 );
 
+export const TrustedHealthDisclosureControls = pattern<
+  { revealSensitive: Writable<boolean> },
+  TrustedHealthDisclosureOutput
+>(({ revealSensitive }) => {
+  const reveal = setRevealSensitive({
+    revealSensitive,
+    next: true,
+  });
+  const conceal = setRevealSensitive({
+    revealSensitive,
+    next: false,
+  });
+  const buttonLabel = computed(() =>
+    revealSensitive.get()
+      ? "Hide sensitive health data"
+      : "Show sensitive health data"
+  );
+  const revealState = computed(() =>
+    revealSensitive.get() ? "Reveal enabled" : "Reveal disabled"
+  );
+
+  return {
+    [NAME]: "Trusted health disclosure controls",
+    [UI]: (
+      <cf-vstack gap="3">
+        <cf-hstack gap="2">
+          <cf-button
+            data-ui-action={TRUSTED_REVEAL_HEALTH_DATA_ACTION}
+            onClick={reveal}
+          >
+            {buttonLabel}
+          </cf-button>
+          <cf-button
+            data-ui-action={TRUSTED_CONCEAL_HEALTH_DATA_ACTION}
+            onClick={conceal}
+          >
+            Reset to private
+          </cf-button>
+        </cf-hstack>
+        <cf-label id="reveal-state">
+          {revealState}
+        </cf-label>
+      </cf-vstack>
+    ),
+    revealSensitive,
+    revealState,
+    reveal,
+    conceal,
+  };
+});
+
 export const UntrustedDirectHealthRender = pattern<
   DirectHealthRenderInput,
-  { [NAME]: string; [UI]: unknown }
+  { [NAME]: string; [UI]: VNode }
 >(({ content }) => ({
   [NAME]: "Untrusted direct health render",
   [UI]: (
@@ -117,16 +169,7 @@ export const TrustedHealthDisclosureSurface = pattern<
   TrustedHealthDisclosureInput,
   TrustedHealthDisclosureOutput
 >(({ content, revealSensitive }) => {
-  const reveal = setRevealSensitive({ revealSensitive, next: true });
-  const conceal = setRevealSensitive({ revealSensitive, next: false });
-  const buttonLabel = computed(() =>
-    revealSensitive.get()
-      ? "Hide sensitive health data"
-      : "Show sensitive health data"
-  );
-  const revealState = computed(() =>
-    revealSensitive.get() ? "Reveal enabled" : "Reveal disabled"
-  );
+  const controls = TrustedHealthDisclosureControls({ revealSensitive });
   const trustedContentStyle = computed(() => ({
     display: revealSensitive.get() ? "block" : "none",
   }));
@@ -150,23 +193,7 @@ export const TrustedHealthDisclosureSurface = pattern<
             to be rendered. The render boundary only declassifies the matching
             label after this control is switched on.
           </cf-label>
-          <cf-hstack gap="2">
-            <cf-button
-              data-ui-action={TRUSTED_REVEAL_HEALTH_DATA_ACTION}
-              onClick={reveal}
-            >
-              {buttonLabel}
-            </cf-button>
-            <cf-button
-              data-ui-action={TRUSTED_CONCEAL_HEALTH_DATA_ACTION}
-              onClick={conceal}
-            >
-              Reset to private
-            </cf-button>
-          </cf-hstack>
-          <cf-label id="reveal-state">
-            {revealState}
-          </cf-label>
+          {controls}
           <cf-card>
             <cf-vstack slot="content" gap="2">
               <cf-label>Trusted render region</cf-label>
@@ -199,9 +226,10 @@ export const TrustedHealthDisclosureSurface = pattern<
         </cf-vstack>
       </cf-card>
     ),
-    revealSensitive,
-    reveal,
-    conceal,
+    revealSensitive: controls.revealSensitive,
+    revealState: controls.revealState,
+    reveal: controls.reveal,
+    conceal: controls.conceal,
   };
 });
 
@@ -246,6 +274,7 @@ export default pattern<unknown, RenderPolicyDemoOutput>(() => {
       </cf-screen>
     ),
     revealSensitive: trustedDisclosure.revealSensitive,
+    revealState: trustedDisclosure.revealState,
     reveal: trustedDisclosure.reveal,
     conceal: trustedDisclosure.conceal,
   };

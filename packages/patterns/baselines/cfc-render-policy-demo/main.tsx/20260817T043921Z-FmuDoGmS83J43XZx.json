@@ -1,0 +1,67 @@
+{
+  "argumentSchema": {
+    "type": "unknown"
+  },
+  "pattern": "cfc-render-policy-demo/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "TrustedHealthVisibility": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedRevealHealthData",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedHealthDisclosureSurface"
+            ],
+            "trustedPattern": "TrustedHealthDisclosureSurface"
+          },
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-render-policy-demo/main.tsx",
+              "moduleIdentity": "xP6bSF4ToH74XT17ftP-99YzZ6ERc1YpvMUvRmRjgG0",
+              "path": [
+                "setRevealSensitive"
+              ]
+            }
+          }
+        },
+        "type": "boolean"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "conceal": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "unknown"
+      },
+      "reveal": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "unknown"
+      },
+      "revealSensitive": {
+        "$ref": "#/$defs/TrustedHealthVisibility"
+      },
+      "revealState": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "revealSensitive",
+      "revealState",
+      "reveal",
+      "conceal",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

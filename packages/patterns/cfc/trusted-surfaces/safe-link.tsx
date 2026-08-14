@@ -12,8 +12,8 @@ import {
 
 export const TRUSTED_SAFE_LINK_SURFACE = "TrustedSafeLinkSurface";
 
-const PREPARE_SAFE_LINK_ACTION = "TrustedPrepareSafeLink";
-const RELEASE_SAFE_LINK_ACTION = "TrustedReleaseSafeLink";
+export const PREPARE_SAFE_LINK_ACTION = "TrustedPrepareSafeLink";
+export const RELEASE_SAFE_LINK_ACTION = "TrustedReleaseSafeLink";
 
 export const prepareTrustedSafeLink = handler<
   void,

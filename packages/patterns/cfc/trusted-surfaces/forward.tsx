@@ -12,8 +12,8 @@ import {
 
 export const TRUSTED_FORWARD_SURFACE = "TrustedForwardSurface";
 
-const PREPARE_FORWARD_ACTION = "TrustedPrepareForward";
-const FORWARD_NOTE_ACTION = "TrustedForwardNote";
+export const PREPARE_FORWARD_ACTION = "TrustedPrepareForward";
+export const FORWARD_NOTE_ACTION = "TrustedForwardNote";
 
 export const prepareTrustedForward = handler<
   void,
