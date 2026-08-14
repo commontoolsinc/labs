@@ -1995,6 +1995,39 @@ describe("piece call stdin payloads", () => {
     expect(printed).toEqual([]);
   });
 
+  it("writes the Invocation JSON to stdout when the wait bound expires", () => {
+    // A wait expiry is the one failure that still owes stdout a machine
+    // surface: the same Invocation JSON shape as a settled call, carrying
+    // the furthest observed phase as its status, so a script parses one
+    // shape either way. The stderr lines stay exactly the ordinary failure
+    // contract.
+    const printed: string[] = [];
+    const rendered: string[] = [];
+    const exited: number[] = [];
+    const observer = pieceCallPhaseObserver(false, () => {}, () => {}, () => 0);
+    expect(() =>
+      exitPieceCallFailure(
+        observer,
+        new WaitBoundExpired(5),
+        "inv-9",
+        "dispatched",
+        {
+          printError: (message) => printed.push(message),
+          render: (text) => rendered.push(text),
+          exit: (code): never => {
+            exited.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow("exit-sentinel");
+    expect(printed[1]).toBe("invocation: inv-9 phase: dispatched");
+    expect(rendered).toEqual([
+      JSON.stringify({ invocation: "inv-9", status: "dispatched" }, null, 2),
+    ]);
+    expect(exited).toEqual([1]);
+  });
+
   it("closes the verbose span on the pre-dispatch payload-rejection exit", () => {
     // reportVerbInputErrorOrRethrow terminates the process from inside the
     // promise chain, bypassing the action's catch — without the observer
