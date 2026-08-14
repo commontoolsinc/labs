@@ -47,11 +47,24 @@ import type {
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 
 /** Consecutive cold-view deferrals before a drained event hardens into
- * events.md §5's DROP (see #eventDeferrals). Each deferral is one full
- * input-driven wave cycle, so the creation race has this many commits'
- * worth of arrival time. */
+ * events.md §5's DROP (see #eventDeferrals). A deferral re-arms the
+ * scan from the NEXT INPUT (the creation commit arriving) or, absent
+ * input, from a real-time backstop tick — never synchronously, so the
+ * retry budget cannot be consumed back-to-back inside one quiet
+ * moment (verdict blocker, 2026-08-12: all eight deferrals used to
+ * run in immediate succession and permanently drop an event whose
+ * creation input was milliseconds away). */
 const EVENT_DEFERRAL_DROP_THRESHOLD = 8;
-import { markRuntimeInjectedEventKeys } from "../cell.ts";
+
+/** The deferral backstop cadence: with NO input arriving at all, a
+ * deferred event retries once per tick and hardens into the DROP
+ * after the full budget — bounded unrunnable-event cleanup (the park
+ * criterion needs the drop) without racing the creation window. */
+const EVENT_DEFERRAL_REARM_MS = 250;
+import {
+  markRuntimeInjectedEventKeys,
+  sanitizeRuntimeInjectedEventKeys,
+} from "../cell.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import {
   EXECUTION_LEASE_RENEW_INTERVAL_MS,
@@ -236,6 +249,11 @@ export class SpaceServer implements TransactionSealDestination {
    * park). Cleared on activation (a fresh runtime re-tries from
    * scratch) and on any non-deferred outcome. */
   readonly #eventDeferrals = new Map<string, number>();
+  /** The deferral backstop timer (see EVENT_DEFERRAL_REARM_MS): armed
+   * when a drain pass left deferred/transient work behind, so the scan
+   * re-arms after a REAL wait even when no input ever arrives. Input
+   * arriving first promotes the owed scan immediately (#drainFeed). */
+  #deferredRescanTimer: ReturnType<typeof setTimeout> | undefined;
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
    * at seal). Admitted to the outbox after the wave's commit step;
@@ -1021,6 +1039,24 @@ export class SpaceServer implements TransactionSealDestination {
     return this.#pendingEffectsByWave.get(wave)?.length ?? 0;
   }
 
+  /** Re-arm the event scan for DEFERRED (transient) drain outcomes —
+   * never synchronously (verdict blocker, 2026-08-12): an immediate
+   * `#eventScanOwed = true` makes `#hasWork()` spin the next wave at
+   * once, consuming the whole deferral budget back-to-back before the
+   * creation input can arrive. Instead the scan re-arms on the FIRST
+   * of: new input (#drainFeed promotes it), or the real-time backstop
+   * tick here (so a permanently unrunnable event still hardens into
+   * the events.md §5 DROP and clears the park criterion). */
+  #armDeferredRescan(): void {
+    if (this.#deferredRescanTimer !== undefined) return;
+    this.#deferredRescanTimer = setTimeout(() => {
+      this.#deferredRescanTimer = undefined;
+      if (!this.#active) return;
+      this.#eventScanOwed = true;
+      this.#feedArrived?.resolve();
+    }, EVENT_DEFERRAL_REARM_MS);
+  }
+
   async #waitForInput(maxMs: number): Promise<void> {
     if (this.#feed.length > 0) return;
     if (this.#pendingShadowFlipWake) {
@@ -1065,6 +1101,16 @@ export class SpaceServer implements TransactionSealDestination {
       if (record.eventAppends !== undefined && record.eventAppends.length > 0) {
         this.#eventScanOwed = true;
         this.#options.stats.events.appended += record.eventAppends.length;
+      }
+      // Deferred events re-try on NEW INPUT (the creation-race arm:
+      // the piece's pattern-run commit is exactly such a record) —
+      // this is the input signal the deferral budget counts, not a
+      // synchronous self-scan.
+      if (
+        this.#eventDeferrals.size > 0 ||
+        this.#deferredRescanTimer !== undefined
+      ) {
+        this.#eventScanOwed = true;
       }
     }
     this.#feed = [];
@@ -1127,7 +1173,7 @@ export class SpaceServer implements TransactionSealDestination {
           "next wave",
           error,
         ]);
-        this.#eventScanOwed = true;
+        this.#armDeferredRescan();
         continue;
       }
       // The FULL stored log — mark indices address positions in it.
@@ -1195,7 +1241,7 @@ export class SpaceServer implements TransactionSealDestination {
               `drain deferring ${entry.eventId}: replica view holds ` +
               `${JSON.stringify(viewEntry)} at index ${index}`,
             ]);
-            this.#eventScanOwed = true;
+            this.#armDeferredRescan();
             continue;
           }
           runtime.scheduler.queueEvent(
@@ -1209,18 +1255,36 @@ export class SpaceServer implements TransactionSealDestination {
             false,
             {
               eventId: entry.eventId,
-              ...(entry.runtimeInjectedEventKeys !== undefined
-                ? {
+              // Sanitize BEFORE re-minting (verdict blocker,
+              // 2026-08-12): a persisted malformed value (pre-guard or
+              // corrupted rows) would throw in the mint's spread on
+              // every scan — perpetual drain churn. Malformed degrades
+              // to absent; the closed-world gate judges the payload
+              // strictly, as with an unminted spoof.
+              ...((() => {
+                const carried = sanitizeRuntimeInjectedEventKeys(
+                  entry.runtimeInjectedEventKeys,
+                );
+                if (
+                  carried === undefined &&
+                  entry.runtimeInjectedEventKeys !== undefined
+                ) {
+                  logger.warn("event-malformed-injected-keys", () => [
+                    `entry ${entry.eventId} carries malformed ` +
+                    "runtimeInjectedEventKeys; treated as absent",
+                  ]);
+                }
+                return carried === undefined ? {} : {
                   // Re-mint the carried provenance in THIS runtime (the
                   // mint is a process-local trust mark): the entry's keys
                   // were committed under the firing client's own
                   // admission, the same in-process trust the client-side
                   // gate ran under.
                   runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(
-                    entry.runtimeInjectedEventKeys,
+                    carried,
                   ),
-                }
-                : {}),
+                };
+              })()),
               served: {
                 ...(entry.firedAt !== undefined
                   ? {
@@ -1241,10 +1305,11 @@ export class SpaceServer implements TransactionSealDestination {
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
                     this.#eventDeferrals.set(entry.eventId, deferrals);
                     if (deferrals < EVENT_DEFERRAL_DROP_THRESHOLD) {
-                      // No consequence: the entry stays pending and the
-                      // next wave re-drains it (the cold-view creation
-                      // race — OW19's conflation caution).
-                      this.#eventScanOwed = true;
+                      // No consequence: the entry stays pending; the
+                      // re-drain waits for input or the backstop tick
+                      // (the cold-view creation race — OW19's
+                      // conflation caution), NEVER a synchronous spin.
+                      this.#armDeferredRescan();
                       return;
                     }
                     // The race window is long past: no runnable handler
@@ -1279,7 +1344,7 @@ export class SpaceServer implements TransactionSealDestination {
           queued += 1;
         } catch (drainError) {
           logger.warn("drain-debug", () => ["per-entry threw", drainError]);
-          this.#eventScanOwed = true;
+          this.#armDeferredRescan();
         }
       }
     }
@@ -1935,6 +2000,10 @@ export class SpaceServer implements TransactionSealDestination {
     if (this.#renewTimer !== undefined) {
       clearInterval(this.#renewTimer);
       this.#renewTimer = undefined;
+    }
+    if (this.#deferredRescanTimer !== undefined) {
+      clearTimeout(this.#deferredRescanTimer);
+      this.#deferredRescanTimer = undefined;
     }
     this.#feedArrived?.resolve();
     for (const cancel of this.#demandSinks.values()) {

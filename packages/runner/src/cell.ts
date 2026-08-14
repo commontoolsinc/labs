@@ -338,6 +338,29 @@ export function markRuntimeInjectedEventKeys(
   return minted;
 }
 
+/**
+ * Validate PERSISTED runtime-injected-key carriage before re-minting
+ * (verdict blocker, 2026-08-12): engine admission refuses malformed
+ * carriage at the door, but rows persisted before that guard (or by a
+ * corrupted store) can still surface here — and a non-array value
+ * would throw inside `markRuntimeInjectedEventKeys`'s spread on EVERY
+ * drain pass, churning the serving loop forever on one poisoned
+ * entry. Malformed carriage degrades to ABSENT: the closed-world gate
+ * then judges the payload keys strictly, exactly as it already treats
+ * an unminted (spoofed) array.
+ */
+export function sanitizeRuntimeInjectedEventKeys(
+  value: unknown,
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (
+    Array.isArray(value) && value.every((key) => typeof key === "string")
+  ) {
+    return value as readonly string[];
+  }
+  return undefined;
+}
+
 const mintedRuntimeInjectedEventKeys = (
   keys: readonly string[] | undefined,
 ): readonly string[] | undefined =>

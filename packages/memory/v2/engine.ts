@@ -2145,6 +2145,24 @@ const validateEventAppends = (
             "sidecar id are one derivation (events.md §1)",
         );
       }
+      // A PRESENT runtimeInjectedEventKeys must be a string array
+      // (verdict blocker, 2026-08-12): the drain re-mints the carried
+      // keys per entry, and a persisted malformed value would throw
+      // there on EVERY scan pass — perpetual serving churn from one
+      // poisoned entry. Refused at the door instead.
+      if (
+        entry.runtimeInjectedEventKeys !== undefined &&
+        (!Array.isArray(entry.runtimeInjectedEventKeys) ||
+          entry.runtimeInjectedEventKeys.some((key) =>
+            typeof key !== "string"
+          ))
+      ) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} carries malformed ` +
+            "runtimeInjectedEventKeys — a present value must be an " +
+            "array of strings (events.md §1's entry shape)",
+        );
+      }
 
       // The firedAt stamp, per admitting class (protocol.md §2).
       let firedAt: StreamEventFiredAt;

@@ -18,7 +18,10 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
+import {
+  markRuntimeInjectedEventKeys,
+  sanitizeRuntimeInjectedEventKeys,
+} from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
 import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
@@ -1986,4 +1989,25 @@ Deno.test("navigateTo handler results navigate once and deduplicate redelivery",
     await runtime.dispose();
     await storageManager.close();
   }
+});
+
+Deno.test("sanitizeRuntimeInjectedEventKeys: malformed persisted carriage degrades to absent instead of throwing in the drain (verdict blocker, 2026-08-12)", () => {
+  // Pre-fix the drain spread malformed carriage straight into the
+  // mint: `[...42]` threw on EVERY scan pass — perpetual serving churn
+  // from one poisoned entry. The sanitize maps malformed to absent;
+  // well-formed carriage passes through for re-minting.
+  expect(sanitizeRuntimeInjectedEventKeys(undefined)).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys(42)).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys("detail")).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys([1, 2])).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys({ keys: [] })).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys(null)).toBe(undefined);
+  const wellFormed = ["detail", "result"];
+  expect(sanitizeRuntimeInjectedEventKeys(wellFormed)).toEqual(wellFormed);
+  // The sanitized value re-mints without throwing.
+  expect(
+    markRuntimeInjectedEventKeys(
+      sanitizeRuntimeInjectedEventKeys(wellFormed)!,
+    ),
+  ).toEqual(wellFormed);
 });

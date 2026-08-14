@@ -695,6 +695,52 @@ describe("Phase 3 events-down (serving side)", () => {
     expect(Engine.selectPendingStreamEventDocs(engine).length).toBe(0);
   });
 
+  it("a deferral consumes REAL TIME, never back-to-back waves: the drop cannot land inside the creation-race window (verdict blocker, 2026-08-12)", async () => {
+    // Pre-fix, a deferral set #eventScanOwed synchronously, #hasWork()
+    // spun the next wave at once, and the whole 8-slot budget burned
+    // in immediate succession — an event whose creation input was
+    // milliseconds away was permanently dropped. Post-fix each retry
+    // waits for input or the 250ms backstop tick, so the budget spans
+    // >= threshold * tick of wall clock. The pin: at +500ms the entry
+    // must still be PENDING (at most ~2 ticks consumed); the drop
+    // still arrives eventually (the DROP-arm test above).
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    host = newHost();
+    const laggardStream = { id: "of:laggard-piece", path: ["stream"] };
+    const delivered = await server.commitDelegatedAppend({
+      targetSpace: space,
+      targetStream: streamEntriesDocId(laggardStream),
+      targetStreamLink: laggardStream,
+      eventId: "evt-laggard",
+      payload: {},
+      actingPrincipal: aliceSigner.did(),
+      actingSession: "laggard-session",
+      capabilityRef: "cap-laggard",
+      sessionId: `service:${space}`,
+      localSeq: 990_200,
+    });
+    expect(delivered.deduped).toBe(false);
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "activation on the delivered event",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const value = Engine.read(engine, {
+      id: streamEntriesDocId(laggardStream),
+    })?.value as StreamEventsDocValue | undefined;
+    const entry = value?.entries?.[0];
+    // Still pending: NOT consequenced, NOT dropped — the budget has
+    // structurally not had time to exhaust (8 ticks x 250ms >> 500ms).
+    expect(entry?.eventId).toBe("evt-laggard");
+    expect(entry?.status).toBeUndefined();
+    expect(entry?.consequenced).not.toBe(true);
+    // The event is still discoverable work (nothing wedged, nothing
+    // lost): the drop (or a late-arriving piece) resolves it later.
+    expect(Engine.selectPendingStreamEventDocs(engine).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
   it("same-space cascade (LT1): the served handler's send commits a durable wave-carried entry with the INHERITED actor — processed exactly once", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);

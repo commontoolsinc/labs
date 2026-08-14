@@ -466,6 +466,59 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
     });
 
     await t.step(
+      "an entry with malformed runtimeInjectedEventKeys is refused — the persisted carriage would throw in every drain pass, churning the serving loop forever (verdict blocker, 2026-08-12)",
+      () => {
+        for (
+          const [seq, malformed] of [
+            [31, 42],
+            [32, "not-an-array"],
+            [33, [1, 2]],
+            [34, { keys: [] }],
+          ] as const
+        ) {
+          assertThrows(
+            () =>
+              authored(
+                seq,
+                appendCommit(seq, [
+                  entryOf(`evt-malformed-keys-${seq}`, {
+                    runtimeInjectedEventKeys: malformed as never,
+                  }),
+                ]),
+              ),
+            ProtocolError,
+            "runtimeInjectedEventKeys",
+          );
+        }
+        // The well-formed positive still admits — on its OWN stream, so
+        // the shared sidecar's log state stays untouched for the later
+        // creation-shape steps.
+        const keysStream = { id: "of:wellformed-keys", path: [] as string[] };
+        const keysSidecar = streamEntriesDocId(keysStream);
+        authored(35, {
+          operations: [{
+            op: "patch",
+            id: keysSidecar,
+            patches: [{
+              op: "append",
+              path: "/value/entries",
+              values: [{
+                eventId: "evt-wellformed-keys",
+                stream: keysStream,
+                payload: { vote: "green" },
+                runtimeInjectedEventKeys: ["detail"],
+              }] as never[],
+            }],
+          }],
+          eventAppends: [{
+            id: keysSidecar,
+            eventId: "evt-wellformed-keys",
+          }],
+        });
+      },
+    );
+
+    await t.step(
       "an entry whose stream link does not derive the sidecar being written is refused — a fresh sidecar id cannot smuggle another stream's handler dispatch past that stream's event-id horizon (verdict blocker, 2026-08-12)",
       () => {
         // The attack: append into a FRESH sidecar doc (empty horizon)
