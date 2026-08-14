@@ -1,5 +1,5 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * Cross-space label-metadata representation classes (inv-12 / SC-14 / SC-25;
@@ -198,7 +198,7 @@ export const classifyAtomField = (
   atom: unknown,
   field: readonly string[],
 ): LabelFieldRepresentationClass | undefined => {
-  if (!isRecord(atom)) {
+  if (!isObjectOrArray(atom)) {
     return undefined;
   }
   if (typeof atom.type === "string") {

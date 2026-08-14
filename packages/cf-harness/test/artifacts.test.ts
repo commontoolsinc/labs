@@ -1894,3 +1894,26 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name:
+    "filesystem artifact store advertises an image-attachment snapshot dir under its run root",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-artifacts-",
+    });
+    try {
+      const store = createFileSystemHarnessArtifactStore({
+        artifactRoot,
+        runId: "run-snapshot-dir",
+      });
+      assertEquals(
+        store.imageAttachmentSnapshotDir,
+        join(store.runRoot, "image-attachments"),
+      );
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});

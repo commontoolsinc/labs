@@ -1,24 +1,29 @@
 #!/usr/bin/env -S deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env
-// Fabric wall — modular live dashboard.
-//
-// Each tile lives in tiles/ and is registered once in registry.ts. This file is
-// generic: it schedules every tile's collect() on its own interval, renders the
-// results uniformly, serves the page, pushes SSE updates, and mounts any
-// drill-down routes a tile declares. It knows nothing about individual tiles.
-//
-//   cd <repo root>
-//   deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env \
-//     packages/dashboard/server.ts
-//   open http://localhost:8731
-//
-// Optional env for the token-gated tiles (each grays out cleanly without it):
-//   SIGNOZ_URL, SIGNOZ_API_KEY        production error-rate tile
-//   GCP_BILLING_TABLE                 cloud-spend tile (BigQuery REST; Workload
-//                                     Identity in GKE, or GCP_SA_KEY locally)
-//   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
-//   GH_TOKEN                          GitHub tiles; org Members read also powers
-//                                     the organization-users tile
-//   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
+/**
+ * Runs the fabric wall: the live dashboard everything else in this package
+ * feeds. Each tile lives under tiles/ and is registered once in registry.ts,
+ * and this file stays generic about all of them. It schedules every tile's
+ * collect() on that tile's own interval, renders the results uniformly, serves
+ * the page, pushes updates down the event stream, and mounts whatever
+ * drill-down routes a tile declares. It knows nothing about individual tiles.
+ *
+ *   cd <repo root>
+ *   deno run --allow-net --allow-run=deno,git --allow-read --allow-write \
+ *     --allow-env packages/dashboard/server.ts
+ *   open http://localhost:8731
+ *
+ * The token-gated tiles read optional environment variables, and each one
+ * grays out cleanly when its own is unset:
+ *   SIGNOZ_URL, SIGNOZ_API_KEY        production error-rate tile
+ *   GCP_BILLING_TABLE                 cloud-spend tile, over the BigQuery REST
+ *                                     API, authenticating as the workload in
+ *                                     GKE or with GCP_SA_KEY locally
+ *   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
+ *   GH_TOKEN                          GitHub tiles; read access to the
+ *                                     organization's members also powers the
+ *                                     organization-users tile
+ *   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
+ */
 
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
@@ -29,6 +34,11 @@ import type { FaviconStatus } from "./favicon.ts";
 import { renderTile, shell } from "./render.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
 import { dashboardVersion } from "./version.ts";
+import {
+  DASHBOARD_MESSAGE_MAX_LENGTH,
+  type DashboardMessage,
+  DashboardMessageStore,
+} from "./dashboard-message.ts";
 
 const ctx = makeCtx();
 const views = new Map<string, TileView>();
@@ -45,6 +55,12 @@ const activeTileUpdates = new Map<string, ActiveTileUpdate>();
 const activeRunSourceUpdates = new Set<string>();
 let lastChange = 0;
 let faviconRedSince: number | null = null;
+const dashboardMessageStore = new DashboardMessageStore();
+let dashboardMessage: DashboardMessage = {
+  text: "",
+  updatedAt: null,
+  revision: 0,
+};
 
 export function nextFaviconRedSince(
   current: number | null,
@@ -74,6 +90,7 @@ interface DashboardUpdate {
   faviconStatus: FaviconStatus;
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
+  message: DashboardMessage;
 }
 
 function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): DashboardUpdate {
@@ -105,7 +122,23 @@ function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): D
     faviconRedAgeMs: faviconRedSince === null
       ? null
       : Math.max(0, now - faviconRedSince),
+    message: { ...dashboardMessage },
   };
+}
+
+async function refreshDashboardMessage(): Promise<boolean> {
+  try {
+    const refreshed = await dashboardMessageStore.refresh();
+    const previous = dashboardMessage;
+    dashboardMessage = refreshed.message;
+    return refreshed.expired ||
+      previous.text !== dashboardMessage.text ||
+      previous.updatedAt !== dashboardMessage.updatedAt ||
+      previous.revision !== dashboardMessage.revision;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return false;
+  }
 }
 
 export const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -420,6 +453,7 @@ export function page(currentViews: ReadonlyMap<string, TileView> = views): strin
     update.faviconStatus,
     update.faviconRedSince,
     update.faviconRedAgeMs,
+    update.message,
   );
 }
 
@@ -433,7 +467,49 @@ export async function handle(req: Request): Promise<Response> {
       },
     });
   }
+  if (url.pathname === "/message") {
+    if (req.method !== "PUT") {
+      return new Response("Method not allowed", {
+        status: 405,
+        headers: { allow: "PUT" },
+      });
+    }
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return Response.json({ error: "Expected a JSON request body." }, {
+        status: 400,
+      });
+    }
+    if (
+      typeof body !== "object" || body === null || Array.isArray(body) ||
+      typeof (body as { text?: unknown }).text !== "string"
+    ) {
+      return Response.json({ error: "Message text must be a string." }, {
+        status: 400,
+      });
+    }
+    const text = (body as { text: string }).text;
+    if (text.length > DASHBOARD_MESSAGE_MAX_LENGTH) {
+      return Response.json({
+        error:
+          `Messages are limited to ${DASHBOARD_MESSAGE_MAX_LENGTH} characters.`,
+      }, { status: 400 });
+    }
+    try {
+      dashboardMessage = await dashboardMessageStore.set(text);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      return Response.json({ error: "Could not save the dashboard message." }, {
+        status: 500,
+      });
+    }
+    broadcast(dashboardUpdate());
+    return Response.json(dashboardMessage);
+  }
   if (url.pathname === "/events") {
+    await refreshDashboardMessage();
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
@@ -452,6 +528,7 @@ export async function handle(req: Request): Promise<Response> {
   for (const r of routes) {
     if (url.pathname === r.path) return await r.handler(req, url);
   }
+  await refreshDashboardMessage();
   return new Response(page(), { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
@@ -461,6 +538,7 @@ export async function serveTick(
   collect: () => void | Promise<void> = tick,
 ): Promise<void> {
   heartbeat();
+  if (await refreshDashboardMessage()) broadcast(dashboardUpdate());
   await collect();
 }
 

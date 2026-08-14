@@ -41,11 +41,22 @@ describe("parseCellPath", () => {
 
   it("should not convert non-integer numbers", () => {
     expect(parseCellPath("value/3.14/pi")).toEqual(["value", "3.14", "pi"]);
-    // Note: 1e5 is considered an integer (100000) by JavaScript
     expect(parseCellPath("data/1e5/scientific")).toEqual([
       "data",
-      100000,
+      "1e5",
       "scientific",
+    ]);
+  });
+
+  it("keeps a leading-zero segment as a string", () => {
+    expect(parseCellPath("items/01/name")).toEqual(["items", "01", "name"]);
+  });
+
+  it("keeps a segment past the largest array index as a string", () => {
+    expect(parseCellPath("items/4294967294/4294967295")).toEqual([
+      "items",
+      4294967294,
+      "4294967295",
     ]);
   });
 

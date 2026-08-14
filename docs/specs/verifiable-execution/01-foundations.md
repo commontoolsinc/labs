@@ -103,11 +103,12 @@ a point in time:
 
 State MAY be represented as:
 
-- Full materialized state (content-addressed via merkle-reference), or
+- Full materialized state (content-addressed), or
 - A patch applied to a prior state
 
-Implementations MUST produce a deterministic hash for every update via the
-`merkle-reference` library (see `packages/memory/HASHING.md`).
+Implementations MUST produce a deterministic hash for every update via this
+project's `hashOf()` function, whose byte-level encoding is specified in
+[`../space-model-formal-spec/2-hash-byte-format.md`](../space-model-formal-spec/2-hash-byte-format.md).
 
 ### 3.3 Receipt
 

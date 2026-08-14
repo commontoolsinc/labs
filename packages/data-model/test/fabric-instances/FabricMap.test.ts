@@ -1,3 +1,15 @@
+/**
+ * A `Map` as a fabric instance, which is at present only half a value.
+ *
+ * Native conversion is the part that works: a frozen form is produced on
+ * request, an already-frozen one is handed back rather than rebuilt, and a
+ * mutable form is copied only when what it holds is frozen.
+ *
+ * The freeze protocols and the codec are stubs that throw, and these cases
+ * assert the throwing deliberately. An unimplemented member asserted to throw
+ * is a recorded gap; one that is merely never called is a gap nobody can see.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -5,10 +17,10 @@ import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "@/fabric-instances/BaseFabricInstance.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
+} from "@/codec-common/BaseFabricInstance.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FrozenMap } from "@/frozen-builtins.ts";

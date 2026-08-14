@@ -36,6 +36,7 @@ import type { AppliedCommit } from "./engine.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
+import { type ArmedTurn, armTurn } from "./turn.ts";
 
 export type Transport = {
   send(payload: string): Promise<void>;
@@ -1622,7 +1623,7 @@ export class WatchView {
 
 export const connect = Client.connect;
 
-// Loopback delivers server frames on zero-delay TIMER turns, one frame per
+// Loopback delivers server frames on EVENT LOOP turns, one frame per
 // turn, like a socket: no response or push ever arrives inside the sender's
 // own await cascade, so code that accidentally depends on "nothing arrives
 // until I yield" fails here the way it would against a deployment. One
@@ -1635,13 +1636,20 @@ export const connect = Client.connect;
 // staged at close() are dropped — nothing arrives after the socket is
 // gone. Remaining fidelity gap: setCloseReceiver is a no-op, so a
 // server-initiated disconnect is invisible over loopback.
+//
+// The pump takes that turn through armTurn, so a queued frame always has an
+// armed zero-delay timer for `clock.settle()` to see without the delivery
+// itself waiting on one. A posted message is not an option in its place:
+// Node's MessageChannel replaces the web one as soon as anything in the
+// process loads node compatibility, and its ports deliver inside a microtask
+// cascade rather than on a turn of their own.
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
   let closed = false;
   const queue: string[] = [];
-  let pump: ReturnType<typeof setTimeout> | null = null;
+  let turn: ArmedTurn | null = null;
   const drainOne = () => {
-    pump = null;
+    turn = null;
     if (closed) return;
     const frame = queue.shift();
     if (frame === undefined) return;
@@ -1649,7 +1657,7 @@ export const loopback = (server: Server): Transport => {
     if (queue.length > 0) schedule();
   };
   const schedule = () => {
-    pump ??= setTimeout(drainOne, 0);
+    turn ??= armTurn(drainOne);
   };
   const connection = server.connect((message) => {
     if (closed) return;
@@ -1662,10 +1670,8 @@ export const loopback = (server: Server): Transport => {
     },
     close() {
       closed = true;
-      if (pump !== null) {
-        clearTimeout(pump);
-        pump = null;
-      }
+      turn?.cancel();
+      turn = null;
       queue.length = 0;
       connection.close();
       return Promise.resolve();

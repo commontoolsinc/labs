@@ -1478,7 +1478,7 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     ).toBeDefined();
   });
 
-  // A `FabricSpecialObject` is `isRecord`, so it reaches the record branch
+  // A `FabricSpecialObject` is `isObjectOrArray`, so it reaches the record branch
   // rather than the leaf return. What keeps it whole is the copy-on-write
   // gate: such a value has zero enumerable own properties, so no member can
   // come back changed, `changed` stays false, and the original goes back by

@@ -1,6 +1,9 @@
-// github users: organization members and outside collaborators. The headline
-// counts unique users across both rosters. Successive polls keep a rolling
-// history of each roster's size and chart them as two lines.
+/**
+ * Counts the GitHub organization's members and its outside collaborators. The
+ * headline counts unique users across both rosters. Successive polls keep a
+ * rolling history of each roster's size and chart them as two lines.
+ */
+
 import { REPO } from "../config.ts";
 import type { Tile, TileView } from "../types.ts";
 import { dashboardCacheFile } from "../history-files.ts";

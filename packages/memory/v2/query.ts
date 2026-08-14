@@ -16,7 +16,7 @@ import {
 } from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
-import { isObject } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
@@ -652,7 +652,7 @@ const loadFactsForDoc = (
   }
   traversalContext.schemaTracker.add(docKey, internedSelector);
 
-  if (!isObject(fact.value)) {
+  if (!isObjectNotArray(fact.value)) {
     return;
   }
 

@@ -101,6 +101,23 @@ export interface NoteInput {
   linkPattern?: Writable<string | Default<"">>;
   /** Parent notebook reference. Set at creation, can be updated for moves. */
   parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
+  /**
+   * The note's mentions in reference form. Stored beside `content` because it
+   * has to stay in lockstep with it: the text carries keys, and this is what
+   * says where they point.
+   *
+   * The default has to be the same one `NoteOutput` declares. A map published
+   * in the result under a different default than its input carries cannot be
+   * materialized, and a consumer that captures the note then gets `undefined`
+   * for the whole capture — which stops any action bound to it from running,
+   * rather than merely leaving this field empty.
+   */
+  // `{}` is the default VALUE here, in the same spirit as `Default<"">` and
+  // `Default<[]>` elsewhere in this file, and its permissiveness as a type is
+  // exactly what is wanted: `Record<PropertyKey, never>` would say the map may
+  // hold no entries, and a populated one then fails to materialize.
+  // deno-lint-ignore ban-types
+  references?: Writable<MentionRefMap | Default<{}>>;
 }
 
 export interface NotebookInput {
@@ -112,6 +129,30 @@ export interface NotebookInput {
   parentNotebook?: Writable<NotebookPiece | null | Default<null>>;
 }
 
+/**
+ * One mention in reference form: where it points, and whether the label
+ * carrying it in the text is the user's own wording rather than the
+ * destination's name.
+ *
+ * `destination` is typed `unknown` because a mention may address any piece.
+ * A read of the VALUE comes back undefined for that reason, which is why an
+ * address is taken from the path to it instead — the path survives where the
+ * value does not. The editor writes the same field under a schema that reads
+ * it back as a cell (`asCell`,
+ * `packages/ui/src/v2/core/mention-refs.ts`): one stored link, read the way
+ * each side needs it.
+ */
+export interface MentionRef {
+  destination: unknown;
+  modifiedTitle: boolean;
+}
+
+/**
+ * A note's mentions, keyed by the token that appears in its text. The keys are
+ * local to one note and mean nothing anywhere else.
+ */
+export type MentionRefMap = Record<string, MentionRef>;
+
 export interface NoteMdInput {
   /** Cell reference to note data (title + content + backlinks) */
   note?: NotePiece | Default<{ title: ""; content: ""; backlinks: [] }>;
@@ -119,6 +160,8 @@ export interface NoteMdInput {
   sourceNoteRef?: NotePiece;
   /** Writable content cell for checkbox updates */
   content?: Writable<string>;
+  /** The note's mentions, for resolving `[Label][key]` in its content */
+  references?: Writable<MentionRefMap>;
 }
 
 // ===== Utility Functions =====

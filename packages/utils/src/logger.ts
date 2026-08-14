@@ -254,51 +254,51 @@ const TIMING_RESERVOIR_SIZE = 1000;
  * with O(1) memory regardless of measurement count.
  */
 class TimingDataStore {
-  private count = 0;
-  private min = Infinity;
-  private max = -Infinity;
-  private totalTime = 0;
-  private lastTime = 0;
-  private lastTimestamp = 0;
-  private samples: number[] = [];
-  private hasBaseline = false;
-  private baselineCount = 0;
-  private baselineTotalTime = 0;
-  private deltaSamples: number[] = []; // Reservoir for samples since baseline
-  private deltaCount = 0; // Count of samples since baseline
+  #count = 0;
+  #min = Infinity;
+  #max = -Infinity;
+  #totalTime = 0;
+  #lastTime = 0;
+  #lastTimestamp = 0;
+  #samples: number[] = [];
+  #hasBaseline = false;
+  #baselineCount = 0;
+  #baselineTotalTime = 0;
+  #deltaSamples: number[] = []; // Reservoir for samples since baseline
+  #deltaCount = 0; // Count of samples since baseline
 
   /**
    * Records a timing measurement.
    * @param elapsed - The elapsed time in milliseconds
    */
   record(elapsed: number): void {
-    this.count++;
-    this.totalTime += elapsed;
-    this.lastTime = elapsed;
-    this.lastTimestamp = performance.now();
+    this.#count++;
+    this.#totalTime += elapsed;
+    this.#lastTime = elapsed;
+    this.#lastTimestamp = performance.now();
 
-    if (elapsed < this.min) this.min = elapsed;
-    if (elapsed > this.max) this.max = elapsed;
+    if (elapsed < this.#min) this.#min = elapsed;
+    if (elapsed > this.#max) this.#max = elapsed;
 
     // Reservoir sampling (Algorithm R) for full history
-    if (this.samples.length < TIMING_RESERVOIR_SIZE) {
-      this.samples.push(elapsed);
+    if (this.#samples.length < TIMING_RESERVOIR_SIZE) {
+      this.#samples.push(elapsed);
     } else {
-      const j = Math.floor(Math.random() * this.count);
+      const j = Math.floor(Math.random() * this.#count);
       if (j < TIMING_RESERVOIR_SIZE) {
-        this.samples[j] = elapsed;
+        this.#samples[j] = elapsed;
       }
     }
 
     // Also record to delta reservoir if baseline is set
-    if (this.hasBaseline) {
-      this.deltaCount++;
-      if (this.deltaSamples.length < TIMING_RESERVOIR_SIZE) {
-        this.deltaSamples.push(elapsed);
+    if (this.#hasBaseline) {
+      this.#deltaCount++;
+      if (this.#deltaSamples.length < TIMING_RESERVOIR_SIZE) {
+        this.#deltaSamples.push(elapsed);
       } else {
-        const j = Math.floor(Math.random() * this.deltaCount);
+        const j = Math.floor(Math.random() * this.#deltaCount);
         if (j < TIMING_RESERVOIR_SIZE) {
-          this.deltaSamples[j] = elapsed;
+          this.#deltaSamples[j] = elapsed;
         }
       }
     }
@@ -309,16 +309,16 @@ class TimingDataStore {
    * After calling this, new samples will be tracked separately for delta CDF.
    */
   setBaseline(): void {
-    this.hasBaseline = true;
-    this.baselineCount = this.count;
-    this.baselineTotalTime = this.totalTime;
-    this.deltaSamples = [];
-    this.deltaCount = 0;
+    this.#hasBaseline = true;
+    this.#baselineCount = this.#count;
+    this.#baselineTotalTime = this.#totalTime;
+    this.#deltaSamples = [];
+    this.#deltaCount = 0;
   }
 
   /** Returns computed statistics over the recorded data. */
   getStats(): TimingStats {
-    if (this.count === 0) {
+    if (this.#count === 0) {
       return {
         count: 0,
         min: 0,
@@ -338,47 +338,58 @@ class TimingDataStore {
     }
 
     // Sort samples for percentile calculation
-    const sorted = [...this.samples].sort((a, b) => a - b);
+    const sorted = [...this.#samples].sort((a, b) => a - b);
     const p50Index = Math.floor(sorted.length * 0.5);
     const p95Index = Math.floor(sorted.length * 0.95);
     const median = sorted[p50Index] ?? 0;
 
     // Calculate CDF of all samples
-    const cdf = this.calculateCDF(sorted);
+    const cdf = this.#calculateCDF(sorted);
 
     // Calculate CDF of samples since baseline (if baseline exists and has data)
     let cdfSinceBaseline: CDFPoint[] | null = null;
-    if (this.deltaCount > 0 && this.deltaSamples.length > 0) {
-      const deltaSorted = [...this.deltaSamples].sort((a, b) => a - b);
-      cdfSinceBaseline = this.calculateCDF(deltaSorted);
+    if (this.#deltaCount > 0 && this.#deltaSamples.length > 0) {
+      const deltaSorted = [...this.#deltaSamples].sort((a, b) => a - b);
+      cdfSinceBaseline = this.#calculateCDF(deltaSorted);
     }
 
-    const countSinceBaseline = this.hasBaseline
-      ? this.count - this.baselineCount
+    const countSinceBaseline = this.#hasBaseline
+      ? this.#count - this.#baselineCount
       : 0;
-    const totalTimeSinceBaseline = this.hasBaseline
-      ? this.totalTime - this.baselineTotalTime
+    const totalTimeSinceBaseline = this.#hasBaseline
+      ? this.#totalTime - this.#baselineTotalTime
       : 0;
     const averageSinceBaseline = countSinceBaseline > 0
       ? totalTimeSinceBaseline / countSinceBaseline
       : 0;
 
     return {
-      count: this.count,
-      min: this.min,
-      max: this.max,
-      totalTime: this.totalTime,
-      average: this.totalTime / this.count,
+      count: this.#count,
+      min: this.#min,
+      max: this.#max,
+      totalTime: this.#totalTime,
+      average: this.#totalTime / this.#count,
       countSinceBaseline,
       totalTimeSinceBaseline,
       averageSinceBaseline,
       p50: median,
       p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
-      lastTime: this.lastTime,
-      lastTimestamp: this.lastTimestamp,
+      lastTime: this.#lastTime,
+      lastTimestamp: this.#lastTimestamp,
       cdf,
       cdfSinceBaseline,
     };
+  }
+
+  /** Resets all timing data. */
+  reset(): void {
+    this.#count = 0;
+    this.#min = Infinity;
+    this.#max = -Infinity;
+    this.#totalTime = 0;
+    this.#lastTime = 0;
+    this.#lastTimestamp = 0;
+    this.#samples = [];
   }
 
   /**
@@ -386,24 +397,13 @@ class TimingDataStore {
    * points where `(x, y)` means that a `y` fraction of the samples are at
    * most `x` milliseconds.
    */
-  private calculateCDF(sorted: number[]): CDFPoint[] {
+  #calculateCDF(sorted: number[]): CDFPoint[] {
     if (sorted.length === 0) return [];
 
     return sorted.map((x, i) => ({
       x,
       y: (i + 1) / sorted.length,
     }));
-  }
-
-  /** Resets all timing data. */
-  reset(): void {
-    this.count = 0;
-    this.min = Infinity;
-    this.max = -Infinity;
-    this.totalTime = 0;
-    this.lastTime = 0;
-    this.lastTimestamp = 0;
-    this.samples = [];
   }
 }
 
@@ -545,48 +545,50 @@ export type LoggerBreakdown = {
 
 /** Logger, which handles both basic and tagged logging. */
 export class Logger {
-  private _disabled: boolean;
-  public level?: LogLevel;
-  private _counts: { debug: number; info: number; warn: number; error: number };
-  private _countsByKey: Record<
+  #moduleName: string | undefined;
+  #disabled: boolean;
+  #level: LogLevel | undefined;
+  #counts: { debug: number; info: number; warn: number; error: number };
+  #countsByKey: Record<
     string,
     { debug: number; info: number; warn: number; error: number }
   >;
-  private _logCountEvery: number;
-  private _lastLoggedAt: number;
-  private _timingsByKey: Map<string, TimingDataStore> = new Map();
-  private _activeTimers: Map<string, number> = new Map();
-  private _timingBaselineActive = false;
-  private _countBaseline: {
+  #logCountEvery: number;
+  #lastLoggedAt: number;
+  #timingsByKey: Map<string, TimingDataStore> = new Map();
+  #activeTimers: Map<string, number> = new Map();
+  #timingBaselineActive = false;
+  #countBaseline: {
     debug: number;
     info: number;
     warn: number;
     error: number;
   } | null = null;
-  private _flags: Map<string, Map<string, Record<string, unknown> | true>> =
-    new Map();
+  #flags: Map<string, Map<string, Record<string, unknown> | true>> = new Map();
 
   /**
    * Constructs an instance which tags its output with `moduleName`, if given,
    * and which is configured per `options`.
    */
-  constructor(private moduleName?: string, options?: GetLoggerOptions) {
+  constructor(moduleName?: string, options?: GetLoggerOptions) {
+    this.#moduleName = moduleName;
+
     // Set initial disabled state from options
     // Default to false (enabled) if not specified
-    this._disabled = options?.enabled === undefined ? false : !options.enabled;
+    this.#disabled = options?.enabled === undefined ? false : !options.enabled;
 
-    // Set logger-specific level if provided; default to "info" when unset.
-    // This keeps behavior consistent and avoids assigning undefined with
-    // exactOptionalPropertyTypes enabled.
-    this.level = options?.level ?? getEnvLevel() ?? "info";
+    // Set logger-specific level if provided, falling back to the environment
+    // and then to "info", so that every instance reports a level rather than
+    // leaving callers to interpret its absence.
+    this.#level = options?.level ?? getEnvLevel() ?? "info";
 
     // Initialize call counts
-    this._counts = { debug: 0, info: 0, warn: 0, error: 0 };
-    this._countsByKey = {};
+    this.#counts = { debug: 0, info: 0, warn: 0, error: 0 };
+    this.#countsByKey = {};
 
     // Set logCountEvery threshold (default to 100, 0 to disable)
-    this._logCountEvery = options?.logCountEvery ?? 100;
-    this._lastLoggedAt = 0;
+    this.#logCountEvery = options?.logCountEvery ?? 100;
+    this.#lastLoggedAt = 0;
   }
 
   /**
@@ -595,12 +597,25 @@ export class Logger {
    * - false: Logger is enabled, logs are shown based on level (default)
    */
   get disabled(): boolean {
-    return this._disabled;
+    return this.#disabled;
   }
 
   /** @inheritDoc */
   set disabled(value: boolean) {
-    this._disabled = value;
+    this.#disabled = value;
+  }
+
+  /**
+   * Minimum level at which this logger emits. A message below it is counted
+   * but not printed.
+   */
+  get level(): LogLevel | undefined {
+    return this.#level;
+  }
+
+  /** @inheritDoc */
+  set level(value: LogLevel | undefined) {
+    this.#level = value;
   }
 
   /**
@@ -610,10 +625,10 @@ export class Logger {
    */
   get counts(): LogCounts {
     return {
-      debug: this._counts.debug,
-      info: this._counts.info,
-      warn: this._counts.warn,
-      error: this._counts.error,
+      debug: this.#counts.debug,
+      info: this.#counts.info,
+      warn: this.#counts.warn,
+      error: this.#counts.error,
       get total(): number {
         return this.debug + this.info + this.warn + this.error;
       },
@@ -626,7 +641,7 @@ export class Logger {
    */
   get countsByKey(): Record<string, LogCounts> {
     const result: Record<string, LogCounts> = {};
-    for (const [key, counts] of Object.entries(this._countsByKey)) {
+    for (const [key, counts] of Object.entries(this.#countsByKey)) {
       result[key] = {
         debug: counts.debug,
         info: counts.info,
@@ -640,88 +655,58 @@ export class Logger {
     return result;
   }
 
-  /** Resets all call counts to zero, both the overall and the by-key ones. */
-  resetCounts(): void {
-    this._counts.debug = 0;
-    this._counts.info = 0;
-    this._counts.warn = 0;
-    this._counts.error = 0;
-    this._countsByKey = {};
-    this._lastLoggedAt = 0;
-  }
-
-  /** Increments the count for a specific message key and log level. */
-  private incrementKeyCount(key: string, level: ActiveLogLevel): void {
-    // Skip reserved key name "total" to prevent corruption of breakdown totals
-    if (key === "total") {
-      console.warn(
-        `[Logger] Message key \`total\` is reserved and cannot be used. ` +
-          `Please use a different key.`,
-      );
-      return;
+  /**
+   * Returns all timing statistics for this logger.
+   * Returns a flat map with "/" joined keys.
+   */
+  get timeStats(): Record<string, TimingStats> {
+    const result: Record<string, TimingStats> = {};
+    for (const [key, store] of this.#timingsByKey) {
+      result[key] = store.getStats();
     }
-    if (!this._countsByKey[key]) {
-      this._countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
-    }
-    this._countsByKey[key][level]++;
+    return result;
   }
 
   /**
-   * Logs the count summary, if incrementing the counter has just carried the
-   * total past another multiple of the configured threshold.
+   * All active flags, as a record from flag name to a record from id to
+   * metadata. The metadata is whatever was passed to `flag()`, or `null` when
+   * none was. A flag name with no active id is omitted entirely.
    */
-  private maybeLogCountSummary(): void {
-    // Skip if disabled or logCountEvery is 0
-    if (this._logCountEvery === 0) return;
-
-    const total = this.counts.total;
-    const threshold = Math.floor(total / this._logCountEvery);
-
-    // Check if we've crossed a new threshold
-    if (threshold > this._lastLoggedAt) {
-      this._lastLoggedAt = threshold;
-
-      // Only log if debug level is enabled
-      if (shouldLog("debug", this.level)) {
-        const { prefix, color } = this.getLogFormat("debug");
-        const moduleName = this.moduleName || "logger";
-        const message =
-          `${moduleName}: ${total} log calls made (debug: ${this._counts.debug}, info: ${this._counts.info}, warn: ${this._counts.warn}, error: ${this._counts.error})`;
-        console.debug(prefix, color, message);
+  get flags(): Record<string, Record<string, Record<string, unknown> | null>> {
+    const result: Record<
+      string,
+      Record<string, Record<string, unknown> | null>
+    > = {};
+    for (const [name, group] of this.#flags) {
+      if (group.size > 0) {
+        const entries: Record<string, Record<string, unknown> | null> = {};
+        for (const [id, value] of group) {
+          entries[id] = value === true ? null : value;
+        }
+        result[name] = entries;
       }
     }
+    return result;
   }
 
-  /** Returns the prefix and color for a log level. */
-  private getLogFormat(
-    level: ActiveLogLevel,
-  ): { prefix: string; color: string } {
-    const levelUpper = level.toUpperCase();
-    const timestamp = getTimeStamp();
-
-    if (this.moduleName) {
-      const prefix = `%c[${levelUpper}][${this.moduleName}::${timestamp}]`;
-      const color = LOG_COLORS[
-        `tagged${
-          levelUpper.charAt(0) + level.slice(1)
-        }` as keyof typeof LOG_COLORS
-      ];
-      return { prefix, color };
-    } else {
-      const prefix = `%c[${levelUpper}][${timestamp}]`;
-      const color = LOG_COLORS[level];
-      return { prefix, color };
-    }
+  /** Resets all call counts to zero, both the overall and the by-key ones. */
+  resetCounts(): void {
+    this.#counts.debug = 0;
+    this.#counts.info = 0;
+    this.#counts.warn = 0;
+    this.#counts.error = 0;
+    this.#countsByKey = {};
+    this.#lastLoggedAt = 0;
   }
 
   /** Logs a debug message. */
   debug(key: string, ...messages: LogMessage[]): void {
-    this._counts.debug++;
-    this.incrementKeyCount(key, "debug");
-    if (this._disabled) return;
-    this.maybeLogCountSummary();
-    if (shouldLog("debug", this.level)) {
-      const { prefix, color } = this.getLogFormat("debug");
+    this.#counts.debug++;
+    this.#incrementKeyCount(key, "debug");
+    if (this.#disabled) return;
+    this.#maybeLogCountSummary();
+    if (shouldLog("debug", this.#level)) {
+      const { prefix, color } = this.#getLogFormat("debug");
       if (shouldLogToStderr()) {
         logToStderr(
           prefix.replace("%c", ""),
@@ -741,12 +726,12 @@ export class Logger {
 
   /** Logs an info message. */
   info(key: string, ...messages: LogMessage[]): void {
-    this._counts.info++;
-    this.incrementKeyCount(key, "info");
-    if (this._disabled) return;
-    this.maybeLogCountSummary();
-    if (shouldLog("info", this.level)) {
-      const { prefix, color } = this.getLogFormat("info");
+    this.#counts.info++;
+    this.#incrementKeyCount(key, "info");
+    if (this.#disabled) return;
+    this.#maybeLogCountSummary();
+    if (shouldLog("info", this.#level)) {
+      const { prefix, color } = this.#getLogFormat("info");
       if (shouldLogToStderr()) {
         logToStderr(
           prefix.replace("%c", ""),
@@ -761,12 +746,12 @@ export class Logger {
 
   /** Logs a warning message. */
   warn(key: string, ...messages: LogMessage[]): void {
-    this._counts.warn++;
-    this.incrementKeyCount(key, "warn");
-    if (this._disabled) return;
-    this.maybeLogCountSummary();
-    if (shouldLog("warn", this.level)) {
-      const { prefix, color } = this.getLogFormat("warn");
+    this.#counts.warn++;
+    this.#incrementKeyCount(key, "warn");
+    if (this.#disabled) return;
+    this.#maybeLogCountSummary();
+    if (shouldLog("warn", this.#level)) {
+      const { prefix, color } = this.#getLogFormat("warn");
       if (shouldLogToStderr()) {
         logToStderr(
           prefix.replace("%c", ""),
@@ -781,12 +766,12 @@ export class Logger {
 
   /** Logs an error message. */
   error(key: string, ...messages: LogMessage[]): void {
-    this._counts.error++;
-    this.incrementKeyCount(key, "error");
-    if (this._disabled) return;
-    this.maybeLogCountSummary();
-    if (shouldLog("error", this.level)) {
-      const { prefix, color } = this.getLogFormat("error");
+    this.#counts.error++;
+    this.#incrementKeyCount(key, "error");
+    if (this.#disabled) return;
+    this.#maybeLogCountSummary();
+    if (shouldLog("error", this.#level)) {
+      const { prefix, color } = this.#getLogFormat("error");
       if (shouldLogToStderr()) {
         logToStderr(
           prefix.replace("%c", ""),
@@ -817,7 +802,7 @@ export class Logger {
    */
   timeStart(...keys: string[]): void {
     const keyPath = keys.join("/");
-    this._activeTimers.set(keyPath, performance.now());
+    this.#activeTimers.set(keyPath, performance.now());
   }
 
   /**
@@ -827,15 +812,15 @@ export class Logger {
    */
   timeEnd(...keys: string[]): number | undefined {
     const keyPath = keys.join("/");
-    const startTime = this._activeTimers.get(keyPath);
+    const startTime = this.#activeTimers.get(keyPath);
     if (startTime === undefined) {
       return undefined;
     }
-    this._activeTimers.delete(keyPath);
+    this.#activeTimers.delete(keyPath);
 
     const endTime = performance.now();
     const elapsed = endTime - startTime;
-    this._recordTime(elapsed, keys);
+    this.#recordTime(elapsed, keys);
     return elapsed;
   }
 
@@ -871,26 +856,9 @@ export class Logger {
 
     const elapsed = endTime - startTime;
     if (keys.length > 0) {
-      this._recordTime(elapsed, keys);
+      this.#recordTime(elapsed, keys);
     }
     return elapsed;
-  }
-
-  /**
-   * Records timing against the full key path only, with no rollup to the
-   * shorter paths.
-   */
-  private _recordTime(elapsed: number, keys: string[]): void {
-    const path = keys.join("/");
-    let store = this._timingsByKey.get(path);
-    if (!store) {
-      store = new TimingDataStore();
-      if (this._timingBaselineActive) {
-        store.setBaseline();
-      }
-      this._timingsByKey.set(path, store);
-    }
-    store.record(elapsed);
   }
 
   /**
@@ -903,27 +871,15 @@ export class Logger {
    */
   getTimeStats(...keys: string[]): TimingStats | undefined {
     const keyPath = keys.join("/");
-    const store = this._timingsByKey.get(keyPath);
+    const store = this.#timingsByKey.get(keyPath);
     return store?.getStats();
-  }
-
-  /**
-   * Returns all timing statistics for this logger.
-   * Returns a flat map with "/" joined keys.
-   */
-  get timeStats(): Record<string, TimingStats> {
-    const result: Record<string, TimingStats> = {};
-    for (const [key, store] of this._timingsByKey) {
-      result[key] = store.getStats();
-    }
-    return result;
   }
 
   /** Resets all timing statistics for this logger. */
   resetTimeStats(): void {
-    this._timingsByKey.clear();
-    this._activeTimers.clear();
-    this._timingBaselineActive = false;
+    this.#timingsByKey.clear();
+    this.#activeTimers.clear();
+    this.#timingBaselineActive = false;
   }
 
   //
@@ -935,7 +891,7 @@ export class Logger {
    * `getCountDeltas()` reports relative to them.
    */
   resetCountBaseline(): void {
-    this._countBaseline = { ...this._counts };
+    this.#countBaseline = { ...this.#counts };
   }
 
   /**
@@ -943,8 +899,8 @@ export class Logger {
    * curves show the samples taken since.
    */
   resetTimingBaseline(): void {
-    this._timingBaselineActive = true;
-    for (const store of this._timingsByKey.values()) {
+    this.#timingBaselineActive = true;
+    for (const store of this.#timingsByKey.values()) {
       store.setBaseline();
     }
   }
@@ -960,17 +916,17 @@ export class Logger {
     error: number;
     total: number;
   } {
-    if (!this._countBaseline) {
-      return { ...this._counts, total: this.getTotal() };
+    if (!this.#countBaseline) {
+      return { ...this.#counts, total: this.#getTotal() };
     }
     return {
-      debug: this._counts.debug - this._countBaseline.debug,
-      info: this._counts.info - this._countBaseline.info,
-      warn: this._counts.warn - this._countBaseline.warn,
-      error: this._counts.error - this._countBaseline.error,
-      total: this.getTotal() - (
-        this._countBaseline.debug + this._countBaseline.info +
-        this._countBaseline.warn + this._countBaseline.error
+      debug: this.#counts.debug - this.#countBaseline.debug,
+      info: this.#counts.info - this.#countBaseline.info,
+      warn: this.#counts.warn - this.#countBaseline.warn,
+      error: this.#counts.error - this.#countBaseline.error,
+      total: this.#getTotal() - (
+        this.#countBaseline.debug + this.#countBaseline.info +
+        this.#countBaseline.warn + this.#countBaseline.error
       ),
     };
   }
@@ -993,10 +949,10 @@ export class Logger {
     value: boolean,
     metadata?: Record<string, unknown>,
   ): void {
-    let group = this._flags.get(name);
+    let group = this.#flags.get(name);
     if (!group) {
       group = new Map();
-      this._flags.set(name, group);
+      this.#flags.set(name, group);
     }
     if (value) {
       group.set(id, metadata ?? true);
@@ -1005,37 +961,100 @@ export class Logger {
     }
   }
 
-  /**
-   * All active flags, as a record from flag name to a record from id to
-   * metadata. The metadata is whatever was passed to `flag()`, or `null` when
-   * none was. A flag name with no active id is omitted entirely.
-   */
-  get flags(): Record<string, Record<string, Record<string, unknown> | null>> {
-    const result: Record<
-      string,
-      Record<string, Record<string, unknown> | null>
-    > = {};
-    for (const [name, group] of this._flags) {
-      if (group.size > 0) {
-        const entries: Record<string, Record<string, unknown> | null> = {};
-        for (const [id, value] of group) {
-          entries[id] = value === true ? null : value;
-        }
-        result[name] = entries;
-      }
-    }
-    return result;
-  }
-
   /** Resets all flags for this logger. */
   resetFlags(): void {
-    this._flags.clear();
+    this.#flags.clear();
+  }
+
+  //
+  // Private helpers
+  //
+
+  /** Increments the count for a specific message key and log level. */
+  #incrementKeyCount(key: string, level: ActiveLogLevel): void {
+    // Skip reserved key name "total" to prevent corruption of breakdown totals
+    if (key === "total") {
+      console.warn(
+        `[Logger] Message key \`total\` is reserved and cannot be used. ` +
+          `Please use a different key.`,
+      );
+      return;
+    }
+    if (!this.#countsByKey[key]) {
+      this.#countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
+    }
+    this.#countsByKey[key][level]++;
+  }
+
+  /**
+   * Logs the count summary, if incrementing the counter has just carried the
+   * total past another multiple of the configured threshold.
+   */
+  #maybeLogCountSummary(): void {
+    // Skip if disabled or logCountEvery is 0
+    if (this.#logCountEvery === 0) return;
+
+    const total = this.counts.total;
+    const threshold = Math.floor(total / this.#logCountEvery);
+
+    // Check if we've crossed a new threshold
+    if (threshold > this.#lastLoggedAt) {
+      this.#lastLoggedAt = threshold;
+
+      // Only log if debug level is enabled
+      if (shouldLog("debug", this.#level)) {
+        const { prefix, color } = this.#getLogFormat("debug");
+        const moduleName = this.#moduleName || "logger";
+        const message =
+          `${moduleName}: ${total} log calls made (debug: ${this.#counts.debug}, info: ${this.#counts.info}, warn: ${this.#counts.warn}, error: ${this.#counts.error})`;
+        console.debug(prefix, color, message);
+      }
+    }
+  }
+
+  /** Returns the prefix and color for a log level. */
+  #getLogFormat(
+    level: ActiveLogLevel,
+  ): { prefix: string; color: string } {
+    const levelUpper = level.toUpperCase();
+    const timestamp = getTimeStamp();
+
+    if (this.#moduleName) {
+      const prefix = `%c[${levelUpper}][${this.#moduleName}::${timestamp}]`;
+      const color = LOG_COLORS[
+        `tagged${
+          levelUpper.charAt(0) + level.slice(1)
+        }` as keyof typeof LOG_COLORS
+      ];
+      return { prefix, color };
+    } else {
+      const prefix = `%c[${levelUpper}][${timestamp}]`;
+      const color = LOG_COLORS[level];
+      return { prefix, color };
+    }
+  }
+
+  /**
+   * Records timing against the full key path only, with no rollup to the
+   * shorter paths.
+   */
+  #recordTime(elapsed: number, keys: string[]): void {
+    const path = keys.join("/");
+    let store = this.#timingsByKey.get(path);
+    if (!store) {
+      store = new TimingDataStore();
+      if (this.#timingBaselineActive) {
+        store.setBaseline();
+      }
+      this.#timingsByKey.set(path, store);
+    }
+    store.record(elapsed);
   }
 
   /** Returns the total count of all log calls, over all four levels. */
-  private getTotal(): number {
-    return this._counts.debug + this._counts.info + this._counts.warn +
-      this._counts.error;
+  #getTotal(): number {
+    return this.#counts.debug + this.#counts.info + this.#counts.warn +
+      this.#counts.error;
   }
 }
 

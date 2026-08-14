@@ -106,7 +106,6 @@ describe("cfc render policy demo integration test", () => {
           "TrustedRevealHealthData",
           "#trusted-health-visible",
           "Sensitive health data: migraine treatment plan",
-          { timeout: 45_000 },
         ),
     );
     await timeline.run(

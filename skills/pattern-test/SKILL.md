@@ -16,6 +16,19 @@ Run tests with:
 deno task cf test <pattern>.test.tsx
 ```
 
+Keep the complete list of test entry paths for deployment. A deployed source
+revision carries those tests only when each entry is supplied with a repeatable
+`--test` flag:
+
+```bash
+deno task cf piece new <pattern>.tsx --test <pattern>.test.tsx ...
+deno task cf piece setsrc <pattern>.tsx --test <pattern>.test.tsx --piece <piece-id> ...
+```
+
+Repeat `--test` for multiple entry files and repeat the complete flag set on
+every `setsrc`. The deployment command packages and type-checks attached tests
+but does not execute them, so a successful `cf test` run remains required.
+
 When working in a Pattern Factory Build workspace, also follow
 `docs/common/ai/pattern-factory-build-guide.md` (as mandated by pattern-dev). It
 defines Pattern Factory's build completion gate and expected coverage shape.
@@ -52,3 +65,5 @@ Runtime notes:
   from the spec).
 - The pattern still compiles after any interface changes made to support
   testing.
+- Every authored test entry is handed to deployment for attachment to the source
+  revision.

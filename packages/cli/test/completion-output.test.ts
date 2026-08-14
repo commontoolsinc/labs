@@ -138,6 +138,12 @@ Deno.test("--root defers to directory completion", async () => {
   assertEquals(await completeFor("cf piece new --root "), [":cf:dirs"]);
 });
 
+Deno.test("--test defers to pattern file completion", async () => {
+  assertEquals(await completeFor("cf piece new --test "), [
+    ":cf:files *.tsx",
+  ]);
+});
+
 Deno.test("a live slot with no resolvable context yields nothing, not an error", async () => {
   // Mid-keystroke with no identity configured: silence is the correct signal.
   const previous = Deno.env.get("CF_IDENTITY");

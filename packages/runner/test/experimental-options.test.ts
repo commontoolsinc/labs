@@ -1,3 +1,9 @@
+/**
+ * Tests for the `ExperimentalOptions` feature-flag system: verifies that
+ * `Runtime` construction/disposal correctly resolves flags and propagates the
+ * flags whose consumers are ambient.
+ */
+
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -16,11 +22,6 @@ import {
 
 const signer = await Identity.fromPassphrase("test experimental");
 
-/**
- * Tests for the `ExperimentalOptions` feature-flag system: verifies that
- * `Runtime` construction/disposal correctly resolves flags and propagates the
- * flags whose consumers are ambient.
- */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetModernCellRepConfig();
@@ -39,6 +40,7 @@ describe("ExperimentalOptions", () => {
           commitPreconditions: false,
           plainResultReceipts: false,
           computedCellIds: false,
+          lazyMaterialization: false,
         },
       });
       expect(runtime.experimental).toEqual({
@@ -46,6 +48,7 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: false,
         plainResultReceipts: false,
         computedCellIds: false,
+        lazyMaterialization: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -69,6 +72,7 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
+        lazyMaterialization: true,
         eagerSourceAnnotation: false,
         serverExecution: false,
       });
@@ -88,6 +92,7 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
+        lazyMaterialization: true,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,

@@ -480,7 +480,7 @@ Every runner exposure path uses this chokepoint: schema-driven `asFactory`
 reads, recursive Cell/query result materialization, graph binding and dynamic
 module dispatch, and CLI/FUSE/tool adapters. Transformed symbolic invocation
 may pass a cell to the same hook after resolving its value. Context-free
-`valueFromJson()` remains the intentional shell-returning boundary.
+`fabricFromJsonValue()` remains the intentional shell-returning boundary.
 
 Materialization returns another function, not a wrapper object, and preserves
 the canonical codec state for reserialization.

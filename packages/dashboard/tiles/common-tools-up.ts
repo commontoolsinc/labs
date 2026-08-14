@@ -1,8 +1,12 @@
-// common.tools uptime: a synthetic round-trip check of the public site, mirroring
-// the production tile. A single unreachable check reads as calm gray ("can't
-// tell"), and only a sustained run of failures escalates to a red "down"; an HTTP
-// 5xx is bad immediately. Override the target with COMMON_TOOLS_URL (e.g. point at
-// the www host if the apex redirects).
+/**
+ * Checks that the public common.tools site answers, with the same synthetic
+ * round trip the production tile makes. A single unreachable check reads as a
+ * calm gray, meaning the wall cannot tell, and only a sustained run of
+ * failures escalates to a red "down"; an HTTP 5xx is bad immediately.
+ * COMMON_TOOLS_URL overrides the target, which is how the check is pointed at
+ * the www host when the apex redirects.
+ */
+
 import type { Status, Tile, TileView } from "../types.ts";
 
 const FAIL_THRESHOLD = 3; // consecutive unreachable checks before declaring "down"

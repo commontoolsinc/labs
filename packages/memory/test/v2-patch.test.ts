@@ -1,3 +1,15 @@
+/**
+ * `patch.ts` deep-clones incoming op values for isolation. It MUST preserve
+ * fabric wrapper classes: it previously used `structuredClone()`, which
+ * silently demotes class instances to plain objects, so a `FabricError`
+ * (or any `FabricInstance`/`FabricPrimitive`) round-tripped through a patch
+ * op came back as a plain object and was then serialized lossily (PR #3613).
+ * These tests pin the property directly at the `patch.ts` layer, exercising
+ * every op that clones a value (`replace`, `add`, `splice`, and the
+ * `add`-via-`move` path), plus a second `applyPatch` pass to mimic the
+ * engine replaying a stored patch sequence over an already-deep-frozen base.
+ */
+
 import {
   assert,
   assertEquals,
@@ -9,16 +21,6 @@ import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricInstance } from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
-
-// `patch.ts` deep-clones incoming op values for isolation. It MUST preserve
-// fabric wrapper classes: it previously used `structuredClone()`, which
-// silently demotes class instances to plain objects, so a `FabricError`
-// (or any `FabricInstance`/`FabricPrimitive`) round-tripped through a patch
-// op came back as a plain object and was then serialized lossily (PR #3613).
-// These tests pin the property directly at the `patch.ts` layer, exercising
-// every op that clones a value (`replace`, `add`, `splice`, and the
-// `add`-via-`move` path), plus a second `applyPatch` pass to mimic the
-// engine replaying a stored patch sequence over an already-deep-frozen base.
 
 Deno.test("memory v2 patch preserves `FabricInstance` values with full fidelity", () => {
   const placements = [

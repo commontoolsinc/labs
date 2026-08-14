@@ -33,7 +33,9 @@
  * `compileAndRun`, `generateObject`, `generateText`, `navigateTo`, `wish`,
  * `sqliteQuery` (server round-trip; an effect like `llm`),
  * `inspectConfLabel` (reads stored label metadata — ambient CFC state that
- * changes independently of the node's inputs).
+ * changes independently of the node's inputs), `cellFromUrl` (resolves a
+ * space name against the runtime's cache, which is ambient in the same sense,
+ * and is on its way to probing hosts over the network).
  */
 export const REPLAYABLE_BUILTIN_REFS: ReadonlySet<string> = new Set([
   "map",

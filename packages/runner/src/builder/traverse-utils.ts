@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   FabricInstance,
   FabricPrimitive,
@@ -27,8 +27,8 @@ export function traverseValue(
 
   // Prevent infinite recursion
   if (seen.has(value) || seen.has(result)) return value;
-  if (isRecord(result)) seen.add(result);
-  else if (isRecord(unprocessedValue)) seen.add(unprocessedValue);
+  if (isObjectOrArray(result)) seen.add(result);
+  else if (isObjectOrArray(unprocessedValue)) seen.add(unprocessedValue);
 
   // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
   // contents rather than by property name, which this walk cannot do, so the
@@ -62,7 +62,7 @@ export function traverseValue(
     !isCell(value) &&
     !isCellResultForDereferencing(value) &&
     !((value as object) instanceof FabricPrimitive) &&
-    (isRecord(value) || isPattern(value))
+    (isObjectOrArray(value) || isPattern(value))
   ) {
     if (Array.isArray(value)) {
       return (value as Array<any>).map((v) => traverseValue(v, fn, seen));

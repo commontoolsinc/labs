@@ -1,5 +1,9 @@
-// Source artwork for raster generation and parity tests. Runtime modules serve
-// only the generated PNGs and do not import this file.
+/**
+ * Draws each favicon face as an SVG. This is the source artwork the served
+ * PNGs are rendered from, and the artwork the parity tests check those PNGs
+ * against; what the dashboard serves is the generated raster, never this.
+ */
+
 import type { FaviconFace } from "./favicon-types.ts";
 import { STATUS_COLOR } from "./palette.ts";
 

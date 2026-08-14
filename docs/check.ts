@@ -16,6 +16,10 @@
 //   // Shown as interface or class members.    -> inside `interface { ... }` / `class { ... }`
 //   // Shown for illustration only.            -> not type-checked (pseudocode)
 //
+// A whole document opts out with `<!-- check-docs: excerpts -->` on its own
+// line, declaring that its blocks quote repository source verbatim rather than
+// teaching an API.
+//
 // A block with no such comment is checked as-is (a standalone module), matching
 // the previous behaviour. The scaffold supplies the framework surface (a real
 // `commonfabric` import) plus ambient declarations for the example identifiers
@@ -46,6 +50,32 @@ const MARKERS: Array<[RegExp, Context]> = [
   [/^\/\/\s*Shown as alternative snippets\.?\s*$/i, "alternatives"],
   [/^\/\/\s*Shown for illustration only\.?\s*$/i, "skip"],
 ];
+
+// A whole document opts out by declaring that its blocks quote repository
+// source verbatim. See the `declaresExcerpts` use in `run()` for why those are
+// not type-checked, and `docs/check.md` for when the declaration is warranted.
+const EXCERPT_MARKER = /^<!--\s*check-docs:\s*excerpts\s*-->\s*$/;
+
+// The declaration must be prose, not a fenced example — otherwise `check.md`,
+// which documents the marker by showing it, would opt itself out. A fence
+// closes only on the same character it opened with, at least as long, which
+// matters because getting it wrong desynchronizes the rest of the file and
+// turns a fenced example into a document-wide opt-out.
+function declaresExcerpts(source: string): boolean {
+  let open: { char: string; len: number } | undefined;
+  for (const line of source.split("\n")) {
+    const fence = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      const char = fence[1][0];
+      const len = fence[1].length;
+      if (!open) open = { char, len };
+      else if (char === open.char && len >= open.len) open = undefined;
+      continue;
+    }
+    if (!open && EXCERPT_MARKER.test(line)) return true;
+  }
+  return false;
+}
 
 // A "wrong then right" comment separates alternative snippets that share a name.
 const ALT_SEPARATOR = new RegExp(
@@ -464,7 +494,15 @@ async function run(tmpDir: string): Promise<number> {
     // docs/history holds archived point-in-time documents; their snippets
     // reflect the API of their era and are not kept compiling.
     if (entry.path.includes("/history/")) continue;
-    blocks.push(...extractBlocks(entry.path, Deno.readTextFileSync(entry.path)));
+    const source = Deno.readTextFileSync(entry.path);
+    // A document may declare that its blocks are verbatim citations of
+    // repository source. Those are excerpts, not examples: they are correct
+    // when they still match the file they came from, and they do not compile
+    // in isolation — an excerpt of a function body has no imports and no
+    // surrounding scope. Type-checking them would only pressure the author to
+    // paraphrase, which is the one thing such a document must not do.
+    if (declaresExcerpts(source)) continue;
+    blocks.push(...extractBlocks(entry.path, source));
   }
 
   const jobs: Job[] = [];

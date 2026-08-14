@@ -2,7 +2,7 @@ import type { JSONSchema, JSONValue } from "@commonfabric/api";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   cfcLabelPathPrefixMatches,
@@ -116,8 +116,8 @@ export const cfcConfidentialityForObservationNode = (
   const observes = options.observes ?? "value";
 
   if (
-    observes === "value" && isRecord(options.schema) &&
-    isRecord(options.schema.ifc)
+    observes === "value" && isObjectOrArray(options.schema) &&
+    isObjectOrArray(options.schema.ifc)
   ) {
     joined.push(...(options.schema.ifc.confidentiality ?? []));
   }
@@ -218,10 +218,10 @@ const integrityAtomSatisfies = (
     // Concept-typed `actual` locally, BEFORE the resolver, so a misconfigured
     // trust statement whose `concrete` is itself Concept-shaped cannot let a
     // smuggled `Concept` atom pool-match its way through — fail closed here
-    // rather than lean on the upstream mint gate. `isRecord` admits arrays, so
+    // rather than lean on the upstream mint gate. `isObjectOrArray` admits arrays, so
     // this catches a Concept-typed array shape too.
     return concept.uri !== undefined &&
-      !(isRecord(actual) &&
+      !(isObjectOrArray(actual) &&
         (actual as { type?: unknown }).type === CFC_ATOM_TYPE.Concept) &&
       trust?.trustResolver !== undefined &&
       trust.trustResolver.conceptSatisfied(
@@ -279,7 +279,8 @@ export const cfcIntegrityWitnessKey = (
 ): string | null => {
   if (!integrityAtomSatisfies(required, actual, trust)) return null;
   if (
-    isRecord(actual) && isRecord((actual as { scope?: unknown }).scope) &&
+    isObjectOrArray(actual) &&
+    isObjectOrArray((actual as { scope?: unknown }).scope) &&
     (actual as { scope: { valueRef?: unknown } }).scope.valueRef !== undefined
   ) {
     const scope = { ...(actual as { scope: Record<string, unknown> }).scope };

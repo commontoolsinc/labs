@@ -47,15 +47,15 @@ interface LayoutEdge {
 const NODE_WIDTH = 140;
 const NODE_HEIGHT = 36;
 
-/**
- * Scheduler Graph visualization component.
- * Shows dependency graph with effects and computations.
- */
 // Entity-scheme parsers derived from the canonical scheme set, so a new
 // entity kind cannot leave a stale `of|computed` alternation here.
 const ENTITY_SCHEME_ALT = ENTITY_URI_SCHEMES.join("|");
 const ENTITY_SCHEME_PART_RE = new RegExp(`^(?:${ENTITY_SCHEME_ALT}):(.*)$`);
 
+/**
+ * Scheduler Graph visualization component.
+ * Shows dependency graph with effects and computations.
+ */
 export class XSchedulerGraph extends LitElement {
   static override styles = css`
     :host {

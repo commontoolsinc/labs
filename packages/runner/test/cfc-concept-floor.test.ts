@@ -205,7 +205,7 @@ describe("CFC concept-level integrity floors (D5)", () => {
     });
 
     it("does not treat a Concept-shaped ARRAY as a concept guard (cubic P2)", () => {
-      // `isRecord` admits arrays (`typeof [] === "object"`), so an array
+      // `isObjectOrArray` admits arrays (`typeof [] === "object"`), so an array
       // carrying own `type`/`uri` properties previously routed to trust-closure
       // satisfaction. The canonical Concept atom is an OBJECT; a Concept-shaped
       // array is not the canonical shape and must fail closed to ordinary

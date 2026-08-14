@@ -78,7 +78,8 @@ export function reservesStdoutForCommandOutput(
   if (args[0] === "exec") return true;
   if (args[0] === "wish") return true;
   const subcommand = pieceSubcommand(args);
-  return subcommand === "get" || subcommand === "call";
+  return subcommand === "get" || subcommand === "get-label" ||
+    subcommand === "set-label" || subcommand === "call";
 }
 
 export const stderrConsoleHandler: ConsoleHandler = ({ method, args }) => ({

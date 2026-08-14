@@ -29,7 +29,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -255,12 +255,6 @@ export class CellHandle<T = unknown> {
     );
   }
 
-  /**
-   * Subscribe to cell value changes.
-   * The callback is called immediately with the current value (even if undefined)
-   * and whenever the value changes.
-   * The callback's return value (if a Cancel function) is called before the next update.
-   */
   /** The cell's current display CFC label, for label-aware subscribers. */
   get cfcLabel(): CfcLabelView | undefined {
     return this.#cfcLabel;
@@ -271,6 +265,12 @@ export class CellHandle<T = unknown> {
     return this.#wantsCfcLabel;
   }
 
+  /**
+   * Subscribe to cell value changes.
+   * The callback is called immediately with the current value (even if undefined)
+   * and whenever the value changes.
+   * The callback's return value (if a Cancel function) is called before the next update.
+   */
   subscribe(
     callback: (
       value: T | undefined,
@@ -503,7 +503,7 @@ export class CellHandle<T = unknown> {
       return value.map((item) => CellHandle.deserialize(base, item));
     }
 
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       const reference = parseAsCellRef(
         value as JSONValue | undefined,
         base.ref(),
@@ -553,7 +553,7 @@ export class CellHandle<T = unknown> {
     //
     // TODO(danfuzz): carry the whole `FabricValue` domain across this
     // connection, at which point this becomes a conversion rather than a
-    // refusal. `JsonCodec` is the mechanism, and the gap it closes is the one
+    // refusal. `JsonCodecEngine` is the mechanism, and the gap it closes is the one
     // marked on `WireCellValue` in `protocol/types.ts`.
     if (value instanceof FabricSpecialObject) {
       throw new Error(
@@ -562,7 +562,7 @@ export class CellHandle<T = unknown> {
       );
     }
 
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       return Object.fromEntries(
         Object.entries(value).map((
           [key, member],
@@ -638,8 +638,8 @@ function applyValue(
   }
 
   // For plain objects, recursively apply to each property
-  if (isRecord(current)) {
-    const prevRecord = (isRecord(previous) && !Array.isArray(previous))
+  if (isObjectOrArray(current)) {
+    const prevRecord = (isObjectNotArray(previous))
       ? previous as Record<string, unknown>
       : {};
     const result: Record<string, unknown> = {};

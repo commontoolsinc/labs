@@ -97,9 +97,14 @@ export class FsTree {
     return this.nextIno++;
   }
 
-  private trackPath(ino: bigint, parentIno: bigint, name: string): void {
+  /** The path an entry named `name` under `parentIno` has, or would have. */
+  childPath(parentIno: bigint, name: string): string {
     const parentPath = this.getPath(parentIno);
-    const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
+    return parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
+  }
+
+  private trackPath(ino: bigint, parentIno: bigint, name: string): void {
+    const path = this.childPath(parentIno, name);
     this.paths.set(path, ino);
     this.inoPaths.set(ino, path);
     this.inoNames.set(ino, name);

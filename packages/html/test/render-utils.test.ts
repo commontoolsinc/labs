@@ -1,3 +1,20 @@
+/**
+ * The two render-utility contracts a renderer depends on and neither the name
+ * nor the signature states.
+ *
+ * `setPropDefault` compares under `Object.is` rather than `===`, which decides
+ * two cases that differ from each other: `NaN` over a stored `NaN` is
+ * unchanged and must not assign, while `-0` over `0` is a change and must.
+ * The bound matters because a custom element commonly re-renders on any
+ * property assignment, so a redundant write is a visible cost rather than a
+ * wasted one.
+ *
+ * `styleObjectToCssString` is pinned across the cases where a plausible
+ * implementation quietly does the wrong thing: a unitless property, a zero, a
+ * vendor prefix, a custom property (which keeps its case and takes no unit),
+ * and a `null` or `undefined` value, which drops rather than rendering.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { setPropDefault, styleObjectToCssString } from "../src/render-utils.ts";

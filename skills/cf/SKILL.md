@@ -130,24 +130,27 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 ## Quick Command Reference
 
-| Operation          | Command                                                                                              |
-| ------------------ | ---------------------------------------------------------------------------------------------------- |
-| Type check         | `deno task cf check pattern.tsx --no-run`                                                            |
-| Deploy new         | `deno task cf piece new pattern.tsx --root . --repository REPO -i key -a url -s space`               |
-| Update existing    | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
-| Inspect state      | `deno task cf piece inspect --piece ID ...`                                                          |
-| Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
-| Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                             |
-| Project fields     | `deno task cf piece get --piece ID items --select id,title ...`                                      |
-| Read addresses     | `deno task cf piece get --piece ID items --schema '{"type":"array","items":{"$link":true}}' ...`     |
-| Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
-| Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
-| Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
-| List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                     |
-| Trigger recompute  | `deno task cf piece step --piece ID ...`                                                             |
-| List pieces        | `deno task cf piece ls -i key -a url -s space`                                                       |
-| Visualize          | `deno task cf piece map ...`                                                                         |
-| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)              |
+| Operation          | Command                                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Type check         | `deno task cf check pattern.tsx --no-run`                                                                                    |
+| Test pattern       | `deno task cf test pattern.test.tsx`                                                                                         |
+| Deploy new         | `deno task cf piece new pattern.tsx --test pattern.test.tsx --root . --repository REPO -i key -a url -s space`               |
+| Update existing    | `deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
+| Inspect state      | `deno task cf piece inspect --piece ID ...`                                                                                  |
+| Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                                            |
+| Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                                                     |
+| Project fields     | `deno task cf piece get --piece ID items --select id,title ...`                                                              |
+| Read an address    | `deno task cf piece get --piece ID --select 'topic@,topic.title' ...`                                                        |
+| Read addresses     | `deno task cf piece get --piece ID items --schema '{"type":"array","items":{"$link":true}}' ...`                             |
+| Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                                                     |
+| Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                                          |
+| Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                                         |
+| Shape a result     | `deno task cf piece call --piece ID --select topic.title addTopic ...`                                                       |
+| List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                                             |
+| Trigger recompute  | `deno task cf piece step --piece ID ...`                                                                                     |
+| List pieces        | `deno task cf piece ls -i key -a url -s space`                                                                               |
+| Visualize          | `deno task cf piece map ...`                                                                                                 |
+| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)                                      |
 
 ## Check Command Flags
 
@@ -181,18 +184,26 @@ deno task cf check pattern.tsx --verbose-errors     # Detailed error context
 
 ## Core Workflow: setsrc vs new
 
-**Critical pattern:** After initial deployment, use `setsrc` to iterate:
+**Critical pattern:** Run every authored test before deployment. After initial
+deployment, use `setsrc` to iterate and repeat the complete set of attached test
+entries:
 
 ```bash
+# Before every deployment
+deno task cf test pattern.test.tsx
+
 # First time only
-deno task cf piece new pattern.tsx ...
+deno task cf piece new pattern.tsx --test pattern.test.tsx ...
 # Output: Created piece bafyreia... <- Save this ID!
 
 # ALL subsequent iterations
-deno task cf piece setsrc pattern.tsx --piece bafyreia... ...
+deno task cf piece setsrc pattern.tsx --test pattern.test.tsx --piece bafyreia... ...
 ```
 
-**Why:** `new` creates duplicate pieces. `setsrc` updates in-place.
+**Why:** `new` creates duplicate pieces. `setsrc` updates in-place. `--test`
+packages and type-checks a test entry but does not run it. Repeat the flag for
+every authored test entry. Each `setsrc` describes a complete new source
+revision, so omitting the flags drops those test roots from that revision.
 
 `setsrc` normally rejects incompatible argument/result schema changes and
 retained links whose durable contracts no longer fit. For an intentional
@@ -207,11 +218,13 @@ intentional breaking migration.
 ### Source location metadata
 
 The local-source deployment commands `piece new`, `piece setsrc`, and custom
-`piece set-home` accept `--root` plus `--repository`. Use the repository
-checkout root for `--root`; this preserves `source.entry` as a path inside the
+`piece set-home` accept repeatable `--test` flags as well as `--root` and
+`--repository`. Attach every authored pattern test. Use the repository checkout
+root for `--root`; this preserves `source.entry` as a path inside the
 repository. `--repository` is stored exactly as supplied in `source.repository`
 and is never inferred from Git configuration. On `setsrc`, omitting
 `--repository` preserves the existing value; supplying it replaces the value.
+Test flags are different: every source update must repeat the complete list.
 `piece inspect --json` and `piece ls --json` expose the resulting structured
 source locator.
 
@@ -260,18 +273,48 @@ union of predicate and projection paths, so omitted linked subgraphs are not
 hydrated; ambiguous compositions can retain a wider selector, and schema-less or
 root-union sources need a value-shape read first. CFC behavior is the same as a
 computed pattern expression. Source schema metadata is authoritative; projection
-schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A JSON `--schema`
-marks a position `"$link": true` to get that position's address —
-`{"id","space","scope","path"}`, all four always present, no schema inlined —
-instead of what is behind it, or beside a projection to get both. That address
-is the deepest stored link crossed on the way to the marked position plus the
-segments below it, so marking a field under a linked element names that
-element's own document rather than a slot in the collection above it; a position
-with no link above it keeps the source document's own address. A marked position
-is never fetched, so a marked collection costs one document read rather than one
-per element; the rendered `id` minus its `of:` prefix is what `--piece` accepts.
-Markers do not compose with `--filter`. See `packages/cli/README.md` for the
-exact syntax and supported schema subset.
+schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A projection marks
+a position to get that position's address — `{"id","space","scope","path"}`, all
+four always present, no schema inlined — instead of what is behind it, or beside
+a projection to get both. A JSON `--schema` marks with `"$link": true`; a field
+list marks with a trailing `@`, so `--select 'topic@,topic.title'` returns one
+`topic` carrying its address and its title. A path that is only `@` marks the
+position the read is already at, so `--select '@'` returns the source's own
+address and `--select '@,title'` returns it beside the title. `@` is otherwise
+special only at the end of a segment and `\@` writes a literal one, which keeps
+a field named `user@home` reachable; a leading `@` followed by anything else is
+the `@file` only `--schema` reads. A field list applies to each element wherever
+it crosses an array, an address included, so `--select 'notes@'` returns one
+address per note and is the concise spelling of
+`--schema '{"type":"array","items":{"$link":true}}'`; a marked position holding
+anything else returns its own address. That address is the deepest stored link
+crossed on the way to the marked position plus the segments below it, so marking
+a field under a linked element names that element's own document rather than a
+slot in the collection above it; a position with no link above it keeps the
+source document's own address. A marked position is never fetched, so a marked
+collection costs one document read rather than one per element; the rendered
+`id` minus its `of:` prefix is what `--piece` accepts. Neither spelling composes
+with `--filter`. See `packages/cli/README.md` for the exact syntax and supported
+schema subset.
+
+`piece call` takes the same three flags, before the callable name, with the same
+grammar, the same `--select`/`--schema` conflict, and the same error messages.
+They shape the result of the call — a handler's `result` inside the Invocation
+JSON, or a tool's JSON on stdout:
+
+```bash
+deno task cf piece call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
+```
+
+A selection shapes a result that already exists; it does not narrow what the
+call fetches, because the readback materializes the whole receipt first and a
+receipt declares no schema to narrow against. A value-less verb therefore still
+reports no `result` at all rather than `{}` — but a selection that keeps nothing
+from a result that does exist is refused, so the two stay distinguishable.
+`--no-wait` refuses all three flags, since it skips the receipt readback they
+are answered from. `--show-links` composes with a projection — links are
+collected after the selection, so each address names a position in the value you
+were handed — but not with `--filter`, which moves the positions a link names.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The
@@ -327,18 +370,20 @@ deno task cf piece step --piece ID ...  # Required!
 deno task cf piece inspect --piece ID ...
 ```
 
-**Handler testing workflow** (deploy → call → step → inspect):
+**Handler testing workflow** (automated test → deploy → call → step → inspect):
 
 ```bash
-# 1. Deploy
-deno task cf piece new pattern.tsx -i key -a url -s space
-# 2. Call a handler
+# 1. Run the authored automated test
+deno task cf test pattern.test.tsx
+# 2. Deploy with the test attached
+deno task cf piece new pattern.tsx --test pattern.test.tsx -i key -a url -s space
+# 3. Call a handler
 deno task cf piece call --piece ID handlerName '{"arg": "value"}' ...
-# 3. Step to process
+# 4. Step to process
 deno task cf piece step --piece ID ...
-# 4. Inspect result
+# 5. Inspect result
 deno task cf piece inspect --piece ID ...
-# 5. Repeat 2-4 for each handler
+# 6. Repeat 3-5 for each handler
 ```
 
 See `docs/common/workflows/handlers-cli-testing.md` for the full workflow and

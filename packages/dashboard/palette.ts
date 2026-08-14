@@ -1,16 +1,18 @@
-// The one place the wall's status colors are chosen, and the one place a shade
-// derived from them is worked out. Everything that paints a status in color
-// reads from here: the tile, the header dot, the headline, a sparkline's fade,
-// a run cell, the drill-down rows, and the favicon. The shape a header dot
-// takes is CSS geometry rather than a color, and lives with the rest of the
-// tile's CSS in render.ts.
-//
-// Green sits at teal and amber at orange rather than at a yellow. The two then
-// differ along the blue/yellow axis, which red/green color blindness leaves
-// working, so good and warn stay apart for a viewer who cannot separate them by
-// the red/green axis alone. Color is one of four cues the wall carries: the
-// header dot also takes a per-status shape, the tile's wash and border get
-// stronger as the status gets more serious, and warn and bad carry a texture.
+/**
+ * Chooses the wall's status colors, and works out every shade derived from
+ * them. Everything that paints a status in color reads from here: the tile,
+ * the header dot, the headline, a sparkline's fade, a run cell, the drill-down
+ * rows, and the favicon. The shape a header dot takes is CSS geometry rather
+ * than a color, and lives with the rest of the tile's CSS in render.ts.
+ *
+ * Green sits at teal and amber at orange rather than at a yellow. The two then
+ * differ along the blue-to-yellow axis, which red-green color blindness leaves
+ * working, so good and warn stay apart for a viewer who cannot separate them
+ * by the red-to-green axis alone. Color is one of four cues the wall carries:
+ * the header dot also takes a per-status shape, the tile's wash and border get
+ * stronger as the status gets more serious, and warn and bad carry a texture.
+ */
+
 import type { Status } from "./types.ts";
 
 export const STATUS_COLOR: Record<Status, string> = {

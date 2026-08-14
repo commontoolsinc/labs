@@ -17,7 +17,8 @@ where those properties are stated once.
 
 - **Reference invariants by ID** (e.g. `INV-1`) in PR descriptions, review
   comments, code comments, and tickets whenever a change touches commit
-  admission, conflict detection, dependency recording, or client replay.
+  admission (including ACL admission), conflict detection, dependency
+  recording, or client replay.
 - **Every entry names its soundness direction.** Most invariants are
   asymmetric: one direction of approximation is safe (costs a retry), the
   other is corruption. An optimization is admissible only if it moves
@@ -39,7 +40,9 @@ Checkers referenced below:
   validator (`packages/memory/test/naive-admission.ts`);
 - the **TLA+ model**: `docs/specs/memory-v2/tla/PendingStacks.tla`, which
   model-checks INV-1/INV-3/INV-4/INV-5 over all small interleavings for each
-  dependency-recording and staleness-basis variant.
+  dependency-recording and staleness-basis variant, and — in its
+  delayed-verdict-delivery mode (the `PendingStacks_Channel*.cfg` configs) —
+  INV-6 over the decided-but-not-yet-processed window.
 
 ## The invariants
 
@@ -119,12 +122,14 @@ generator test asserting the runner's array-op discipline
 
 > A commit that reads a document through a pending stack records a dependency
 > set that (a) includes every pending layer whose acceptance or rejection can
-> change the observed value, and (b) includes the document's top-of-stack
-> layer below the reader. For a read declaring its true confirmed basis
+> change the observed value, and (b) includes the top-of-stack layer of the
+> reader's materialized view. For a read declaring its true confirmed basis
 > (`basisSeq`), the staleness scan runs from that basis with predecessor-only
 > own-session exclusion; for a legacy read, the top-of-stack layer's
 > resolution is the staleness basis. Narrowing may drop only non-top layers
-> whose write footprint provably cannot influence the read path.
+> that provably cannot influence the observed value: a layer whose write
+> footprint misses the read path, or a layer the overlay removed before the
+> view was built (a processed rejection — see below).
 
 Clause (a) is what makes rejection cascades reach every semantically
 dependent commit (see INV-4); recording fewer layers than the value's true
@@ -144,18 +149,41 @@ TLA+ config `PendingStacks_Filtered.cfg` certifies that shape in the bounded
 model. Dropping a layer that overlaps the read path instead re-creates the
 CT-1872 phantom — an INV-1 violation.
 
+Completeness is relative to the reader's VIEW, not to the session's commit
+history (`03-commit-model.md` §3.5): a layer the overlay removed before the
+view was built — a rejection verdict honored, the view rebuilt without it —
+is not a contributor under clause (a), so its absence is a sound narrowing
+and the recorded array may be non-contiguous in the session's `localSeq`
+space. The server cannot check completeness (it does not know the client's
+view); it imposes per-element resolution on what is named and nothing on
+what is not, so the soundness burden for an omission sits entirely with the
+client, in the same trust class as a fabricated read. The interleaving this
+permits — rejections honored eagerly while an accept's promotion is still
+parked — is reachable in the TLA+ model's `fullstack` recording mode:
+rejection removes the doomed layers from the pending stack, an accepted
+layer stays pending until `Integrate`, and a later `Build` records only the
+survivors — a sparse set relative to session history. The delayed-delivery
+mode (the `PendingStacks_Channel*.cfg` configs) additionally certifies the
+window where a rejection is decided but not yet processed: a commit built
+there still names the dead layer and is refused by the dead-dependency
+admission rule, while a commit built after the processed drop records the
+sparse survivor set and is admitted.
+
 Layer: client dependency recording (`packages/runner/src/storage/v2.ts`
 pending-stack bookkeeping); server resolution (`resolvePendingReads`).
 
 Soundness direction: MAY record more layers than semantically necessary;
-MUST NOT drop a layer that overlaps the read path, and MUST NOT drop the
-top-of-stack layer. A legacy read MUST NOT base its staleness scan below
+MAY omit a layer the overlay dropped before the view was built (a processed
+rejection is no longer a contributor); MUST NOT omit a layer of the view
+that overlaps the read path, and MUST NOT omit the view's top-of-stack
+layer. A legacy read MUST NOT base its staleness scan below
 the top of stack; a `basisSeq` read scans from its declared basis and MUST
 exclude only true predecessor own-session commits (localSeq below the
 reader's — an own write accepted out of submission order conflicts like a
 foreign write).
 
-Checked by: the TLA+ model (all three recording modes); stacked-commit unit
+Checked by: the TLA+ model (both recording modes, under atomic and
+delayed-delivery configs); stacked-commit unit
 tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`).
 
 ### INV-4 — Cascade totality
@@ -221,13 +249,20 @@ Soundness direction: MAY hold a send longer than necessary; MUST NOT send a
 commit whose local doom is still possible, and MUST NOT locally drop a
 commit whose acceptance is still possible without confirming its fate.
 
-Checked by: currently only example-based tests (reconnect-race,
-pending-commit-durability). The TLA+ model treats verdict delivery as atomic
-with admission and therefore does NOT cover this invariant. That area has
-churned — under CT-1927 the client parks an accept's promotion until a
-frame's `caughtUpLocalSeq` marker covers it, a decided-but-not-yet-applied
-window — so extending the model with delayed verdict delivery is the
-standing refinement that would bring this invariant into scope.
+Checked by: the TLA+ model's delayed-delivery mode
+(the `PendingStacks_Channel*.cfg` configs, invariant
+`AcceptedVersusDropped`), which splits the server's decision from the
+client's processing, runs the rejection drop-and-cascade at the
+processing point, and checks that a locally
+cascade-dropped commit is never durably accepted — the guarantee rests on
+FIFO admission plus the dead-dependency rule, and the model checks that
+composition rather than assuming it. The CT-1927 parking window is in
+scope (promotion waits for `Integrate`, and a covering frame cannot
+precede its verdict). What the model still does NOT cover is connection
+loss and replay — the scalar-downgrade hold and reconnect races remain
+covered only by example-based tests (reconnect-race,
+pending-commit-durability); extending the channel with loss and re-send is
+the remaining refinement.
 
 ### INV-7 — Committed writes are never silently dropped
 
@@ -311,6 +346,114 @@ replay.
 Soundness direction: none — exact.
 
 Checked by: engine and reconnect unit tests.
+
+### INV-12 — ACL mutation commit shape
+
+> A commit that touches a space's ACL document (entity id `of:<space>`) is
+> admitted only if it is, all at once: the **only** operation in the commit;
+> an `op: "set"` on exactly that id, with `scope` `"space"` or absent; on the
+> default branch (`branch` absent or `""`); and carrying a value that
+> satisfies `isACL` and retains at least one **concrete** (non-`"*"`) OWNER.
+> Every other shape — a patch, a delete, a different scope, a mixed ACL/data
+> commit, a non-default branch, an ownerless or malformed result — is a
+> `ProtocolError`.
+
+This is `04-protocol.md` §4.5.1's normative sentence ("A valid ACL mutation is
+a whole-document, space-scoped replacement on the default branch and must
+retain at least one concrete OWNER") restated as a checkable entry, because it
+is the invariant a client is most likely to violate without knowing the rule
+exists.
+
+The clauses are checked in this order, each rejecting with a `ProtocolError`
+carrying a distinct message (so a message identifies the clause):
+
+| Clause | Rejection message |
+| --- | --- |
+| default branch | `ACL mutations are only valid on the default branch` |
+| exactly one operation | `ACL mutations must be an ACL-only commit` |
+| whole-document `set` on `of:<space>`, scope space-or-absent | `ACL mutations must replace the space-scoped ACL document` |
+| result is a valid ACL with a concrete OWNER | `ACL must be valid and retain at least one concrete OWNER` |
+
+It holds in **both** `observe` and `enforce`, and is skipped only when
+`MEMORY_ACL_MODE` is `off`. The code states its own reason for keeping it
+outside the mode dial: it is a *storage* invariant, not an access decision —
+"an invalid ACL or an ordinary first write would make later enforcement
+ambiguous or impossible" (`#validateAclCommit`'s doc comment). The shape check
+also runs *before* the OWNER capability check on the same commit, so a
+malformed ACL write reports `ProtocolError` even from a principal that has no
+OWNER capability at all.
+
+On the whole-document clause specifically, one mechanical observation is
+available and no stated rationale is: the validity clause inspects
+`operation.value?.value` — the document the operation itself carries — and of
+the four operation shapes only `SetOperation` carries one (`patch` carries
+patch ops, `delete` and `sqlite` carry no document). So under whole-document
+replacement the value the server validates *is* the document the commit
+produces. That is an observation about the current check, not recovered
+intent: the rule arrived with ACL enforcement in #4670 (`4eb3026d1`) with no
+separately stated motivation, and no spec gives one. Anyone proposing to relax
+it owes the argument #4670 did not record.
+
+Layer: server admission (`#validateAclCommit` in
+`packages/memory/v2/server.ts`); client emission (`ACLManager` in
+`packages/runner/src/acl-manager.ts`, which satisfies the rule by addressing
+the whole document at path `[]` — a write through the ordinary value surface
+decomposes into per-key `op: "patch"` details and is refused).
+
+Soundness direction: none — an exact admission predicate, with a real cost on
+each side. Over-rejection is not merely a retry: a client that cannot produce
+the accepted shape has no route to change the ACL at all, which is what
+happened while `ACLManager` wrote through the value surface — every
+post-genesis grant and revoke failed, and the wildcard a named space is born
+with could not be removed. Over-acceptance lets the ACL document reach a state
+no admission check ever validated.
+
+Checked by: example-based server tests only — no oracle, TLA+, or differential
+coverage. `packages/memory/test/v2-server-acl-test.ts`: "ACL mutations must
+preserve a concrete owner" (rejects `delete`, `patch`, `scope: "user"`, and
+empty / wildcard-only-owner / downgraded-owner / invalid-capability values) and
+"ACL mutations are default-branch ACL-only commits" (rejects a non-default
+branch and a mixed ACL+data commit, asserting the data operation did not land).
+Client side, `packages/runner/test/memory-v2-acl-mutation.test.ts` asserts the
+emitted operation *shape and count* against a real server, not just the
+resulting value.
+
+### INV-13 — ACL genesis precedence and authority
+
+> A space's ACL document must exist before any ordinary write is admitted, and
+> the commit that creates it must come from the space's own identity or from an
+> identity the deployment has designated. Concretely:
+> with ACL state missing and server sequence 0, a commit that does **not**
+> touch `of:<space>` is refused; and a commit that **does** touch it while ACL
+> state is missing is refused unless the session's principal is the space DID
+> itself or a configured service DID (`acl.serviceDids` /
+> `MEMORY_SERVICE_DIDS`).
+
+Genesis is the one commit with no prior ACL to authorize it, so its authority
+is derived rather than granted. Both clauses reject with an
+`AuthorizationError`: `Space <space> requires an ACL genesis commit before
+ordinary writes` for the precedence clause, and `Only the space identity or a
+service DID may initialize <space>` for the authority clause. Like INV-12 this
+is enforced in `observe` as well as `enforce`, for the reason quoted there.
+
+The precedence clause binds only at server sequence 0. A *populated* space that
+never had an ACL is not forced through genesis; it falls under the temporary
+pre-launch compatibility rule in `04-protocol.md` §4.5.1 (authenticated
+READ/WRITE, never OWNER). Retracted, malformed, and ownerless ACL state is not
+equivalent to missing state — it fails closed rather than reopening genesis.
+
+Layer: server admission (`#validateAclCommit`). The operator `writeDocument`
+path enforces the same precedence separately and additionally refuses *any*
+direct write to the ACL document, so genesis cannot be performed off-protocol.
+
+Soundness direction: none — exact.
+
+Checked by: example-based server tests only.
+`packages/memory/test/v2-server-acl-test.ts`: "an ordinary opener cannot claim
+or write a new space", "the space identity initializes a private space",
+"service DIDs have implicit OWNER and do not claim spaces", "acl observe:
+fresh-space genesis remains a hard invariant", "direct writes cannot create or
+mutate ACL state", "a retracted ACL fails closed instead of becoming public".
 
 ## Change discipline
 

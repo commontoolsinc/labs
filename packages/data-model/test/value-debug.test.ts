@@ -1,3 +1,18 @@
+/**
+ * Rendering a value for a human to read, including the values that resist
+ * being rendered.
+ *
+ * A debug renderer is called on whatever is at hand, usually while something
+ * is already wrong, so it has to survive input that would defeat an ordinary
+ * serializer: a cycle, a value that refuses to be rendered, a structure too
+ * large to print whole. Producing something useful and bounded matters more
+ * than producing something complete, which is what the length limit is for.
+ *
+ * The compact and indented forms differ only in spacing, while the kind string
+ * names what a value is without rendering it at all. The custom inspector is
+ * how all of this reaches a `console.log()`.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

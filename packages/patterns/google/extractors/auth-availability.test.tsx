@@ -5,7 +5,7 @@
  * branch. Empty auth keeps API calls inactive while exercising their initial
  * missing-auth state.
  */
-import { assert, pattern, Writable } from "commonfabric";
+import { assert, pattern, TESTS, Writable } from "commonfabric";
 import type { Auth } from "../core/gmail-importer.tsx";
 import EmailNotes from "./email-notes.tsx";
 import ExpectResponseFollowup from "./expect-response-followup.tsx";
@@ -45,7 +45,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_notes_start_empty },
       { assertion: assert_followups_start_empty },
       { assertion: assert_task_engine_starts_empty },

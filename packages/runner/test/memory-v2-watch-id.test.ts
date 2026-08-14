@@ -115,3 +115,45 @@ Deno.test("memory v2 selector normalization ignores inherited definition names",
 
   assertEquals(normalized.schema, { $ref: "#/$defs/toString" });
 });
+
+// The registry of reads a provider replays onto a replacement replica keys its
+// entries by the normalized selector's identity. These two tests pin what that
+// key relies on: normalization hands back one shared instance per distinct
+// registration, so identity separates registrations exactly and the registry
+// needs no content hash per `sync()` call to tell them apart.
+
+Deno.test("memory v2 selector normalization collapses schemaless reads", () => {
+  const first = normalizeSyncSelector({
+    path: ["items", "0", "count"],
+    schema: false,
+  });
+  const second = normalizeSyncSelector({
+    path: ["items", "1", "count"],
+    schema: false,
+  });
+  const absent = normalizeSyncSelector(undefined);
+
+  // A schemaless read accepts nothing, so its path carries no information and
+  // normalization drops it. Every such read on a document is one registration.
+  assertStrictEquals(first, second);
+  assertStrictEquals(first, absent);
+  assertEquals(first.path, []);
+  assertEquals(first.schema, false);
+});
+
+Deno.test("memory v2 selector normalization separates paths by identity", () => {
+  const at = (path: string[]): SchemaPathSelector =>
+    normalizeSyncSelector({
+      path,
+      schema: {
+        type: "object",
+        properties: { count: { type: "number" } },
+      },
+    });
+
+  assertStrictEquals(at(["items", "0", "count"]), at(["items", "0", "count"]));
+  assertNotStrictEquals(
+    at(["items", "0", "count"]),
+    at(["items", "1", "count"]),
+  );
+});

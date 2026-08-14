@@ -161,6 +161,18 @@ Deno.test("source writeback re-encodes decoded source relpaths for tree lookup",
   );
 });
 
+Deno.test("source writeback retains attached test roots", async () => {
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const sourceWriteback = source.slice(
+    source.indexOf('if (writeTarget?.kind === "source")'),
+  );
+
+  assert(
+    sourceWriteback.includes("sourceRoots: program.sourceRoots"),
+    "source writeback must pass the recovered source roots to setPattern",
+  );
+});
+
 Deno.test("no-handle truncate opens only the bounded target prefix", () => {
   const content = new Uint8Array([1, 2, 3, 4, 5]);
   assertEquals([...bufferForNoHandleTruncate(content, 2)], [1, 2]);

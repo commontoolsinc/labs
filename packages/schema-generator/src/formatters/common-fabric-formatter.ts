@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   type CellWrapperKind,
   getCellBrand,
@@ -103,7 +103,7 @@ const applyScopeToAsCellEntry = (
   if (typeof entry === "string") {
     return { kind: entry, scope };
   }
-  if (isRecord(entry)) {
+  if (isObjectOrArray(entry)) {
     return { ...entry, scope };
   }
   return entry;
@@ -1327,7 +1327,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     switch (aliasName) {
       case "Cfc": {
         const payload = readValue(1);
-        return isRecord(payload) ? { ...payload } : undefined;
+        return isObjectOrArray(payload) ? { ...payload } : undefined;
       }
       case "Confidential":
         return { confidentiality: readValue(1) };
@@ -1586,7 +1586,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       return schema === false ? { not: true, ifc } : { ifc };
     }
 
-    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+    const existingIfc = isObjectOrArray(schema.ifc) ? schema.ifc : {};
     return {
       ...schema,
       ifc: {

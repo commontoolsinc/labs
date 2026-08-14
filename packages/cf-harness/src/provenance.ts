@@ -287,14 +287,23 @@ export function provenanceHeaders(
   );
 }
 
+/** The program named at the front of a User-Agent when none is given. */
+const DEFAULT_PRODUCT = "cf-harness";
+
 /**
  * The same values condensed into a User-Agent, which the gateway access log
  * records. The session is shortened to its first eight characters; the full
  * value is in the header.
+ *
+ * `product` names the program sending the request and opens the string, so a
+ * reader can tell one sender's traffic from another's by user agent alone.
  */
-export function provenanceUserAgent(provenance: HarnessProvenance): string {
+export function provenanceUserAgent(
+  provenance: HarnessProvenance,
+  product: string = DEFAULT_PRODUCT,
+): string {
   const parts = provenanceEntries(provenance).map(([name, value]) =>
     `${name}=${name === "session" ? value.slice(0, 8) : value}`
   );
-  return `cf-harness (${parts.join("; ")})`;
+  return `${sanitize(product)} (${parts.join("; ")})`;
 }

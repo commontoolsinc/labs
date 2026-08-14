@@ -1,3 +1,17 @@
+/**
+ * The routes by which `createRef()` gets an encodable form out of something
+ * cell-shaped: a cell, the query result standing for one, a cell whose link
+ * nothing has materialized yet, and a builder artifact that happens to be a
+ * function.
+ *
+ * Two cells at different paths of one document holding equal contents run
+ * through most of it, because anything identifying a cell by its contents
+ * rather than by what names it answers the same for both. The one input that
+ * fails closed is a cell method: a reactive proxy makes it and a same-named
+ * data key one object with one encodable form, so a derived id cannot say
+ * which was meant.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

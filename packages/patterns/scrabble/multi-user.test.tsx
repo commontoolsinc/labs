@@ -22,7 +22,7 @@
  *
  * Join order is deterministic (markers): Alice first, then Bob.
  */
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, assert, multiUserTest, pattern, TESTS } from "commonfabric";
 import Scrabble, { type GameOutput } from "./scrabble.tsx";
 
 interface Setup {
@@ -40,7 +40,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     game.joinWithName.send("Alice");
   });
 
-  const assert_joined = computed(() =>
+  const assert_joined = assert(() =>
     game.myName === "Alice" &&
     (game.rack ?? []).length === 7 &&
     (game.players ?? []).length === 1 &&
@@ -48,7 +48,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   );
   // Bob joining must not clobber Alice's PerUser identity or rack, and the
   // shared roster must resolve BOTH players in Alice's runtime.
-  const assert_sees_both = computed(() =>
+  const assert_sees_both = assert(() =>
     (game.players ?? []).length === 2 &&
     game.players?.[0]?.name === "Alice" &&
     game.players?.[1]?.name === "Bob" &&
@@ -56,10 +56,10 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     (game.rack ?? []).length === 7
   );
   // Two players drew 7 tiles each from the one shared bag.
-  const assert_bag_consumed = computed(() => game.bagIndex === 14);
+  const assert_bag_consumed = assert(() => game.bagIndex === 14);
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join },
       { assertion: assert_joined },
       { label: "alice-joined" },
@@ -81,19 +81,19 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   });
 
   // Shared roster propagated from Alice's runtime.
-  const assert_sees_alice = computed(() =>
+  const assert_sees_alice = assert(() =>
     (game.players ?? []).length === 1 &&
     game.players?.[0]?.name === "Alice"
   );
   // PerUser isolation: Alice's join must not leak into Bob's identity.
-  const assert_not_joined_yet = computed(() => game.myName === "");
+  const assert_not_joined_yet = assert(() => game.myName === "");
   // A DIFFERENT user trying to take Alice's name is rejected with a message
   // (PerSession) and stays unjoined.
-  const assert_name_taken = computed(() =>
+  const assert_name_taken = assert(() =>
     game.message === "Name Alice is already taken." &&
     game.myName === ""
   );
-  const assert_joined = computed(() =>
+  const assert_joined = assert(() =>
     game.myName === "Bob" &&
     (game.rack ?? []).length === 7 &&
     (game.players ?? []).length === 2 &&
@@ -102,7 +102,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-joined" },
       { assertion: assert_sees_alice },
       { assertion: assert_not_joined_yet },

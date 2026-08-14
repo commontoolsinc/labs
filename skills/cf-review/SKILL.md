@@ -203,6 +203,22 @@ stopgaps, abandoned TODOs. A new workspace package must register in the root
 `deno.jsonc` and carry its own `tasks.test` (a missing one makes the root runner
 recurse and time out CI). Run `deno fmt` and `deno lint` on touched files.
 
+**A doc comment detached from its declaration** belongs here too, and a diff is
+the one place it is easy to see. A definition added directly under an existing
+doc comment takes that comment over and leaves the declaration it was written
+for undocumented; a `//` note wedged in between splits the contract from its
+subject, unless it is a label picking out one member of an overload set, which
+is allowed. Two doc comments in a row are the loudest tell — only the nearer one
+survives into rendered documentation. See
+`docs/development/code-comment-style.md`, "Where one goes".
+
+**A missing or misplaced file header** is that same defect one level up, and is
+equally a thing a diff shows you. A file header is a doc comment at the very
+top, above the first `import` and the first `export`; a new file carrying none,
+or carrying one written as a `//` block or parked below the import block, is a
+finding nothing else in the file will point you at. See the same document, "File
+headers".
+
 ### 6. Craft & conventions
 
 Mostly Improvement / Nit — don't drown the report in these. Dead code, unused
@@ -274,6 +290,8 @@ summary. Skip posting when it isn't worth it.
   `docs/development/skill-authoring.md`
 - Pattern rules + severity taxonomy: `docs/common/ai/pattern-critique-guide.md`
 - Design principles & idioms: `docs/development/DEVELOPMENT.md`
+- Comment style, `//` and JSDoc alike, file headers included:
+  `docs/development/code-comment-style.md`
 - Transformer semantics: `docs/specs/ts-transformer/README.md`
 - Reactivity model: `docs/common/concepts/reactivity.md`
 - Debugging & gotchas: `docs/development/debugging/README.md`

@@ -109,6 +109,34 @@ the full JSON representation of that subtree. This is essential for:
    - `result/items/` — directory with `0/`, `1/`, etc.
 4. Writing to a `.json` file replaces the entire subtree with the parsed
    JSON value.
+5. A `.json` file spells out 128 levels of nested objects and arrays beneath
+   itself. Anything below that is written as the string
+   `"[Max depth exceeded]"`.
+6. A value that appears twice along the same chain of parents — a circular
+   reference — is written as the string `"[Circular]"`.
+
+### Nesting Depth
+
+The 128-level bound is measured from the value each `.json` file holds, not
+from the root of the piece. A directory at every level of the data carries its
+own `.json` sibling, so data below the bound stays readable through the `.json`
+sibling of a directory closer to it:
+
+```bash
+# Spells out 128 levels from the result root, and marks what is below them.
+cat result.json
+
+# Spells out 128 levels from `deeply/nested/value` instead.
+cat result/deeply/nested/value.json
+```
+
+The directory tree itself is not bounded. Every level of the data has its
+directory entry and its leaf files, however deep the nesting goes, so no value
+is unreachable — only the aggregate views of it are abbreviated.
+
+Because a truncated `.json` file does not carry the whole subtree, writing one
+back replaces the elided part with the marker string. Write to a `.json` file
+closer to the data, or to the leaf files, to change something below the bound.
 
 ### Callable Sigils In Aggregate JSON
 

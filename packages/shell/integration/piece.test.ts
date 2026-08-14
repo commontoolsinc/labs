@@ -152,15 +152,15 @@ describe("shell piece tests", () => {
                 value?: {
                   id(): string;
                 };
+                error?: {
+                  message?: string;
+                };
               };
               _spaceRootPattern?: {
                 status?: unknown;
                 value?: {
                   id(): string;
                 };
-              };
-              _patternError?: {
-                message?: string;
               };
             }
             | null;
@@ -179,7 +179,7 @@ describe("shell piece tests", () => {
             activePatternId: appView?._patterns?.value?.activePattern?.id?.(),
             selectedPatternId: appView?._selectedPattern?.value?.id?.(),
             spaceRootPatternId: appView?._spaceRootPattern?.value?.id?.(),
-            patternError: appView?._patternError?.message,
+            patternError: appView?._selectedPattern?.error?.message,
             bodyText: document.body.textContent?.trim().slice(0, 200),
           };
         }),
