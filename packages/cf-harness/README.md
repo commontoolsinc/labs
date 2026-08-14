@@ -67,8 +67,8 @@ What works today:
 - interactive chat NDJSON stdio transport with opt-in SQLite session, turn, and
   event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
-  default/browser/web_fetch/web_search child profiles, retained child run
-  references, and a sanitized summary/state return channel
+  default/browser/web_fetch/web_search/pattern-author child profiles, retained
+  child run references, and a sanitized summary/state return channel
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
@@ -636,11 +636,11 @@ a new entry in the parent's table and reaches the parent as a token the parent
 can pass straight back into its own tools. The child's raw tokens never appear
 in parent-facing text.
 
-A `default`-profile subagent inherits the parent's fabric session, so it can
-call `run_pattern` itself, under the same gate as the parent: with no session
-configured the tool is absent from the child's surface rather than
-present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles do
-not offer it.
+A `default`- or `pattern-author`-profile subagent inherits the parent's fabric
+session, so it can call `run_pattern` itself, under the same gate as the parent:
+with no session configured the tool is absent from the child's surface rather
+than present-but-failing. The `browser`, `web_fetch`, and `web_search` profiles
+do not offer it.
 
 ### Running patterns against a Fabric space
 
@@ -664,8 +664,8 @@ configuration error naming the missing flags. The same holds under an explicit
 allowlist: `--allow-tool run_pattern` without the three session flags is a
 configuration error, and the tool is never offered to the model without a
 session. `--fabric-space` accepts a space name or a `did:key`, and
-`--describe-capabilities` reports `runPattern` among its features. A
-`default`-profile subagent is offered the tool under the same gate and works
+`--describe-capabilities` reports `runPattern` among its features. The `default`
+and `pattern-author` profiles are offered the tool under the same gate and work
 through the parent's session; the `browser`, `web_fetch`, and `web_search`
 profiles never receive it.
 
@@ -906,6 +906,44 @@ observations stay in child artifacts, and the parent receives only the sanitized
 subagent return channel. Because this profile overrides the parent model, parent
 `--reasoning-effort` and `--prompt-cache-mode` settings remain on
 model-inheriting loops and do not apply to the search child.
+
+The `pattern-author` profile is where Common Fabric pattern source gets written
+and run. Its child receives `run_pattern` (under the ordinary fabric-session
+gate), plus `read_file`, `bash`, and `read_skill_resource` for reading existing
+patterns and documentation in the workspace. It receives neither `write_file`
+nor `edit_file`: pattern source goes inline into `run_pattern`'s `sourceText`,
+and the deliverable is a result reference rather than a file. When the run has a
+skill registry, the child preloads the `pattern-dev` and `pattern-schema` skills
+from it. That preload is best-effort — a run whose skills root does not carry
+them, or that configures no skills root at all, still gets the same child with
+the same tools, just without the preloaded guidance.
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --fabric-api-url https://toolshed.example/ \
+  --fabric-identity ~/.cf/agent.pkcs8 \
+  --fabric-space my-space \
+  --skills-root labs/skills \
+  --allow-subagent-profile pattern-author \
+  --prompt "Answer the question about my space by delegating a pattern to a pattern-author child."
+```
+
+The division of labour is the point. Pattern syntax is expensive to learn from
+the repository and cheap to preload, so a root agent that pays for it once per
+question runs out of turns before it runs a pattern. The root stays an
+orchestrator: it holds the addresses, decides what to compute, and delegates.
+The child holds the pattern knowledge: it writes the source, owns the write,
+compile-error, fix loop against `run_pattern`, and returns the result reference
+plus a short inert description.
+
+Neither side reads the data. The references a delegation hands the child are
+addresses to wire into the pattern as `run_pattern` inputs, not values to fetch
+and transcribe, and the child's return is a reference for the same reason. The
+handle machinery makes that work in both directions: a token the parent writes
+into the goal is seeded into the child's table and resolves inside the child's
+own `run_pattern` call, and the result reference the child returns arrives at
+the parent as a token the parent can pass straight into its next `run_pattern`.
 
 Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
 object or boolean. In that mode the child is required to return a single JSON

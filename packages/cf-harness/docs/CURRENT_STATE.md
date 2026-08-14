@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-07-30
+Last verified: 2026-08-14
 
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
@@ -39,8 +39,8 @@ The current package provides:
 - workspace, Fabric, and explicit host mounts with path containment;
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
-- one child at a time through `default`, `browser`, `web_fetch`, and
-  `web_search` profiles;
+- one child at a time through `default`, `browser`, `web_fetch`, `web_search`,
+  and `pattern-author` profiles;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
@@ -82,8 +82,20 @@ The current package provides:
   value, and leaves the piece detached (no recorded origin) and out of the
   space's registered piece list, with run→piece provenance carried by the run's
   persisted artifacts; without the session configuration the tool is absent from
-  the tool surface, for a `default`-profile subagent as much as for the parent —
-  a child shares the one session the parent built.
+  the tool surface, for a `default`- or `pattern-author`-profile subagent as
+  much as for the parent — a child shares the one session the parent built;
+- a `pattern-author` child profile that authors and runs Common Fabric pattern
+  source: `run_pattern` under the same fabric-session gate, plus `read_file`,
+  `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
+  is a result reference rather than a file. It preloads whichever of
+  `pattern-dev` and `pattern-schema` the run's skill registry carries — a run
+  without them still gets the same child, without the guidance — and it is told
+  that the references its delegation hands it are addresses to wire in as
+  pattern inputs, that it owns the write/compile-error/fix loop, and that it
+  returns the result reference plus an inert description rather than data. This
+  is the division of labour a data question wants: the root orchestrates and
+  never pays for pattern syntax or reads the data, and the child computes over
+  references it cannot read out.
 
 Run the capability probe instead of copying this list into adapters:
 

@@ -42,6 +42,7 @@ import {
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
 } from "./contracts/run-report.ts";
+import type { HarnessSkillRegistry } from "./contracts/skill.ts";
 import {
   BROWSER_SUBAGENT_PROFILE,
   DEFAULT_SUBAGENT_PROFILE,
@@ -59,6 +60,7 @@ import {
   type HarnessSubagentStructuredReturn,
   isHarnessSubagentProfile,
   MAX_SUBAGENT_MAX_MODEL_TURNS,
+  PATTERN_AUTHOR_SUBAGENT_PROFILE,
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
 } from "./contracts/subagent.ts";
@@ -762,6 +764,21 @@ const resolveChildHandleTokens = (
   return table === undefined ? text : swapTokensForRefs(table, text) as string;
 };
 
+/**
+ * The profile's skills that this run's registry actually carries. A profile
+ * names the skills its child works best with; a run's skills root is
+ * configured independently and need not hold them. Preloading what is present
+ * keeps a profile usable against any skills root — a child missing its
+ * guidance is a weaker child, not a failed delegation.
+ */
+const availableProfileSkillNames = (
+  registry: HarnessSkillRegistry,
+  skillNames: readonly string[],
+): readonly string[] => {
+  const present = new Set(registry.skills.map((skill) => skill.name));
+  return skillNames.filter((name) => present.has(name));
+};
+
 const resolveSubagentModel = (
   parentModel: string,
   profileConfig: HarnessSubagentProfileConfig,
@@ -848,6 +865,16 @@ const buildSubagentSystemPrompt = (
               : []),
           ]
           : []),
+      ]
+      : []),
+    ...(profileConfig.profile === PATTERN_AUTHOR_SUBAGENT_PROFILE
+      ? [
+        "You author Common Fabric pattern source and run it with run_pattern against the one Fabric space this run is configured for. That is the whole job.",
+        "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
+        "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
+        "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
+        "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
+        "Return the result reference run_pattern gave you plus one or two inert sentences saying what the pattern computes. Do not return the data, sample rows, counts, names, or any other content read out of the space.",
       ]
       : []),
     ...(profileConfig.profile === WEB_FETCH_SUBAGENT_PROFILE
@@ -3217,15 +3244,16 @@ export class CfHarnessPromptLoop {
           `subagent profile ${delegateInput.profile} model ${childModel.model} is not available from provider openai-codex`,
         );
       }
-      if (
-        profileConfig.skillNames !== undefined &&
-        profileConfig.skillNames.length > 0 &&
-        parentRunState.skillRegistry !== undefined
-      ) {
-        await childEngine.persistSkillRegistry(parentRunState.skillRegistry);
+      const skillRegistry = parentRunState.skillRegistry;
+      const preloadSkillNames =
+        profileConfig.skillNames !== undefined && skillRegistry !== undefined
+          ? availableProfileSkillNames(skillRegistry, profileConfig.skillNames)
+          : [];
+      if (preloadSkillNames.length > 0 && skillRegistry !== undefined) {
+        await childEngine.persistSkillRegistry(skillRegistry);
         const skillContext = await loadHarnessSkillContext({
-          registry: parentRunState.skillRegistry,
-          skillNames: profileConfig.skillNames,
+          registry: skillRegistry,
+          skillNames: preloadSkillNames,
           source: "subagent-inherit",
           runId: childRunId,
           activatedAt: childCreatedState.updatedAt,

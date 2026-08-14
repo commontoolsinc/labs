@@ -20,6 +20,7 @@ export const DEFAULT_SUBAGENT_PROFILE = "default" as const;
 export const BROWSER_SUBAGENT_PROFILE = "browser" as const;
 export const WEB_FETCH_SUBAGENT_PROFILE = "web_fetch" as const;
 export const WEB_SEARCH_SUBAGENT_PROFILE = "web_search" as const;
+export const PATTERN_AUTHOR_SUBAGENT_PROFILE = "pattern-author" as const;
 export const WEB_SEARCH_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
@@ -51,6 +52,20 @@ export const WEB_FETCH_SUBAGENT_ALLOWED_TOOL_IDS = [
 ] as const satisfies readonly BuiltinToolId[];
 export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
   [] as const satisfies readonly BuiltinToolId[];
+/**
+ * Tool surface of the `pattern-author` profile. The child writes pattern source
+ * into `run_pattern` arguments rather than into the workspace, so it receives
+ * neither `write_file` nor `edit_file`: its deliverable is a result reference,
+ * not a file. `bash` and `read_file` are there to read existing patterns and
+ * documentation. `run_pattern` is gated on a configured fabric session exactly
+ * as it is for the `default` profile.
+ */
+export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
+  "bash",
+  "read_file",
+  "read_skill_resource",
+  "run_pattern",
+] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
   "bash-no-sandbox",
@@ -62,6 +77,17 @@ export const BROWSER_SUBAGENT_ALLOWED_SKILL_SCRIPTS = [
   { skill: "agent-browser", path: "scripts/form-automation.sh" },
   { skill: "agent-browser", path: "scripts/capture-workflow.sh" },
 ] as const satisfies readonly HarnessAllowedSkillScript[];
+/**
+ * Skills preloaded into a `pattern-author` child when the run has a skill
+ * registry. These are the documents a pattern author would otherwise spend its
+ * whole turn budget rediscovering: the authoring guide and the schema-design
+ * guide. Preload is best-effort — a run whose skills root does not carry them
+ * gets a child with the same tools and no preloaded guidance.
+ */
+export const PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES = [
+  "pattern-dev",
+  "pattern-schema",
+] as const satisfies readonly string[];
 export const WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS = [
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
 ] as const satisfies readonly HarnessNativeModelToolId[];
@@ -71,6 +97,7 @@ export const HARNESS_SUBAGENT_PROFILES = [
   BROWSER_SUBAGENT_PROFILE,
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
+  PATTERN_AUTHOR_SUBAGENT_PROFILE,
 ] as const;
 
 export type HarnessSubagentProfile = typeof HARNESS_SUBAGENT_PROFILES[number];
@@ -172,6 +199,17 @@ export const WEB_SEARCH_SUBAGENT_PROFILE_CONFIG: HarnessSubagentProfileConfig =
     returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
   };
 
+export const PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG:
+  HarnessSubagentProfileConfig = {
+    type: "cf-harness.subagent-profile-config",
+    profile: PATTERN_AUTHOR_SUBAGENT_PROFILE,
+    allowedToolIds: PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS,
+    hostToolIds: NO_HOST_TOOL_IDS,
+    skillNames: PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES,
+    maxModelTurns: DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
+    returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
+  };
+
 export const isHarnessSubagentProfile = (
   input: string,
 ): input is HarnessSubagentProfile =>
@@ -189,6 +227,8 @@ export const getHarnessSubagentProfileConfig = (
       return WEB_FETCH_SUBAGENT_PROFILE_CONFIG;
     case WEB_SEARCH_SUBAGENT_PROFILE:
       return WEB_SEARCH_SUBAGENT_PROFILE_CONFIG;
+    case PATTERN_AUTHOR_SUBAGENT_PROFILE:
+      return PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG;
   }
 };
 

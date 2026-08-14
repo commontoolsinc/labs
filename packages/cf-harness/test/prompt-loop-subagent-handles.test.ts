@@ -391,6 +391,105 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(runRef?.manifest.allowedToolIds).not.toContain("run_pattern");
   });
 
+  it("rejects a `pattern-author` delegation when the profile is not allowed in the run", async () => {
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-subagent-pattern-author-denied",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+      }),
+      allowedSubagentProfiles: ["default"],
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-delegate", {
+          goal: "Author a pattern.",
+          profile: "pattern-author",
+        }),
+        finalTurn("Parent done."),
+      ]),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+
+    expect(result.runState.subagentRuns ?? []).toEqual([]);
+    expect(
+      result.runState.policyEvents.some((event) =>
+        event.severity === "denied" &&
+        event.detail?.includes("pattern-author") === true
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps `run_pattern` out of the `pattern-author` child tool surface when no fabric session is configured", async () => {
+    const requestBodies: unknown[] = [];
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-subagent-pattern-author-no-session",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+      }),
+      allowedSubagentProfiles: ["pattern-author"],
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-delegate", {
+          goal: "Author a pattern.",
+          profile: "pattern-author",
+        }),
+        finalTurn("Child done."),
+        finalTurn("Parent done."),
+      ], requestBodies),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+
+    expect(chatViewOfRequest(requestBodies[1]).tools).toEqual([
+      "bash",
+      "read_file",
+      "read_skill_resource",
+    ]);
+    const runRef = result.runState.subagentRuns?.[0];
+    expect(runRef?.manifest.allowedToolIds).not.toContain("run_pattern");
+  });
+
+  it("tells the `pattern-author` child to wire its input references into the pattern rather than read them", async () => {
+    const requestBodies: unknown[] = [];
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-subagent-pattern-author-prompt",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+      }),
+      allowedSubagentProfiles: ["pattern-author"],
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-delegate", {
+          goal: "Author a pattern.",
+          profile: "pattern-author",
+        }),
+        finalTurn("Child done."),
+        finalTurn("Parent done."),
+      ], requestBodies),
+    });
+
+    await loop.runPrompt({ prompt: "Delegate the authoring." });
+
+    const childSystemPrompt =
+      chatViewOfRequest(requestBodies[1]).messages[0]!.content ?? "";
+    expect(childSystemPrompt).toContain("Subagent profile: pattern-author");
+    expect(childSystemPrompt).toContain(
+      "Every reference in your task is an address, not a value.",
+    );
+    expect(childSystemPrompt).toContain(
+      "You own the write, compile-error, fix",
+    );
+    expect(childSystemPrompt).toContain(
+      "Return the result reference run_pattern gave you",
+    );
+  });
+
   it("offers `run_pattern` to the child and returns its result ref as a token the parent can pass back to a pattern", async () => {
     const runId = "run-subagent-handles-run-pattern";
     const signer = await Identity.fromPassphrase(
@@ -502,6 +601,151 @@ describe("prompt-loop cross-agent address handles", () => {
       expect((src as Cell<unknown>).getAsNormalizedFullLink().id).toBe(
         childResultCell.getAsNormalizedFullLink().id,
       );
+    } finally {
+      await fabricRuntime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves a delegated reference inside the `pattern-author` child's own `run_pattern` and returns its result reference as a parent token", async () => {
+    const runId = "run-subagent-pattern-author-round-trip";
+    const signer = await Identity.fromPassphrase("pattern-author handles");
+    const storageManager = StorageManager.emulate({ as: signer });
+    const fabricRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    const pieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `pattern-author-${crypto.randomUUID()}`,
+      }),
+      fabricRuntime,
+    );
+    await pieces.synced();
+    try {
+      const created: Array<{
+        input: Record<string, unknown> | undefined;
+        piece: Cell<unknown>;
+      }> = [];
+      const originalRunPersistent = pieces.runPersistent.bind(pieces);
+      pieces.runPersistent = (async (
+        ...args: Parameters<PiecesController["runPersistent"]>
+      ) => {
+        const piece = await originalRunPersistent(...args);
+        created.push({
+          input: args[1] as Record<string, unknown> | undefined,
+          piece,
+        });
+        return piece;
+      }) as PiecesController["runPersistent"];
+      const doublingSource = [
+        "import { computed, pattern } from 'commonfabric';",
+        "export default pattern<{ n: number }, { doubled: number }>(",
+        "  ({ n }) => ({ doubled: computed(() => n * 2) }),",
+        ");",
+      ].join("\n");
+      const copySource = [
+        "import { computed, pattern } from 'commonfabric';",
+        "interface Source { doubled: number; }",
+        "export default pattern<{ src: Source }, { copied: number }>(",
+        "  ({ src }) => ({ copied: computed(() => src.doubled) }),",
+        ");",
+      ].join("\n");
+      const recopySource = [
+        "import { computed, pattern } from 'commonfabric';",
+        "interface Source { copied: number; }",
+        "export default pattern<{ src: Source }, { again: number }>(",
+        "  ({ src }) => ({ again: computed(() => src.copied) }),",
+        ");",
+      ].join("\n");
+      const requestBodies: unknown[] = [];
+      // The parent runs the seed pattern, hands the child the token for its
+      // result cell, and finally runs a third pattern against whatever token
+      // the delegation returned — so every reference in the script is read
+      // back off the transcript rather than written in as fixed text.
+      const fetchFn: typeof fetch = (_input, init) => {
+        requestBodies.push(JSON.parse(String(init?.body)));
+        const turn = requestBodies.length;
+        const lastToolContent = (index: number): string => {
+          const messages = chatViewOfRequest(requestBodies[index]).messages;
+          const message = [...messages].reverse().find((candidate) =>
+            candidate.role === "tool"
+          );
+          return message?.content ?? "";
+        };
+        const payload = turn === 1
+          ? runPatternCallTurn("call-seed", {
+            sourceText: doublingSource,
+            inputs: { n: 3 },
+          })
+          : turn === 2
+          ? delegateCallTurn("call-delegate", {
+            profile: "pattern-author",
+            goal: `Copy the doubled value held by ${
+              firstToken(lastToolContent(1))
+            }.`,
+          })
+          : turn === 3
+          ? runPatternCallTurn("call-child", {
+            sourceText: copySource,
+            inputs: { src: firstToken(lastToolContent(1)) },
+          })
+          : turn === 4
+          ? finalTurn(`The copy is at ${firstToken(lastToolContent(3))}.`)
+          : turn === 5
+          ? runPatternCallTurn("call-parent", {
+            sourceText: recopySource,
+            inputs: { src: firstToken(lastToolContent(4)) },
+          })
+          : finalTurn("Parent done.");
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-5.4",
+          cfcEnforcementMode: "disabled",
+          fabricSessionFactory: () => Promise.resolve({ pieces }),
+        }),
+        allowedSubagentProfiles: ["pattern-author"],
+        fetchFn,
+      });
+
+      await loop.runPrompt({ prompt: "Delegate the copy." });
+
+      expect(chatViewOfRequest(requestBodies[2]).tools).toContain(
+        "run_pattern",
+      );
+      expect(created.length).toBe(3);
+      const resultCellId = async (index: number): Promise<string> =>
+        (await new PieceController(pieces, created[index]!.piece).result
+          .getCell()).getAsNormalizedFullLink().id;
+      // The token the parent wrote into the goal reached the child's
+      // `run_pattern` as the seed pattern's live result cell.
+      const childInput = created[1]?.input?.src;
+      expect(isCell(childInput)).toBe(true);
+      expect((childInput as Cell<unknown>).getAsNormalizedFullLink().id).toBe(
+        await resultCellId(0),
+      );
+      // And the reference the child returned reached the parent's own
+      // `run_pattern` as the child's result cell.
+      const parentInput = created[2]?.input?.src;
+      expect(isCell(parentInput)).toBe(true);
+      expect((parentInput as Cell<unknown>).getAsNormalizedFullLink().id).toBe(
+        await resultCellId(1),
+      );
+      const delegateOutput = chatViewOfRequest(requestBodies[4]).messages
+        .filter((message) => message.role === "tool")
+        .at(-1)?.content ?? "";
+      expect(firstToken(delegateOutput)).toBeDefined();
+      expect(delegateOutput).not.toContain("of:fid1:");
     } finally {
       await fabricRuntime.dispose();
       await storageManager.close();
