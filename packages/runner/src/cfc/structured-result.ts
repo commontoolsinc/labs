@@ -286,30 +286,64 @@ const childSchemaForKey = (
   return combineAllOf(childSchemas);
 };
 
+/**
+ * Every property name the schema models for one object: the names on the node
+ * itself and the names its `allOf`/`anyOf`/`oneOf` branches declare, merged.
+ * This decides which of a value's keys are unmodeled, and an unmodeled key
+ * seals the object — so a name this misses costs the caller the whole object.
+ *
+ * The walk is a worklist rather than a recursion, and carries the same two
+ * guards as the sanitizer's own combinator walk: `activeRefs` is PATH-scoped,
+ * so a self-recursive union terminates while two sibling branches naming one
+ * `$ref` under different constraints each still contribute their names, and
+ * `visited` is walk-wide over resolved nodes, so a shared tail is walked once
+ * however many paths reach it. Depth costs heap, not call stack.
+ */
 const knownPropertyNames = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
 ): Set<string> => {
-  const resolved = resolveSchemaForValidation(schema, fullSchema);
   const known = new Set<string>();
-  if (!isObjectOrArray(resolved)) {
-    return known;
-  }
-  if (isObjectOrArray(resolved.properties)) {
-    for (const key of Object.keys(resolved.properties)) {
-      known.add(key);
-    }
-  }
-  for (
-    const branches of [resolved.allOf, resolved.anyOf, resolved.oneOf] as const
-  ) {
-    if (!Array.isArray(branches)) {
+  const activeRefs = new Set<string>();
+  const visited = new Set<object>();
+
+  type NameStep =
+    | { kind: "node"; raw: JSONSchema }
+    | { kind: "leave"; ref: string };
+
+  const stack: NameStep[] = [{ kind: "node", raw: schema }];
+  while (stack.length > 0) {
+    const step = stack.pop()!;
+    if (step.kind === "leave") {
+      activeRefs.delete(step.ref);
       continue;
     }
-    for (const branch of branches) {
-      for (const key of knownPropertyNames(branch, fullSchema)) {
+    const raw = step.raw;
+    const ref = isObjectOrArray(raw) && typeof raw.$ref === "string"
+      ? raw.$ref
+      : undefined;
+    if (ref !== undefined && activeRefs.has(ref)) continue;
+    const resolved = resolveSchemaForValidation(raw, fullSchema);
+    if (!isObjectOrArray(resolved) || visited.has(resolved)) continue;
+    visited.add(resolved);
+    if (isObjectOrArray(resolved.properties)) {
+      for (const key of Object.keys(resolved.properties)) {
         known.add(key);
       }
+    }
+    if (ref !== undefined) {
+      activeRefs.add(ref);
+      stack.push({ kind: "leave", ref });
+    }
+    for (
+      const branches of [
+        resolved.allOf,
+        resolved.anyOf,
+        resolved.oneOf,
+      ] as const
+    ) {
+      if (!Array.isArray(branches)) continue;
+      for (const branch of branches) stack.push({ kind: "node", raw: branch });
     }
   }
   return known;

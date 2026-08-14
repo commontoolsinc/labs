@@ -271,69 +271,96 @@ export const cfcObjectSchemaIsClosed = (
  * This grants nothing a branch would refuse: a branch is validated against the
  * same value in its own right, and rejects any key it does not model.
  *
- * `visited` is what makes a self-recursive union — `$defs.Node.anyOf = [leaf,
- * {$ref: "#/$defs/Node"}]` — terminate instead of overflowing the stack. It
- * records both halves of what this walk has already entered: the `$ref`
- * strings it followed, and the schema objects it descended into. Refs are
- * tracked by string because a resolved view is a fresh object unless the
- * schema happens to be deep-frozen and cached, so object identity alone would
- * not close the loop; objects are tracked too, so a schema whose branch array
- * holds the node itself is cut as well.
+ * The walk is an explicit worklist rather than a recursion, so a chain of
+ * combinators costs heap instead of call stack: `A` branches to `B` branches
+ * to `C` for as long as an author (or a generator) cares to nest, and depth is
+ * no longer what decides whether this returns an answer or a stack overflow.
  *
- * A branch already on the walk contributes nothing further: no property names,
- * and no `open`. Contributing nothing is the fail-closed answer, because
- * `open` is the permissive result — it is what makes the caller skip its
+ * Two guards keep it finite, and each answers a different question:
+ *
+ * - `activeRefs` is PATH-scoped: a `$ref` goes in when the walk descends
+ *   through it and comes out when the walk leaves, so the set holds exactly
+ *   the chain from the root to wherever the walk stands. That is what makes a
+ *   self-recursive union — `$defs.Node.anyOf = [leaf, {$ref: "#/$defs/Node"}]`
+ *   — terminate. Scoping it to the path rather than to the whole walk is
+ *   load-bearing: two SIBLING branches may name one `$ref` while carrying
+ *   different constraints of their own, and a walk-wide guard would skip the
+ *   second, losing the property names it declares and treating keys it models
+ *   as unmodeled. Refs are tracked by string because a ref site carrying
+ *   siblings resolves to a fresh object every time, so identity alone would
+ *   not close such a loop.
+ * - `visited` is walk-wide, and holds the RESOLVED branch objects already
+ *   descended into. One object's subtree is the same subtree whichever path
+ *   arrives at it, so descending once is enough — which is what keeps a
+ *   diamond of definitions from re-walking its shared tail once per path, and
+ *   what cuts a branch array that holds its own node. Nothing is lost to it:
+ *   a ref site with its own siblings resolves to its own object, so it is
+ *   never confused with another site naming the same definition.
+ *
+ * A branch a guard cuts contributes nothing further: no property names, and no
+ * `open`. Contributing nothing is the fail-closed answer, because `open` is
+ * the permissive result — it is what makes the caller skip its
  * additional-property check — so a cycle leaves the surface closed and an
- * unmodeled key is still refused. Nothing is lost by it either: every branch's
- * own property names are collected by the loop below before the recursion, and
- * every nested result merges upward into the single set the caller reads, so a
- * schema reached twice has already contributed through its first path.
+ * unmodeled key is still refused. A cut branch's own property names are
+ * collected before the cut, and every branch merges into the one set the
+ * caller reads.
  */
-interface CombinatorSurfaceVisit {
-  refs: Set<string>;
-  schemas: Set<object>;
-}
-
 const combinatorObjectSurface = (
   schema: Record<string, unknown>,
   schemaRoot: JSONSchema,
-  visited: CombinatorSurfaceVisit = { refs: new Set(), schemas: new Set() },
 ): { known: Set<string>; open: boolean } => {
   const known = new Set<string>();
   let open = false;
-  if (visited.schemas.has(schema)) return { known, open };
-  visited.schemas.add(schema);
-  for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
-    const branches = schema[keyword];
-    if (!Array.isArray(branches)) continue;
-    for (const rawBranch of branches) {
-      const branchRef = isObjectOrArray(rawBranch) &&
-          typeof rawBranch.$ref === "string"
-        ? rawBranch.$ref
-        : undefined;
-      if (branchRef !== undefined) {
-        if (visited.refs.has(branchRef)) continue;
-        visited.refs.add(branchRef);
-      }
-      const branch = branchRef !== undefined && isObjectOrArray(rawBranch)
-        ? resolveCfcSchemaRefs(rawBranch, schemaRoot)
-        : rawBranch;
-      if (branch === false) continue;
-      if (!isObjectNotArray(branch)) {
-        open = true;
-        continue;
-      }
-      if (!cfcObjectSchemaIsClosed(branch)) {
-        open = true;
-        continue;
-      }
-      for (const key of Object.keys(branch.properties ?? {})) {
-        known.add(key);
-      }
-      const nested = combinatorObjectSurface(branch, schemaRoot, visited);
-      if (nested.open) open = true;
-      for (const key of nested.known) known.add(key);
+  const activeRefs = new Set<string>();
+  const visited = new Set<object>([schema]);
+
+  type SurfaceStep =
+    | { kind: "branch"; raw: unknown }
+    | { kind: "leave"; ref: string };
+
+  const stack: SurfaceStep[] = [];
+  const pushBranches = (node: Record<string, unknown>): void => {
+    for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
+      const branches = node[keyword];
+      if (!Array.isArray(branches)) continue;
+      for (const raw of branches) stack.push({ kind: "branch", raw });
     }
+  };
+  pushBranches(schema);
+
+  while (stack.length > 0) {
+    const step = stack.pop()!;
+    if (step.kind === "leave") {
+      activeRefs.delete(step.ref);
+      continue;
+    }
+    const raw = step.raw;
+    const branchRef = isObjectOrArray(raw) && typeof raw.$ref === "string"
+      ? raw.$ref
+      : undefined;
+    if (branchRef !== undefined && activeRefs.has(branchRef)) continue;
+    const branch = branchRef !== undefined && isObjectOrArray(raw)
+      ? resolveCfcSchemaRefs(raw, schemaRoot)
+      : raw;
+    if (branch === false) continue;
+    if (!isObjectNotArray(branch)) {
+      open = true;
+      continue;
+    }
+    if (!cfcObjectSchemaIsClosed(branch)) {
+      open = true;
+      continue;
+    }
+    for (const key of Object.keys(branch.properties ?? {})) {
+      known.add(key);
+    }
+    if (visited.has(branch)) continue;
+    visited.add(branch);
+    if (branchRef !== undefined) {
+      activeRefs.add(branchRef);
+      stack.push({ kind: "leave", ref: branchRef });
+    }
+    pushBranches(branch);
   }
   return { known, open };
 };

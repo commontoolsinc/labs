@@ -1488,6 +1488,56 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       .toBeUndefined();
   });
 
+  it("collects the names of two branches that share one `$ref` under different constraints", () => {
+    const schema = {
+      type: "object",
+      anyOf: [
+        { $ref: "#/$defs/Base", properties: { alpha: { type: "number" } } },
+        { $ref: "#/$defs/Base", properties: { beta: { type: "number" } } },
+      ],
+      $defs: { Base: { type: "object" } },
+    } as unknown as JSONSchema;
+
+    // Each branch is a ref SITE of its own: the definition they share says
+    // nothing about properties, so the names live on the sites. A guard that
+    // remembered the ref for the whole walk would skip the second site and
+    // treat the key it declares as unmodeled.
+    expect(validateAgainstSchema(schema, { alpha: 1 })).toBeUndefined();
+    expect(validateAgainstSchema(schema, { beta: 1 })).toBeUndefined();
+    // A name no branch declares is refused, by the branches themselves.
+    expect(validateAgainstSchema(schema, { alpha: 1, smuggled: "x" }))
+      .toBeDefined();
+  });
+
+  it("answers for a combinator chain far deeper than the call stack", () => {
+    const depth = 20_000;
+    let chain: JSONSchema = {
+      type: "object",
+      properties: { [`key${depth}`]: { type: "number" } },
+    } as unknown as JSONSchema;
+    for (let index = depth - 1; index >= 0; index--) {
+      chain = {
+        type: "object",
+        properties: { [`key${index}`]: { type: "number" } },
+        anyOf: [chain],
+      } as unknown as JSONSchema;
+    }
+    // The value matches the first branch, so validation itself stops there;
+    // the surface walk is what visits every link of the chain.
+    const schema = {
+      type: "object",
+      properties: { head: { type: "number" } },
+      anyOf: [
+        { type: "object", properties: { head: { type: "number" } } },
+        chain,
+      ],
+    } as unknown as JSONSchema;
+
+    // Nothing about the chain is cyclic, so no visited set cuts it: only a
+    // walk that keeps its own worklist reaches the end of it and answers.
+    expect(validateAgainstSchema(schema, { head: 1 })).toBeUndefined();
+  });
+
   it("terminates on a branch surface that cycles through a nested ref", () => {
     const schema = {
       type: "object",
@@ -1984,6 +2034,32 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       value: { "@link": "opaque:run-1" },
       linkedStringCount: 0,
     });
+  });
+
+  it("sanitizes against a self-recursive union without walking the call stack", () => {
+    const schema = {
+      type: "object",
+      properties: { node: { $ref: "#/$defs/Node" } },
+      required: ["node"],
+      $defs: {
+        Node: {
+          type: "object",
+          anyOf: [
+            { $ref: "#/$defs/Node" },
+            { type: "object", properties: { leaf: { type: "number" } } },
+          ],
+        },
+      },
+    } as unknown as JSONSchema;
+
+    // Reading which names a union models follows the same `$ref` the union
+    // declares, so the walk has to cut its own cycle rather than ride the
+    // stack down.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { node: { leaf: 1 } },
+      opaqueHandleId: "run-1",
+    })).toEqual({ value: { node: { leaf: 1 } }, linkedStringCount: 0 });
   });
 
   it("measures a reserved key the schema does model, and measures it raw", () => {
