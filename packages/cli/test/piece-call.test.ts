@@ -4282,9 +4282,12 @@ describe("verbInputSchemaError", () => {
       .toBeUndefined();
   });
 
+  // `{}` rather than a misspelling, so this reaches the schema validation
+  // rather than the undeclared-field refusal that now precedes it — a
+  // misspelled required property is BOTH, and it is refused as the undeclared
+  // field it is (verb-undeclared-field.test.ts).
   it("rejects a missing required property", () => {
-    expect(verbInputSchemaError({ mesage: "milk" }, objectSchema))
-      .toMatch(/message/);
+    expect(verbInputSchemaError({}, objectSchema)).toMatch(/message/);
   });
 
   it("rejects a payload of the wrong type", () => {

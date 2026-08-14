@@ -48,7 +48,7 @@ without reconstructing it.
 | 9a. listing marks | on main (#5309) |
 | 10. listing rows carry a handler's declared result | on main (#5629) |
 | 9b. closed-world event emission | **ruled against** (#5589); does not land |
-| 12. `cf` refuses an undeclared field on a call | not started — where the ruling puts this capability |
+| 12. `cf` refuses an undeclared field on a call | **in review** (#5835) — where the ruling puts this capability |
 | 4. `receipt` as a top-level envelope field | on main (#5694) |
 | 2. an unrecognized projection key is refused | **in review** (#5817); design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
@@ -333,11 +333,11 @@ the piece — the root pattern's own verb, reachable today by `pieces.add` from
 inside the runtime and by a model through the dialog builtin, and by no other
 caller.
 
-**12. `cf` refuses an undeclared field on a call.** *(S)* A payload carrying a
-field the verb does not declare is accepted, the field is dropped on the way in,
-and the caller is told the call settled — the silent-strip failure, which is
-what a caller writing JSON by hand or by model hits and a TypeScript author
-never does.
+**12. `cf` refuses an undeclared field on a call.** *(S)* **In review as
+#5835.** A payload carrying a field the verb does not declare is accepted,
+the field is dropped on the way in, and the caller is told the call settled —
+the silent-strip failure, which is what a caller writing JSON by hand or by
+model hits and a TypeScript author never does.
 
 *This is item 2's shape, one surface over.* There a projection key in neither
 denylist is accepted and ignored; here an event field the schema does not
@@ -352,6 +352,27 @@ through the same command.
 event schema before dispatch. What it does not do is treat an undeclared field
 as a reason to refuse — and the schema it validates against names exactly the
 fields the verb declares, so the comparison needs no new source of truth.
+
+*The refusal is derived from where a field actually goes missing*, not from a
+rule about schemas. A position drops what it does not name exactly when it
+reaches a `properties` map with no `additionalProperties` beside it — measured
+against the read a handler's event goes through, and true of every spelling of
+an object-shaped position: a stated `type: "object"`, a bare map, a type union
+admitting an object, and a conjunction, whose declared fields are the union
+across its members. A position reaching no map at all delivers the whole
+payload, so a verb that declares nothing THAT way takes anything; a position
+spelling `properties: {}` delivers nothing, so every field written there is
+refused. Which spellings describe an object is `schemaIsObjectShaped`'s
+question, asked rather than answered a second time. Everywhere else the check
+fails open — a disjunction, an `asCell` position below the root, a container the
+payload does not match — because a refusal can be retried and a call wrongly
+refused cannot be made at all.
+
+*What a caller reads names fewer fields than the TypeScript does.* The emitted
+event schema names the fields the handler body READS, so a field declared in
+the event interface and never touched is one the runtime would have dropped and
+this now refuses. That is the same failure surfacing, and `--help` prints the
+same vocabulary the refusal does.
 
 *Exit:* a call naming a field the verb does not declare is refused, the message
 names the field, and the invocation id is not spent.
@@ -438,8 +459,8 @@ its own track.
 | 9 | A rejection propagates up through what holds it | **on main** (#5701) — item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
 | 10 | Two identical projections stop colliding | **on main** (#5757) — #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
 | 11 | One piece, one address | **decided — they are aliases**; the documentation half is #5754 | — | Measured: the two routes differ because one resolves the link chain and the other renders the link as stored. That is the read model working, not a defect, so the outcome is the statement rather than the fix. What remains is a doc correction and closing #5632 — no code changes, and step 13 is not gated on it |
-| 12 | An unrecognized projection key is refused | **in review** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
-| 12a | `cf` refuses an undeclared field on a call | item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says |
+| 12 | An unrecognized projection key is refused | **on main** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
+| 12a | `cf` refuses an undeclared field on a call | **in review** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
 | 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
 | 14 | A caller may name a reference | item 11, #5560 | — | Item 11 has carried this since the State table was written and the ordering never gave it a step, so nothing scheduled it. Sequenced last only because it is unstarted, not because anything gates it — and it is the most consequential thing open: the shape-matching payload the CLI does accept **stores a detached copy and reports success**, so a caller relating two pieces is told it worked |
 

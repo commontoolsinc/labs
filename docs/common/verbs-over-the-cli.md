@@ -348,6 +348,50 @@ cf piece call --piece <board> --invocation add-1 \
 That is the difference worth holding onto: a **settled** id replays its original
 result, while a **refused** id was never consumed and is still yours to use.
 
+### A field the verb does not declare
+
+A payload is judged against the verb's declared event schema before anything is
+sent, and a field that schema does not name is refused there. The runtime hands
+a handler the fields its event schema names and drops the rest, so a field
+nobody declared would otherwise reach nothing while the call reported itself
+settled. The refusal names the field, the position it sat at, the vocabulary
+that position takes, and the declared name it is one edit from:
+
+```bash
+cf piece call --piece <board> addTopic '{"titel":"Ship it","agentName":"Sol"}'
+```
+
+```
+Invalid input for "addTopic": "titel" at <event> is not a field this verb
+declares. Did you mean "title"? <event> takes "title", "body", "agentName"
+```
+
+Positions below the root are spelled the way a `--schema` position is —
+`<event>.item`, `<event>.tags[1]` — so one vocabulary covers this refusal and
+the one an unrecognized projection key gets.
+
+Every position that names its fields is judged, however it names them: with a
+stated `type: "object"`, with a `properties` map and no type beside it, with a
+type union admitting an object, or through a conjunction — whose fields are the
+**union** across its members, since a payload satisfying an `allOf` satisfies
+every one of them.
+
+Two kinds of position are passed over, and a call reaching one goes out rather
+than being refused on a guess. Under a **disjunction** (`anyOf`, `oneOf`) a
+payload need satisfy only one branch, so a field missing from one branch may be
+named by another. And a position marked as a cell or a stream may hold a link
+rather than a value, whose `"/"` is nothing anybody declared.
+
+The declared vocabulary is what `cf piece call --piece <id> <verb> --help`
+prints, and it names the fields the verb's handler **reads**. That can be fewer
+than the TypeScript event type declares: a field the body never touches is one
+the runtime would have dropped, so the call is refused rather than accepted and
+quietly emptied. A verb that publishes no event schema at all takes any payload
+— with nothing declared, nothing is dropped either.
+
+Like every other refusal here, this one costs nothing: the invocation id was
+never spent, and the corrected retry can reuse it.
+
 ### Reading is not calling
 
 `cf piece get` reads data. A path that lands on a verb is refused and redirected
