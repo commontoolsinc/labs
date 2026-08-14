@@ -415,7 +415,7 @@ function ownEncodableFormMethod(
   const method = (value as { toEncodableForm: unknown }).toEncodableForm;
 
   // The `typeof` gate is what settles a value carrying a user-data key of the
-  // name -- a query-result proxy answers `Object.hasOwn()` for any key its
+  // name -- a query-result proxy satisfies `Object.hasOwn()` for any key its
   // record holds -- since a fabric record has no function-valued member to
   // find.
   return typeof method === "function" ? method as () => unknown : undefined;

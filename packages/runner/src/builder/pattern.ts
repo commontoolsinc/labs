@@ -583,7 +583,7 @@ function factoryFromPattern<T, R>(
     // Important that this refers to patternFactory, as .program will be set on
     // pattern afterwards (see factory.ts:exportsCallback)
     toEncodableForm: () => patternToEncodableForm(patternFactory),
-    // What `JSON.stringify(SomePattern)` answers, which pattern source uses.
+    // What `JSON.stringify(SomePattern)` returns, which pattern source uses.
     toJSON: () => patternToEncodableForm(patternFactory),
   };
 

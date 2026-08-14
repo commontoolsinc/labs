@@ -211,12 +211,12 @@ export function isUiInputBlindWriteTx(tx: object): boolean {
 // tool call dispatched later and a SQLite result flushed post-commit among
 // them. Marked, a view keeps the transaction it was created with, so the value
 // it describes stays the value that was there when it was taken, and reading
-// after that transaction finishes throws rather than quietly answering from
+// after that transaction finishes throws rather than quietly reading from
 // committed state.
 //
 // Nothing outside the mark changes, so an unmarked transaction reads exactly as
 // it did before lazy materialization existed. Marked on the same wrapper chain
-// as the marks above, so a wrapper and the transaction it wraps answer alike.
+// as the marks above, so a wrapper and the transaction it wraps read alike.
 const lazyMaterializationTxs = new WeakSet<object>();
 
 export function markLazyMaterializationTx(tx: object): void {
@@ -260,7 +260,7 @@ export function clearSchemaRefusalTx(tx: object, refusal: unknown): void {
 export function isLazyMaterializationTx(tx: object): boolean {
   // Walk the chain rather than testing the object: a wrapper built over a
   // transaction that was marked earlier has never been marked itself, and must
-  // still answer for what it wraps.
+  // still report the mark of what it wraps.
   for (const layer of blindWriteTxChain(tx)) {
     if (lazyMaterializationTxs.has(layer)) return true;
   }

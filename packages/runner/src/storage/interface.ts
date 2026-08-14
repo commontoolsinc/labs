@@ -1226,7 +1226,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * any of it. A view also keeps the transaction it was created with, so the
    * value it describes stays the value that was there when it was taken, and
    * reading after the transaction finishes throws rather than quietly
-   * answering from committed state.
+   * reading from committed state.
    *
    * Unmarked, every read behaves exactly as it did before lazy materialization
    * existed — including the standing-handle semantics that long-lived
