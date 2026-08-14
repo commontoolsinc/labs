@@ -188,10 +188,12 @@ the CLI already builds itself.
 *Exit:* an unrecognized key is refused and the message names it; a tolerated
 keyword is accepted and ignored; a consulted keyword is read for inference and
 the caller's copy goes no further, while the source-derived `required` the
-reader builds still reaches the read boundary; a projection naming a `required`
-field it does not project reads the fields it does. A command that ran only
-because a key was silently dropped now fails loudly, which is the point rather
-than a regression.
+reader builds still reaches the read boundary — asserted against the output
+schema itself, which the selector handed to the storage provider is not; a
+projection naming a `required` field it does not project reads the fields it
+does; and a caller's scalar `type` still filters the leaf it is written on, at
+depth as well as at an array item. A command that ran only because a key was
+silently dropped now fails loudly, which is the point rather than a regression.
 
 **3. A rejection propagates up through what holds it.** *(S)* The projection
 mask reduces either container whose whole selection rejects — an array whose

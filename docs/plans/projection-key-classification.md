@@ -55,7 +55,9 @@ the JSON spelling it assigns the caller's own object, unchanged, to both
 
 **That asymmetry is the whole of the problem below.** On one path the CLI hands
 the read boundary something it built. On the other it hands over what a caller
-typed.
+typed. The two inputs are not interchangeable, though, and the fix turns on
+that: a field list has only positions to state, while a JSON projection also
+states scalar types.
 
 ## The problem
 
@@ -120,18 +122,51 @@ exercise that ended at "known keys pass, unknown keys are refused" would file
 So the design has two halves, and the second is the load-bearing one:
 
 1. **A key the projection vocabulary does not contain is refused, by name.**
-2. **The schema that crosses the read boundary is built by the reader**, from
-   the mask the projection implies and the source schema, on the JSON path as
-   it already is on the concise path.
+2. **The schema that crosses the read boundary is built by the reader**, key by
+   key, out of the classification below: an honored key is carried through, a
+   consulted key is consumed during inference and dropped, a tolerated key is
+   carried only where carrying it is provably inert, and a refused key never
+   reaches construction because the projection naming it was rejected. To that
+   the reader adds a key of its own, derived from the source: `required`, below.
+
+**The mask is not the material to build from**, and it fails on the honored key
+the whole classification rests hardest on. `ProjectionMask`
+(`packages/cli/lib/cell-selection.ts:ProjectionMask`) records `true`, `false`,
+and the two containers, and nothing else. It therefore carries `type` only where
+`type` names a container: `projectionMask` reduces every scalar position to
+`true`, because a scalar is neither container and the mask has no third thing
+for it to be. **A reader that constructed the outgoing schema from the mask
+could not honor a scalar `type`, having discarded it before construction
+began.** Two losses follow, and both of them widen a read:
+
+- A scalar leaf whose declared type does not match the stored value is omitted
+  today — deliberately, documented in `packages/cli/README.md`, and tested in
+  `packages/cli/test/piece-get-transform.test.ts` ("filters and projects arrays
+  through the runtime pattern graph", which projects `{"type":"string"}` over a
+  numeric `id` and expects the property gone). That leaf masks to `true`, and
+  `selectSourceSchema` answers a `true` mask with the source's own schema, so a
+  mask-built output schema would derive the source's numeric leaf and return
+  the value the caller's `type` excluded.
+- A scalar projection standing over an object source masks to `true` the same
+  way, so a mask-built output schema is the source object's, entire.
+  `projectValue` already copies every key of an object it is handed a scalar
+  schema for; the output schema re-asserted at the read boundary is the only
+  thing standing between that value and the caller. Sourcing that schema from
+  the mask removes the only stop.
+
+The concise path can build from the mask precisely because it has no scalar type
+to lose: `conciseSelectionSchema` writes containers and `true` leaves and
+nothing else. A JSON projection states scalar types, so the two paths converge
+on the rule and not on the code.
 
 Half 2 is what makes the tiers below meaningful. Once the outgoing schema is
 constructed, a tier does not describe what gets forwarded — no key crosses the
 boundary because a caller wrote it — it describes what a caller is allowed to
-write and what the reader does with it. What the reader then puts in the schema
-it builds is a separate question, answered from the source schema.
+write and what the reader puts in the schema it builds because of it.
 
-Note that `selectSourceSchema` already carries the exact rule half 2 needs,
-with a comment giving exactly this reason:
+The reader supplies exactly one key from somewhere other than the classified
+projection, and `selectSourceSchema` already derives that key this way, with a
+comment giving exactly this reason:
 
 ```text
 A rejected position holds nothing to require. Keeping it required makes
@@ -141,11 +176,12 @@ selection rather than for the one position that declined to be read.
 
 It takes the *source* schema's `required`, filters it to the properties that
 survived selection, and re-emits it — so the schema the reader constructs does
-carry `required`, on the reader's own authority and with the source's meaning.
-That construction runs on the source-read schema and on the concise path's
-output schema, and never on the JSON path's. **This item applies an existing
-rule to a second call site rather than inventing one**, and the rule it applies
-is *derive the constraint*, not *delete the keyword*.
+carry `required`, on the reader's own authority and with the source's meaning
+rather than the caller's. That derivation runs on the source-read schema and on
+the concise path's output schema, and on no JSON-path output schema. **This item
+extends an existing derivation to a second call site rather than inventing
+one**, and what it extends is *derive the constraint*, not *delete the
+keyword*.
 
 ## Four tiers
 
@@ -167,6 +203,11 @@ further.
 `items` and `additionalProperties` to build the mask. `$link` never reaches it,
 having been lifted out one step earlier — which is why the marker is honored
 without ever being a keyword the mask has to understand.
+
+An honored key is also the only kind the reader carries into the schema it
+constructs, and `type` is why that construction reads the classified projection
+rather than the mask: a scalar leaf's declared `type` is the whole of what
+filters that leaf, and a scalar `type` is exactly what the mask does not keep.
 
 **C** is the tier that earns the fourth slot, and calling its members
 "tolerated" would be false. `impliedProjectionType` decides whether an untyped
@@ -197,11 +238,12 @@ reader happens to default to.
 (`packages/piece/src/schema-compatibility.ts`), the compatibility checker's
 record of which keywords are validation-neutral. Deriving is what keeps the two
 registries from forking when a keyword like `tier` or `deprecated` is added to
-the durable dialect. Because the outgoing schema is constructed, a tolerated key
-has no forwarding question attached to most of its members; where one arises —
-`$id` and `$schema` declare the identity and dialect of a *document*, and the
-reader is not producing the caller's document — the answer is to accept and
-drop.
+the durable dialect. Because the outgoing schema is constructed key by key, a
+tolerated key is a decision rather than a default: it is accepted from the
+caller, and it reaches the constructed schema only where carrying it is provably
+inert. `$id` and `$schema` are the plain case for dropping — they declare the
+identity and dialect of a *document*, and the reader is not producing the
+caller's document.
 
 **R** is everything else, and it keeps three keys that are *also* annotation
 keys: `default`, `$defs`, and `definitions`. All three are refused today, for
@@ -370,17 +412,33 @@ happens to a key, never what a key means.
   source schema marks a projected property required still carries `required`
   past the read boundary, filtered to the projected properties, exactly as
   `selectSourceSchema` builds it.
-- A test holds those two apart — a caller's `required` does not survive into the
-  constructed schema, and a source-derived `required` does.
-  `packages/cli/test/piece-get-transform.test.ts` asserts the second today in
-  "narrows the initial source selector to predicate and projection fields",
-  which reads the selector handed to the storage provider and expects `required`
-  filtered to the projected properties.
+- A test holds those two apart, **inspecting the output schema specifically**: a
+  caller's `required` does not survive into it, and a source-derived `required`
+  does, filtered to the projected properties. The schema it inspects is the one
+  `deriveSelectedValue` re-asserts on `result.key("value")`, read back off that
+  output cell. **A selector captured from the storage provider does not satisfy
+  this and cannot stand in for it**: that selector is `sourceReadSchema`, built
+  by a separate `selectSourceSchema` call for the source read, and an
+  implementation that kept the caller's `required` on the source read while
+  dropping it from the output schema would pass an assertion over it while
+  failing this criterion. The two schemas have to be asserted separately because
+  they are two schemas.
 - A tier T key is accepted and changes nothing about what is read.
 - A projection naming a `required` field it does not project reads the fields it
   does project, rather than nothing.
 - A misspelled `properties` beside a stated `type` is refused, rather than
   returning the whole object.
+- **A scalar leaf whose declared type does not match the stored value is still
+  omitted at a nested position**, not only at an array item: a projection
+  declaring `{"type":"string"}` for a property the source declares a number
+  returns the surrounding object without that property. This is the criterion a
+  mask-built output schema fails, and it fails it silently.
+- **A scalar projection over an object source does not widen to that object.**
+  A projection of `{"type":"string"}` against an object value behaves as it does
+  now and in particular does not return the object's fields. The mask records
+  `true` at that position, so a reader building the output schema from the mask
+  would return all of them — and `projectValue`, which copies every key of an
+  object handed a scalar schema, has that value ready to hand over.
 - A test asserts the `ANNOTATION_KEYS` relation in both directions, as the
   first of the three coupling constraints words it.
 - A test asserts a **read outcome** for a projection carrying `required`, not
