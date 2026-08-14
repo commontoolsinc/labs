@@ -3,22 +3,28 @@
  * of them nameable.
  *
  * An interned symbol is fully described by its key, so encoding is writing
- * that key down and decoding is asking the registry for the same symbol back
- * -- the round trip returns the identical instance rather than an equal one.
- * A unique symbol has no key, and is refused because nothing about it could be
- * written down and recovered.
+ * that key down and decoding is asking the registry for the same symbol back.
+ * Encoding and decoding here happen in one realm, which is why the round trip
+ * returns the identical instance: `Symbol.for()` reaches one registry per
+ * agent, and what a codec promises across a boundary is internedness rather
+ * than identity. A unique symbol has no key, and is refused because nothing
+ * about it could be written down and recovered.
+ *
+ * The codec is generic over the encoded type, so this instantiates it at one
+ * and the behavior is the same at any.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { SymbolCodec } from "@/codec-json/SymbolCodec.ts";
+import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 
 describe("SymbolCodec", () => {
-  const codec = new SymbolCodec();
+  const codec = new SymbolCodec<JsonCodecValue>();
   const expectedTag = CODEC_TYPE_TAGS.Symbol;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 

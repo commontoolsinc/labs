@@ -1,6 +1,6 @@
 import { BigIntCodec } from "./BigIntCodec.ts";
 import { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
-import { SymbolCodec } from "./SymbolCodec.ts";
+import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 import { UndefinedCodec } from "./UndefinedCodec.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { JSON_FORMAT, type JsonCodecValue } from "./interface.ts";
@@ -36,7 +36,7 @@ export function createBaseJsonRegistry(): CodecRegistry<JsonCodecValue> {
   // JS primitives that need tagged encoding, registered by `typeof`.
   registry.registerPrimitive("bigint", new BigIntCodec());
   registry.registerPrimitive("number", new SpecialNumberCodec());
-  registry.registerPrimitive("symbol", new SymbolCodec());
+  registry.registerPrimitive("symbol", new SymbolCodec<JsonCodecValue>());
   registry.registerPrimitive("undefined", new UndefinedCodec());
 
   // Self-representing primitives: emitted as-is (their own wire form).
