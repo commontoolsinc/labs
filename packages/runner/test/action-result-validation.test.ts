@@ -272,7 +272,7 @@ describe("validateAndCheckReactives", () => {
       const circular: Record<string, unknown> = {};
       circular.self = circular;
       expect(() => validateAndCheckReactives(circular)).toThrow(
-        /Actions must return FabricValues, Reactives, or Cells\.[\s\S]*Not representable as a `FabricValue`: circular reference/,
+        /Actions must return FabricValues, Reactives, or Cells\.[\s\S]*Conversion refuses a circular reference/,
       );
     });
 
