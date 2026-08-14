@@ -17,7 +17,11 @@ import type {
   ITransactionWriteRequest,
   TransactionReactivityLog,
 } from "../src/storage/interface.ts";
-import { reactivityLogFromActivities } from "../src/storage/reactivity-log.ts";
+import {
+  ignoreReadForScheduling,
+  markReadAsAttemptedWrite,
+  reactivityLogFromActivities,
+} from "../src/storage/reactivity-log.ts";
 import {
   getTransactionReadActivities,
   getTransactionWriteAttempts,
@@ -136,6 +140,32 @@ describe("transaction inspection", () => {
     );
   });
 
+  it("keeps attempted writes that are excluded from scheduling", () => {
+    const address = {
+      space: "did:key:test" as any,
+      scope: "space" as const,
+      id: "of:attempted-write" as any,
+      path: ["value", "field"],
+    };
+    assertEquals(
+      reactivityLogFromActivities([{
+        read: {
+          ...address,
+          meta: {
+            ...ignoreReadForScheduling,
+            ...markReadAsAttemptedWrite,
+          },
+        },
+      }]),
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+        attemptedWrites: [address],
+      },
+    );
+  });
+
   it("uses the native v2 transaction reactivity log hook", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
@@ -182,6 +212,35 @@ describe("transaction inspection", () => {
         status: tx.status.bind(tx),
       } as unknown as IExtendedStorageTransaction;
       assertEquals(txToReactivityLog(extended), expected);
+    } finally {
+      await storageManager.close();
+    }
+  });
+
+  it("keeps native attempted writes that are excluded from scheduling", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+
+    try {
+      const tx = storageManager.edit();
+      const address = {
+        space,
+        scope: "space" as const,
+        id: "test:transaction-inspection-attempted-v2" as const,
+        path: [],
+      };
+      tx.read(address, {
+        meta: {
+          ...ignoreReadForScheduling,
+          ...markReadAsAttemptedWrite,
+        },
+      });
+
+      assertEquals(tx.getReactivityLog?.(), {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+        attemptedWrites: [address],
+      });
     } finally {
       await storageManager.close();
     }

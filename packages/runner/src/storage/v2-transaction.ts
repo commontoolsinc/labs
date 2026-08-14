@@ -2262,10 +2262,6 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     for (const read of this.#readActivities) {
       const meta = read.meta ?? EMPTY_META;
-      if (isReadIgnoredForScheduling(meta)) {
-        continue;
-      }
-
       const address = {
         space: read.space,
         scope: read.scope,
@@ -2273,15 +2269,19 @@ export class V2StorageTransaction implements IStorageTransaction {
         path: read.path,
       };
 
+      if (isReadMarkedAsAttemptedWrite(meta)) {
+        attemptedWrites ??= [];
+        attemptedWrites.push(address);
+      }
+
+      if (isReadIgnoredForScheduling(meta)) {
+        continue;
+      }
+
       if (read.nonRecursive === true) {
         shallowReads.push(address);
       } else {
         reads.push(address);
-      }
-
-      if (isReadMarkedAsAttemptedWrite(meta)) {
-        attemptedWrites ??= [];
-        attemptedWrites.push(address);
       }
     }
 

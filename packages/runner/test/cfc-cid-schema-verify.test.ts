@@ -62,7 +62,11 @@ const fakeTxOverDocuments = (
   documents: Record<string, unknown>,
 ): IExtendedStorageTransaction =>
   ({
-    readOrThrow: (target: { id: string }) => documents[target.id],
+    readOrThrow: (target: { id: string; path?: readonly string[] }) =>
+      (target.path ?? []).reduce<unknown>((value, segment) =>
+        typeof value === "object" && value !== null
+          ? (value as Record<string, unknown>)[segment]
+          : undefined, documents[target.id]),
   }) as unknown as IExtendedStorageTransaction;
 
 const envelopeTarget = { space, id: "of:doc", scope: "space" } as const;

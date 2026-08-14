@@ -4,6 +4,7 @@ import type { NormalizedFullLink } from "../link-utils.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
+  Metadata,
 } from "../storage/interface.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -33,6 +34,7 @@ export const readStoredCfcMetadata = (
     id: string;
     scope?: NormalizedFullLink["scope"];
   },
+  meta?: Metadata,
 ): CfcMetadata | undefined => {
   const document = tx.readOrThrow({
     space: target.space,
@@ -41,7 +43,7 @@ export const readStoredCfcMetadata = (
     type: "application/json",
     path: ["cfc"],
   }, {
-    meta: INTERNAL_VERIFIER_META,
+    meta: { ...INTERNAL_VERIFIER_META, ...meta },
   });
   if (isCfcMetadata(document)) {
     return document;
@@ -54,8 +56,9 @@ export const readStoredCfcMetadata = (
 export const storedCfcMetadataAppliesToPath = (
   tx: IExtendedStorageTransaction,
   target: Pick<NormalizedFullLink, "space" | "id" | "scope" | "path">,
+  meta?: Metadata,
 ): boolean => {
-  const metadata = readStoredCfcMetadata(tx, target);
+  const metadata = readStoredCfcMetadata(tx, target, meta);
   if (metadata === undefined) {
     return false;
   }

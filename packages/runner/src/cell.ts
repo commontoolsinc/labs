@@ -239,7 +239,7 @@ const storedSchemaForWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
 ): JSONSchema | undefined => {
-  const metadata = readStoredCfcMetadata(tx, link);
+  const metadata = readStoredCfcMetadata(tx, link, ignoreReadForScheduling);
   if (metadata === undefined) {
     return undefined;
   }
@@ -268,7 +268,7 @@ export const recordRelevantSchemaWritePolicyInput = (
 ): void => {
   const resolvedSchema = resolveSchema(schema);
   const cfcRelevant = schemaHasIfc(resolvedSchema) ||
-    storedCfcMetadataAppliesToPath(tx, link);
+    storedCfcMetadataAppliesToPath(tx, link, ignoreReadForScheduling);
   if (!cfcRelevant) {
     return;
   }
@@ -2581,7 +2581,12 @@ export class CellImpl<T extends FabricValue>
       "writeRedirect",
     );
     const value = this.tx.readValueOrThrow(writeLink, {
-      meta: { ...markReadAsAttemptedWrite, ...allowMutableTransactionRead },
+      meta: {
+        ...markReadAsAttemptedWrite,
+        ...allowMutableTransactionRead,
+        ...ignoreReadForScheduling,
+        ...internalVerifierRead,
+      },
     });
     if (value === undefined) {
       throw new Error("Cannot apply a CFC schema to an absent value");

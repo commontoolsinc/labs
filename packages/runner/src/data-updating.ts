@@ -229,7 +229,11 @@ const recordLinkWritePolicyInput = (
     sourceMetadata !== undefined ||
     hasPendingSchemaPolicyInput(tx, source) ||
     cfcLabelViewHasValues(carriedCfcLabelView);
-  const targetRelevant = storedCfcMetadataAppliesToPath(tx, target) ||
+  const targetRelevant = storedCfcMetadataAppliesToPath(
+    tx,
+    target,
+    ignoreReadForScheduling,
+  ) ||
     hasPendingSchemaPolicyInput(tx, target);
   if (!sourceRelevant && !targetRelevant) {
     return;

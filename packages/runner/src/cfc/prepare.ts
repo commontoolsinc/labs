@@ -122,6 +122,23 @@ const INTERNAL_VERIFIER_META = {
   ...internalVerifierRead,
 };
 
+const RUNTIME_DOCUMENT_METADATA_FIELDS = new Set([
+  "argument",
+  "cfc",
+  "displacedPattern",
+  "internal",
+  "pattern",
+  "patternIdentity",
+  "patternRepository",
+  "patternSetupIdentity",
+  "patternSource",
+  "pieceSourceHistory",
+  "result",
+  "schema",
+  "slug",
+  "source",
+]);
+
 const isPrefix = (
   prefix: readonly string[],
   path: readonly string[],
@@ -805,11 +822,18 @@ const storedMetadataFor = (
     id,
     scope,
     type,
-    path: [],
+    path: ["cfc"],
   }, {
     meta: INTERNAL_VERIFIER_META,
   });
-  return isObjectOrArray(document) && isObjectOrArray(document.cfc)
+  if (!isObjectOrArray(document)) return undefined;
+  if (
+    document.version === 1 && isObjectOrArray(document.labelMap) &&
+    Array.isArray(document.labelMap.entries)
+  ) {
+    return document as CfcMetadata;
+  }
+  return isObjectOrArray(document.cfc)
     ? document.cfc as CfcMetadata
     : undefined;
 };
@@ -1377,24 +1401,13 @@ const valueWriteTargets = (
     for (const write of tx.getWriteDetails?.(space) ?? []) {
       const rawPath = write.address.path;
       const writePath = canonicalizeLogicalPath(rawPath);
-      // The `cfc`/`source` surface exclusions key on the RAW storage path:
-      // the runtime-internal surfaces are document-root siblings of `value`
-      // (raw `["cfc", ...]`/`["source", ...]`), while user fields of the
-      // same names live under `["value", ...]` and canonicalize to identical
-      // logical paths. Keying on the canonical path would let a user write
-      // to `value.source` dodge schema write policy and flow-label
-      // attachment (#4011 review). The link-valued `internal` exclusion
-      // stays canonical on purpose: it covers the runtime's link plumbing
-      // both at the root surface and inside process-doc values; link writes
-      // carry their labels via the link-write machinery, not here.
+      // Runtime metadata is stored beside the `value` member. User fields with
+      // the same names remain below `value` and are included. A low-level
+      // transaction may also address a logical value path without the `value`
+      // prefix, so an arbitrary non-`value` path is not necessarily metadata.
       if (
         write.address.id.startsWith("cid:") ||
-        rawPath[0] === "cfc" ||
-        rawPath[0] === "source" ||
-        (
-          writePath[0] === "internal" &&
-          isPrimitiveCellLink(write.value)
-        )
+        RUNTIME_DOCUMENT_METADATA_FIELDS.has(rawPath[0])
       ) {
         continue;
       }

@@ -1212,7 +1212,11 @@ export function validateAndTransform(
   if (
     schemaHasIfc(effectiveSchema) ||
     (options?.viewChild !== true &&
-      storedCfcMetadataAppliesToPath(tx, resolvedLink))
+      storedCfcMetadataAppliesToPath(
+        tx,
+        resolvedLink,
+        ignoreReadForScheduling,
+      ))
   ) {
     tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
   }
