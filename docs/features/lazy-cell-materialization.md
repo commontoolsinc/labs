@@ -55,18 +55,18 @@ which is where an eager read decides the same question:
 
 Either way the read that failed is registered first.
 
-## Answering "nothing is there" still owes a read
+## Returning "nothing is there" still owes a read
 
 The entry point takes the container's value without telling the scheduler, and
 lets whatever materializes it register reads as it walks. So every way a view
-answers without a value has to register the read it stands in for: a refusal, a
+returns without a value has to register the read it stands in for: a refusal, a
 key the container does not hold, and a value replaced by the schema's `default`.
 Miss one and the reader holds no dependency on the path it just found empty — it
 goes on reading its default however late the value arrives.
 
 ## Agreeing with an eager read
 
-A view and an eager read must answer alike; where they do not, the view is
+A view and an eager read must agree; where they do not, the view is
 wrong. Six rules exist only to hold that:
 
 - **The last link hop's schema is combined in.** Eager traversal walks *through*
@@ -88,7 +88,7 @@ wrong. Six rules exist only to hold that:
   [`data:` identifier](data-uri-identifiers.md), and the view does the same. The
   read stays on the slot, and recursively: the identity is derived from the whole
   element value.
-- **A property the schema turns down is answered off the schema, not by reading
+- **A property the schema turns down is settled off the schema, not by reading
   it.** Declaring it `false` turns it down, and so does leaving it unnamed by a
   schema that refuses the properties it does not name. Either way it is absent
   to a reader — from `in`, from enumeration and from a plain access alike — and
@@ -98,7 +98,7 @@ wrong. Six rules exist only to hold that:
   and a marked collection would otherwise load one document per element.
   Requiring such a property instead voids the object, since nothing reaches the
   filtered result at that key. This is narrower than it sounds — schema
-  narrowing also answers `false` where it cannot read a child out of the shape
+  narrowing also returns `false` where it cannot read a child out of the shape
   it was given, an `allOf` among them, and there the subschema is still
   reachable below.
 - **A read-only array method visits every element, even past one that does not
@@ -144,7 +144,7 @@ Assignment, deletion, `defineProperty` and freezing all throw. Snapshot it with
 `snapshotQueryResult` if you need a value you own. A view also keeps the
 transaction it was created with, so what it describes stays what was there when
 it was taken; reading after that transaction finishes throws rather than quietly
-answering from committed state.
+reading from committed state.
 
 That last point is what separates a view from the schema-less proxy in
 [`query-result-proxy.ts`](../../packages/runner/src/query-result-proxy.ts),

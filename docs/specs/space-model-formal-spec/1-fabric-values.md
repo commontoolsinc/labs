@@ -1277,7 +1277,7 @@ Section 4.5.
   because an array's prototype has no representation as array content, so
   accepting one could only mean dropping it silently. A subclass prototype is
   live code besides — an overridden `Symbol.iterator`, say, makes iteration
-  answer differently than the indices do, and freezing the array does not
+  yield different content than the indices do, and freezing the array does not
   change that. Plain objects are governed by the same principle; see the
   object rule below.
 - May be dense or sparse
@@ -1390,7 +1390,7 @@ expanded, or a shared subtree quietly copied in two, is a value that decodes
 to a different graph than the one encoded, with nothing at either end saying
 so.
 
-**Conversion answers separately from serialization, and refuses a cycle.**
+**Conversion is decided separately from serialization, and refuses a cycle.**
 `fabricFromNativeValue()` builds a fabric value out of native data, and will not
 build one containing a cycle; it preserves shared references, so the converted
 form for a given original is reused and structural sharing survives. That is a
@@ -3555,9 +3555,9 @@ export function fabricFromNativeValue(
 > `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,
 > `"FabricInstance"`). The conversion function then switches on the tag to
 > route to the appropriate wrapping logic. An array is the exception to the
-> constructor lookup: `Array.isArray()` is consulted first and answers
+> constructor lookup: `Array.isArray()` is consulted first and returns
 > `"Array"` unconditionally, so a subclass instance, a severed-prototype array,
-> and a cross-realm array all reach array handling and are answered by the
+> and a cross-realm array all reach array handling and are handled by the
 > array rule of Section 1.5, rather than being rejected as some unrecognized
 > class or routed elsewhere by something the array carries. Fallback paths
 > handle exotic Error subclasses (via `Error.isError()`) and null-prototype
