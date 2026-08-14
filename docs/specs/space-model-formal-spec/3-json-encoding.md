@@ -212,6 +212,29 @@ round-trip correctly.
 // Whether a symbol value reaches this encoder depends on the fabric-value
 // conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
 // above is the encoder's contract regardless of how the value arrived.
+
+// Preserved failures (see `1-fabric-values.md` Section 3.5)
+// Tag: "Problematic@1"
+// { "/Problematic@1": { tag: string, state: <any>, error: string } }
+//
+// `tag` is the tag the faulty data arrived under, `state` is what was at
+// fault, and `error` describes what is wrong with it. All three are
+// preserved, so a recorded failure survives a round trip as the account of
+// a failure rather than as an unremarkable value.
+//
+// Unlike every other entry above, the tag here is fixed rather than being
+// the tag of the value it stands in for. The preserved tag rides inside the
+// state because it need not be a well-formed tag at all -- reporting one
+// that is not is among the things this type is for, and such a value cannot
+// go back out under it. `UnknownValue` is the type that re-emits under its
+// preserved tag (Section 8), which it can because that tag is checked to be
+// a real one.
+//
+// On deserialization, a non-object state, a non-string `tag` or `error`, or
+// an absent `state` property produces a `ProblematicValue` describing this
+// decode. `state` is checked for presence rather than type because every
+// `FabricValue` is a valid state, `undefined` among them, so filling in an
+// absent one would put a reshaped record back on the wire.
 ```
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
@@ -378,9 +401,9 @@ for:
   `codec.tagForValue(value)` on encode, and decode routes each tag to its
   registered codec via the `CodecRegistry`.
 - Re-wrapping unknown types using the per-instance `wireTypeTag` preserved
-  in `UnknownValue` / `ProblematicValue` (read back through their codecs'
-  `tagForValue()`), and constructing `UnknownValue` for tags with no
-  registered codec.
+  in `UnknownValue` (read back through its codec's `tagForValue()`), and
+  constructing `UnknownValue` for tags with no registered codec. A
+  `ProblematicValue` is not re-wrapped this way; see Section 8.
 - Settling a codec's rejection according to `lenient`: in lenient mode a
   codec's throw becomes a `ProblematicValue`, and in strict mode a
   `ProblematicValue` a codec returns becomes a throw.
@@ -393,7 +416,18 @@ escaping rather than type encoding.
 
 When a JSON context encounters a `/<Type>@<Version>` key it doesn't recognize,
 it wraps the data in `UnknownValue` (see `1-fabric-values.md` Section 3) to
-preserve it for round-tripping.
+preserve it for round-tripping. Re-serializing reproduces the original key,
+the codec's `tagForValue()` reading back the preserved tag and `encode()`
+returning the preserved bare state, so the value passes through byte for byte.
+
+This applies only to a key that is syntactically a tag but claimed by no
+codec. A key that is not a tag at all is a structural violation rather than an
+unknown type, and is rejected under Section 9 — so an `UnknownValue` always
+holds a real tag, which is what makes the round trip above a guarantee.
+
+A `ProblematicValue` (Section 3) does not work this way. It encodes under its
+own `Problematic@1` key with the preserved tag as data, because that tag may
+be one that is not a tag, and so cannot be reproduced as a key.
 
 ## 9. `/`-Key Reservation Rule
 

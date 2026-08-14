@@ -12,21 +12,22 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
 } from "@/codec-common/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
+import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { UnknownValue } from "@/codec-common/UnknownValue.ts";
-import { ExplicitTagValue } from "@/codec-common/ExplicitTagValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("UnknownValue", () => {
   // Subclass-checking-superclass identity: lives directly under the class
   // describe (the rule's cross-cutting carve-out).
-  it("is an instance of `ExplicitTagValue`", () => {
-    const us = new UnknownValue("Test@1", "state");
-    expect(us instanceof ExplicitTagValue).toBe(true);
+  it("is an instance of `BaseFabricInstance`", () => {
+    const value = new UnknownValue("Test@1", "state");
+    expect(value instanceof BaseFabricInstance).toBe(true);
   });
 
   describe("constructor()", () => {
@@ -34,6 +35,41 @@ describe("UnknownValue", () => {
       const us = new UnknownValue("FancyType@3", { data: [1, 2, 3] });
       expect(us.wireTypeTag).toBe("FancyType@3");
       expect(us.state).toEqual({ data: [1, 2, 3] });
+    });
+
+    it("throws given a tag that is not a codec type tag", () => {
+      // This class encodes back to the tag it holds, so a tag a decoder would
+      // refuse would make an instance that encodes and cannot be read back.
+      for (const tag of ["", "hole", "Bytes"]) {
+        expect(() => new UnknownValue(tag, "state")).toThrow(
+          /Not a codec type tag/,
+        );
+      }
+    });
+
+    it("throws a `ProblematicStateError` carrying the tag and state", () => {
+      // The same vocabulary a strict decode fails in, so a caller gets the
+      // offending tag and state structurally rather than out of prose.
+      try {
+        new UnknownValue("hole", "state");
+        throw new Error("Should have thrown.");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProblematicStateError);
+        expect((e as ProblematicStateError).wireTypeTag).toBe("hole");
+        expect((e as ProblematicStateError).state).toBe("state");
+      }
+    });
+
+    it("throws given a tag that is not a string", () => {
+      // The thrown error renders what it was handed, so building the report
+      // cannot itself fail on a tag that is not a string.
+      try {
+        new UnknownValue(42 as never, "state");
+        throw new Error("Should have thrown.");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ProblematicStateError);
+        expect((e as ProblematicStateError).wireTypeTag).toBe("42");
+      }
     });
   });
 

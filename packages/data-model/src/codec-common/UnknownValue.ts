@@ -1,5 +1,6 @@
 import type { FabricValue } from "@/interface.ts";
 import {
+  BaseFabricInstance,
   DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
@@ -11,19 +12,66 @@ import {
   type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
-import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
+import { isCodecTypeTag } from "./isCodecTypeTag.ts";
+import { ProblematicStateError } from "./ProblematicStateError.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When the
- * serialization system encounters an unknown tag during deserialization, it
- * wraps the tag and state here; on re-serialization, it uses the preserved data
- * to produce the original wire format. See Section 3.3 of the formal spec.
+ * serialization system meets a tag no codec claims during deserialization, it
+ * wraps the tag and state here; on re-serialization, the preserved pair
+ * reproduces the original wire form. See Section 3.3 of the formal spec.
+ *
+ * The tag is a real tag, checked at construction. That is what makes the
+ * round trip a promise rather than a hope: this class encodes back to
+ * `<its tag>` over its state, so a tag a decoder would refuse would make an
+ * instance that encodes and cannot be read back. A tag that is not a tag is
+ * not an unknown type -- it names no type at all -- and belongs in a
+ * `ProblematicValue`, which is built to carry one.
  */
-export class UnknownValue extends ExplicitTagValue {
-  /** Constructs an instance for the given unrecognized tag and its state. */
+export class UnknownValue extends BaseFabricInstance {
+  /** The value of {@link #wireTypeTag}. */
+  readonly #wireTypeTag: string;
+
+  /** The value of {@link #state}. */
+  readonly #state: FabricValue;
+
+  /**
+   * Constructs an instance for the given unrecognized tag and its state.
+   *
+   * @param wireTypeTag - The tag this value arrived under.
+   * @param state - The raw state under that tag.
+   * @throws If `wireTypeTag` is not a codec type tag.
+   */
   constructor(wireTypeTag: string, state: FabricValue) {
-    super(wireTypeTag, state);
+    super();
+
+    if (!isCodecTypeTag(wireTypeTag)) {
+      throw new ProblematicStateError(
+        wireTypeTag,
+        state,
+        "Not a codec type tag, so nothing encoded under it could be " +
+          "decoded. Use a `ProblematicValue`.",
+      );
+    }
+
+    this.#wireTypeTag = wireTypeTag;
+    this.#state = state; // TODO(danfuzz): Should be guaranteed deep-frozen.
+  }
+
+  /** Arbitrary raw instance state. */
+  get state(): FabricValue {
+    return this.#state;
+  }
+
+  /**
+   * The tag preserved for this instance. Unlike other fabric types -- whose
+   * tag is a per-class constant carried by the class's `[CODEC]` -- this class
+   * carries a per-instance tag, the tag of a value whose type nothing here
+   * knows, which its codec's `tagForValue()` reads back.
+   */
+  get wireTypeTag(): string {
+    return this.#wireTypeTag;
   }
 
   /** Deep-freezes in place. */

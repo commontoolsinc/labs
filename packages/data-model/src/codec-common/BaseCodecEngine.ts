@@ -221,7 +221,10 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * caller sees; `lenient` does.
    *
    * @param wireTypeTag The tag the malformed data arrived under, or the
-   *   meta-tag naming the structure at fault.
+   *   meta-tag naming the structure at fault. Of any type whatsoever: what
+   *   sits in tag position is wire data like any other, and a tag that is not
+   *   a tag is among the faults reported here. `ProblematicValue` renders what
+   *   it cannot keep.
    * @param state The data at fault, of any type whatsoever, preserved so that
    *   a lenient result round-trips. A format whose states are not
    *   `FabricValue`s hands one over as it stands; `ProblematicValue` renders
@@ -231,7 +234,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * @throws If this engine is not lenient.
    */
   protected reportMalformed(
-    wireTypeTag: string,
+    wireTypeTag: any,
     state: any,
     error: string,
   ): FabricValue {
@@ -256,7 +259,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * fallback is a separate arm and is intentionally NOT covered by it.
    */
   protected decodeTagged(
-    tag: unknown,
+    tag: any,
     rawState: Encoded,
     context: ReconstructionContext,
   ): FabricValue {
@@ -267,7 +270,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // tag no codec claims, which presupposes a tag. Reported over the
       // decoded state, so that a lenient result carries what arrived.
       return this.reportMalformed(
-        "",
+        tag,
         this.decodeValue(rawState, context),
         `tagged value has a malformed tag: ${
           backtickQuote(toCompactDebugString(tag, 30))
@@ -300,7 +303,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
           state as FabricValue,
           context,
         );
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (!this.lenient) {
         // Normalized rather than rethrown: what a codec throws is not
         // guaranteed to be an `Error`, let alone one naming the state it
@@ -321,12 +324,22 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       );
     }
 
-    if (!this.lenient && (decoded instanceof ProblematicValue)) {
+    if (
+      !this.lenient && (decoded instanceof ProblematicValue) &&
+      (matched.uniqueHandledClass !== ProblematicValue)
+    ) {
       // The two ways a codec reports a state it will not accept -- throwing,
       // and returning one of these -- are the codec author's choice and say
       // nothing about what a caller wants. `lenient` is what says that, so
       // this instance settles both into the same answer: a strict decode
       // fails, whichever way the codec spelled it.
+      //
+      // `ProblematicValue`'s own codec is exempt, because for that one a
+      // `ProblematicValue` is the successful product rather than a refusal.
+      // A payload under `Problematic@1` is a well-formed record of a past
+      // failure, and reading one is not a failure of this decode; without the
+      // exemption a strict reader could never read such a record back, which
+      // is most of what preserving one is for.
       throw new ProblematicStateError(tag, decoded.state, decoded.error);
     }
 

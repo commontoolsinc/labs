@@ -1471,14 +1471,32 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("`ProblematicValue` (lenient mode)", () => {
-    it("preserves `ProblematicValue`'s original tag and state via `encode()`", () => {
+    it("encodes a `ProblematicValue` under its own tag, fault and all", () => {
       const prob = new ProblematicValue(
         "BadType@1",
         "original data",
         "something went wrong",
       );
-      const wireFormat = toWireFormat(prob);
-      expect(wireFormat).toEqual({ "/BadType@1": "original data" });
+
+      // The preserved tag is data here rather than wire structure, which is
+      // what lets an instance reporting an unusable tag be encoded at all.
+      expect(toWireFormat(prob)).toEqual({
+        "/Problematic@1": {
+          tag: "BadType@1",
+          state: "original data",
+          error: "something went wrong",
+        },
+      });
+    });
+
+    it("round-trips a `ProblematicValue` whose preserved tag is not a tag", () => {
+      const prob = new ProblematicValue("hole", "original data", "boom");
+      const result = roundTrip(prob) as ProblematicValue;
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect(result.wireTypeTag).toBe("hole");
+      expect(result.state).toBe("original data");
+      expect(result.error).toBe("boom");
     });
 
     it("lenient mode wraps failed handler reconstruction", () => {

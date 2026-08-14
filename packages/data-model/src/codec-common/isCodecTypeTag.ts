@@ -17,6 +17,6 @@ const CODEC_TYPE_TAG_SYNTAX = /^[A-Za-z][A-Za-z0-9]*@[1-9][0-9]*$/;
  * being a structural marker its format handles itself rather than a type
  * anything can encode.
  */
-export function isCodecTypeTag(value: unknown): value is string {
+export function isCodecTypeTag(value: any): value is string {
   return (typeof value === "string") && CODEC_TYPE_TAG_SYNTAX.test(value);
 }
