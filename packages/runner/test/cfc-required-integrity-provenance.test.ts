@@ -154,7 +154,7 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
     });
     try {
       await seedLabeledDoc(runtime, "ri-conf-src", "briefing", {
-        confidentiality: ["prompt-injection-risk"],
+        confidentiality: ["prompt-injection-risk-unscreened"],
       });
 
       const tx = runtime.edit();

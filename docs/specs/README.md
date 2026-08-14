@@ -5,7 +5,7 @@ live documentation: when the behavior a spec describes changes, the spec must
 change in the same commit (see [`../README.md`](../README.md)).
 
 Two kinds of documents graduate out of this tree into
-[`../history/specs/`](../history/README.md):
+[`../history/specs/`](../history/specs/):
 
 - an implementation plan or work order whose work is complete or abandoned;
 - a design document for a change that shipped, where the document describes
@@ -30,6 +30,7 @@ decision is reversed or superseded).
 - [Content-addressed action identity](content-addressed-action-identity.md)
 - [Content-addressed module loading](module-loading.md)
 - [Piece source lifecycle](piece-source-lifecycle.md)
+- [Hosted pattern authoring](hosted-pattern-authoring.md)
 - [Scoped cell instances](scoped-cell-instances.md)
 
 ### Data, storage, and execution

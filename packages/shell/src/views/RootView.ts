@@ -25,7 +25,7 @@ import {
   type TransferrableInsecureCryptoKeyPair,
 } from "@commonfabric/identity";
 import { property, state } from "lit/decorators.js";
-import { Task } from "@lit/task";
+import { Task, TaskStatus } from "@lit/task";
 import {
   type ErrorNotification,
   type RuntimeClient,
@@ -48,6 +48,7 @@ import {
 import { COMMIT_SHA, ENVIRONMENT, EXPERIMENTAL } from "../lib/env.ts";
 import { runtimeHostFlags } from "../lib/host-toggles.ts";
 import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
+import type { LoadError } from "./BodyView.ts";
 
 function getCommonfabricGlobal(): typeof globalThis & {
   commonfabric?: CommonfabricDebugState;
@@ -84,20 +85,43 @@ export class XRootView extends BaseView implements ShellApp {
   @state()
   private accessor _themePreference: ThemePreference = getThemePreference();
 
+  @state()
+  private accessor _spaceResolutionError: LoadError | undefined = undefined;
+
+  @state()
+  private accessor _runtimeLoadErrors: readonly ErrorNotification[] = [];
+
   // Invalidates callbacks from replaced workers. A coded compiler-load error
   // can arrive through either a request reply or an asynchronous runtime error;
   // only the currently-owned worker may trigger one replacement.
   private _runtimeGeneration = 0;
+  private _preserveRuntimeErrorsForNextViewChange = false;
+
+  readonly preserveRuntimeErrorsForNextViewChange = (): void => {
+    this._preserveRuntimeErrorsForNextViewChange = true;
+  };
 
   readonly _handleRuntimeError = (
     event: ErrorNotification,
     generation = this._runtimeGeneration,
   ): void => {
     console.error("[RuntimeClient Error]", event);
-    if (
-      event.code !== RuntimeErrorCode.CompilerStackLoadFailed ||
-      generation !== this._runtimeGeneration
-    ) {
+    if (generation !== this._runtimeGeneration) {
+      return;
+    }
+
+    if (event.code !== RuntimeErrorCode.CompilerStackLoadFailed) {
+      if (!event.space || event.space !== this.space) return;
+      const sameContext = (candidate: ErrorNotification) =>
+        candidate.space === event.space &&
+        candidate.pieceId === event.pieceId &&
+        candidate.patternId === event.patternId;
+      this._runtimeLoadErrors = [
+        ...this._runtimeLoadErrors.filter((candidate) =>
+          !sameContext(candidate)
+        ).slice(-19),
+        event,
+      ];
       return;
     }
 
@@ -105,6 +129,7 @@ export class XRootView extends BaseView implements ShellApp {
     // RuntimeInternals.dispose() asks the worker to flush pending storage writes
     // before terminating it; the replacement gets a fresh module map and can
     // retry the compiler chunk when the user retries the operation.
+    this._runtimeLoadErrors = [];
     this._runtimeGeneration++;
     this._rt.run([this.app]);
   };
@@ -136,6 +161,7 @@ export class XRootView extends BaseView implements ShellApp {
       // like previous app state.
       task: async ([app]: [AppState | undefined], { signal }) => {
         const generation = ++this._runtimeGeneration;
+        this._runtimeLoadErrors = [];
         const previous = this._rt.value;
         if (previous) {
           previous.dispose().catch(console.error);
@@ -257,6 +283,13 @@ export class XRootView extends BaseView implements ShellApp {
   // and treats a space name that disagrees with a space DID as an error.
   protected override willUpdate(changedProperties: PropertyValues<this>): void {
     if (changedProperties.has("app")) {
+      const previous = changedProperties.get("app");
+      if (JSON.stringify(previous?.view) !== JSON.stringify(this.app?.view)) {
+        if (!this._preserveRuntimeErrorsForNextViewChange) {
+          this._runtimeLoadErrors = [];
+        }
+        this._preserveRuntimeErrorsForNextViewChange = false;
+      }
       this.#syncViewSpace(this.app);
     }
   }
@@ -317,6 +350,7 @@ export class XRootView extends BaseView implements ShellApp {
       return;
     }
 
+    this._spaceResolutionError = undefined;
     this.#resolvedSpaceName = undefined;
     this.#spaceResolution = undefined;
     let space: DID | undefined;
@@ -332,6 +366,7 @@ export class XRootView extends BaseView implements ShellApp {
 
   #resolveNamedSpace(identity: Identity, spaceName: string): void {
     const token = ++this.#resolveSpaceToken;
+    this._spaceResolutionError = undefined;
     this.#resolvedSpaceName = spaceName;
     // The lookup is asynchronous, so the view addresses no space until it
     // completes. The space of the view being replaced is not it.
@@ -341,6 +376,7 @@ export class XRootView extends BaseView implements ShellApp {
       (error) => {
         console.error("[RootView] Failed to resolve space name:", error);
         if (token !== this.#resolveSpaceToken) return;
+        this._spaceResolutionError = { kind: "space", error };
         this.#resolvedSpaceName = undefined;
         this.#setSpace(undefined, token);
       },
@@ -433,6 +469,10 @@ export class XRootView extends BaseView implements ShellApp {
   }
 
   override render() {
+    const loadError: LoadError | undefined = this._spaceResolutionError ??
+      (this._rt.status === TaskStatus.ERROR
+        ? { kind: "space", error: this._rt.error }
+        : undefined);
     return html`
       <cf-theme .theme="${{ colorScheme: this._themePreference }}">
         <x-app-view
@@ -440,6 +480,10 @@ export class XRootView extends BaseView implements ShellApp {
           .keyStore="${this.keyStore}"
           .rt="${this._rt.value}"
           .space="${this.space}"
+          .spaceLoadError="${loadError}"
+          .runtimeLoadErrors="${this._runtimeLoadErrors}"
+          .preserveRuntimeErrorsForNextViewChange="${this
+            .preserveRuntimeErrorsForNextViewChange}"
         ></x-app-view>
       </cf-theme>
     `;

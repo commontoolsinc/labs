@@ -11,6 +11,7 @@ import {
   toResponsesTools,
 } from "./responses-protocol.ts";
 import type { OpenAICodexOAuthCredential } from "../auth/types.ts";
+import { HarnessControlError } from "../control-errors.ts";
 import type {
   HarnessModelAttemptDiagnostic,
   HarnessModelCatalogEntry,
@@ -43,6 +44,12 @@ export interface OpenAICodexResponsesClientOptions {
 const OPENAI_CODEX_PROVIDER_ID = "openai-codex";
 const OPENAI_CODEX_RESPONSES_LABEL = "Codex Responses";
 
+const providerUnavailable = (message: string): HarnessControlError =>
+  new HarnessControlError("provider-unavailable", message);
+
+const providerAuthRequired = (message: string): HarnessControlError =>
+  new HarnessControlError("provider-auth-required", message);
+
 const textBytes = (text: string): number =>
   new TextEncoder().encode(text).byteLength;
 
@@ -71,7 +78,7 @@ async function* parseSse(
   signal?: AbortSignal,
 ): AsyncGenerator<Record<string, unknown>> {
   if (!response.body) {
-    throw new Error("Codex Responses stream did not include a body");
+    throw providerUnavailable("Codex Responses stream did not include a body");
   }
   const reader = response.body.getReader();
   if (signal?.aborted) {
@@ -90,9 +97,9 @@ async function* parseSse(
       let read: ReadableStreamReadResult<Uint8Array>;
       try {
         read = await reader.read();
-      } catch (error) {
+      } catch {
         if (signal?.aborted) throw abortReason(signal);
-        throw error;
+        throw providerUnavailable("Codex Responses stream read failed");
       }
       const { value, done } = read;
       if (signal?.aborted) throw abortReason(signal);
@@ -111,12 +118,14 @@ async function* parseSse(
         try {
           parsed = JSON.parse(data);
         } catch {
-          throw new Error("Codex Responses stream contained malformed JSON");
+          throw providerUnavailable(
+            "Codex Responses stream contained malformed JSON",
+          );
         }
         if (
           typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
         ) {
-          throw new Error(
+          throw providerUnavailable(
             "Codex Responses stream contained a non-object event",
           );
         }
@@ -125,7 +134,7 @@ async function* parseSse(
       if (done) break;
     }
     if (buffered.trim().length > 0) {
-      throw new Error(
+      throw providerUnavailable(
         "Codex Responses stream ended with an incomplete SSE event",
       );
     }
@@ -147,7 +156,6 @@ const selectedHeaders = (
     const name of [
       "x-request-id",
       "x-openai-request-id",
-      "retry-after",
       "content-type",
     ]
   ) {
@@ -217,23 +225,34 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     if (signal?.aborted) throw abortReason(signal);
     const url = new URL(OPENAI_CODEX_MODELS_URL);
     url.searchParams.set("client_version", OPENAI_CODEX_CLIENT_VERSION);
-    const response = await this.#fetchFn(url, {
-      method: "GET",
-      redirect: "error",
-      headers: {
-        Authorization: `Bearer ${credential.accessToken}`,
-        "chatgpt-account-id": credential.accountId,
-        originator: "cf-harness",
-        "User-Agent": "cf-harness",
-      },
-      signal,
-    });
+    let response: Response;
+    try {
+      response = await this.#fetchFn(url, {
+        method: "GET",
+        redirect: "error",
+        headers: {
+          Authorization: `Bearer ${credential.accessToken}`,
+          "chatgpt-account-id": credential.accountId,
+          originator: "cf-harness",
+          "User-Agent": "cf-harness",
+        },
+        signal,
+      });
+    } catch {
+      if (signal?.aborted) throw abortReason(signal);
+      throw providerUnavailable("OpenAI Codex model discovery failed");
+    }
     if (signal?.aborted) {
       await response.body?.cancel(signal.reason).catch(() => {});
       throw abortReason(signal);
     }
     if (!response.ok) {
-      throw new Error(
+      if (response.status === 401 || response.status === 403) {
+        throw providerAuthRequired(
+          "OpenAI Codex authentication is no longer accepted",
+        );
+      }
+      throw providerUnavailable(
         `OpenAI Codex model discovery failed (${response.status})`,
       );
     }
@@ -242,15 +261,19 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       body = await response.json() as Record<string, unknown>;
     } catch {
       if (signal?.aborted) throw abortReason(signal);
-      throw new Error("OpenAI Codex model discovery returned invalid JSON");
+      throw providerUnavailable(
+        "OpenAI Codex model discovery returned invalid JSON",
+      );
     }
     if (signal?.aborted) throw abortReason(signal);
     if (!Array.isArray(body.models)) {
-      throw new Error("OpenAI Codex model discovery omitted the models array");
+      throw providerUnavailable(
+        "OpenAI Codex model discovery omitted the models array",
+      );
     }
     return body.models.map((raw): HarnessModelCatalogEntry => {
       if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-        throw new Error(
+        throw providerUnavailable(
           "OpenAI Codex model discovery returned an invalid model",
         );
       }
@@ -259,7 +282,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         typeof model.slug !== "string" ||
         typeof model.display_name !== "string"
       ) {
-        throw new Error(
+        throw providerUnavailable(
           "OpenAI Codex model discovery returned an invalid model",
         );
       }
@@ -395,7 +418,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         errorDetail,
       });
       if (request.signal?.aborted) throw abortReason(request.signal);
-      throw new Error(errorDetail);
+      throw providerUnavailable("OpenAI Codex transport request failed");
     }
     const endedAt = this.#now();
     const baseAttempt: HarnessModelAttemptDiagnostic = {
@@ -423,20 +446,26 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         : {}),
     };
     if (!response.ok) {
-      const errorBody = await response.text();
+      let responseBodyBytes: number | undefined;
+      try {
+        responseBodyBytes = textBytes(await response.text());
+      } catch {
+        if (request.signal?.aborted) throw abortReason(request.signal);
+      }
       await emitAttempt(request.onAttempt, {
         ...baseAttempt,
-        responseBodyBytes: textBytes(errorBody),
+        ...(responseBodyBytes !== undefined ? { responseBodyBytes } : {}),
       });
+      if (request.signal?.aborted) throw abortReason(request.signal);
       if (response.status === 429) {
-        const retryAfter = response.headers.get("retry-after");
-        throw new Error(
-          `OpenAI Codex usage limit reached${
-            retryAfter ? `; retry after ${retryAfter}` : ""
-          }`,
+        throw providerUnavailable("OpenAI Codex usage limit reached");
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw providerAuthRequired(
+          "OpenAI Codex authentication is no longer accepted",
         );
       }
-      throw new Error(
+      throw providerUnavailable(
         `OpenAI Codex Responses request failed (${response.status})`,
       );
     }
@@ -454,7 +483,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         streamedItems.push(event.item);
       }
       if (type === "error") {
-        throw new Error(
+        throw providerUnavailable(
           "OpenAI Codex Responses stream returned an error event",
         );
       }
@@ -466,7 +495,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
           typeof event.response !== "object" || event.response === null ||
           Array.isArray(event.response)
         ) {
-          throw new Error(
+          throw providerUnavailable(
             "Codex Responses terminal event did not include a response object",
           );
         }
@@ -475,7 +504,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       }
     }
     if (!terminal) {
-      throw new Error(
+      throw providerUnavailable(
         "Codex Responses stream ended without a terminal response event",
       );
     }
@@ -500,13 +529,21 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       ...normalizedUsage,
       estimateWithheldReason: "provider-pricing-unavailable" as const,
     };
-    return {
-      assistant: normalizeTerminalResponse(
+    let assistant: ReturnType<typeof normalizeTerminalResponse>;
+    try {
+      assistant = normalizeTerminalResponse(
         terminal,
         request.model,
         OPENAI_CODEX_PROVIDER_ID,
         OPENAI_CODEX_RESPONSES_LABEL,
-      ),
+      );
+    } catch {
+      throw providerUnavailable(
+        "OpenAI Codex returned an invalid terminal response",
+      );
+    }
+    return {
+      assistant,
       ...(usage !== undefined ? { usage } : {}),
     };
   }

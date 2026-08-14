@@ -8,6 +8,7 @@ import {
   executePieceCallable,
   formatViewTree,
   generateSpaceMap,
+  getCellCfcLabel,
   getCellValue,
   getPieceView,
   inspectPiece,
@@ -27,6 +28,7 @@ import {
   resetHomePattern,
   savePiecePattern,
   searchPieces,
+  setCellCfcLabel,
   setCellValue,
   setHomePattern,
   setPiecePattern,
@@ -36,7 +38,13 @@ import {
 } from "../lib/piece.ts";
 import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
-import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
+import type {
+  InvocationIdentity,
+  InvocationOutcome,
+  InvocationPhase,
+} from "../lib/callable.ts";
+import { newSessionId } from "../lib/session.ts";
+import { normalizeLLMFriendlyRef } from "../lib/llm-friendly-ref.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
@@ -45,11 +53,13 @@ import { cliText } from "../lib/cli-name.ts";
 import { absPath } from "../lib/utils.ts";
 import type { CellScope } from "@commonfabric/api";
 import { parseCellPath } from "@commonfabric/runner";
+import { parseScopedIdSegment } from "@commonfabric/runner/shared";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {
+  type CellSelection,
   CellSelectionError,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
@@ -154,6 +164,7 @@ export function localPatternEntry(
     mainExport?: string;
     repository?: string;
     root?: string;
+    test?: string[];
   },
 ): EntryConfig {
   return {
@@ -161,6 +172,7 @@ export function localPatternEntry(
     mainExport: options.mainExport,
     repository: options.repository,
     rootPath: options.root ? absPath(options.root) : undefined,
+    testPaths: options.test?.map((path) => absPath(path)),
   };
 }
 
@@ -331,8 +343,11 @@ export function exitPieceCallFailure(
   const exit = deps?.exit ?? Deno.exit;
   printError(error instanceof Error ? error.message : String(error));
   // Where the invocation stopped decides retry semantics: anything at or
-  // past "dispatched" retries SAFELY ONLY with this same id (same-id
-  // retries deduplicate; a fresh id would re-execute).
+  // past "dispatched" retries SAFELY ONLY with this same id. At-most-once
+  // is per COMMIT, not per execution: a same-id retry runs the handler
+  // body again and then loses the race for the receipt, so nothing
+  // commits twice but effects outside the transaction repeat. A fresh id
+  // loses nothing and commits a second time.
   printError(`invocation: ${invocationId} phase: ${phase}`);
   return exit(1);
 }
@@ -420,30 +435,72 @@ export function pieceCallInvocation(
 }
 
 /**
- * Resolve the invocation id for a handler call: the caller's own id, or a
- * freshly minted one. A blank id is rejected rather than passed down — it
- * would read as "the caller supplied one" while carrying nothing that can
- * distinguish one delivery from another, so the retry it promises to make
- * safe would not be (verb contract WS-D).
+ * Resolve what names a handler call's invocation: the id for this dispatch
+ * and the session it was chosen within (`CF_INVOCATION_SESSION`, or
+ * `--invocation-session`). Both reach the durable event id the handling's
+ * receipt is filed under, so a later call settles on that receipt only by
+ * naming the same pair (verb contract WS-D).
+ *
+ * A caller that names neither gets both minted for this one request. The id
+ * is random, so it names an outcome nothing else will ask for; scoping it to
+ * a session minted alongside it costs such a call nothing, and keeps every
+ * call deriving its address the one way.
+ *
+ * A caller that names an id but no session is refused. Naming an id asks for
+ * an outcome that is addressable and replayable, and a session minted per
+ * request would put that same id on a different outcome next time — so the
+ * request cannot be honored as it was made. Saying so beats accepting it and
+ * letting the caller find out at the retry it was preparing for, when the
+ * verb runs a second time.
+ *
+ * A blank id or session is rejected rather than passed down: either would
+ * read as "the caller named one" while carrying nothing that tells two
+ * deliveries apart.
  */
-export function resolveInvocationId(
-  raw: string | undefined,
-  mint: () => string = () => crypto.randomUUID(),
-): string {
-  if (raw === undefined) return mint();
-  if (!raw.trim()) {
+export function resolveInvocationIdentity(
+  rawInvocation: string | undefined,
+  rawSession: string | undefined,
+  mintInvocationId: () => string = () => crypto.randomUUID(),
+  mintSession: () => string = newSessionId,
+): InvocationIdentity {
+  if (rawInvocation !== undefined && !rawInvocation.trim()) {
     throw new ValidationError("--invocation requires a non-blank id");
   }
-  return raw;
+  if (rawSession !== undefined && !rawSession.trim()) {
+    throw new ValidationError("--invocation-session requires a non-blank id");
+  }
+  if (rawSession === undefined) {
+    if (rawInvocation !== undefined) {
+      throw new ValidationError(
+        "--invocation names an id to replay, and an id is replayable only " +
+          "within the session it was chosen in. Mint a session with " +
+          "`cf invocation-session new` and set `CF_INVOCATION_SESSION`, or " +
+          "pass it as `--invocation-session <id>`.",
+      );
+    }
+    return { id: mintInvocationId(), session: mintSession() };
+  }
+  return { id: rawInvocation ?? mintInvocationId(), session: rawSession };
 }
 
 /**
  * Build the phase observer for a handler invocation. Its whole job is to put
  * the invocation id on stderr at the moment the event is about to dispatch —
  * BEFORE any network work — so a caller whose process dies past that line
- * still holds the exact id to retry with, and the retry deduplicates instead
- * of executing a second time. Announcing once matters: a caller scraping
+ * still holds the exact id to retry with. At-most-once is per COMMIT, not per
+ * execution: the retry runs the handler body again and loses the race for the
+ * receipt, so nothing commits twice while effects outside the transaction
+ * repeat. Announcing once matters: a caller scraping
  * stderr for its id should not have to decide which of several to trust.
+ *
+ * The id is half of what a retry names: it deduplicates only under the session
+ * it was chosen in. So the session is announced beside it, on its own line —
+ * a caller that named no session was minted one for this call, and without
+ * reading it here would hold an id that names nothing it can return to.
+ *
+ * Two lines rather than one because `invocation: <id> phase: <phase>` below is
+ * a parsed shape: appending to the id line would change what a scenario
+ * blocking on a phase reads.
  *
  * `announcePhases` is a test-harness hook (reached via the
  * `CF_TEST_ANNOUNCE_INVOCATION_PHASES` env var at the call site): every phase
@@ -456,7 +513,7 @@ export function resolveInvocationId(
  * byte-identical with the hook absent.
  */
 export function invocationPhaseReporter(
-  invocationId: string,
+  invocation: InvocationIdentity,
   onAdvance: (phase: InvocationPhase) => void,
   announce: (message: string) => void = console.error,
   announcePhases = false,
@@ -465,10 +522,11 @@ export function invocationPhaseReporter(
   return (next) => {
     if (next === "dispatched" && !announced) {
       announced = true;
-      announce(`invocation: ${invocationId}`);
+      announce(`invocation: ${invocation.id}`);
+      announce(`session: ${invocation.session}`);
     }
     if (announcePhases) {
-      announce(`invocation: ${invocationId} phase: ${next}`);
+      announce(`invocation: ${invocation.id} phase: ${next}`);
     }
     onAdvance(next);
   };
@@ -540,7 +598,7 @@ export function renderPieceCallOutcome(
     hint?: (text: string, prefix?: boolean) => void;
     printError?: (text: string) => void;
   } = {},
-  opts: { detached?: boolean; invocationId?: string } = {},
+  opts: { detached?: boolean; invocation?: InvocationIdentity } = {},
 ): void {
   const renderOut = deps.render ?? render;
   const hintOut = deps.hint ?? hint;
@@ -574,13 +632,35 @@ export function renderPieceCallOutcome(
     // Invocation JSON — settled, or stopped at "committed" under --no-wait —
     // prose stays on stderr via hint().
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
+    // The address the envelope published, when the runtime wrote a receipt.
+    // It leads the detached next steps because it collects the outcome
+    // without running the verb again.
+    const receiptId = result.invocation.receipt?.id;
     hintOut(
       opts.detached
-        ? cliText(`NEXT STEPS:
-  → Read the outcome: cf piece call --piece ${piece} --invocation ${
-          opts.invocationId ?? "<id>"
-        } ${callableName} ... (the commit is durable; a same-id call deduplicates and returns the settled outcome)
-  → Verify state:     cf piece get --piece ${piece} <path> ...`)
+        ? cliText(
+          receiptId === undefined
+            // No receipt means receipts are not being written here, and that
+            // is exactly the configuration in which a same-id call does NOT
+            // deduplicate — it executes AND commits a second time. Offering
+            // the replay as a recovery would be offering a duplicate.
+            ? `NEXT STEPS:
+  → Nothing to collect: this handling wrote no receipt, so the outcome has no address and a call naming the same pair executes and commits AGAIN rather than deduplicating.
+  → Verify state:     cf piece get --piece ${piece} <path> ...`
+            // The replay names its session through the environment rather
+            // than `--invocation-session`, because a session is what keeps an
+            // outcome's address out of reach of anyone who can guess a piece,
+            // a verb and an id — and an argument is readable in a process
+            // listing where an environment variable is not.
+            : `NEXT STEPS:
+  → Read the outcome: cf piece get --piece ${receiptId} (this call's receipt, an ordinary read — the handler does not run again)
+  → Or replay it:     CF_INVOCATION_SESSION=${
+              opts.invocation?.session ?? "<session>"
+            } cf piece call --piece ${piece} --invocation ${
+              opts.invocation?.id ?? "<id>"
+            } ${callableName} ... (the commit is durable and the replay loses the race for the receipt, so nothing commits twice — but the handler body RUNS AGAIN, repeating effects outside its transaction, and any write it made into another space)
+  → Verify state:     cf piece get --piece ${piece} <path> ...`,
+        )
         : nextSteps,
     );
     return;
@@ -602,6 +682,11 @@ export function renderPieceCallOutcome(
  * `null`, which would be indistinguishable from a verb that returned null.
  * `links` appears only under --show-links: provenance beside the value,
  * never inline in it.
+ *
+ * `receipt` is the one key that does not depend on a readback or a flag: it
+ * is the address of the cell holding this outcome, known at commit, so it
+ * rides a `--no-wait` envelope as well as a settled one. It is absent only
+ * where the runtime wrote no receipt to address.
  */
 export function invocationJson(
   outcome: InvocationOutcome,
@@ -610,6 +695,7 @@ export function invocationJson(
     invocation: outcome.id,
     status: outcome.status,
     ...(outcome.deduplicated ? { deduplicated: true } : {}),
+    ...(outcome.receipt !== undefined ? { receipt: outcome.receipt } : {}),
     ...("result" in outcome && outcome.result !== undefined
       ? { result: outcome.result }
       : {}),
@@ -631,19 +717,45 @@ export interface PieceCallWaitControl {
   boundSeconds?: number;
 }
 
+/** The `cf piece call` flags whose answer needs the receipt readback. */
+export interface PieceCallReadbackFlags {
+  showLinks?: boolean;
+  filter?: string;
+  select?: string;
+  schema?: string;
+}
+
+/**
+ * Those flags paired with the spelling a refusal names them by, in the order a
+ * caller writes them.
+ */
+const READBACK_FLAGS: ReadonlyArray<
+  [keyof PieceCallReadbackFlags, string]
+> = [
+  ["showLinks", "--show-links"],
+  ["filter", "--filter"],
+  ["select", "--select"],
+  ["schema", "--schema"],
+];
+
 /**
  * Resolve the wait flags into one control. `--await` is the explicit spelling
  * of the default (flag parity, so a script can state its intent), which makes
  * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
  * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
  * names the patience. A non-positive bound is refused: it would spell
- * "don't wait" while claiming to be a wait. `--show-links --no-wait` is
- * refused too: the links ride the receipt readback a detached exit skips,
- * so honoring both is impossible — refusing beats silently dropping the
+ * "don't wait" while claiming to be a wait.
+ *
+ * `--no-wait` also refuses every flag that shapes or annotates the outcome —
+ * `--show-links` and the selection flags. All of them are answered from the
+ * receipt a detached exit never reads, so honoring both is impossible;
+ * refusing beats silently handing back an unshaped result or dropping the
  * links.
  */
 export function resolveWaitControl(
-  options: { await?: boolean; wait?: number | boolean; showLinks?: boolean },
+  options:
+    & { await?: boolean; wait?: number | boolean }
+    & PieceCallReadbackFlags,
 ): PieceCallWaitControl {
   if (options.wait === false) {
     if (options.await) {
@@ -651,10 +763,13 @@ export function resolveWaitControl(
         "--await and --no-wait contradict each other; pass one.",
       );
     }
-    if (options.showLinks) {
+    const named = READBACK_FLAGS
+      .filter(([key]) => options[key] !== undefined && options[key] !== false)
+      .map(([, flag]) => flag);
+    if (named.length > 0) {
       throw new ValidationError(
-        "--show-links needs the receipt readback that --no-wait skips; " +
-          "pass one.",
+        `${listFlags(named)} need${named.length === 1 ? "s" : ""} the ` +
+          "receipt readback that --no-wait skips; pass one.",
       );
     }
     return { mode: "commit" };
@@ -670,22 +785,60 @@ export function resolveWaitControl(
   return { mode: "settle" };
 }
 
+/** Flag names as prose: "--a", "--a and --b", "--a, --b and --c". */
+function listFlags(flags: readonly string[]): string {
+  if (flags.length <= 1) return flags.join("");
+  return `${flags.slice(0, -1).join(", ")} and ${flags.at(-1)}`;
+}
+
+/**
+ * Parse `cf piece call`'s selection flags into the shape the result should
+ * arrive in, through the same parser `cf piece get` uses — one grammar, one
+ * set of error messages, whichever command a caller reaches for.
+ *
+ * The one combination refused here is `--filter` with `--show-links`. A link
+ * names a position in the result, and a predicate that drops elements leaves
+ * the survivors at positions that are no longer the ones they came from, so
+ * every address below a filtered array would name the wrong element. It is
+ * the same refusal a `$link` marker meets inside the selection step, on the
+ * same grounds.
+ */
+export async function parsePieceCallSelection(
+  options: PieceCallReadbackFlags,
+): Promise<CellSelection | undefined> {
+  const selection = await parseCellSelectionOptions(options);
+  if (options.showLinks && selection?.filter !== undefined) {
+    throw new ValidationError(
+      "--show-links cannot be combined with --filter: a filtered array's " +
+        "elements no longer say which positions they came from, and a link " +
+        "names a position.",
+    );
+  }
+  return selection;
+}
+
 /**
  * The caller's patience bound expired before the invocation settled. The
  * handler runs in THIS process's runtime, so an exit before the commit is
  * acknowledged abandons un-executed work rather than leaving it settling
  * elsewhere: before the `committed` phase, the invocation may not have
  * executed or committed at all. The recovery is re-invoking with the SAME
- * id — safe in every phase, because it deduplicates against the create-only
- * receipt when the commit landed and re-executes when it never did. The
- * exit reports the id and the furthest phase so the caller can.
+ * id AND session — safe in every phase, because it deduplicates against the
+ * create-only receipt when the commit landed and re-executes when it never
+ * did.
+ *
+ * Both halves are named because both reach the address: an id alone is
+ * replayable within no session, and `resolveInvocationIdentity` refuses one
+ * offered without its session rather than putting that id on a different
+ * outcome. The dispatch announcement puts the pair on stderr, which is where
+ * a caller acting on this recovers them from.
  */
 export class WaitBoundExpired extends Error {
   constructor(readonly seconds: number) {
     super(
       `--wait bound of ${seconds}s expired: the invocation may not have ` +
-        "executed or committed — re-invoke with the same invocation id " +
-        "to finish it or read the outcome back",
+        "executed or committed — re-invoke with the same invocation id and " +
+        "session to finish it or read the outcome back",
     );
     this.name = "WaitBoundExpired";
   }
@@ -760,6 +913,11 @@ const EX_ID = `--identity ./my.key`;
 const EX_URL = `--url ${RAW_EX_URL}`;
 const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
+const PIECE_OPTION_HELP =
+  "The target piece: an id, slug, or canonical LLM-friendly reference " +
+  "(/of:fid1:.../).";
+const PIECE_OPTION_PATH_HELP = `${PIECE_OPTION_HELP} A path embedded in ` +
+  `the reference prefixes the positional path.`;
 const PIECE_REGISTRY_LINK_EXAMPLE = [
   cliText(
     `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/pieceRegistry`,
@@ -882,6 +1040,11 @@ export const piece = new Command()
     "--repository <repository:string>",
     "Repository locator associated with the authored source (stored exactly as supplied).",
   )
+  .option(
+    "--test <path:string>",
+    "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .option(
     "--dangerously-allow-incompatible-schema",
@@ -930,7 +1093,8 @@ export const piece = new Command()
   .action(async (options, slug, sourceRef) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
-    const source = parseLink(sourceRef);
+    const source = parseLink(sourceRef, { space: spaceConfig.space });
+    collectEmbeddedSpace(spaceConfig, source);
     await setPieceSlug(
       spaceConfig,
       slug,
@@ -952,7 +1116,7 @@ export const piece = new Command()
     cliText(`cf piece step ${EX_ID} ${EX_COMP_PIECE}`),
     `Start, wait for idle+synced, then stop piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     await stepPiece(pieceConfig);
@@ -969,7 +1133,7 @@ export const piece = new Command()
     cliText(`echo '{"foo":5}' | cf piece apply ${EX_ID} ${EX_URL}`),
     `Applies the input '{"foo":5}' to piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) =>
     applyPieceInput(parsePieceOptions(options), await drainStdin())
   )
@@ -984,7 +1148,7 @@ export const piece = new Command()
     cliText(`cf piece getsrc ${EX_ID} ${EX_URL} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .arguments("<outpath:string>")
   .action((options, outPath) =>
     savePiecePattern(parsePieceOptions(options), absPath(outPath))
@@ -1000,7 +1164,7 @@ export const piece = new Command()
     cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option(
     "--main-export <export:string>",
     'Named export from entry for pattern definition. Defaults to "default".',
@@ -1012,6 +1176,11 @@ export const piece = new Command()
   .option(
     "--repository <repository:string>",
     "Repository locator associated with the authored source (stored exactly as supplied).",
+  )
+  .option(
+    "--test <path:string>",
+    "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
   )
   .option(
     "--dangerously-allow-incompatible-schema",
@@ -1055,7 +1224,7 @@ export const piece = new Command()
     cliText(`cf piece inspect ${EX_ID} ${EX_URL}`),
     `Inspect detailed information about piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output raw JSON data")
   .option(
     "--summary",
@@ -1150,7 +1319,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     cliText(`cf piece view ${EX_ID} ${EX_URL}`),
     `Display the view for piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output raw JSON data")
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
@@ -1181,7 +1350,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     cliText(`cf piece render ${EX_ID} ${EX_COMP_PIECE} --watch`),
     `Watch and re-render piece "${RAW_EX_COMP.piece!}" when UI changes.`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output HTML as JSON")
   .option("-w,--watch", "Watch for changes and re-render")
   .option(
@@ -1299,7 +1468,8 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     // BEFORE parseLink (the sqlite: scheme is not a piece ref).
     const sqliteSource = parseSqliteSource(sourceRef);
     if (sqliteSource) {
-      const target = parseLink(targetRef);
+      const target = parseLink(targetRef, { space: spaceConfig.space });
+      collectEmbeddedSpace(spaceConfig, target);
       if (!target.path) {
         throw new ValidationError(
           `Target reference must include a path. Expected: pieceId/path/to/field`,
@@ -1320,8 +1490,13 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     }
 
     // Parse source and target references - handle both pieceId/path and well-known IDs
-    const source = parseLink(sourceRef, { allowWellKnown: true });
-    const target = parseLink(targetRef);
+    const source = parseLink(sourceRef, {
+      allowWellKnown: true,
+      space: spaceConfig.space,
+    });
+    const target = parseLink(targetRef, { space: spaceConfig.space });
+    collectEmbeddedSpace(spaceConfig, source);
+    collectEmbeddedSpace(spaceConfig, target);
 
     // For linking, sources can be either:
     // 1. pieceId (links entire result cell)
@@ -1415,12 +1590,18 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .example(
     cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} --select 'topic@,topic.title'`,
+    ),
+    "Return a field's address, and the fields asked for beside it.",
+  )
+  .example(
+    cliText(
       `cf piece get ${EX_ID} ${EX_COMP_PIECE} items ` +
         `--schema '{"type":"array","items":{"$link":true}}'`,
     ),
     "Return each item's address instead of its contents.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(
     "--step",
@@ -1436,7 +1617,8 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .option(
     "--select <fields:string>",
-    "Project output to comma-separated field paths",
+    "Project output to comma-separated field paths; a trailing @ asks for a " +
+      "position's address, and @ alone for the source's own",
   )
   .option(
     "--schema <schema:string>",
@@ -1450,10 +1632,10 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = {
-      ...parsePieceOptions(options),
+      ...parsePieceOptions(options, { acceptsPath: true }),
       jsonOutput: true,
     };
-    const pathSegments = pathString ? parseCellPath(pathString) : [];
+    const pathSegments = mergePiecePath(pieceConfig, pathString);
     try {
       const selection = await parseCellSelectionOptions(options);
       const value = await getCellValue(pieceConfig, pathSegments, {
@@ -1475,6 +1657,67 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
       throw error;
     }
   })
+  /* piece get-label */
+  .command(
+    "get-label",
+    `Get the effective CFC label view for a piece data path.
+
+The returned paths are relative to the selected path. The view includes
+declared, derived, and link-carried labels. Omit path to inspect the root.`,
+  )
+  .usage(`${pieceUsage} [path]`)
+  .example(
+    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} messages/0/body`),
+    "Get the effective label on a nested result value.",
+  )
+  .example(
+    cliText(`cf piece get-label ${EX_ID} ${EX_COMP_PIECE} secret --input`),
+    "Get the effective label on an input value.",
+  )
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
+  .option("--input", "Read from the piece's input cell instead of result cell")
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
+  .arguments("[path:string]")
+  .action(getCellCfcLabelFromCommand)
+  /* piece set-label */
+  .command(
+    "set-label",
+    cliText(`Set the declared CFC label at a piece data path from JSON on stdin.
+
+INPUT: An object with confidentiality and/or integrity arrays, plus an optional
+observes value: value, shape, enumerate, or followRef.
+
+The command records the label through the same checked write operation used for
+piece data. It never changes raw CFC metadata. Confidentiality may only become
+more restrictive. An integrity update may keep or remove existing claims, but
+cannot add trust. Conflicting observation classes are rejected. If observes is
+omitted, an existing unambiguous class is preserved. The command returns the
+updated effective label view.`),
+  )
+  .usage(`${pieceUsage} [path]`)
+  .example(
+    cliText(
+      `echo '{"confidentiality":["team"]}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} notes`,
+    ),
+    "Add a confidentiality requirement to a result value.",
+  )
+  .example(
+    cliText(
+      `echo '{"integrity":[],"observes":"value"}' | cf piece set-label ${EX_ID} ${EX_COMP_PIECE} draft --input`,
+    ),
+    "Remove declared integrity claims from an input value.",
+  )
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
+  .option("--input", "Write to the piece's input cell instead of result cell")
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
+  .arguments("[path:string]")
+  .action(setCellCfcLabelFromCommand)
   /* piece set */
   .command(
     "set",
@@ -1496,18 +1739,18 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     ),
     `Set a nested object value in piece input "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_PATH_HELP)
   .option("--input", "Write to the piece's input cell instead of result cell")
   .arguments("<path:string>")
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    const pathSegments = parseCellPath(pathString);
+    const pieceConfig = parsePieceOptions(options, { acceptsPath: true });
+    const pathSegments = mergePiecePath(pieceConfig, pathString);
     const value = await drainStdin();
     await setCellValue(pieceConfig, pathSegments, value, {
       input: options.input,
     });
-    render(`Set value at path: ${pathString}`);
+    render(`Set value at path: ${pathSegments.join("/")}`);
     hint(
       cliText(
         `TIP: Computed values may be stale. Run 'cf piece step --piece ${pieceConfig.piece} ...' to trigger recomputation.`,
@@ -1577,13 +1820,47 @@ after --. Handlers interpret piped input when no input argument is present.`,
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),
     `Run the "search" tool using schema-derived flags after "--".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .example(
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP_PIECE} --select topic.title addTopic ` +
+        `'{"title":"Ship it"}'`,
+    ),
+    "Return only the selected fields of the verb's result.",
+  )
+  .example(
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP_PIECE} ` +
+        `--schema '{"properties":{"topic":{"$link":true}}}' addTopic ` +
+        `'{"title":"Ship it"}'`,
+    ),
+    "Return the address of what the verb returned instead of its contents.",
+  )
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option(
     "--invocation <id:string>",
-    "Idempotency key for a handler call (before the callable name). A " +
-      "same-id retry cannot commit twice — it settles on the original " +
-      "outcome — but the handler body does re-run, so effects outside the " +
-      "transaction repeat. Minted automatically when omitted.",
+    "Idempotency key for a handler call (before the callable name), and " +
+      "requires an invocation session. A retry naming the same pair cannot " +
+      "commit twice — it settles on the original outcome — but the " +
+      "handler body does re-run, so effects outside the transaction " +
+      "repeat. Both are minted for the one call when neither is given.",
+  )
+  .env(
+    "CF_INVOCATION_SESSION=<id:string>",
+    "Invocation session that this run's invocation ids belong to. The form " +
+      "to reach for: a session is what makes an outcome's address " +
+      "unguessable, and an environment variable stays out of the process " +
+      "listing an argument shows up in.",
+    { prefix: "CF_" },
+  )
+  .option(
+    "--invocation-session <id:string>",
+    "Override CF_INVOCATION_SESSION for this one call (before the callable " +
+      "name): the session this call's invocation id was chosen within, " +
+      "since an invocation id is the caller's own word and another caller " +
+      "can pick the same one. The pair decides which outcome a replay " +
+      "reads, so the same id under another session is another invocation. " +
+      "Mint a session per agent run with `cf invocation-session new`, and " +
+      "carry that one session on every call of the run.",
   )
   .option(
     "--verbose",
@@ -1601,17 +1878,20 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "Bound the settlement wait by a chosen patience, in seconds (before " +
       "the callable name). On expiry the exit is nonzero with the " +
       "invocation id and furthest phase on stderr; the invocation may not " +
-      "have executed or committed, and re-invoking with the same id is " +
-      "safe in every phase — it finishes the work or reads the outcome " +
-      "back.",
+      "have executed or committed. Re-invoking under the same id and " +
+      "session cannot commit twice — but it runs the handler body again, " +
+      "so effects outside the transaction repeat. An expiry is exactly the " +
+      "case where you cannot tell whether it committed.",
   )
   .option(
     "--no-wait",
     "Exit once this handling's commit is acknowledged (before the callable " +
       "name), skipping only the receipt readback: stdout reports status " +
-      '"committed", and a later call with the same --invocation id reads ' +
-      "the outcome back. The handler still executes here and its commit " +
-      "is durable. Handler invocations only.",
+      '"committed" plus the receipt address, so `cf piece get --piece <that ' +
+      "id>` collects the outcome later without re-running the handler; a " +
+      "call naming the same session and --invocation recovers it too, but " +
+      "runs the handler body again. The handler still executes here and its " +
+      "commit is durable. Handler invocations only.",
   )
   .option(
     "--show-links",
@@ -1623,18 +1903,56 @@ after --. Handlers interpret piped input when no input argument is present.`,
       "appear only where a path is backed by a different document. Handler " +
       "invocations only — a tool already reports its result cell on stderr.",
   )
+  .option(
+    "--filter <predicate:string>",
+    "Filter an array with a jq-inspired predicate",
+  )
+  .option(
+    "--select <fields:string>",
+    "Project output to comma-separated field paths",
+  )
+  .option(
+    "--schema <schema:string>",
+    "Project output with an inline JSON Schema, @file, or the --select " +
+      "field list",
+    // Both flags carry the one projection, so a command naming both has not
+    // said which shape it wants. Refuse before the call rather than pick.
+    { conflicts: ["select"] },
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
-    const invocationId = resolveInvocationId(options.invocation);
+    const identity = resolveInvocationIdentity(
+      options.invocation,
+      options.invocationSession,
+    );
+    const invocationId = identity.id;
     const waitControl = resolveWaitControl(options);
     let phase: InvocationPhase = "initial_sync";
     const observer = pieceCallPhaseObserver(
       !!options.verbose,
       (next) => phase = next,
     );
+    setQuietMode(!!options.quiet);
+    // Read outside the invocation's failure wrapper below. Nothing is
+    // dispatched here — no callable resolved, no id spent — so a malformed
+    // selection is a data error about the flags, the same one `cf piece get`
+    // reports. Inside the wrapper it would name an id and a phase to retry
+    // from for a call that was never made; a selection that fails against a
+    // RESULT does sit inside it, and does name one.
+    let selection: CellSelection | undefined;
     try {
-      setQuietMode(!!options.quiet);
+      selection = await parsePieceCallSelection(options);
+    } catch (error) {
+      // Both exits below leave without reaching the action's catch, so the
+      // verbose in-flight span is closed here.
+      observer.finish("failed");
+      if (error instanceof CellSelectionError) {
+        exitWithDataError({ message: error.message });
+      }
+      throw error;
+    }
+    try {
       const invocation = pieceCallInvocation(
         tail,
         this.getLiteralArgs(),
@@ -1649,11 +1967,12 @@ after --. Handlers interpret piped input when no input argument is present.`,
           callableName,
           invocation.rawArgs,
           {
-            invocationId,
+            invocation: identity,
             skipReadback: waitControl.mode === "commit",
             showLinks: !!options.showLinks,
+            ...(selection === undefined ? {} : { selection }),
             onPhase: invocationPhaseReporter(
-              invocationId,
+              identity,
               observer.onPhase,
               undefined,
               Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
@@ -1675,7 +1994,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
         callableName,
         pieceConfig.piece,
         {},
-        { detached: waitControl.mode === "commit", invocationId },
+        { detached: waitControl.mode === "commit", invocation: identity },
       );
     } catch (error) {
       if (error instanceof ValidationError) {
@@ -1686,8 +2005,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
       console.error(message);
       observer.finish("failed");
       // Where the invocation stopped decides retry semantics: anything at or
-      // past "dispatched" retries SAFELY ONLY with this same id (same-id
-      // retries deduplicate; a fresh id would re-execute).
+      // past "dispatched" retries SAFELY ONLY with this same id. At-most-once
+      // is per COMMIT, not per execution: a same-id retry runs the handler
+      // body again and then loses the race for the receipt, so nothing
+      // commits twice but effects outside the transaction repeat. A fresh id
+      // loses nothing and commits a second time.
       console.error(`invocation: ${invocationId} phase: ${phase}`);
       if (error instanceof WaitBoundExpired) {
         // The caller's patience expired. The handler runs in this process,
@@ -1721,7 +2043,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     cliText(`cf piece verbs ${EX_ID} ${EX_URL} --json`),
     "Machine-readable listing: name, kind, and input schema per verb.",
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .option("--json", "Output machine-readable JSON.")
   .option(
     "--all",
@@ -1801,7 +2123,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     cliText(`cf piece rm ${EX_ID} ${EX_URL}`),
     `Remove piece "${RAW_EX_COMP.piece!}".`,
   )
-  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("-c,--piece <piece:string>", PIECE_OPTION_HELP)
   .action(async (options) => {
     const pieceConfig = parsePieceOptions(options);
     await removePiece(pieceConfig);
@@ -1860,6 +2182,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "--repository <repository:string>",
     "Repository locator associated with the authored source (stored exactly as supplied).",
   )
+  .option(
+    "--test <path:string>",
+    "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
   .arguments("[main:string]")
   .action(async (options, main?: string) => {
     setQuietMode(!!options.quiet);
@@ -1879,6 +2206,12 @@ after --. Handlers interpret piped input when no input argument is present.`,
     if (options.reset && options.repository !== undefined) {
       throw new ValidationError(
         "Cannot use --repository with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.test !== undefined) {
+      throw new ValidationError(
+        "Cannot use --test with --reset.",
         { exitCode: 1 },
       );
     }
@@ -1908,12 +2241,65 @@ export interface PieceCLIOptions {
   mainExport?: string;
   repository?: string;
   root?: string;
+  test?: string[];
   dangerouslyAllowIncompatibleSchema?: boolean;
   json?: boolean;
 }
 
 export interface PieceSummaryCLIOptions extends PieceCLIOptions {
   json?: boolean;
+}
+
+export interface PieceLabelCLIOptions extends PieceCLIOptions {
+  input?: boolean;
+  quiet?: boolean;
+}
+
+export interface PieceLabelCommandDependencies {
+  getCellCfcLabel?: typeof getCellCfcLabel;
+  setCellCfcLabel?: typeof setCellCfcLabel;
+  drainStdin?: typeof drainStdin;
+  render?: typeof render;
+}
+
+export async function getCellCfcLabelFromCommand(
+  options: PieceLabelCLIOptions,
+  pathString?: string,
+  deps: PieceLabelCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = {
+    ...parsePieceOptions(options, { acceptsPath: true }),
+    jsonOutput: true,
+  };
+  const pathSegments = mergePiecePath(pieceConfig, pathString);
+  const label = await (deps.getCellCfcLabel ?? getCellCfcLabel)(
+    pieceConfig,
+    pathSegments,
+    { input: options.input },
+  );
+  (deps.render ?? render)(label, { json: true });
+}
+
+export async function setCellCfcLabelFromCommand(
+  options: PieceLabelCLIOptions,
+  pathString?: string,
+  deps: PieceLabelCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const pieceConfig = {
+    ...parsePieceOptions(options, { acceptsPath: true }),
+    jsonOutput: true,
+  };
+  const pathSegments = mergePiecePath(pieceConfig, pathString);
+  const update = await (deps.drainStdin ?? drainStdin)();
+  const label = await (deps.setCellCfcLabel ?? setCellCfcLabel)(
+    pieceConfig,
+    pathSegments,
+    update,
+    { input: options.input },
+  );
+  (deps.render ?? render)(label, { json: true });
 }
 
 export interface PieceListCommandDependencies {
@@ -2021,25 +2407,19 @@ export async function setPieceSourceFromCommand(
   return pieceConfig;
 }
 
-const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
-
-function parseScopedIdSegment(id: string): {
-  id: string;
-  scope?: CellScope;
-} {
-  const scopeSeparator = id.lastIndexOf("@");
-  if (scopeSeparator === -1) return { id };
-
-  const scope = id.slice(scopeSeparator + 1);
-  const scopedId = id.slice(0, scopeSeparator);
-  if (!scopedId || !CELL_SCOPE_VALUES.has(scope)) {
+/**
+ * Like `parseScopedIdSegment`, except a rejected `@scope` suffix is raised
+ * as a usage error, the suffix being something the user typed.
+ */
+function parseScopedId(id: string): { id: string; scope?: CellScope } {
+  try {
+    return parseScopedIdSegment(id);
+  } catch (error) {
     throw new ValidationError(
-      `Invalid scope suffix "@${scope}". Expected @space, @user, or @session.`,
+      error instanceof Error ? error.message : String(error),
       { exitCode: 1 },
     );
   }
-
-  return { id: scopedId, scope: scope as CellScope };
 }
 
 function parseSetHomeOptions(
@@ -2061,7 +2441,10 @@ function parseSetHomeOptions(
   return { identity: absPath(input.identity), apiUrl };
 }
 
-export function parsePieceOptions(input: PieceCLIOptions): PieceConfig {
+export function parsePieceOptions(
+  input: PieceCLIOptions,
+  parseOptions?: { acceptsPath?: boolean },
+): PieceConfig {
   const options = parseSpaceOptions(input);
   if (!("piece" in options) || !options.piece) {
     throw new ValidationError(
@@ -2069,7 +2452,16 @@ export function parsePieceOptions(input: PieceCLIOptions): PieceConfig {
       { exitCode: 1 },
     );
   }
-  return options as PieceConfig;
+  const config = options as PieceConfig;
+  if (config.piecePath?.length && !parseOptions?.acceptsPath) {
+    throw new ValidationError(
+      `The piece reference embeds a path ("${
+        config.piecePath.join("/")
+      }") but this command takes a piece id only.`,
+      { exitCode: 1 },
+    );
+  }
+  return config;
 }
 
 // With args and env vars shadowing each other, and multiple
@@ -2123,9 +2515,19 @@ export function parseSpaceOptions(
   if (input.piece) {
     // Do not validate here -- piece is only
     // required via `parsePieceOptions`
-    const parsedPiece = parseScopedIdSegment(input.piece);
-    output.piece = parsedPiece.id;
-    if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
+    const llmRef = normalizeLLMFriendlyRef(input.piece, {
+      space: input.space,
+    });
+    if (llmRef) {
+      output.piece = llmRef.pieceId;
+      if (llmRef.scope) output.pieceScope = llmRef.scope;
+      if (llmRef.path.length > 0) output.piecePath = llmRef.path;
+      if (llmRef.embeddedSpace) output.embeddedSpaces = [llmRef.embeddedSpace];
+    } else {
+      const parsedPiece = parseScopedId(input.piece);
+      output.piece = parsedPiece.id;
+      if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
+    }
   }
 
   output.apiUrl = normalizeApiUrl(input.apiUrl);
@@ -2140,10 +2542,55 @@ export function parseSpaceOptions(
   return output as PieceConfig;
 }
 
+/**
+ * Fold the space DID embedded in a parsed link reference into the command's
+ * config, for the deferred check `loadPieces` runs once the session has
+ * resolved the target space to a DID.
+ */
+function collectEmbeddedSpace(
+  config: SpaceConfig,
+  ref: { embeddedSpace?: string },
+): void {
+  if (ref.embeddedSpace === undefined) return;
+  config.embeddedSpaces = [
+    ...(config.embeddedSpaces ?? []),
+    ref.embeddedSpace,
+  ];
+}
+
+/**
+ * The full path a piece data command addresses: any path embedded in an
+ * LLM-friendly `--piece` reference, followed by the positional path argument.
+ */
+export function mergePiecePath(
+  pieceConfig: PieceConfig,
+  pathString?: string,
+): (string | number)[] {
+  return [
+    ...(pieceConfig.piecePath ?? []),
+    ...(pathString ? parseCellPath(pathString) : []),
+  ];
+}
+
 export function parseLink(
   ref: string,
-  _options?: { allowWellKnown?: boolean },
-): { pieceId: string; scope?: CellScope; path?: (string | number)[] } {
+  options?: { allowWellKnown?: boolean; space?: string },
+): {
+  pieceId: string;
+  scope?: CellScope;
+  path?: (string | number)[];
+  embeddedSpace?: string;
+} {
+  const llmRef = normalizeLLMFriendlyRef(ref, { space: options?.space });
+  if (llmRef) {
+    return {
+      pieceId: llmRef.pieceId,
+      ...(llmRef.scope && { scope: llmRef.scope }),
+      ...(llmRef.embeddedSpace && { embeddedSpace: llmRef.embeddedSpace }),
+      ...(llmRef.path.length > 0 && { path: llmRef.path }),
+    };
+  }
+
   const parts = ref.split("/");
   if (parts.length < 1) {
     throw new ValidationError(
@@ -2152,7 +2599,7 @@ export function parseLink(
     );
   }
 
-  const parsedPiece = parseScopedIdSegment(parts[0]);
+  const parsedPiece = parseScopedId(parts[0]);
   const pieceId = parsedPiece.id;
 
   if (parts.length === 1) {
@@ -2190,7 +2637,7 @@ function parseUrl(
     );
   }
   if (!piece) return { apiUrl, space };
-  const parsedPiece = parseScopedIdSegment(piece);
+  const parsedPiece = parseScopedId(piece);
   return {
     apiUrl,
     space,

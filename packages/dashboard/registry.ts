@@ -1,6 +1,9 @@
-// The single registration point. Add a tile by importing it and adding it to
-// this array; remove one by deleting its line. Order controls placement (grid
-// order for normal tiles; wide tiles render full-width below the grid, in order).
+/**
+ * Names every tile the wall runs, and is the only place any of them is
+ * registered. A tile is added by importing it here and listing it below, and
+ * removed by deleting its line.
+ */
+
 import type { Tile } from "./types.ts";
 
 import { labsCi, loomCi } from "./tiles/main-build.ts";
@@ -18,6 +21,8 @@ import { dau } from "./tiles/dau.ts";
 import { githubMembers } from "./tiles/github-members.ts";
 import { recentRuns } from "./tiles/recent-runs.ts";
 
+// Order controls placement: a normal tile takes the next slot in the grid, and
+// a wide tile renders full-width below the grid, in this same order.
 export const TILES: Tile[] = [
   // Row 1: labs CI family + benchmark
   labsCi,

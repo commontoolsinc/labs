@@ -1,5 +1,5 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
@@ -7,13 +7,18 @@ import {
   isPatternToolValue,
 } from "./callables.ts";
 import {
+  buildFsProjection,
   buildJsonTree,
   buildJsonTreeAsync,
   buildPendingJsonTreeAsync,
+  type FsValue,
   isHandlerCell,
   isSigilLink,
   isStreamValue,
+  MAX_DEPTH_MARKER,
+  MAX_JSON_DEPTH,
   safeStringify,
+  stringifyEntryValue,
   transformStreamValues,
 } from "./tree-builder.ts";
 import { CellBridge } from "./cell-bridge.ts";
@@ -395,6 +400,180 @@ Deno.test("safeStringify - preserves shared DAG objects", () => {
     a: { leaf: "same" },
     b: { leaf: "same" },
   });
+});
+
+/** A chain of `depth` nested objects, each under the key `next`. */
+function nestedChain(depth: number): Record<string, unknown> {
+  let value: Record<string, unknown> = { leaf: "bottom" };
+  for (let i = 0; i < depth; i++) value = { next: value };
+  return value;
+}
+
+/** How many levels of `next` the parsed chain spells out, and what ends it. */
+function chainDepth(value: unknown): { depth: number; tail: unknown } {
+  let depth = 0;
+  let cursor = value;
+  while (cursor !== null && typeof cursor === "object") {
+    const next = (cursor as Record<string, unknown>).next;
+    if (next === undefined) break;
+    depth++;
+    cursor = next;
+  }
+  return { depth, tail: cursor };
+}
+
+Deno.test("safeStringify - a circular edge at the depth bound reads as circular", () => {
+  // Objects at nesting levels 0 to the bound, the deepest pointing at the
+  // root, so the back edge falls exactly where the depth bound would bite.
+  const nodes: Record<string, unknown>[] = [];
+  for (let level = 0; level < MAX_JSON_DEPTH; level++) nodes.push({});
+  for (let level = 0; level < MAX_JSON_DEPTH - 1; level++) {
+    nodes[level].next = nodes[level + 1];
+  }
+  nodes[MAX_JSON_DEPTH - 1].next = nodes[0];
+
+  // Circular, not out of depth: nothing lies below the back edge that a
+  // deeper bound would have shown.
+  assertEquals(chainDepth(JSON.parse(safeStringify(nodes[0]))), {
+    depth: MAX_JSON_DEPTH,
+    tail: "[Circular]",
+  });
+});
+
+Deno.test("safeStringify - spells out nesting up to the depth bound", () => {
+  const shallow = JSON.parse(safeStringify(nestedChain(MAX_JSON_DEPTH - 2)));
+  assertEquals(chainDepth(shallow), {
+    depth: MAX_JSON_DEPTH - 2,
+    tail: { leaf: "bottom" },
+  });
+});
+
+Deno.test("safeStringify - marks values nested below the depth bound", () => {
+  const deep = JSON.parse(safeStringify(nestedChain(MAX_JSON_DEPTH * 4)));
+  assertEquals(chainDepth(deep), {
+    depth: MAX_JSON_DEPTH,
+    tail: MAX_DEPTH_MARKER,
+  });
+});
+
+Deno.test("safeStringify - survives nesting deeper than the call stack", () => {
+  // A serializer that recurses per level overflows well before this depth.
+  const result = JSON.parse(safeStringify(nestedChain(100_000)));
+  assertEquals(chainDepth(result).tail, MAX_DEPTH_MARKER);
+});
+
+Deno.test("safeStringify - bounds depth per value, not across siblings", () => {
+  const wide = { a: nestedChain(4), b: nestedChain(4) };
+  const result = JSON.parse(safeStringify(wide)) as Record<string, unknown>;
+  assertEquals(chainDepth(result.a).tail, { leaf: "bottom" });
+  assertEquals(chainDepth(result.b).tail, { leaf: "bottom" });
+});
+
+Deno.test("buildJsonTree - projects nesting deeper than the call stack", () => {
+  const depth = MAX_JSON_DEPTH * 8;
+  const tree = new FsTree();
+  buildJsonTree(tree, tree.rootIno, "deep", nestedChain(depth));
+
+  // Every level keeps its directory entry, so the leaf the root's `.json`
+  // sibling elides is still reachable through the directory tree.
+  let ino = tree.lookup(tree.rootIno, "deep")!;
+  for (let level = 0; level < depth; level++) {
+    const next = tree.lookup(ino, "next");
+    assertEquals(next !== undefined, true, `level ${level} is missing`);
+    ino = next!;
+  }
+  assertEquals(getFileContent(tree, ino, "leaf"), "bottom");
+
+  // A `.json` sibling far enough down the chain spells out what the root's
+  // elided, so the bound hides no data.
+  assertEquals(
+    chainDepth(JSON.parse(getFileContent(tree, tree.rootIno, "deep.json")))
+      .tail,
+    MAX_DEPTH_MARKER,
+  );
+  const parentIno = tree.parents.get(ino)!;
+  assertEquals(
+    JSON.parse(getFileContent(tree, parentIno, "next.json")),
+    { leaf: "bottom" },
+  );
+});
+
+Deno.test("buildFsProjection - application/json writes index.json", () => {
+  const tree = new FsTree();
+  const fsValue: FsValue = {
+    type: "application/json",
+    content: { title: "My Todos", count: 3 },
+  };
+
+  const ino = buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(tree.lookup(tree.rootIno, "index.json"), ino);
+  const node = tree.getNode(ino);
+  assertEquals(node?.kind === "file" ? node.jsonType : undefined, "object");
+  // `entityId` leads, so a reader sees which entity the projection came from.
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.json")),
+    { entityId: "of:entity-1", title: "My Todos", count: 3 },
+  );
+});
+
+Deno.test("buildFsProjection - a pattern cannot overwrite entityId", () => {
+  const tree = new FsTree();
+  const fsValue = {
+    type: "application/json",
+    content: { entityId: "of:forged", title: "My Todos" },
+  } as FsValue;
+
+  buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.json")),
+    { entityId: "of:entity-1", title: "My Todos" },
+  );
+});
+
+Deno.test("buildFsProjection - an unknown type falls back to index.txt", () => {
+  const tree = new FsTree();
+  const fsValue = { type: "text/csv", content: "a,b" } as unknown as FsValue;
+
+  const ino = buildFsProjection(tree, tree.rootIno, fsValue, "of:entity-1");
+
+  assertEquals(tree.lookup(tree.rootIno, "index.txt"), ino);
+  assertEquals(tree.lookup(tree.rootIno, "index.json"), undefined);
+  assertEquals(tree.lookup(tree.rootIno, "index.md"), undefined);
+  assertEquals(
+    JSON.parse(getFileContent(tree, tree.rootIno, "index.txt")),
+    { type: "text/csv", content: "a,b" },
+  );
+});
+
+Deno.test("buildFsProjection - names the failing entry when a value cannot serialize", () => {
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.rootIno, "todo-app");
+  const fsValue = {
+    type: "application/json",
+    content: { count: 1n },
+  } as unknown as FsValue;
+
+  assertThrows(
+    () => buildFsProjection(tree, piece, fsValue, "of:entity-1"),
+    Error,
+    "/todo-app/index.json",
+  );
+});
+
+Deno.test("stringifyEntryValue - names the failing entry's mounted path", () => {
+  const tree = new FsTree();
+  const space = tree.addDir(tree.rootIno, "did:key:zSpace");
+  const pieces = tree.addDir(space, "pieces");
+  const piece = tree.addDir(pieces, "todo-app");
+
+  const error = assertThrows(
+    () => stringifyEntryValue(tree, piece, "result.json", { count: 1n }),
+    Error,
+    "/did:key:zSpace/pieces/todo-app/result.json",
+  );
+  assertEquals((error as Error).cause instanceof TypeError, true);
 });
 
 Deno.test("FsTree - addSymlink", () => {
@@ -1516,5 +1695,46 @@ Deno.test("makeLinkResolver leaves malformed link paths inert", () => {
       },
     }, 0),
     null,
+  );
+});
+
+Deno.test("a failure during a rebuild names where the entry mounts", async () => {
+  // A rebuild of a prop that already exists assembles under a staging root and
+  // reconciles onto the live tree afterwards. The staging name is internal and
+  // never appears in the mount, so the failure names the live path instead.
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.addDir(tree.rootIno, "pieces"), "todo-app");
+  const unserializable = { items: [{ count: 1n }] };
+
+  const rebuild = await assertRejects(
+    () => buildPendingJsonTreeAsync(tree, piece, "result", unserializable),
+    Error,
+    "/pieces/todo-app/result.json",
+  );
+  assertEquals(rebuild.message.includes(".result.pending"), false);
+
+  const firstHydration = await assertRejects(
+    () => buildJsonTreeAsync(tree, piece, "result", unserializable),
+    Error,
+  );
+  // Both routes reach the same mounted file, so both name the same path.
+  assertEquals(firstHydration.message, rebuild.message);
+});
+
+Deno.test("a failure under the [FS] staging container names the piece entry", () => {
+  const tree = new FsTree();
+  const piece = tree.addDir(tree.addDir(tree.rootIno, "pieces"), "todo-app");
+  const stage = tree.addDir(piece, ".fs.pending");
+  const fsValue = {
+    type: "application/json",
+    content: { count: 1n },
+  } as unknown as FsValue;
+
+  // The staging container's children land on the piece directory itself, so
+  // the container drops out of the path rather than being renamed.
+  assertThrows(
+    () => buildFsProjection(tree, stage, fsValue, "of:entity-1"),
+    Error,
+    "/pieces/todo-app/index.json",
   );
 });

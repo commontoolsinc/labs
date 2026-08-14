@@ -1,3 +1,21 @@
+/**
+ * Asking whether a value is deep-frozen, and making it so, across the shapes
+ * that complicate both.
+ *
+ * Caching is the part with teeth. An answer is remembered by identity, so a
+ * wrong `true` is not one mistake but a permanent one, and several cases exist
+ * to pin when a result may be cached and when it may not. One is kept as a
+ * regression pin against a cycle that was once answered wrongly.
+ *
+ * The stricter of the two checks also asks whether the value is a
+ * `FabricValue` at all, so an accessor-backed property, a symbol key, or an
+ * array whose structure is inadmissible makes it answer `false` where a plain
+ * frozen-ness test would have said `true`.
+ *
+ * A fabric instance is reached through its own protocol member rather than by
+ * enumeration, and a primitive short-circuits ahead of all of it.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/gmail-importer.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import GmailImporter, { type Auth } from "./gmail-importer.tsx";
 import { hasText } from "../../test/vnode-helpers.ts";
 
@@ -107,7 +107,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state checks ===
       { assertion: assert_emails_empty },
       { assertion: assert_count_zero },

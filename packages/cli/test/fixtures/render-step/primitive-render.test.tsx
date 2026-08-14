@@ -1,11 +1,11 @@
-import { computed, pattern } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 
 export default pattern(() => ({
-  tests: [
+  [TESTS]: [
     { render: null },
     { render: "text" },
     { render: 1 },
     { render: true },
-    { assertion: computed(() => true) },
+    { assertion: assert(() => true) },
   ],
 }));

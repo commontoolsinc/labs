@@ -1,9 +1,11 @@
-// `setBGPiece()` against a real `Runtime`, because the thing worth testing is
-// transactional: registering the same (`space`, `pieceId`) pair twice must land
-// on one entry. The fakes in `service-modules.test.ts` cannot show that -- their
-// `withTx()` is the identity function and their `editWithRetry()` calls its
-// callback once and never conflicts -- so they exercise the shape of the calls
-// without their semantics.
+/**
+ * `setBGPiece()` against a real `Runtime`, because the thing worth testing is
+ * transactional: registering the same (`space`, `pieceId`) pair twice must land
+ * on one entry. The fakes in `service-modules.test.ts` cannot show that -- their
+ * `withTx()` is the identity function and their `editWithRetry()` calls its
+ * callback once and never conflicts -- so they exercise the shape of the calls
+ * without their semantics.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertEquals, assertRejects } from "@std/assert";

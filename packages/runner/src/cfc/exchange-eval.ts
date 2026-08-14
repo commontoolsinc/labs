@@ -8,7 +8,7 @@ import {
   matchAtomPattern,
   matchAtomPatternAgainstAtoms,
 } from "./atom-pattern.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   CFC_ATOM_TYPE,
   type CfcAtom,
@@ -264,7 +264,7 @@ const policyRefHomeClauses = (
   if (record.digest.length === 0) return homes;
   for (let index = 0; index < confidentiality.length; index++) {
     for (const alternative of clauseAlternatives(confidentiality[index])) {
-      if (!isRecord(alternative) || Array.isArray(alternative)) continue;
+      if (!isObjectNotArray(alternative)) continue;
       const atom = alternative as {
         type?: unknown;
         name?: unknown;
@@ -309,7 +309,7 @@ const isModulePolicyCandidate = (value: Record<string, unknown>): boolean =>
 const isExactModulePolicyRef = (
   value: unknown,
 ): value is CfcModulePolicyRefAtom => {
-  if (!isRecord(value) || Array.isArray(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   if (
     value.type !== CFC_ATOM_TYPE.Policy || value.policyRefKind !== "module" ||
     typeof value.moduleIdentity !== "string" ||
@@ -336,7 +336,7 @@ const collectSelectedModulePolicyRefs = (
   const failures: ModulePolicyResolutionFailure[] = [];
   for (const clause of confidentiality) {
     for (const alternative of clauseAlternatives(clause)) {
-      if (!isRecord(alternative) || Array.isArray(alternative)) continue;
+      if (!isObjectNotArray(alternative)) continue;
       if (
         alternative.type !== CFC_ATOM_TYPE.Policy &&
         alternative.type !== CFC_ATOM_TYPE.Context
@@ -387,11 +387,11 @@ const modulePolicyRefHomeClauses = (
 };
 
 const isThisPolicyPattern = (value: unknown): boolean =>
-  isRecord(value) && Object.keys(value).length === 1 &&
+  isObjectOrArray(value) && Object.keys(value).length === 1 &&
   value.thisPolicy === true;
 
 const isThisPolicySubjectPattern = (value: unknown): boolean =>
-  isRecord(value) && Object.keys(value).length === 1 &&
+  isObjectOrArray(value) && Object.keys(value).length === 1 &&
   value.thisPolicyField === "subject";
 
 const bindThisPolicy = (
@@ -403,7 +403,7 @@ const bindThisPolicy = (
   if (Array.isArray(value)) {
     return value.map((entry) => bindThisPolicy(entry, reference));
   }
-  if (!isRecord(value)) return value;
+  if (!isObjectOrArray(value)) return value;
   return Object.fromEntries(
     Object.entries(value).map(([key, field]) => [
       key,
@@ -492,7 +492,7 @@ const grantGuardQuery = (
   consumption: CfcGrantConsumptionContext,
 ): CfcGrantResolverQuery | undefined => {
   if (
-    !isRecord(pattern) || Array.isArray(pattern) ||
+    !isObjectNotArray(pattern) ||
     isAtomVarPlaceholder(pattern)
   ) {
     return undefined;

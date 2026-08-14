@@ -1,10 +1,24 @@
+/**
+ * Freezing a value all the way down, and asking whether it already is.
+ *
+ * Both walks are memoized in a `WeakSet`, which is what makes the ordinary
+ * case cheap: a value frozen once answers in constant time ever after, and a
+ * primitive never needs asking at all. Those answers are given before any
+ * per-walk state is allocated, so the cheap path costs nothing.
+ *
+ * A fabric instance keeps its contents private, so neither walk can descend
+ * into one directly. Each calls the instance's own protocol member and passes
+ * recursion back in, which is what keeps the cycle tracking and the cache
+ * shared across that boundary instead of restarting inside it.
+ */
+
 import type { FabricValue } from "./interface.ts";
 import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
-} from "./fabric-instances/BaseFabricInstance.ts";
-import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
+} from "./codec-common/BaseFabricInstance.ts";
+import { BaseFabricPrimitive } from "./codec-common/BaseFabricPrimitive.ts";
 import { isFabricValue } from "./type-check.ts";
 
 /** Cache of confirmed deep-frozen objects. */

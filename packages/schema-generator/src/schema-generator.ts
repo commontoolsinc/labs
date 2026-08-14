@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type {
   MutableJSONSchema,
@@ -596,10 +596,12 @@ export class SchemaGenerator {
     if (typeof schema !== "object") return schema;
 
     const docInfo = extractDocFromType(type, context.typeChecker);
-    if (docInfo.firstDoc && isRecord(schema) && !("description" in schema)) {
+    if (
+      docInfo.firstDoc && isObjectOrArray(schema) && !("description" in schema)
+    ) {
       (schema as Record<string, unknown>).description = docInfo.firstDoc;
     }
-    if (isRecord(schema) && typeof schema.description === "string") {
+    if (isObjectOrArray(schema) && typeof schema.description === "string") {
       attachDocTags(schema as Record<string, unknown>, schema.description);
     }
     return schema;

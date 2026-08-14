@@ -1,3 +1,14 @@
+/**
+ * What `isInertPlainObject()` accepts, and the accepting cases are the
+ * surprising ones. A frozen object qualifies, and so does a key whose value is
+ * `undefined` and one whose name is index-shaped -- none of those disturbs the
+ * property that the predicate is actually about.
+ *
+ * Inertness is about how the properties are defined rather than what they
+ * hold, which is the distinction a caller has to get right before trusting the
+ * answer to bound anything.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isInertPlainObject } from "@commonfabric/utils/objects";

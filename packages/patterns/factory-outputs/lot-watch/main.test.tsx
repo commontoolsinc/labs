@@ -22,7 +22,7 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, assert, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 import LotWatch from "./main.tsx";
 import type { KnownVehicle, PlateGroup, Sighting } from "./main.tsx";
 import { classifyPlate, plateKey } from "./main.tsx";
@@ -769,7 +769,7 @@ export default pattern(() => {
   // Test sequence
   // ============================================================
   return {
-    tests: [
+    [TESTS]: [
       // S1: Capture — plate normalization
       { assertion: assert_s1_empty },
       { action: action_s1_capture_lowercase_plate },

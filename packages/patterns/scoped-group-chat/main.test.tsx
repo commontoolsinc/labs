@@ -1,4 +1,4 @@
-import { action, assert, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 import ScopedGroupChat, {
   type Conversation,
   type SelectedRoom,
@@ -51,7 +51,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_scoped_fields },
       { action: action_add_new_room },
       { assertion: assert_added_room_is_selected },

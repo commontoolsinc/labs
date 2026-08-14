@@ -92,9 +92,6 @@ function unquoteIdent(raw: string): string {
   return raw.trim().replace(/^["'`[]|["'`\]]$/g, "");
 }
 
-/** The single target table of a write (`INSERT INTO t`, `UPDATE t`,
- *  `DELETE FROM t`), unquoted; undefined if it can't be confidently extracted
- *  (e.g. a schema-qualified or unusual form). Used to resolve a column's `ifc`. */
 /** Blank string literals/comments so the structural parsers can't be fooled by
  *  `?`/keywords/commas inside them. Exposed so a caller parsing the SAME SQL for
  *  both table and param-columns can blank once and pass it to both. */
@@ -102,6 +99,9 @@ export function blankWriteSql(sql: string): string {
   return blankStringsAndComments(sql);
 }
 
+/** The single target table of a write (`INSERT INTO t`, `UPDATE t`,
+ *  `DELETE FROM t`), unquoted; undefined if it can't be confidently extracted
+ *  (e.g. a schema-qualified or unusual form). Used to resolve a column's `ifc`. */
 export function parseWriteTable(
   sql: string,
   blanked: string = blankStringsAndComments(sql),

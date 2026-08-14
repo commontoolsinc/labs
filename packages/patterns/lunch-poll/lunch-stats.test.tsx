@@ -15,7 +15,7 @@
  *   - pre-yellow query had no `yellows` field at all (=> undefined !== 1)
  */
 
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import CozyPoll from "./main.tsx";
 
 export default pattern(() => {
@@ -57,7 +57,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { action: join },
       { action: add_thai },
       { action: add_chipotle },

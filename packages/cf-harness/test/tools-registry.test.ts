@@ -22,8 +22,9 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "edit_file",
     "write_file",
     "delegate_task",
+    "run_pattern",
   ]);
-  assertEquals(BUILTIN_TOOL_REGISTRY.size, 10);
+  assertEquals(BUILTIN_TOOL_REGISTRY.size, 11);
   assertEquals(
     [...DEFAULT_PARENT_TOOL_IDS],
     [

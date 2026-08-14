@@ -33,6 +33,129 @@ about one aspect of the runtime, are indexed in
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
 
+### Classes
+
+- Use JavaScript `#privateName` fields and methods rather than TypeScript's
+  `private` modifier. `protected` has no such counterpart, and stays a
+  TypeScript modifier.
+- A class exposes no enumerable properties, instance or static. Hold the
+  value in a `#privateName` field and expose a getter, and a setter when the
+  value is meant to be settable. This holds for a constructor parameter
+  property too, which is a field declaration in disguise. Depart from it only
+  for a strong and compelling reason. A module-internal class — one its module
+  does not export, whose instances therefore never reach a stranger — is
+  exempt: the confusion the rule prevents is between an instance and a plain
+  object, and there is no one there to be confused. Two things follow from
+  it:
+  - An instance stops looking like a plain object. Enumerating one, spreading
+    it, or serializing it yields nothing, so code that mistakes an instance
+    for data fails where it stands instead of quietly half-working. A `#`
+    field is not an own property at all, whereas a field declared `private` or
+    `protected` is: those modifiers are erased, and the property they describe
+    is as enumerable as any other.
+  - A whole class of bug becomes unreachable rather than merely discouraged. A
+    `readonly` field is only a compile-time promise, so a cast can strip it and
+    write through; a getter with no setter refuses the write at runtime.
+- The default order of items within a class is:
+  1. The exposed instance properties, which an exempt class is the only kind
+     to have, ordered from least to most protection: public, then protected.
+     A constructor parameter property is not one of these; it stays in the
+     constructor.
+  2. Private instance variables.
+  3. The constructor.
+  4. The abstract members, public and protected alike.
+  5. The remaining instance members, ordered from most to least access: public,
+     then protected, then private. Getters and setters come before methods.
+  6. The exposed static properties, ordered as the exposed instance properties
+     are.
+  7. Private static variables.
+  8. The remaining static members, ordered as the instance members are.
+- Three of those groups take a
+  [section marker](code-comment-style.md#section-markers), when the class has
+  meaningful sections to delineate or is large enough for one to earn its
+  keep: `Subclass contract` ahead of the abstract members, `Instance members`
+  ahead of the remaining instance members, and `Static members` ahead of the
+  exposed static properties.
+- Depart from that order when there is a compelling reason to, not by default.
+
+A class with every group filled, in order:
+
+```ts
+// Shown at module scope.
+
+/**
+ * Fryer of donuts. Being module-internal is what lets this one expose
+ * properties directly; an exported class holds them in `#` fields behind
+ * accessors.
+ */
+abstract class Fryer {
+  /** How many batches have been fried. */
+  batches = 0;
+
+  /** Oil temperature, which subclasses consult. */
+  protected temperature = 190;
+
+  #basket: string[];
+
+  /** Constructs an instance which fries the contents of `basket`. */
+  constructor(basket: string[]) {
+    this.#basket = basket;
+  }
+
+  //
+  // Subclass contract
+  //
+
+  /** Fries one item, however this fryer does it. */
+  abstract fry(item: string): string;
+
+  /** Drains the oil, however this fryer does it. */
+  protected abstract drain(): void;
+
+  //
+  // Instance members
+  //
+
+  /** What is waiting to be fried. */
+  get basket(): readonly string[] {
+    return this.#basket;
+  }
+
+  /** Fries everything waiting, and empties the basket. */
+  fryAll(): string[] {
+    const result = this.#basket.map((item) => this.fry(item));
+    this.#empty();
+    this.batches++;
+    return result;
+  }
+
+  /** Reports the oil temperature, for a subclass's diagnostics. */
+  protected report(): string {
+    return `${this.temperature}C`;
+  }
+
+  /** Helper for `fryAll()`, which drains the oil and clears the basket. */
+  #empty(): void {
+    this.drain();
+    this.#basket = [];
+  }
+
+  //
+  // Static members
+  //
+
+  /** Temperature a fryer runs at unless told otherwise. */
+  static defaultTemperature = 190;
+
+  static #built = 0;
+
+  /** How many fryers have been built. */
+  static get built(): number {
+    return Fryer.#built;
+  }
+}
+```
+
 ### Comments
 
 - Comments explain **why**, not what, and describe the system as it stands.
@@ -156,12 +279,12 @@ validated types.
 
 ```ts
 class Data {
-  private inner: any;
+  #inner: any;
   constructor(inner: any) {
-    this.inner = inner;
+    this.#inner = inner;
   }
   process() {
-    // if (typeof this.inner === "object")
+    // if (typeof this.#inner === "object")
   }
 }
 
@@ -349,12 +472,12 @@ In both cases, we can maintain multiple caches, or instances of cache consumers.
 
 ```ts
 export class Cache {
-  private map: Map<string, string> = new Map();
+  #map: Map<string, string> = new Map();
   get(key: string): string | undefined {
-    return this.map.get(key);
+    return this.#map.get(key);
   }
   set(key: string, value: string) {
-    this.map.set(key, value);
+    this.#map.set(key, value);
   }
 }
 ```

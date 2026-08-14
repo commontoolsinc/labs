@@ -18,7 +18,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   IMemoryAddress,
   ITypeMismatchError,
@@ -47,7 +47,7 @@ export type MutablePathWriteOptions = {
 export const isContainerValue = (
   value: FabricValue | undefined,
 ): value is Record<string, FabricValue> | FabricValue[] =>
-  Array.isArray(value) || isRecord(value);
+  Array.isArray(value) || isObjectOrArray(value);
 
 export const getValueTypeName = (value: FabricValue | undefined): string => {
   if (value === null) {

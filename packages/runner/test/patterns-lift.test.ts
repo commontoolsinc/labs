@@ -165,9 +165,17 @@ describe("Pattern Runner - Lift", () => {
 
     value = await result.pull();
 
+    // `multiplyGenerator` FORWARDS `args` into `multiply(args)` without ever
+    // reading through it, so under lazy materialization it takes no dependency
+    // on the values inside and does not re-run when `x` changes. That is the
+    // point of the mode, and it is safe here because what forwarding passes is
+    // a LINK: the inner `multiply` node re-reads through it and re-runs, which
+    // is why `multiply` still counts 4 and the result below is still 9.
+    // `multiplyGenerator2` destructures `{ x, y }`, so it reads both and keeps
+    // its dependency in either mode.
     expect(runCounts).toMatchObject({
       multiply: 4,
-      multiplyGenerator: 2,
+      multiplyGenerator: runtime.experimental.lazyMaterialization ? 1 : 2,
       multiplyGenerator2: 2,
     });
 

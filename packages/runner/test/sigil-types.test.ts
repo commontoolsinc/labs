@@ -1,3 +1,16 @@
+/**
+ * `assertWebhookCellLinkRefPayload()` guards a cell-link payload arriving from
+ * outside the runtime, so what it refuses carries more weight here than what
+ * it accepts.
+ *
+ * Every field is optional, which makes the empty payload valid and means the
+ * assertion cannot lean on presence at all. What it does instead is refuse
+ * anything unrecognized -- an extra field is how a schema would ride in
+ * alongside an addressing payload -- and refuse a malformed value in any field
+ * it does know, since an assertion that admits a bad `scope` hands its caller
+ * a type that lies.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertWebhookCellLinkRefPayload } from "../src/sigil-types.ts";

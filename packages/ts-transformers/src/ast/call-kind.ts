@@ -403,6 +403,35 @@ export function getPatternToolHoistablePatternCall(
   return patternCall;
 }
 
+/** The verb builders, and the type-argument slot each names its result in. */
+const VERB_RESULT_TYPE_ARG_SLOT = {
+  action: 1,
+  handler: 2,
+} as const;
+
+/** A builder whose call may declare a verb result. */
+export type VerbBuilderName = keyof typeof VERB_RESULT_TYPE_ARG_SLOT;
+
+/**
+ * The type node naming a verb's declared result, or undefined when the verb
+ * declares none.
+ *
+ * A result is opt-in by explicit type argument — `action<Event, Result>` /
+ * `handler<Event, State, Result>` (api `ActionFunction` / `HandlerFunction`) —
+ * and never inferred: the `=> any` overloads absorb every callback first, so a
+ * concise arrow body whose completion value happens to be a cell declares
+ * nothing. An absent type-argument list, a short one, and an explicit `void`
+ * all name the value-less verb.
+ */
+export function declaredVerbResultTypeNode(
+  call: ts.CallExpression,
+  builderName: VerbBuilderName,
+): ts.TypeNode | undefined {
+  const typeArg = call.typeArguments?.[VERB_RESULT_TYPE_ARG_SLOT[builderName]];
+  if (!typeArg) return undefined;
+  return typeArg.kind === ts.SyntaxKind.VoidKeyword ? undefined : typeArg;
+}
+
 export function getCapabilitySummaryCallbackArgument(
   call: ts.CallExpression,
   checker: ts.TypeChecker,

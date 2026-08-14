@@ -7,10 +7,12 @@ import {
   assertThrows,
 } from "@std/assert";
 import {
+  acceptsCoverageDebt,
   aggregateCacheStates,
-  applyBaselineOverrides,
   type Artifact,
+  type BaselineSample,
   buildCoverageDebtSuggestionComment,
+  buildCoverageDebtUnattributedComment,
   buildCoverageResolvedComment,
   type CompileCacheStates,
   COVERAGE_BASELINE_RESET_MARKER,
@@ -20,70 +22,110 @@ import {
   downloadAndExtractArtifact,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
+  fetchIssueComments,
   fetchPRBody,
   fetchPRFiles,
   formatOverrideSuggestion,
   githubGet,
   githubPatch,
   githubPost,
-  latestNonColdSample,
   newestArtifactsByName,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
-  parseCoverageBaseline,
   parseCoverageBaselineDetailed,
+  REPO,
   serializeCoverageBaseline,
   shouldGateCoverageDebtMetric,
-  type TimingSample,
 } from "./ci-check-lib.ts";
 
 Deno.test("coverage baseline files round-trip stable metric samples", () => {
-  const metrics = new Map([
-    [
-      "step: Type check",
-      {
-        runId: 123,
-        runUrl: "https://example.test/run/123",
-        sha: "abc123",
-        createdAt: "2026-01-01T00:00:00Z",
-        durationSeconds: 42.5,
-      },
-    ],
-    [
-      "job: Check",
-      {
-        runId: 123,
-        runUrl: "https://example.test/run/123",
-        sha: "abc123",
-        createdAt: "2026-01-01T00:00:00Z",
-        durationSeconds: 60,
-      },
-    ],
+  const metrics = new Map<string, BaselineSample>([
+    ["coverage-debt: packages/runner uncovered lines", {
+      runId: 123,
+      sha: "abc123",
+      createdAt: "2026-01-01T00:00:00Z",
+      uncoveredLines: 42,
+    }],
+    ["coverage-debt: packages/memory uncovered lines", {
+      runId: 123,
+      sha: "abc123",
+      createdAt: "2026-01-01T00:00:00Z",
+      uncoveredLines: 60,
+    }],
   ]);
 
   const serialized = serializeCoverageBaseline(metrics);
   assertEquals(
     serialized.metrics.map((metric) => metric.name),
-    ["job: Check", "step: Type check"],
+    [
+      "coverage-debt: packages/memory uncovered lines",
+      "coverage-debt: packages/runner uncovered lines",
+    ],
+  );
+
+  // The file keeps the keys it has always carried, so a run whose checkout
+  // predates the in-memory rename still reads a file this run writes.
+  assertEquals(serialized.metrics[0].durationSeconds, 60);
+  assertEquals(
+    serialized.metrics[0].runUrl,
+    `https://github.com/${REPO}/actions/runs/123`,
   );
 
   assertEquals(
-    parseCoverageBaseline(JSON.stringify(serialized)),
+    parseCoverageBaselineDetailed(JSON.stringify(serialized)).metrics,
     metrics,
   );
 });
 
+Deno.test("coverage baseline files read a file the performance gate wrote", () => {
+  // Written when the artifact also carried CI timing metrics: the file names
+  // the run's page, and the uncovered-line count sits under `durationSeconds`.
+  const legacy = JSON.stringify({
+    version: 1,
+    generatedAt: "2026-01-01T00:00:00Z",
+    metrics: [
+      {
+        name: "coverage-debt: packages/runner uncovered lines",
+        runId: 7,
+        runUrl: "https://example.test/run/7",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 5740,
+      },
+      {
+        name: "job: Check",
+        runId: 7,
+        runUrl: "https://example.test/run/7",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 61.5,
+      },
+    ],
+  });
+
+  const parsed = parseCoverageBaselineDetailed(legacy);
+  assertEquals(
+    parsed.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    {
+      runId: 7,
+      sha: "abc123",
+      createdAt: "2026-01-01T00:00:00Z",
+      uncoveredLines: 5740,
+    },
+  );
+  assertEquals(parsed.compileCacheStates, null);
+});
+
 Deno.test("coverage baseline files round-trip compile cache states", () => {
-  const metrics = new Map<string, TimingSample>([
+  const metrics = new Map<string, BaselineSample>([
     [
       "job: Check",
       {
         runId: 123,
-        runUrl: "https://example.test/run/123",
         sha: "abc123",
         createdAt: "2026-01-01T00:00:00Z",
-        durationSeconds: 60,
+        uncoveredLines: 60,
       },
     ],
   ]);
@@ -97,9 +139,6 @@ Deno.test("coverage baseline files round-trip compile cache states", () => {
   const detailed = parseCoverageBaselineDetailed(serialized);
   assertEquals(detailed.metrics, metrics);
   assertEquals(detailed.compileCacheStates, states);
-
-  // The tagged file stays version 1, so the legacy parser still accepts it.
-  assertEquals(parseCoverageBaseline(serialized), metrics);
 });
 
 Deno.test("parseCoverageBaselineDetailed treats legacy files as untagged", () => {
@@ -204,27 +243,6 @@ Deno.test("cache state parsing keeps valid unknown-family records inert", () => 
   });
 });
 
-Deno.test("latestNonColdSample skips trailing cold runs and falls back when all are cold", () => {
-  const sample = (runId: number): TimingSample => ({
-    runId,
-    runUrl: `https://example.test/run/${runId}`,
-    sha: `sha${runId}`,
-    createdAt: `2026-01-0${runId}T00:00:00Z`,
-    durationSeconds: runId,
-  });
-  const samples = [sample(1), sample(2), sample(3)];
-  const coldRuns = new Set([2, 3]);
-
-  assertEquals(
-    latestNonColdSample(samples, (runId) => coldRuns.has(runId))?.runId,
-    1,
-  );
-  // All-cold: fall back to the last sample so override-truncation resets
-  // still take effect.
-  assertEquals(latestNonColdSample(samples, () => true)?.runId, 3);
-  assertEquals(latestNonColdSample([], () => false), undefined);
-});
-
 Deno.test("coverage debt metrics format and parse line units", () => {
   const metric = "coverage-debt: workspace uncovered lines";
   assertEquals(formatOverrideSuggestion(12.2), "13 lines");
@@ -301,57 +319,32 @@ Deno.test("coverage baseline reset marker parses from PR body", () => {
   assertEquals(overrides.metrics.size, 0);
 });
 
-Deno.test("coverage baseline reset truncates coverage timelines only", () => {
-  const coverageMetric = "coverage-debt: workspace uncovered lines";
-  const jobMetric = "job: Check";
-  const sample = (
-    sha: string,
-    day: number,
-    durationSeconds: number,
-  ): TimingSample => ({
-    runId: day,
-    runUrl: `https://example.test/run/${day}`,
-    sha,
-    createdAt: `2026-01-0${day}T00:00:00Z`,
-    durationSeconds,
-  });
-  const oldCoverage = sample("old", 1, 9);
-  const resetCoverage = sample("reset", 2, 12);
-  const newCoverage = sample("new", 3, 10);
-  const oldJob = sample("old", 1, 20);
-  const resetJob = sample("reset", 2, 21);
-  const newJob = sample("new", 3, 22);
-  const timelines = new Map([
-    [
-      coverageMetric,
-      {
-        name: coverageMetric,
-        samples: [oldCoverage, resetCoverage, newCoverage],
-      },
-    ],
-    [
-      jobMetric,
-      { name: jobMetric, samples: [oldJob, resetJob, newJob] },
-    ],
-  ]);
-
-  applyBaselineOverrides(
-    timelines,
-    new Map([
-      [
-        "reset",
-        { metrics: new Map(), coverageBaselineReset: true },
-      ],
-    ]),
-  );
+Deno.test("a merged reset accepts coverage-debt metrics only", () => {
+  const reset = { metrics: new Map(), coverageBaselineReset: true };
 
   assertEquals(
-    timelines.get(coverageMetric)?.samples.map((s) => s.sha),
-    ["reset", "new"],
+    acceptsCoverageDebt(reset, "coverage-debt: workspace uncovered lines"),
+    true,
+  );
+  assertEquals(acceptsCoverageDebt(reset, "job: Check"), false);
+
+  const perMetric = {
+    metrics: new Map([["coverage-debt: packages/runner uncovered lines", 12]]),
+    coverageBaselineReset: false,
+  };
+  assertEquals(
+    acceptsCoverageDebt(
+      perMetric,
+      "coverage-debt: packages/runner uncovered lines",
+    ),
+    true,
   );
   assertEquals(
-    timelines.get(jobMetric)?.samples.map((s) => s.sha),
-    ["old", "reset", "new"],
+    acceptsCoverageDebt(
+      perMetric,
+      "coverage-debt: packages/memory uncovered lines",
+    ),
+    false,
   );
 });
 
@@ -681,6 +674,48 @@ Deno.test("fetchPRBody reads the live pull request body from the GitHub API", as
       requestedUrl,
       "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchIssueComments reads every page of a pull request's comments", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+  try {
+    // A full page means there may be another, so the reader asks for one more.
+    // The second page comes back short and ends the walk. The comment with a
+    // null body is what the GitHub API returns for a comment whose text was
+    // deleted, and it reads back as empty rather than as null.
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      body: `comment ${index + 1}`,
+    }));
+    const secondPage = [{ id: 101, body: null }];
+
+    globalThis.fetch = ((input, _init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      requestedUrls.push(url);
+      // Read the page from the query rather than by searching the whole URL:
+      // `per_page=100` carries `page=1` inside it.
+      const page = new URL(url).searchParams.get("page");
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(page === "1" ? firstPage : secondPage),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    const comments = await fetchIssueComments(5727);
+
+    assertEquals(comments.length, 101);
+    assertEquals(comments[0], { id: 1, body: "comment 1" });
+    assertEquals(comments[100], { id: 101, body: "" });
+    assertEquals(requestedUrls, [
+      "https://api.github.com/repos/commontoolsinc/labs/issues/5727/comments?per_page=100&page=1",
+      "https://api.github.com/repos/commontoolsinc/labs/issues/5727/comments?per_page=100&page=2",
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1027,4 +1062,69 @@ Deno.test("newestArtifactsByName keeps the latest re-run upload per name", () =>
       ["test-timing-pattern-unit-4", 200],
     ],
   );
+});
+
+Deno.test("buildCoverageDebtUnattributedComment names the lines and how to skip the check", () => {
+  const comment = buildCoverageDebtUnattributedComment({
+    groups: [{ group: "packages/runner", target: 4612, current: 4614 }],
+    files: [
+      {
+        relativePath: "packages/runner/src/scheduler/diagnosis.ts",
+        lines: [333, 334],
+      },
+    ],
+  });
+
+  // Same marker as the other coverage comments, so the poster keeps updating
+  // the one comment rather than adding a second.
+  assertStringIncludes(comment, COVERAGE_SUGGESTION_MARKER);
+  assertStringIncludes(
+    comment,
+    "<summary><h3>🕵🏻‍♀️ Test coverage regressed by 2 lines</h3></summary>",
+  );
+  assertStringIncludes(comment, "not introduced by this PR");
+  assertStringIncludes(comment, "inconsistently covered");
+  assertStringIncludes(comment, "The following lines are affected:");
+  assertStringIncludes(
+    comment,
+    "`packages/runner/src/scheduler/diagnosis.ts`: 333, 334",
+  );
+  // The line to paste into the description, with the count this PR measured.
+  assertStringIncludes(
+    comment,
+    "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 4614 lines",
+  );
+  // The agent prompt is about the flapping lines, not about this PR.
+  assertStringIncludes(comment, "### Prompt for an AI coding agent");
+  assertStringIncludes(comment, "covered on some runs");
+  assertStringIncludes(
+    comment,
+    "  packages/runner/src/scheduler/diagnosis.ts: 333, 334",
+  );
+  assertStringIncludes(comment, "docs/development/COVERAGE.md");
+  // Repetition is not offered as evidence: the prompt asks for the new test to
+  // be measured on its own instead.
+  assertStringIncludes(comment, "Do not try to establish that a line is fixed");
+  assertStringIncludes(comment, "deno coverage --lcov coverage/raw/line-check");
+  assertStringIncludes(comment, "DA:<line>,<hits>");
+  assertFalse(comment.includes("twice from a clean profile directory"));
+  // None of the "this PR adds uncovered lines" copy survives.
+  assertFalse(comment.includes("This PR adds source lines"));
+  assertFalse(comment.includes("Could not tie the regression"));
+});
+
+Deno.test("buildCoverageDebtUnattributedComment counts files and lines past the cap", () => {
+  const comment = buildCoverageDebtUnattributedComment({
+    groups: [{ group: "tasks", target: 0, current: 40 }],
+    files: Array.from({ length: 25 }, (_, index) => ({
+      relativePath: `tasks/file-${String(index).padStart(2, "0")}.ts`,
+      lines: Array.from({ length: 30 }, (_, line) => line + 1),
+    })),
+  });
+
+  // 20 files listed, 5 counted; 20 lines listed per file, 10 counted.
+  assertStringIncludes(comment, "`tasks/file-19.ts`");
+  assertFalse(comment.includes("`tasks/file-20.ts`"));
+  assertStringIncludes(comment, "…and 5 more file(s)._");
+  assertStringIncludes(comment, "…and 10 more");
 });

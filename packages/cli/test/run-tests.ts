@@ -14,11 +14,10 @@ const PERMISSIONS = [
 // `deno task check` (tasks/check.sh), so the test run skips it.
 const BASE_FLAGS = ["--no-check"];
 
-// Optional sharding for CI fan-out: CLI_TEST_SHARD="i/n" (1-based) runs only
-// the test files where (sorted index % n) == (i - 1), so the CLI suite spreads
-// across several workspace test shards instead of all landing in one. Mirrors
-// PATTERN_INTEGRATION_SHARD in packages/patterns/integration/all.test.ts.
-// Unset (local dev) runs every test file.
+// Optional sharding for CI fan-out. CLI_TEST_SHARD uses the same one-based
+// "i/n" syntax as PATTERN_INTEGRATION_SHARD. Ordinary files advance through
+// the shards in sorted order, starting with the second shard and wrapping after
+// the last. An unset variable runs every test file for local development.
 function parseCliTestShard(): { index: number; count: number } {
   const raw = Deno.env.get("CLI_TEST_SHARD");
   if (!raw) return { index: 0, count: 1 };
@@ -54,7 +53,16 @@ const SERIAL_TESTS = [
   "test/runtime-creation.test.ts",
   "test/test-runner-compile-byte-cache.test.ts",
   "test/test-runner-pattern-coverage.test.ts",
-  "test/view-commitmsg.test.ts",
+  "test/view-commitmsg-01.test.ts",
+  "test/view-commitmsg-02.test.ts",
+  "test/view-commitmsg-03.test.ts",
+  "test/view-commitmsg-04.test.ts",
+  "test/view-commitmsg-05.test.ts",
+  "test/view-commitmsg-06.test.ts",
+  "test/view-commitmsg-07.test.ts",
+  "test/view-commitmsg-08.test.ts",
+  "test/view-commitmsg-09.test.ts",
+  "test/view-commitmsg-10.test.ts",
   "test/view-mod-gate.test.ts",
   "test/view-pager-pty.test.ts",
   "test/wish-command.test.ts",
@@ -155,7 +163,9 @@ if (missingIntegrationTests.length > 0) {
 const unitTests = allTests.filter((test) => !integration.has(test));
 
 const shard = parseCliTestShard();
-const tests = unitTests.filter((_, i) => i % shard.count === shard.index);
+const tests = unitTests.filter((_, index) =>
+  (index + 1) % shard.count === shard.index
+);
 
 const parallelTests = tests.filter((test) =>
   !serial.has(test) && !allAccess.has(test)

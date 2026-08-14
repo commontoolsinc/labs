@@ -1,3 +1,12 @@
+/**
+ * A `FabricPrimitive` (byte sequence, temporal value, hash, ...) is an
+ * immutable leaf. The query-result proxy must hand it back raw rather than
+ * wrapping it in a live proxy: a wrapped primitive leaks the proxy into any
+ * consumer that deep-clones or freezes the surrounding value -- notably schema
+ * interning, which deep-freezes its argument and trips the proxy's
+ * structural-mutation guard.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -11,12 +20,6 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test proxy fabric primitive");
 const space = signer.did();
 
-// A `FabricPrimitive` (byte sequence, temporal value, hash, ...) is an
-// immutable leaf. The query-result proxy must hand it back raw rather than
-// wrapping it in a live proxy: a wrapped primitive leaks the proxy into any
-// consumer that deep-clones or freezes the surrounding value -- notably schema
-// interning, which deep-freezes its argument and trips the proxy's
-// structural-mutation guard.
 describe("query-result proxy: FabricPrimitive leaves are not proxy-wrapped", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

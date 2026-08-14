@@ -1,6 +1,6 @@
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type { FabricValue } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export type ReadPathOptions = {
   allowArrayLength?: boolean;
@@ -45,7 +45,7 @@ export const hasValueAtPath = (
       current = current[index];
       continue;
     }
-    if (!isRecord(current)) {
+    if (!isObjectOrArray(current)) {
       return false;
     }
     const record = current as Record<string, unknown>;
@@ -79,7 +79,7 @@ export const readValueAtPath = (
       current = current[index];
       continue;
     }
-    if (!isRecord(current)) {
+    if (!isObjectOrArray(current)) {
       return undefined;
     }
     const record = current as Record<string, unknown>;

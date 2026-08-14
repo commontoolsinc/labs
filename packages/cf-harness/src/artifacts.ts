@@ -79,6 +79,13 @@ const writeJsonFile = async (path: string, value: unknown): Promise<void> => {
 export interface HarnessArtifactStore {
   readonly artifactRoot: string;
   readonly runRoot: string;
+  /**
+   * Host directory where image-attachment snapshots may be written, for
+   * stores backed by a writable filesystem. Stores without a writable
+   * location omit it; view_image attachments then stay locked to their
+   * source file's bytes instead of snapshotting.
+   */
+  readonly imageAttachmentSnapshotDir?: string;
   persistRunState(state: HarnessRunState): Promise<string>;
   persistTranscript(
     transcript: readonly HarnessTranscriptMessage[],
@@ -123,10 +130,12 @@ export interface FileSystemHarnessArtifactStoreOptions {
 export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
   readonly artifactRoot: string;
   readonly runRoot: string;
+  readonly imageAttachmentSnapshotDir: string;
 
   constructor(options: FileSystemHarnessArtifactStoreOptions) {
     this.artifactRoot = resolve(options.artifactRoot);
     this.runRoot = join(this.artifactRoot, assertValidRunId(options.runId));
+    this.imageAttachmentSnapshotDir = join(this.runRoot, "image-attachments");
   }
 
   async persistRunState(state: HarnessRunState): Promise<string> {

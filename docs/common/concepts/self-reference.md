@@ -63,6 +63,16 @@ interface Input { title: string | Default<"Untitled">; }
 - **Both type params required:** Use `pattern<Input, Output>()` - single param `pattern<Input>()` will error if you access SELF
 - **`self` is typed as the output** - the instantiated piece itself, enabling recursive structures
 - **Inputs need defaults:** If an input feeds into the output, use `T | Default<V>` so `self` can bind
+- **A recursive field takes the whole output type, verbs included:** a child in
+  `children` is a full piece, so declaring that field as a narrower verb-free
+  interface is a claim the runtime contradicts — ask that child what it can do
+  and it lists every verb. The expensive unshaped read that leaves you with is
+  answered by naming what you want (`--select 'title,status'`), not by
+  narrowing the type; the measurement is in
+  [What you are driving](../verb-session-walkthrough.md#what-you-are-driving).
+  Adding a verb to such a type later is refused on update —
+  [designing verbs so they can change](../../plans/verb-evolution.md) has the
+  mechanism, and the holder-side rule that removes the refusal.
 
 ## See Also
 

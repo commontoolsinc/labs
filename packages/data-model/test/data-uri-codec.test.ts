@@ -1,3 +1,20 @@
+/**
+ * The `data:` URI form of a value: minting one, and reading one back.
+ *
+ * A minted URI stands in for the value, which pulls two demands against each
+ * other. It has to be canonical -- key insertion order cannot show through,
+ * and neither can a sort order that differs between UTF-16 and code points --
+ * while still telling apart values that ordinary equality would merge. That is
+ * where the numeric cases earn their place: `-0` and `+0` mint different URIs,
+ * the two infinities differ, and every `NaN` mints the same one whatever
+ * payload bits it happened to carry.
+ *
+ * Reading one back is deliberately strict. The media type must be this
+ * codec's, header parameters are refused, a percent-encoded payload is
+ * refused, and the payload stops at a raw query or fragment delimiter rather
+ * than swallowing it. What comes back is deep-frozen.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -6,10 +23,10 @@ import {
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 import {
-  JsonCodec,
+  JsonCodecEngine,
   seemsLikeJsonEncodedFabricValue,
 } from "@/codec-json/index.ts";
-import { jsonFromValue } from "@/codecs.ts";
+import { jsonFromFabricValue } from "@/codecs.ts";
 import {
   DATA_URI_MEDIA_TYPE,
   dataUriFromValue,
@@ -61,12 +78,45 @@ describe("data-uri-codec", () => {
       expect(seemsLikeJsonEncodedFabricValue(payload)).toBe(true);
     });
 
+    // The payload is base64url of the UTF-8 form of the encoded text. The id
+    // is that payload, so however the bytes are arrived at, the answer has to
+    // be the one this spells out. The cases cover text that is entirely
+    // ASCII, text that is not, and text too long to take any short cut.
+    it("mints a payload that is base64url of the encoded text", () => {
+      const textEncoder = new TextEncoder();
+      const values = [
+        { x: 1 },
+        { text: "Ñoño 🚀 你好" },
+        { long: "y".repeat(8000) },
+      ];
+
+      for (const value of values) {
+        const uri = dataUriFromValue(value);
+        expect(uri.slice(uri.indexOf(",") + 1)).toBe(
+          toUnpaddedBase64url(textEncoder.encode(jsonFromFabricValue(value))),
+        );
+      }
+    });
+
     // The standard encoding canonicalizes key order, so the minted id is a
     // function of content alone.
     it("mints the same URI regardless of key insertion order", () => {
       const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
       const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
       expect(dataUriFromValue(scrambled)).toBe(dataUriFromValue(inOrder));
+    });
+
+    // Canonical order is UTF-8 byte order, which differs from the order a
+    // plain JavaScript string comparison gives whenever a key carries a
+    // surrogate pair.
+    it("mints the same URI for keys that a UTF-16 sort would order differently", () => {
+      const oneWay = { "￿": 1, "\u{10000}": 2 };
+      const other = { "\u{10000}": 2, "￿": 1 };
+      expect(dataUriFromValue(other)).toBe(dataUriFromValue(oneWay));
+      expect(Object.keys(valueFromDataUri(dataUriFromValue(other)))).toEqual([
+        "￿",
+        "\u{10000}",
+      ]);
     });
 
     it("round-trips an `undefined` value", () => {
@@ -132,14 +182,16 @@ describe("data-uri-codec", () => {
 
   describe("valueFromDataUriPayloadText", () => {
     it("decodes encoded payload text of every top-level shape", () => {
-      expect(valueFromDataUriPayloadText(jsonFromValue({ b: 1, a: [true] })))
+      expect(
+        valueFromDataUriPayloadText(jsonFromFabricValue({ b: 1, a: [true] })),
+      )
         .toEqual({ b: 1, a: [true] });
-      expect(valueFromDataUriPayloadText(jsonFromValue([1, 2, 3])))
+      expect(valueFromDataUriPayloadText(jsonFromFabricValue([1, 2, 3])))
         .toEqual([1, 2, 3]);
-      expect(valueFromDataUriPayloadText(jsonFromValue("plain"))).toBe(
+      expect(valueFromDataUriPayloadText(jsonFromFabricValue("plain"))).toBe(
         "plain",
       );
-      expect(valueFromDataUriPayloadText(jsonFromValue(null))).toBe(null);
+      expect(valueFromDataUriPayloadText(jsonFromFabricValue(null))).toBe(null);
     });
 
     it("throws given historical bare-JSON payload text", () => {
@@ -157,13 +209,15 @@ describe("data-uri-codec", () => {
 
     it("decodes encoded-`FabricValue` payload text", () => {
       const value = { value: { b: 1, a: [true, null, "x"] } };
-      expect(valueFromDataUriPayloadText(jsonFromValue(value))).toEqual(value);
+      expect(valueFromDataUriPayloadText(jsonFromFabricValue(value))).toEqual(
+        value,
+      );
     });
 
     it("throws given invalid payload text past the codec tag", () => {
       expect(() =>
         valueFromDataUriPayloadText(
-          JsonCodec.wrapEncodedValueForTesting("{nope", true),
+          JsonCodecEngine.wrapEncodedValueForTesting("{nope", true),
         )
       ).toThrow();
     });
@@ -186,7 +240,7 @@ describe("data-uri-codec", () => {
     // form is not.
     it("throws given the `application/json` media type", () => {
       const payload = toUnpaddedBase64url(
-        new TextEncoder().encode(jsonFromValue({ a: 1 })),
+        new TextEncoder().encode(jsonFromFabricValue({ a: 1 })),
       );
       expect(() => valueFromDataUri(`data:application/json,${payload}`))
         .toThrow(/Invalid URI/);
@@ -196,7 +250,7 @@ describe("data-uri-codec", () => {
     // fails the media-type check.
     it("throws given header parameters (charset, base64)", () => {
       const payload = toUnpaddedBase64url(
-        new TextEncoder().encode(jsonFromValue({})),
+        new TextEncoder().encode(jsonFromFabricValue({})),
       );
       expect(() =>
         valueFromDataUri(
@@ -218,7 +272,7 @@ describe("data-uri-codec", () => {
     });
 
     it("throws given a percent-encoded payload", () => {
-      const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
+      const payload = encodeURIComponent(jsonFromFabricValue({ a: 1 }));
       expect(() =>
         valueFromDataUri(
           `data:${DATA_URI_MEDIA_TYPE},${payload}`,
@@ -243,26 +297,26 @@ describe("data-uri-codec", () => {
     describe("encoded-`FabricValue` payloads", () => {
       it("decodes a payload", () => {
         const value = { value: { b: 1, a: [true, null, "x"] } };
-        expect(valueFromDataUri(uriOf(jsonFromValue(value)))).toEqual(
+        expect(valueFromDataUri(uriOf(jsonFromFabricValue(value)))).toEqual(
           value,
         );
       });
 
       it("decodes non-ASCII text", () => {
         const value = { value: "città" };
-        expect(valueFromDataUri(uriOf(jsonFromValue(value))))
+        expect(valueFromDataUri(uriOf(jsonFromFabricValue(value))))
           .toEqual(value);
       });
 
       it("decodes a non-object payload", () => {
-        expect(valueFromDataUri(uriOf(jsonFromValue([1, 2, 3]))))
+        expect(valueFromDataUri(uriOf(jsonFromFabricValue([1, 2, 3]))))
           .toEqual([1, 2, 3]);
-        expect(valueFromDataUri(uriOf(jsonFromValue("plain"))))
+        expect(valueFromDataUri(uriOf(jsonFromFabricValue("plain"))))
           .toBe("plain");
       });
 
       it("preserves non-finite numbers and negative zero", () => {
-        const uri = uriOf(jsonFromValue({ value: [NaN, -0, Infinity] }));
+        const uri = uriOf(jsonFromFabricValue({ value: [NaN, -0, Infinity] }));
         const result = valueFromDataUri(uri);
         expect(Object.is(result.value[0], NaN)).toBe(true);
         expect(Object.is(result.value[1], -0)).toBe(true);
@@ -276,13 +330,15 @@ describe("data-uri-codec", () => {
         const value = {
           value: { "/": { "link@1": { id: "of:xyz", path: ["a"] } } },
         };
-        expect(valueFromDataUri(uriOf(jsonFromValue(value)))).toEqual(
+        expect(valueFromDataUri(uriOf(jsonFromFabricValue(value)))).toEqual(
           value,
         );
       });
 
       it("returns deep-frozen results", () => {
-        const uri = uriOf(jsonFromValue({ value: { nested: { deep: [1] } } }));
+        const uri = uriOf(
+          jsonFromFabricValue({ value: { nested: { deep: [1] } } }),
+        );
         const result = valueFromDataUri(uri);
         expect(Object.isFrozen(result)).toBe(true);
         expect(Object.isFrozen(result.value)).toBe(true);
@@ -292,7 +348,7 @@ describe("data-uri-codec", () => {
       it("stops the payload at a raw query or fragment delimiter", () => {
         // base64url never contains `?` or `#`; raw ones delimit a
         // query/fragment per the URL grammar.
-        const uri = uriOf(jsonFromValue({ a: 1 }));
+        const uri = uriOf(jsonFromFabricValue({ a: 1 }));
         expect(valueFromDataUri(`${uri}#frag`)).toEqual({ a: 1 });
         expect(valueFromDataUri(`${uri}?q=1`)).toEqual({ a: 1 });
       });
@@ -301,7 +357,7 @@ describe("data-uri-codec", () => {
         expect(() =>
           valueFromDataUri(
             uriOf(
-              JsonCodec.wrapEncodedValueForTesting("{nope", true),
+              JsonCodecEngine.wrapEncodedValueForTesting("{nope", true),
             ),
           )
         ).toThrow();

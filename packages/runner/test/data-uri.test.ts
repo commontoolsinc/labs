@@ -1,3 +1,19 @@
+/**
+ * Minting a `data:` URI from a value, which has to do two things at once.
+ *
+ * The URI carries its own bytes, so nothing the value names can stay
+ * relative: a link is resolved against a base before it is written, and one
+ * that was already absolute is left as it is. And the URI stands in for the
+ * value wherever an id would, so what comes back has to be what went in --
+ * key insertion order cannot show through, and the cases usually rounded off
+ * on the way (a negative zero, a non-finite number, a hole in a sparse array,
+ * an `undefined`) survive rather than being normalized away.
+ *
+ * A cycle is refused rather than encoded. A value merely reached twice is not
+ * a cycle and is not refused, which is the distinction the shared-object cases
+ * hold in place.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
@@ -9,7 +25,7 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
+import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
@@ -278,6 +294,53 @@ describe("data-uri", () => {
     it("round-trips an `undefined` value", () => {
       expect(valueFromDataUri(dataUriFromValueWithResolvedLinks(undefined)))
         .toBeUndefined();
+    });
+
+    // The walk rebuilds a container only when something under it was
+    // rewritten, so these two exercise the rebuilding branch and pin what it
+    // has to carry across: the holes in a sparse array, and every sibling of
+    // the member that changed.
+    it("keeps the holes in a sparse array that also holds a link", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const sparse: unknown[] = [];
+      sparse[0] = { "/": { [LINK_V1_TAG]: { path: ["item"] } } };
+      sparse[3] = "after the gap";
+
+      const parsed = valueFromDataUri(
+        dataUriFromValueWithResolvedLinks(sparse as any, baseCell),
+      );
+
+      expect(parsed.length).toBe(4);
+      expect(1 in parsed).toBe(false);
+      expect(2 in parsed).toBe(false);
+      expect(parsed[3]).toBe("after the gap");
+    });
+
+    it("keeps the siblings of a rewritten link untouched", () => {
+      const baseCell = runtime.getCell(space, "base", undefined, tx);
+      const baseId = baseCell.getAsNormalizedFullLink().id;
+      const data = {
+        before: { deep: [1, 2, { three: true }] },
+        link: { "/": { [LINK_V1_TAG]: { path: ["item"] } } },
+        after: "unchanged",
+      };
+
+      const parsed = valueFromDataUri(
+        dataUriFromValueWithResolvedLinks(data, baseCell),
+      );
+
+      expect(parsed.link["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.before).toEqual({ deep: [1, 2, { three: true }] });
+      expect(parsed.after).toBe("unchanged");
+    });
+
+    // A value with no fabric representation reaches the encoder as it came
+    // in, rather than being emptied out into a plain object on the way.
+    it("refuses a value that no codec can represent", () => {
+      expect(() =>
+        dataUriFromValueWithResolvedLinks({ when: new Date() } as any)
+      )
+        .toThrow(/no applicable codec/);
     });
 
     it("represents a `FabricPrimitive` leaf correctly", () => {

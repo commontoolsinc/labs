@@ -16,6 +16,7 @@ import type {
   HarnessSkillScriptExecutionTarget,
 } from "../contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
+import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -29,6 +30,18 @@ export interface HarnessToolContext {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
+  /**
+   * The run's trusted Fabric session, lazy and cached by the engine.
+   * Undefined when the run has no fabric session configured, which also
+   * keeps `run_pattern` out of the tool surface.
+   */
+  getFabricSession?: () => Promise<HarnessFabricSession>;
+  /**
+   * The prompt loop's run-level abort signal, when the invocation came
+   * through the loop. The only cancellation source a tool may honor — no
+   * tool-side timeout supplements it. Tools are free to ignore it.
+   */
+  signal?: AbortSignal;
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;
@@ -45,6 +58,12 @@ export interface HarnessToolContext {
     path: string,
     options?: { allowMissing?: boolean },
   ): Promise<boolean>;
+  /**
+   * Host directory for image-attachment snapshots (under the artifact
+   * root). Undefined when the run has no artifact store; attachments then
+   * stay locked to their source file's bytes.
+   */
+  imageAttachmentSnapshotDir?: string;
   doesHostPathIntersectArtifactRoot(
     path: string,
     options?: { allowMissing?: boolean },

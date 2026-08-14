@@ -15,7 +15,7 @@
  * arrays do not resolve before a local write (see lunch-poll and scrabble
  * multi-user tests).
  */
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, computed, multiUserTest, pattern, TESTS } from "commonfabric";
 import Topics, { type TopicsOutput } from "./main.tsx";
 
 interface Setup {
@@ -64,7 +64,7 @@ export const gideon = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_start_topic },
       { assertion: assert_topic_created },
       { action: action_comment },
@@ -113,7 +113,7 @@ export const fable = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "gideon-commented" },
       { assertion: assert_sees_sol_setup },
       { action: action_comment },
