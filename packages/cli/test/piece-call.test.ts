@@ -4746,6 +4746,38 @@ describe("renderPieceCallOutcome", () => {
       .toBeLessThan(hinted[0].indexOf("CF_INVOCATION_SESSION"));
   });
 
+  it("spells a non-space receipt scope into the collect address", () => {
+    // The scope is part of the address: reopening a session-scoped cell
+    // without it resolves the space-scoped instance — a different cell — so
+    // the hint carries the id@scope form parseScopedId accepts. The bare
+    // form stays bare for space scope, which it already means.
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: {
+          id: "inv-1",
+          status: "committed",
+          receipt: {
+            space: "did:key:s",
+            id: "of:receipt-1",
+            scope: "session",
+          },
+        },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+      { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
+    );
+    assertStringIncludes(
+      hinted[0],
+      "cf piece get --piece of:receipt-1@session",
+    );
+  });
+
   it("confirmations route to stderr under JSON input, stdout otherwise", () => {
     const jsonCase = observerRecorder();
     const jsonSinks = sinkRecorder();
