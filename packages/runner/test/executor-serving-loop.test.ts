@@ -2043,6 +2043,210 @@ describe("stage F serving loop", () => {
     expect(host.stats().outbox.completed).toBeGreaterThanOrEqual(1);
   });
 
+  it("T17 lifecycle identity carriage: a TURN-key completion inherits the demanded run's identity through its outbox carriage, while a carriage-less LIFECYCLE-key completion (llmDialog:lifecycle:*'s shape) falls back to the WAVE identity with no acting attribution", async () => {
+    // The round-2 T17 finding, pinnable only now that the per-(action ×
+    // instance) run supply exists (stage P2-F): pre-supply no run ever
+    // carried an identity, so "completion identity = carriage identity"
+    // and "completion identity = wave fallback" were indistinguishable.
+    // With a DEMANDED identity on the original run the two shapes
+    // split, and this pin binds BOTH observables:
+    // - the turn's own effect key has a live carriage captured at the
+    //   run's seal → its completion's scoped op resolves under the
+    //   DEMANDED instance key and every op carries the acting pair;
+    // - the lifecycle subkey (deliberately NOT the turn's key —
+    //   llm-dialog.ts's pin/unpin, which must not tear the turn's
+    //   in-flight dedupe) has NO carriage → its scoped op resolves
+    //   under the serving session's WAVE identity and carries no
+    //   attribution. Sound while `pinnedCells` is space-scope; if that
+    //   cell is ever scoped per-user/per-session, THIS assertion is the
+    //   one the change must flip (the llm-dialog NOTE's revisit
+    //   trigger, made mechanical).
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+
+    // Activation via the client's demand.
+    const kick = clientRuntime.getCell<{ n: number }>(
+      space,
+      "t17-kick",
+      undefined,
+    );
+    await kick.sync();
+    const kickTx = clientRuntime.edit();
+    kick.withTx(kickTx).set({ n: 1 });
+    expect((await kickTx.commit()).error).toBeUndefined();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const engine = await server.engineForSpace(space);
+    const serving = servingRuntime!;
+
+    const demanded = {
+      principal: "did:key:t17-carol",
+      sessionId: "carol-s1" as never,
+    };
+    const demandedKey = resolveScopeKey("user", demanded);
+    const waveKey = resolveScopeKey("user", serving.scopeKeyIdentity);
+    expect(demandedKey).not.toBe(waveKey);
+
+    // The ORIGINAL run: stamped through the production seam with the
+    // DEMANDED identity (the run supply's output shape), it enqueues
+    // the turn's effect. The carriage captured at its seal carries the
+    // demanded scopeKeyIdentity AND the acting pair #stampRun derives
+    // from it (stage P2-F).
+    const turnKey = "llmDialogTest:t17-turn";
+    const turnBase = serving.getCell<{ value?: number }>(
+      space,
+      "t17-turn-result",
+      undefined,
+    );
+    const turnScoped = serving.getCellFromLink<{ value?: number }>({
+      ...turnBase.getAsNormalizedFullLink(),
+      scope: "user",
+    });
+    const lifecycleBase = serving.getCell<{ note?: string }>(
+      space,
+      "t17-lifecycle-scoped",
+      undefined,
+    );
+    const lifecycleScoped = serving.getCellFromLink<{ note?: string }>({
+      ...lifecycleBase.getAsNormalizedFullLink(),
+      scope: "user",
+    });
+    const lifecycleSpace = serving.getCell<{ pins?: string[] }>(
+      space,
+      "t17-lifecycle-pins",
+      undefined,
+    );
+    await turnBase.sync();
+    const completed = Promise.withResolvers<void>();
+    const runTx = serving.edit();
+    serving.stampServerRun(runTx, {
+      actionId: "test/t17-turn-node",
+      kind: "derivation",
+      scopeKeyIdentity: demanded,
+      actionScopeKey: demandedKey,
+    });
+    turnScoped.withTx(runTx).set({ value: 1 });
+    runTx.enqueuePostCommitEffect({
+      id: turnKey,
+      kind: "llmDialogTest-start",
+      flush: () => {
+        const work = (async () => {
+          // The LIFECYCLE-key completions first (carriage-less by
+          // construction — no effect under these keys is in flight):
+          // one SCOPED write (the hazard the NOTE warns about) and one
+          // SPACE write (today's real pinnedCells shape).
+          {
+            const { error } = await serving.editWithRetry((tx) => {
+              markEffectCompletion(tx, "llmDialog:lifecycle:pin");
+              lifecycleScoped.withTx(tx).set({ note: "lifecycle scoped" });
+            });
+            if (error !== undefined) {
+              throw new Error(`lifecycle scoped completion: ${error.message}`);
+            }
+          }
+          {
+            const { error } = await serving.editWithRetry((tx) => {
+              markEffectCompletion(tx, "llmDialog:lifecycle:unpin");
+              lifecycleSpace.withTx(tx).set({ pins: ["a"] });
+            });
+            if (error !== undefined) {
+              throw new Error(`lifecycle space completion: ${error.message}`);
+            }
+          }
+          // The TURN-key completion: rides the carriage captured at the
+          // original run's seal.
+          {
+            const { error } = await serving.editWithRetry((tx) => {
+              markEffectCompletion(tx, turnKey);
+              turnScoped.withTx(tx).set({ value: 7 });
+            });
+            if (error !== undefined) {
+              throw new Error(`turn completion: ${error.message}`);
+            }
+          }
+          completed.resolve();
+        })();
+        serving.trackAsyncWork(work);
+      },
+    });
+    expect((await runTx.commit()).error).toBeUndefined();
+    await completed.promise;
+
+    type AnnotationRow = {
+      scopeKey?: string;
+      actingUser?: string;
+      actingSession?: string;
+    };
+    const annotatedCommits = () =>
+      (engine.database.prepare(
+        `SELECT annotations FROM "commit"
+         WHERE class = 'derived' AND annotations IS NOT NULL`,
+      ).all() as Array<{ annotations: string }>).map((row) =>
+        decodeMemoryBoundary(row.annotations) as unknown as AnnotationRow[]
+      );
+
+    // The turn completion: scoped op under the DEMANDED key, acting
+    // pair on every op (the carriage's identity, not the wave's). TWO
+    // demanded-key commits must exist — the wave commit carrying the
+    // original run's write AND the completion's own derived commit —
+    // so the count is what proves the COMPLETION inherited the
+    // identity rather than only the stamped run.
+    const demandedKeyCommits = () =>
+      annotatedCommits().filter((annotations) =>
+        annotations.some((a) => a.scopeKey === demandedKey)
+      );
+    await waitUntil(
+      () => demandedKeyCommits().length >= 2,
+      "the turn-key completion to commit under the demanded identity",
+      15_000,
+    );
+    expect(demandedKeyCommits().length).toBe(2);
+    for (const annotations of demandedKeyCommits()) {
+      for (const annotation of annotations) {
+        expect(annotation.actingUser).toBe(demanded.principal);
+        expect(annotation.actingSession).toBe("carol-s1");
+      }
+    }
+
+    // The lifecycle completion's scoped op: the WAVE identity's key —
+    // never the demanded key — and NO acting attribution.
+    const lifecycleCommits = annotatedCommits().filter((annotations) =>
+      annotations.some((a) => a.scopeKey === waveKey)
+    );
+    expect(lifecycleCommits.length).toBe(1);
+    for (const annotation of lifecycleCommits[0]) {
+      expect(annotation.actingUser).toBeUndefined();
+      expect(annotation.actingSession).toBeUndefined();
+    }
+
+    // The scoped-value split, end to end: the demanded instance's row
+    // holds the turn value; the wave instance's row holds the lifecycle
+    // note. Neither leaked into the other's instance.
+    const scopeKeysOf = (docId: string): string[] =>
+      (engine.database.prepare(
+        `SELECT DISTINCT scope_key FROM revision WHERE id = :id`,
+      ).all({ id: docId }) as Array<{ scope_key: string }>).map((row) =>
+        row.scope_key
+      );
+    expect(scopeKeysOf(turnBase.getAsNormalizedFullLink().id))
+      .toEqual([demandedKey]);
+    expect(scopeKeysOf(lifecycleBase.getAsNormalizedFullLink().id))
+      .toEqual([waveKey]);
+
+    // The SPACE-scope lifecycle write (today's real pinnedCells shape):
+    // its completion carries no annotations at all — space addressing,
+    // no attribution (protocol.md §1's service-write posture).
+    const pinsDocRows = engine.database.prepare(
+      `SELECT DISTINCT scope_key FROM revision WHERE id = :id`,
+    ).all({ id: lifecycleSpace.getAsNormalizedFullLink().id }) as Array<
+      { scope_key: string }
+    >;
+    expect(pinsDocRows.map((row) => row.scope_key)).toEqual(["space"]);
+  });
+
   it("threads per-run DEMANDED identities through the production stamper seam: two runs, two instances, two carriages (M1 at cardinality 2; T7.Q4's m-4 discharge)", async () => {
     host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
     onServingRuntime = () => Promise.resolve();

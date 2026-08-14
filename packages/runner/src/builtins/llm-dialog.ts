@@ -2553,13 +2553,17 @@ async function handlePin(
   // The lifecycle subkey is deliberately NOT the turn's own effect key:
   // retiring `llmDialog:<requestId>` mid-turn would tear the turn's
   // in-flight dedupe entry.
-  // NOTE (review 2026-08-11): the completion path's identity
-  // annotations fall back to the WAVE-LEVEL identity when no outbox
-  // carriage is live (space-server.ts's effect-completion comment). If
-  // `pinnedCells` is ever SCOPED (per-user/per-session), this commit
-  // would resolve against the serving session's identity, not the
-  // acting user's instance — revisit the completion key's identity
-  // sourcing then. Applies to unpin below identically.
+  // NOTE (review 2026-08-11; T17 pinned 2026-08-14): the completion
+  // path's identity annotations fall back to the WAVE-LEVEL identity
+  // when no outbox carriage is live (space-server.ts's
+  // effect-completion comment) — and these lifecycle subkeys carry no
+  // carriage by construction. Sound while `pinnedCells` is
+  // space-scope. If it is ever SCOPED (per-user/per-session), this
+  // commit would resolve against the serving session's identity, not
+  // the acting user's instance — the T17 lifecycle-carriage pin in
+  // executor-serving-loop.test.ts binds exactly that fallback (scoped
+  // op under the wave key, no attribution) and is the test such a
+  // change must flip. Applies to unpin below identically.
   const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
     tx,
   ) => {

@@ -30,11 +30,15 @@ import {
   decodeMemoryBoundary,
   resolveScopeKey,
   streamEntriesDocId,
+  type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../src/storage/interface.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { SpaceServer } from "../src/executor/space-server.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
@@ -1033,5 +1037,208 @@ describe("stage G SpaceServer recovery seams", () => {
     // root) — it neither terminalized nor failed.
     expect(stats.structureLoadTerminal).toBe(0);
     expect(stats.structureLoadFailures).toBe(0);
+  });
+
+  it("LT6 at the events-down layer: an event emitted by a DEMANDED (user, session) derivation run carries the demanding actor on its durable entry — and with the supply neutral (no demanded instance) the same emission classifies userless", async () => {
+    // The cross-stack blocker this pin closes (round-2, STEP 3): under
+    // Phase 3 a serving-arm emission stamps the entry's `firedAt` from
+    // the RUN's acting identity (cell.ts, events.md §2) — but before
+    // stage P2-F no derivation run ever HAD one, so a demanded user's
+    // derivation emitted userless events (`firedAt.session = "server"`,
+    // no user), and delivery destroyed the actor. With the
+    // per-(action × instance) run supply below us, the whole
+    // production chain is drivable: demand registry → run.ts's
+    // per-instance fan-out → #stampRun's acting derivation → the
+    // serving-arm same-space emission → the durable entry → the drain's
+    // dispatch → the handler's attribution. The pin binds the DURABLE
+    // OBSERVABLES (the sidecar entry's `firedAt`, the handler
+    // consequence's acting annotations), with the supply-neutral arm
+    // first: the SAME emission machinery, run without a demanded
+    // instance, emits the userless shape — restore the supply and the
+    // actor is carried. (events.md §2; scopes.md §5; LT6 RULED
+    // 2026-08-03: "events run as the session they originated from".)
+    const demander = {
+      principal: "did:key:lt6-demander",
+      sessionId: "lt6-s1",
+    };
+    const demandedRoot = "of:lt6-demanded-root";
+    await server.writeDocument(space, demandedRoot, { plain: 1 });
+
+    // Stream + probe docs, created by a CLIENT runtime (client commits
+    // land natively; the serving runtime's own writes must ride stamped
+    // waves).
+    const creatorManager = EmulatedStorageManager.connectTo(server, {
+      as: spaceSigner,
+    });
+    const creator = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: creatorManager,
+    });
+    try {
+      for (
+        const name of [
+          "lt6-stream-userless",
+          "lt6-stream-demanded",
+        ]
+      ) {
+        const stream = creator.getCell<unknown>(space, name, undefined);
+        await stream.sync();
+        const tx = creator.edit();
+        stream.withTx(tx).setRaw({ $stream: true });
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      for (const name of ["lt6-probe-userless", "lt6-probe-demanded"]) {
+        const probe = creator.getCell<{ handled?: number }>(
+          space,
+          name,
+          undefined,
+        );
+        await probe.sync();
+        const tx = creator.edit();
+        probe.withTx(tx).set({});
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      await creator.storageManager.synced();
+    } finally {
+      await creator.dispose();
+      await creatorManager.close();
+    }
+
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({
+      stats,
+      serverFacade: demandFacade([
+        { id: demandedRoot, scope: "user", identity: demander },
+      ]),
+    });
+    expect(await created.activate()).toBe(true);
+    const serving = servingRuntime!;
+    // The demand registry has absorbed the identity-bearing demand —
+    // the run supply's input.
+    await waitUntil(
+      () => created.demandedIdentitiesOf(demandedRoot).length === 1,
+      "the demanded identity to register",
+    );
+
+    const cancels: Array<() => void> = [];
+    try {
+      const runArm = async (arm: {
+        stream: string;
+        probe: string;
+        pieceRootId: string;
+        actionId: string;
+      }): Promise<{
+        entry: NonNullable<StreamEventsDocValue["entries"]>[number];
+      }> => {
+        const streamCell = serving.getCell<unknown>(
+          space,
+          arm.stream,
+          undefined,
+        );
+        const probeCell = serving.getCell<{ handled?: number }>(
+          space,
+          arm.probe,
+          undefined,
+        );
+        await streamCell.sync();
+        await probeCell.sync();
+        const streamLink = streamCell.getAsNormalizedFullLink();
+        cancels.push(serving.scheduler.addEventHandler(
+          (tx: IExtendedStorageTransaction, _event: unknown) => {
+            probeCell.withTx(tx).set({ handled: 1 });
+          },
+          streamLink,
+        ));
+        // The emitting derivation, through the PRODUCTION choke points:
+        // scheduler.run → run.ts's demanded-instance fan-out →
+        // stampServerRun → the SpaceServer's #stampRun → the
+        // serving-arm send.
+        const action = Object.assign(
+          (tx: IExtendedStorageTransaction) => {
+            streamCell.withTx(tx).send({ ping: 1 } as never);
+          },
+          {
+            schedulerObservationIdentity: {
+              pieceId: `space:${arm.pieceRootId}`,
+              pieceRootId: arm.pieceRootId,
+            },
+          },
+        );
+        await serving.scheduler.run(action as never);
+        const sidecarId = streamEntriesDocId({
+          id: streamLink.id,
+          path: [...streamLink.path],
+        } as never);
+        const entriesOf = () =>
+          ((Engine.read(engine, { id: sidecarId })?.value ??
+            {}) as StreamEventsDocValue).entries ?? [];
+        await waitUntil(
+          () =>
+            entriesOf().length === 1 &&
+            entriesOf()[0].consequenced === true,
+          `the ${arm.stream} emission to commit and consequence`,
+          20_000,
+        );
+        return { entry: entriesOf()[0] };
+      };
+
+      // ARM 1 — the supply NEUTRAL (no demand entry for this root): the
+      // run keeps the wave identity and the emission classifies
+      // USERLESS — the pre-P2-F misclassification, still the truthful
+      // shape for a chain with no actor (OW15's omitted-key posture:
+      // no `user` KEY at all, session "server").
+      const userless = await runArm({
+        stream: "lt6-stream-userless",
+        probe: "lt6-probe-userless",
+        pieceRootId: "of:lt6-undemanded-root",
+        actionId: "test/lt6-userless-emitter",
+      });
+      expect(userless.entry.firedAt).toBeDefined();
+      expect("user" in userless.entry.firedAt!).toBe(false);
+      expect(userless.entry.firedAt!.session).toBe("server");
+
+      // ARM 2 — the supply LIVE: the demanded root's action runs AS the
+      // demanding (user, session) instance, and its emission carries
+      // that actor on the durable entry.
+      const demanded = await runArm({
+        stream: "lt6-stream-demanded",
+        probe: "lt6-probe-demanded",
+        pieceRootId: demandedRoot,
+        actionId: "test/lt6-demanded-emitter",
+      });
+      expect(demanded.entry.firedAt?.user).toBe(demander.principal);
+      expect(demanded.entry.firedAt?.session).toBe(demander.sessionId);
+
+      // The classification CARRIES to the handler run (LD1: handlers
+      // keep the event's actor): its consequence commit's write
+      // annotations name the demanding pair.
+      const actingAnnotations = () =>
+        (engine.database.prepare(
+          `SELECT annotations FROM "commit"
+           WHERE class = 'derived' AND annotations IS NOT NULL`,
+        ).all() as Array<{ annotations: string }>).flatMap((row) =>
+          decodeMemoryBoundary(row.annotations) as unknown as Array<{
+            actingUser?: string;
+            actingSession?: string;
+          }>
+        ).filter((annotation) => annotation.actingUser !== undefined);
+      await waitUntil(
+        () =>
+          actingAnnotations().some((a) =>
+            a.actingUser === demander.principal &&
+            a.actingSession === demander.sessionId
+          ),
+        "the handler consequence to carry the demanding actor",
+        20_000,
+      );
+      // And the userless arm never manufactured an actor anywhere.
+      expect(
+        actingAnnotations().every((a) =>
+          a.actingUser === demander.principal
+        ),
+      ).toBe(true);
+    } finally {
+      for (const cancel of cancels) cancel();
+    }
   });
 });
