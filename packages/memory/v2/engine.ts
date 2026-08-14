@@ -1809,8 +1809,8 @@ const entryFiredAtMatches = (
  *   ever validated — would sit durable and poison the FIRST ON
  *   activation. This is a recorded OFF-arm acceptance (writes that
  *   formerly succeeded now refuse): defect-flavored freedom removed;
- *   see verification-coverage.md's recorded-acceptance row (pending
- *   owner ratification — coordinator-adjudicated 2026-08-11).
+ *   see verification-coverage.md's recorded-acceptance row (RATIFIED
+ *   2026-08-13, both deltas — coordinator-adjudicated 2026-08-11).
  *
  * Derived commits stay exempt (one trust environment — the
  * SpaceServer's own serialization); the pending scan and the watermark

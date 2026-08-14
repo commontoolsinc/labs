@@ -415,7 +415,13 @@ function admitDelegatedAppend(w: World, entry: OutboxEntry): void {
     seq: sp.seq,
     eventId: entry.eventId,
     firedAt: {
-      user: entry.actingPrincipal,
+      // A userless (OW15 sessionless-space-scope) delivery stamps NO
+      // user key at all — key ABSENCE, not `user: undefined` (round-2
+      // thread T32: the pinned carve-out is "no user key", and a
+      // present-but-undefined key let the pin pass vacuously).
+      ...(entry.actingPrincipal === undefined
+        ? {}
+        : { user: entry.actingPrincipal }),
       session: entry.actingSession ?? "server",
     },
     consequenced: false,

@@ -33,7 +33,7 @@ was last checked against the code.
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A) | default ON at the plan's Phase 7 flip, then delete the flag and the OFF path | Phase 1 in progress: stages A (flag, commit `class` metadata, CI arms, `stream-data` disable), B (`execution_lease` + derived-class admission check), and D (seal-into-wave transaction machinery, dark) landed, off by default |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A) | default ON at the plan's Phase 7 flip, then delete the flag and the OFF path | Phases 1–3 landed (stages A–G, the Phase 2 client speculation overlay, and Phase 3 events-down — clients no longer derive or commit handler writes under the flag), off by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -384,11 +384,21 @@ propagate](#how-flags-propagate).
     hosts the pattern-update watcher server-side (serving-loop.md §3e),
     and exposes the §7 `servingLoop` counters on `/api/health/stats`.
     Narrowing writes chain the eager via-user hop (scopes.md §2's MUST).
-    Clients still derive too in this interim — the two-deriver CAS
-    storming the plan names is expected until Phase 2 removes the client
-    path. Later stages add their surfaces under this same flag
-    (speculation, events, effects); both halves of any coupled behavior
-    move together on it.
+    Since Phase 2 (speculation.md), a flag-ON CLIENT no longer commits
+    derivations at all: derivation runs divert into the process-local
+    speculation overlay (the echo), and the store's only derivation
+    results are the SpaceServer's derived-class commits — the
+    two-deriver interim is over. Since Phase 3 (events-down;
+    events.md), client HANDLER runs divert to the overlay too and the
+    fire's ONE authored act is the EVENT APPEND to the stream's sidecar
+    doc (fired-order offline queue, LT9): the server drains undelivered
+    events, runs handlers authoritatively as the event's stamped actor,
+    marks consequences + advances the per-stream `eventWatermark` in the
+    same derived commit, and the client's echo retires on the
+    consequence signal (the client handler-write commit path — the old
+    F10 interim — is DELETED). Later stages add their surfaces under
+    this same flag; both halves of any coupled behavior move together
+    on it.
 - **Current default and planned end state.** Off by default in every process.
   The integration suites run an ON arm in CI from stage A on, with explicit
   per-phase skip lists (testing.md §2). End state: the plan's Phase 7 flips

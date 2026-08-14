@@ -59,26 +59,43 @@ const fetchStats = async (): Promise<EventStats | undefined> => {
   return body.servingLoop;
 };
 
-const waitUntil = async (
-  predicate: () => boolean | Promise<boolean>,
-  label: string,
-  timeoutMs = 30_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-};
-
 describe("sx2 events (Phase 3 gates)", () => {
   let identity: Identity;
   let cc: PiecesController;
   let piece: PieceController;
   let sinkCancel: (() => void) | undefined;
   let latestValue: number | undefined;
+  /** Sink-driven value waits (round-2 thread T9): the sink callback IS
+   * the delivery channel, so value conditions resolve from it directly
+   * — no polling loop, and a paused/slow worker only delays the
+   * resolve instead of burning the retry budget. The timeout is purely
+   * the failure bound. */
+  const valueWaiters: Array<{
+    predicate: (value: number | undefined) => boolean;
+    settle: () => void;
+  }> = [];
+  const waitForValue = (
+    predicate: (value: number | undefined) => boolean,
+    label: string,
+    timeoutMs = 60_000,
+  ): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      if (predicate(latestValue)) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(
+        () => reject(new Error(`timed out waiting for ${label}`)),
+        timeoutMs,
+      );
+      valueWaiters.push({
+        predicate,
+        settle: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+      });
+    });
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -100,6 +117,11 @@ describe("sx2 events (Phase 3 gates)", () => {
     const resultCell = cc.getResult(piece.getCell());
     sinkCancel = resultCell.sink((value: unknown) => {
       latestValue = (value as { value?: number } | undefined)?.value;
+      for (let index = valueWaiters.length - 1; index >= 0; index -= 1) {
+        if (valueWaiters[index].predicate(latestValue)) {
+          valueWaiters.splice(index, 1)[0].settle();
+        }
+      }
     });
   });
 
@@ -128,8 +150,8 @@ describe("sx2 events (Phase 3 gates)", () => {
       resultCell.key("increment").send(undefined as never);
       await cc.runtime.idle();
       await cc.runtime.storageManager.synced();
-      await waitUntil(
-        () => (latestValue ?? 0) >= 1,
+      await waitForValue(
+        (value) => (value ?? 0) >= 1,
         "the client-committed increment",
       );
       return;
@@ -147,8 +169,8 @@ describe("sx2 events (Phase 3 gates)", () => {
     // The echo renders immediately (speculation.md §3); the
     // AUTHORITATIVE value arrives with the settle.
     await settleAfter(space, watermarkBefore);
-    await waitUntil(
-      () => (latestValue ?? 0) >= 1,
+    await waitForValue(
+      (value) => (value ?? 0) >= 1,
       "the served consequence to render",
     );
     const observeMs = performance.now() - fireStart;
@@ -184,8 +206,8 @@ describe("sx2 events (Phase 3 gates)", () => {
     );
     await cc.runtime.idle();
     await settleAfter(space, dupWatermark);
-    await waitUntil(
-      () => (latestValue ?? 0) >= beforeDup + 1,
+    await waitForValue(
+      (value) => (value ?? 0) >= beforeDup + 1,
       "the deduped consequence",
     );
     // One consequence, not two: the duplicate deduped at the horizon.
@@ -204,8 +226,8 @@ describe("sx2 events (Phase 3 gates)", () => {
     }
     await cc.runtime.idle();
     await settleAfter(space, rapidWatermark);
-    await waitUntil(
-      () => (latestValue ?? 0) >= beforeRapid + N,
+    await waitForValue(
+      (value) => (value ?? 0) >= beforeRapid + N,
       "all N consequences (final-only value)",
     );
     assertEquals(latestValue, beforeRapid + N);

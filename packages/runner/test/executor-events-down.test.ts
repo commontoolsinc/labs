@@ -434,13 +434,30 @@ describe("Phase 3 events-down (serving side)", () => {
       () => host!.spaceServer(space)?.active === true,
       "reactivation",
     );
-    // Give the loop a settle: the value must never reach 2.
+    // Give the loop a settle: the value must never reach 2. The
+    // negative is sharpened past the bare value read (round-2 thread
+    // T24): a wrong re-run's consequence commit carries
+    // consequence_of = [the event] — so count those DIRECTLY. Exactly
+    // ONE such commit may ever exist, whatever else the loop commits
+    // (watermark advances move the seq legitimately, so seq stability
+    // is NOT the observable).
+    const eventId = (Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue).entries![0].eventId;
+    const consequenceCommitsFor = () =>
+      (engine.database.prepare(
+        `SELECT consequence_of FROM "commit"
+         WHERE class = 'derived' AND consequence_of IS NOT NULL`,
+      ).all() as Array<{ consequence_of: string }>).filter((row) =>
+        row.consequence_of.includes(eventId)
+      ).length;
+    expect(consequenceCommitsFor()).toBe(1);
     await new Promise((resolve) => setTimeout(resolve, 500));
     {
       const doc = Engine.read(engine, {
         id: argument.getAsNormalizedFullLink().id,
       });
       expect((doc?.value as { value?: number })?.value).toBe(1);
+      expect(consequenceCommitsFor()).toBe(1);
     }
     cancelDemand();
   });

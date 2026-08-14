@@ -1195,9 +1195,17 @@ export class SpaceServer implements TransactionSealDestination {
           index,
           seq: entry.seq ?? 0,
         };
+        // Only a NUMERIC-seq consequenced twin skips this entry
+        // (round-2 thread T12): a seq-less consequenced entry (the
+        // stage-G interim shape, legacy stores only — admission stamps
+        // every new append's seq) holds no frontier position and its
+        // dedupe RETIRES once consequenced (events.md §4), so a valid
+        // re-admission after it is a NEW event whose handler must run
+        // — skipping on the seq-less twin silently dropped it.
         const duplicateOfConsequenced = stored.some((candidate) =>
           candidate?.eventId === entry.eventId &&
           candidate.consequenced === true &&
+          typeof candidate.seq === "number" &&
           candidate.seq !== entry.seq
         );
         if (duplicateOfConsequenced) {

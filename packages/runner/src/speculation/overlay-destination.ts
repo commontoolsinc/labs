@@ -516,7 +516,22 @@ export class SpeculationOverlayDestination
           value as StreamEventsDocValue | undefined,
         );
       });
-      this.#intentSinks.set(sinkKey, cancel);
+      // The sink's IMMEDIATE callback may have resolved the last
+      // tracked id (a duplicate fire whose consequence already landed
+      // — round-2 thread T25): #untrackIntent then found no stored
+      // cancel to release, so storing it NOW would leak the sidecar
+      // subscription for the runtime's lifetime. Store only while ids
+      // remain tracked; cancel otherwise.
+      const stillTracked = this.#trackedIntents.get(space)?.get(sidecarId);
+      if (stillTracked === undefined || stillTracked.size === 0) {
+        try {
+          cancel();
+        } catch {
+          // best-effort: the sink resolved everything it was for
+        }
+      } else {
+        this.#intentSinks.set(sinkKey, cancel);
+      }
     } catch (error) {
       logger.warn("intent-sink-failed", () => [
         `intent sidecar sink for ${space} failed; echo retirement for ` +

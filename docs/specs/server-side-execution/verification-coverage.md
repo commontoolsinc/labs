@@ -1218,16 +1218,23 @@ red-first-evidenced where the batch required it):
   `memory/test/v2-event-append.test.ts` (the reviewer's repro shapes:
   admit-then-TypeError, the set-arm coercion, the OFF-arm refusal,
   the derived-garbage recompute wedge).
-- A THIRD RECORDED OFF-arm acceptance rides the m4 half (PENDING
-  OWNER RATIFICATION — coordinator-adjudicated 2026-08-11: the
-  defect-flavored freedom removed; the OFF-written garbage poisons
-  the ON flip): authored writes into `of:stream-events:`-prefixed
-  docs under the OFF flag, which formerly SUCCEEDED unvalidated (no
-  admission exists OFF — including forged `firedAt` actors that the
-  first ON activation would deliver as-stamped), now REFUSE
-  prefix-keyed. No legitimate OFF-arm producer writes the reserved
-  prefix; the ratification lands separately, and testing §2's gate
-  clause already names this register's recorded-acceptance rows.
+- A THIRD RECORDED OFF-arm acceptance rides the m4 half (RATIFIED
+  2026-08-13 — owner ruling: BOTH deltas stand, the both-arms
+  non-array refusal AND the OFF-arm `of:stream-events:` id-prefix
+  refusal; coordinator-adjudicated 2026-08-11: the defect-flavored
+  freedom removed; the OFF-written garbage poisons the ON flip):
+  authored writes into `of:stream-events:`-prefixed docs under the
+  OFF flag, which formerly SUCCEEDED unvalidated (no admission
+  exists OFF — including forged `firedAt` actors that the first ON
+  activation would deliver as-stamped), now REFUSE prefix-keyed. No
+  legitimate OFF-arm producer writes the reserved prefix; testing
+  §2's gate clause already names this register's recorded-acceptance
+  rows. The ruling's simplicity lean was applied as a review of
+  `refuseMalformedAuthoredStreamWrites` (engine.ts): no
+  behavior-preserving simplification was worth taking — folding the
+  patch-op arms or replacing the `"entries" in` narrowing changes
+  edge behavior (explicit-`undefined` payloads flip from refused to
+  admitted), so the guard stands as written.
 - M2 — the C8d parent fold WIRED FOR REAL. The fold keyed on
   `context.parentEventId`, which nothing in production set: cell.ts's
   same-wave cascade queued `{eventId, served:{firedAt}}` only, so a
@@ -1241,7 +1248,8 @@ red-first-evidenced where the batch required it):
   raced-cascade test: a predicate-scoped settle gate holds the
   sealed wave open, a rival races the parent's consequence — child
   lands exactly once, never doubled).
-- M3 (coordinator-adjudicated 2026-08-11, VETOABLE) — the emit-path
+- M3 (RULED let-stand 2026-08-13; coordinator-adjudicated
+  2026-08-11) — the emit-path
   tail-read excluded from the dependency log and basis rows: a
   sender does not re-send because someone else sent. cell.ts's LT1
   emission read `/entries` unmarked, putting the target sidecar in

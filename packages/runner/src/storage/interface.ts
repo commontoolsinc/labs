@@ -1843,7 +1843,11 @@ export type EventAppendRequest = {
   stream: { id: string; path: readonly string[]; scope?: CellScope };
   /** The durable client-minted event id (event-identity). */
   eventId: string;
-  payload?: unknown;
+  /** The event payload — a FabricValue (round-2 thread T23): the type
+   * is the admission boundary's own domain, so a payload the memory
+   * protocol cannot represent is refused at the CALL SITE'S type check
+   * instead of failing (or endlessly retrying) at delivery. */
+  payload?: FabricValue;
   /** Client-minted append order within this session; allocated by the
    * queue when absent. */
   clientSeq?: number;

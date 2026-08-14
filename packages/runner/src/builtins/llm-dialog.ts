@@ -2743,7 +2743,15 @@ async function handleUpdateArgument(
     tx,
   ) => {
     runtime.stampServerRun(tx, {
-      actionId: "llm-dialog/update-argument",
+      // Keyed per TARGET instance (round-2 thread T28): one global id
+      // made the wave's §3b overwrite unit treat CONCURRENT
+      // updateArgument calls against different targets as re-runs of
+      // one action — a later contribution's basis/rebase rows replaced
+      // an earlier unrelated one's as a set. The argument doc id is
+      // durable and retry-stable.
+      actionId: `llm-dialog/update-argument:${
+        argumentCell.getAsNormalizedFullLink().id
+      }`,
       kind: "event-handler",
     });
     if (

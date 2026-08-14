@@ -1129,7 +1129,7 @@ describe("stage D seal-into-wave", () => {
     expect(outcome.requeuedEventIds).toEqual(["e-parent"]);
   });
 
-  it("the emit-path tail read is append mechanics, not a dependency (review 2026-08-11 M3, coordinator-adjudicated, vetoable): a derivation emitter neither logs nor bases on the target sidecar", async () => {
+  it("the emit-path tail read is append mechanics, not a dependency (review 2026-08-11 M3, RULED let-stand 2026-08-13): a derivation emitter neither logs nor bases on the target sidecar", async () => {
     // LT6's case: a demanded DERIVATION that emits. Pre-fix, cell.ts's
     // LT1 emission read the sidecar tail UNMARKED, so the emitting
     // run's dependency log and basis rows contained the target stream

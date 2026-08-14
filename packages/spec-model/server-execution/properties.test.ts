@@ -822,7 +822,10 @@ Deno.test("C0-guards: connection guards; no-actor space writes carry no attribut
   w4 = apply(w4, { kind: "deliver", space: "A" });
   const sessionless = w4.spaces.B.streams.t.entries[0];
   assertEquals(sessionless.firedAt.session, "server");
-  assertEquals(sessionless.firedAt.user, undefined, "no user key (OW15)");
+  // Key ABSENCE, not a present-but-undefined key (round-2 thread T32):
+  // the OW15 carve-out stamps NO user key at all, and the old
+  // value-equality read passed vacuously against `{ user: undefined }`.
+  assertEquals("user" in sessionless.firedAt, false, "no user key (OW15)");
 });
 
 // ---------- conformance bridge: model keys === the wire vocabulary ----------

@@ -417,6 +417,11 @@ export function holdShapedEvent(
   // Injection provenance rides the hold unchanged, so a shaped delivery
   // cannot silently strip the closed-world gate's exemption.
   const runtimeInjectedEventKeys = opts.runtimeInjectedEventKeys;
+  // The served carriage rides too (round-2 thread T31): its own doc
+  // promises "carried through a held delivery unchanged", and dropping
+  // it here would strip the acting identity / stream-entry location /
+  // failure hook from a shaped served dispatch.
+  const served = opts.served;
   shaper.hold({
     // FLAGGED (PR #5439 thread r3731191482, unresolved semantic): the
     // fallback linkKey resolves the scope instance from the RUNTIME's
@@ -436,6 +441,7 @@ export function holdShapedEvent(
         originTx,
         time,
         runtimeInjectedEventKeys,
+        served,
       }),
   });
 }

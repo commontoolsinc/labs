@@ -5385,7 +5385,14 @@ export class Runner {
         return run.resultCell;
       })();
 
-    if (!deferForNavigate) {
+    if (!deferForNavigate && receiptsEnabled) {
+      // Gated like every other receipt write above (round-2 thread
+      // T27): under serverExecution the receipt create-only mechanism
+      // is subsumed by the stream's eventWatermark and MUST NOT ride a
+      // serving run's wave commit — an ungated mark here left the
+      // create-only precondition active alongside the watermark, so a
+      // duplicate derived run aborted on receipt-exists instead of
+      // coalescing to the watermark.
       tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
     }
 
