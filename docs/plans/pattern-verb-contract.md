@@ -35,9 +35,10 @@ gain the second reason they are load-bearing.
 **Amendment (2026-07-30)**, from repointing this document's source citations at
 symbols rather than line numbers. Verifying each one against the tree showed
 that WS-D has landed whole, and the claims below are corrected in place:
-`Cell.send` accepts a caller-supplied event id and scopes it per stream;
-`resolveInvocationId` mints one for every `cf piece call`, so the id is always
-supplied rather than only when a caller passes `--invocation`;
+`Cell.send` accepts a caller-supplied event id and scopes it by the session
+that chose it and the stream it was sent to; `resolveInvocationIdentity` mints
+the id–session pair for every `cf piece call`, so the pair is always supplied
+rather than only when a caller passes `--invocation`;
 `executeResolvedCallable` forwards it, then reads the handling's outcome back
 off `tx.handlingReceiptLink` and returns it as `invocation.result` — including
 on a receipt-exists collision, where the original handling's outcome settles
@@ -162,16 +163,19 @@ plumbing through the callable layer:
 
 1. **No caller-supplied id from the CLI.** *Closed.* Written when `cf piece
    call` sent without an `eventId`, so a client retry minted a fresh event and
-   re-executed rather than colliding on the receipt. `resolveInvocationId`
-   (`packages/cli/commands/piece.ts`) now mints an id whenever `--invocation`
-   is absent, and `executeResolvedCallable`'s handler branch
-   (`packages/cli/lib/callable.ts`) forwards it as `{ eventId: invocationId }`.
+   re-executed rather than colliding on the receipt. `resolveInvocationIdentity`
+   (`packages/cli/commands/piece.ts`) now mints the id–session pair whenever
+   neither is named — refusing an `--invocation` named without its session —
+   and `executeResolvedCallable`'s handler branch
+   (`packages/cli/lib/callable.ts`) forwards it as
+   `{ eventId: invocation.id, session: invocation.session }`.
 2. **No readback.** *Closed.* The same handler branch reads the receipt at
    `tx.handlingReceiptLink` through `runtime.getCellFromLink`, pulls it, and
    returns the value as `invocation.result`, treating a value-less verb's
    empty record as existence-only. A receipt-exists collision reads back the
    ORIGINAL handling's outcome, so a retry settles as a success without
-   re-executing.
+   committing again — the redelivered body still runs, and then loses the
+   race for the receipt.
 3. **Patterns return nothing.** All of `topics` is handlers that return no
    value — `addTopic: Stream<AddTopicEvent>` on the board, and the
    `AgentAuthoredEvent` family (`addComment`, `addLink`, `setBody`) on the
@@ -771,25 +775,33 @@ contract.
 ### Client surface
 
 ```text
+# An invocation id deduplicates only within the session it was chosen in,
+# so a run mints one session and every call of that run shares it.
+$ export CF_INVOCATION_SESSION="$(cf invocation-session new)"
+
 $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --body @body.md
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
-# The client mints the id before sending and prints it even when its wait
-# times out. Retrying with it returns the original — no re-execution.
+# The client mints the id before sending and prints it — beside its session —
+# even when its wait times out. Retrying the pair returns the original
+# outcome: the body re-runs and loses the create-only receipt race, so
+# nothing commits twice. An --invocation named without a session is refused.
 $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
     --title "Verb contract" --invocation inv_7f3a
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
-# The caller chooses whether and how long to wait
+# The caller chooses whether to wait: a detached call exits at the commit
+# acknowledgement with the receipt's address, and collecting the outcome
+# later is an ordinary read of that address.
 $ cf piece call --url "$TOPICS_BOARD_URL" summarize \
     --topic fid1:abc --no-wait
-{ "invocation": "inv_9c1b", "status": "pending" }
-$ cf piece invocation --url "$TOPICS_BOARD_URL" inv_9c1b --await
-{ "invocation": "inv_9c1b", "status": "settled",
-  "result": { "summary": "..." } }
+{ "invocation": "inv_9c1b", "status": "committed",
+  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" } }
+$ cf piece get --piece of:fid1:… summary
+"..."
 ```
 
 Client-local `@name` bindings are deferred. They can encode host + space +

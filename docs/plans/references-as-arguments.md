@@ -130,16 +130,31 @@ home where every caller reaches it. Beside it, the CLI's pre-dispatch gate
 needs the `acceptOpaqueValue` option the dispatch gate already passes, so the
 two gates stop disagreeing about link values.
 
-**A schema emission fix, and a marker for one road only.** An event field
-declared `Writable<ItemOutput>` emits as `{"$ref": "#/$defs/ItemOutput"}` with
-no `asCell`; an inline `Writable<{ title: string }>` disappears from the
-emitted properties entirely. Measured both ways. The disappearance needs fixing
-under any road: a field the schema does not name cannot be validated or
-documented, and once event schemas close (verb contract WS-C) cannot be
-supplied at all. The `asCell` marker is needed only if resolution becomes
-schema-directed — schema-blind acceptance already composes with closed-world
-validation, as `closedWorldEventRejection` demonstrates: a link value passes
-opaquely in any declared position while an undeclared key still rejects.
+**A schema emission fix, and a marker for one road only.** A verb carries two
+event schemas, and they diverge by construction. The handler-side schema — the
+one the deployed stream cell carries, which the CLI gate validates against and
+discovery serves — is a **usage summary of the handler body**:
+`applyCapabilitySummaryToArgument`
+(`packages/ts-transformers/src/transformers/schema-injection.ts`) shrinks the
+event parameter to what the body uses, so a declared reference field the body
+never reads disappears from the emitted `properties` and `required` — named
+and inline spellings alike — while a field the body does read emits for both
+spellings with a capability-narrowed `asCell` (`["readonly"]` for a read-only
+body), not the authored `Writable`. The pattern's durable `$defs` meanwhile
+keeps the full declared event. Measured both ways at the emitted output.
+
+The divergence needs fixing under any road: a field the stream schema does not
+name cannot be validated or documented, and once anything refuses on that
+schema (plan item 12's CLI refusal) cannot be supplied at all. Which of the
+two schemas is a verb's input contract — the body's usage summary or the
+authored event — is an open question for whoever owns items 11 and 12,
+adjacent to the open evolution-policy discussion; this document does not
+decide it. The `asCell` marker is needed only if resolution becomes
+schema-directed — and note that today's emitted marker records the body's
+usage, not the author's declaration — while schema-blind acceptance already
+composes with closed-world validation, as `closedWorldEventRejection`
+demonstrates: a link value passes opaquely in any declared position while an
+undeclared key still rejects.
 
 *Whether resolution should stay schema-blind or become schema-directed is an
 implementation question this document does not settle.* Schema-blind is proven

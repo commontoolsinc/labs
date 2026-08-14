@@ -148,6 +148,10 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Shape a result     | `deno task cf piece call --piece ID --select topic.title addTopic ...`                                                       |
 | List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                                             |
 | Trigger recompute  | `deno task cf piece step --piece ID ...`                                                                                     |
+| Mint a session     | `export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"` (once per run; ids deduplicate only within it)       |
+| Replayable call    | `deno task cf piece call --piece ID --invocation my-id-1 handlerName ...` (same pair retries settle on the original outcome) |
+| Detached call      | `deno task cf piece call --piece ID --no-wait --invocation my-id-1 handlerName ...` (exits at commit with `receipt` address) |
+| Collect a receipt  | `deno task cf piece get --piece <receipt id> ...` (the envelope's `receipt.id`, later, from any process)                     |
 | List pieces        | `deno task cf piece ls -i key -a url -s space`                                                                               |
 | Visualize          | `deno task cf piece map ...`                                                                                                 |
 | Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)                                      |
@@ -293,8 +297,9 @@ a field under a linked element names that element's own document rather than a
 slot in the collection above it; a position with no link above it keeps the
 source document's own address. A marked position is never fetched, so a marked
 collection costs one document read rather than one per element; the rendered
-`id` minus its `of:` prefix is what `--piece` accepts. Neither spelling composes
-with `--filter`. See `packages/cli/README.md` for the exact syntax and supported
+`id` is what `--piece` accepts, scheme included, so an emitted address
+composes into the next command unchanged. Neither spelling composes with
+`--filter`. See `packages/cli/README.md` for the exact syntax and supported
 schema subset.
 
 `piece call` takes the same three flags, before the callable name, with the same
@@ -307,10 +312,15 @@ deno task cf piece call --piece ID --select topic.title addTopic '{"title":"Ship
 ```
 
 A selection shapes a result that already exists; it does not narrow what the
-call fetches, because the readback materializes the whole receipt first and a
-receipt declares no schema to narrow against. A value-less verb therefore still
-reports no `result` at all rather than `{}` — but a selection that keeps nothing
-from a result that does exist is refused, so the two stay distinguishable.
+call fetches — the readback materializes the whole receipt before the
+selection runs (a plain result's receipt carries a descriptive schema of what
+it holds; a reactive one carries none). A value-less verb therefore still
+reports no `result` at all rather than `{}` — but a selection that keeps
+nothing from a result that does exist is refused, so the two stay
+distinguishable. A shaped call also waits on the CLI runtime's global idle,
+not just its own handling's commit, so on a piece with heavy derived state
+prefer calling plain (or `--no-wait`) and shaping the collect:
+`cf piece get --piece <receipt id> --select …`.
 `--no-wait` refuses all three flags, since it skips the receipt readback they
 are answered from. `--show-links` composes with a projection — links are
 collected after the selection, so each address names a position in the value you
@@ -427,6 +437,8 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 
 ## References
 
+- `docs/common/verbs-over-the-cli.md` - The verb walkthrough: invocation ids
+  and sessions, receipts, retries, and shaped reads, each step runnable
 - `packages/patterns/system/default-app.tsx` - System pieces (pieceRegistry
   lives here)
 - `docs/common/workflows/handlers-cli-testing.md` - Handler testing

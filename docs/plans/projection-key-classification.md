@@ -74,7 +74,7 @@ distinct failures come out of that, and they are not variations of one:
 | --- | --- | --- |
 | `{"propertes":{"title":true}}` | nothing | 0 |
 | `{"type":"object","propertes":{"title":true}}` | **the whole object**, every field | 0 |
-| `{"type":"object","required":["secret"],"properties":{"title":true}}` | nothing | 0 |
+| `{"type":"object","required":["secret"],"properties":{"title":true}}` | a refusal whose message names neither the key nor the position | 1 |
 
 **A typo can narrow a read to nothing.** With no `type` stated,
 `impliedProjectionType` has nothing to infer a container from — the misspelled
@@ -98,7 +98,11 @@ because it is what a missing `type` was fixed for twice already. A design that
 only stops narrowing leaves the disclosure-shaped half standing.
 
 **A recognized key can empty a read entirely.** [#5734]: a projection naming a
-`required` field it does not project returns nothing at all, exit 0. `required`
+`required` field it does not project empties the whole selection. The command
+layer then refuses the empty materialization — a `CellSelectionError`, exit
+nonzero, measured at `5ca4c1296` against a runtime-built piece — but the
+message names neither `required` nor the position, so the failure is loud
+while pointing away from its cause. `required`
 reaches the read boundary in the caller's schema, and
 `SchemaObjectTraverser.traverseObjectWithSchema`
 (`packages/runner/src/traverse.ts`) returns `undefined` for an object missing a
@@ -627,9 +631,10 @@ itself runs.
 **In scope.** The JSON Schema spelling of `--schema`, on every command that
 takes it. [#5734] belongs here: deriving the constructed schema's `required`
 from the source rather than carrying the caller's is the same edit as the
-refusal, landing in the same branch of `resolveProjection`, and shipping a loud
-refusal for typos while leaving an unsatisfiable `required` silently returning
-nothing would be a strange thing to have done deliberately.
+refusal, landing in the same branch of `resolveProjection`, and shipping a
+refusal that names a typo'd key while leaving an unsatisfiable `required` to
+surface as a refusal that points away from its cause would be a strange thing
+to have done deliberately.
 
 **Out of scope.** `--select`, entirely. Its grammar is comma-separated field
 paths — `parseSelectProjection` refuses a JSON Schema argument outright and
@@ -670,8 +675,9 @@ happens to a key, never what a key means.
   schema. This is the criterion `$comment` fails, and would have failed on the
   day it was admitted: a membership assertion passes for a key the runner acts
   on, so membership can never stand in for inertness.
-- A projection naming a `required` field it does not project reads the fields it
-  does project, rather than nothing.
+- A projection naming a `required` field it does not project reads the fields
+  it does project — rather than emptying the whole read into a refusal that
+  points away from the cause, which is the measured behavior at `5ca4c1296`.
 - **One test covers a source-required property and a caller type mismatch
   together**: a source declaring `id` (number) `required` alongside `title`,
   read through a projection asking for `id` as a string and `title`, returns

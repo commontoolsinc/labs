@@ -299,8 +299,9 @@ cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
 All four fields are always present, so a caller indexes them without branching:
 `id` keeps its scheme, `space` and `scope` are filled in even when they match
 the reader's own, and `path` is `[]` at a document's root. No schema is inlined
-and no write-redirect flag rides along. The rendered `id`, minus its `of:`
-prefix, is what `cf piece call --piece` and `cf piece get --piece` accept.
+and no write-redirect flag rides along. The rendered `id` is what
+`cf piece call --piece` and `cf piece get --piece` accept, scheme included — an
+address emitted by one command composes into the next unchanged.
 
 The address names the deepest stored link crossed on the way to the marked
 position, plus the segments that remain below that link. Marking `title` under
@@ -385,10 +386,20 @@ no longer say which positions they came from, and an address names a position.
 
 A selection shapes a result that already exists. It does not narrow what the
 call fetches: the readback materializes the whole receipt before the selection
-runs, and a handling's receipt declares no schema for a selector to narrow
-against. The same holds for a tool, whose result is read off the cell the tool
-wrote. Use a selection to control what reaches stdout, not to control what
-travels.
+runs. (A plain result's receipt does carry a descriptive schema of what it
+holds — a receipt holding anything reactive carries none — but either way the
+fetch has happened before the selection applies.) The same holds for a tool,
+whose result is read off the cell the tool wrote. Use a selection to control
+what reaches stdout, not to control what travels.
+
+A selection also couples the call to graph quiescence. The shaped readback
+runs through the same shared read step as `cf piece get`, and that step awaits
+the CLI runtime's global idle plus storage sync before answering — while the
+plain call acknowledges at its own handling's commit. On a piece with heavy
+derived state, a shaped call can therefore wait on unrelated recomputation the
+handler triggered elsewhere in the graph. When that wait matters, shape the
+collect instead: call plain (or `--no-wait`), then
+`cf piece get --piece <receipt id> --select …`.
 
 Three cases follow from that:
 
