@@ -1023,19 +1023,25 @@ third bound, the read-only-space seal dependencies): an overlay
 implementation of the sealSpaceReads handoff (per-entry read-only-space
 floors; retirement additionally gated on EACH read-only space's
 watermark; cross-space re-sweeps on watermark/ack/settled events) was
-built red-first and REVERTED the same day — it regressed the
-two-browsers Phase-2 gate (bisect-verified against the live harness:
-the gate's "Bob sees Alice" step stalls to its 300s timeout with the
-machinery in and passes in ~2s with it out; every other component of
-the same batch was individually exonerated by the same procedure).
-The suspected mechanism — the flag-ON client runtime opening
-watermark subscriptions into foreign/unauthorized spaces it read
-through links, and conservative blocking pinning entries on
-never-covered floors — needs a design that does not gate on
-foreign-space watermark subscriptions. The BOUND THEREFORE STANDS as
-documented: a cross-space speculation can retire on its written
-space's coverage while a read-only input is still uncovered. Owed:
-the redesign, flagged for the owner alongside P2-F's follow-ups.
+built red-first and REVERTED the same day. CORRECTED RATIONALE (the
+revert commit's original "bisect-verified gate regression" claim was
+INVALIDATED hours later: the two-browsers Phase-2 gate proved
+BIMODALLY FLAKY on the from-source local harness independent of
+commit — the UNMODIFIED merge base failed the same "Bob sees Alice"
+300s stall twice in a row under clean single-engine fresh-store
+conditions, and a runtime-identical tree to an earlier passing
+configuration also failed — so the gate discriminates nothing
+locally; CI's compiled-binary harness is its arbiter). The revert is
+RETAINED on design-risk grounds identified during the investigation:
+the machinery makes flag-ON client runtimes open watermark
+subscriptions into foreign — possibly unauthorized — spaces reached
+through links (AuthorizationError sync-load noise observed), and its
+conservative blocking can pin entries on never-covered floors
+forever. That risk profile wants an owner-reviewed design, not a
+fix-batch patch. The BOUND THEREFORE STANDS as documented: a
+cross-space speculation can retire on its written space's coverage
+while a read-only input is still uncovered. Owed: the redesign,
+flagged for the owner alongside P2-F's follow-ups.
 
 Two adjacency closures ride the same 2026-08-13 round (stage-G
 round-2 follow-ups):
