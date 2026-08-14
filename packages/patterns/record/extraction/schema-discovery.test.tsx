@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/record/extraction/schema-discovery.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern } from "commonfabric";
+import { assert, computed, pattern, TESTS } from "commonfabric";
 import { getSchemaForType } from "./schema-utils.ts";
 import { getFieldToTypeMapping } from "../registry.ts";
 import Note from "../../notes/note.tsx";
@@ -24,42 +24,42 @@ export default pattern(() => {
   const unknownSchema = getSchemaForType("does-not-exist");
   const fieldMap = getFieldToTypeMapping();
 
-  const assert_real_piece_built = computed(() =>
+  const assert_real_piece_built = assert(() =>
     notesPiece !== undefined && notesPiece !== null
   );
 
   // The notes module's content field is discoverable via the registry.
-  const assert_notes_content_discoverable = computed(() =>
+  const assert_notes_content_discoverable = assert(() =>
     notesSchema?.properties?.content !== undefined
   );
 
   // A representative data module also exposes its fields.
-  const assert_address_has_fields = computed(() =>
+  const assert_address_has_fields = assert(() =>
     addressSchema?.properties !== undefined &&
     Object.keys(addressSchema.properties).length > 0
   );
 
   // The registry-driven field map is populated and carries the record-title
   // pseudo-mapping the extractor relies on.
-  const assert_map_built = computed(() =>
+  const assert_map_built = assert(() =>
     Object.keys(fieldMap).length > 0 && fieldMap.name === "record-title"
   );
 
   // The notes alias routes back to the notes module. (The `content` field is
   // shared with text-import, another content source, so it is not asserted to
   // any single owner.)
-  const assert_notes_routed = computed(() => fieldMap.notes === "notes");
+  const assert_notes_routed = assert(() => fieldMap.notes === "notes");
 
   // The content field reaches some real source module.
-  const assert_content_routed = computed(() => fieldMap.content !== undefined);
+  const assert_content_routed = assert(() => fieldMap.content !== undefined);
 
   // An unknown module type yields no schema (no accidental catch-all).
-  const assert_unknown_type_undefined = computed(() =>
+  const assert_unknown_type_undefined = assert(() =>
     unknownSchema === undefined
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_real_piece_built },
       { assertion: assert_notes_content_discoverable },
       { assertion: assert_address_has_fields },

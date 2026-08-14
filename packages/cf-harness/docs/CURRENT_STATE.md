@@ -34,6 +34,8 @@ The current package provides:
 
 - batch CLI execution with bounded model turns and optional streamed events;
 - machine-readable capability discovery with `--describe-capabilities`;
+- persistent provider configuration and structured config/auth control, with
+  durable bounded Codex refresh health;
 - workspace, Fabric, and explicit host mounts with path containment;
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
@@ -54,7 +56,27 @@ The current package provides:
   replay, cancellation, and restore state;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
-  evidence.
+  evidence;
+- a session-local address handle table: deterministic `cfh:a:` tokens minted per
+  run for cell addresses, recorded in `run-state.json`, and carried across
+  resume; the prompt loop swaps addresses to tokens in model-bound tool output
+  and resolves tokens in model-authored tool arguments before policy evaluation
+  and dispatch, `delegate_task` arguments excepted;
+- an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
+  `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
+  environment fallbacks): compiles and runs an inline `sourceText` pattern
+  (capped at 256 KiB) against a deployed Fabric space from the trusted host side
+  over a lazy per-run session that caches only a healthy, authorized
+  construction; passes whole-string LLM-friendly link inputs as live cells,
+  refusing links into another space and live-cell values that mismatch the
+  compiled argument schema before any piece exists; honors the run's abort
+  signal by stopping the created piece and returning a structured `cancelled`
+  error; scrubs bare fabric identifiers from model-facing diagnostics; returns
+  the result cell's canonical reference plus an optionally schema-sanitized
+  value, and leaves the piece detached (no recorded origin) and out of the
+  space's registered piece list, with run→piece provenance carried by the run's
+  persisted artifacts; without the session configuration the tool is absent from
+  the tool surface.
 
 Run the capability probe instead of copying this list into adapters:
 
@@ -99,13 +121,23 @@ mode.
 - Package-default sandbox networking is a provisional bridge-oriented posture,
   not the final destination policy model. Product adapters may narrow it.
 - Delegation is serial: only one child runs at a time.
+- Every `run_pattern` invocation persists an unlisted piece in the configured
+  space. An aborted run stops its piece, but no piece is ever deleted, and each
+  piece's source-history revision is a storage-retention root the piece list
+  does not reveal. Tooling that enumerates a space's contents from the piece
+  list must not assume the list is exhaustive; there is no garbage collection
+  for these pieces yet.
 - Model-driven dynamic skill activation is not implemented. Skills are
   explicitly preloaded by the caller; child skills are profile-controlled.
 - Resume is transcript-oriented and does not recover an arbitrary partially
   executed tool or orchestration state machine.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
-  sanitized, but a future opaque artifact-handle layer would further reduce path
-  and placement coupling.
+  sanitized, and the prompt loop swaps model-bound tool output and
+  model-authored tool arguments through the address handle table; denial-path
+  tool messages are not swapped.
+- The session-local handle table covers cell addresses only. Value handles
+  (`cfh:v:`) are reserved in the token grammar but not implemented, and there is
+  no explicit dereference/release mechanism.
 - `estimatedCostUsd` is available only for known GPT-5.6 gateway models when the
   response includes cache reads and writes. It uses public OpenAI pricing;
   gateway markup, subscription quota accounting, and provider invoices remain

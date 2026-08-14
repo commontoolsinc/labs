@@ -1,6 +1,6 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
 import type { CfcConfClause } from "./cfc/clause.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import type {
@@ -79,7 +79,7 @@ const buildSymbolicSchemaAtPathClassifier = (
 ): SymbolicSchemaAtPathClassifier | undefined => {
   if (typeof schema === "boolean") return () => "boolean";
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
   if (rootedSchemaVisitIsActive(active, rootKey, schema)) return undefined;
   const nextActive = { root: rootKey, schema, parent: active };
   {
@@ -282,7 +282,7 @@ export class ContextualFlowControl {
     // schema `default` fields; plain `JSON.stringify` would silently
     // mis-encode them.
     const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-    const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+    const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
     const canonical = internSchema(schema) as JSONSchemaObj;
     if (rootedSchemaVisitIsActive(active, rootKey, canonical)) {
       // we've already joined this
@@ -356,7 +356,7 @@ export class ContextualFlowControl {
     confidentiality: readonly CfcConfClause[],
   ): JSONSchema {
     const joined = new Set<unknown>(confidentiality);
-    if (isRecord(schema) && schema.ifc !== undefined) {
+    if (isObjectOrArray(schema) && schema.ifc !== undefined) {
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
     // If we have no confidentiality, we can leave the schema
@@ -512,11 +512,13 @@ export class ContextualFlowControl {
     if (schema === false) return false;
     if (schema === true && extraConfidentiality === undefined) return true;
     // Take defs from schema if available
-    const defs = isRecord(schema) && schema.$defs ? schema.$defs : undefined;
+    const defs = isObjectOrArray(schema) && schema.$defs
+      ? schema.$defs
+      : undefined;
     const cacheable = extraConfidentiality === undefined &&
       typeof defaultEmptyProperties === "boolean" &&
       typeof defaultMissingProperty === "boolean" &&
-      isRecord(schema) && isDeepFrozen(schema);
+      isObjectOrArray(schema) && isDeepFrozen(schema);
     if (!cacheable) {
       return ContextualFlowControl.schemaAtPathInternal(
         schema,
@@ -575,7 +577,7 @@ export class ContextualFlowControl {
       )
     ) {
       // If the cursor is a $ref, get the target location
-      if (isRecord(cursor) && "$ref" in cursor) {
+      if (isObjectOrArray(cursor) && "$ref" in cursor) {
         // Follow the reference
         cursor = ContextualFlowControl.resolveSchemaRefsOrThrow(
           cursor,
@@ -583,12 +585,12 @@ export class ContextualFlowControl {
         );
         // Resolve schema refs can resolve to a fullSchema, in which case we
         // need to replace our defs.
-        if (isRecord(cursor) && cursor.$defs) {
+        if (isObjectOrArray(cursor) && cursor.$defs) {
           defs = cursor.$defs;
         }
       }
       if (
-        isRecord(cursor) &&
+        isObjectOrArray(cursor) &&
         (Array.isArray(cursor.type) || "anyOf" in cursor || "oneOf" in cursor)
       ) {
         const subSchemas = new Set<JSONSchema>();
@@ -599,7 +601,7 @@ export class ContextualFlowControl {
           ? [...cursorObject.anyOf, ...cursorObject.oneOf]
           : cursorObject.anyOf ?? cursorObject.oneOf ?? [];
         for (const entry of options) {
-          const entryDefs = isRecord(entry) && entry.$defs !== undefined
+          const entryDefs = isObjectOrArray(entry) && entry.$defs !== undefined
             ? entry.$defs as Record<string, JSONSchema>
             : defs;
           const optSchema = ContextualFlowControl.schemaAtPathInternal(
@@ -702,11 +704,11 @@ export class ContextualFlowControl {
         // we can only descend into objects and arrays or unknown
         return false;
       }
-      if (isRecord(cursor) && cursor.$defs) {
+      if (isObjectOrArray(cursor) && cursor.$defs) {
         defs = cursor.$defs;
       }
     }
-    if (isRecord(cursor) && cursor.ifc !== undefined) {
+    if (isObjectOrArray(cursor) && cursor.ifc !== undefined) {
       ContextualFlowControl.addIfcAtoms(joined, cursor.ifc.confidentiality);
     }
     if (typeof cursor === "boolean") {
@@ -752,7 +754,7 @@ export class ContextualFlowControl {
   static getAsCellValues(
     schema: JSONSchema | undefined,
   ): readonly AsCellEntry[] {
-    if (isRecord(schema) && Array.isArray(schema.asCell)) {
+    if (isObjectOrArray(schema) && Array.isArray(schema.asCell)) {
       return schema.asCell;
     }
     return [];
@@ -784,7 +786,7 @@ export class ContextualFlowControl {
   static getSchemaScopeCap(
     schema: JSONSchema | undefined,
   ): SchemaScope | undefined {
-    if (!isRecord(schema)) return undefined;
+    if (!isObjectOrArray(schema)) return undefined;
     const entryScope = ContextualFlowControl.getAsCellScope(
       ContextualFlowControl.getAsCellValues(schema).at(0),
     );
@@ -812,7 +814,7 @@ export class ContextualFlowControl {
   static getAsCellFollowScopeCap(
     schema: JSONSchema | undefined,
   ): SchemaScope | undefined {
-    if (!isRecord(schema)) return undefined;
+    if (!isObjectOrArray(schema)) return undefined;
     const entryScope = ContextualFlowControl.getAsCellScope(
       ContextualFlowControl.getAsCellValues(schema).at(0),
     );

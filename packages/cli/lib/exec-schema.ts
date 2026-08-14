@@ -781,6 +781,55 @@ function outputPropertyLines(schema: JSONSchema): string[] {
   ];
 }
 
+/** A handler's declared result, named at the position a caller reads it from:
+ * the settled Invocation JSON's `result` key, not the command's stdout. An
+ * object result enumerates its fields the way a tool's does; anything else
+ * names its type, because a scalar result still has a shape worth publishing.
+ */
+function invocationResultLines(schema: JSONSchema): string[] {
+  const properties = objectProperties(schema);
+  if (!properties || Object.keys(properties).length === 0) {
+    return [
+      "  The invocation's `result`:",
+      ...schemaShapeString(schema).split("\n").map((line) => `    ${line}`),
+    ];
+  }
+
+  return [
+    "  The invocation's `result`:",
+    ...Object.entries(properties).map(([key, propertySchema]) =>
+      `    ${key} ${valuePlaceholder(propertySchema)}`
+    ),
+  ];
+}
+
+/** The `Output:` section of a help page, or nothing at all.
+ *
+ * A DECLARED result decides it, not the callable kind. A verb declared
+ * `Stream<E, R>` enumerates `R` exactly as a tool enumerates its pattern's
+ * result; a handler that declares nothing keeps no section at all, because an
+ * absent section reports that the page has nothing to say, where a fixed claim
+ * about output would be false for every verb that returns one.
+ *
+ * The two kinds name different positions because a caller collects them from
+ * different places: a tool's result IS the command's stdout, and a handler's
+ * rides the settled Invocation JSON.
+ */
+function outputSectionLines(spec: ExecCommandSpec): string[] {
+  if (spec.outputSchemaSummary === undefined) {
+    return spec.callableKind === "tool"
+      ? ["", "Output:", "  JSON on success."]
+      : [];
+  }
+  return [
+    "",
+    "Output:",
+    ...(spec.callableKind === "handler"
+      ? invocationResultLines(spec.outputSchemaSummary)
+      : outputPropertyLines(spec.outputSchemaSummary)),
+  ];
+}
+
 function usageCommandPrefix(
   mountedFilePath: string,
   invocationStyle: "cf" | "direct",
@@ -1012,22 +1061,12 @@ export function renderExecHelp(
 
   if (spec.callableKind === "handler") {
     lines.push("");
-    lines.push("Output:");
-    lines.push("  No output on success.");
-    lines.push("");
     lines.push("Alternatively, write JSON to this file to invoke the handler.");
     if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {
       lines.push("Invoke alone will call the handler without any inputs.");
     }
-  } else if (spec.outputSchemaSummary !== undefined) {
-    lines.push("");
-    lines.push("Output:");
-    lines.push(...outputPropertyLines(spec.outputSchemaSummary));
-  } else if (spec.callableKind === "tool") {
-    lines.push("");
-    lines.push("Output:");
-    lines.push("  JSON on success.");
   }
+  lines.push(...outputSectionLines(spec));
 
   return lines.join("\n");
 }
@@ -1109,24 +1148,17 @@ export function renderPieceCallHelp(
     lines.push(...specificFlags);
   }
 
-  if (spec.callableKind === "handler") {
+  // No write-through note here, unlike the mounted-file page above: this
+  // command takes its payload as an argument, and there is no file for a
+  // caller to write JSON to.
+  if (
+    spec.callableKind === "handler" &&
+    handlerAllowsInvokeWithoutInputs(spec.inputSchema)
+  ) {
     lines.push("");
-    lines.push("Output:");
-    lines.push("  No output on success.");
-    lines.push("");
-    lines.push("Alternatively, write JSON to this file to invoke the handler.");
-    if (handlerAllowsInvokeWithoutInputs(spec.inputSchema)) {
-      lines.push("Invoke alone will call the handler without any inputs.");
-    }
-  } else if (spec.outputSchemaSummary !== undefined) {
-    lines.push("");
-    lines.push("Output:");
-    lines.push(...outputPropertyLines(spec.outputSchemaSummary));
-  } else if (spec.callableKind === "tool") {
-    lines.push("");
-    lines.push("Output:");
-    lines.push("  JSON on success.");
+    lines.push("Invoke alone will call the handler without any inputs.");
   }
+  lines.push(...outputSectionLines(spec));
 
   return lines.join("\n");
 }

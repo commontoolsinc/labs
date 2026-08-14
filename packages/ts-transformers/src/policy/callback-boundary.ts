@@ -84,14 +84,6 @@ function isWithinJsxExpression(node: ts.Node): boolean {
   return false;
 }
 
-/**
- * True when `patternCall` (a `pattern(...)` call) is the first argument of an
- * enclosing `patternTool(...)` call — the canonical CT-1655 shape
- * `patternTool(pattern(cb), extraParams?)`. Used to give such a pattern's
- * callback a patternTool boundary (function creation allowed in the
- * surrounding restricted context) rather than the restricted pattern-builder
- * boundary a bare `pattern(...)` gets.
- */
 /** True when `callee` is the SQLite `table()` builder (the `commonfabric`
  *  export or `cfSqlite.table`) — recognized by name plus the
  *  `SqliteTableFunction` type alias, so local rebinding keeps working and an
@@ -121,6 +113,14 @@ function isSqliteTableCallee(
   });
 }
 
+/**
+ * True when `patternCall` (a `pattern(...)` call) is the first argument of an
+ * enclosing `patternTool(...)` call — the canonical CT-1655 shape
+ * `patternTool(pattern(cb), extraParams?)`. Used to give such a pattern's
+ * callback a patternTool boundary (function creation allowed in the
+ * surrounding restricted context) rather than the restricted pattern-builder
+ * boundary a bare `pattern(...)` gets.
+ */
 function isPatternToolPatternArgument(
   patternCall: ts.CallExpression,
   checker: ts.TypeChecker,

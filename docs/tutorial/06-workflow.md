@@ -1,7 +1,7 @@
 # Chapter 6 — The Development Workflow
 
 You now know the language; this chapter is the toolchain. The loop is:
-**sketch → check → deploy → drive → test**, all through the `cf` CLI
+**sketch → check → test → deploy → drive**, all through the `cf` CLI
 (run as `deno task cf ...` from the repo root). Keep this chapter open while
 you build your first pattern.
 
@@ -67,16 +67,43 @@ See `cf completion --help`.
 ## Deploy and iterate
 
 ```bash
-# First deploy only — SAVE THE PRINTED PIECE ID
-deno task cf piece new pattern.tsx -s myspace
+# Run every authored pattern test before deployment
+deno task cf test pattern.test.tsx
 
-# Every iteration after that: update the SAME piece in place
-deno task cf piece setsrc pattern.tsx --piece fid1:abc... -s myspace
+# First deploy only — SAVE THE PRINTED PIECE ID
+deno task cf piece new pattern.tsx --test pattern.test.tsx -s myspace
+
+# Every iteration after that: rerun tests, then update the SAME piece in place
+deno task cf test pattern.test.tsx
+deno task cf piece setsrc pattern.tsx --test pattern.test.tsx \
+  --piece fid1:abc... -s myspace
 ```
 
 The most common workflow mistake is rerunning `piece new` after each edit —
 that creates a new piece every time, and your space fills with stale
 duplicates. `new` once, `setsrc` forever after.
+
+Write automated pattern tests for new or changed behavior. Repeat `cf test` and
+`--test` for every authored test entry. The deployment command packages and
+type-checks attached tests but does not run them. Repeat the complete set of
+flags on every `setsrc`; each update defines a complete source revision, so an
+omitted test entry is not retained.
+
+For example, a second test entry is run and attached separately:
+
+```bash
+deno task cf test pattern.integration.test.tsx
+deno task cf piece setsrc pattern.tsx \
+  --test pattern.test.tsx \
+  --test pattern.integration.test.tsx \
+  --piece fid1:abc... -s myspace
+```
+
+The attached files are included by `cf piece getsrc`, so another checkout of
+the piece receives the source and its tests together. Without `--root`, the CLI
+infers the common directory that contains the main entry and every test entry.
+An explicit `--root` applies to all of them. A test-only change creates a new
+source revision, so history and recovery keep each test package separate.
 
 ## Drive a deployed piece from the CLI
 
@@ -109,12 +136,13 @@ streams, same cells. The browser shell is just one more client.
 ## Testing patterns
 
 Tests are patterns that test patterns: instantiate the subject, alternate
-`action` steps and `computed(() => boolean)` assertions, and return them as
-a `tests` array. From `packages/patterns/counter/counter.test.tsx`:
+`action` steps and `computed(() => boolean)` assertions, and return them
+under the reserved `[TESTS]` key. From
+`packages/patterns/counter/counter.test.tsx`:
 
 ```tsx
 // Shown at module scope.
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern, TESTS } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -128,7 +156,7 @@ export default pattern(() => {
   const assert_value_is_1 = computed(() => counter.value === 1);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_value_is_0 },
       { action: action_increment },
       { assertion: assert_value_is_1 },

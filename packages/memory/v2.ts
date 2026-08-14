@@ -2,7 +2,10 @@ import {
   type EntityRef,
   getModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type {
   FabricPlainObject,
@@ -10,7 +13,7 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 export const MEMORY_PROTOCOL = "memory" as const;
@@ -1020,7 +1023,7 @@ export const compatibleMemoryProtocolFlags = (
 export const parseMemoryProtocolFlags = (
   value: unknown,
 ): MemoryProtocolFlags | null => {
-  if (!isRecord(value) || Array.isArray(value)) {
+  if (!isObjectNotArray(value)) {
     return null;
   }
 
@@ -1156,7 +1159,7 @@ export const wireMemoryProtocolFlags = (
  * stops holding.
  */
 export const encodeMemoryBoundary = (value: FabricValue): string =>
-  jsonFromValue(value);
+  jsonFromFabricValue(value);
 
 export const commitPreconditionValueHash = (value: FabricValue): string =>
   hashStringOf(encodeMemoryBoundary(value));
@@ -1164,7 +1167,7 @@ export const commitPreconditionValueHash = (value: FabricValue): string =>
 export const decodeMemoryBoundary = <Value extends FabricValue = FabricValue>(
   source: string,
 ): Value & FabricValue => {
-  const decoded = valueFromJson(
+  const decoded = fabricFromJsonValue(
     source,
     memoryReconstructionContext,
   );
@@ -1193,7 +1196,7 @@ export const toDocumentSelector = (
 
 export const isEntityDocument = (
   value: unknown,
-): value is EntityDocument => isObject(value);
+): value is EntityDocument => isObjectNotArray(value);
 
 export const getEntityDocumentMetadata = (
   document: EntityDocument,

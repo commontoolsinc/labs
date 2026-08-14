@@ -376,6 +376,18 @@ describe("provenance", () => {
       const agent = provenanceUserAgent(detectProvenance({ env: envFrom({}) }));
       expect(agent).not.toMatch(/service=/);
     });
+
+    it("returns the product it is given in place of the harness", () => {
+      expect(provenanceUserAgent(BASE, "toolshed")).toBe(
+        "toolshed (principal=a1b2c3d4; invoker=cli; session=0123abcd)",
+      );
+    });
+
+    it("returns a bounded product for one that would break the header", () => {
+      expect(provenanceUserAgent(BASE, "tool shed (x)")).toMatch(
+        /^tool_shed_x \(/,
+      );
+    });
   });
 
   describe("withRunManifest()", () => {

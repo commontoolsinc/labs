@@ -1,5 +1,8 @@
-// Completed runtime benchmark artifacts persisted across dashboard restarts.
-// One workflow run attempt is immutable, including the absence of a usable artifact.
+/**
+ * Keeps the completed runtime benchmark artifacts across dashboard restarts.
+ * One workflow run attempt is immutable, including the absence of a usable
+ * artifact.
+ */
 
 import { dashboardCacheFile } from "./history-files.ts";
 

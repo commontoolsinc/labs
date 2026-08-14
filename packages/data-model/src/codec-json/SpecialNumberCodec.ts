@@ -1,8 +1,9 @@
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import type { JsonCodecValue } from "./interface.ts";
+import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
  * Codec for the four "special" numeric values that JSON cannot represent
@@ -17,7 +18,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * Any NaN bit pattern serializes as the literal `"NaN"` and round-trips
  * back to `Number.NaN`.
  */
-export class SpecialNumberCodec extends BaseFabricCodec {
+export class SpecialNumberCodec extends BaseTerminalCodec<JsonCodecValue> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.SpecialNumber, Number);
@@ -33,7 +34,7 @@ export class SpecialNumberCodec extends BaseFabricCodec {
   }
 
   /** @inheritDoc */
-  encode(value: number): FabricValue {
+  encode(value: number): JsonCodecValue {
     if (Number.isNaN(value)) return "NaN";
     if (value === Infinity) return "+Infinity";
     if (value === -Infinity) return "-Infinity";
@@ -44,7 +45,7 @@ export class SpecialNumberCodec extends BaseFabricCodec {
   /** @inheritDoc */
   decode(
     typeTag: string,
-    state: FabricValue,
+    state: JsonCodecValue,
     _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {

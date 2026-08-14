@@ -5,7 +5,11 @@ import {
   type LLMNativeModelToolId,
 } from "@commonfabric/llm/types";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
-import type { HarnessModelProviderId } from "../config.ts";
+import type {
+  HarnessModelAuthSource,
+  HarnessModelProviderId,
+} from "../config.ts";
+import type { HarnessCredentialOwnerRef } from "./run-manifest.ts";
 import type {
   HarnessAllowedSkillScript,
   HarnessSkillScriptExecutionTarget,
@@ -201,6 +205,9 @@ export interface HarnessSubagentRunManifest {
   depth: 1;
   cfcEnforcementMode: CfcEnforcementMode;
   modelProvider?: HarnessModelProviderId;
+  modelAuthSource?: HarnessModelAuthSource;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  harnessHomeIdentity?: string;
   model: string;
   modelSource?: HarnessSubagentModelSource;
   allowedToolIds: readonly BuiltinToolId[];

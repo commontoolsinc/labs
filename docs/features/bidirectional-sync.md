@@ -68,11 +68,20 @@ write redirect link from the edit-allocated cell to the canonical cell. This
 ensures any links created between the edit and the sync remain valid.
 
 ```typescript
-// Shown for illustration only.
-// After getting canonical ID for a newly created item:
-const canonicalCell = Cell.for(canonicalId);
-const editCell = item.asResolvedCell();
-editCell.setRaw(canonicalCell.getAsWriteRedirectLink({ base: editCell }));
+import type { Cell } from "@commonfabric/runner";
+
+// `editCell` is the cell the edit allocated before the item had a canonical
+// ID. `canonicalCell` is the cell that ID names. After this write, anything
+// holding the edit's cell writes through to the canonical one.
+export function redirectToCanonical<T>(
+  editCell: Cell<T>,
+  canonicalCell: Cell<T>,
+): void {
+  const resolved = editCell.resolveAsCell();
+  resolved.setRawUntyped(
+    canonicalCell.getAsWriteRedirectLink({ base: resolved }),
+  );
+}
 ```
 
 ---
@@ -99,59 +108,54 @@ directory and keeps cells in sync with the filesystem.
 
 ### Daemon Setup
 
+A daemon runs outside any pattern, so it starts from a `Runtime` it built
+itself and from cells it looked up on a deployed piece. Before the first sync
+cycle, bring those cells and the storage layer up to date:
+
 ```typescript
-// Shown for illustration only.
-import { Runtime } from "@commonfabric/runner";
-import { popFrame, pushFrameFromCause } from "@commonfabric/runner/builder";
+import type { Cell, Runtime } from "@commonfabric/runner";
 
-const runtime = new Runtime(/* storage config */);
-
-// Sync the cells you'll operate on
-await Promise.all([
-  stateCell.sync(),
-  editsCell.sync(),
-  runtime.storageManager.synced(),
-]);
+export async function prepare(
+  runtime: Runtime,
+  stateCell: Cell<unknown>,
+  editsCell: Cell<unknown>,
+): Promise<void> {
+  await Promise.all([
+    stateCell.sync(),
+    editsCell.sync(),
+    runtime.storageManager.synced(),
+  ]);
+}
 ```
 
-### The Sync Loop
+### Scheduling the Sync
+
+Two things ask for a sync: the filesystem changed, or the pattern appended an
+edit. Both funnel into one scheduler that runs at most one cycle at a time.
+When a request arrives while a cycle is running, `syncAgain` records it and a
+trailing cycle picks it up. The worst case is a cycle that re-reads the
+filesystem, finds nothing new, and writes nothing.
 
 ```typescript
-// Shown for illustration only.
-async function runSyncLoop(
-  runtime: Runtime,
-  space: MemorySpace,
-  stateCell: Cell<State>,
-  editsCell: Cell<Edit[]>,
-  appliedEditsCell: Cell<Edit[]>,
+import type { Cell } from "@commonfabric/runner";
+import { debounce } from "@std/async";
+
+// One full compare-and-swap cycle: `doSyncCycle` from the next section, with
+// its runtime, cells and paths already bound.
+declare function doSync(): Promise<void>;
+
+export function scheduleSyncs(
+  editsCell: Cell<unknown[]>,
   watchPath: string,
-) {
-  // Concurrency guard: only one sync runs at a time.
-  // If a notification arrives mid-sync, we set syncAgain = true so
-  // another full cycle runs immediately after the current one finishes.
-  // Worst case: we re-read the filesystem, produce no diffs, no-op.
+): { dispose: () => void } {
   let syncInProgress = false;
   let syncAgain = false;
 
-  const debouncedSync = debounce(sync, 100);
-
-  function scheduleSync() {
-    syncAgain = true;
-    debouncedSync();
-  }
-
-  // Watch filesystem for changes
-  const watcher = fs.watch(watchPath, { recursive: true }, scheduleSync);
-
-  // Watch edit queue for new entries
-  editsCell.sink(scheduleSync);
-
-  async function sync() {
+  async function sync(): Promise<void> {
     if (syncInProgress) {
       syncAgain = true;
       return;
     }
-
     syncInProgress = true;
     try {
       do {
@@ -163,89 +167,218 @@ async function runSyncLoop(
     }
   }
 
-  async function doSync() {
-    let editWatermark = 0; // Track which edits have been applied to fs
-    const editIdMap: Map<Edit, string> = new Map(); // Survives CAS retries
-    let committed = false;
+  // Coalesce the burst of events a single save produces into one cycle.
+  const debouncedSync = debounce(sync, 100);
 
-    while (!committed) {
-      // Wait for any in-flight syncs to settle
-      await runtime.storageManager.synced();
-
-      // Create transaction and frame
-      const tx = runtime.edit();
-      const frame = pushFrameFromCause("my-importer", {
-        runtime,
-        tx,
-        space,
-      });
-
-      try {
-        const edits = editsCell.get();
-
-        // 1. Apply NEW edits to the filesystem (only past the watermark)
-        //    On first iteration watermark is 0, so all edits are applied.
-        //    On retry (tx failed because new edits arrived), only the
-        //    new edits beyond the watermark are applied — earlier ones
-        //    are already on disk.
-        for (let i = editWatermark; i < edits.length; i++) {
-          const edit = edits[i];
-          try {
-            applyEditToFilesystem(edit, watchPath);
-            if (edit.type === "create") {
-              editIdMap.set(edit, getCanonicalId(edit, watchPath));
-            }
-          } catch (err) {
-            if (isSystemError(err)) {
-              // System error: keep edit in queue, crash loud.
-              // Operator fixes the condition, restarts daemon.
-              throw new Error(
-                `System error applying edit: ${err.message}. ` +
-                  `Edit remains in queue. Fix the issue and restart.`,
-              );
-            }
-            // Conflict error: move to failedEdits for user reformulation
-            failedEditsCell.push({ edit, error: err.message });
-          }
-        }
-        editWatermark = edits.length;
-
-        // 2. Read full filesystem state, build cell structure
-        //    IMPORTANT: Use Cell.for(canonicalId) for each item that has
-        //    an external ID. This ensures stable links in the fabric.
-        const fsState = readFilesystemState(watchPath);
-        stateCell.set(
-          buildStateFromFs(fsState), // Must use Cell.for() internally — see below
-        );
-
-        // 3. Write redirect links for newly created items
-        for (const [edit, canonicalId] of editIdMap) {
-          const canonicalCell = Cell.for(canonicalId);
-          const editCell = edit.tempRef.asResolvedCell();
-          editCell.setRaw(
-            canonicalCell.getAsWriteRedirectLink({ base: editCell }),
-          );
-        }
-
-        // 4. Clear edit queue, record applied edits
-        appliedEditsCell.push(...edits);
-        editsCell.set([]);
-      } finally {
-        popFrame();
-      }
-
-      // 5. Commit — retry if transaction failed
-      const { error } = await tx.commit();
-      if (!error) {
-        committed = true;
-      }
-      // If error, loop again: a new edit was appended, so catch up.
-      // The watermark ensures we don't re-apply edits to the filesystem.
-    }
+  function scheduleSync(): void {
+    syncAgain = true;
+    debouncedSync();
   }
 
-  // Initial sync
-  scheduleSync();
+  const watcher = Deno.watchFs(watchPath, { recursive: true });
+  (async () => {
+    for await (const _event of watcher) scheduleSync();
+  })();
+
+  const cancelEditsSink = editsCell.sink(scheduleSync);
+
+  scheduleSync(); // Initial sync.
+
+  return {
+    dispose() {
+      watcher.close();
+      cancelEditsSink();
+    },
+  };
+}
+```
+
+### The Sync Cycle
+
+One cycle applies the pending edits to the filesystem, reads the filesystem
+back into cells, and clears the queue — all as a single compare-and-swap
+transaction. If the commit fails, a new edit arrived while the cycle was
+running, and the cycle repeats against the longer queue.
+
+```typescript
+import type { Cell, MemorySpace, Runtime } from "@commonfabric/runner";
+import { popFrame, pushFrameFromCause } from "@commonfabric/runner";
+
+/** What the user asked for, recorded before it reaches the filesystem. */
+type Edit =
+  | { type: "create"; name: string; pendingId?: string }
+  | { type: "rename"; id: string; name: string }
+  | { type: "delete"; id: string };
+
+interface Item {
+  id: string;
+  name: string;
+}
+
+interface State {
+  items: Item[];
+}
+
+/** An edit the filesystem refused. */
+interface FailedEdit {
+  edit: Edit;
+  error: string;
+}
+
+/** The cells the pattern and the daemon share. */
+interface SyncCells {
+  state: Cell<State>;
+  edits: Cell<Edit[]>;
+  appliedEdits: Cell<Edit[]>;
+  failedEdits: Cell<FailedEdit[]>;
+}
+
+// Applies one edit to the filesystem. A "create" comes back with the ID the
+// filesystem assigned to the new item.
+declare function applyEditToFilesystem(
+  edit: Edit,
+  watchPath: string,
+): { canonicalId?: string };
+
+// Reads the whole directory and builds the cell structure, using the cell
+// constructor for stable identity. See "Building State with Stable Identity".
+declare function buildStateFromFs(
+  watchPath: string,
+  cellFor: (cause: unknown) => Cell<Item>,
+): State;
+
+// Tells a broken environment apart from an edit that cannot succeed. See
+// "Error Handling: Failed Edits".
+declare function isSystemError(error: unknown): boolean;
+
+// Points the cell an optimistic create allocated at the canonical cell. See
+// "Write Redirect Links for In-Flight Edits".
+declare function redirectToCanonical<T>(
+  editCell: Cell<T>,
+  canonicalCell: Cell<T>,
+): void;
+
+// An edit the pattern enqueued against an item that had not reached the
+// filesystem yet names that item by its pending ID. Once the filesystem has
+// assigned the real one, swap it in.
+function resolveEdit(edit: Edit, pendingToCanonical: Map<string, string>): Edit {
+  if (edit.type === "create") return edit;
+  const canonicalId = pendingToCanonical.get(edit.id);
+  return canonicalId === undefined ? edit : { ...edit, id: canonicalId };
+}
+
+export async function doSyncCycle(
+  runtime: Runtime,
+  space: MemorySpace,
+  cells: SyncCells,
+  watchPath: string,
+  cellFor: (cause: unknown) => Cell<Item>,
+  // The cells the pattern allocated for items it created optimistically,
+  // keyed by the position of the create edit in the queue.
+  tempCells: Map<number, Cell<Item>>,
+  // Pending IDs the pattern minted, mapped to the IDs the filesystem assigned.
+  // This one outlives the cycle: an edit naming a pending ID can arrive long
+  // after the create that minted it was synced.
+  pendingToCanonical: Map<string, string>,
+): Promise<void> {
+  // How far into the queue the filesystem has already been taken. It lives
+  // outside the retry loop, so a retry does not apply an edit twice.
+  let editWatermark = 0;
+  // Canonical IDs learned on an earlier attempt, kept across retries.
+  const editIdMap = new Map<Edit, string>();
+  // What became of each edit the filesystem has already seen. These accumulate
+  // across retries for the same reason the watermark does: an aborted attempt
+  // still applied its edits to disk, and the commit that finally lands is the
+  // only one that gets to record them.
+  const applied: Edit[] = [];
+  const failed: FailedEdit[] = [];
+  let committed = false;
+
+  while (!committed) {
+    // Which optimistic-create cells this attempt redirected. Reset per
+    // attempt, because an aborted commit undoes the redirects with it.
+    const redirected: number[] = [];
+
+    // Let any in-flight storage traffic settle first.
+    await runtime.storageManager.synced();
+
+    const tx = runtime.edit();
+    pushFrameFromCause("fs-sync", { runtime, tx, space, inHandler: true });
+
+    try {
+      // Bind the cells to this transaction, so every read and write below
+      // belongs to the same compare-and-swap unit.
+      const txState = cells.state.withTx(tx);
+      const txEdits = cells.edits.withTx(tx);
+      const txApplied = cells.appliedEdits.withTx(tx);
+      const txFailed = cells.failedEdits.withTx(tx);
+
+      const edits = txEdits.get();
+
+      // 1. Apply the edits past the watermark to the filesystem. On the first
+      //    attempt the watermark is 0, so every edit is applied. On a retry
+      //    only the edits that arrived since are applied; the earlier ones
+      //    are already on disk.
+      for (let i = editWatermark; i < edits.length; i++) {
+        const original = edits[i];
+        const edit = resolveEdit(original, pendingToCanonical);
+        try {
+          const { canonicalId } = applyEditToFilesystem(edit, watchPath);
+          if (canonicalId !== undefined) {
+            editIdMap.set(original, canonicalId);
+            if (original.type === "create" && original.pendingId !== undefined) {
+              pendingToCanonical.set(original.pendingId, canonicalId);
+            }
+          }
+          applied.push(edit);
+        } catch (error) {
+          if (isSystemError(error)) {
+            // The environment is broken. Leave the edit in the queue and
+            // stop, so an operator can fix the condition and restart.
+            throw new Error(
+              `System error applying edit: ${(error as Error).message}. ` +
+                `Edit remains in queue. Fix the issue and restart.`,
+            );
+          }
+          // The edit cannot succeed as written. Record it and carry on.
+          failed.push({ edit, error: (error as Error).message });
+        }
+      }
+      editWatermark = edits.length;
+
+      // 2. Read the whole filesystem state back and write it to cells.
+      txState.set(buildStateFromFs(watchPath, cellFor));
+
+      // 3. Redirect the cells the pattern allocated for optimistic creates
+      //    at the cells their canonical IDs now name. These writes go through
+      //    the transaction, so a failed commit rolls them back and the next
+      //    attempt has to make them again.
+      for (const [index, tempCell] of tempCells) {
+        const canonicalId = editIdMap.get(edits[index]);
+        if (canonicalId === undefined) continue;
+        redirectToCanonical(tempCell, cellFor(canonicalId));
+        redirected.push(index);
+      }
+
+      // 4. Clear the queue, and record what happened to every edit this cycle
+      //    has processed, including the ones an earlier attempt applied.
+      txApplied.push(...applied);
+      txFailed.push(...failed);
+      txEdits.set([]);
+    } finally {
+      popFrame();
+    }
+
+    // 5. Commit. A failure means a new edit was appended while this cycle was
+    //    running, so go round again and catch up. The watermark keeps the
+    //    filesystem from receiving the earlier edits a second time.
+    const { error } = await tx.commit();
+    if (!error) {
+      committed = true;
+      // The redirects are durable now, so stop offering those cells.
+      for (const index of redirected) tempCells.delete(index);
+    }
+  }
 }
 ```
 
@@ -258,20 +391,42 @@ async function runSyncLoop(
 > platform-level support.
 
 The `buildStateFromFs` function (or equivalent) **must** use `Cell.for()` for
-every sub-item that has an external canonical ID. For example:
+every sub-item that has an external canonical ID. A daemon runs outside a
+pattern, so it is handed the cell constructor rather than reaching for a bound
+`Cell`:
 
 ```typescript
-// Shown for illustration only.
-function buildStateFromFs(fsState: FsState): State {
+import type { Cell } from "@commonfabric/runner";
+
+interface Item {
+  id: string;
+  name: string;
+  path: string;
+}
+
+interface State {
+  items: Item[];
+}
+
+interface FsState {
+  items: Array<{ canonicalId: string; name: string; path: string }>;
+}
+
+export function buildStateFromFs(
+  fsState: FsState,
+  cellFor: (cause: unknown) => Cell<Item>,
+): State {
   return {
     items: fsState.items.map((item) =>
-      // Cell.for() ensures this item has a stable cell derived from
-      // its canonical ID. Links to this item survive across syncs.
-      Cell.for(item.canonicalId).set({
+      // `for()` derives the cell from the canonical ID, so the same ID always
+      // names the same cell and links to this item survive across syncs.
+      // `set()` hands back the cell, which stands in for the item's value
+      // inside the structure being built.
+      cellFor(item.canonicalId).set({
+        id: item.canonicalId,
         name: item.name,
         path: item.path,
-        // ...
-      })
+      }) as unknown as Item
     ),
   };
 }
@@ -297,44 +452,43 @@ Only one daemon instance should run per sync target. Use a lockfile with the
 daemon's PID:
 
 ```typescript
-// Shown inside a pattern body.
-const lockPath = path.join(watchPath, ".sync.lock");
-
-function acquireLock(): boolean {
+export function acquireLock(lockPath: string): boolean {
   try {
-    // Atomic create — fails if file exists
-    fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+    // Creating the file exclusively is the atomic step: two daemons racing
+    // for the same target cannot both succeed.
+    Deno.writeTextFileSync(lockPath, String(Deno.pid), { createNew: true });
     return true;
   } catch {
-    // Check if the existing lock's PID is still alive
-    const existingPid = parseInt(fs.readFileSync(lockPath, "utf8"));
     try {
-      process.kill(existingPid, 0); // Signal 0 = check if alive
-      return false; // Process is alive, lock is valid
+      const existingPid = parseInt(Deno.readTextFileSync(lockPath), 10);
+      // Throws when no such process exists.
+      Deno.kill(existingPid, "SIGCONT");
+      return false; // The other daemon is running; its lock stands.
     } catch {
-      // Stale lock from a crashed process — reclaim it
-      fs.writeFileSync(lockPath, String(process.pid));
+      // The lock names a process that is gone. Reclaim it.
+      Deno.writeTextFileSync(lockPath, String(Deno.pid));
       return true;
     }
   }
 }
 
-function releaseLock() {
+export function releaseLock(lockPath: string): void {
   try {
-    fs.unlinkSync(lockPath);
-  } catch {}
+    Deno.removeSync(lockPath);
+  } catch {
+    // Already gone.
+  }
 }
 
-// Clean up on exit
-process.on("exit", releaseLock);
-process.on("SIGINT", () => {
-  releaseLock();
-  process.exit();
-});
-process.on("SIGTERM", () => {
-  releaseLock();
-  process.exit();
-});
+export function releaseLockOnExit(lockPath: string): void {
+  globalThis.addEventListener("unload", () => releaseLock(lockPath));
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    Deno.addSignalListener(signal, () => {
+      releaseLock(lockPath);
+      Deno.exit(0);
+    });
+  }
+}
 ```
 
 ### Error Handling: Failed Edits
@@ -351,24 +505,25 @@ Not all edit failures are equal. Two categories require different strategies:
   can't succeed as-is and won't succeed on retry either. Move to a `failedEdits`
   queue and surface to the user for reformulation. The daemon continues running.
 
+Step 1 of the sync cycle is where the two are told apart. The test itself looks
+at what the filesystem reported:
+
 ```typescript
-// Shown for illustration only.
-// In the edit application loop:
-try {
-  applyEditToFilesystem(edit, watchPath);
-} catch (err) {
-  if (isSystemError(err)) {
-    // Don't clear the queue — this edit and all after it are preserved.
-    // Crash loud so the operator knows what to fix.
-    throw new Error(
-      `System error applying edit: ${err.message}. ` +
-        `Edit remains in queue. Fix the issue and restart.`,
-    );
-  }
-  // Conflict: move to failed queue, continue with remaining edits
-  failedEditsCell.push({ edit, error: err.message });
+export function isSystemError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("permission denied") ||
+    message.includes("no space left") ||
+    message.includes("disk full") ||
+    message.includes("enospc") ||
+    message.includes("eacces");
 }
 ```
+
+A system error throws out of the cycle before the transaction commits, so the
+queue is never cleared and every pending edit is preserved. A conflict error
+joins the `failed` list, which the cycle commits to `failedEdits` alongside the
+edits that succeeded.
 
 ### Why This Works: CAS Atomicity and the No-Loss Guarantee
 
@@ -397,8 +552,7 @@ is automatically detected.
 #### What the watermark protects
 
 When a transaction retries, we don't want to re-apply edits that already made it
-to the filesystem. The `editWatermark` (line 164 in the sync loop) tracks how
-far we got:
+to the filesystem. The `editWatermark` in `doSyncCycle` tracks how far we got:
 
 ```
 First attempt:  edits = [A, B]    → apply A, B to fs → watermark = 2
@@ -406,10 +560,26 @@ First attempt:  edits = [A, B]    → apply A, B to fs → watermark = 2
 Retry:          edits = [A, B, C] → skip A, B (watermark) → apply C → watermark = 3
 ```
 
-The watermark lives outside the `while (!committed)` loop but inside `doSync`,
-so it survives across CAS retries within a single sync cycle but resets between
-cycles. The `editIdMap` works the same way — canonical IDs discovered during
-earlier attempts are preserved across retries.
+The watermark lives outside the `while (!committed)` loop but inside
+`doSyncCycle`, so it survives across CAS retries within a single sync cycle but
+resets between cycles. The `editIdMap` works the same way — canonical IDs
+discovered during earlier attempts are preserved across retries.
+
+The `applied` and `failed` lists must live out there too, and for a reason that
+is easy to miss. An aborted attempt still wrote its edits to the filesystem,
+and the watermark makes sure the next attempt skips them. So if those lists
+were rebuilt per attempt, the commit that finally lands would record only the
+last attempt's edits. Every edit an earlier attempt applied would vanish from
+`appliedEdits`, and, worse, every edit an earlier attempt rejected would vanish
+from `failedEdits` without ever reaching the user who has to reformulate it.
+Accumulating both lists across attempts is what makes the winning commit a
+complete record of the cycle.
+
+The redirects go the other way. Each one is a write through the transaction, so
+an aborted commit rolls it back and the next attempt has to make it again. That
+is why a `tempCells` entry is only dropped after a commit succeeds. Drop one
+earlier and the retry skips a redirect that no longer exists, leaving an
+optimistically created item pointing at a cell nothing writes to.
 
 #### Why there's no backsliding
 
@@ -428,7 +598,7 @@ transaction eliminates this window.
 #### Why append-only matters
 
 The edit queue is append-only during normal operation. Edits are only removed by
-the daemon (step 4: `editsCell.set([])`). This means:
+the daemon (step 4: `txEdits.set([])`). This means:
 
 - A CAS retry always sees the original edits plus any new ones — never fewer.
 - The watermark is always valid: edits before the watermark are the same objects
@@ -441,9 +611,9 @@ figure out what's already applied.
 
 #### The concurrency guard's role
 
-The `syncInProgress` / `syncAgain` guard (lines 130–131) is not about
+The `syncInProgress` / `syncAgain` guard in `scheduleSyncs` is not about
 correctness — CAS handles that. It's about efficiency. Without it, rapid
-filesystem changes or edit queue appends would spawn overlapping `doSync` calls,
+filesystem changes or edit queue appends would spawn overlapping sync cycles,
 each doing redundant filesystem reads. The guard serializes sync cycles so at
 most one runs at a time, and the `syncAgain` flag ensures a trailing cycle picks
 up anything that arrived mid-sync.
@@ -452,10 +622,13 @@ up anything that arrived mid-sync.
 
 | Code                             | What it protects                              |
 | -------------------------------- | --------------------------------------------- |
-| `editsCell.get()` + `editsCell.set([])` in same tx | No-loss guarantee: CAS detects concurrent appends |
-| `stateCell.set(...)` in same tx  | No-backsliding: state and queue are always consistent |
+| `txEdits.get()` + `txEdits.set([])` in same tx | No-loss guarantee: CAS detects concurrent appends |
+| `txState.set(...)` in same tx    | No-backsliding: state and queue are always consistent |
 | `editWatermark`                  | No double-apply: filesystem edits aren't repeated on retry |
 | `editIdMap` outside retry loop   | Canonical IDs survive CAS retries             |
+| `applied`/`failed` outside retry loop | The winning commit records every edit the cycle processed |
+| `tempCells` entries dropped after commit | A rolled-back redirect is made again on the retry |
+| `pendingToCanonical` across cycles | Edits naming a pending ID still reach the right item |
 | Append-only queue                | Watermark validity: prefix is stable across retries |
 | `syncInProgress` guard           | Efficiency: one sync at a time, no redundant fs reads |
 
@@ -472,12 +645,21 @@ Render directly from the synced state cell. No local state management, no
 optimistic-update tracking in the UI layer.
 
 ```tsx
-// Shown for illustration only.
+// Shown at module scope.
+interface Item {
+  id: string;
+  name: string;
+}
+
+interface State {
+  items: Item[];
+}
+
 const myPattern = pattern<{ state: State; edits: Edit[] }>(
   ({ state, edits }) => {
     return (
       <div>
-        {state.items.map((item) => <div key={item.id}>{item.name}</div>)}
+        {state.items.map((item) => <div>{item.name}</div>)}
       </div>
     );
   },
@@ -492,16 +674,17 @@ On user interaction, atomically (via `action()` or `handler()`) do two things:
 2. Optimistically apply the change to the local state
 
 ```tsx
-// Shown for illustration only.
-const onRename = handler<{ item: Item; edits: Edit[] }>(
-  ({ item, edits }, newName: string) => {
-    // Enqueue the edit
-    edits.push({ type: "rename", id: item.id, name: newName });
+// Shown at module scope.
+const onRename = handler<
+  { name: string },
+  { item: Writable<Item>; edits: Writable<Edit[]> }
+>((event, { item, edits }) => {
+  // Enqueue the edit
+  edits.push({ type: "rename", id: item.get().id, name: event.name });
 
-    // Optimistic update — will be overwritten by next sync
-    item.name = newName;
-  },
-);
+  // Optimistic update — will be overwritten by next sync
+  item.key("name").set(event.name);
+});
 ```
 
 Because both mutations happen in a single atomic transaction, the UI never sees
@@ -520,12 +703,10 @@ sync overwrites the state. No cleanup logic needed — reactivity handles it.
 "syncing..." badges.
 
 ```tsx
-// Shown for illustration only.
-{
-  edits.length > 0 && (
-    <span class="sync-badge">Syncing {edits.length} changes...</span>
-  );
-}
+// Shown as JSX element children.
+{edits.length > 0 && (
+  <span className="sync-badge">Syncing {edits.length} changes...</span>
+)}
 ```
 
 ---

@@ -6,12 +6,18 @@ import type {
   GetModelsRoute,
 } from "./llm.routes.ts";
 import { httpStatusForError } from "./errors.ts";
-import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
+import {
+  ALIAS_NAMES,
+  ModelList,
+  MODELS,
+  TASK_MODELS,
+  whenModelsReady,
+} from "./models.ts";
 import { CacheItem, hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
-import { findModel } from "./models.ts";
+import { findModel, resolveModel } from "./models.ts";
 import { isLLMRequest } from "@commonfabric/llm/types";
 import { type BuiltInLLMMessage } from "@commonfabric/api";
 
@@ -50,12 +56,12 @@ async function readJsonBody(
  * Validates that the model and JSON mode settings are compatible
  * @returns An error response object if validation fails, or null if validation passes
  */
-function validateModelAndJsonMode(
+async function validateModelAndJsonMode(
   c: Context,
   modelString: string | undefined,
   mode: string | undefined,
 ) {
-  const model = modelString ? findModel(modelString) : null;
+  const model = modelString ? await resolveModel(modelString) : null;
 
   if (!model) {
     return c.json(
@@ -91,7 +97,13 @@ function validateModelAndJsonMode(
  * Handler for GET /models endpoint
  * Returns filtered list of available LLM models based on search criteria
  */
-export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
+export const getModels: AppRouteHandler<GetModelsRoute> = async (c) => {
+  // The list is what this route answers for, so it waits for the whole of it.
+  // A route naming one model asks `resolveModel`, which waits only when the
+  // name is not registered yet; there is no such shortcut for all of them, and
+  // a list quietly missing every gateway model is a wrong answer rather than
+  // an early one.
+  await whenModelsReady();
   const { search, capability, task } = c.req.query();
   const capabilities = capability?.split(",");
 
@@ -205,7 +217,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     }
   };
 
-  const validationError = validateModelAndJsonMode(
+  const validationError = await validateModelAndJsonMode(
     c,
     payload.model,
     payload.mode,

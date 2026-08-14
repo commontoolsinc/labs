@@ -5,12 +5,15 @@
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
     "test": "ENV=test deno test --no-check -A --env-file=.env.test",
     "llm-exercise": "deno run --allow-env --allow-net ./scripts/llm-exercise.ts",
-    "provision-ingest-channel": "deno run -A --env-file=.env scripts/provision-ingest-channel.ts"
+    "provision-ingest-channel": "deno run -A --env-file=.env scripts/provision-ingest-channel.ts",
+    "audit-ingest-channels": "deno run -A --env-file=.env scripts/audit-ingest-channels.ts",
+    "retire-ingest-channels": "deno run -A --env-file=.env scripts/retire-ingest-channels.ts"
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@/": "./",
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
+    "@node/async_hooks": "node:async_hooks",
     "ai": "npm:ai@^7.0.31",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@^4.0.16",

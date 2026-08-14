@@ -1,17 +1,19 @@
-// What the two schema-guided argument walks in `runner.ts` do with a
-// `FabricSpecialObject`. Both collect links out of a live action argument, and
-// both are security-relevant: what they find becomes scheduler read tracking
-// and write-policy input.
-//
-// Neither walk rebuilds anything -- each INDEXES the value at the position its
-// schema names (`currentValue[key]`). So a `FabricPrimitive` standing where the
-// schema expects a container yields `undefined` per key and contributes
-// nothing, which is the right answer: a leaf holds no link to find.
-//
-// A `FabricInstance` is a different case and both walks refuse one. A link in
-// its codec contents is unreachable by property name, so passing it through
-// _misses_ that link -- and over-collection is these walkers' safe direction,
-// which makes a miss the unsafe one.
+/**
+ * What the two schema-guided argument walks in `runner.ts` do with a
+ * `FabricSpecialObject`. Both collect links out of a live action argument, and
+ * both are security-relevant: what they find becomes scheduler read tracking
+ * and write-policy input.
+ *
+ * Neither walk rebuilds anything -- each INDEXES the value at the position its
+ * schema names (`currentValue[key]`). So a `FabricPrimitive` standing where the
+ * schema expects a container yields `undefined` per key and contributes
+ * nothing, which is the right answer: a leaf holds no link to find.
+ *
+ * A `FabricInstance` is a different case and both walks refuse one. A link in
+ * its codec contents is unreachable by property name, so passing it through
+ * _misses_ that link -- and over-collection is these walkers' safe direction,
+ * which makes a miss the unsafe one.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

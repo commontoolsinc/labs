@@ -1,3 +1,10 @@
+/**
+ * The three states `Cell.push()` and `Cell.addUnique()` can find the stored
+ * value in: absent, an array, or something else. Each method decides between
+ * them before it has an array to work with, so all three are covered here for
+ * both.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -7,12 +14,6 @@ import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
-/**
- * The three states `Cell.push()` and `Cell.addUnique()` can find the stored
- * value in: absent, an array, or something else. Each method decides between
- * them before it has an array to work with, so all three are covered here for
- * both.
- */
 const signer = await Identity.fromPassphrase("array write guards");
 const space = signer.did();
 

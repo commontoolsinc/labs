@@ -1,16 +1,20 @@
-// Google Cloud access plus a minimal BigQuery query, over REST — no bq/gcloud CLI.
-//
-// Access tokens come from one of two sources, in this order:
-//   - GCP_SA_KEY: a service-account key (the whole JSON file, as the env value).
-//     Its private key signs a JWT that is exchanged for a short-lived access
-//     token. This is the local-development path.
-//   - the GCE/GKE metadata server, which returns an access token for the
-//     workload's own service account. This is the in-cluster path (Workload
-//     Identity), where no key is stored anywhere.
-//
-// BigQuery has no API-key auth: a key does not identify a principal, and every
-// query runs as some service account. So this is the closest analogue to the
-// GitHub tiles' bearer token — a token obtained without a CLI.
+/**
+ * Reaches Google Cloud over REST, and runs the one small BigQuery query the
+ * spend tiles need, without the bq or gcloud command-line tools.
+ *
+ * Access tokens come from one of two sources, in this order:
+ *   - GCP_SA_KEY: a service-account key, the whole JSON file as the value of
+ *     the environment variable. Its private key signs a JWT that is exchanged
+ *     for a short-lived access token. This is the local-development path.
+ *   - the metadata server on GCE and GKE, which returns an access token for
+ *     the workload's own service account. This is the in-cluster path,
+ *     Workload Identity, where no key is stored anywhere.
+ *
+ * BigQuery has no API-key authentication: a key does not identify a principal,
+ * and every query runs as some service account. So this is the closest
+ * analogue to the bearer token the GitHub tiles use — a token obtained without
+ * a command-line tool.
+ */
 
 export interface SaKey {
   client_email: string;

@@ -1,4 +1,11 @@
-// Shared helpers used across tiles and the core.
+/**
+ * Collects the helpers the tiles and the dashboard core share: the wrappers
+ * that call the GitHub REST API and spend its rate-limit budget, the service
+ * name a SigNoz query is scoped to, the small formatting routines that turn a
+ * number or a span into the text a tile shows, and the sparkline and strip
+ * drawing the tiles chart their history with.
+ */
+
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
 import { CHART_HIGHLIGHT } from "./theme.ts";

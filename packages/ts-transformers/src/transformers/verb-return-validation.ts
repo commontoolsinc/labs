@@ -35,16 +35,12 @@
  */
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
-import { detectCallKind } from "../ast/call-kind.ts";
+import {
+  declaredVerbResultTypeNode,
+  detectCallKind,
+  type VerbBuilderName,
+} from "../ast/call-kind.ts";
 import { visitEachChildWithJsx } from "../ast/utils.ts";
-
-type VerbBuilderName = "action" | "handler";
-
-/** Result slot: `action`'s 2nd type argument, `handler`'s 3rd. */
-const RESULT_TYPE_ARG_SLOT: Record<VerbBuilderName, number> = {
-  action: 1,
-  handler: 2,
-};
 
 const DECLARE_HINT: Record<VerbBuilderName, string> = {
   action: "action<Event, Result>(...)",
@@ -79,7 +75,7 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
     builderName: VerbBuilderName,
     context: TransformationContext,
   ): void {
-    if (declaresResult(call, builderName)) return;
+    if (declaredVerbResultTypeNode(call, builderName)) return;
 
     const callback = verbCallback(call);
     // Concise (expression) bodies never error: absorbing their completion
@@ -105,19 +101,6 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
 }
 
 /**
- * Whether the call names a non-void result type argument. An absent argument
- * list, a short one, and an explicit `void` all mean the value-less shape.
- */
-function declaresResult(
-  call: ts.CallExpression,
-  builderName: VerbBuilderName,
-): boolean {
-  const typeArg = call.typeArguments?.[RESULT_TYPE_ARG_SLOT[builderName]];
-  if (!typeArg) return false;
-  return typeArg.kind !== ts.SyntaxKind.VoidKeyword;
-}
-
-/**
  * The verb body: the call's single function-shaped argument. Every authored
  * form — `action(cb)`, `handler(cb)`, `handler(cb, { proxy: true })`,
  * `handler(eventSchema, stateSchema, cb)` — carries exactly one; anything
@@ -133,11 +116,6 @@ function verbCallback(
   return fns.length === 1 ? fns[0] : undefined;
 }
 
-/**
- * `return <expr>` statements that return from the verb body itself — nested
- * function-likes return to their own callers and are not descended into. The
- * literal `undefined` counts as control flow, not a value.
- */
 /**
  * The shapes a forgotten result declaration actually takes: expressions that
  * are plain data by construction. Calls, identifiers, property reads, JSX,
@@ -189,6 +167,11 @@ function isDefinitelyPlainShaped(expr: ts.Expression): boolean {
     expr.kind === ts.SyntaxKind.NullKeyword;
 }
 
+/**
+ * `return <expr>` statements that return from the verb body itself — nested
+ * function-likes return to their own callers and are not descended into. The
+ * literal `undefined` counts as control flow, not a value.
+ */
 function topLevelValueReturns(body: ts.Block): ts.ReturnStatement[] {
   const found: ts.ReturnStatement[] = [];
   const walk = (node: ts.Node): void => {

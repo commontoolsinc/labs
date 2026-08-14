@@ -21,19 +21,28 @@ FUSE mounting, filesystem layout, and low-level read/write mechanics, see the
 cd ~/code/labs
 export CF_IDENTITY=./shared.key CF_API_URL=http://localhost:8000
 
-# 1. Deploy and capture piece ID
+# 1. Run every authored pattern test
+deno task cf test packages/patterns/<path>.test.tsx
+
+# 2. Deploy with every test entry attached and capture the piece ID
 ID=$(cf piece new packages/patterns/<path>.tsx \
+  --test packages/patterns/<path>.test.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 
-# 2. Set title
+# 3. Set title
 cf piece call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
 
-# 3. Step to materialise
+# 4. Step to materialise
 cf piece step --piece $ID --space SPACE
 
-# 4. Re-read pieces.json immediately — stale after deploy
+# 5. Re-read pieces.json immediately — stale after deploy
 cat "MOUNT/SPACE/pieces/pieces.json"
 ```
+
+For new or changed pattern behavior, write an authored pattern test before
+deploying. Repeat `--test` for multiple entries and pass the same complete set
+on every later `piece setsrc`. Deployment packages and type-checks attached
+tests but does not run them.
 
 **Pattern index:** `cat ~/code/labs/packages/patterns/index.md`
 
@@ -246,6 +255,11 @@ Annotations (`annotation.tsx`) are pieces that record observations, flags, and
 wishes. Use them to leave notes about things noticed without necessarily acting.
 
 **Deploy and configure via CF CLI:**
+
+`annotation.tsx` currently has no authored test entry, so the unchanged support
+pattern deployment below has no `--test` flag. If you change its behavior, first
+create and run an automated pattern test. Then attach every test entry with
+repeatable `--test` flags here and on every later `setsrc` update.
 
 ```bash
 ID=$(cf piece new packages/patterns/annotation.tsx \

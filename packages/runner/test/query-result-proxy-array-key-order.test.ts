@@ -1,7 +1,9 @@
-// The `ownKeys` trap supplies a `length` key when the underlying value has
-// none of its own. Where it puts that key matters: own-key order is what
-// distinguishes an index-only array from one carrying named properties, and
-// `isArrayWithOnlyIndexProperties()` reads exactly that.
+/**
+ * The `ownKeys` trap supplies a `length` key when the underlying value has
+ * none of its own. Where it puts that key matters: own-key order is what
+ * distinguishes an index-only array from one carrying named properties, and
+ * `isArrayWithOnlyIndexProperties()` reads exactly that.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

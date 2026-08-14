@@ -6,9 +6,10 @@
  * `isNumber()`, `isFunction()` -- and says everything there is to say about the
  * value, so its `false` branch is exactly as trustworthy as its `true` branch.
  *
- * The other kind is *structural*: `isPlainObject()` and `isPlainContainer()`
- * here, and `isInertArray()`, `isArrayWithOnlyIndexProperties()`, and
- * `isInertPlainObject()` in the sibling `arrays` and `objects` modules. Each of
+ * The other kind is *structural*: `isObjectNotArray()`, `isPlainObject()` and
+ * `isPlainContainer()` here, and `isInertArray()`,
+ * `isArrayWithOnlyIndexProperties()`, and `isInertPlainObject()` in the sibling
+ * `arrays` and `objects` modules. Each of
  * those checks strictly more than the type it narrows to can express, and
  * deliberately so: each narrows to the weakest type that stays true however the
  * value is treated afterwards, never to the property it actually checks. A
@@ -46,14 +47,56 @@
  * would not be assignable, and TypeScript would intersect the two instead: the
  * resulting `readonly number[] & unknown[]` accepts writes, which is how a
  * mutable target launders `readonly` away.
+ *
+ * ## Every object-shape predicate answers the array question in its name
+ *
+ * `typeof [] === "object"`, so a predicate named only for "object" leaves a
+ * reader guessing whether an array passes it, and a reader who guesses wrong
+ * writes the wrong branch. Each name below settles the question in its own
+ * final word. They are listed loosest test first, each accepting a subset of
+ * what the one above it accepts:
+ *
+ * * `isObjectOrArray()` -- any non-`null` value whose `typeof` is `"object"`.
+ *   Arrays, `Date`s, `Map`s, other class instances, and null-prototype objects
+ *   all pass.
+ * * `isObjectNotArray()` -- the same question with arrays removed. Class
+ *   instances still pass.
+ * * `isPlainObject()` -- rooted at `Object.prototype`, or at `null` unless the
+ *   caller asks for the narrower question. Class instances do not pass.
+ * * `isInertPlainObject()`, in the sibling `objects` module -- rooted at
+ *   `Object.prototype` exactly, with every own property an enumerable
+ *   string-keyed data property.
+ *
+ * Two more sit outside that chain. `isPlainContainer()` is `isPlainObject()`
+ * widened to admit arrays again, for a caller whose next move is member access
+ * by property name or by array index. `isInstance()` is the complement of the
+ * plain objects among the non-array ones: a prototype that is neither
+ * `Object.prototype` nor `null`.
+ *
+ * What a predicate narrows to is a separate matter from what its name says.
+ * `isObjectOrArray()` narrows to `Record<string, unknown>`, and an array
+ * satisfies that as far as reading a property by name goes. The name is what
+ * tells a caller an array can be the thing it is now holding; the type does
+ * not.
+ *
+ * `@commonfabric/data-model` asks the first of these questions of a value the
+ * type system already says is a `FabricValue`, and spells it
+ * `isFabricObjectOrArray()` for the same reason.
  */
 
 /**
- * Predicate for narrowing a mutable string-keyed record type.
+ * Indicates whether a value is a non-`null` value whose `typeof` is `"object"`.
+ * This is the loosest of the object-shape questions: an array passes, as does
+ * any class instance and any null-prototype object.
+ *
+ * The narrowed type is mutable, and is a string-keyed record because reading a
+ * property by name is what callers do with the result. An array reaching such a
+ * caller is read the same way, its indices being property names like any other.
+ *
  * @param value - The value to check
- * @returns True if the value is a record object
+ * @returns True if the value is a non-`null` object, array included
  */
-export function isRecord(
+export function isObjectOrArray(
   value: unknown,
 ): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -65,11 +108,15 @@ export function isRecord(
 export type ReadonlyRecord = Readonly<Record<string, unknown>>;
 
 /**
- * Predicate for narrowing a read-only record type, including frozen values.
+ * The `isObjectOrArray()` question asked on behalf of a caller that only reads:
+ * the same test, narrowing to a read-only record so a frozen value keeps its
+ * protection.
  * @param value - The value to check
- * @returns True if the value is a record object
+ * @returns True if the value is a non-`null` object, array included
  */
-export function isReadonlyRecord(value: unknown): value is ReadonlyRecord {
+export function isReadonlyObjectOrArray(
+  value: unknown,
+): value is ReadonlyRecord {
   return typeof value === "object" && value !== null;
 }
 
@@ -90,7 +137,7 @@ export function isFunction(
  * @returns True if the value is an instance
  */
 export function isInstance(value: unknown): boolean {
-  if (!isObject(value)) return false;
+  if (!isObjectNotArray(value)) return false;
 
   const proto = Object.getPrototypeOf(value);
 
@@ -98,25 +145,23 @@ export function isInstance(value: unknown): boolean {
 }
 
 /**
- * Indicates whether a value is a non-array, non-`null` `object` type.
+ * Indicates whether a value is a non-`null` value whose `typeof` is `"object"`
+ * and which is not an array. Class instances pass; for the narrower question
+ * that rejects those, see `isPlainObject()`.
+ *
+ * This is a structural predicate, so it narrows in one direction only, and is
+ * overloaded accordingly; see the module header for what that means and why.
+ * A `false` result means the value was not established to be a non-array
+ * object, which is weaker than saying it is one of the things the check
+ * rejects.
+ *
  * @param value - The value to check
- * @returns True if the value is an object (not array or null)
+ * @returns True if the value is a non-`null` object other than an array
  */
-export function isObject(value: unknown): boolean {
+export function isObjectNotArray(value: ReadonlyRecord): boolean;
+export function isObjectNotArray(value: unknown): value is ReadonlyRecord;
+export function isObjectNotArray(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Narrowing for a non-array/non-null `object` type.
- * @param value - The value to check
- * @returns if the value is an object (not array or null) or throws if it is not
- */
-export function assertIsObject(value: unknown): asserts value is object {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(
-      "Assertion that value is a non-array/non-null object failed",
-    );
-  }
 }
 
 /**

@@ -82,6 +82,26 @@ describe("main command", () => {
     expect(mismatchedUsage).toEqual([]);
   });
 
+  it("tells a caller what a same-id retry costs, on every waiting flag", async () => {
+    // Both waiting flags invite a retry, and a retry runs the handler body
+    // again — at-most-once is per commit, not per execution. `--wait` is the
+    // sharper case: an expiry is exactly when the caller cannot tell whether
+    // the handling committed. The two sit adjacent in `--help`, so a caveat
+    // on one and silence on the other reads as a real difference between
+    // them.
+    const { code, stdout, stderr } = await cf("piece call --help");
+    checkStderr(stderr);
+    const help = stripAnsi(stdout.join("\n")).replaceAll(/\s+/g, " ");
+    expect(help).toContain(
+      "Re-invoking under the same id and session cannot commit twice — but " +
+        "it runs the handler body again",
+    );
+    expect(help).toContain(
+      "recovers it too, but runs the handler body again",
+    );
+    expect(code).toBe(0);
+  });
+
   it("describes and parses piece call's accepted input forms", async () => {
     const { piece } = await import(
       "../commands/piece.ts?piece-call-usage-test"
@@ -134,6 +154,43 @@ describe("main command", () => {
     ]);
   });
 
+  it("reads piece call's invocation session from `CF_INVOCATION_SESSION`, behind `--invocation-session`", async () => {
+    const { piece } = await import(
+      "../commands/piece.ts?piece-call-session-test"
+    );
+    const call = piece.getCommand("call")!;
+    const sessions: Array<string | undefined> = [];
+    call.action((options) => {
+      sessions.push(options.invocationSession);
+    });
+
+    await withEnv("CF_INVOCATION_SESSION", "from-env", async () => {
+      await piece.parse([
+        "call",
+        "--invocation-session",
+        "from-flag",
+        "increment",
+      ]);
+      await piece.parse(["call", "increment"]);
+    });
+    await withEnv("CF_INVOCATION_SESSION", undefined, async () => {
+      await piece.parse(["call", "increment"]);
+    });
+
+    // The environment is the standing default for a shell or an agent run,
+    // and the flag is the one call that departs from it — so the flag wins.
+    // With neither, the option arrives `undefined`: this is the option layer
+    // alone, and `resolveInvocationIdentity` is what goes on to mint a
+    // session for a caller that named none.
+    //
+    // The middle reading is the one that pins the env var to this option:
+    // the variable is declared under the `CF_` prefix, and what reaches
+    // `.invocationSession` is the remainder camel-cased. A name whose
+    // remainder camel-cases to anything else would leave that reading
+    // `undefined` while the flag readings stayed green.
+    expect(sessions).toEqual(["from-flag", "from-env", undefined]);
+  });
+
   it("rejects multiple inline inputs to piece call", async () => {
     const { main } = await import(
       "../commands/main.ts?piece-call-inline-validation-test"
@@ -170,6 +227,9 @@ describe("main command", () => {
           command.getName()
         );
         expect(commandNames).toContain("view");
+        // A command that is not registered is invisible: `cf ingest` would
+        // simply not exist, with no error anywhere to say why.
+        expect(commandNames).toContain("ingest");
         expect(commandNames).toContain("fuse-daemon");
         expect(commandNames).toContain("fuse-supervisor");
         expect(commandNames).not.toContain("dev");
@@ -196,19 +256,20 @@ describe("main command", () => {
 
   it("shows exec command help before trying to resolve a mounted file", async () => {
     const { code, stdout } = await cf("exec --help");
+    const help = stripAnsi(stdout.join("\n"));
 
     expect(code).toBe(0);
-    expect(stdout.join("\n")).toContain(
+    expect(help).toContain(
       "Execute a mounted callable file from a Common Fabric FUSE mount.",
     );
-    expect(stdout.join("\n")).not.toContain("not within a mounted cf fuse");
+    expect(help).not.toContain("not within a mounted cf fuse");
   });
 
   it("shows help for the direct FUSE daemon entry point", async () => {
     const { code, stdout } = await cf("fuse-daemon --help");
 
     expect(code).toBe(0);
-    expect(stdout.join("\n")).toContain(
+    expect(stripAnsi(stdout.join("\n"))).toContain(
       "Usage:   cf fuse-daemon <mountpoint> [options]",
     );
   });
