@@ -11,7 +11,8 @@ mapped in [`../README.md`](../README.md).
 ## Start here
 
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — coding standards, design principles,
-  and the build and test workflow. Read this first
+  the word choice all prose here standardizes on, and the build and test
+  workflow. Read this first
 - [`code-comment-style.md`](code-comment-style.md) — how a comment is written:
   what earns one, the rule that a comment describes the system as it stands and
   the shapes that break it, the Markdown markup comments and error messages

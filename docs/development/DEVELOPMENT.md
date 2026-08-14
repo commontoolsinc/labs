@@ -165,6 +165,52 @@ abstract class Fryer {
   and to the Markdown markup that comments, error messages, and log messages
   all use.
 
+### Word choice
+
+Prose written in this repository — comments, documents, error and log messages,
+test descriptions — standardizes on one spelling per word and one word per
+concept. Both halves buy the same thing: a search for a word finds all of it,
+and two files stating the same kind of fact read as though they do.
+
+The rule is forward-looking. New prose follows it, an edit conforms the prose it
+touches, and converting a whole file or package is its own change rather than a
+side effect of another one.
+
+#### Spelling
+
+American spellings: `behavior`, `color`, `center`, `serialize`, `analyze`,
+`gray`. This is standardization rather than a claim about which English is
+better, and it is the variety already in overwhelming use in these files.
+
+Two carve-outs. Material quoted from outside — a dependency's name, a message
+relayed from another system, a specification's wording, a data file's contents —
+keeps whatever spelling it arrived with. And an identifier vocabulary already
+established in the codebase, `cancelled` among them, is a rename rather than a
+spelling fix: match the surrounding code, and treat a change to it as the code
+change it is.
+
+#### One word per concept
+
+Where two words would do, this repository picks one. The list grows as the pairs
+come up.
+
+- **`returns`**, not `answers`, for what a call evaluates to. A call is not a
+  question put to the code, and the metaphor stands in for a word that is
+  already exact and already shorter.
+  [`unit-test-coding-style.md`](unit-test-coding-style.md#writing-the-description-strings)
+  states this for an `it()` description, which is where it comes up most often;
+  it holds everywhere else too.
+- **`represents`**, `denotes`, or `is written as` — not `spells` — for the
+  relation between a construct and what it means. A path fragment denotes a ref
+  that cannot resolve, and a non-positive bound means "don't wait". The verb
+  belongs to orthography, and borrowing it dresses a semantic relation in
+  orthographic clothes. Three uses survive: the noun names a surface form ("the
+  same spelling the root span uses"), the verb is exact when the claim is about
+  the form itself ("the string that spells the number"), and "spell out" is
+  ordinary English for writing something at length. `spell` is additionally an
+  identifier here — the retired name for a pattern, still read by the state
+  inspector — so prose that borrows the word costs a search as well.
+
 ## Code Design & Principles
 
 ### Error Handling
