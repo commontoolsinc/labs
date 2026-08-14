@@ -61,7 +61,7 @@ const MODULE_MESSAGE =
 /** The shape these rules read off a node, on top of the type tag. */
 interface ImportNode {
   readonly type: string;
-  readonly source?: { readonly type: string };
+  readonly source?: { readonly type: string; readonly value?: unknown };
 }
 
 export default {
@@ -83,9 +83,13 @@ export default {
           ImportExpression(node) {
             // A computed specifier — a template literal, a variable, a URL
             // built at run time — names a module no import declaration can
-            // name, so it is left alone.
+            // name, so it is left alone. The value is checked as well as the
+            // node type, because a number, a regular expression and `null` are
+            // all `Literal` too, and none of them is a module specifier an
+            // import declaration could carry.
             const { source } = node as unknown as ImportNode;
             if (source?.type !== "Literal") return;
+            if (typeof source.value !== "string") return;
             context.report({ node, message: MODULE_MESSAGE });
           },
         };

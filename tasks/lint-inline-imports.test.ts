@@ -93,6 +93,14 @@ describe("lint-inline-imports", () => {
       expect(diagnose(source)).toEqual([]);
     });
 
+    it("passes a literal that is not a string", () => {
+      // A number, a regular expression and `null` all parse as literals, and
+      // none of them is something an import declaration could carry.
+      expect(diagnose(`const m = await import(42);`)).toEqual([]);
+      expect(diagnose(`const m = await import(/re/);`)).toEqual([]);
+      expect(diagnose(`const m = await import(null);`)).toEqual([]);
+    });
+
     it("passes a specifier held in a variable", () => {
       const source = `
         async function load(path: string) {
