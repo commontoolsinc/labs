@@ -1407,13 +1407,13 @@ describe("JsonCodecEngine", () => {
       expect(unknown.state).toEqual({ some: "data" });
     });
 
-    it("converts a `/hole` outside array context to `UnknownValue`", () => {
+    it("rejects a `/hole` outside array context rather than calling it unknown", () => {
+      // Per spec §9, `UnknownValue` is for a syntactically well-formed tag no
+      // codec claims. `hole` is a meta-tag, meaningful only among array
+      // elements, and is a structural violation anywhere else.
       const data = { "/hole": 5 } as JsonCodecValue;
-      const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(UnknownValue);
-      const unknown = result as unknown as UnknownValue;
-      expect(unknown.wireTypeTag).toBe("hole");
-      expect(unknown.state).toBe(5);
+
+      expect(() => fromWireFormat(data)).toThrow(/malformed tag/);
     });
   });
 
@@ -1834,7 +1834,7 @@ describe("JsonCodecEngine", () => {
   describe("malformed wire the engine itself detects", () => {
     /** The wire shapes the engine rejects without any codec being consulted. */
     const CASES: readonly (readonly [string, JsonCodecValue, RegExp])[] = [
-      ["a bare `/` key", { "/": "x" }, /empty tag/],
+      ["a bare `/` key", { "/": "x" }, /malformed tag/],
       ["a `/`-prefixed key in a bare object", { a: 1, "/b": 2 }, /reserved/],
       ["a key this runtime reserves", { ["__proto__"]: 1 }, /reserves/],
       [

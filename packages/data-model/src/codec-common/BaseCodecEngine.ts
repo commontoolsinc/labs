@@ -13,6 +13,7 @@ import type {
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
+import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
 import { UnknownValue } from "./UnknownValue.ts";
@@ -37,8 +38,8 @@ import { UnknownValue } from "./UnknownValue.ts";
  * * A terminal codec's state is final and a nonterminal codec's is walked
  *   again -- read off the codec's base class, on both sides of the trip.
  * * A tag comes from `tagForValue()` rather than from the value.
- * * An unrecognized tag becomes an `UnknownValue`, and an empty one an error,
- *   per Section 9 of the formal spec.
+ * * An unrecognized tag becomes an `UnknownValue`, and one that is not a tag
+ *   at all an error, per Section 9 of the formal spec.
  * * A codec's `decode()` result is deep-frozen, and a throw from one is
  *   re-raised or wrapped according to `lenient`.
  *
@@ -246,29 +247,41 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * subclass calls this once it has recognized a tagged form and taken off
    * whatever meta-tags this format defines for itself.
    *
+   * The tag's syntax is checked here rather than by each caller: `tag` is
+   * whatever a format found in tag position, of whatever type, and a subclass
+   * is not expected to know what a tag may look like.
+   *
    * Frozen-ness contract: a value returned through the codec arm here is
    * deep-frozen, so callers do not each have to freeze. The unknown-tag
    * fallback is a separate arm and is intentionally NOT covered by it.
    */
   protected decodeTagged(
-    tag: string,
+    tag: unknown,
     rawState: Encoded,
     context: ReconstructionContext,
   ): FabricValue {
+    if (!isCodecTypeTag(tag)) {
+      // Anything that is not a tag syntactically is an encoding error whatever
+      // follows it, per Section 9 of the formal spec, and is reported rather
+      // than preserved as an `UnknownValue`: that form exists to round-trip a
+      // tag no codec claims, which presupposes a tag. Reported over the
+      // decoded state, so that a lenient result carries what arrived.
+      return this.reportMalformed(
+        "",
+        this.decodeValue(rawState, context),
+        `tagged value has a malformed tag: ${
+          backtickQuote(toCompactDebugString(tag, 30))
+        }`,
+      );
+    }
+
     const matched = this.registry.codecFromTag(tag);
 
     if (matched === undefined) {
-      const state = this.decodeValue(rawState, context);
-
-      // An empty tag is an encoding error whatever follows it, per Section 9
-      // of the formal spec, so it is reported rather than preserved as an
-      // `UnknownValue` with no name. Otherwise the tag is simply one this
-      // registry does not carry, and the unknown form is kept so that it
-      // round-trips. Neither of these is covered by the deep-frozen contract
-      // the codec arm below states.
-      return (tag === "")
-        ? this.reportMalformed(tag, state, "tagged value has an empty tag")
-        : new UnknownValue(tag, state);
+      // A tag this registry does not carry, kept in the unknown form so that
+      // it round-trips. Not covered by the deep-frozen contract the codec arm
+      // below states.
+      return new UnknownValue(tag, this.decodeValue(rawState, context));
     }
 
     // A terminal codec takes the state exactly as it arrived; a nonterminal

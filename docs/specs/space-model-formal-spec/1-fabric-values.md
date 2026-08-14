@@ -2722,13 +2722,15 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 2. **Structural escapes** — handles `/quote` (literal pass-through) and
    `/object` (entry-by-entry decode), per Section 6 of
    `3-json-encoding.md`.
-3. **State decode + bare-`/` check** — for any other tag, the walker first
-   recursively decodes the wrapped state, then rejects an empty tag (a
-   bare `"/"` key) as an encoding error. That rejection, and every other
-   malformed-wire fault the walker finds for itself, is settled against
-   `lenient` exactly as a codec's is: a `ProblematicValue` leniently
-   (Section 3.5), a raise strictly (see also Section 9 of
-   `3-json-encoding.md`).
+3. **State decode + tag syntax check** — for any other tag, the walker first
+   recursively decodes the wrapped state, then rejects any tag that is not
+   syntactically a type tag as an encoding error: a bare `"/"` key (the
+   empty tag), and equally a name that is not of the `<Type>@<Version>`
+   form, such as a meta-tag met outside the context that defines it. That
+   rejection, and every other malformed-wire fault the walker finds for
+   itself, is settled against `lenient` exactly as a codec's is: a
+   `ProblematicValue` leniently (Section 3.5), a raise strictly (see also
+   Section 9 of `3-json-encoding.md`).
 4. **Codec dispatch** — `codecFromTag()` routes the tag to its registered
    codec's `decode()`, and settles the codec's verdict against `lenient`:
    leniently, a throw becomes a `ProblematicValue`; strictly, a
@@ -2740,9 +2742,11 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    scoped to this arm only; the unknown-tag arm (step 5) is intentionally
    not covered. See Section 8.6 for the full deep-freeze protocol and the
    egress-freezing call sites.
-5. **Unknown tags** — a tag with no registered codec produces an
-   `UnknownValue` wrapping the tag and (already-decoded) state, preserving
-   the form for round-tripping (Section 3).
+5. **Unknown tags** — a syntactically valid tag with no registered codec
+   produces an `UnknownValue` wrapping the tag and (already-decoded) state,
+   preserving the form for round-tripping (Section 3). Syntax is what
+   separates this from step 3: a tag names a type nothing here knows,
+   whereas a non-tag names nothing at all.
 6. **Primitives** — pass through.
 7. **Arrays** — recursively deserialized; `hole` entries reconstructed as
    true holes (absent indices).

@@ -159,7 +159,26 @@ describe("BaseCodecEngine", () => {
       const { engine } = newProbeEngine();
 
       expect(() => engine.decode(new Tagged("", "x"), CONTEXT))
-        .toThrow(/empty tag/);
+        .toThrow(/malformed tag/);
+    });
+
+    it("rejects a tag with no version rather than calling it unknown", () => {
+      // An unrecognized tag becomes an `UnknownValue` only if it is a tag.
+      // `hole` is a meta-tag, well-formed only in the context that defines
+      // it, and nowhere else a type this or any registry could carry.
+      const { engine } = newProbeEngine();
+
+      expect(() => engine.decode(new Tagged("hole", 5), CONTEXT))
+        .toThrow(/malformed tag/);
+    });
+
+    it("rejects a tag that is not a string at all", () => {
+      // A format finds a tag wherever its own shape puts one, and what it
+      // finds off the wire need not be a string.
+      const { engine } = newProbeEngine();
+
+      expect(() => engine.decode(new Tagged(42 as never, "x"), CONTEXT))
+        .toThrow(/malformed tag/);
     });
 
     it("deep-freezes what a codec returns", () => {
@@ -217,7 +236,9 @@ describe("BaseCodecEngine", () => {
       it("raises a malformation the walk itself found", () => {
         const { engine } = newProbeEngine();
 
-        expect(() => engine.decode(MALFORMED, CONTEXT)).toThrow(/empty tag/);
+        expect(() => engine.decode(MALFORMED, CONTEXT)).toThrow(
+          /malformed tag/,
+        );
       });
 
       it("wraps an unclaimed tag in an `UnknownValue` regardless", () => {
@@ -309,7 +330,7 @@ describe("BaseCodecEngine", () => {
         const result = engine.decode(MALFORMED, CONTEXT);
 
         expect(result).toBeInstanceOf(ProblematicValue);
-        expect((result as ProblematicValue).error).toMatch(/empty tag/);
+        expect((result as ProblematicValue).error).toMatch(/malformed tag/);
       });
 
       it("deep-freezes a `ProblematicValue` a codec returned", () => {
