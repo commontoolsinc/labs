@@ -130,6 +130,7 @@ export type {
   FsProjection,
   Handler,
   HandlerFactory,
+  HandlerState,
   HKT,
   ICell,
   IDerivable,
