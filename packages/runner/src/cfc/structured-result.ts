@@ -293,6 +293,12 @@ const childSchemaForKey = (
     return true;
   }
   const childSchemas: JSONSchema[] = [];
+  // An array counts as a `properties` map here. `validateAgainstSchema()`
+  // enumerates the keyword with `Object.entries()` and asks `Object.hasOwn()`,
+  // both of which read an array's indices as property names, so a stored
+  // `properties` array declares a property per index as far as validation is
+  // concerned. Answering "no declared properties" would route those keys to
+  // `additionalProperties` below, which validation does not do.
   if (isObjectOrArray(resolved.properties)) {
     const child = resolved.properties[key];
     if (isSubschema(child)) {
