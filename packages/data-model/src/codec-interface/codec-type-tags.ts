@@ -58,12 +58,7 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     /** Constant for class `FabricError`. */
     Error: "Error@1",
 
-    /**
-     * Constant for class `ProblematicValue`. Unlike `UnknownValue`, which
-     * round-trips to the tag it preserved, this class encodes under a tag of
-     * its own and carries the preserved one as data -- a preserved tag need
-     * not be a tag at all, that being what the class exists to report.
-     */
+    /** Constant for class `ProblematicValue`. */
     Problematic: "Problematic@1",
 
     /** Constant for class `FabricLink`. */
