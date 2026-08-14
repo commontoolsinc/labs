@@ -27,30 +27,42 @@ import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 async function waitForSchedulerCondition(
   runtime: Runtime,
   condition: () => boolean,
-) {
-  const deadline = performance.now() + 1_000;
-  while (!condition() && performance.now() < deadline) {
+  message: string,
+): Promise<void> {
+  // Iteration-bounded, not wall-clock-bounded: zero-delay yields do not
+  // advance the fake clock, so a time deadline could never expire and an
+  // unreachable condition would spin forever — and the old deadline form
+  // also fell through SILENTLY when it lapsed, letting a later assertion
+  // fail far from the wait. Each round drains the scheduler and yields one
+  // real timer turn — transport pumps and the emulated server's fan-out
+  // flush (which resolves awaited commits at marker coverage, CT-1950) ride
+  // zero-delay timers, exempt from the fake clock's test-armed freeze — so a
+  // condition the system will ever reach is reached within a bounded number
+  // of rounds, and one it never reaches throws `message` instead of hanging.
+  for (let round = 0; round < 200 && !condition(); round++) {
     await runtime.idle();
-    // Yield a zero-delay timer turn: an idle() that resolves through
-    // microtasks alone would otherwise starve the timer queue, and the
-    // emulated server's fan-out flush — which resolves awaited commits at
-    // marker coverage (CT-1950) — rides a zero-delay timer.
     await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  if (!condition()) {
+    throw new Error(message);
   }
 }
 
-async function waitForSignal(signal: Promise<void>, message: string) {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      signal,
-      new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), 1_000);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+/**
+ * Await a signal the test itself resolves — a gate's deferred, a commit
+ * callback. Deliberately no deadline: the package clock preload freezes
+ * test-armed positive-delay timers, so a `setTimeout(reject, …)` race here
+ * could never fire and would backstop nothing
+ * (`docs/development/waiting-in-tests.md`). A signal that never arrives lets
+ * the event loop quiesce, and Deno fails the pending wait at once, naming
+ * the test; the label keeps the call site readable for whoever reads that
+ * failure.
+ */
+async function waitForSignal(
+  signal: Promise<void>,
+  _label: string,
+): Promise<void> {
+  await signal;
 }
 
 describe("event handling", () => {
@@ -473,7 +485,11 @@ describe("event handling", () => {
       );
 
       runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
-      await waitForSchedulerCondition(runtime, () => commitMarkers.length > 0);
+      await waitForSchedulerCondition(
+        runtime,
+        () => commitMarkers.length > 0,
+        "no commit marker was recorded for the queued event",
+      );
 
       const marker = commitMarkers.at(-1);
       expect(marker?.type).toBe("scheduler.event.commit");
