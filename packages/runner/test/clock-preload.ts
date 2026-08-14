@@ -49,6 +49,11 @@ installFakeClock({
     // wall-clock policy, and the tests wait on transport edges with
     // bounded timeouts — the same class as the serving-loop suites).
     "event-append-client",
+    // The late-hint suite now drives the SAME queue discharge pacing
+    // (the LT9 replacement-preservation and route-marker pins fire real
+    // appends whose retry backoff is a wall-clock policy) — the same
+    // class as event-append-client above.
+    "space-host-late-hint",
     // The Phase-3 serving-side events-down suite drives a live
     // ExecutorHost under the same wall-clock policies.
     "executor-events-down",
