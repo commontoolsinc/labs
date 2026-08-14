@@ -123,19 +123,6 @@ type OverlayEntry = {
    * relative to the verdict — and on a quiet space no further
    * watermark event would re-sweep. */
   settled: Promise<unknown>;
-  /** Spaces this run READ but wrote nothing to (the
-   * `sealSpaceReads` handoff — stage F's discharge of the stage-D
-   * bound; review thread r3739139506): retirement must also wait for
-   * EACH of these spaces' watermarks to cover the reads' basis, or a
-   * cross-space speculation retires the moment its WRITTEN space's W
-   * advances while a read-only input is still uncovered. `confirmedFloor`
-   * is the docs' confirmed basis at seal time; the docs' pending/acked
-   * state is re-evaluated against that space's replica at each sweep. */
-  readOnlyDeps: Array<{
-    space: MemorySpace;
-    confirmedFloor: number;
-    docs: Array<{ id: URI; scope?: CellScope }>;
-  }>;
 };
 
 /**
@@ -209,7 +196,6 @@ export class SpeculationOverlayDestination
       space: MemorySpace;
       entry: OverlayEntry;
     }> = [];
-    const readOnlyDeps: OverlayEntry["readOnlyDeps"] = [];
     const collector: ITransactionSealSink = {
       sealSpaceCommit: (
         space: MemorySpace,
@@ -261,47 +247,23 @@ export class SpeculationOverlayDestination
           pendingReadDocs: [...pendingDocs.values()],
           originLocalSeqs: [...originLocalSeqs],
           settled: sealed.settled.catch(() => undefined),
-          readOnlyDeps: [],
         };
         sealedSpaces.push({ space, entry });
         return Promise.resolve({ ok: {} });
       },
-      sealSpaceReads: (
-        space: MemorySpace,
-        reads: readonly { id: URI; scope?: CellScope }[],
-      ): void => {
-        // Read-only-space dependencies (review thread r3739139506;
-        // stage D's documented third bound, discharged for the overlay):
-        // record each read doc and its confirmed basis at seal time.
-        // Registration onto the entries happens after the sealInto
-        // completes (the handoff arrives before the written-space
-        // commits, so the entries may not exist yet).
-        const docs = new Map<string, { id: URI; scope?: CellScope }>();
-        for (const read of reads) {
-          const key = `${read.scope ?? ""}\0${read.id}`;
-          if (!docs.has(key)) {
-            docs.set(key, { id: read.id, scope: read.scope });
-          }
-        }
-        if (docs.size === 0) return;
-        let confirmedFloor = 0;
-        try {
-          const replica = this.#runtime.storageManager.open(space).replica;
-          const view = replica.speculationRetirementView?.bind(replica);
-          if (view !== undefined) {
-            for (const doc of docs.values()) {
-              const state = view(doc.id, doc.scope);
-              if (state.confirmedSeq > confirmedFloor) {
-                confirmedFloor = state.confirmedSeq;
-              }
-            }
-          }
-        } catch {
-          // Basis unavailable: keep floor 0 — the pending/acked check
-          // at sweep time still gates on the space's replica state.
-        }
-        readOnlyDeps.push({ space, confirmedFloor, docs: [...docs.values()] });
-      },
+      // Read-only-space dependencies (review thread r3739139506; stage
+      // D's documented third bound): an implementation that gated
+      // retirement on EACH read-only space's watermark was built and
+      // REVERTED 2026-08-13 — the cross-space watermark subscriptions
+      // and conservative blocking it added regressed the two-browsers
+      // Phase-2 gate (bisect-verified: the gate stalls with the
+      // machinery in, passes with it out). The bound therefore STANDS
+      // as documented: a cross-space speculation can retire on its
+      // written space's coverage while a read-only input is still
+      // uncovered. `sealSpaceReads` is deliberately not implemented
+      // here until a design that does not gate on foreign-space
+      // watermark subscriptions exists (flagged in
+      // verification-coverage.md's 2026-08-13 delta).
     };
     let result: Result<Unit, CommitError>;
     try {
@@ -348,10 +310,6 @@ export class SpeculationOverlayDestination
       return { ok: {} };
     }
     for (const { space, entry } of sealedSpaces) {
-      // The tx-level read-only-space dependencies apply to EVERY entry
-      // this seal produced (conservative: the handoff is per-tx, not
-      // per-written-space — r3739139506).
-      entry.readOnlyDeps = readOnlyDeps;
       let entries = this.#entries.get(space);
       if (entries === undefined) {
         entries = new Map();
@@ -359,11 +317,6 @@ export class SpeculationOverlayDestination
       }
       entries.set(entry.localSeq, entry);
       this.#ensureWatermarkSink(space);
-    }
-    // Read-only spaces get the same hooks: their watermark movement and
-    // origin accepts must re-evaluate the entries that depend on them.
-    for (const dep of readOnlyDeps) {
-      this.#ensureWatermarkSink(dep.space);
     }
     if (sealedSpaces.length > 0) {
       // A fresh entry may already be covered (a re-speculation after
@@ -448,13 +401,6 @@ export class SpeculationOverlayDestination
           this.#watermarks.set(space, seq);
         }
         this.#sweep(space, Math.max(seq, known));
-        // Cross-space re-evaluation (r3739139506): entries of OTHER
-        // spaces may name this space as a read-only dependency, and
-        // this event may be the coverage they were waiting on.
-        for (const other of [...this.#entries.keys()]) {
-          if (other === space) continue;
-          this.#sweep(other, this.#watermarks.get(other) ?? 0);
-        }
       });
       this.#watermarkSinks.set(space, cancel);
     } catch (error) {
@@ -483,14 +429,7 @@ export class SpeculationOverlayDestination
       };
       observable.speculationAckObserver = () => {
         if (this.#closed) return;
-        // Every entry space: an accept in THIS space can unblock a
-        // cross-space entry that names it as a read-only dependency
-        // (r3739139506), not just this space's own entries.
         this.#sweep(space, this.#watermarks.get(space) ?? 0);
-        for (const other of [...this.#entries.keys()]) {
-          if (other === space) continue;
-          this.#sweep(other, this.#watermarks.get(other) ?? 0);
-        }
       };
       this.#ackObserverReleases.set(space, () => {
         observable.speculationAckObserver = undefined;
@@ -559,46 +498,6 @@ export class SpeculationOverlayDestination
             break;
           }
         }
-        // Read-only-space dependencies (r3739139506): EACH read-only
-        // space's watermark must cover the reads' basis there — the
-        // written space's W says nothing about another space's inputs.
-        // An unacked pending layer on a read doc blocks (an in-flight
-        // origin in that space); acked layers raise that space's floor
-        // like origins do at home. A replica without the retirement API
-        // blocks conservatively (same posture as the early return
-        // above: no view, no retirement).
-        if (!blocked) {
-          for (const dep of entry.readOnlyDeps) {
-            const roWatermark = this.#watermarks.get(dep.space) ?? 0;
-            let roFloor = dep.confirmedFloor;
-            const roReplica = this.#runtime.storageManager.open(dep.space)
-              .replica;
-            const roView = roReplica.speculationRetirementView?.bind(
-              roReplica,
-            );
-            const roAckedSeqOf = roReplica.ackedSeqOf?.bind(roReplica);
-            if (roView === undefined || roAckedSeqOf === undefined) {
-              blocked = true;
-              break;
-            }
-            for (const doc of dep.docs) {
-              const state = roView(doc.id, doc.scope);
-              for (const seq of state.pendingLocalSeqs) {
-                const acked = roAckedSeqOf(seq);
-                if (acked === undefined) {
-                  blocked = true;
-                  break;
-                }
-                if (acked > roFloor) roFloor = acked;
-              }
-              if (blocked) break;
-            }
-            if (blocked || roWatermark < roFloor) {
-              blocked = true;
-              break;
-            }
-          }
-        }
         if (blocked || watermark < floor) continue;
         entries.delete(entry.localSeq);
         entry.resolveVerdict({
@@ -611,14 +510,10 @@ export class SpeculationOverlayDestination
         // A chained entry blocked on this one unblocks only once the
         // drop is APPLIED (async relative to the verdict): re-sweep
         // after settlement, off the freshest observed W — on a quiet
-        // space no further watermark event would do it. Every entry
-        // space, not just this one: a cross-space dependent names this
-        // space through its read-only deps (r3739139506).
+        // space no further watermark event would do it.
         void entry.settled.then(() => {
           if (this.#closed) return;
-          for (const other of [...this.#entries.keys()]) {
-            this.#sweep(other, this.#watermarks.get(other) ?? 0);
-          }
+          this.#sweep(space, this.#watermarks.get(space) ?? 0);
         });
         progressed = true;
       }

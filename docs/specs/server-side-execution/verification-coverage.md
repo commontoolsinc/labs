@@ -1017,6 +1017,26 @@ blockquote; this PR):
   pre-fix the entry stayed pending forever (red: the observer was
   never installed and the sweep never re-ran).
 
+One ATTEMPTED-AND-REVERTED fix rides this round, recorded per
+flag-don't-fill (review thread r3739139506 — stage D's documented
+third bound, the read-only-space seal dependencies): an overlay
+implementation of the sealSpaceReads handoff (per-entry read-only-space
+floors; retirement additionally gated on EACH read-only space's
+watermark; cross-space re-sweeps on watermark/ack/settled events) was
+built red-first and REVERTED the same day — it regressed the
+two-browsers Phase-2 gate (bisect-verified against the live harness:
+the gate's "Bob sees Alice" step stalls to its 300s timeout with the
+machinery in and passes in ~2s with it out; every other component of
+the same batch was individually exonerated by the same procedure).
+The suspected mechanism — the flag-ON client runtime opening
+watermark subscriptions into foreign/unauthorized spaces it read
+through links, and conservative blocking pinning entries on
+never-covered floors — needs a design that does not gate on
+foreign-space watermark subscriptions. The BOUND THEREFORE STANDS as
+documented: a cross-space speculation can retire on its written
+space's coverage while a read-only input is still uncovered. Owed:
+the redesign, flagged for the owner alongside P2-F's follow-ups.
+
 Two adjacency closures ride the same 2026-08-13 round (stage-G
 round-2 follow-ups):
 
