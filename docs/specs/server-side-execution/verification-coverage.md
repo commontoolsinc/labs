@@ -1017,6 +1017,41 @@ blockquote; this PR):
   pre-fix the entry stayed pending forever (red: the observer was
   never installed and the sweep never re-ran).
 
+Two adjacency closures ride the same 2026-08-13 round (stage-G
+round-2 follow-ups):
+
+- `tryClaimMutex` swallows a TERMINAL claim-commit failure (row only;
+  no code change): the claim callback sets `claimed = true`, but the
+  surrounding `editWithRetry`'s outcome is not consulted — a commit
+  that terminally fails after retries still returns
+  `{ claimed: true }`, the builtin proceeds as claim-holder, and the
+  effect can complete locally WITHOUT its claim/completion egress
+  ever becoming durable. Bounded by design: recovery is §6 step 3's
+  re-miss — the next demanded run finds no durable result, re-misses
+  the memo, and re-claims (the completed-request guard reads the
+  durable view, so nothing wedges on the phantom claim). Recorded as
+  a known-swallow with a ruled recovery path; a loud disposition
+  (consulting the editWithRetry outcome) is follow-up material, not
+  Phase-2 gate material.
+- The wave-replay reachability closure (stage-G round-2's flag,
+  checked against the spec-model): `applyWaveCommit` runs the
+  per-doc CAS re-verification BEFORE `applyCommitTransaction`'s
+  replay return, so an exact replay at its ORIGINAL basisSeq can
+  never reach replay service — the first application advanced the
+  heads past that basis and the re-verification throws
+  `WaveCommitConflictError`. Only a re-drive with a RE-DERIVED
+  (current) basis reaches the stored-result return (the FP1
+  insert-skip's test shape). VERIFIED AGREEING with the spec-model's
+  crash-recovery arms: the model's `crash` step nulls the in-memory
+  `pendingWave` (nothing retains an old basis), `recover` recomputes
+  at current state per the ruled §6 no-replay recovery, and no arm
+  re-submits an already-admitted wave — the model never expects
+  original-basis replay service, so the engine's reachability
+  restriction and the model agree by construction. (The
+  admitted-but-unacked re-drive window G's engine test pins sits
+  below the model's step granularity — the wave step is atomic
+  there; noted, accepted.)
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row
