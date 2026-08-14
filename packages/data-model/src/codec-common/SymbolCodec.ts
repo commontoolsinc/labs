@@ -16,6 +16,14 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  * strings, so both the encoding and its refusals are the same wherever it is
  * registered.
  *
+ * A format supplies `keyAsEncoded` rather than this class casting a `string`
+ * into `Encoded`. That is the one step a type parameter cannot justify from
+ * inside -- TypeScript will not prove a `string` assignable to a bare
+ * parameter, and no `extends` clause can even exclude the parameter being
+ * `never`, `never` being assignable to everything. Handed in from the outside
+ * it is checked where it is provable, and a format with no `string` arm cannot
+ * supply it.
+ *
  * **What crosses is internedness**, and that is the whole of the promise: a
  * decoded symbol is interned under the key the encoded one was interned under,
  * which is as interned as a symbol on the far side can be. Whether it is the
@@ -34,12 +42,21 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class SymbolCodec<
-  Encoded extends (string extends Encoded ? unknown : never),
-> extends BaseTerminalCodec<Encoded> {
-  /** Constructs an instance. */
-  constructor() {
+export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
+  /** The value of {@link #keyAsEncoded}, supplied by the registering format. */
+  readonly #keyAsEncoded: (key: string) => Encoded;
+
+  /**
+   * Constructs an instance.
+   *
+   * @param keyAsEncoded - How this format holds a registry key. A format that
+   *   has a `string` arm writes `(key) => key`; one that has none cannot write
+   *   this at all, which is the point.
+   */
+  constructor(keyAsEncoded: (key: string) => Encoded) {
     super(CODEC_TYPE_TAGS.Symbol, Symbol as unknown as Constructor);
+
+    this.#keyAsEncoded = keyAsEncoded;
   }
 
   /** @inheritDoc */
@@ -47,18 +64,10 @@ export class SymbolCodec<
     return typeof value === "symbol" && Symbol.keyFor(value) !== undefined;
   }
 
-  /**
-   * @inheritDoc
-   *
-   * The cast is unavoidable but not unguarded. TypeScript will not prove a
-   * `string` assignable to a bare type parameter inside a body, whatever the
-   * parameter is constrained to; what the constraint on the class does instead
-   * is make the cast safe by construction, since no caller can instantiate
-   * this at an `Encoded` that a registry key would not fit.
-   */
+  /** @inheritDoc */
   encode(value: symbol): Encoded {
     // `canEncode()` already verified the symbol has a registry key.
-    return Symbol.keyFor(value)! as Encoded;
+    return this.#keyAsEncoded(Symbol.keyFor(value)!);
   }
 
   /** @inheritDoc */

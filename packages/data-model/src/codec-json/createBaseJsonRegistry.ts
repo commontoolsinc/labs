@@ -36,7 +36,10 @@ export function createBaseJsonRegistry(): CodecRegistry<JsonCodecValue> {
   // JS primitives that need tagged encoding, registered by `typeof`.
   registry.registerPrimitive("bigint", new BigIntCodec());
   registry.registerPrimitive("number", new SpecialNumberCodec());
-  registry.registerPrimitive("symbol", new SymbolCodec<JsonCodecValue>());
+  registry.registerPrimitive(
+    "symbol",
+    new SymbolCodec<JsonCodecValue>((key) => key),
+  );
   registry.registerPrimitive("undefined", new UndefinedCodec());
 
   // Self-representing primitives: emitted as-is (their own wire form).

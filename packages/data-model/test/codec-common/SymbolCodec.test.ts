@@ -23,15 +23,17 @@ import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstruct
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 
-// The class constrains `Encoded` to admit a registry key, which is what makes
-// the cast in `encode()` safe rather than merely believed. This is its own
-// differential: `@ts-expect-error` fails when the line it marks stops erroring,
-// so relaxing the constraint breaks the build here.
-// @ts-expect-error -- `number` cannot hold a `string`.
-type _RefusesAnEncodedThatCannotHoldAKey = SymbolCodec<number>;
+// An `Encoded` that cannot hold a registry key cannot be constructed at, since
+// the format has to hand in the embedding and no honest one exists. This covers
+// `never` as well, which no `extends` clause can exclude. Each line is its own
+// differential: `@ts-expect-error` fails when the line it marks stops erroring.
+// @ts-expect-error -- no `(key: string) => number` exists.
+const _refusesNumber = new SymbolCodec<number>((key) => key);
+// @ts-expect-error -- nor a `(key: string) => never`.
+const _refusesNever = new SymbolCodec<never>((key) => key);
 
 describe("SymbolCodec", () => {
-  const codec = new SymbolCodec<JsonCodecValue>();
+  const codec = new SymbolCodec<JsonCodecValue>((key) => key);
   const expectedTag = CODEC_TYPE_TAGS.Symbol;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 
