@@ -125,6 +125,7 @@ export type HarnessFailureKind =
   | "not_a_file"
   | "permission_denied"
   | "tool_not_allowed"
+  | "invalid_tool_call"
   | "workspace_path_confusion"
   | "timeout"
   | "sandbox_exec_mismatch"
@@ -136,6 +137,7 @@ export type HarnessFailureSource =
   | "policy_snapshot"
   | "policy_trace"
   | "policy_event"
+  | "tool_call"
   | "tool_output"
   | "run_error";
 
@@ -915,7 +917,6 @@ export const classifyHarnessRunError = (
   }
   const kind = normalized.includes("unknown builtin tool") ||
       normalized.includes("did not return an outputid") ||
-      normalized.includes("failed to parse tool arguments") ||
       normalized.includes("chat completion response did not include a message")
     ? "harness_error"
     : "unknown";
@@ -946,6 +947,10 @@ const FAILURE_PRIORITY: Record<HarnessFailureKind, number> = {
   file_not_found: 25,
   sandbox_exec_mismatch: 20,
   harness_error: 10,
+  // A call the model wrote wrong and can write again ranks below every
+  // failure the run itself suffered, so it becomes the primary failure only
+  // when nothing else went wrong.
+  invalid_tool_call: 5,
   unknown: 0,
 };
 

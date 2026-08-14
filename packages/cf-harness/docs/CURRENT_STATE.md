@@ -46,6 +46,14 @@ The current package provides:
 - image inputs and structured top-level batch results;
 - explicit skill preload, indexed supporting-resource reads, and exact
   allowlisted Deno/Bash skill scripts;
+- recoverable rejection of a malformed tool call: a name no tool answers to,
+  arguments that are not a JSON object, or a `delegate_task` argument of the
+  wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming
+  the field and the shape expected of it — never the value it rejected — and the
+  run carries on; the call is recorded as a denied policy decision, a `not-run`
+  tool activity, and an `invalid_tool_call` failure record. Only what the model
+  cannot correct — transport, engine invariants, artifact persistence,
+  cancellation, the turn cap — ends the run;
 - transcript-based resume and durable run artifacts;
 - per-turn and aggregate token/cache usage in run reports, operator output,
   batch metadata, and interactive turn-completion events;

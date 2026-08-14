@@ -23,6 +23,10 @@ import {
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
 import {
+  createHarnessInvalidToolCall,
+  type CreateHarnessInvalidToolCallOptions,
+} from "./contracts/invalid-tool-call.ts";
+import {
   createObservationDenied as makeObservationDenied,
   createOpaqueHandle,
   type ObservationDenied,
@@ -69,6 +73,7 @@ import {
 import type {
   BuiltinToolId,
   HarnessToolDescriptor,
+  HarnessToolEffectClass,
 } from "./contracts/tool-descriptor.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
 import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
@@ -79,7 +84,10 @@ import type {
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import { HarnessControlError } from "./control-errors.ts";
-import type { HarnessFailureRecord } from "./diagnostics.ts";
+import {
+  createHarnessFailureRecord,
+  type HarnessFailureRecord,
+} from "./diagnostics.ts";
 import {
   type BuiltinToolInputMap,
   CfHarnessEngine,
@@ -196,35 +204,46 @@ export interface HarnessPromptLoopResult {
 const isBuiltinToolId = (input: string): input is BuiltinToolId =>
   getBuiltinTool(input as BuiltinToolId) !== undefined;
 
+/**
+ * The outcome of decoding the arguments string a model wrote for a tool call:
+ * either the object the tool takes, or the complaint the model reads instead
+ * of running it. Neither branch throws — a model that mistypes its arguments
+ * gets another turn, not a dead run.
+ */
+type ParsedToolArguments =
+  | { input: Record<string, unknown> }
+  | { invalid: CreateHarnessInvalidToolCallOptions };
+
 const parseToolArguments = (
   toolCall: HarnessToolCall,
-): Record<string, unknown> => {
+): ParsedToolArguments => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(toolCall.function.arguments);
-  } catch (error) {
-    throw new Error(
-      `failed to parse tool arguments for ${toolCall.function.name}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+  } catch {
+    return {
+      invalid: {
+        reason: "unparsable-arguments",
+        expected: "a JSON object encoding this tool's arguments",
+      },
+    };
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(
-      `tool arguments for ${toolCall.function.name} must decode to an object`,
-    );
+    return {
+      invalid: {
+        reason: "arguments-not-an-object",
+        expected: "a JSON object encoding this tool's arguments",
+      },
+    };
   }
-  return parsed as Record<string, unknown>;
+  return { input: parsed as Record<string, unknown> };
 };
 
 const tryParseToolArguments = (
   toolCall: HarnessToolCall,
 ): Record<string, unknown> | undefined => {
-  try {
-    return parseToolArguments(toolCall);
-  } catch {
-    return undefined;
-  }
+  const parsed = parseToolArguments(toolCall);
+  return "input" in parsed ? parsed.input : undefined;
 };
 
 const TRUSTED_ONLY_TOOL_INPUT_FIELDS = ["cfcInputLabels"];
@@ -613,14 +632,28 @@ const summarizeToolInput = async (
   };
 };
 
+/**
+ * The outcome of reading a `delegate_task` input the model wrote: either the
+ * delegation to run, or the field that did not fit and the shape it wanted.
+ * The field name and the expected shape are both harness vocabulary, so the
+ * complaint can go back to the model without carrying the rejected value.
+ */
+type ParsedDelegateTaskInput =
+  | { input: DelegateTaskToolInput }
+  | { invalid: { field: string; expected: string } };
+
 const parseDelegateTaskInput = (
   input: Record<string, unknown>,
-): DelegateTaskToolInput => {
+): ParsedDelegateTaskInput => {
   if (typeof input.goal !== "string" || input.goal.trim().length === 0) {
-    throw new Error("delegate_task goal must be a non-empty string");
+    return {
+      invalid: { field: "goal", expected: "a non-empty string" },
+    };
   }
   if (input.context !== undefined && typeof input.context !== "string") {
-    throw new Error("delegate_task context must be a string when provided");
+    return {
+      invalid: { field: "context", expected: "a string, or omit it" },
+    };
   }
   const profile = input.profile === undefined
     ? DEFAULT_SUBAGENT_PROFILE
@@ -629,11 +662,12 @@ const parseDelegateTaskInput = (
     ? input.profile
     : undefined;
   if (profile === undefined) {
-    throw new Error(
-      `delegate_task profile must be one of ${
-        HARNESS_SUBAGENT_PROFILES.join(", ")
-      }`,
-    );
+    return {
+      invalid: {
+        field: "profile",
+        expected: `one of ${HARNESS_SUBAGENT_PROFILES.join(", ")}`,
+      },
+    };
   }
   const maxModelTurns = input.maxModelTurns;
   if (
@@ -643,24 +677,40 @@ const parseDelegateTaskInput = (
       maxModelTurns <= 0 ||
       maxModelTurns > MAX_SUBAGENT_MAX_MODEL_TURNS)
   ) {
-    throw new Error(
-      `delegate_task maxModelTurns must be an integer from 1 to ${MAX_SUBAGENT_MAX_MODEL_TURNS}`,
-    );
+    return {
+      invalid: {
+        field: "maxModelTurns",
+        expected: `an integer from 1 to ${MAX_SUBAGENT_MAX_MODEL_TURNS}`,
+      },
+    };
   }
-  const parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
+  let parsedReturnSchema: ReturnType<typeof parseSubagentReturnSchema>;
+  try {
+    parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
+  } catch {
+    return {
+      invalid: {
+        field: "returnSchema",
+        expected:
+          "a JSON Schema object, a boolean, or a string holding one of those as JSON",
+      },
+    };
+  }
   // A profile that declares a return contract applies it to a delegation
   // that declares none, so the child's return is a shape the parent can test
   // rather than prose a failure and a success both fit.
   const returnSchema = parsedReturnSchema?.schema ??
     getHarnessSubagentProfileConfig(profile).defaultReturnSchema;
   return {
-    goal: input.goal,
-    profile,
-    ...(typeof input.context === "string" && input.context.trim().length > 0
-      ? { context: input.context }
-      : {}),
-    ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
-    ...(returnSchema !== undefined ? { returnSchema } : {}),
+    input: {
+      goal: input.goal,
+      profile,
+      ...(typeof input.context === "string" && input.context.trim().length > 0
+        ? { context: input.context }
+        : {}),
+      ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
+      ...(returnSchema !== undefined ? { returnSchema } : {}),
+    },
   };
 };
 
@@ -2506,6 +2556,85 @@ export class CfHarnessPromptLoop {
     return swapped.value;
   }
 
+  /**
+   * Helper for `#invokeToolCall()`, which turns a call the model wrote wrong
+   * into the result the model reads. The call leaves the same trail a run one
+   * does — a tool-activity row, a policy decision, and a failure record — so
+   * the run report shows the malformed call rather than a gap where one was.
+   */
+  async #rejectInvalidToolCall(options: {
+    toolCall: HarnessToolCall;
+    invalid: CreateHarnessInvalidToolCallOptions;
+    sequence: number;
+    startedAt: string;
+    promptSlotBinding?: PromptSlotBinding;
+    effectClass?: HarnessToolEffectClass;
+    toolInputSummary?: HarnessToolInputSummary;
+    policyEventIndexes?: readonly number[];
+    recordActivity: (activity: HarnessToolActivity) => void;
+  }): Promise<InvokedToolCallMessages> {
+    const invalid = createHarnessInvalidToolCall(options.invalid);
+    const runState = this.engine.getRunState();
+    this.engine.appendFailureRecord(createHarnessFailureRecord({
+      kind: "invalid_tool_call",
+      source: "tool_call",
+      detail: invalid.detail,
+      at: runState.updatedAt,
+      toolId: options.toolCall.function.name,
+      toolCallId: options.toolCall.id,
+    }));
+    options.recordActivity({
+      type: "cf-harness.tool-activity",
+      runId: runState.runId,
+      sequence: options.sequence,
+      startedAt: options.startedAt,
+      endedAt: this.engine.getRunState().updatedAt,
+      toolCallId: options.toolCall.id,
+      toolId: options.toolCall.function.name,
+      ...(options.effectClass !== undefined
+        ? { effectClass: options.effectClass }
+        : {}),
+      cfcEnforcementMode: runState.cfcEnforcementMode,
+      policyDecision: "denied",
+      executionStatus: "not-run",
+      ...(options.promptSlotBinding !== undefined
+        ? { promptSlot: options.promptSlotBinding }
+        : {}),
+      ...(options.toolInputSummary !== undefined
+        ? { toolInputSummary: options.toolInputSummary }
+        : {}),
+      ...optionalPolicyEventIndexes(options.policyEventIndexes ?? []),
+      errorDetail: invalid.detail,
+    });
+    await this.engine.recordPolicyDecision({
+      toolActivitySequence: options.sequence,
+      toolCallId: options.toolCall.id,
+      toolId: options.toolCall.function.name,
+      ...(options.effectClass !== undefined
+        ? { effectClass: options.effectClass }
+        : {}),
+      cfcEnforcementMode: runState.cfcEnforcementMode,
+      decision: "denied",
+      reasonCodes: ["invalid_tool_call"],
+      detail: invalid.detail,
+      ...(options.promptSlotBinding !== undefined
+        ? { promptSlot: options.promptSlotBinding }
+        : {}),
+      ...(options.toolInputSummary !== undefined
+        ? { toolInputSummary: options.toolInputSummary }
+        : {}),
+      ...optionalPolicyEventIndexes(options.policyEventIndexes ?? []),
+    });
+    return {
+      toolMessage: {
+        role: "tool",
+        toolCallId: options.toolCall.id,
+        toolName: options.toolCall.function.name,
+        content: JSON.stringify(invalid),
+      },
+    };
+  }
+
   async #invokeToolCall(
     toolCall: HarnessToolCall,
     model: string,
@@ -2515,16 +2644,28 @@ export class CfHarnessPromptLoop {
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
     recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
   ): Promise<InvokedToolCallMessages> {
+    // The name the model wrote stays out of the complaint: it is model text,
+    // and a tool name carries injected instruction as readily as any other
+    // argument. The tools the run offers are harness vocabulary, so listing
+    // those is what tells the model how to call again.
+    const rejectUnknownTool = (): Promise<InvokedToolCallMessages> =>
+      this.#rejectInvalidToolCall({
+        toolCall,
+        invalid: {
+          reason: "unknown-tool",
+          expected: `one of ${this.#allowedToolIdsForSnapshot().join(", ")}`,
+        },
+        sequence,
+        startedAt: this.engine.getRunState().updatedAt,
+        ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+        recordActivity,
+      });
     if (!isBuiltinToolId(toolCall.function.name)) {
-      throw new Error(
-        `unknown builtin tool requested: ${toolCall.function.name}`,
-      );
+      return await rejectUnknownTool();
     }
     const tool = getBuiltinTool(toolCall.function.name);
     if (tool === undefined) {
-      throw new Error(
-        `unknown builtin tool requested: ${toolCall.function.name}`,
-      );
+      return await rejectUnknownTool();
     }
     const parsedInput = tryParseToolArguments(toolCall);
     const parsedInputForDeniedTool = parsedInput === undefined
@@ -2616,8 +2757,25 @@ export class CfHarnessPromptLoop {
         },
       };
     }
-    const parsedAllowedInput = parsedInputForDeniedTool ??
-      stripTrustedOnlyToolInputFields(parseToolArguments(toolCall));
+    let parsedAllowedInput = parsedInputForDeniedTool;
+    if (parsedAllowedInput === undefined) {
+      // Only arguments that failed to decode reach here, and a model that
+      // mistyped them reads the complaint and writes the call again.
+      const reparsed = parseToolArguments(toolCall);
+      if ("invalid" in reparsed) {
+        return await this.#rejectInvalidToolCall({
+          toolCall,
+          invalid: { ...reparsed.invalid, toolId: tool.descriptor.toolId },
+          sequence,
+          startedAt: activityStartedAt,
+          effectClass: tool.descriptor.effectClass,
+          ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
+          policyEventIndexes,
+          recordActivity,
+        });
+      }
+      parsedAllowedInput = stripTrustedOnlyToolInputFields(reparsed.input);
+    }
     // Handle tokens resolve to their referents here, so policy evaluation,
     // summarization, and the tool itself all see the real addresses. Denial
     // summaries recorded above keep the tokens the model wrote. A
@@ -2704,35 +2862,25 @@ export class CfHarnessPromptLoop {
     }
     let delegateInput: DelegateTaskToolInput | undefined;
     if (toolCall.function.name === "delegate_task") {
-      try {
-        delegateInput = parseDelegateTaskInput(input);
-      } catch (error) {
-        recordActivity({
-          type: "cf-harness.tool-activity",
-          ...baseActivity(policyDecision, "failed"),
-          toolInputSummary,
-          ...optionalPolicyEventIndexes(policyEventIndexes),
-          errorDetail: toErrorDetail(error),
-        });
-        await this.engine.recordPolicyDecision({
-          toolActivitySequence: sequence,
-          toolCallId: toolCall.id,
-          toolId: toolCall.function.name,
+      const parsedDelegateInput = parseDelegateTaskInput(input);
+      if ("invalid" in parsedDelegateInput) {
+        return await this.#rejectInvalidToolCall({
+          toolCall,
+          invalid: {
+            reason: "invalid-argument",
+            toolId: "delegate_task",
+            ...parsedDelegateInput.invalid,
+          },
+          sequence,
+          startedAt: activityStartedAt,
           effectClass: tool.descriptor.effectClass,
-          cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
-          decision: policyDecision,
-          reasonCodes: policyDecisionReasonCodes,
-          ...(policyDecisionDetail !== undefined
-            ? { detail: policyDecisionDetail }
-            : {}),
-          ...(promptSlotBinding !== undefined
-            ? { promptSlot: promptSlotBinding }
-            : {}),
+          ...(promptSlotBinding !== undefined ? { promptSlotBinding } : {}),
           toolInputSummary,
-          ...optionalPolicyEventIndexes(policyEventIndexes),
+          policyEventIndexes,
+          recordActivity,
         });
-        throw error;
       }
+      delegateInput = parsedDelegateInput.input;
       if (!this.#allowedSubagentProfiles.has(delegateInput.profile)) {
         const detail =
           `delegate_task profile "${delegateInput.profile}" is not allowed in this run`;
@@ -2838,12 +2986,15 @@ export class CfHarnessPromptLoop {
       // Reaching this catch means a genuinely fatal tool failure — sandbox
       // spawn/infra, CFC transport, artifact/run-state persistence, an engine
       // invariant, or a cancelled run. These are not model-correctable, so the
-      // run stays fatal. RECOVERABLE mistakes (a `cwd` outside the sandbox, a
-      // command timeout) never arrive here: the bash tool converts them into an
-      // ordinary failed BashToolOutput the model reacts to, which flows through
-      // the normal CFC-mediated output path below (see bash.ts). Keeping the
-      // narrowing at the tool boundary is what lets this catch stay run-fatal
-      // without matching error-message strings.
+      // run stays fatal. RECOVERABLE mistakes never arrive here, and there are
+      // two kinds. A mistake inside the tool (a `cwd` outside the sandbox, a
+      // command timeout) becomes an ordinary failed BashToolOutput the model
+      // reacts to, flowing through the normal CFC-mediated output path below
+      // (see bash.ts). A mistake in how the model wrote the call itself (a name
+      // no tool answers to, arguments that are not JSON, an argument of the
+      // wrong shape) is caught before dispatch and answered by
+      // `#rejectInvalidToolCall()`. Keeping both narrowings above this catch is
+      // what lets it stay run-fatal without matching error-message strings.
       throw error;
     }
     // Before the outbound swap, so the token it mints for the result cell
