@@ -108,7 +108,7 @@ Language deltas found by adversarial verification of the target-language
 matrix (implementation vs normative spec). Resolution status is recorded on
 each finding:
 
-- **Top-level eager-read carve-out (#3725, 2026-05-28) — resolved 2026-08-07 by
+- **Top-level eager-read carve-out (#3725, 2026-05-28) — resolved 2026-08-12 by
   ratifying the has-a-lowerable-site rule.** A `.get()` read on a
   `Cell`/`Writable`/`Stream` in pattern-owned context is part of the language
   wherever a lowerable expression site can carry it; that site lowers into a
