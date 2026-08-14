@@ -217,7 +217,7 @@ export const revoke = createRoute({
           schema: z.object({
             id: z.string(),
             requestId: requestIdField,
-            // REQUIRED, and the actual defence. The request id only makes a
+            // REQUIRED, and the actual defense. The request id only makes a
             // revoke at-most-once-DELIVERED; it does nothing for one that is
             // captured and withheld, because an id that was never spent is
             // still live for the whole proof window. Naming the generation the

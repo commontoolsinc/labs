@@ -3084,7 +3084,7 @@ export class CfHarnessPromptLoop {
       cacheAffinityKey: childRunId,
       // Provider controls follow only a child that inherits the parent model.
       // A profile-overridden child keeps its model's own reasoning/cache
-      // defaults, and a chat-routed override like web_search cannot honour the
+      // defaults, and a chat-routed override like web_search cannot honor the
       // parent model's controls at all. `compactThreshold: 0` is the exception:
       // the model-independent off-switch stays run-wide.
       ...(this.#compactThreshold !== undefined &&

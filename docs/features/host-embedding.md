@@ -248,7 +248,7 @@ for what an origin means.
 `describe("CFRender piece context menu")` — the event name, the detail shape, and
 when the click is taken. `packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.test.ts`
 — the entries, lifecycle actions, compatibility confirmation, and their test
-hooks. The menu's DOM behaviour is driven end to end by
+hooks. The menu's DOM behavior is driven end to end by
 `packages/shell/integration/piece-menu.test.ts`.
 
 ---

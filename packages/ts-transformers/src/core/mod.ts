@@ -131,7 +131,7 @@
  * for zero structural win, and would lie to the typechecker at the boundary.
  * This mirrors the TS compiler, which keeps its NodeLinks table private and
  * exposes narrow typed accessors (getTypeAtLocation) instead of the table. The
- * bare boundary maps are our analogue of that narrow published contract.
+ * bare boundary maps are our analog of that narrow published contract.
  *
  * --- Cache invalidation contract ---
  *

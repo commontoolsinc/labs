@@ -16,7 +16,7 @@ export interface RateLimiterOptions {
    */
   maxKeys?: number;
   /**
-   * Clock source, injectable so refill behaviour can be tested by advancing a
+   * Clock source, injectable so refill behavior can be tested by advancing a
    * counter rather than sleeping. A timing-dependent test of a rate limiter is
    * flaky by construction, and the repo's waiting guidance rules sleeps out.
    *

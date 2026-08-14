@@ -750,7 +750,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     );
 
     await t.step(
-      "Cell<Props> event handler is removed after unmount acknowledgement",
+      "Cell<Props> event handler is removed after unmount acknowledgment",
       async () => {
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({

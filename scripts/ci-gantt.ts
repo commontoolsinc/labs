@@ -260,7 +260,7 @@ function latestJobsByName(jobs: Job[]): Job[] {
 // Every step is placed into a phase from the marker emoji its name begins with.
 // The emoji is load-bearing: workflow and composite-action authors pick one from
 // the vocabulary in tasks/ci-step-phases.ts, and the chart splits each job bar
-// into these phases without having to recognise step wording. The authoritative
+// into these phases without having to recognize step wording. The authoritative
 // table is docs/development/CI_PERFORMANCE.md ("Step phase markers"); keep them
 // in sync. A step whose name carries no known marker lands in "other" and is
 // reported to stderr so a missing marker is easy to spot. In a normal run the

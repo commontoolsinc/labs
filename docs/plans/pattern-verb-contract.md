@@ -192,7 +192,7 @@ flag a wrong assumption before it becomes a wrong choice: the redesign keeps
 what is load-bearing and changes only what is not.
 
 **Fire-and-forget streams are essential** — in a narrow sense worth pinning
-down, because the loom FUSE audit calls a neighbouring behaviour a bug.
+down, because the loom FUSE audit calls a neighboring behavior a bug.
 Essential: a handler's *effect* is writes that propagate, not a value returned
 into the stream. *Not* essential, and what the audit flags as a spec violation,
 is *acknowledging a write before its transaction commits*. The runtime's own
@@ -205,8 +205,8 @@ model; it exposes it.
 the result cell are omissions in the callable layer, not properties the system
 relies on. Closing them is safe; what it costs is two commitments:
 
-- **Honouring caller-supplied ids** obliges us to define what a repeated id
-  means and to trust callers not to collide — though the collision behaviour
+- **Honoring caller-supplied ids** obliges us to define what a repeated id
+  means and to trust callers not to collide — though the collision behavior
   itself (create-only receipt) is already the scheduler's invariant, not new
   machinery.
 - **Handing out result-cell addresses** commits the runtime to those addresses
@@ -535,12 +535,12 @@ with fan-out.
 This is not a new semantic — it is when the receipt commits today. But the CLI
 waits for far more than that: the handler branch awaits `runtime.idle()` and
 `manager.synced()` — the whole reactive graph quiescing, then full sync — so
-acknowledgement of an already-committed write is held hostage to every derived
+acknowledgment of an already-committed write is held hostage to every derived
 recomputation it triggered. On the live topics board that is `crossrefs`
 re-deriving over the whole board; mutations were observed taking 60–80 s. The
 work is exposure *and narrowing*: await this handling's commit, sync the
 receipt, return — never the graph going quiet. An acceptance test must prove a
-slow derived recomputation cannot delay acknowledgement (implementation plan,
+slow derived recomputation cannot delay acknowledgment (implementation plan,
 WS-D).
 
 Waiting is a caller-side choice — whether to wait at all, and for how long. The
@@ -597,7 +597,7 @@ cells already inherit `resultScope` from the callable cell
 exists; today those
 cells are unlinked and merely unguessable.
 
-Scope is not the whole confidentiality story: a result derived from labelled
+Scope is not the whole confidentiality story: a result derived from labeled
 data carries CFC confidentiality labels of its own, so a stored invocation
 record is subject to the same label rules as any other cell
 (`docs/specs/cfc-label-metadata-confidentiality.md`). Retention and readback
@@ -794,7 +794,7 @@ $ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
   "result": { "topic": "fid1:abc" } }
 
 # The caller chooses whether to wait: a detached call exits at the commit
-# acknowledgement with the receipt's address, and collecting the outcome
+# acknowledgment with the receipt's address, and collecting the outcome
 # later is an ordinary read of that address.
 $ cf piece call --url "$TOPICS_BOARD_URL" summarize \
     --topic fid1:abc --no-wait
@@ -935,7 +935,7 @@ client retry needs.
    without it. Options: a small runtime change writing the validated plain
    return into the receipt instead of `{}`, or a contract rule that results
    carry at least one reactive. The first looks right; it is the one place this
-   design asks the runtime for new behaviour rather than exposure. That change
+   design asks the runtime for new behavior rather than exposure. That change
    now exists behind the `plainResultReceipts` experimental option (WS-C),
    default-on since the three-topic integration proof (#5244), so neither the
    mechanism nor the default remains open — an explicit `false` stays the

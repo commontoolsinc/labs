@@ -341,7 +341,7 @@ never does.
 *This is item 2's shape, one surface over.* There a projection key in neither
 denylist is accepted and ignored; here an event field the schema does not
 declare is accepted and ignored. Both are the CLI declining to refuse what it
-cannot honour, and both are fixed by the CLI refusing it — not by a schema
+cannot honor, and both are fixed by the CLI refusing it — not by a schema
 forbidding it, which is the distinction #5589 turns on. Worth building the two
 with the same vocabulary for what a refusal says, since a caller meets both
 through the same command.
@@ -651,7 +651,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5560 | an address a call returns cannot be passed back as a verb argument | item 11 |
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
 
-**Filed against neighbouring subsystems, and not sequenced here.** `{ proxy:
+**Filed against neighboring subsystems, and not sequenced here.** `{ proxy:
 true }` never reaching `module.writableProxy` for a transformed pattern
 (#5502), an unnormalized external piece id upserting twice (#5499), and a
 create that drops its navigation (#5530). Each is real and none is about the

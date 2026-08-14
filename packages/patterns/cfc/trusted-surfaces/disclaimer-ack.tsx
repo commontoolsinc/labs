@@ -72,7 +72,7 @@ export const TrustedDisclaimerAckSurface = pattern<
           <cf-card data-ui-disclosure-kind="trusted-disclaimer-ack-disclosure">
             <cf-vstack slot="content" gap="1">
               <cf-label>
-                The trusted disclaimer must be rendered before acknowledgement.
+                The trusted disclaimer must be rendered before acknowledgment.
               </cf-label>
             </cf-vstack>
           </cf-card>
@@ -88,7 +88,7 @@ export const TrustedDisclaimerAckSurface = pattern<
           </cf-button>
           <cf-card>
             <cf-vstack slot="content" gap="2">
-              <cf-label>Acknowledgement result</cf-label>
+              <cf-label>Acknowledgment result</cf-label>
               <div id="trusted-disclaimer-acknowledged">
                 {acknowledgedDisclaimer}
               </div>

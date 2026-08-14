@@ -59,7 +59,7 @@ declare const collection: {
     assertEquals(analysis.rewriteHint, undefined);
   });
 
-  it("recognises ifElse when called via alias", () => {
+  it("recognizes ifElse when called via alias", () => {
     const { analysis } = analyzeExpression(
       "aliasIfElse(state.count > 3, 'hi', 'bye')",
       { prelude: "declare const aliasIfElse: typeof ifElse;" },
@@ -70,7 +70,7 @@ declare const collection: {
     );
   });
 
-  it("recognises builders when called via alias", () => {
+  it("recognizes builders when called via alias", () => {
     const { analysis } = analyzeExpression(
       "aliasPattern(() => state.count)",
       { prelude: "declare const aliasPattern: typeof pattern;" },
@@ -141,7 +141,7 @@ declare const collection: {
     assertEquals(classifyArrayMethodResultSinkCall(call, checker), undefined);
   });
 
-  it("recognises fetchJson as a reactive origin call", () => {
+  it("recognizes fetchJson as a reactive origin call", () => {
     const { call, checker } = getCallExpression(
       'fetchJson({ url: "https://example.com", result: [] })',
       {
@@ -155,7 +155,7 @@ declare const collection: {
   });
 
   for (const name of ["fetchBinary", "fetchText", "fetchJson"]) {
-    it(`recognises ${name} as a reactive origin call`, () => {
+    it(`recognizes ${name} as a reactive origin call`, () => {
       const { call, checker } = getCallExpression(
         `${name}({ url: "https://example.com" })`,
         {

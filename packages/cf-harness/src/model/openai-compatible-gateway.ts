@@ -168,12 +168,12 @@ export const usesResponsesApi = (
 ): boolean => nativeModelToolIds.length === 0 && model.startsWith("gpt-");
 
 /**
- * Rejects a compaction threshold on a turn that cannot honour it.
+ * Rejects a compaction threshold on a turn that cannot honor it.
  *
  * `context_management` is only sent on the Responses path, so a chat-routed
  * model would accept the option and silently ignore it — a user-supplied
  * control that appears to work while doing nothing. `0` stays legal
- * everywhere: its requested behaviour is already "do not compact".
+ * everywhere: its requested behavior is already "do not compact".
  */
 export const assertCompactThresholdSupported = (
   model: string,
@@ -250,7 +250,7 @@ const assertReasoningEffortSupported = (
 /**
  * Fraction of the usable input budget at which server-side compaction fires.
  *
- * Chosen as a guard rather than an optimisation: compacting costs extra on the
+ * Chosen as a guard rather than an optimization: compacting costs extra on the
  * turn that does it, so firing early taxes short runs to benefit long ones. At
  * 75% it stays dormant for ordinary runs and engages once a built-up context
  * (large system prompt, preloaded skills, accumulated documents) approaches
@@ -478,7 +478,7 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       // `--resume-run X --model other` is allowed here (the CLI pins the
       // provider on resume, not the model), so a continuation from the old
       // model is dropped rather than failing the run. Reasoning replay is an
-      // optimisation; the turn is still correct without it.
+      // optimization; the turn is still correct without it.
       "drop",
     );
     const tools = toResponsesTools(request.tools);

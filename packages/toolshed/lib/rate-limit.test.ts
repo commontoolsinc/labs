@@ -94,7 +94,7 @@ describe("token bucket", () => {
   // The LRU exists so the limiter cannot become the memory exhaustion it
   // prevents. It has a sharp edge: an evicted key gets a fresh full bucket, so
   // a flood of distinct keys is a reset primitive against a throttled one. The
-  // defence is the size of maxKeys, and this pins that the eviction is real.
+  // defense is the size of maxKeys, and this pins that the eviction is real.
   it("evicts the least recently used key once maxKeys is exceeded", () => {
     const limiter = createRateLimiter({
       capacity: 1,

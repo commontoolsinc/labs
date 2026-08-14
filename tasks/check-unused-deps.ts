@@ -44,12 +44,12 @@
 // their imports' aliases unused. Off a git working tree (a unit-test fixture)
 // nothing is tracked, so the scan falls back to walking.
 //
-// Two import shapes are not recognised, because no source in this workspace
+// Two import shapes are not recognized, because no source in this workspace
 // uses them to reach an import-map alias: a `@jsxImportSource <alias>` pragma
 // (the configured jsx source is a workspace package, not an alias) and a
 // `/// <reference types="<alias>" />` directive. If either is ever pointed at
 // an alias, the check reports that alias unused; wire the alias up through one
-// of the recognised shapes, or allowlist it.
+// of the recognized shapes, or allowlist it.
 //
 // The ALLOWLIST holds aliases that are declared without a local import on
 // purpose; each entry records why.
@@ -167,7 +167,7 @@ export function owningMember(
   return owner;
 }
 
-// The workspace member list from the root deno.jsonc, normalised to
+// The workspace member list from the root deno.jsonc, normalized to
 // repo-relative paths with no leading `./` or trailing `/`.
 export function parseWorkspaceMembers(rootConfigText: string): string[] {
   const config = parseJsonc(rootConfigText) as { workspace?: unknown } | null;
@@ -276,13 +276,13 @@ export interface ScanResult {
   allowlisted: UnusedEntry[];
 }
 
-// The config file names Deno recognises for a directory, in the order it
+// The config file names Deno recognizes for a directory, in the order it
 // prefers them: when a directory holds both, Deno reads deno.json and ignores
 // deno.jsonc, so this reads the same file Deno would.
 const CONFIG_NAMES = ["deno.json", "deno.jsonc"];
 
 // Finds the Deno config for the directory `dir` (the empty string for the
-// workspace root) under `root`, trying each recognised name. Returns its
+// workspace root) under `root`, trying each recognized name. Returns its
 // repo-relative path and text, or null when the directory has neither. A member
 // that keeps its config in deno.json rather than deno.jsonc is read the same
 // way, so its import map is checked too.
@@ -295,7 +295,7 @@ async function readConfig(
     try {
       return { path, text: await Deno.readTextFile(join(root, path)) };
     } catch {
-      // Try the next recognised name.
+      // Try the next recognized name.
     }
   }
   return null;

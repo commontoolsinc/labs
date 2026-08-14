@@ -129,7 +129,7 @@ export function topicTitle(index: number): string {
  * `citingTopics` cite at all.
  *
  * The citations are spread evenly over everything earlier, so one reaches the
- * far end of the board as readily as it reaches the neighbour, and the crossref
+ * far end of the board as readily as it reaches the neighbor, and the crossref
  * join has to look at scattered entries rather than a run of adjacent ones. The
  * first is always the immediate predecessor, which is the link the navigation
  * benchmark follows.

@@ -1,9 +1,9 @@
 /**
- * Test: adding an area of interest derives its title and colour from the same
+ * Test: adding an area of interest derives its title and color from the same
  * snapshot it is appended to.
  *
- * The handler picks a colour by the list's length and titles the area from that
- * same length, so title, colour and position have to agree with the slot the
+ * The handler picks a color by the list's length and titles the area from that
+ * same length, so title, color and position have to agree with the slot the
  * area actually lands in. The demo binds the handler to a button rather than
  * exporting it, so the test walks the rendered tree to the button and sends an
  * event to the stream bound to its onClick.
@@ -14,12 +14,12 @@ import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import { findElementByText, propsOf } from "./test/vnode-helpers.ts";
 import MapDemo from "./map-demo.tsx";
 
-// The colour cycle the handler indexes with the list's length.
+// The color cycle the handler indexes with the list's length.
 const COLORS = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6"];
 
 export default pattern(() => {
-  // Start from an empty map: no stops, no areas and no tracked centre, so the
-  // first add exercises the handler's own centre fallback.
+  // Start from an empty map: no stops, no areas and no tracked center, so the
+  // first add exercises the handler's own center fallback.
   const subject = MapDemo({
     tripName: "Test Trip",
     stops: [],
@@ -68,7 +68,7 @@ export default pattern(() => {
       area.description === "New area of interest";
   });
 
-  // With no centre tracked yet the handler falls back to its own default rather
+  // With no center tracked yet the handler falls back to its own default rather
   // than leaving the area without a position.
   const assert_first_area_uses_default_center = assert(() => {
     const areas = [...subject.areasOfInterest];
@@ -78,7 +78,7 @@ export default pattern(() => {
   });
 
   // The second add reads a one-entry list, so it titles itself "Area 2" and
-  // takes the next colour. Both have to match the slot it appends into.
+  // takes the next color. Both have to match the slot it appends into.
   const assert_second_area = assert(() => {
     const areas = [...subject.areasOfInterest];
     if (areas.length !== 2) return false;

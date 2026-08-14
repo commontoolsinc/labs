@@ -20,7 +20,7 @@ the remaining surfaces are in
 
 The evaluator and direct authoring path live in
 `packages/runner/src/cfc/exchange-eval.ts`, `packages/api/cfc.ts`, and the CFC
-transformer passes. The evaluator provides fuelled-fixpoint guarded rewrites
+transformer passes. The evaluator provides fueled-fixpoint guarded rewrites
 with clause locality, label-carried `referenced`
 policy records with home-clause locality (CT-1874, #4652), and §4.3.5 grant
 records — `policyState` guards, reserved-path storage, single-use
@@ -404,7 +404,7 @@ parameters only from endorsed intent evidence.
    runtime-computed rule content other than `v()` variables and
    `THIS_POLICY`. `ConceptOf` is not implemented.
 2. All rule firing happens in trusted boundaries (render boundary, sink gate,
-   gated writes) via the fuelled fixpoint of spec §4.4.5, fail-closed.
+   gated writes) via the fueled fixpoint of spec §4.4.5, fail-closed.
 3. Observing contexts (preview/diagnostics) must not consume single-use
    grants (§4.3.5) — "would release" chrome renders without spending.
 4. Module-declared records are pinned by defining module identity, export

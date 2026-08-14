@@ -1238,7 +1238,7 @@ Deno.test("applyShrinkAndWrap resolves a union-only property during type-driven 
   assertEquals(members.get("common")?.type, "string");
 });
 
-// Type-driven shrink where a deeper path fails to materialise on a nested
+// Type-driven shrink where a deeper path fails to materialize on a nested
 // property: the child is dropped rather than widened (buildShrunkTypeNodeFromType
 // `!shrunkChild && !hasDirectAccess` continue, ~978-989 region). Access a valid
 // head plus an invalid deep path on the same property.

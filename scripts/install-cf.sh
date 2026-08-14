@@ -133,7 +133,7 @@ fi
 
 # Auto-detection only ever picks a directory already on PATH; an explicit --dir
 # can point anywhere, and installing somewhere unreachable is precisely the
-# silent failure this exists to prevent. Explicit intent is honoured, but not
+# silent failure this exists to prevent. Explicit intent is honored, but not
 # quietly.
 if ! on_path "${target_dir}"; then
   echo "install-cf: warning: ${target_dir} is not on your PATH," >&2

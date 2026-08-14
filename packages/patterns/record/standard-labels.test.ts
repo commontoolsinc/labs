@@ -44,7 +44,7 @@ Deno.test("a different type starts its own sequence", () => {
 });
 
 Deno.test("entries of other types do not consume labels", () => {
-  // A phone labelled "Work" must not make the email skip "Work".
+  // A phone labeled "Work" must not make the email skip "Work".
   const entries = [entry("phone", "Work")];
   assertEquals(getNextUnusedLabel("email", entries), "Personal");
 });

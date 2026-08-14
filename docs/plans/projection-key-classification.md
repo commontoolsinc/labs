@@ -45,7 +45,7 @@ design:
   at all, the item schema under `items`, which decides the same for an array,
   and `$comment`, three values of which the runner reserves as control
   markers. Value constraints are not among them: `minLength`, `minimum`,
-  `minItems` and their neighbours appear nowhere in that traversal. That
+  `minItems` and their neighbors appear nowhere in that traversal. That
   `required` and `$comment` are both keywords it acts on is what makes a
   caller's schema crossing this boundary consequential.
 

@@ -133,7 +133,7 @@ target path parsing rules and examples.
 3. If the path is `result.json`, replace the entire result cell.
 4. If the path is `result/items/0.json`, replace just that subtree.
 5. Apply `cell.set()` at the appropriate path using the same commit-confirmed
-   acknowledgement contract as scalar writes.
+   acknowledgment contract as scalar writes.
 
 The buffer is written through as it was parsed. A `.json` file whose read form
 abbreviated part of the value — see

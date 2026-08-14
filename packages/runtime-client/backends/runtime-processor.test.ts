@@ -310,7 +310,7 @@ describe("piece source state", () => {
         synced.push("cell");
         return Promise.resolve();
       },
-      // A piece with no metadata at all: the reader's own behaviour on each
+      // A piece with no metadata at all: the reader's own behavior on each
       // field is covered in packages/piece; this asserts the addressing.
       getMetaRaw: () => undefined,
       getAsNormalizedFullLink: () => ({ id: "of:fid1:sourced" }),
@@ -1760,7 +1760,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const processor = {
       runtime: {
         getCellFromLink: () => ({
-          get: () => "labelled data",
+          get: () => "labeled data",
           getMetaRaw: () => rawEnvelope,
         }),
       },
@@ -1790,7 +1790,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
           runtime: {
             readTx: () => ({
               readOrThrow: () => ({
-                value: "labelled data",
+                value: "labeled data",
                 cfc: {
                   version: 1,
                   schemaHash: "test-schema",
@@ -1840,7 +1840,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
           runtime: {
             readTx: () => ({
               readOrThrow: () => ({
-                value: "labelled data",
+                value: "labeled data",
                 cfc: {
                   version: 1,
                   schemaHash: "test-schema",
@@ -2323,7 +2323,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
       runtime: {
         readTx: () => ({
           readOrThrow: () => ({
-            value: "labelled data",
+            value: "labeled data",
             cfc: {
               version: 1,
               schemaHash: "test-schema",

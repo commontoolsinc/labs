@@ -312,7 +312,7 @@ export const rejectMutation = (verb: string, reason: string): never => {
   throw new Error(`${verb} rejected: ${reason}`);
 };
 
-/** Structured author first, legacy string second. Agent snapshots are labelled
+/** Structured author first, legacy string second. Agent snapshots are labeled
  * explicitly because they share the authenticated principal's identity key. */
 export const topicAuthorLabel = (
   author: TopicAuthor | undefined,

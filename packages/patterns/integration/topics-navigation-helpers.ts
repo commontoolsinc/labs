@@ -18,7 +18,7 @@ import {
 const LINK_TARGET_ATTR = "data-topics-link-target";
 
 /**
- * Find the resolved `cf-cell-link` labelled `targetLabel` and tag both it and
+ * Find the resolved `cf-cell-link` labeled `targetLabel` and tag both it and
  * the native button inside it with `targetToken`. Self-contained: it is
  * serialized and run in the page, so it closes over nothing in this module.
  *

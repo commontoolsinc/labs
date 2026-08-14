@@ -150,7 +150,7 @@ export default pattern<Input, Output>(
           {display}
           </pre>
           <div style={{ color: "red", fontSize: "0.875rem" }}>{errorMsg}</div>
-          <div style={{ color: "grey", fontSize: "9pt" }}>{VERSION}</div>
+          <div style={{ color: "gray", fontSize: "9pt" }}>{VERSION}</div>
         </cf-vstack>
       ),
       value,

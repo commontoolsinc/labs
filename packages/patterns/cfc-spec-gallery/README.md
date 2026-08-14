@@ -7,8 +7,8 @@ This gallery rounds the branch up to 16 CFC demo examples:
 3. Hotel Membership Return
 4. Forward Hotel Note
 5. Search Result Selection
-6. Disclosure Acknowledgement
-7. Alert Acknowledgement
+6. Disclosure Acknowledgment
+7. Alert Acknowledgment
 8. Invite Acceptance
 9. Redacted Summary Release
 10. Support Escalation

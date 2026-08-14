@@ -101,7 +101,7 @@ describe("vintage paths", () => {
   it("keeps an identity that itself contains dashes whole", () => {
     // Not hypothetical: identities are base64url, and home.tsx's real one is
     // `xaLUAd13811rdYUEzKt7vaXYy-P8PAkhRcvqRshiNW4`. An earlier parse cut at
-    // the LAST dash, so the gate failed to recognise a fixture it had just
+    // the LAST dash, so the gate failed to recognize a fixture it had just
     // written and reported the pattern as uncovered with the file sitting
     // right there. Both fields contain dashes; only the stamp's fixed shape
     // separates them.
@@ -1274,7 +1274,7 @@ describe("promoting a generation", () => {
       }`,
     );
     // And it still parses as the same fixture, one tier over — a promoted
-    // vintage the enumerator no longer recognises would silently stop being
+    // vintage the enumerator no longer recognizes would silently stop being
     // replayed, which is the failure this whole tier exists to prevent.
     const reparsed = parseVintagePath(destination);
     expect(reparsed?.tier).toBe(PINNED);
@@ -1668,7 +1668,7 @@ describe("what the capture and promote commands print", () => {
     expect(message).toContain("same world");
   });
 
-  it("REFUSES a flag it does not recognise, rather than ignoring it", () => {
+  it("REFUSES a flag it does not recognize, rather than ignoring it", () => {
     // A misspelled flag matches no branch and falls through to the plain gate:
     // it replays everything, prints a healthy summary and exits 0, so someone
     // who asked to capture a generation is told the tree is fine. Measured on

@@ -32,7 +32,7 @@ ID=$(cf piece new packages/patterns/<path>.tsx \
 # 3. Set title
 cf piece call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
 
-# 4. Step to materialise
+# 4. Step to materialize
 cf piece step --piece $ID --space SPACE
 
 # 5. Re-read pieces.json immediately — stale after deploy

@@ -159,7 +159,7 @@ Deno.test("two toRaw() callers cannot interfere with each other", async () => {
 Deno.test("toRaw throws cleanly for a non-noble implementation", async () => {
   // On Firefox ≥136 the DEFAULT (native/WebCrypto) implementation is used, and
   // it cannot export private material. The failure must be an honest error, not
-  // a PKCS8-flavoured red herring, and pairing callers pass NOBLE explicitly to
+  // a PKCS8-flavored red herring, and pairing callers pass NOBLE explicitly to
   // avoid it entirely.
   const identity = await Identity.generate(); // default implementation
   let message = "";

@@ -49,7 +49,7 @@ for as long as the coordinator lives.
 A release stops the child's registration only when both of these hold:
 
 - The registration is the one this launch installed. A later attempt that
-  replaced it owns itself, so a release that no longer recognises what it
+  replaced it owns itself, so a release that no longer recognizes what it
   finds does nothing.
 - Nothing holds an independent lifetime for the result (below).
 

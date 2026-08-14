@@ -1958,7 +1958,7 @@ export async function main() {
 
   // 6b. Cold compile cache note. A cold run covers cold-compile-only branches,
   // so it is recorded cold and a later PR's coverage ratchet skips it as a
-  // baseline in favour of the nearest warm ancestor of its base-branch commit.
+  // baseline in favor of the nearest warm ancestor of its base-branch commit.
   const coldFamilies = COMPILE_CACHE_FAMILIES.filter(
     (family) => currentCacheStates[family] === "cold",
   );

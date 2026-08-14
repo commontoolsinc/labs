@@ -498,7 +498,7 @@ The merged file carries line coverage only. LCOV identifies a function by its
 name, and `deno coverage --lcov` can emit several functions with the same name
 in one file (a free function and a method, for example), so function and branch
 records cannot be merged back together reliably from the fragments alone. Line
-coverage is what an IDE uses to colour the gutter, which is what this file is
+coverage is what an IDE uses to color the gutter, which is what this file is
 for.
 
 To download the report for a given commit:

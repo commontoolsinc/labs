@@ -175,7 +175,7 @@ export const TrustedDisclaimerAckHost = pattern<
                     </cf-heading>
                     <cf-label>
                       The trusted disclosure is rendered with the content label;
-                      no acknowledgement click is required.
+                      no acknowledgment click is required.
                     </cf-label>
                     <cf-label>{disclaimerText}</cf-label>
                     <cf-cfc-label
@@ -804,7 +804,7 @@ export const DisclaimerLookalikeHostExample = pattern<
   const host = TrustedDisclaimerAckHost({
     title: new Writable("Lookalike disclaimer host"),
     summary: new Writable(
-      "This example renders a visible host control that looks similar but does not call the trusted acknowledgement stream.",
+      "This example renders a visible host control that looks similar but does not call the trusted acknowledgment stream.",
     ),
     content: makePromptInfluenceContent({
       id: "disclaimer-lookalike-host",

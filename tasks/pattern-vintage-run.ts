@@ -223,7 +223,7 @@ export interface ReplayReport {
    * in `failures`, so a fixture holding any is a RED run rather than a green one
    * with a caveat — the replay skips them, and a verdict that passes while
    * silently covering fewer roots than the fixture holds is this tier's worst
-   * failure mode. Kept as a count for the tests that pin that behaviour.
+   * failure mode. Kept as a count for the tests that pin that behavior.
    */
   unmappable: number;
   /** Targets whose source CHANGED since capture — the actual migrations. */
