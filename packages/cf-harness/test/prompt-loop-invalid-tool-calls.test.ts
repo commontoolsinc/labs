@@ -410,6 +410,49 @@ describe("prompt-loop invalid tool calls", () => {
     }
   });
 
+  it("keeps a child's invented tool name and call id out of the parent's summary", async () => {
+    const injected = "ZZ-CHILD-INJECTED-ZZ";
+    const requestCount = { value: 0 };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-invalid-child-identifiers",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+      }),
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["default"],
+      fetchFn: scriptedFetch([
+        toolCallTurn(
+          "call-delegate",
+          "delegate_task",
+          JSON.stringify({ goal: "Investigate." }),
+        ),
+        // The child writes both identifiers, so both are model text.
+        toolCallTurn(
+          `call-${injected}`,
+          `tool_${injected}`,
+          JSON.stringify({ anything: true }),
+        ),
+        finalTurn("Child done."),
+        finalTurn("Parent done."),
+      ], requestCount),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the work." });
+
+    const delegateOutput = result.transcript
+      .filter((message) => message.role === "tool")
+      .map((message) => message.content).join("\n");
+    expect(delegateOutput.includes(injected)).toBe(false);
+    const primaryFailure = result.runState.subagentRuns?.[0]?.runState
+      ?.primaryFailure;
+    expect(primaryFailure?.kind).toEqual("invalid_tool_call");
+    expect(primaryFailure?.toolId).toEqual("[unknown-tool]");
+    expect(primaryFailure).not.toHaveProperty("toolCallId");
+  });
+
   it("records the rejected call in run state and in the run report", async () => {
     const artifactStore = new RecordingArtifactStore("run-invalid-recorded");
     const requestCount = { value: 0 };

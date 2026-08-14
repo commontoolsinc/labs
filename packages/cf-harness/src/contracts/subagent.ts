@@ -413,16 +413,18 @@ export interface HarnessSubagentRunManifest {
   inputSummary: HarnessSubagentInputSummary;
 }
 
+/**
+ * The parent-facing view of a child's failure. Every field is harness
+ * vocabulary: a `kind` and `source` from a closed set, an output id the
+ * harness minted, an exit code, and a `toolId` that is either a tool the run
+ * offers or a fixed sentinel. The identifiers a child chose — the tool name a
+ * model wrote, its call id, a command name parsed out of shell output — stay
+ * in the audit artifacts, where no model reads them.
+ */
 export interface HarnessSubagentFailureSummary extends
   Pick<
     HarnessFailureRecord,
-    | "kind"
-    | "source"
-    | "toolId"
-    | "toolCallId"
-    | "outputId"
-    | "commandName"
-    | "exitCode"
+    "kind" | "source" | "toolId" | "outputId" | "exitCode"
   > {
   type: "cf-harness.subagent-failure-summary";
 }

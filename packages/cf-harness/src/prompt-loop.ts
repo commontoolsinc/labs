@@ -393,20 +393,41 @@ const nextSubagentSequence = (
   return Math.max(retainedDelegateOutputs, retainedChildRunSequence) + 1;
 };
 
+/**
+ * What a tool name stands as in a parent-facing summary when the run offers no
+ * tool by that name. A call the model wrote names whatever the model wrote, so
+ * the name is model text — bounded harness text stands in for it.
+ */
+const UNKNOWN_TOOL_SUMMARY_SENTINEL = "[unknown-tool]";
+
+/**
+ * The parent-facing view of a child's failure: what KIND of thing went wrong
+ * and where in the harness it went wrong, and nothing a child wrote.
+ *
+ * A failure record is an audit artifact and keeps every identifier as it was —
+ * the tool name the model wrote, the call id it chose, the command name a
+ * missing-binary diagnostic parsed out of the child's own shell output. None
+ * of those reach this summary, because this one is read by the parent MODEL: a
+ * child that cannot smuggle text through its return channel could otherwise
+ * smuggle it through a tool name or a call id and have the harness relay it as
+ * harness-authored diagnostic. What is left is harness vocabulary — a tool id
+ * the run offers, an output id the harness minted, a `kind`, a `source`, an
+ * exit code — plus a sentinel where a model-chosen name stood.
+ */
 const summarizeSubagentFailure = (
   failure: HarnessFailureRecord,
 ): HarnessSubagentFailureSummary => ({
   type: "cf-harness.subagent-failure-summary",
   kind: failure.kind,
   source: failure.source,
-  ...(failure.toolId !== undefined ? { toolId: failure.toolId } : {}),
-  ...(failure.toolCallId !== undefined
-    ? { toolCallId: failure.toolCallId }
+  ...(failure.toolId !== undefined
+    ? {
+      toolId: isBuiltinToolId(failure.toolId)
+        ? failure.toolId
+        : UNKNOWN_TOOL_SUMMARY_SENTINEL,
+    }
     : {}),
   ...(failure.outputId !== undefined ? { outputId: failure.outputId } : {}),
-  ...(failure.commandName !== undefined
-    ? { commandName: failure.commandName }
-    : {}),
   ...(failure.exitCode !== undefined ? { exitCode: failure.exitCode } : {}),
 });
 
