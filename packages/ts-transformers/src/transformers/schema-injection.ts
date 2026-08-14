@@ -2557,10 +2557,14 @@ function isCallbackReference(
   const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
   if (declaration === undefined) return false;
   if (ts.isFunctionDeclaration(declaration)) return true;
+  // The initializer goes through the wrapper-stripping resolver rather than
+  // a node-kind test: an assertion (`as any`), parentheses, or the hardening
+  // helper around the function must not hide it. The resolver works on a
+  // foreign file's node — the checker is program-wide.
   return ts.isVariableDeclaration(declaration) &&
     declaration.initializer !== undefined &&
-    (ts.isArrowFunction(declaration.initializer) ||
-      ts.isFunctionExpression(declaration.initializer));
+    resolveCallbackFunctionExpression(declaration.initializer, checker) !==
+      undefined;
 }
 
 function resolveFunctionLikeExpression(

@@ -18,7 +18,10 @@ export function echoImported(
   return { echoed: event.word };
 }
 // deno-lint-ignore no-explicit-any
-export const echoAny: any = (event: Ping) => ({ echoed: event.word });
+export const echoAny: any = ((event: Ping) => ({
+  echoed: event.word,
+  // deno-lint-ignore no-explicit-any
+})) as any;
 `;
 
 const MAIN = `import { cell, handler, pattern, Stream } from "commonfabric";
