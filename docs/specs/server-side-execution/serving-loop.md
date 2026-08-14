@@ -810,8 +810,17 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   commit is an ordinary self-echo and is skipped (§3). A crash between
   completion commit and consumption is covered by recovery: the basis
   index shows the consumers stale against the result doc's head (§6).
-- **In-flight dedupe**: one outstanding effect per key per space; a second
-  miss on the same key attaches to the in-flight effect.
+- **In-flight dedupe**: one outstanding effect per (key, result
+  target) per space; a second miss on the same (key, target)
+  attaches to the in-flight effect. Two DISTINCT result targets
+  carrying byte-identical inputs are two distinct requests, and
+  each egresses (RULED 2026-08-13; the earlier per-key-only
+  wording promised a cross-target sharing that §4's own miss
+  rule — exactly one result-cell address per entry — could not
+  deliver). A response-sharing layer (one egress fanned to N
+  per-target writebacks, restricted to idempotent-marked
+  effects) remains a possible future optimization, not an owed
+  item.
 - Failures commit an error-shaped result (the existing builtin error cell
   conventions) with the key, so retries are input-driven (inputs change →
   new key), never timer-driven loops.
