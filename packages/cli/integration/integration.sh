@@ -1037,13 +1037,11 @@ run_verbs_walkthrough() {
   echo "Successfully ran the verb-result walkthrough for ${API_URL}."
 }
 
-# The gap harness beside the walkthrough: what does NOT work yet, asserted as
-# gaps that fail loudly the day a capability arrives. Running it here is what
-# makes that announcement automatic — a gap script nobody runs announces
-# nothing. Same delegation rationale as above: the standalone script is the
-# artifact docs/common/verb-session-walkthrough.md documents, so the
-# documented thing is the tested one. It deploys its own fixture and takes its
-# own space.
+# The gap harness beside the walkthrough: what does NOT work yet, asserted so
+# it fails the day a capability arrives — its own header says what and why.
+# Running it here is what makes that announcement automatic: a gap script
+# nobody runs announces nothing. Same delegation rationale as above; it
+# deploys its own fixture and takes its own space.
 run_verb_session_gaps() {
   echo "Running the verb-session gap harness..."
   API_URL="$API_URL" bash "$SCRIPT_DIR/verb-session-gaps.sh" ||
