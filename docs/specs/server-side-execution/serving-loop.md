@@ -639,8 +639,21 @@ service-identity writes; earlier drafts mis-attributed it to
 stage G). Stage G's own retirement — the outbox's delivery-acked
 ROW delete — is no stamped write at all: it rides the direct-engine
 plane (c) as an engine-table delete, never a commit (§1). Declared
-at the three stamping choke points the scheduler and runner own
-(the reactive-action run, the event dispatch, the pattern swap). Its conflict class: bookkeeping writes
+at the stamping choke points the scheduler and runner own: the
+reactive-action run, the event dispatch, the pattern swap, and — the
+PIECE-START site (RULED 2026-08-13, the F1 fold-in) — the
+demanded-piece startup path's setup/instantiation writes
+(`ensurePieceRunning` → start → `startCore`: the self-minted
+instantiation tx, the missing-stream-marker setup REPAIR, the
+deferred piece-start/run transactions, and the runtime-internal
+pattern-update/rollforward writes — the same `applySetupState`
+output the pattern-swap choke point already stamps). A piece-start
+commit that FAILS after start() resolved (the path is
+fire-and-forget by design) must SURFACE — loudly logged in every
+arm and counted into §7's `structureLoadFailures` on a serving
+runtime via the installed observer — never be swallowed: a
+swallowed refusal leaves the piece silently running against setup
+writes that never landed. Its conflict class: bookkeeping writes
 are advances that commute, so they REBASE like other
 non-re-derivable writes; a rebase that conflicts semantically DROPS
 the contribution whole — there is no event to requeue, and the loop
@@ -931,14 +944,25 @@ escalate.
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
-structureLoadFailures, structureLoadDeferred, watermarkClamped,
+structureLoadFailures, structureLoadDeferred, structureLoadTerminal,
+structureLoadRearmed, watermarkClamped,
 unstampedSealRefusals, watermarkLag, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed}, lease:
 {held, lost} }` (`structureLoadFailures`/`structureLoadDeferred`
 count demanded-structure loads that threw / could not land yet —
 never-a-piece id classes are EXCLUDED from piece demand and count
-nothing, RULED 2026-08-07; `watermarkClamped` counts waves whose W
+nothing, RULED 2026-08-07; `structureLoadFailures` also counts a
+piece-start commit that failed AFTER its start resolved (the §3d
+piece-start site's surfaced fire-and-forget failure, stage P2-F);
+`structureLoadTerminal`/`structureLoadRearmed` carry the
+demand-cycle terminal state (stage P2-F, the OW19 design): a root
+confirmed synced with no pattern meta parks TERMINAL — counted per
+terminalization, no per-cycle churn — and a commit touching one of
+the load's observed docs RE-ARMS it (the retry is settle-gated so it
+reads the re-arming commit's applied state); the demanded-structure
+load pass itself runs UNDER §3's flush deadline (single-flighted
+across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts waves whose W
 advance was actually clamped below the input batch head by the
 Phase-2 settle input barrier — inbound foreign novelty still
 shadowed by a parked own write; the clamp is honesty, not failure,

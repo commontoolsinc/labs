@@ -588,17 +588,20 @@ client does not; this PR):
   journey whose per-run outbox carriages carry two DIFFERENT keys
   into the completions — the m-4 note's "arrives with Phase 2's
   stamper" DISCHARGED). The per-run SUPPLY — the scheduler running a
-  scoped action once per demanded instance (per-(action × instance)
-  read-set/dirtiness state) and the replica-level per-instance read
-  keying — is the owed scheduler-instance-dimension follow-up,
-  reported to the plan as a proposed train cut (OW17 below).
+  scoped action once per demanded instance — LANDED with stage P2-F
+  (the N-run settle loop through the `runInstanceResolver` seam;
+  OW17 below carries the narrowed residue: the replica-level
+  per-instance read keying and the local dirtiness precision that
+  depends on it).
 - The ON-arm skip list: Phase 2 RETIRED the two-browsers entry (its
   named unskipping condition — the client derivation-commit path
   removed — is this PR; that gate now runs and passes ON) and ADDED
   one entry, `sx2-serving-loop`, under `phase-2-followup` — the
-  demand-cycle starvation fork's reproducer (the owed row below
-  carries the durable record; the skip reason carries the mechanism
-  and the ruled id-class exclusion that reduced it).
+  demand-cycle starvation fork's reproducer. Stage P2-F
+  (2026-08-13) RETIRED that entry too: the terminal state closed
+  the fork (the OW19 row below records the closure), and the ON-arm
+  skip list is EMPTY again — the full patterns suite runs both
+  arms.
 - testing §4's single-deriver envelope gate: impl-covered — the
   store-attribution query pinned in `speculation-overlay.test.ts`
   (every derived commit's holder is the service identity; none from a
@@ -852,34 +855,76 @@ pre-flight):**
 **Phase 2 follow-up (APPROVED as its own follow-on stage — owner
 nod, 2026-08-07; recorded in the plan's stage list):**
 
-- OW17 — the scheduler instance dimension: per-(action × instance)
-  read-set/dirtiness state, the N-run settle loop over demanded
-  identities (consuming the SpaceServer's demanded-identity
-  registry through the widened `#stampRun` seam), and the
-  replica-level per-instance READ keying (one doc, N instances read
-  locally — today's replica keys scoped docs by scope NAME, the
-  cardinality-1 collapse the sink-level fold test documents). Until
-  it lands, a scoped node's runs resolve via the wave-level identity
-  (the Phase-1 fallback) unless a caller supplies per-run identities
-  through the seam. Trigger: the approved follow-on stage (the plan's
-  Phase 2 tail); no later than Phase 3's events (handler runs
-  already carry per-run actors).
-- OW19 — the demand-cycle terminal state (RULED direction,
-  2026-08-07; the durable record for the starvation fork the
-  `sx2-serving-loop` skip reproduces): the COMPLETE design is
-  terminal-on-loaded-doc-without-pattern-meta with COMMIT-TRIGGERED
-  re-arm — a loaded doc whose meta is absent stops retrying until a
-  commit touches it — plus moving the demanded-structure load pass
-  under the wave's flush deadline (today it runs before the settle
-  race, unbounded, so a slow ensure throttles input consumption).
-  The ruled id-class exclusion (computed:/cid:/watermark — landed
-  with Phase 2, counter-exempt) removed the structurally-futile
-  classes; the conflation hazard that makes the rest non-trivial:
-  a not-yet-created piece and a never-a-piece `of:` value doc are
-  indistinguishable by id, so a terminal state without the
-  commit-triggered re-arm would break the creation race the
-  ensure-retry fix exists for. Trigger: the Phase-2 follow-on PR
-  (with OW17 or before it); the skip-list entry lifts with it.
+- OW17 — the scheduler instance dimension, NARROWED by stage P2-F
+  (2026-08-13; the supply LANDED): the N-run settle loop over
+  demanded identities is BUILT — the scheduler's reactive-action
+  choke point resolves an action's piece root against the
+  SpaceServer's demanded-identity registry (the
+  `runInstanceResolver` seam installed beside the §3d stamper) and
+  runs once per demanded instance, each run stamped with that
+  instance's identity AND acting pair; the LT6 inheritance hands an
+  emitting run's identity to its dispatched handler run. Pinned:
+  `executor-run-supply.test.ts` (the N-run loop at cardinality 2
+  through the production choke point; LT6 inheritance; both
+  red-first at the P2 base), `executor-serving-loop.test.ts`
+  ("supplies the demanded (user, session) identity … END TO END" —
+  registry → auto-stamped run → acting annotations + per-instance
+  basis rows in the engine, red-first;
+  `executor-space-server.test.ts` adds the argument-doc demand — the
+  ensure-resolved owning root differs from the demanded id — reaching
+  the same observable through the resolved-root mapping). What
+  REMAINS owed — one leg,
+  together: the replica-level per-instance READ keying (one doc, N
+  instances read locally — the replica still keys scoped docs by
+  scope name, the cardinality-1 collapse the sink-level fold test
+  documents) and the per-(action × instance) LOCAL read-set/
+  dirtiness precision that depends on it (until the replica holds
+  distinct instances, per-instance local dirtiness is
+  behaviorally unobservable; the node re-runs its current instance
+  set and equality cutoffs/memo hits absorb the siblings — those two
+  are the ONLY absorbers: event ids mint per origin transaction, so
+  sibling instance runs mint DISTINCT ids and a derivation body
+  calling `.send()` would dispatch once per demanded instance, with
+  no eventId-level dedupe absorbing it. Handler dispatch is a
+  separate non-fanned path (C11b), and derivation-emitted events are
+  an anti-pattern today; that surface is unpinned either way — a pin
+  is owed when they become legal). The read collapse has a VALUE
+  half, stated explicitly so Phase 5's trigger is legible: sibling
+  runs read the SAME collapsed local scoped doc, so at
+  cardinality ≥ 2 with genuinely divergent scoped inputs one user's
+  per-instance engine rows hold values derived from the OTHER user's
+  data, stamped acting = the wrong user — a consequence stage P2-F
+  SHARPENS (pre-P2-F, scoped writes never landed in user instances
+  at all). Trigger:
+  no later than Phase 5's cross-space serving (foreign scoped
+  instances make the local collapse load-bearing); flag-don't-fill
+  until then.
+- OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
+  (2026-08-13; the RULED 2026-08-07 direction, built whole). A
+  demanded root CONFIRMED synced with no pattern meta parks TERMINAL
+  (`structureLoadTerminal`) — no per-cycle ensure churn — and a
+  commit touching one of the load's observed docs RE-ARMS it
+  (`structureLoadRearmed`); the re-armed retry is SETTLE-GATED
+  (retrying inside the re-arming cycle reads the replica's stale
+  pre-commit state and would re-terminalize the not-yet case the
+  re-arm exists to keep sound — caught red during the build). The
+  demanded-structure load pass moved UNDER the wave's flush deadline
+  (single-flighted across cycles; completion wakes the loop), so a
+  slow ensure no longer throttles input consumption. The conflation
+  hazard is discharged exactly as ruled: not-yet (creation race —
+  the instantiation commit re-arms, the settled retry loads and the
+  piece serves) vs never (a plain value doc stays parked) are
+  distinguished by the re-arm, never by id. Pinned red-first:
+  `executor-space-server.test.ts` ("terminalizes … STOPS the
+  per-cycle churn" — deferred/terminal counters flat across driven
+  cycles; "re-arms … and LOADS a piece created after the terminal
+  decision" — the full terminal → re-arm → settle-gated retry →
+  serve journey), and the serving-loop E2E's creation-race test
+  reconciled to the new classification (terminal + re-arm counters,
+  failures still zero). The `sx2-serving-loop` skip-list entry is
+  RETIRED with this row — the surface runs in CI's ON arm, carrying
+  the amplification-ratio gate and the pattern-updater CHECK-half
+  witness (the plan's Phase-2 revisit (b), now ticked).
 
 - OW18 — the ensurer move (owner direction, 2026-08-07; recorded with
   the scheduler-tell batch, NOT implemented by it):
@@ -1095,7 +1140,8 @@ sentence, coverage below):
 
 This closes leg A of the lunch-gate triage arc (the unstamped
 recovery-seed storm). Leg B — the OW19 demand spin
-(`structureLoadDeferred` climbing) — is separately owned; leg C
+(`structureLoadDeferred` climbing) — is closed by stage P2-F's
+demand-cycle terminal state (the closed OW19 row above); leg C
 (the speculative-pending-basis design fix) is closed by the
 2026-08-13 delta below.
 

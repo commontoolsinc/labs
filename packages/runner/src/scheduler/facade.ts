@@ -651,6 +651,9 @@ export class Scheduler {
       ...(identity.processGeneration !== undefined
         ? { processGeneration: identity.processGeneration }
         : {}),
+      ...(identity.pieceRootId !== undefined
+        ? { pieceRootId: identity.pieceRootId }
+        : {}),
     };
   }
 

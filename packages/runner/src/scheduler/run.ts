@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import type { Runtime } from "../runtime.ts";
+import type { Runtime, ServerRunInstance } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
@@ -35,6 +35,7 @@ import type {
   ActionRunTraceEntry,
   EventHandler,
   ReactivityLog,
+  TelemetryAnnotations,
 } from "./types.ts";
 import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
 
@@ -366,68 +367,120 @@ export async function runSchedulerAction(
   const runningPromise = state.getRunningPromise();
   if (runningPromise) await runningPromise;
 
-  const tx = state.runtime.edit({
-    changeGroup: state.actionChangeGroups.get(action),
-  });
   const record = state.nodes.get(action);
   const invalidCauses = record ? takeInvalidCauses(record) : undefined;
   if (record) {
     state.nodes.setStatus(action, "clean");
   }
-  // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
-  // run to the transaction so flow-label derivation can taint its writes
-  // even when this run's branch never re-reads them. Consumed once; if the
-  // run aborts and is retried (RetryImmediately, commit conflict) the
-  // consumed addresses are restored below so the retry inherits them.
-  if (invalidCauses !== undefined && invalidCauses.length > 0) {
-    tx.addCfcTriggerReads(invalidCauses);
-  }
-  (tx.tx as { debugActionId?: string }).debugActionId = actionId;
-  tx.tx.sourceAction = action;
-  // Server-execution v2 stage F (serving-loop.md §3d): a serving
-  // runtime's installed stamper attaches the wave run context here — the
-  // reactive-action choke point — so every scheduler-driven derivation
-  // seals stamped. A no-op everywhere else (one undefined check).
-  state.runtime.stampServerRun(tx, { actionId, kind: "derivation" });
-  const actionStartTime = performance.now();
 
-  let result: any;
-  const nextRunningPromise = new Promise((resolve) => {
-    const finalizeAction = (error?: unknown) => {
-      finalizeSchedulerAction(state, {
+  // The per-(action × instance) run SUPPLY (server-execution v2 stage
+  // P2-F; scopes.md §5 — the DEMAND supplies the run identity). On a
+  // serving runtime the SpaceServer's installed resolver maps this
+  // action's piece root to its demanded instances, and the action runs
+  // ONCE PER INSTANCE, serially, each run stamped with that instance's
+  // identity (the N-run settle loop over demanded identities).
+  // Instances live in keys, basis rows, and stamps — never as extra
+  // dependency-graph nodes (C11b): the node, its dirtiness, and its
+  // subscription stay singular, and a re-trigger re-runs the current
+  // instance set (equality cutoffs and memo hits make the sibling
+  // recomputes converge). Everywhere else (`serverRunInstancesFor`
+  // undefined or empty) this is exactly the old single
+  // wave-identity run.
+  const pieceRootId = (action as Partial<TelemetryAnnotations>)
+    .schedulerObservationIdentity?.pieceRootId;
+  const demandedInstances = pieceRootId !== undefined
+    ? state.runtime.serverRunInstancesFor(pieceRootId)
+    : undefined;
+  const runs: readonly (ServerRunInstance | undefined)[] =
+    demandedInstances !== undefined && demandedInstances.length > 0
+      ? demandedInstances
+      : [undefined];
+
+  const runOnce = (
+    instance: ServerRunInstance | undefined,
+  ): Promise<unknown> => {
+    const tx = state.runtime.edit({
+      changeGroup: state.actionChangeGroups.get(action),
+    });
+    // §8.9.2 trigger reads: hand the addresses whose changes scheduled
+    // this run to the transaction so flow-label derivation can taint its
+    // writes even when this run's branch never re-reads them. Consumed
+    // once per scheduling; every instance run of that scheduling carries
+    // them (the trigger caused ALL the instance runs). If a run aborts
+    // and is retried (RetryImmediately, commit conflict) the consumed
+    // addresses are restored below so the retry inherits them.
+    if (invalidCauses !== undefined && invalidCauses.length > 0) {
+      tx.addCfcTriggerReads(invalidCauses);
+    }
+    (tx.tx as { debugActionId?: string }).debugActionId = actionId;
+    tx.tx.sourceAction = action;
+    // Server-execution v2 stage F (serving-loop.md §3d): a serving
+    // runtime's installed stamper attaches the wave run context here —
+    // the reactive-action choke point — so every scheduler-driven
+    // derivation seals stamped. Stage P2-F: a demanded instance's run
+    // carries the demand-supplied identity, so its seal annotations,
+    // basis rows, and scoped addressing classify under the demanding
+    // (user, session) — and its emitted events inherit that actor
+    // (LT6) — instead of falling to the userless wave fallback
+    // (protocol.md §1). A no-op everywhere else (one undefined check).
+    state.runtime.stampServerRun(tx, {
+      actionId,
+      kind: "derivation",
+      ...(instance !== undefined
+        ? {
+          scopeKeyIdentity: instance.scopeKeyIdentity,
+          actionScopeKey: instance.actionScopeKey,
+        }
+        : {}),
+    });
+    const actionStartTime = performance.now();
+
+    let result: any;
+    return new Promise((resolve) => {
+      const finalizeAction = (error?: unknown) => {
+        finalizeSchedulerAction(state, {
+          action,
+          actionId,
+          tx,
+          actionStartTime,
+          invalidCauses,
+          result,
+          error,
+          resolve,
+        });
+      };
+
+      invokeReactiveAction({
+        runtime: state.runtime,
+        setExecutingAction: state.setExecutingAction,
+        clearExecutingAction: state.clearExecutingAction,
+      }, {
         action,
         actionId,
         tx,
         actionStartTime,
-        invalidCauses,
-        result,
-        error,
-        resolve,
-      });
-    };
-
-    invokeReactiveAction({
-      runtime: state.runtime,
-      setExecutingAction: state.setExecutingAction,
-      clearExecutingAction: state.clearExecutingAction,
-    }, {
-      action,
-      actionId,
-      tx,
-      actionStartTime,
-    })
-      .then((invocation) => {
-        if (invocation.ok) {
-          result = invocation.result;
-          finalizeAction();
-        } else {
-          finalizeAction(invocation.error);
-        }
       })
-      .catch((error) => {
-        finalizeAction(error);
-      });
-  });
+        .then((invocation) => {
+          if (invocation.ok) {
+            result = invocation.result;
+            finalizeAction();
+          } else {
+            finalizeAction(invocation.error);
+          }
+        })
+        .catch((error) => {
+          finalizeAction(error);
+        });
+    });
+  };
+
+  const nextRunningPromise = (async () => {
+    let lastResult: unknown;
+    for (const instance of runs) {
+      lastResult = await runOnce(instance);
+    }
+    return lastResult;
+  })();
   state.setRunningPromise(nextRunningPromise);
 
   return nextRunningPromise.then((result) => {

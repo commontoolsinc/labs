@@ -267,7 +267,14 @@ an answer (it would resolve `user:<serviceDID>` and silently read an
 empty instance — protocol.md §2). The rule: a derivation runs PER
 DEMANDED INSTANCE, and the DEMAND supplies the identity — a
 subscribing client demands its own instance, and the run reads and
-writes as that instance. Before any narrowing, a node runs at SPACE
+writes as that instance. When a space demand and a scoped demand
+coexist on one root, the run set is exactly the identity-bearing
+demand entries: the space demand rides those runs (the space
+consumer reads the run's value) and mints no separate userless run,
+so the root's derived writes carry the scoped demander's acting
+annotation — recorded, not read (protocol.md §1; its "a space-scope
+derivation carries none" is the NO-identity-bearing-demand case).
+Before any narrowing, a node runs at SPACE
 scope and needs no principal at all. Handlers are the other case and
 take the event's actor, above. Those are the only two sources.
 

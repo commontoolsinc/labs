@@ -2503,7 +2503,21 @@ export class Runner {
       } finally {
         if (shouldCommit) {
           this.runtime.prepareTxForCommit(actualTx);
-          actualTx.commit();
+          // Fire-and-forget by design (start() resolves before the
+          // commit settles), but NEVER swallowed (stage P2-F, the F1
+          // fold-in — RULED 2026-08-13): a refused or failed
+          // instantiation commit means the piece is running against
+          // writes that never landed, so the failure surfaces loudly
+          // and, on a serving runtime, counted.
+          const instantiateActionId =
+            `piece-instantiate/${resultCell.sourceURI}`;
+          actualTx.commit().then(({ error }) => {
+            if (error !== undefined) {
+              this.reportPieceStartCommitFailure(instantiateActionId, error);
+            }
+          }).catch((error) => {
+            this.reportPieceStartCommitFailure(instantiateActionId, error);
+          });
         }
       }
     };
@@ -2913,10 +2927,20 @@ export class Runner {
           this.allCancels.delete(cancel);
           cancel();
         };
+        const repairActionId = `piece-start-repair/${resultCell.sourceURI}`;
         repairTx.addCommitCallback((_committedTx, result) => {
-          if (result.error) teardownAfterFailedCommit();
+          if (result.error) {
+            // Surfaced BEFORE the teardown (stage P2-F, the F1
+            // fold-in): the pre-P2-F path tore the registration down
+            // silently — correct liveness, invisible failure.
+            this.reportPieceStartCommitFailure(repairActionId, result.error);
+            teardownAfterFailedCommit();
+          }
         });
-        repairTx.commit().catch(() => teardownAfterFailedCommit());
+        repairTx.commit().catch((error) => {
+          this.reportPieceStartCommitFailure(repairActionId, error);
+          teardownAfterFailedCommit();
+        });
       }
     };
 
@@ -3789,11 +3813,39 @@ export class Runner {
   // §2 — the resolver also normalizes the raw `undefined:` form the
   // previous string interpolation produced for scope-less links, which
   // merges with `space:`, the same instance by definition).
+  /** Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
+   * setup/instantiation commit failure is fire-and-forget by design but
+   * NEVER silent — loud in every arm, and handed to the serving
+   * runtime's installed observer (the SpaceServer counts it into §7's
+   * structureLoadFailures). */
+  private reportPieceStartCommitFailure(
+    actionId: string,
+    error: unknown,
+  ): void {
+    logger.error("piece-start-commit-failed", () => [
+      `piece-start commit ${actionId} failed; the started graph's setup ` +
+      "writes did not land (stage P2-F, F1)",
+      error,
+    ]);
+    try {
+      this.runtime.pieceStartCommitFailureObserver?.({ actionId, error });
+    } catch (observerError) {
+      logger.warn("piece-start-commit-observer-failed", () => [
+        "pieceStartCommitFailureObserver threw",
+        observerError,
+      ]);
+    }
+  }
+
   private schedulerObservationIdentity(resultCell: Cell<any>) {
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
     return {
       pieceId: `${resolveScopeKey(scope, this.runtime.scopeKeyIdentity)}:${id}`,
       ownerSpace: space,
+      // The RAW root doc id, un-prefixed, for the per-(action × instance)
+      // run supply (server-execution v2 stage P2-F): the scheduler
+      // resolves this piece's demanded instances through it.
+      pieceRootId: id,
     };
   }
 
@@ -5968,6 +6020,9 @@ export class Runner {
           resolveScopeKey(instanceLink.scope, this.runtime.scopeKeyIdentity)
         }:${instanceLink.id}`,
         ownerSpace: instanceLink.space,
+        // Raw root id for the per-(action × instance) run supply
+        // (stage P2-F).
+        pieceRootId: instanceLink.id,
       },
       ...(presyncInputs !== undefined && { presyncInputs }),
     });

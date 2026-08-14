@@ -461,42 +461,44 @@ W):
       serving-loop.md §7) + the flag-gated shadow-flip notification
       in `confirmPending`, with the own-echo and seq-0 exemptions
       pinned both arms (verification-coverage.md's Phase-2 delta).
-- [ ] The pattern-updater CHECK-half bring-up verification (the
+- [x] The pattern-updater CHECK-half bring-up verification (the
       network source-check the unit fixture cannot serve — the
       stage-F flagged residual in `executor-serving-loop.test.ts`):
       verify it in the integration environment's `sx2-serving-loop`
-      surface, not a unit fixture. PARTIAL — the box stays open
-      (r3739139553): the surface is AUTHORED
-      (`packages/patterns/integration/sx2-serving-loop.test.ts`) and
-      the machinery observation was made in the live bring-up runs
-      (quiescence with the server-side updater posture against
-      toolshed's real routes), but that surface is currently
-      ON-skip-listed as the demand-cycle starvation fork's
-      reproducer (verification-coverage.md OW19), so CI witness
-      rides the serving-loop unit suite. The box ticks when the
-      terminal-state follow-on below un-skips the surface; a full
-      stale-pointer roll-forward journey stays the named follow-up.
+      surface, not a unit fixture. DONE with stage P2-F (2026-08-13):
+      the surface (`packages/patterns/integration/
+      sx2-serving-loop.test.ts`) is UN-SKIPPED — the demand-cycle
+      terminal state removed the starvation fork it reproduced
+      (verification-coverage.md's closed OW19 row) — and its
+      updater-posture gate runs in CI's ON arm. A full stale-pointer
+      roll-forward journey stays the named follow-up.
 
 **Follow-on stage (APPROVED — owner nod, 2026-08-07; its own PR
 after this phase's, the way stage C's train was cut):**
 
-- [ ] **P2-F — the scheduler instance dimension + demand-cycle
-      terminal state**: per-(action × instance) read-set/dirtiness
-      state and the N-run settle loop over demanded identities
-      (consuming the SpaceServer's demanded-identity registry through
-      the widened `#stampRun` seam — verification-coverage.md OW17,
-      approved), the replica-level per-instance READ keying, AND the
-      demand-cycle terminal state with commit-triggered re-arm plus
-      the load pass moved under the flush deadline
-      (verification-coverage.md OW19 — lifts the `sx2-serving-loop`
-      ON-skip). Until it lands, scoped runs resolve via the
-      wave-level identity unless per-run identities arrive through
-      the seam (the Phase-1 fallback, cardinality-2-pinned at the
-      seam level in this phase's PR). P2-F is part of PHASE 2's gate
-      closure — it carries the suspended `sx2-serving-loop` surface
-      and, with it, the in-CI amplification-ratio gate — not optional
-      hardening (the Phase-2 independent review's assessment,
-      2026-08-07).
+- [x] **P2-F — the scheduler instance dimension + demand-cycle
+      terminal state**: LANDED 2026-08-13. The per-(action ×
+      instance) run SUPPLY: the N-run settle loop over demanded
+      identities (the scheduler's reactive-action choke point
+      consumes the SpaceServer's demanded-identity registry through
+      the widened seam and runs a demanded action once per instance,
+      each run stamped with its instance's identity and ACTING pair —
+      instances live in keys/basis rows/stamps, never as extra graph
+      nodes, C11b), the LT6 acting inheritance at the event-dispatch
+      choke point, and the F1 piece-start surfacing (§3d's
+      piece-start site, RULED 2026-08-13). The demand-cycle terminal
+      state with commit-triggered re-arm (settle-gated retry) landed
+      with the load pass moved under the flush deadline
+      (verification-coverage.md's closed OW19 row), and the
+      `sx2-serving-loop` ON-skip is LIFTED — the in-CI
+      amplification-ratio gate runs. Deliberately narrowed, flagged
+      not filled: the replica-level per-instance READ keying (one
+      doc, N instances read locally) and per-(action × instance)
+      LOCAL read-set/dirtiness precision remain owed together —
+      they are one leg (a scoped doc's local state still collapses
+      per scope name at cardinality > 1), tracked as the narrowed
+      OW17 residue; engine-side instancing (keys, basis rows,
+      annotations, carriages) is exact at any cardinality.
 
 Success criteria (the old Phase-1 ON gates land here, merged):
 

@@ -1814,7 +1814,17 @@ export class CellImpl<T extends FabricValue>
         }
       }
 
-      // Trigger on fully resolved link
+      // Trigger on fully resolved link. The origin transaction below is
+      // the LT6 carriage (events.md §2, stage P2-F): on a serving
+      // runtime, the dispatch choke point reads the emitting run's
+      // stamped identity off this tx and hands it to the handler run —
+      // an event emitted by ANY run carries that run's acting identity,
+      // so a demanded (user, session) derivation's emissions no longer
+      // classify userless. Everywhere else the tx carries no wave stamp
+      // and the carriage is inert. (Under Phase 3's serving arm the
+      // wave-stamped emission paths above intercept first and carry the
+      // same actor explicitly, as the entry's `firedAt`; this carriage
+      // covers the remaining in-process queueEvent shapes.)
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
         event,
