@@ -32,6 +32,7 @@
 export * from "@/codec-interface/index.ts";
 
 export { codecOf } from "./codecOf.ts";
+export { isCodecTypeTag } from "./isCodecTypeTag.ts";
 export { CodecRegistry } from "./CodecRegistry.ts";
 export { BaseCodecEngine } from "./BaseCodecEngine.ts";
 
