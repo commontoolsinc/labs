@@ -100,6 +100,30 @@ describe("CFC label view helpers", () => {
     expect(cfcLabelViewFromSchema(null as never)).toBeUndefined();
   });
 
+  it("ignores declarations beside an unresolved schema reference", () => {
+    expect(cfcLabelViewFromSchema({
+      $ref: "#/$defs/Missing",
+      ifc: { confidentiality: ["workspace"] },
+    })).toBeUndefined();
+  });
+
+  it("ignores an IFC block that is not an object", () => {
+    expect(cfcLabelViewFromSchema({ ifc: null } as never)).toBeUndefined();
+  });
+
+  it("ignores a properties value that is not an object", () => {
+    expect(cfcLabelViewFromSchema({
+      ifc: { confidentiality: ["workspace"] },
+      properties: null,
+    } as never)).toEqual({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["workspace"] },
+      }],
+    });
+  });
+
   it("rebases wildcard label paths onto concrete array item paths", () => {
     const metadata: CfcMetadata = {
       version: 1,

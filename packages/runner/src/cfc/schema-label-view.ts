@@ -46,9 +46,9 @@ export const cfcSchemaEntries = (
   const nextActive = { root: rootKey, schema, parent: active };
 
   const resolved = typeof schema.$ref === "string"
-    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot) ?? schema
+    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
     : schema;
-  if (typeof resolved === "boolean") {
+  if (resolved === undefined || typeof resolved === "boolean") {
     return entries;
   }
 
@@ -58,7 +58,7 @@ export const cfcSchemaEntries = (
       ? resolveCfcSchemaRefRoot(schema, schemaRoot)
       : schemaRoot,
   );
-  if (resolved.ifc !== undefined) {
+  if (isObjectOrArray(resolved.ifc)) {
     entries.push({
       path,
       label: {
@@ -75,7 +75,8 @@ export const cfcSchemaEntries = (
   }
 
   const recordOnly = resolved.properties === undefined ||
-    Object.keys(resolved.properties).length === 0;
+    (isObjectOrArray(resolved.properties) &&
+      Object.keys(resolved.properties).length === 0);
   forEachSubschema(resolved, (child, keyword, key, index) => {
     switch (keyword) {
       case "properties":
