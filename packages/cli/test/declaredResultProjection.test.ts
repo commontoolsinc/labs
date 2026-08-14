@@ -72,6 +72,46 @@ describe("declaredResultProjection", () => {
     });
   });
 
+  it("derives the cut through a nested `$defs` scope", () => {
+    // A subtree carrying its own `$defs` opens a new local-ref scope, and
+    // the canonical resolver reads the reference against it — the outer
+    // document also names `Item`, and that one does not recurse. A private
+    // pointer parser resolving every reference against the outer root read
+    // the wrong definition and silently derived nothing.
+    const declared: JSONSchema = {
+      type: "object",
+      properties: {
+        wrapper: {
+          type: "object",
+          $defs: {
+            Item: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                parent: { $ref: "#/$defs/Item" },
+              },
+            },
+          },
+          properties: { item: { $ref: "#/$defs/Item" } },
+        },
+      },
+      $defs: {
+        Item: { type: "object", properties: { title: { type: "string" } } },
+      },
+    };
+    expect(declaredResultProjection(declared)?.schema).toEqual({
+      type: "object",
+      properties: {
+        wrapper: {
+          type: "object",
+          properties: { item: CUT_ITEM },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    });
+  });
+
   it("returns `undefined` where the verb declares no result to bound with", () => {
     expect(declaredResultProjection(undefined)).toBeUndefined();
     expect(declaredResultProjection(true)).toBeUndefined();
