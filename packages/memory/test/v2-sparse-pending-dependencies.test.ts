@@ -102,9 +102,10 @@ describe("sparse pending dependencies", () => {
 
       // The reader's rebuilt view: confirmed A@1 plus the surviving layer 3.
       // The array names [3] only — non-contiguous past the rejected 2 — and
-      // basisSeq 1 is the confirmed basis that view reflected. Layer 3's own
-      // accepted write inside the scan interval is a true predecessor
-      // (localSeq below the reader's), so the read is not stale.
+      // basisSeq 1 is the confirmed basis that view reflected. Layer 3's
+      // accepted write inside the scan interval is excluded because the
+      // array NAMES it (the declared-set exclusion), so the read is not
+      // stale.
       const applied = applyCommit(engine, {
         sessionId: SESSION,
         commit: {
