@@ -80,6 +80,13 @@ describe("stage D seal-into-wave", () => {
         sessionId: "wave-test-session",
       },
       replicaFor: (s) => storageManager.open(s).replica,
+      // The Phase-5 posture, explicitly: these tests exercise the §2b
+      // multi-space machinery (foreign-first sequencing, cross-space
+      // withdrawal closure) — dark until Phase 5, kept correct here.
+      // The serving loop's real accumulators run the DEFAULT ("refuse",
+      // RULED 2026-08-14 (c)) — pinned by its own tests below and in
+      // executor-serving-loop.test.ts.
+      foreignWrites: "accept",
       ...(options.lease !== undefined ? { lease: options.lease } : {}),
     });
 
@@ -590,6 +597,157 @@ describe("stage D seal-into-wave", () => {
       // replays (§2b).
       expect(Engine.serverSeq(engine)).toBe(homeSeqBefore);
     }
+  });
+
+  it("refuses a foreign-space write at ACCUMULATION on the default posture: the action fails loudly and counted, the wave survives (serving-loop.md §3d, RULED 2026-08-14 (c))", async () => {
+    // The lunch-wall trigger, at its ruled seat: a serving runtime's
+    // wish materialization resolves against the RUNTIME's home space —
+    // the SERVICE identity's — and its writes ride the wave into a
+    // foreign space. Pre-ruling those writes sealed fine and the WHOLE
+    // WAVE died later at the commit step's #foreignEngineFor guard
+    // (loop-failed → park: the space outage). Ruled (c): the refusal
+    // moves to ACCUMULATION — action-scoped (only the writing action
+    // fails), loud, counted; the wave commits everything else. The
+    // commit-step guard stays as backstop.
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave foreign refusal",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const lease = liveLease();
+    const refusals: { space: MemorySpace; actionId?: string }[] = [];
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "wave-refusal-session",
+      },
+      replicaFor: (s) => storageManager.open(s).replica,
+      lease,
+      onForeignWriteRefusal: (info) => refusals.push(info),
+    });
+    runtime.installSealDestination(wave);
+
+    // The trigger shape: a single-space tx whose writes target the
+    // foreign space outright (the profile-bootstrap shape).
+    const foreignCell = runtime.getCell<{ value: number }>(
+      foreign,
+      "refusal-foreign-doc",
+      undefined,
+    );
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "wish/profile-materialize",
+      kind: "derivation",
+    });
+    foreignCell.withTx(tx).set({ value: 1 });
+    const committed = await tx.commit();
+    expect(committed.error).toBeDefined();
+    expect(committed.error!.message).toContain("foreign-space write");
+    expect(refusals).toEqual([
+      { space: foreign, actionId: "wish/profile-materialize" },
+    ]);
+
+    // The wave SURVIVES: a clean home-space contribution seals and the
+    // wave commits it (pre-ruling the foreign batch reached the commit
+    // step and killed the whole wave).
+    const homeCell = runtime.getCell<{ value: number }>(
+      space,
+      "refusal-home-doc",
+      undefined,
+    );
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, { actionId: "derive/home", kind: "derivation" });
+    homeCell.withTx(tx2).set({ value: 2 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.seq).toBeDefined();
+    // The home write landed; nothing of the refused action did.
+    const homeRow = engine.database.prepare(
+      `SELECT COUNT(*) AS n FROM revision WHERE id = :id`,
+    ).get({ id: homeCell.getAsNormalizedFullLink().id }) as { n: number };
+    expect(homeRow.n).toBeGreaterThanOrEqual(1);
+    const foreignRow = engine.database.prepare(
+      `SELECT COUNT(*) AS n FROM revision WHERE id = :id`,
+    ).get({ id: foreignCell.getAsNormalizedFullLink().id }) as { n: number };
+    expect(foreignRow.n).toBe(0);
+  });
+
+  it("a multi-space tx under the default posture refuses WHOLE: its already-sealed home writes withdraw, the wave survives (RULED 2026-08-14 (c))", async () => {
+    // Failure isolation is per ACTION (§3d): when the tx's foreign half
+    // refuses at accumulation, its home half — sealed earlier in the
+    // same tx's commit order — must withdraw with it, and the wave
+    // keeps serving everyone else.
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave foreign refusal multi",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const lease = liveLease();
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "wave-refusal-multi-session",
+      },
+      replicaFor: (s) => storageManager.open(s).replica,
+      lease,
+    });
+    runtime.installSealDestination(wave);
+
+    const homeCell = runtime.getCell<{ value: number }>(
+      space,
+      "refusal-multi-home",
+      undefined,
+    );
+    const foreignCell = runtime.getCell<{ value: number }>(
+      foreign,
+      "refusal-multi-foreign",
+      undefined,
+    );
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "provision/multi",
+      kind: "event-handler",
+      eventId: "e-refused",
+      acting: { user: "did:key:alice", session: "sess-1" },
+    });
+    // HOME FIRST, deliberately: the home half seals into the overlay
+    // before the foreign half refuses — pinning the withdrawal.
+    tx.enableMultiSpaceWrites?.([space, foreign]);
+    homeCell.withTx(tx).set({ value: 1 });
+    foreignCell.withTx(tx).set({ value: 2 });
+    const committed = await tx.commit();
+    expect(committed.error).toBeDefined();
+    expect(committed.error!.message).toContain("foreign-space write");
+
+    // The wave still commits a clean later contribution, and the
+    // refused action's HOME write never lands (withdrawn at seal).
+    const cleanCell = runtime.getCell<{ value: number }>(
+      space,
+      "refusal-multi-clean",
+      undefined,
+    );
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, { actionId: "derive/clean", kind: "derivation" });
+    cleanCell.withTx(tx2).set({ value: 3 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.seq).toBeDefined();
+    const withdrawnHome = engine.database.prepare(
+      `SELECT COUNT(*) AS n FROM revision WHERE id = :id`,
+    ).get({ id: homeCell.getAsNormalizedFullLink().id }) as { n: number };
+    expect(withdrawnHome.n).toBe(0);
+    const clean = engine.database.prepare(
+      `SELECT COUNT(*) AS n FROM revision WHERE id = :id`,
+    ).get({ id: cleanCell.getAsNormalizedFullLink().id }) as { n: number };
+    expect(clean.n).toBeGreaterThanOrEqual(1);
   });
 
   it("folds a reader of a FOREIGN sealed write into the writer's withdrawal (cross-space withdrawn-read closure)", async () => {
@@ -1885,6 +2043,8 @@ describe("stage F fix round: foreign-batch settle sequences and shallow reads", 
         principal: signer.did(),
         sessionId: "wave-foreign-seq-session",
       },
+      // §2b Phase-5 machinery under test (see newWave's posture note).
+      foreignWrites: "accept",
       replicaFor: (s) => {
         const real = storageManager.open(s).replica;
         return new Proxy(real, {
@@ -2046,6 +2206,8 @@ describe("stage F fix round: foreign-batch settle sequences and shallow reads", 
         principal: signer.did(),
         sessionId: "wave-shallow-session",
       },
+      // §2b Phase-5 machinery under test (see newWave's posture note).
+      foreignWrites: "accept",
       replicaFor: (s) => storageManager.open(s).replica,
       lease: cycle,
     });

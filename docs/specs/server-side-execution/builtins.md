@@ -136,6 +136,17 @@ stream is passed to other spaces, which then append intents to it.
   LOAD-BEARING on main in `filter.ts`/`flatmap.ts` (#4367, #4438), so
   "do not port" is not on the table; decide its end state against
   serving-loop.md §6 when Phase 1 lands the list coordinators.
+- `wish` home-space materialization under serving (RULED 2026-08-14
+  (c)): a serving-runtime wish that materializes home-space state
+  resolves against the SERVICE identity's home space, so its writes
+  are foreign to the served space — REFUSED at wave accumulation
+  (serving-loop.md §3d: action-scoped, loud, counted into §7's
+  `foreignWriteRefusals`; the wave and the loop keep serving; the
+  commit-step foreign-engine guard stays as backstop). No client
+  diversion. Phase 5 lifts it as per-demanding-identity wish
+  resolution riding protocol.md §2b's `.inSpace` sanctioned crossing —
+  both halves already exist (P2-F's per-run identity supply, stage G's
+  foreign-first provisioning sequencing).
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 
