@@ -204,11 +204,24 @@ therefore records its FULL dependency set directly: the read's `localSeq`
 array names every pending layer of the document that the reader's
 materialized view sat on, in ascending order. Each element imposes a
 resolution requirement; the highest element — the view's top-of-stack layer
-— is the legacy staleness basis when no `basisSeq` is declared (§3.6.3). The
-client mirrors the server cascade at drop time: when a pending commit's
-optimistic writes are dropped, every queued or in-flight commit whose
-recorded dependency set names the dropped `localSeq` is locally rejected
-without waiting for the server's per-commit verdict.
+— is the legacy staleness basis when no `basisSeq` is declared (§3.6.3).
+
+The client mirrors the server cascade from the moment a rejection is KNOWN,
+not from the moment the layer leaves the overlay. A client that keeps a
+rejected layer in its overlay past the verdict — to hold the drop until the
+conflict's read repair lands, so that a retry rebuilds against repaired
+confirmed state — is still building views over that layer meanwhile, and so
+still names it. It MUST reject such a commit locally rather than send it,
+because the server can only answer it with "pending dependency not
+resolved"; the same applies to every queued or in-flight commit naming a
+`localSeq` whose optimistic writes are dropped. Deciding at the verdict
+rather than at the drop is what bounds the cost: otherwise one conflict
+spawns a doomed round trip per commit minted anywhere in that window, which
+is a run of them under sustained write load, and the window is bounded only
+by a timer the client may be in no position to fire. The local rejection's
+readiness gate waits for the dependency's drop, so the retry rebuilds
+against the repaired base rather than against the dead layer that doomed
+it.
 
 Completeness is relative to the VIEW, not to the session's commit history,
 so the array may be non-contiguous in the session's `localSeq` space. A
