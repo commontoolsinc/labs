@@ -400,6 +400,83 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
     runtime.clearSealDestination();
   });
 
+  it("surfaces a refused fire-and-forget piece-INSTANTIATE commit through the observer (the start path's own arm, not only the repair's)", async () => {
+    // A HEALTHY piece — no repair involved: run V1, stop, restart. The
+    // restart's startCore mints the self-minted fire-and-forget
+    // instantiation tx (`piece-instantiate/<root>`) — the arm the F1
+    // hazard was actually filed about (start() resolves before the
+    // commit settles, so a swallowed refusal leaves the piece silently
+    // running against writes that never landed).
+    const tx = runtime.edit();
+    const pm = runtime.patternManager;
+    const v1 = await pm.compilePattern(programOf(V1_NO_HANDLER), {
+      space,
+      tx,
+    });
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "p2f-f2-restart",
+      undefined,
+      tx,
+    );
+    const running = runtime.runner.run(tx, v1, { limit: 3 }, cell);
+    await tx.commit();
+    await running.pull();
+    runtime.runner.stop(cell);
+
+    // A destination that REFUSES exactly the instantiate seal and
+    // passes everything else through natively — the same deterministic
+    // wave-side refusal stand-in as the repair test above.
+    const refused: string[] = [];
+    runtime.installSealDestination({
+      seal: (sealTx: IExtendedStorageTransaction) => {
+        const context = waveRunContextOf(sealTx);
+        if (context?.actionId.startsWith("piece-instantiate/")) {
+          refused.push(context.actionId);
+          return Promise.resolve({
+            error: {
+              name: "StorageTransactionAborted" as const,
+              message: "test refusal of the piece-instantiate seal",
+              reason: new Error("p2f-f2-test-refusal"),
+            },
+          });
+        }
+        return sealTx.tx.commit();
+      },
+    }, {
+      runStamper: (stampTx, info) => {
+        stampWaveRunContext(stampTx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        });
+      },
+    });
+
+    const surfaced: Array<{ actionId: string; error: unknown }> = [];
+    runtime.pieceStartCommitFailureObserver = (failure) => {
+      surfaced.push(failure);
+    };
+
+    // Fire-and-forget by design: start resolves true while the refused
+    // commit settles behind it.
+    const started = await runtime.start(cell);
+    expect(started).toBe(true);
+    await runtime.idle();
+
+    // The refusal genuinely happened…
+    expect(refused.length).toBeGreaterThanOrEqual(1);
+    // …and SURFACED through the observer (neutralization red: silence
+    // the instantiate arm's commit().then/.catch reporting in
+    // instantiatePattern and this never fires).
+    const deadline = Date.now() + 5_000;
+    while (surfaced.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(surfaced.length).toBeGreaterThanOrEqual(1);
+    expect(surfaced[0].actionId.startsWith("piece-instantiate/")).toBe(true);
+    runtime.clearSealDestination();
+  });
+
   it("stamps the piece-start repair seal with the sanctioned bookkeeping kind (the §3d piece-start site, RULED 2026-08-13)", async () => {
     const cell = await brickedPiece();
     const stamps: ServerRunInfo[] = [];

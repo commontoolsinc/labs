@@ -26,7 +26,9 @@ import {
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
 import { liveExecutionLeaseHolder } from "@commonfabric/memory/v2/execution-lease";
+import { decodeMemoryBoundary, resolveScopeKey } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
@@ -789,5 +791,175 @@ describe("stage G SpaceServer recovery seams", () => {
       (server as { watchedRootsForSpace: unknown }).watchedRootsForSpace =
         originalWatched;
     }
+  });
+
+  // ---- stage P2-F: the argument-doc demand → owning-piece run supply ----
+
+  it("supplies a scoped ARGUMENT-doc demand's identity to the owning piece's derivation runs: the ensure-resolved root differs from the demanded id, and the derived commit still carries the demanding actor (the #pieceRootByDemandKey arm)", async () => {
+    // An ordinary nested-doc watch: the client's scoped subscription
+    // names the piece's ARGUMENT doc, not its result root. The demand
+    // key therefore never matches the piece root by suffix — the run
+    // supply finds the demand's identity ONLY through the structure
+    // load's resolved-root mapping. If that mapping silently breaks,
+    // the demanded derivation falls back to the wave identity and its
+    // writes classify USERLESS — the exact misclassification stage
+    // P2-F exists to end, which is why this pin binds the OBSERVABLE
+    // (the derived commit's acting annotations), not the map.
+    //
+    // The piece, created BEFORE serving starts, via a client runtime.
+    // The demanded doc is the piece's argument META doc (the runner's
+    // own argument cell, which carries the `result` backlink the
+    // ensure traversal follows to the owning root).
+    const creatorManager = EmulatedStorageManager.connectTo(server, {
+      as: spaceSigner,
+    });
+    const creator = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: creatorManager,
+    });
+    let pieceRootId: string;
+    let argMetaDocId: string;
+    let inputDocId: string;
+    try {
+      const compiled = await creator.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            "  ({ n }) => ({ total: computed(() => n + 7) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const input = creator.getCell<{ n: number }>(
+        space,
+        "p2f-argdemand-input",
+        undefined,
+      );
+      const root = creator.getCell<{ total?: number }>(
+        space,
+        "p2f-argdemand-root",
+        undefined,
+      );
+      await input.sync();
+      await root.sync();
+      const tx = creator.edit();
+      input.withTx(tx).set({ n: 1 });
+      creator.run(tx, compiled, input, root);
+      expect((await tx.commit()).error).toBeUndefined();
+      await creator.idle();
+      await creator.storageManager.synced();
+      pieceRootId = root.getAsNormalizedFullLink().id;
+      inputDocId = input.getAsNormalizedFullLink().id;
+      argMetaDocId = getMetaLink(root, "argument")!.id;
+    } finally {
+      await creator.dispose();
+      await creatorManager.close();
+    }
+    // The mapping premise: the demanded id is NOT the owning root.
+    expect(argMetaDocId).not.toBe(pieceRootId);
+
+    // The demander's scoped watch on the argument doc (identity-
+    // bearing) coexists with a plain space demand on the piece root
+    // (the value subscription that pulls the derivation; it carries no
+    // identity and mints no run of its own — scopes.md §5: the run set
+    // is exactly the identity-bearing demand entries, and a coexisting
+    // space demand rides those runs).
+    const demander = {
+      principal: "did:key:p2f-argdemander",
+      sessionId: "argdemander-s1",
+    };
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({
+      stats,
+      serverFacade: demandFacade([
+        { id: pieceRootId },
+        { id: argMetaDocId, scope: "user", identity: demander },
+      ]),
+    });
+    expect(await created.activate()).toBe(true);
+
+    // The authored input: a client writes the piece's argument value;
+    // the notice drives the cycle whose wave re-derives `total` — as
+    // the DEMANDING instance.
+    const pokerManager = EmulatedStorageManager.connectTo(server, {
+      as: spaceSigner,
+    });
+    const poker = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: pokerManager,
+    });
+    try {
+      const input = poker.getCell<{ n: number }>(
+        space,
+        "p2f-argdemand-input",
+        undefined,
+      );
+      await input.sync();
+      const pokeTx = poker.edit();
+      input.withTx(pokeTx).set({ n: 2 });
+      expect((await pokeTx.commit()).error).toBeUndefined();
+      await poker.storageManager.synced();
+    } finally {
+      await poker.dispose();
+      await pokerManager.close();
+    }
+    created.enqueueCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "session:p2f-argdemand-poker",
+      writes: [{ id: inputDocId, scopeKey: "space" }],
+    });
+
+    // THE PIN (neutralization red: with the `#pieceRootByDemandKey`
+    // match removed from `#runInstancesFor` — or the setter that feeds
+    // it dropped — no instance resolves for the owning root, the run
+    // falls back to the wave identity, and no acting annotation ever
+    // lands): the derived commit's write annotations carry the
+    // demanding (user, session).
+    const actingRows = () => {
+      const rows = engine.database.prepare(
+        `SELECT annotations FROM "commit" WHERE class = 'derived' AND
+         annotations IS NOT NULL`,
+      ).all() as Array<{ annotations: string }>;
+      return rows.flatMap((row) =>
+        decodeMemoryBoundary(row.annotations) as unknown as Array<{
+          actingUser?: string;
+          actingSession?: string;
+        }>
+      ).filter((annotation) => annotation.actingUser !== undefined);
+    };
+    await waitUntil(
+      () => actingRows().some((a) => a.actingUser === demander.principal),
+      "the argument-demand derivation to act as the demanding user",
+      15_000,
+    );
+    expect(
+      actingRows().some((a) =>
+        a.actingUser === demander.principal &&
+        a.actingSession === demander.sessionId
+      ),
+    ).toBe(true);
+
+    // The same run's basis rows key under the demander's INSTANCE
+    // (serving-loop.md §3b's action_scope_key) — the supply reached
+    // keys, not only stamps.
+    const expectedInstanceKey = resolveScopeKey("user", demander as never);
+    const basisKeys = new Set(
+      (engine.database.prepare(
+        `SELECT DISTINCT action_scope_key FROM scheduler_basis`,
+      ).all() as Array<{ action_scope_key: string }>).map((row) =>
+        row.action_scope_key
+      ),
+    );
+    expect(basisKeys.has(expectedInstanceKey)).toBe(true);
+
+    // The argument-doc demand RESOLVED (started through the owning
+    // root) — it neither terminalized nor failed.
+    expect(stats.structureLoadTerminal).toBe(0);
+    expect(stats.structureLoadFailures).toBe(0);
   });
 });
