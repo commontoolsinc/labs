@@ -109,10 +109,13 @@ The current package provides:
   references it cannot read out. It runs on its own turn budget of 24 rather
   than the default subagent cap of 8, since each compile-error iteration costs a
   turn, and it carries a return contract — a discriminated union of
-  `{ ok: true, resultRef, describes }` and `{ ok: false, reason }` — applied to
-  any `pattern-author` delegation that declares no `returnSchema` of its own, so
-  a failure and a success are different shapes and only the success branch
-  carries a reference.
+  `{ ok: true, resultRef, describes }` and `{ ok: false, code, detail? }` —
+  applied to any `pattern-author` delegation that declares no `returnSchema` of
+  its own, so a failure and a success are different shapes and only the success
+  branch carries a reference. The failure `code` comes from a fixed inert
+  vocabulary, so a parent learns why without declassifying anything, and any
+  child return saying `ok: false` reaches the parent as a coded failure rather
+  than as a schema complaint.
 
 Run the capability probe instead of copying this list into adapters:
 

@@ -749,17 +749,25 @@ pieces yet.
 A successful run returns `{ status: "ok", resultRef }` to the model, where
 `resultRef` is the canonical LLM-friendly link to the piece's result cell, plus
 the schema-sanitized `value` (with `linkedStringCount`) when `resultSchema` was
-given. The ordinary outbound swap turns `resultRef` (and any link strings inside
-`value`) into `cfh:a:` tokens at the model boundary, and the ordinary inbound
-swap resolves such a token passed back through `inputs`; the tool itself carries
-no handle code. The persisted tool-output artifact keeps the raw reference, the
-raw result value, and the `pieceId` — a bare fabric identifier the handle
-boundary never swaps, so it stays out of the model-facing rendering. Compiler
-diagnostics come back as `{ status: "compile-error", message }` so the model can
-iterate on the source; bare fabric identifiers a diagnostic can embed
-(compiler-generated `fid1:` module roots, DIDs, `data:` URIs) are replaced with
-a `[fabric-id]` placeholder in the model-facing message, while the persisted
-artifact keeps the raw text.
+given. `resultSchema` is how a caller reads what the pattern computed: without
+one there is no `value` at all, and with one the inert positions the schema
+models — numbers, booleans, `enum` and `const` strings — come back as
+themselves, while unconstrained strings and anything unmodeled come back as
+opaque links. The framework's own result keys (`$NAME`, `$UI` and the other
+rendering variants) are dropped before sanitization unless the schema names one,
+so a schema describing only the computed fields does not have to declare them —
+and does not lose its numbers to the whole-object seal an unmodeled key would
+otherwise cause. The ordinary outbound swap turns `resultRef` (and any link
+strings inside `value`) into `cfh:a:` tokens at the model boundary, and the
+ordinary inbound swap resolves such a token passed back through `inputs`; the
+tool itself carries no handle code. The persisted tool-output artifact keeps the
+raw reference, the raw result value, and the `pieceId` — a bare fabric
+identifier the handle boundary never swaps, so it stays out of the model-facing
+rendering. Compiler diagnostics come back as
+`{ status: "compile-error", message }` so the model can iterate on the source;
+bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
+module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder
+in the model-facing message, while the persisted artifact keeps the raw text.
 
 Interactive chat stdio transport:
 
@@ -992,9 +1000,20 @@ unstructured:
       "type": "object",
       "properties": {
         "ok": { "type": "boolean", "const": false },
-        "reason": { "type": "string" }
+        "code": {
+          "type": "string",
+          "enum": [
+            "compile-error",
+            "turn-budget-exhausted",
+            "schema-mismatch",
+            "missing-input-shape",
+            "unsupported-request",
+            "other"
+          ]
+        },
+        "detail": { "type": "string" }
       },
-      "required": ["ok", "reason"],
+      "required": ["ok", "code"],
       "additionalProperties": false
     }
   ]
@@ -1007,9 +1026,24 @@ is impossible against the references it holds, its turns run out — returns the
 failure branch, and a failure carries no `resultRef` at all. That is what stops
 a failed delegation from being answered with some other step's reference: the
 parent reads `ok`, and a reference exists only on the branch that produced one.
-The free-form `describes` and `reason` strings reach the parent as opaque links,
-the ordinary treatment of unconstrained strings in a sanitized child return; the
-discriminant and the minted `resultRef` token are what the parent acts on.
+
+The failure branch says why in a fixed vocabulary rather than in prose. A `code`
+is inert by construction — one of a closed set, carrying nothing read out of a
+space — so it survives sanitization as itself and the parent learns why without
+any declassification. The optional `detail` elaborates in free text and reaches
+the parent as an opaque link, which is the right treatment: the code is the
+actionable part, and the detail is for a reader entitled to open it. The
+free-form `describes` string on the success branch travels the same way; the
+discriminant, the `code`, and the minted `resultRef` token are what the parent
+acts on.
+
+`ok: false` is heard as a failure whatever else about a child's return is
+malformed. When a return says it failed but does not fit the declared schema,
+the parent gets `structuredReturn.status: "child-reported-failure"` carrying
+`failureCode`, not a schema complaint — a child that correctly reports failure
+is never turned into a validation error. A `failureCode` is recorded on a
+validating `ok: false` return too, so the code reaches the parent by the same
+name either way.
 
 The same discipline is what the parent-facing guidance asks of any delegation:
 declare the return shape up front, say what the child should do when it cannot

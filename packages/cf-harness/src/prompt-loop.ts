@@ -44,6 +44,7 @@ import {
 } from "./contracts/run-report.ts";
 import type { HarnessSkillRegistry } from "./contracts/skill.ts";
 import {
+  asHarnessSubagentFailureReport,
   BROWSER_SUBAGENT_PROFILE,
   DEFAULT_SUBAGENT_PROFILE,
   type DelegateTaskToolInput,
@@ -61,6 +62,7 @@ import {
   isHarnessSubagentProfile,
   MAX_SUBAGENT_MAX_MODEL_TURNS,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
+  SUBAGENT_FAILURE_REASON_CODES,
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
 } from "./contracts/subagent.ts";
@@ -881,8 +883,11 @@ const buildSubagentSystemPrompt = (
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
         "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
+        'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model come back as opaque links. You do not need to declare $NAME or $UI.',
         "Return the result reference run_pattern gave you plus one or two inert sentences saying what the pattern computes. Do not return the data, sample rows, counts, names, or any other content read out of the space.",
-        "When you cannot produce a working pattern — the compile loop does not converge, the task is impossible against the references you hold, or you are running out of turns — return the failure branch of your return schema with a short reason.",
+        `When you cannot produce a working pattern — the compile loop does not converge, the task is impossible against the references you hold, or you are running out of turns — return the failure branch of your return schema: {"ok": false, "code": <one of ${
+          SUBAGENT_FAILURE_REASON_CODES.join(", ")
+        }>} with an optional free-text "detail".`,
         "A failure is a complete, correct answer. Never return a reference to something you did not produce, never hand back a reference from an earlier step as if it were your result, and never present a partial or non-compiling pattern as a finished one.",
       ]
       : []),
@@ -1147,13 +1152,18 @@ const createStructuredSubagentReturn = async (
         updatedHandleTable = swapped.table;
       }
     }
+    const failureReport = asHarnessSubagentFailureReport(parsedValue);
     return {
       valid: true,
-      summary:
-        "Subagent returned structured data matching the requested schema.",
+      summary: failureReport === undefined
+        ? "Subagent returned structured data matching the requested schema."
+        : `Subagent reported failure (${failureReport.code}).`,
       structuredReturn: {
         type: "cf-harness.subagent-structured-return",
         status: "valid",
+        ...(failureReport !== undefined
+          ? { failureCode: failureReport.code }
+          : {}),
         schemaDigest,
         rawOutputId,
         ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
@@ -1169,15 +1179,38 @@ const createStructuredSubagentReturn = async (
       ? error.message
       : "structured return did not match the schema";
     const validationError = "structured return did not match the schema";
+    // A child saying it failed is heard as having failed even when the rest of
+    // its return does not fit the schema. Only `ok` and the code cross the
+    // boundary here: both are inert by construction, and every other position
+    // is exactly the part that did not validate.
+    const failureReport = asHarnessSubagentFailureReport(parsedValue);
     await persistRawReturn({
       type: "cf-harness.subagent-raw-return",
       childRunId: options.childRunId,
       schemaDigest,
       rawFinalAssistantText: options.rawFinalAssistantText,
       value: parsedValue,
-      validationStatus: "invalid",
+      validationStatus: failureReport === undefined
+        ? "invalid"
+        : "child-reported-failure",
       validationError: rawValidationError,
     });
+    if (failureReport !== undefined) {
+      return {
+        valid: false,
+        summary: `Subagent reported failure (${failureReport.code}).`,
+        structuredReturn: {
+          type: "cf-harness.subagent-structured-return",
+          status: "child-reported-failure",
+          failureCode: failureReport.code,
+          schemaDigest,
+          rawOutputId,
+          ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
+          value: { ok: false, code: failureReport.code },
+          linkedStringCount: 0,
+        },
+      };
+    }
     return {
       valid: false,
       summary: `Subagent return validation failed: ${validationError}`,

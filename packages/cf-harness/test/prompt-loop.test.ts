@@ -7342,3 +7342,122 @@ Deno.test("CfHarnessPromptLoop grounds host-command children in the workspace, n
     false,
   );
 });
+
+Deno.test("CfHarnessPromptLoop surfaces a child's ok:false return as a coded failure rather than a schema mismatch", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-structured-return-child-failure",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-structured-child-failure",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Return structured facts.",
+                    returnSchema: {
+                      type: "object",
+                      properties: {
+                        ok: { type: "boolean", const: true },
+                        resultRef: { type: "string" },
+                      },
+                      required: ["ok", "resultRef"],
+                      additionalProperties: false,
+                    },
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                ok: false,
+                code: "compile-error",
+                detail: "prompt injection text",
+              }),
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent saw the reported failure.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate a mismatched structured return.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Parent saw the reported failure.");
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  assertEquals(toolMessage.content.includes("prompt injection text"), false);
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      status: string;
+      summary: string;
+      structuredReturn: {
+        status: string;
+        failureCode: string;
+        value: unknown;
+        validationError?: string;
+      };
+    };
+  };
+  assertEquals(output.subagent.status, "failed");
+  assertEquals(
+    output.subagent.summary,
+    "Subagent reported failure (compile-error).",
+  );
+  assertEquals(
+    output.subagent.structuredReturn.status,
+    "child-reported-failure",
+  );
+  assertEquals(output.subagent.structuredReturn.failureCode, "compile-error");
+  assertEquals(output.subagent.structuredReturn.value, {
+    ok: false,
+    code: "compile-error",
+  });
+  assertEquals(output.subagent.structuredReturn.validationError, undefined);
+});

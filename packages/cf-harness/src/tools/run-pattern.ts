@@ -102,7 +102,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           { type: "object", additionalProperties: true },
         ],
         description:
-          "Optional JSON Schema for the result value. When provided, the sanitized result value is returned alongside resultRef.",
+          'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself, anything else as an opaque link. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
       },
     },
     required: ["sourceText"],
@@ -180,6 +180,59 @@ const asSerializableValue = (value: unknown): unknown => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Keys the runtime puts on every pattern result: the display name and the
+ * rendering variants. Their names are fixed by the framework, not by anything
+ * the pattern computed.
+ */
+const FRAMEWORK_RESULT_KEYS: readonly string[] = [
+  "$TYPE",
+  "$NAME",
+  "$UI",
+  "$TILE_UI",
+  "$CHIP_UI",
+  "$FS",
+  "$TESTS",
+];
+
+/**
+ * Drops the framework's own keys from a result before it is measured against a
+ * caller's `resultSchema`.
+ *
+ * The sanitizer seals a whole object the moment it carries a key the schema
+ * does not model — a key it cannot model is a key whose NAME may itself be
+ * data, so the object goes over as one opaque link. A pattern result always
+ * carries `$NAME` and `$UI`, so a schema describing only what the pattern
+ * computes would seal every result, taking the inert numbers with it. These
+ * keys are named by the framework and dropped rather than shown, so removing
+ * them discloses nothing; a schema that asks for one by name keeps it.
+ */
+const withoutFrameworkResultKeys = (
+  value: unknown,
+  schema: JSONSchema,
+): unknown => {
+  if (!isRecord(value)) {
+    return value;
+  }
+  const declared = typeof schema === "object" && schema !== null &&
+      isRecord((schema as Record<string, unknown>).properties)
+    ? (schema as { properties: Record<string, unknown> }).properties
+    : {};
+  const dropped = FRAMEWORK_RESULT_KEYS.filter((key) =>
+    key in value && !(key in declared)
+  );
+  if (dropped.length === 0) {
+    return value;
+  }
+  const kept: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (!dropped.includes(key)) {
+      defineOwnEntry(kept, key, child);
+    }
+  }
+  return kept;
+};
 
 /**
  * Awaits `work` unless `signal` aborts first. Resolution (not rejection)
@@ -390,7 +443,10 @@ export const runPatternTool: HarnessToolDefinition<
       try {
         const sanitized = validateAndSanitizeStructuredResult({
           schema: parsedResultSchema.schema,
-          value: rawValue,
+          value: withoutFrameworkResultKeys(
+            rawValue,
+            parsedResultSchema.schema,
+          ),
           opaqueHandleId: outputId,
         });
         value = sanitized.value;

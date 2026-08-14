@@ -100,6 +100,88 @@ export const PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES = [
   "pattern-schema",
 ] as const satisfies readonly string[];
 /**
+ * The vocabulary a child reports a failure in. A code is inert by
+ * construction — it is one of a fixed set, carries nothing read out of a
+ * space, and survives sanitization as itself — so a parent learns WHY a
+ * delegation failed without any declassification.
+ *
+ * - `compile-error`: the write/compile/fix loop did not converge.
+ * - `turn-budget-exhausted`: the turn budget ran out mid-task.
+ * - `schema-mismatch`: the result could not be made to fit the shape asked
+ *   for.
+ * - `missing-input-shape`: an input reference's shape was not available or
+ *   not what the task described.
+ * - `unsupported-request`: the task cannot be done with this profile's tools
+ *   or within its policy.
+ * - `other`: none of the above.
+ */
+export const SUBAGENT_FAILURE_REASON_CODES = [
+  "compile-error",
+  "turn-budget-exhausted",
+  "schema-mismatch",
+  "missing-input-shape",
+  "unsupported-request",
+  "other",
+] as const;
+
+export type HarnessSubagentFailureReasonCode =
+  typeof SUBAGENT_FAILURE_REASON_CODES[number];
+
+export const isHarnessSubagentFailureReasonCode = (
+  input: unknown,
+): input is HarnessSubagentFailureReasonCode =>
+  typeof input === "string" &&
+  (SUBAGENT_FAILURE_REASON_CODES as readonly string[]).includes(input);
+
+/**
+ * The failure branch every profile contract shares: `ok: false` plus a code
+ * from the fixed vocabulary, and an optional free-text `detail`. `detail`
+ * seals into an opaque link like any unconstrained string, which is the right
+ * treatment — the code is the actionable part, and the parent can open the
+ * detail only if it is entitled to.
+ */
+export const SUBAGENT_FAILURE_RETURN_SCHEMA: JSONSchema = {
+  type: "object",
+  properties: {
+    ok: { type: "boolean", const: false },
+    code: {
+      type: "string",
+      enum: [...SUBAGENT_FAILURE_REASON_CODES],
+      description: "Why the task could not be completed.",
+    },
+    detail: {
+      type: "string",
+      description:
+        "Optional free-text elaboration. Reaches the parent as an opaque link, so it is for a reader entitled to open it, not for the parent to act on.",
+    },
+  },
+  required: ["ok", "code"],
+  additionalProperties: false,
+};
+
+/**
+ * Reads a child's parsed return as a failure report. `ok: false` is the
+ * discriminator across every contract, declared or profile-default, so a child
+ * that says it failed is heard as having failed whatever else about its return
+ * is malformed. An unrecognized or absent code reads as `other`: the report
+ * still stands, only less specifically.
+ */
+export const asHarnessSubagentFailureReport = (
+  value: unknown,
+): { code: HarnessSubagentFailureReasonCode } | undefined => {
+  if (
+    typeof value !== "object" || value === null || Array.isArray(value) ||
+    (value as Record<string, unknown>).ok !== false
+  ) {
+    return undefined;
+  }
+  const code = (value as Record<string, unknown>).code;
+  return {
+    code: isHarnessSubagentFailureReasonCode(code) ? code : "other",
+  };
+};
+
+/**
  * Return contract of the `pattern-author` profile: a discriminated union, so
  * a success and a failure are different SHAPES rather than different prose.
  * A parent reading `ok` knows which it has without interpreting text, and a
@@ -108,13 +190,14 @@ export const PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES = [
  * step's reference.
  *
  * Failure is a first-class branch, not an error path: a child that cannot
- * produce a working pattern returns `{ ok: false, reason }`, and `reason` is
- * a short inert explanation of what stopped it — no data read out of the
- * space, no partial result dressed as a whole one.
+ * produce a working pattern returns the shared failure shape, whose `code`
+ * names what stopped it from the fixed inert vocabulary — no data read out of
+ * the space, no partial result dressed as a whole one.
  *
  * The free-form strings arrive at the parent as opaque links, the ordinary
- * treatment of unconstrained strings in a sanitized child return; `ok` and
- * the minted `resultRef` token are what the parent acts on.
+ * treatment of unconstrained strings in a sanitized child return; `ok`, the
+ * failure `code`, and the minted `resultRef` token are what the parent acts
+ * on.
  */
 export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
   oneOf: [
@@ -136,19 +219,7 @@ export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
       required: ["ok", "resultRef", "describes"],
       additionalProperties: false,
     },
-    {
-      type: "object",
-      properties: {
-        ok: { type: "boolean", const: false },
-        reason: {
-          type: "string",
-          description:
-            "Short inert explanation of what stopped the pattern from working. No references to work not produced.",
-        },
-      },
-      required: ["ok", "reason"],
-      additionalProperties: false,
-    },
+    SUBAGENT_FAILURE_RETURN_SCHEMA,
   ],
 };
 
@@ -377,7 +448,17 @@ export interface HarnessSubagentRunStateSummary {
 
 export interface HarnessSubagentStructuredReturn {
   type: "cf-harness.subagent-structured-return";
-  status: "valid" | "invalid";
+  /**
+   * `child-reported-failure` is its own status because a child saying it
+   * failed is an answer, not a broken return: the parent gets a failure it can
+   * act on — the `failureCode` — instead of a schema complaint that says only
+   * that something went wrong somewhere.
+   */
+  status: "valid" | "invalid" | "child-reported-failure";
+  /**
+   * Present whenever the child's return says `ok: false`, on either status.
+   */
+  failureCode?: HarnessSubagentFailureReasonCode;
   schemaDigest: string;
   rawOutputId: string;
   rawArtifactPath?: string;

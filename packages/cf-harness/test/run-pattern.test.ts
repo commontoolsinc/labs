@@ -33,6 +33,17 @@ const DOUBLING_PATTERN_SOURCE = [
   "",
 ].join("\n");
 
+const NAMED_DOUBLING_PATTERN_SOURCE = [
+  "import { computed, NAME, pattern } from 'commonfabric';",
+  "interface Input { n: number; }",
+  "interface Output { doubled: number; $NAME: string; }",
+  "export default pattern<Input, Output>(({ n }) => ({",
+  "  [NAME]: 'Doubler',",
+  "  doubled: computed(() => n * 2),",
+  "}));",
+  "",
+].join("\n");
+
 const DOUBLED_RESULT_SCHEMA = {
   type: "object",
   properties: { doubled: { type: "number" } },
@@ -162,6 +173,27 @@ describe("run-pattern", () => {
       expect(output.resultRef).toMatch(/^\/of:/);
       expect(output.pieceId.length).toBeGreaterThan(0);
       expect((output.value as { doubled: number }).doubled).toBe(42);
+      expect(output.linkedStringCount).toBe(0);
+    });
+
+    it("keeps a computed number when the result carries framework keys the schema does not declare", async () => {
+      // Every pattern result carries the framework's own keys, and a schema
+      // describing only what the pattern computes declares none of them. The
+      // sanitizer seals a whole object over one unmodeled key, so without the
+      // framework keys being dropped first the number goes over as an opaque
+      // link along with everything else.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.rawValue as Record<string, unknown>)["$NAME"]).toBe(
+        "Doubler",
+      );
+      expect(output.value).toEqual({ doubled: 42 });
       expect(output.linkedStringCount).toBe(0);
     });
 

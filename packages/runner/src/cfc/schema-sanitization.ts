@@ -256,6 +256,55 @@ export const cfcObjectSchemaIsClosed = (
   schema.additionalProperties !== true &&
   typeof schema.additionalProperties !== "object";
 
+/**
+ * The property surface an object schema's `anyOf`/`oneOf`/`allOf` branches
+ * contribute to the node carrying them: the property names those branches
+ * declare, and whether any of them leaves the object open.
+ *
+ * A discriminated union is normally written as a bare node — `{type: "object",
+ * oneOf: [...]}` — whose own `properties` is empty because every property
+ * belongs to a branch. Judging that node's closedness on its own `properties`
+ * alone makes it a closed object with no permitted keys, so every value fails
+ * on its first key. The branches are where the shape lives, so they are what
+ * decides.
+ *
+ * This grants nothing a branch would refuse: a branch is validated against the
+ * same value in its own right, and rejects any key it does not model.
+ */
+const combinatorObjectSurface = (
+  schema: Record<string, unknown>,
+  schemaRoot: JSONSchema,
+): { known: Set<string>; open: boolean } => {
+  const known = new Set<string>();
+  let open = false;
+  for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
+    const branches = schema[keyword];
+    if (!Array.isArray(branches)) continue;
+    for (const rawBranch of branches) {
+      const branch = isObjectOrArray(rawBranch) &&
+          typeof rawBranch.$ref === "string"
+        ? resolveCfcSchemaRefs(rawBranch, schemaRoot)
+        : rawBranch;
+      if (branch === false) continue;
+      if (!isObjectNotArray(branch)) {
+        open = true;
+        continue;
+      }
+      if (!cfcObjectSchemaIsClosed(branch)) {
+        open = true;
+        continue;
+      }
+      for (const key of Object.keys(branch.properties ?? {})) {
+        known.add(key);
+      }
+      const nested = combinatorObjectSurface(branch, schemaRoot);
+      if (nested.open) open = true;
+      for (const key of nested.known) known.add(key);
+    }
+  }
+  return { known, open };
+};
+
 export const resolveSchemaForValidation = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
@@ -1708,12 +1757,22 @@ const validateAgainstSchemaInternal = (
           if (failure !== undefined) return atValidationPath(key, failure);
         }
       }
+      const explicitlyClosed = schema.additionalProperties === false;
       const closesAdditionalProperties = options
           .implicitAdditionalPropertiesOpen
-        ? schema.additionalProperties === false
+        ? explicitlyClosed
         : cfcObjectSchemaIsClosed(schema);
-      if (closesAdditionalProperties) {
-        const known = new Set(Object.keys(schema.properties ?? {}));
+      // A node that closes only by the implicit default defers to the shape
+      // its combinator branches declare; one that says `additionalProperties:
+      // false` in so many words is taken at its word.
+      const branchSurface = explicitlyClosed
+        ? { known: new Set<string>(), open: false }
+        : combinatorObjectSurface(schema, schemaRoot);
+      if (closesAdditionalProperties && !branchSurface.open) {
+        const known = new Set([
+          ...Object.keys(schema.properties ?? {}),
+          ...branchSurface.known,
+        ]);
         const patterns = options.strictConstraints
           ? Object.keys(schema.patternProperties ?? {}).map((pattern) =>
             new RegExp(pattern)
