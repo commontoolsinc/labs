@@ -1,6 +1,8 @@
 import type { FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { toReportableState } from "./toReportableState.ts";
+import { toReportableTag } from "./toReportableTag.ts";
+import { ProblematicValue } from "./ProblematicValue.ts";
 
 /**
  * Error thrown when a state cannot be decoded and the engine is not lenient.
@@ -24,14 +26,16 @@ export class ProblematicStateError extends Error {
   /**
    * Constructs an instance.
    *
-   * @param wireTypeTag - The tag the faulty data arrived under.
+   * @param wireTypeTag - The tag the faulty data arrived under, of any type
+   *   whatsoever; kept as-is if it is a string, and otherwise replaced by a
+   *   debug rendering.
    * @param state - What was at fault, of any type whatsoever; rendered if it
    *   is not a `FabricValue`.
    * @param message - What is wrong with it.
    * @param options - Standard `Error` options, notably `cause`.
    */
   constructor(
-    wireTypeTag: string,
+    wireTypeTag: any,
     state: any,
     message: string,
     options?: ErrorOptions,
@@ -39,7 +43,7 @@ export class ProblematicStateError extends Error {
     super(message, options);
 
     this.name = "ProblematicStateError";
-    this.#wireTypeTag = wireTypeTag;
+    this.#wireTypeTag = toReportableTag(wireTypeTag);
     this.#state = toReportableState(state);
   }
 
@@ -51,6 +55,16 @@ export class ProblematicStateError extends Error {
   /** What was at fault, in reportable form. */
   get state(): FabricValue {
     return this.#state;
+  }
+
+  /**
+   * Returns this error's three facts as a `ProblematicValue`: the same account
+   * of the same failure, in the form that is returned rather than thrown.
+   * Both classes normalize a tag and a state the same way, so a value from
+   * here is comparable with one built directly.
+   */
+  asProblematicValue(): ProblematicValue {
+    return new ProblematicValue(this.wireTypeTag, this.state, this.message);
   }
 
   //
@@ -67,20 +81,31 @@ export class ProblematicStateError extends Error {
    * Where `thrown` is already an instance bearing this same tag and state, it
    * is returned as it stands rather than wrapped.
    *
-   * @param wireTypeTag - The tag the faulty data arrived under.
+   * @param wireTypeTag - The tag the faulty data arrived under, of any type
+   *   whatsoever; kept as-is if it is a string, and otherwise replaced by a
+   *   debug rendering.
    * @param state - The state the codec was handed.
    * @param thrown - Whatever the codec threw.
    */
   static fromThrown(
-    wireTypeTag: string,
+    wireTypeTag: any,
     state: any,
-    thrown: unknown,
+    thrown: any,
   ): ProblematicStateError {
-    const reportable = toReportableState(state);
+    const error = (thrown instanceof Error)
+      ? thrown.message
+      : toCompactDebugString(thrown);
+
+    // Built first and compared against, rather than the fields being
+    // normalized here to match. How a tag and a state are made reportable is
+    // one class's business, and restating it here is a copy that can drift
+    // from the one that matters. This path is already the failing one, so an
+    // allocation that turns out to be discarded costs nothing worth counting.
+    const problem = new ProblematicValue(wireTypeTag, state, error);
 
     if (
       (thrown instanceof ProblematicStateError) &&
-      (thrown.wireTypeTag === wireTypeTag) && (thrown.state === reportable)
+      thrown.asProblematicValue().equals(problem)
     ) {
       // Already an account of this same failure. Wrapping it would say
       // nothing the original does not, at the cost of a `cause` chain a
@@ -89,9 +114,9 @@ export class ProblematicStateError extends Error {
     }
 
     return new ProblematicStateError(
-      wireTypeTag,
-      reportable,
-      (thrown instanceof Error) ? thrown.message : toCompactDebugString(thrown),
+      problem.wireTypeTag,
+      problem.state,
+      error,
       { cause: thrown },
     );
   }

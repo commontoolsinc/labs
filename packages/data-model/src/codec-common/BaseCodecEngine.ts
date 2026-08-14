@@ -13,6 +13,7 @@ import type {
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
 import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
+import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 import { ProblematicStateError } from "./ProblematicStateError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
 import { UnknownValue } from "./UnknownValue.ts";
@@ -37,8 +38,8 @@ import { UnknownValue } from "./UnknownValue.ts";
  * * A terminal codec's state is final and a nonterminal codec's is walked
  *   again -- read off the codec's base class, on both sides of the trip.
  * * A tag comes from `tagForValue()` rather than from the value.
- * * An unrecognized tag becomes an `UnknownValue`, and an empty one an error,
- *   per Section 9 of the formal spec.
+ * * An unrecognized tag becomes an `UnknownValue`, and one that is not a tag
+ *   at all an error, per Section 9 of the formal spec.
  * * A codec's `decode()` result is deep-frozen, and a throw from one is
  *   re-raised or wrapped according to `lenient`.
  *
@@ -220,7 +221,10 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * caller sees; `lenient` does.
    *
    * @param wireTypeTag The tag the malformed data arrived under, or the
-   *   meta-tag naming the structure at fault.
+   *   meta-tag naming the structure at fault. Of any type whatsoever: what
+   *   sits in tag position is wire data like any other, and a tag that is not
+   *   a tag is among the faults reported here. `ProblematicValue` renders what
+   *   it cannot keep.
    * @param state The data at fault, of any type whatsoever, preserved so that
    *   a lenient result round-trips. A format whose states are not
    *   `FabricValue`s hands one over as it stands; `ProblematicValue` renders
@@ -230,7 +234,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * @throws If this engine is not lenient.
    */
   protected reportMalformed(
-    wireTypeTag: string,
+    wireTypeTag: any,
     state: any,
     error: string,
   ): FabricValue {
@@ -246,29 +250,41 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * subclass calls this once it has recognized a tagged form and taken off
    * whatever meta-tags this format defines for itself.
    *
+   * The tag's syntax is checked here rather than by each caller: `tag` is
+   * whatever a format found in tag position, of whatever type, and a subclass
+   * is not expected to know what a tag may look like.
+   *
    * Frozen-ness contract: a value returned through the codec arm here is
    * deep-frozen, so callers do not each have to freeze. The unknown-tag
    * fallback is a separate arm and is intentionally NOT covered by it.
    */
   protected decodeTagged(
-    tag: string,
+    tag: any,
     rawState: Encoded,
     context: ReconstructionContext,
   ): FabricValue {
+    if (!isCodecTypeTag(tag)) {
+      // Anything that is not a tag syntactically is an encoding error whatever
+      // follows it, per Section 9 of the formal spec, and is reported rather
+      // than preserved as an `UnknownValue`: that form exists to round-trip a
+      // tag no codec claims, which presupposes a tag. Reported over the
+      // decoded state, so that a lenient result carries what arrived.
+      return this.reportMalformed(
+        tag,
+        this.decodeValue(rawState, context),
+        `tagged value has a malformed tag: ${
+          backtickQuote(toCompactDebugString(tag, 30))
+        }`,
+      );
+    }
+
     const matched = this.registry.codecFromTag(tag);
 
     if (matched === undefined) {
-      const state = this.decodeValue(rawState, context);
-
-      // An empty tag is an encoding error whatever follows it, per Section 9
-      // of the formal spec, so it is reported rather than preserved as an
-      // `UnknownValue` with no name. Otherwise the tag is simply one this
-      // registry does not carry, and the unknown form is kept so that it
-      // round-trips. Neither of these is covered by the deep-frozen contract
-      // the codec arm below states.
-      return (tag === "")
-        ? this.reportMalformed(tag, state, "tagged value has an empty tag")
-        : new UnknownValue(tag, state);
+      // A tag this registry does not carry, kept in the unknown form so that
+      // it round-trips. Not covered by the deep-frozen contract the codec arm
+      // below states.
+      return new UnknownValue(tag, this.decodeValue(rawState, context));
     }
 
     // A terminal codec takes the state exactly as it arrived; a nonterminal
@@ -287,7 +303,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
           state as FabricValue,
           context,
         );
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (!this.lenient) {
         // Normalized rather than rethrown: what a codec throws is not
         // guaranteed to be an `Error`, let alone one naming the state it
@@ -308,12 +324,22 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       );
     }
 
-    if (!this.lenient && (decoded instanceof ProblematicValue)) {
+    if (
+      !this.lenient && (decoded instanceof ProblematicValue) &&
+      (matched.uniqueHandledClass !== ProblematicValue)
+    ) {
       // The two ways a codec reports a state it will not accept -- throwing,
       // and returning one of these -- are the codec author's choice and say
       // nothing about what a caller wants. `lenient` is what says that, so
       // this instance settles both into the same answer: a strict decode
       // fails, whichever way the codec spelled it.
+      //
+      // `ProblematicValue`'s own codec is exempt, because for that one a
+      // `ProblematicValue` is the successful product rather than a refusal.
+      // A payload under `Problematic@1` is a well-formed record of a past
+      // failure, and reading one is not a failure of this decode; without the
+      // exemption a strict reader could never read such a record back, which
+      // is most of what preserving one is for.
       throw new ProblematicStateError(tag, decoded.state, decoded.error);
     }
 

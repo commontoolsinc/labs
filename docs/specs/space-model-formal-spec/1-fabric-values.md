@@ -353,8 +353,8 @@ wrapper binds, because a primitive's codec terminates an encoding where a
 wrapper's only decomposes. What further distinguishes them
 is the hashing layer, where each has a dedicated primitive hash tag rather
 than the `TAG_INSTANCE` path (Section 6.3). They do not carry a
-`wireTypeTag` property (no fabric type does, save the `ExplicitTagValue`
-family; the wire tag is the codec's concern).
+`wireTypeTag` property (no fabric type does, save `UnknownValue` and
+`ProblematicValue`; the wire tag is the codec's concern).
 
 #### 1.4.1 Wrapper Class Summary
 
@@ -883,8 +883,8 @@ export abstract class FabricSpecialObject {
 that are included in `FabricValue` via the `FabricSpecialObject` arm of the
 union. It extends `FabricSpecialObject`.
 
-- `ExplicitTagValue` is the base for `FabricInstance` subtypes that carry
-  an explicit wire-format tag (`UnknownValue`, `ProblematicValue`).
+- `UnknownValue` and `ProblematicValue` are the `FabricInstance` subtypes
+  that preserve a type tag alongside their state (Section 3.2).
 - `FabricPrimitive` is the base for types that behave like primitives but
   need a class wrapper (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`,
   `FabricBytes`, `FabricRegExp`).
@@ -2154,72 +2154,55 @@ When deserializing, a context may encounter a type tag it doesn't recognize —
 for example, data written by a newer version of the system. Unknown types are
 **passed through** rather than rejected, preserving forward compatibility.
 
-### 3.2 `ExplicitTagValue` (Base Class)
+### 3.2 Preserved Tags: `UnknownValue` vs. `ProblematicValue`
 
-Both `UnknownValue` and `ProblematicValue` share a common pattern: they
-carry an explicit wire-format type tag and raw state for round-tripping. The
-abstract base class `ExplicitTagValue` factors out these shared fields,
-enabling a single `instanceof ExplicitTagValue` check where code needs to
-handle both subtypes uniformly (e.g., serialization dispatch).
+Both `UnknownValue` and `ProblematicValue` preserve a type tag and raw state
+for round-tripping. They differ in what a preserved tag is allowed to be, and
+that difference decides how each reaches the wire.
 
-```typescript
-// Shown at module scope.
-// file: packages/data-model/codec-common/ExplicitTagValue.ts
+An `UnknownValue` preserves a tag that **is** a tag — syntactically valid per
+Section 9 of `3-json-encoding.md`, though claimed by no codec here. It is
+checked at construction. That is what lets the class encode back under the tag
+it preserved: a tag a decoder would refuse would otherwise make an instance
+that encodes and cannot be read back.
 
-/**
- * Base class for fabric types that carry an explicit wire-format tag.
- * Used by `UnknownValue` (unrecognized types) and `ProblematicValue`
- * (failed deconstruction/reconstruction). Enables a single `instanceof`
- * check where code needs to handle both.
- *
- * Extends `BaseFabricInstance` so subclasses inherit the `shallowClone()`
- * template method.
- */
-export abstract class ExplicitTagValue extends BaseFabricInstance {
-  /** The value of `wireTypeTag`. */
-  readonly #wireTypeTag;
+A `ProblematicValue` preserves whatever was at fault, and a tag that is not a
+tag is among the faults it exists to report. It therefore **encodes under a
+fixed tag of its own**, `Problematic@1`, carrying the preserved tag as data
+beside the state and the error. A value whose whole content is "this tag was
+not a tag" cannot go back out under that tag.
 
-  /** The value of `state`. */
-  readonly #state;
+They differ again in what they do with something they cannot keep, and the two
+answers follow from the same split. `ProblematicValue` **normalizes**: a state
+that is not a `FabricValue`, and a tag that is not a string, are each replaced
+by a debug rendering of themselves, so that reporting a failure cannot itself
+fail. `UnknownValue` **refuses**: a tag that is not a tag makes construction
+throw, because there is no such thing as an unknown type that has no name, and
+an instance holding one could not be encoded to anything readable.
 
-  constructor(
-    /** The original wire type tag, e.g. `"FutureType@2"`. */
-    wireTypeTag: string,
-    /** The raw state. */
-    state: FabricValue,
-  ) {
-    super();
+A rendering is deliberately not a conversion — a string plainly reads as a
+description of a value rather than the value, which is the honest answer where
+fidelity is not on offer.
+Each class hosts its own `[CODEC]`, and the two are shaped differently for the
+reason above.
 
-    this.#wireTypeTag = wireTypeTag;
-    this.#state = state;
-  }
+`UnknownValue`'s codec is a deliberate "snowflake": it declares **no
+`recognizedTypeTag`** (its instances each carry a per-instance tag, which
+`tagForValue()` reads back), so it is not registered for tag-based decode
+dispatch — an unrecognized tag reaches it through the encoding context's
+unknown-tag arm instead (Section 4.5). Its `encode()` returns the preserved
+**bare `state`** (not an envelope), so an instance round-trips to the *same*
+storage form as the value it stands in for.
 
-  /** Arbitrary raw instance state. */
-  get state(): FabricValue {
-    return this.#state;
-  }
-
-  /**
-   * The wire type tag preserved for this instance. Unlike other fabric
-   * types -- whose tag is a per-class constant carried by the class's
-   * `[CODEC]` -- an `ExplicitTagValue` carries a per-instance tag (the
-   * original tag of a value that couldn't be recognized or reconstructed),
-   * which its codec's `tagForValue()` reads back.
-   */
-  get wireTypeTag(): string {
-    return this.#wireTypeTag;
-  }
-}
-```
-
-Each subclass hosts its own `[CODEC]`. These codecs are deliberate
-"snowflakes": they declare **no `recognizedTypeTag`** (their instances each
-carry a per-instance tag, which `tagForValue()` reads back), so they are
-not registered for tag-based decode dispatch — an unrecognized tag reaches
-them through the encoding context's unknown-tag arm instead (Section 4.5).
-Their `encode()` returns the preserved **bare `state`** (not an envelope),
-so a snowflake round-trips to the *same* storage form as the value it
-stands in for.
+`ProblematicValue`'s codec is ordinary: it declares `Problematic@1`, is
+tag-routed on decode like any other, and its `encode()` returns a record of the
+three preserved facts (`tag`, `state`, `error`). One consequence is worth
+stating, because it is the only place a returned `ProblematicValue` does not
+mean a refusal: this codec's *successful* product is a `ProblematicValue`, so
+the rule in Section 4.5 that turns one into a raise under a strict context does
+not apply to it. Reading back a record of a past failure is not a failure of
+that read, and without the carve-out a strict reader could never read one at
+all.
 
 ### 3.3 `UnknownValue`
 
@@ -2234,18 +2217,39 @@ import {
   type ReconstructionContext,
 } from '../codec-interface/interface';
 import { BaseNonterminalCodec } from '../codec-interface/BaseNonterminalCodec';
-import { ExplicitTagValue } from './ExplicitTagValue';
+import { BaseFabricInstance } from './BaseFabricInstance';
+import { isCodecTypeTag } from './isCodecTypeTag';
 import { deepFreeze } from '../deep-freeze';
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When
- * the serialization system encounters an unknown tag during
+ * the serialization system meets a tag no codec claims during
  * deserialization, it wraps the tag and state here; on re-serialization,
- * it uses the preserved data to produce the original wire format.
+ * the preserved pair reproduces the original wire form.
  */
-export class UnknownValue extends ExplicitTagValue {
+export class UnknownValue extends BaseFabricInstance {
+  readonly #wireTypeTag: string;
+  readonly #state: FabricValue;
+
   constructor(wireTypeTag: string, state: FabricValue) {
-    super(wireTypeTag, state);
+    super();
+
+    // A real tag, so that what this encodes back to is always decodable.
+    if (!isCodecTypeTag(wireTypeTag)) {
+      throw new Error('Not a codec type tag; use a `ProblematicValue`.');
+    }
+
+    this.#wireTypeTag = wireTypeTag;
+    this.#state = state;
+  }
+
+  get state(): FabricValue {
+    return this.#state;
+  }
+
+  /** The tag preserved for this instance, read back by `tagForValue()`. */
+  get wireTypeTag(): string {
+    return this.#wireTypeTag;
   }
 
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into
@@ -2320,33 +2324,61 @@ import {
   type ReconstructionContext,
 } from '../codec-interface/interface';
 import { BaseNonterminalCodec } from '../codec-interface/BaseNonterminalCodec';
-import { ExplicitTagValue } from './ExplicitTagValue';
+import { BaseFabricInstance } from './BaseFabricInstance';
+import { CODEC_TYPE_TAGS } from '../codec-interface/codec-type-tags';
+import { toReportableState } from './toReportableState';
+import { toReportableTag } from './toReportableTag';
 import { deepFreeze } from '../deep-freeze';
 
 /**
  * Container for a value whose deconstruction or reconstruction failed.
- * Preserves the original tag and raw state for round-tripping and
+ * Preserves the tag and raw state at fault, for round-tripping and
  * debugging. Used in lenient mode to allow graceful degradation rather
  * than hard failures.
  */
-export class ProblematicValue extends ExplicitTagValue {
-  /** Value for `error`. */
-  readonly #error;
+export class ProblematicValue extends BaseFabricInstance {
+  readonly #wireTypeTag: string;
+  readonly #state: FabricValue;
+  readonly #error: string;
 
   constructor(
-    wireTypeTag: string,
-    state: FabricValue,
+    /** Of any type; rendered if it is not a string. */
+    wireTypeTag: unknown,
+    /** Of any type; rendered if it is not a `FabricValue`. */
+    state: any,
     /** Description of what went wrong. */
     error: string,
   ) {
-    super(wireTypeTag, state);
+    super();
 
+    this.#wireTypeTag = toReportableTag(wireTypeTag);
+    this.#state = toReportableState(state);
     this.#error = error;
   }
 
   /** Description of what went wrong. */
   get error(): string {
     return this.#error;
+  }
+
+  get state(): FabricValue {
+    return this.#state;
+  }
+
+  /**
+   * The tag preserved for this instance, which need not be a well-formed
+   * tag. It is not the tag this encodes under; that is `Problematic@1`.
+   */
+  get wireTypeTag(): string {
+    return this.#wireTypeTag;
+  }
+
+  /** Whether `other` reports this same fault. */
+  equals(other: any): boolean {
+    return (other instanceof ProblematicValue) &&
+      (other.wireTypeTag === this.wireTypeTag) &&
+      (other.error === this.error) &&
+      Object.is(other.state, this.state);
   }
 
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into
@@ -2356,27 +2388,28 @@ export class ProblematicValue extends ExplicitTagValue {
   static #codec = Object.freeze(
     new (class ProblematicValueCodec extends BaseNonterminalCodec {
       constructor() {
-        // No recognized wire tag: a `ProblematicValue` round-trips to its
-        // *preserved* tag, which varies per instance.
-        super(undefined, ProblematicValue);
+        // A tag of its own: the preserved tag need not be a tag at all.
+        super(CODEC_TYPE_TAGS.Problematic, ProblematicValue);
       }
 
-      /** The instance's preserved per-instance tag. */
-      override tagForValue(value: ProblematicValue): string {
-        return value.wireTypeTag;
-      }
-
-      /** The preserved bare state -- `error` is NOT serialized. */
+      /** All three preserved facts; the tag is data here, not structure. */
       encode(value: ProblematicValue): FabricValue {
-        return value.state;
+        return {
+          tag: value.wireTypeTag,
+          state: value.state,
+          error: value.error,
+        };
       }
 
       decode(
-        typeTag: string,
+        _typeTag: string,
         state: FabricValue,
         context: ReconstructionContext,
       ): FabricValue {
-        const result = new ProblematicValue(typeTag, state, '');
+        // A state that is not this shape becomes a `ProblematicValue` of
+        // this decode; omitted for brevity.
+        const { tag, state: inner, error } = state as never;
+        const result = new ProblematicValue(tag, inner, error);
         return context.shouldDeepFreeze ? deepFreeze(result) : result;
       }
     })(),
@@ -2389,19 +2422,30 @@ export class ProblematicValue extends ExplicitTagValue {
 }
 ```
 
-Like `UnknownValue`, a `ProblematicValue` round-trips through
-serialization, preserving the original data so it is not silently lost.
-Note that the `error` field is **runtime-only, deliberately not
-serialized**: the codec's `encode()` re-emits the preserved bare state
-under the preserved tag, so the wire form is identical to that of the
-value the `ProblematicValue` stands in for (and a later decode under a
-then-recognized tag can recover the real value). The `error` field aids
-in-process debugging by recording what went wrong; the failure-construction
-paths populate it. Whether a decode failure surfaces as a
-`ProblematicValue` or as a throw is the encoding context's `lenient`
-setting alone, not the codec's: a strict context (e.g., tests) raises
-either form of rejection, while a lenient one (e.g., production
-reconstruction) degrades either into a value.
+A `ProblematicValue` round-trips through serialization with all three of its
+facts intact, `error` among them, so a preserved failure survives storage as
+the account of a failure rather than as a value that merely looks unremarkable.
+
+This is the trade against `UnknownValue`'s behavior, and it is deliberate.
+Because the wire form is `Problematic@1` rather than the preserved tag, a
+later reader that *does* have a codec for that tag will not silently decode
+the real value: it reads back a `ProblematicValue` and can see, in `error`,
+why the value was never built.
+
+Healing is not available to this class in any case. A preserved tag is kept
+only when it is a string, and is otherwise a *rendering* of whatever sat in
+tag position — so re-emitting under it would sometimes name the original tag
+and sometimes name a description of it, and a reader could not tell which. A
+form that heals for some inputs and silently produces a different value for
+others is worse than one that heals for none. `UnknownValue` is the type that
+heals, and it can because its tag is checked to be a real one.
+
+Whether a decode failure surfaces as a `ProblematicValue` or as a throw is the
+encoding context's `lenient` setting alone, not the codec's: a strict context
+(e.g., tests) raises either form of rejection, while a lenient one (e.g.,
+production reconstruction) degrades either into a value. The exception is this
+class's own codec, whose successful product is a `ProblematicValue` — see
+Section 3.2.
 
 ---
 
@@ -2671,7 +2715,7 @@ needing classes of its own extends what this returns.
 | 〃 | `FabricMap` | `Map@1` | 〃 (implementation currently stubbed; see Section 1.4.3). |
 | 〃 | `FabricSet` | `Set@1` | 〃 (implementation currently stubbed; see Section 1.4.4). |
 | 〃 | `UnknownValue` | _(per-instance)_ | No `recognizedTypeTag`; `tagForValue()` reads the preserved tag (Section 3). |
-| 〃 | `ProblematicValue` | _(per-instance)_ | 〃 |
+| 〃 | `ProblematicValue` | `Problematic@1` | Fixed tag of its own; the preserved tag rides inside the state, since it need not be a tag (Section 3.2). |
 | `registerPrimitive` | `BigIntCodec` (`bigint`) | `BigInt@1` | Encodes as unpadded base64 of minimal two's complement big-endian bytes. Standalone codec in `codec-json/` — no owned class to host a codec getter. |
 | 〃 | `SpecialNumberCodec` (`number`) | `SpecialNumber@1` | Catches `-0` / `NaN` / `±Infinity`; finite numbers fall to self-representation. |
 | 〃 | `SymbolCodec` (`symbol`) | `Symbol@1` | Registry-interned symbols only; an uninterned symbol matches no codec and is correctly unencodable. |
@@ -2722,13 +2766,15 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 2. **Structural escapes** — handles `/quote` (literal pass-through) and
    `/object` (entry-by-entry decode), per Section 6 of
    `3-json-encoding.md`.
-3. **State decode + bare-`/` check** — for any other tag, the walker first
-   recursively decodes the wrapped state, then rejects an empty tag (a
-   bare `"/"` key) as an encoding error. That rejection, and every other
-   malformed-wire fault the walker finds for itself, is settled against
-   `lenient` exactly as a codec's is: a `ProblematicValue` leniently
-   (Section 3.5), a raise strictly (see also Section 9 of
-   `3-json-encoding.md`).
+3. **State decode + tag syntax check** — for any other tag, the walker first
+   recursively decodes the wrapped state, then rejects any tag that is not
+   syntactically a type tag as an encoding error: a bare `"/"` key (the
+   empty tag), and equally a name that is not of the `<Type>@<Version>`
+   form, such as a meta-tag met outside the context that defines it. That
+   rejection, and every other malformed-wire fault the walker finds for
+   itself, is settled against `lenient` exactly as a codec's is: a
+   `ProblematicValue` leniently (Section 3.5), a raise strictly (see also
+   Section 9 of `3-json-encoding.md`).
 4. **Codec dispatch** — `codecFromTag()` routes the tag to its registered
    codec's `decode()`, and settles the codec's verdict against `lenient`:
    leniently, a throw becomes a `ProblematicValue`; strictly, a
@@ -2740,9 +2786,11 @@ Circular references are detected via a `Set<object>` tracked during the walk.
    scoped to this arm only; the unknown-tag arm (step 5) is intentionally
    not covered. See Section 8.6 for the full deep-freeze protocol and the
    egress-freezing call sites.
-5. **Unknown tags** — a tag with no registered codec produces an
-   `UnknownValue` wrapping the tag and (already-decoded) state, preserving
-   the form for round-tripping (Section 3).
+5. **Unknown tags** — a syntactically valid tag with no registered codec
+   produces an `UnknownValue` wrapping the tag and (already-decoded) state,
+   preserving the form for round-tripping (Section 3). Syntax is what
+   separates this from step 3: a tag names a type nothing here knows,
+   whereas a non-tag names nothing at all.
 6. **Primitives** — pass through.
 7. **Arrays** — recursively deserialized; `hole` entries reconstructed as
    true holes (absent indices).
@@ -2756,10 +2804,11 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 > decodes through its own codec, and a tag no codec claims falls straight to
 > `UnknownValue`. A tag is normally the codec's, either its single
 > `recognizedTypeTag` or whatever `tagForValue()` returns for the specific
-> value. Only the `ExplicitTagValue` family carries a per-instance
-> `wireTypeTag`, which is the tag it was constructed around and what its
-> `tagForValue()` reads — that family exists precisely to hold a tag whose
-> codec is unknown or whose decode failed.
+> value. Only `UnknownValue` carries a per-instance `wireTypeTag` that its
+> `tagForValue()` reads back, holding a tag whose codec is unknown.
+> `ProblematicValue` preserves a tag too, but encodes under `Problematic@1`
+> and carries the preserved one as data, that tag being possibly no tag at all
+> (Section 3.2).
 
 > **Why these are private methods.** `serialize()` and `deserialize()` are
 > private to `JsonCodecEngine`, which keeps the public API to
@@ -2916,7 +2965,7 @@ The implementation is split across several files for separation of concerns:
 |------|---------|
 | `fabric-value.ts` | Public surface: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), and the clone helpers (from `value-clone.ts`); defines `valueEqual()` |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isFabricCompatible` |
-| `fabric-instances/` | `FabricInstance` subclasses, each in its own file: `BaseFabricInstance.ts`, `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricMap.ts`, `FabricSet.ts`, `ExplicitTagValue.ts`, `UnknownValue.ts`, `ProblematicValue.ts` (plus an `index.ts` barrel). |
+| `fabric-instances/` | `FabricInstance` subclasses, each in its own file: `BaseFabricInstance.ts`, `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricMap.ts`, `FabricSet.ts`, `UnknownValue.ts`, `ProblematicValue.ts` (plus an `index.ts` barrel). |
 | `fabric-primitives/` | `FabricPrimitive` subclasses, each in its own file: `BaseFabricPrimitive.ts`, `FabricBytes.ts`, `FabricHash.ts`, `FabricEpochNsec.ts`, `FabricEpochDays.ts`, `FabricRegExp.ts` (plus an `index.ts` barrel). |
 
 ---

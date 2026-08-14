@@ -4,31 +4,32 @@
  * refusal.
  *
  * Keeping all three is what lets a bad encoding survive a round trip without
- * being either lost or believed. Encoding one writes back the bare state, the
- * tag it carries being per-instance and travelling separately, so a value that
- * could not be understood is re-emitted as what it was rather than as what
- * this runtime would have written in its place.
+ * being either lost or believed. Encoding one writes all three under this
+ * class's own `Problematic@1`, the preserved tag included, because that tag
+ * need not be a tag at all -- reporting one that is not is among the things
+ * this class is for.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
 } from "@/codec-common/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { ExplicitTagValue } from "@/codec-common/ExplicitTagValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("ProblematicValue", () => {
   // Subclass-checking-superclass identity: lives directly under the class
   // describe (the rule's cross-cutting carve-out).
-  it("is an instance of `ExplicitTagValue`", () => {
-    const ps = new ProblematicValue("Test@1", "state", "oops");
-    expect(ps instanceof ExplicitTagValue).toBe(true);
+  it("is an instance of `BaseFabricInstance`", () => {
+    const value = new ProblematicValue("Test@1", "state", "oops");
+    expect(value instanceof BaseFabricInstance).toBe(true);
   });
 
   describe("constructor()", () => {
@@ -127,19 +128,125 @@ describe("ProblematicValue", () => {
     });
   });
 
+  describe("equals()", () => {
+    it("returns `true` for an instance reporting the same fault", () => {
+      const state = { x: 1 };
+
+      expect(new ProblematicValue("T@1", state, "boom").equals(
+        new ProblematicValue("T@1", state, "boom"),
+      )).toBe(true);
+    });
+
+    it("returns `false` when any of the three facts differs", () => {
+      const state = { x: 1 };
+      const pv = new ProblematicValue("T@1", state, "boom");
+
+      expect(pv.equals(new ProblematicValue("Other@1", state, "boom")))
+        .toBe(false);
+      expect(pv.equals(new ProblematicValue("T@1", { x: 1 }, "boom")))
+        .toBe(false);
+      expect(pv.equals(new ProblematicValue("T@1", state, "different")))
+        .toBe(false);
+    });
+
+    it("returns `false` for anything that is not a `ProblematicValue`", () => {
+      const pv = new ProblematicValue("T@1", "s", "boom");
+
+      expect(pv.equals(undefined)).toBe(false);
+      expect(pv.equals(null)).toBe(false);
+      expect(pv.equals("T@1")).toBe(false);
+      expect(pv.equals({ wireTypeTag: "T@1", state: "s", error: "boom" }))
+        .toBe(false);
+    });
+
+    it("compares a non-string tag by the rendering it kept", () => {
+      // The tag is normalized on the way in, so two instances built from the
+      // same unusable tag agree.
+      expect(new ProblematicValue(42, "s", "boom").equals(
+        new ProblematicValue(42, "s", "boom"),
+      )).toBe(true);
+    });
+  });
+
   describe("static members", () => {
     describe("[CODEC]", () => {
       describe("tagForValue()", () => {
-        it("returns the value's own (per-instance) wire type tag", () => {
-          const pv = new ProblematicValue("Weird@7", "s", "oops");
-          expect(ProblematicValue[CODEC].tagForValue(pv)).toBe("Weird@7");
+        it("returns `Problematic@1` whatever tag the value preserved", () => {
+          // A preserved tag need not be a tag, so it cannot be the tag this
+          // encodes under; `UnknownValue` is the class that round-trips to
+          // what it preserved.
+          const preserved = new ProblematicValue("Weird@7", "s", "oops");
+          const malformed = new ProblematicValue("hole", "s", "oops");
+
+          expect(ProblematicValue[CODEC].tagForValue(preserved))
+            .toBe("Problematic@1");
+          expect(ProblematicValue[CODEC].tagForValue(malformed))
+            .toBe("Problematic@1");
         });
       });
 
       describe("encode()", () => {
-        it("returns the bare `state` (the tag is carried separately)", () => {
+        it("returns the tag, state, and error together", () => {
           const pv = new ProblematicValue("Weird@7", { x: 1 }, "oops");
-          expect(ProblematicValue[CODEC].encode(pv)).toEqual({ x: 1 });
+
+          expect(ProblematicValue[CODEC].encode(pv)).toEqual({
+            tag: "Weird@7",
+            state: { x: 1 },
+            error: "oops",
+          });
+        });
+      });
+
+      describe("decode()", () => {
+        const CONTEXT = EMPTY_RECONSTRUCTION_CONTEXT;
+
+        it("reconstructs the tag, state, and error", () => {
+          const result = ProblematicValue[CODEC].decode(
+            "Problematic@1",
+            { tag: "Weird@7", state: { x: 1 }, error: "oops" },
+            CONTEXT,
+          ) as ProblematicValue;
+
+          expect(result.wireTypeTag).toBe("Weird@7");
+          expect(result.state).toEqual({ x: 1 });
+          expect(result.error).toBe("oops");
+        });
+
+        it("keeps a `state` that is present and `undefined`", () => {
+          const result = ProblematicValue[CODEC].decode(
+            "Problematic@1",
+            { tag: "Weird@7", state: undefined, error: "oops" },
+            CONTEXT,
+          ) as ProblematicValue;
+
+          expect(result.wireTypeTag).toBe("Weird@7");
+          expect(result.state).toBe(undefined);
+        });
+
+        it("reports a record with no `state` property at all", () => {
+          // Every `FabricValue` is a valid state, `undefined` among them, so
+          // an absent property is the only thing that marks a record this
+          // codec did not write. Filling it in would put a reshaped record
+          // back on the wire rather than reporting the one that arrived.
+          const result = ProblematicValue[CODEC].decode(
+            "Problematic@1",
+            { tag: "Weird@7", error: "oops" },
+            CONTEXT,
+          ) as ProblematicValue;
+
+          expect(result.wireTypeTag).toBe("Problematic@1");
+          expect(result.error).toMatch(/`state` property/);
+        });
+
+        it("reports a state that is not an object", () => {
+          const result = ProblematicValue[CODEC].decode(
+            "Problematic@1",
+            "nope",
+            CONTEXT,
+          ) as ProblematicValue;
+
+          expect(result.wireTypeTag).toBe("Problematic@1");
+          expect(result.error).toMatch(/expected object state/);
         });
       });
     });

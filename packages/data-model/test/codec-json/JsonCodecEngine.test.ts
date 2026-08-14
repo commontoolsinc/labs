@@ -1407,13 +1407,13 @@ describe("JsonCodecEngine", () => {
       expect(unknown.state).toEqual({ some: "data" });
     });
 
-    it("converts a `/hole` outside array context to `UnknownValue`", () => {
+    it("rejects a `/hole` outside array context rather than calling it unknown", () => {
+      // Per spec §9, `UnknownValue` is for a syntactically well-formed tag no
+      // codec claims. `hole` is a meta-tag, meaningful only among array
+      // elements, and is a structural violation anywhere else.
       const data = { "/hole": 5 } as JsonCodecValue;
-      const result = fromWireFormat(data);
-      expect(result).toBeInstanceOf(UnknownValue);
-      const unknown = result as unknown as UnknownValue;
-      expect(unknown.wireTypeTag).toBe("hole");
-      expect(unknown.state).toBe(5);
+
+      expect(() => fromWireFormat(data)).toThrow(/malformed tag/);
     });
   });
 
@@ -1471,14 +1471,32 @@ describe("JsonCodecEngine", () => {
   });
 
   describe("`ProblematicValue` (lenient mode)", () => {
-    it("preserves `ProblematicValue`'s original tag and state via `encode()`", () => {
+    it("encodes a `ProblematicValue` under its own tag, fault and all", () => {
       const prob = new ProblematicValue(
         "BadType@1",
         "original data",
         "something went wrong",
       );
-      const wireFormat = toWireFormat(prob);
-      expect(wireFormat).toEqual({ "/BadType@1": "original data" });
+
+      // The preserved tag is data here rather than wire structure, which is
+      // what lets an instance reporting an unusable tag be encoded at all.
+      expect(toWireFormat(prob)).toEqual({
+        "/Problematic@1": {
+          tag: "BadType@1",
+          state: "original data",
+          error: "something went wrong",
+        },
+      });
+    });
+
+    it("round-trips a `ProblematicValue` whose preserved tag is not a tag", () => {
+      const prob = new ProblematicValue("hole", "original data", "boom");
+      const result = roundTrip(prob) as ProblematicValue;
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect(result.wireTypeTag).toBe("hole");
+      expect(result.state).toBe("original data");
+      expect(result.error).toBe("boom");
     });
 
     it("lenient mode wraps failed handler reconstruction", () => {
@@ -1834,7 +1852,7 @@ describe("JsonCodecEngine", () => {
   describe("malformed wire the engine itself detects", () => {
     /** The wire shapes the engine rejects without any codec being consulted. */
     const CASES: readonly (readonly [string, JsonCodecValue, RegExp])[] = [
-      ["a bare `/` key", { "/": "x" }, /empty tag/],
+      ["a bare `/` key", { "/": "x" }, /malformed tag/],
       ["a `/`-prefixed key in a bare object", { a: 1, "/b": 2 }, /reserved/],
       ["a key this runtime reserves", { ["__proto__"]: 1 }, /reserves/],
       [
