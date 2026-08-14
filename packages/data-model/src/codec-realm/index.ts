@@ -5,5 +5,4 @@ export {
 } from "./interface.ts";
 
 export { createBaseRealmRegistry } from "./createBaseRealmRegistry.ts";
-export { SymbolCodec } from "./SymbolCodec.ts";
 export { RealmCodecEngine } from "./RealmCodecEngine.ts";

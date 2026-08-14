@@ -3,12 +3,14 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import type { Cell } from "../src/cell.ts";
+import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime as RuntimeClass } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type { Runtime } from "../src/runtime.ts";
 import {
   type ElementRun,
+  type SetupRecord,
   trackListSetupRollback,
 } from "../src/builtins/list-element-rollback.ts";
 import type {
@@ -380,6 +382,81 @@ describe("list element rollback", () => {
     expect(entry.lastIndex).toBe(9);
   });
 
+  for (
+    const [label, outcome] of [
+      ["a conflict", conflict],
+      ["a local inconsistency", inconsistent],
+      ["an abort", aborted],
+    ] as const
+  ) {
+    it(`owes the result container its links through ${label}`, () => {
+      const tx = createSettleableTx();
+      const rollback = trackListSetupRollback(
+        tx,
+        createStoppingRuntime().runtime,
+        new Map<string, ElementRun>(),
+      );
+
+      const container: SetupRecord = { needsSetup: true };
+      rollback.setupIssued(container);
+      expect(container.needsSetup).toBe(false);
+
+      tx.settle(outcome);
+
+      // The container survives a stale basis while its links do not, so the
+      // re-run has to issue them again against the container it still holds.
+      expect(container.needsSetup).toBe(true);
+    });
+  }
+
+  it("leaves the result container linked when its reconcile commits", () => {
+    const tx = createSettleableTx();
+    const rollback = trackListSetupRollback(
+      tx,
+      createStoppingRuntime().runtime,
+      new Map<string, ElementRun>(),
+    );
+
+    const container: SetupRecord = { needsSetup: true };
+    rollback.setupIssued(container);
+
+    tx.settle(committed);
+
+    expect(container.needsSetup).toBe(false);
+  });
+
+  it("leaves a result container a later reconcile replaced", () => {
+    const older = createSettleableTx();
+    const newer = createSettleableTx();
+    const elementRuns = new Map<string, ElementRun>();
+    const { runtime } = createStoppingRuntime();
+    const olderRollback = trackListSetupRollback(older, runtime, elementRuns);
+    const newerRollback = trackListSetupRollback(newer, runtime, elementRuns);
+
+    // The shape of the container install in map/filter/flatMap: each reconcile
+    // captures the container it replaced and the one it installed, and gives
+    // back only what it installed.
+    let container = "first";
+    const previousForOlder = container;
+    container = "older";
+    const installedByOlder = container;
+    olderRollback.resultReplaced(() => {
+      if (container === installedByOlder) container = previousForOlder;
+    });
+
+    const previousForNewer = container;
+    container = "newer";
+    const installedByNewer = container;
+    newerRollback.resultReplaced(() => {
+      if (container === installedByNewer) container = previousForNewer;
+    });
+
+    newer.settle(committed);
+    older.settle(aborted);
+
+    expect(container).toBe("newer");
+  });
+
   it("restores a result container it installed", () => {
     const tx = createSettleableTx();
     const rollback = trackListSetupRollback(
@@ -595,6 +672,56 @@ describe("a list coordinator whose first reconcile is discarded", () => {
     };
   }
 
+  // Land a write on a document the first reconcile touched, at the moment that
+  // reconcile commits, so its commit is rejected against a basis that moved
+  // underneath it. Unlike an abort, this rejection is one the scheduler
+  // recovers from by re-running the same reconcile, which is what has to
+  // re-issue the writes the rejected transaction carried.
+  function unsettleFirstElementSetup(): {
+    restore(): void;
+    rejection(): { name?: string } | undefined;
+    elementCells(): Cell<any>[];
+  } {
+    const originalRun = runtime.runner.run;
+    const elementCells: Cell<any>[] = [];
+    let rejection: { name?: string } | undefined;
+    let setups = 0;
+    runtime.runner.run = ((...args: Parameters<typeof originalRun>) => {
+      const run = Reflect.apply(originalRun, runtime.runner, args);
+      const options = args[4] as
+        | { doNotUpdateOnPatternChange?: boolean }
+        | undefined;
+      if (options?.doNotUpdateOnPatternChange !== true) return run;
+      setups++;
+      const elementResult = args[3] as Cell<any>;
+      elementCells.push(elementResult);
+      if (setups !== 1) return run;
+      const reconcileTx = args[0];
+      if (reconcileTx === undefined) {
+        throw new Error("element setup had no transaction");
+      }
+      reconcileTx.addCommitCallback((_settledTx, result) => {
+        rejection = result.error;
+      });
+      const originalCommit = reconcileTx.commit.bind(reconcileTx);
+      reconcileTx.commit = ((
+        ...commitArgs: Parameters<typeof originalCommit>
+      ) => {
+        const moved = runtime.edit();
+        elementResult.withTx(moved).setRaw("moved under the reconcile");
+        return moved.commit().then(() => originalCommit(...commitArgs));
+      }) as typeof reconcileTx.commit;
+      return run;
+    }) as typeof runtime.runner.run;
+    return {
+      restore: () => {
+        runtime.runner.run = originalRun;
+      },
+      rejection: () => rejection,
+      elementCells: () => elementCells,
+    };
+  }
+
   async function runListPattern(
     listOp: ListOp,
     opBody: (element: any) => any,
@@ -628,14 +755,17 @@ describe("a list coordinator whose first reconcile is discarded", () => {
     return result;
   }
 
+  // `backLinksElements` says the coordinator writes the `result` meta that
+  // names an element's owning piece. flatMap links its elements to the pattern
+  // alone, so it has no such link to lose.
   for (
-    const [name, listOp, opBody, expected] of [
-      ["map", "mapWithPattern", (value: number) => value * 2, [6]],
-      ["filter", "filterWithPattern", (value: number) => value > 1, [3]],
+    const [name, listOp, opBody, expected, backLinksElements] of [
+      ["map", "mapWithPattern", (value: number) => value * 2, [6], true],
+      ["filter", "filterWithPattern", (value: number) => value > 1, [3], true],
       ["flatMap", "flatMapWithPattern", (value: number) => [value, value], [
         3,
         3,
-      ]],
+      ], false],
     ] as const
   ) {
     it(`rebuilds a ${name} element and its container`, async () => {
@@ -656,6 +786,67 @@ describe("a list coordinator whose first reconcile is discarded", () => {
         }
       } finally {
         abort.restore();
+      }
+    });
+
+    if (backLinksElements) {
+      it(`re-links a ${name} element to its coordinator when the first reconcile is stale`, async () => {
+        const unsettle = unsettleFirstElementSetup();
+        try {
+          const result = await runListPattern(
+            listOp,
+            opBody,
+            `stale first reconcile element links ${name}`,
+          );
+          const stopReading = result.key("derived").sink(() => {});
+          try {
+            await runtime.scheduler.idleWithPendingCommits();
+            expect(unsettle.rejection()?.name).toBe(
+              "StorageTransactionInconsistent",
+            );
+            // The element's own document names the piece that owns it. A
+            // reader that loses this link cannot start that piece for an event
+            // addressed to the element.
+            const element = unsettle.elementCells()[0];
+            const probeTx = runtime.edit();
+            try {
+              expect(getMetaLink(element.withTx(probeTx), "result"))
+                .toBeDefined();
+            } finally {
+              probeTx.abort("element link probe");
+            }
+          } finally {
+            stopReading();
+          }
+        } finally {
+          unsettle.restore();
+        }
+      });
+    }
+
+    it(`re-links a ${name} container when the first reconcile is stale`, async () => {
+      const unsettle = unsettleFirstElementSetup();
+      try {
+        const result = await runListPattern(
+          listOp,
+          opBody,
+          `stale first reconcile ${name}`,
+        );
+        const stopReading = result.key("derived").sink(() => {});
+        try {
+          await runtime.scheduler.idleWithPendingCommits();
+          // The premise: the reconcile was rejected on its basis, not on
+          // anything else, so the scheduler re-ran it and the re-run is what
+          // has to make the container reachable again.
+          expect(unsettle.rejection()?.name).toBe(
+            "StorageTransactionInconsistent",
+          );
+          expect(await result.key("derived").pull()).toEqual([...expected]);
+        } finally {
+          stopReading();
+        }
+      } finally {
+        unsettle.restore();
       }
     });
   }

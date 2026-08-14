@@ -425,7 +425,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       return splitDefinitions(body).definitions.map((d) => d.address);
     });
 
-    // One resolution per address. `cellFromUrl` answers with no cell for an
+    // One resolution per address. `cellFromUrl` returns no cell for an
     // address that names no piece, which is how an ordinary reference link
     // stays an ordinary reference link.
     const pendingResolutions = pendingAddresses.map((address) =>

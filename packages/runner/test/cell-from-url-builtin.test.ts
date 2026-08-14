@@ -148,7 +148,7 @@ describe("cellFromUrl builtin", () => {
   });
 
   it("clears a resolved cell once the URL stops naming one", async () => {
-    // Reading through the stored link answers undefined for an empty target,
+    // Reading through the stored link returns `undefined` for an empty target,
     // so a guard on that would leave the previous URL's answer in place.
     const id = anExistingCell();
     const url = runtime.getCell<string>(space, "cell-from-url-input", {

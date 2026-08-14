@@ -648,6 +648,26 @@ function isTopmostMemberNode(node: ts.Node): boolean {
   );
 }
 
+/**
+ * True when the member/call spine `resolveSourceRef` walks to reach a root
+ * passes through a call — `table.find(matches)?.mentionedBy`, say, but not
+ * `table.rows.first`.
+ *
+ * Ref resolution consumes that spine without descending into it, so a caller
+ * that resolves a ref in place of visiting the expression leaves whatever
+ * hangs off a call on it — an array method's callback above all — unanalyzed.
+ */
+function memberSpineContainsCall(expression: ts.Expression): boolean {
+  let current = unwrapExpression(expression);
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = unwrapExpression(current.expression);
+  }
+  return ts.isCallExpression(current);
+}
+
 function isDeclarationIdentifier(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (!parent) return false;
@@ -2664,6 +2684,17 @@ export function analyzeFunctionCapabilities(
               markPassthrough(leftRef.root);
             } else {
               trackReadRef(leftRef);
+            }
+            // Resolving the ref stood in for walking the operand, so a call on
+            // its spine has gone unvisited and the reads inside that call's
+            // arguments are still unrecorded — the ref for
+            // `table.find((row) => equals(self, row.topic))?.mentionedBy ?? []`
+            // records `mentionedBy` and drops both `self` and each row's
+            // `topic`, shrinking them out of the schema. Walk it, as the for..of
+            // iterable below does for the same reason; the read tracked above is
+            // a set entry, so recording it twice costs nothing.
+            if (memberSpineContainsCall(node.left)) {
+              visit(node.left);
             }
           } else {
             visit(node.left);

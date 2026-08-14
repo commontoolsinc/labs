@@ -1,6 +1,6 @@
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { REALM_FORMAT, type RealmCodecValue } from "./interface.ts";
-import { SymbolCodec } from "./SymbolCodec.ts";
+import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 
 /**
  * Creates a registry holding this format's determination about JavaScript's
@@ -26,7 +26,10 @@ export function createBaseRealmRegistry(): CodecRegistry<RealmCodecValue> {
   const registry = new CodecRegistry<RealmCodecValue>(REALM_FORMAT);
 
   // The one JS primitive that needs a tagged encoding, registered by `typeof`.
-  registry.registerPrimitive("symbol", new SymbolCodec());
+  registry.registerPrimitive(
+    "symbol",
+    new SymbolCodec<RealmCodecValue>((key) => key),
+  );
 
   // Self-representing primitives: emitted as-is, being their own wire form.
   registry.registerSelfRep("null");

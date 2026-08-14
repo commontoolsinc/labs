@@ -2,9 +2,9 @@
  * Freezing a value all the way down, and asking whether it already is.
  *
  * Both walks are memoized in a `WeakSet`, which is what makes the ordinary
- * case cheap: a value frozen once answers in constant time ever after, and a
- * primitive never needs asking at all. Those answers are given before any
- * per-walk state is allocated, so the cheap path costs nothing.
+ * case cheap: a value frozen once takes constant time ever after, and a
+ * primitive never needs asking at all. Both fast paths run before any per-walk
+ * state is allocated, so the cheap path costs nothing.
  *
  * A fabric instance keeps its contents private, so neither walk can descend
  * into one directly. Each calls the instance's own protocol member and passes
@@ -95,7 +95,7 @@ function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
  * Handles circular references and sparse arrays.
  */
 export function isDeepFrozen(value: unknown): boolean {
-  // Fast leaf paths first, so a primitive or already-cached value answers
+  // Fast leaf paths first, so a primitive or already-cached value returns
   // without allocating the cycle-tracking set or the recursion closure below.
   if (isNecessarilyOrKnownDeepFrozen(value)) {
     return true;
@@ -278,7 +278,7 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   }
 
   // The frozen-ness question goes first because it is the cheap one, and a
-  // `false` from it settles the conjunction. `isDeepFrozen()` answers in
+  // `false` from it settles the conjunction. `isDeepFrozen()` returns in
   // constant time for anything not frozen at its root, and memoizes every
   // subtree it does walk; `isFabricValue()` walks the whole tree afresh on
   // every call. With the walk second, a mutable tree -- what the write path

@@ -4,7 +4,7 @@ import type { FabricCodec, ReconstructionContext } from "./interface.ts";
 
 /**
  * Base class for `FabricCodec` which provides commonly-needed functionality:
- * the matching members, and a `tagForValue()` that answers with the codec's one
+ * the matching members, and a `tagForValue()` that returns the codec's one
  * recognized tag.
  *
  * It is abstract in `encode()` and `decode()` and, deliberately, in identity:

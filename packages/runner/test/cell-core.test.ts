@@ -320,7 +320,7 @@ describe("Cell", () => {
     const arrWithToJSON = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
     arrWithToJSON.toJSON = () => "custom-array-value";
 
-    // An array is answered by the array rule whatever it carries, and `toJSON`
+    // An array is handled by the array rule whatever it carries, and `toJSON`
     // is a named own property, which that rule rejects. Converting by it would
     // mean storing an array by the very property that disqualifies it.
     expect(() => c.set({ arr: arrWithToJSON })).toThrow(

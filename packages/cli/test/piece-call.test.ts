@@ -74,7 +74,7 @@ const callerSession = "ses:piece-call-test";
 describe("executePieceCallable", () => {
   it("reports not-found when the piece cell has no schema-cast surface", async () => {
     // The forced-stream probe's type guard: a piece cell without asSchema
-    // cannot take the cast, so the third resolution path answers null and
+    // cannot take the cast, so the third resolution path returns null and
     // the resolver reports not-found instead of crashing on the probe.
     const emptyChild: Record<string, unknown> = {
       schema: undefined,
@@ -2474,7 +2474,7 @@ describe("piece call wait control", () => {
     });
   });
 
-  it('refuses a bound that spells "don\'t wait"', () => {
+  it('refuses a bound that means "don\'t wait"', () => {
     expect(() => resolveWaitControl({ wait: 0 })).toThrow(/positive/);
     expect(() => resolveWaitControl({ wait: -1 })).toThrow(/positive/);
     expect(() => resolveWaitControl({ wait: Number.NaN })).toThrow(/positive/);
@@ -4803,7 +4803,7 @@ describe("renderPieceCallOutcome", () => {
       .toBeLessThan(hinted[0].indexOf("CF_INVOCATION_SESSION"));
   });
 
-  it("spells a non-space receipt scope into the collect address", () => {
+  it("writes a non-space receipt scope into the collect address", () => {
     // The scope is part of the address: reopening a session-scoped cell
     // without it resolves the space-scoped instance — a different cell — so
     // the hint carries the id@scope form parseScopedId accepts. The bare

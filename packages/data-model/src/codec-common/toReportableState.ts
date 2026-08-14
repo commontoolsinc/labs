@@ -30,7 +30,7 @@ const MAX_RENDERED_LENGTH = 200;
  * runs on the failure path, where throwing does not surface a second problem
  * so much as replace the first one, the original error being lost in favor of
  * whatever the predicate did. `toCompactDebugString()` needs no such wrapping,
- * already answering `"<unrenderable debug string>"` for anything it cannot
+ * already returning `"<unrenderable debug string>"` for anything it cannot
  * render, and is the floor this rests on.
  *
  * @param state - The state at fault, of any type whatsoever.

@@ -13,7 +13,9 @@ function recordingFetch(): {
 } {
   let seen: Headers | undefined;
   return {
-    fetch: (_input, init) => {
+    // Parameters written out for the reason withGatewayProvenance gives:
+    // `typeof fetch` yields an `init` whose `headers` cannot be read.
+    fetch: (_input: RequestInfo | URL, init?: RequestInit) => {
       seen = new Headers(init?.headers);
       return Promise.resolve(new Response(null, { status: 204 }));
     },

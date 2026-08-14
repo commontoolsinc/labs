@@ -699,7 +699,7 @@ export function comparableState(value: unknown): unknown {
  * rest of the object.
  *
  * A schema-driven read resolves nothing at a `{"type": "unknown"}` position —
- * `schemaTypeValidity` in `traverse.ts` answers `Unknown` there, and the value
+ * `schemaTypeValidity` in `traverse.ts` returns `Unknown` there, and the value
  * comes back `undefined` WHATEVER the document holds. That is the right answer
  * for a reader; it is the wrong one for this comparison, because "the schema
  * did not resolve it" then reads exactly like "the document does not hold it",
@@ -714,7 +714,7 @@ export function comparableState(value: unknown): unknown {
  * that stranded any of them would have replayed clean.
  *
  * `required` goes for a different reason, measured on the committed topics
- * fixture. A schema-driven read answers `undefined` for the WHOLE object when a
+ * fixture. A schema-driven read returns `undefined` for the WHOLE object when a
  * required property does not resolve — and a pattern's own result schema marks
  * its session-local drafts required: `topic.tsx` requires `bodyDraft`,
  * `commentDraft`, `editingBody`, `linkUrlDraft` and `linkLabelDraft`, each a

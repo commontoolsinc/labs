@@ -167,6 +167,20 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   synced(): Promise<void>;
 
   /**
+   * Issue an ordered-after round trip on every open space connection, so that
+   * any subscription fan-out the server has already sent has been received and
+   * applied before this resolves. Unlike `synced()`, which waits only on this
+   * replica's own pending syncs and commits, this waits on the delivery of a
+   * peer's committed writes that the server has begun fanning out. A WebSocket
+   * delivers a connection's frames in order, so a fresh round trip on that
+   * connection cannot resolve ahead of fan-out the server sent earlier on it.
+   * Multi-runtime test harnesses use it to make one runtime observe another's
+   * committed state deterministically; a manager with no open remote
+   * connection resolves immediately.
+   */
+  pullOpenSpacesToHead(): Promise<void>;
+
+  /**
    * A throwable `AuthorizationError` when `space` is under a permanent
    * authorization denial (an ACL shortfall, an audience or protocol mismatch),
    * or undefined when it is authorized or was never opened. Scoped to one space
@@ -1212,7 +1226,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * any of it. A view also keeps the transaction it was created with, so the
    * value it describes stays the value that was there when it was taken, and
    * reading after the transaction finishes throws rather than quietly
-   * answering from committed state.
+   * reading from committed state.
    *
    * Unmarked, every read behaves exactly as it did before lazy materialization
    * existed — including the standing-handle semantics that long-lived

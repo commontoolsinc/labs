@@ -802,8 +802,9 @@ Deno.test("memory v2 accepts batched no-op scheduler observations", async () => 
 // basisSeq) is based at the HIGHEST element, so a foreign write before the
 // top layer's resolution does not drop it — the CT-1910 over-advance,
 // retained for that shape. A read declaring `basisSeq` scans the full
-// interval with predecessor-only own-session exclusion: the same foreign
-// write now drops the observation, while own predecessor layers do not.
+// interval with declared-set own-session exclusion: the same foreign
+// write now drops the observation, own layers the array names do not,
+// and an own layer the array OMITS drops it like a foreign write.
 Deno.test("memory v2 scheduler observations resolve array pending reads at the highest layer", async () => {
   const { engine, path } = await createEngine();
   const sessionId = "session:scheduler-array-reads";
@@ -911,8 +912,8 @@ Deno.test("memory v2 scheduler observations resolve array pending reads at the h
           },
           {
             // Repaired shape, coherent: basis 2 reflects the foreign write;
-            // the only writes above it are the session's own predecessor
-            // layers (localSeq 1 and 2, both below 104), excluded — kept.
+            // the only writes above it are the session's own layers
+            // (localSeq 1 and 2), both NAMED by the array, excluded — kept.
             localSeq: 104,
             reads: {
               confirmed: [],
@@ -925,6 +926,25 @@ Deno.test("memory v2 scheduler observations resolve array pending reads at the h
             },
             schedulerObservation: observationForAction(
               "pattern.tsx:array-read:true-basis-kept",
+            ),
+          },
+          {
+            // The same basis, but the array omits layer 2 — whose durable
+            // patch sits in (2, head]. The declared-set exclusion leaves it
+            // unexcluded, so the observation drops; a predecessor mask
+            // (localSeq 2 below 105) would have wrongly kept it.
+            localSeq: 105,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:sched-doc",
+                path: toDocumentPath([]),
+                localSeq: [1],
+                basisSeq: 2,
+              }],
+            },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:array-read:omitted-durable",
             ),
           },
         ],
@@ -950,6 +970,11 @@ Deno.test("memory v2 scheduler observations resolve array pending reads at the h
           reason: "stale-pending-read",
         },
         { localSeq: 104, status: "kept", reason: undefined },
+        {
+          localSeq: 105,
+          status: "dropped",
+          reason: "stale-pending-read",
+        },
       ],
     );
   } finally {

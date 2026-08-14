@@ -33,8 +33,9 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
  *   engine from the same build, so there is nothing for a format tag to
  *   identify and no version for it to guard.
  *
- * `symbol` is absent: cloning refuses one outright, which is why this format
- * carries a `SymbolCodec` of its own.
+ * `symbol` is absent: cloning refuses one outright, so this format registers
+ * the shared `SymbolCodec` and a symbol crosses under a tag like any other
+ * value a transport cannot carry directly.
  */
 export type RealmCodecValue =
   | null

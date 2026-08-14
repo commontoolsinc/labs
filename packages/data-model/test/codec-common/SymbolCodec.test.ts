@@ -3,22 +3,41 @@
  * of them nameable.
  *
  * An interned symbol is fully described by its key, so encoding is writing
- * that key down and decoding is asking the registry for the same symbol back
- * -- the round trip returns the identical instance rather than an equal one.
- * A unique symbol has no key, and is refused because nothing about it could be
- * written down and recovered.
+ * that key down and decoding is asking the registry for the same symbol back.
+ * Encoding and decoding here happen in one realm, which is why the round trip
+ * returns the identical instance: `Symbol.for()` reaches one registry per
+ * agent, and what a codec promises across a boundary is internedness rather
+ * than identity. A unique symbol has no key, and is refused because nothing
+ * about it could be written down and recovered.
+ *
+ * The codec is generic over the encoded type, so this instantiates it at one
+ * and the behavior is the same at any.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { SymbolCodec } from "@/codec-json/SymbolCodec.ts";
+import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
+
+// An `Encoded` that cannot hold a registry key cannot be constructed at, since
+// the format has to hand in the embedding and no honest one exists. This covers
+// `never` as well, which no `extends` clause can exclude. Each line is its own
+// differential: `@ts-expect-error` fails when the line it marks stops erroring.
+// @ts-expect-error -- no `(key: string) => number` exists.
+const _refusesNumber = new SymbolCodec<number>((key) => key);
+// @ts-expect-error -- nor a `(key: string) => never`.
+const _refusesNever = new SymbolCodec<never>((key) => key);
+// A format cannot wrap the key in something its own union admits either, since
+// `decode()` accepts only a string and would refuse what that emitted.
+// @ts-expect-error -- an object is not `JsonCodecValue & string`.
+const _refusesAWrapper = new SymbolCodec<JsonCodecValue>((key) => ({ key }));
 
 describe("SymbolCodec", () => {
-  const codec = new SymbolCodec();
+  const codec = new SymbolCodec<JsonCodecValue>((key) => key);
   const expectedTag = CODEC_TYPE_TAGS.Symbol;
   const context = EMPTY_RECONSTRUCTION_CONTEXT;
 

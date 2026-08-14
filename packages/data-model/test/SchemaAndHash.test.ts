@@ -7,7 +7,7 @@
  *
  * A schema may legitimately be absent, or be one of the boolean schemas, and
  * absence is where the two readers differ on purpose: one throws and the other
- * answers `undefined`, so a caller states up front which it is prepared for
+ * returns `undefined`, so a caller states up front which it is prepared for
  * rather than discovering it.
  */
 

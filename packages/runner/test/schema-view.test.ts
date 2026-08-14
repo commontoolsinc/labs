@@ -473,9 +473,9 @@ describe("schema-view", () => {
     // An optional handle — `Cell<T> | undefined` — generates as a union whose
     // one branch carries `asCell` and whose other is the absent case, and the
     // branches arrive as `$ref`s into `$defs`. Both facts hid the marker: a
-    // union answers `hasAsCell` only when EVERY branch declares one, and a bare
-    // `$ref` declares nothing until it is resolved. A reader got a plain value
-    // where the pattern declared a handle.
+    // union satisfies `hasAsCell` only when EVERY branch declares one, and a
+    // bare `$ref` declares nothing until it is resolved. A reader got a plain
+    // value where the pattern declared a handle.
     it("returns a Cell for an optional handle declared through $ref branches", async () => {
       const read = await seeded(
         "optional-handle",
@@ -988,7 +988,7 @@ describe("schema-view", () => {
     });
 
     it("still reads a property whose shape the narrowing cannot see through", async () => {
-      // `schemaAtPath` also answers `false` where it cannot read a child out of
+      // `schemaAtPath` also returns `false` where it cannot read a child out of
       // the shape it was given. That is not a rejection, and the subschema is
       // still reachable below it.
       const read = await seeded(

@@ -416,9 +416,9 @@ describe("cloneIfNecessary()", () => {
 
   describe(`indirect \`Array\` instances`, () => {
     // An `Array` subclass is not a `FabricValue`, so the deep-frozen identity
-    // optimization must not answer for one: returning it as-is would carry a
+    // optimization must not apply to one: returning it as-is would carry a
     // live prototype into stored state, where an overridden `Symbol.iterator`
-    // answers content that the indices never show.
+    // yields content that the indices never show.
     class Smuggler extends Array<unknown> {
       override *[Symbol.iterator](): Generator<unknown> {
         yield "smuggled";

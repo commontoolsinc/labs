@@ -5,7 +5,7 @@ import type { FabricExecValue, toEncodableForm } from "./types.ts";
  * `toEncodableForm`. `JSON.stringify` consults this name and no other.
  *
  * Both a module and its factory carry it. A factory because pattern source
- * holds one, so `JSON.stringify(someFactory)` has to keep answering. A module
+ * holds one, so `JSON.stringify(someFactory)` has to keep working. A module
  * because `JSON.stringify` reaches one THROUGH A GRAPH: the internal graph
  * (`serializePatternGraph`) is the in-memory instantiation representation and
  * so holds live modules, whose `implementation` is a function. Absent this,

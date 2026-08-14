@@ -65,7 +65,7 @@ export function cellFromUrl(
     const cellWithTx = cell.withTx(tx);
     if (id === undefined) {
       // The SLOT, not what it points at: reading through a stored link to an
-      // empty cell answers undefined, and a guard on that would leave the
+      // empty cell returns `undefined`, and a guard on that would leave the
       // previous URL's link in place after the input stopped naming anything.
       if (cellWithTx.getRaw() !== undefined) cellWithTx.set(undefined);
     } else {

@@ -1752,7 +1752,7 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      // Annotated rather than inferred: `processDefaultValue()` answers `any`,
+      // Annotated rather than inferred: `processDefaultValue()` returns `any`,
       // and assigning that back to `currentValue` would discard the narrowing
       // this block exists to establish.
       const created: FabricValue[] =
@@ -1835,7 +1835,7 @@ export class CellImpl<T extends FabricValue>
       diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
       const resolvedSchema = resolveSchema(this.schema);
       // Annotated for the same reason as in `push()`: `processDefaultValue()`
-      // answers `any`, which would discard the narrowing on assignment.
+      // returns `any`, which would discard the narrowing on assignment.
       const created: FabricValue[] =
         isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
@@ -2074,7 +2074,7 @@ export class CellImpl<T extends FabricValue>
     const array = got as ElemT[];
     // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
     // (or `FabricInstance`) ref to `areLinksSame`, which parses both
-    // operands as links and answers `false` when either is not one — so a
+    // operands as links and returns `false` when either is not one — so a
     // fabric-valued ref matches only by reference identity, never by value,
     // and the call otherwise silently no-ops. The sibling `removeByValue`
     // has the right shape: link comparison for cells, `valueEqual` (which
@@ -3476,8 +3476,9 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
  *
  * `ancestors` holds the ancestors of the value being converted, so what it
  * recognizes is a cycle. A value reachable twice by different paths is not one:
- * it is shared, and each position gets its own conversion. Answering a shared
- * reference with a back-link would rewrite one of its positions into a pointer
+ * it is shared, and each position gets its own conversion. Returning a
+ * back-link for a shared reference would rewrite one of its positions into a
+ * pointer
  * at the other -- and a graph holds plenty of shared structure that is nobody's
  * cycle, an empty `path: []` array reachable from every alias in it being the
  * common case.
@@ -3513,10 +3514,10 @@ export function convertCellsToLinks(
   ancestors.set(original, path); // ...which needs to be tracked for circularity.
 
   // Everything past the line above runs inside this `try`, so that EVERY way
-  // out clears the ancestor just recorded -- the exits that answer a value
+  // out clears the ancestor just recorded -- the exits that return a value
   // without descending into it as much as the ones that recur. An exit that
   // skipped the clearing would leave the value an ancestor of all the rest of
-  // the walk, and the next position holding it would be answered as a cycle.
+  // the walk, and the next position holding it would be taken for a cycle.
   try {
     // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
     // arrays it returns. That symbol is machinery, not content, and an array

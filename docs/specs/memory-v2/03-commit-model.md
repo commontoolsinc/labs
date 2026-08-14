@@ -163,9 +163,9 @@ interface PendingRead {
   // space: the seq of the last accepted write to the document that the
   // client's confirmed view reflected at build time (0 for a document its
   // subscriptions never covered). When present, the staleness check scans
-  // the FULL interval from this basis, excluding only the session's TRUE
-  // PREDECESSOR commits — localSeq below the reader's — per §3.6.3 (the
-  // CT-1910 repair). When absent (a legacy client),
+  // the FULL interval from this basis, excluding only the own-session
+  // layers the `localSeq` array names, per §3.6.3 (the CT-1910 repair
+  // with declared-set validation). When absent (a legacy client),
   // staleness is based at the resolution of the HIGHEST localSeq element —
   // the document's top-of-stack layer below the reader, which the array
   // MUST include (§3.5). Servers ignore unknown fields, so clients attach
@@ -204,11 +204,24 @@ therefore records its FULL dependency set directly: the read's `localSeq`
 array names every pending layer of the document that the reader's
 materialized view sat on, in ascending order. Each element imposes a
 resolution requirement; the highest element — the view's top-of-stack layer
-— is the legacy staleness basis when no `basisSeq` is declared (§3.6.3). The
-client mirrors the server cascade at drop time: when a pending commit's
-optimistic writes are dropped, every queued or in-flight commit whose
-recorded dependency set names the dropped `localSeq` is locally rejected
-without waiting for the server's per-commit verdict.
+— is the legacy staleness basis when no `basisSeq` is declared (§3.6.3).
+
+The client mirrors the server cascade from the moment a rejection is KNOWN,
+not from the moment the layer leaves the overlay. A client that keeps a
+rejected layer in its overlay past the verdict — to hold the drop until the
+conflict's read repair lands, so that a retry rebuilds against repaired
+confirmed state — is still building views over that layer meanwhile, and so
+still names it. It MUST reject such a commit locally rather than send it,
+because the server can only answer it with "pending dependency not
+resolved"; the same applies to every queued or in-flight commit naming a
+`localSeq` whose optimistic writes are dropped. Deciding at the verdict
+rather than at the drop is what bounds the cost: otherwise one conflict
+spawns a doomed round trip per commit minted anywhere in that window, which
+is a run of them under sustained write load, and the window is bounded only
+by a timer the client may be in no position to fire. The local rejection's
+readiness gate waits for the dependency's drop, so the retry rebuilds
+against the repaired base rather than against the dead layer that doomed
+it.
 
 Completeness is relative to the VIEW, not to the session's commit history,
 so the array may be non-contiguous in the session's `localSeq` space. A
@@ -218,12 +231,18 @@ to the observed value and is legitimately absent from the array, and the
 server imposes no resolution requirement on a layer that is not named. This
 is what lets a client process a rejection eagerly and still commit later
 work built over the surviving layers, rather than dooming every dependent
-minted after the verdict. The soundness burden sits with the client:
-omitting a layer whose optimistic value DID contribute to the observed view
+minted after the verdict. The server verifies the DURABLE half of the
+completeness claim: the staleness scan's declared-set exclusion (§3.6.3)
+rejects a read whose omitted own layer left an overlapping durable write in
+the scan interval, so an omission is only ever accepted when the omitted
+layer contributed nothing durable — which a processed rejection never does.
+What remains on the client's honor is only the never-durable half: omitting
+a REJECTED layer whose optimistic value DID contribute to the observed view
 fabricates an observation (the CT-1872 1c phantom shape — an INV-1
 violation, `09-invariants.md`), exactly as a fabricated confirmed read
-would. Omission means "my view did not include this layer", never "I would
-rather not mention it".
+would, and is unverifiable server-side because the rejected value never
+crossed the wire. Omission means "my view did not include this layer",
+never "I would rather not mention it".
 
 The dependency array MUST include the view's top-of-stack pending layer
 below the reader — the highest layer surviving in the overlay when the view
@@ -346,18 +365,31 @@ staleness scan (§3.6.1/§3.6.2) then runs once per read, from a basis chosen
 by the read's shape:
 
 - **True basis (`basisSeq` present).** The scan covers the full interval
-  `(basisSeq, head]` and excludes only the reader's own session's TRUE
-  PREDECESSOR commits — those with `localSeq` below the reader's, the
-  accepted layers its materialized view included. The exclusion is what
-  makes the true basis sound, and its predecessor restriction is what keeps
-  it sound without trusting wire order: an own write with a higher
-  `localSeq` that was admitted first (an out-of-order submission) was not
-  in the reader's view and conflicts exactly like a foreign write. Foreign
+  `(basisSeq, head]` and excludes only the own-session layers the read's
+  dependency array NAMES — the accepted layers whose inclusion in the
+  reader's materialized view the array attests. The exclusion is what
+  makes the true basis sound, and its declared-set restriction is what
+  keeps it sound without trusting either wire order or client discipline:
+  any own write the array does not name conflicts exactly like a foreign
+  write, whether it is a higher `localSeq` admitted first (an out-of-order
+  submission) or an omitted layer whose write is durably integrated — a
+  view missing durable state it never declared away. The server thereby
+  verifies that `basisSeq` plus the named layers fully account for the
+  document's durable history at the read path; §3.5's view-relative
+  omission allowance stays sound because a processed REJECTION left no
+  durable write for the scan to find. (The converse — an omitted rejected
+  layer whose optimistic value DID reach the view — is unverifiable from
+  durable history and remains in the fabricated-read trust class.) Foreign
   writes in the interval conflict — including those between the reader's
   confirmed basis and the top layer's resolution seq, which the legacy
   basis never scanned. A `basisSeq` greater than the server's current head
   is a protocol error; values at or below head are trusted, like a
   confirmed read's `seq` (lying corrupts only the session's own data).
+  The declared-set restriction is server-side VALIDATION of the array's
+  completeness attestation, not an extension of what a client may omit:
+  the sanctioned omission remains a processed rejection (§3.5), and a
+  client has nothing to gain from omitting a live layer — the scan
+  converts exactly that bug into a retryable conflict.
 - **Legacy basis (`basisSeq` absent).** The scan is based at the HIGHEST
   element's resolution seq. Writes landing between the reader's confirmed
   basis and that seq are not scanned — the pending-read basis over-advance

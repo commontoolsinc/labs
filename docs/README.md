@@ -20,7 +20,7 @@ additionally carry descriptive JSDoc.
 [`development/code-comment-style.md`](development/code-comment-style.md) is the
 guide to both kinds: what earns a comment, what a doc comment carries, the
 markup they share with error and log messages, and the shapes that make a
-comment go stale or mislead. The spelling rule below reaches comments too.
+comment go stale or mislead. The word-choice rule below reaches comments too.
 
 ## Live documentation
 
@@ -96,8 +96,8 @@ flavors do the job, and code lifted from this repository does it worse for two
 reasons that compound. Real code moves, and nothing about moving it brings
 anyone back to the document that quoted it. And while it sits there it answers
 searches for the identifier it names, with a hit that is not a use of it —
-the same reason [the spelling rule](#spelling) exists, pointed at a different
-target.
+the same reason [the word-choice rule](#word-choice) exists, pointed at a
+different target.
 
 An example that documents a specific hazard is the exception, because the
 hazard is the real thing: a guide to what goes wrong with a particular
@@ -106,22 +106,18 @@ knowingly. `deno task check-docs` covers only the first half of the first one,
 catching drift that stops the block compiling and never drift that compiles
 and is no longer true.
 
-## Spelling
+## Word choice
 
 Prose written here — comments, documents, error and log messages, test
-descriptions — uses American spellings: `behavior`, `color`, `center`,
-`serialize`, `analyze`, `gray`.
+descriptions — standardizes on one spelling per word (American: `behavior`,
+`color`, `serialize`) and one word per concept (`returns`, not `answers`). A
+search for a word then finds all of it, and two files stating the same kind of
+fact read as though they do.
 
-This is standardization rather than a claim about which English is better: one
-spelling per word means a search for a word finds all of it, and this is the
-variety already in overwhelming use in these files.
-
-Two carve-outs. Material quoted from outside — a dependency's name, a message
-relayed from another system, a specification's wording, a data file's contents
-— keeps whatever spelling it arrived with. And an identifier vocabulary
-already established in the codebase, `cancelled` among them, is a rename
-rather than a spelling fix: match the surrounding code, and treat a change to
-it as the code change it is.
+The rule, its carve-outs, and the list of settled pairs are in
+[`development/DEVELOPMENT.md`](development/DEVELOPMENT.md#word-choice). It lives
+with the coding standards because code is where it applies most; documents are
+held to the same standard.
 
 ## Map of this tree
 

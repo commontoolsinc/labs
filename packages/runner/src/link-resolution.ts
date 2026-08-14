@@ -82,7 +82,7 @@ const recordDereferenceHop = (
 // caps *which* link scopes may be followed; it must never be copied onto the
 // followed link itself.
 //
-// `link.schema` describes the LEAF, so it only answers for a hop found at the
+// `link.schema` describes the LEAF, so it only applies to a hop found at the
 // full path. A hop found at an ancestor is governed by whatever that ancestor's
 // schema declared, which `key()` recorded in `scopeCaps` on its way down —
 // narrowing had already replaced the declaring schema by the time we get here

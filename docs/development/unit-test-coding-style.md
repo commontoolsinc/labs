@@ -159,7 +159,9 @@ Where the fact is a return value, the verb is **"returns"**. Specifically not
 "answers": that casts the call as a question put to the code, which is a
 metaphor standing in for a word that is already exact and already shorter. It
 also splits the vocabulary of the suite, so that two files pinning the same
-kind of fact no longer read as though they do.
+kind of fact no longer read as though they do. This is one instance of the
+[word choice](DEVELOPMENT.md#one-word-per-concept) the repository standardizes
+on, which holds outside tests as well.
 
 Mark up descriptions in Markdown, the same as a comment — backticks around code
 and code-like things. The one exception is a `describe()` whose title would

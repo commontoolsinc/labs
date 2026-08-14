@@ -36,7 +36,10 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
-import type { ExecutedPieceCallable } from "../lib/piece.ts";
+import type {
+  ExecutedPieceCallable,
+  PieceCallablesListing,
+} from "../lib/piece.ts";
 import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
 import type {
   InvocationIdentity,
@@ -124,6 +127,105 @@ export function formatPatternIdentity(
   return patternRef === undefined
     ? "<unknown>"
     : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
+}
+
+/** The parenthesised notes under a `cf piece verbs` listing, in print order.
+ *
+ * A listing can be short in two ways, and neither may be silent — the hidden
+ * counts always print, and so does the report that the compiled pattern could
+ * not be read. The second is not recoverable with `--all`: nothing in this
+ * command can name a verb the pattern would have named.
+ *
+ * Held apart from the command action so the exact text a caller sees is
+ * assertable without driving cliffy. */
+export function verbListingNotes(
+  listing: PieceCallablesListing,
+  partition: { wrapper: number; deprecated: number },
+  all: boolean,
+): string[] {
+  const notes: string[] = [];
+  if (partition.wrapper + partition.deprecated > 0 && !all) {
+    notes.push(
+      `${partition.wrapper} wrapper, ${partition.deprecated} deprecated hidden; --all lists them`,
+    );
+  }
+  if (listing.incomplete === "pattern-unavailable") {
+    notes.push(
+      "the pattern could not be read, so verbs its result type omits are missing; the verbs listed are still callable",
+    );
+  }
+  return notes;
+}
+
+/** Every line `cf piece verbs` prints for the human-readable view, in order.
+ *
+ * The whole view, not a fragment of it: a caller reads the omission notes
+ * against the rows above them, so a test that cannot see both together cannot
+ * tell a listing that admits it is short from one that does not. */
+export function verbListingLines(
+  listing: PieceCallablesListing,
+  all: boolean,
+): string[] {
+  const partition = partitionVerbListing(listing.verbs);
+  const shown = all ? listing.verbs : partition.shown;
+  const notes = verbListingNotes(listing, partition, all);
+  // The hidden-count note rides the placeholder when there is no table to
+  // hang it under; anything else would print a bare "(...)" with nothing
+  // above it to qualify.
+  if (shown.length === 0) {
+    const hiddenNote = partition.wrapper + partition.deprecated > 0 && !all
+      ? notes[0]
+      : undefined;
+    return [
+      hiddenNote !== undefined
+        ? `<no callable verbs shown> (${hiddenNote})`
+        : "<no callable verbs>",
+      ...notes.filter((note) => note !== hiddenNote).map((note) => `(${note})`),
+    ];
+  }
+  return [
+    ...(listing.pattern
+      ? [`PATTERN ${formatPatternIdentity(listing.pattern)}`]
+      : []),
+    Table.from([
+      ["NAME", "KIND", "ON", "MARKS"],
+      ...shown.map((v) => [
+        v.name,
+        v.kind,
+        v.on,
+        [
+          ...(v.tier === "wrapper" ? ["wrapper"] : []),
+          ...(v.deprecated ? ["deprecated"] : []),
+        ].join(","),
+      ]),
+    ]).toString(),
+    ...notes.map((note) => `(${note})`),
+  ];
+}
+
+/** The `--json` payload for `cf piece verbs`: the listing as
+ * `listPieceCallables` returned it, narrowed to the rows actually shown, plus
+ * the hidden counts when any row was withheld. `incomplete` rides through
+ * untouched — a machine reader needs the lower-bound flag more than a human
+ * does, because it has no listing text to read it off. */
+export function verbListingJson(
+  listing: PieceCallablesListing,
+  all: boolean,
+): Record<string, unknown> {
+  const partition = partitionVerbListing(listing.verbs);
+  const hiddenCount = partition.wrapper + partition.deprecated;
+  return {
+    ...listing,
+    verbs: all ? listing.verbs : partition.shown,
+    ...(hiddenCount > 0 && !all
+      ? {
+        hidden: {
+          wrapper: partition.wrapper,
+          deprecated: partition.deprecated,
+        },
+      }
+      : {}),
+  };
 }
 
 export function renderPieceSummaries(
@@ -771,7 +873,7 @@ const READBACK_FLAGS: ReadonlyArray<
  * of the default (flag parity, so a script can state its intent), which makes
  * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
  * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
- * names the patience. A non-positive bound is refused: it would spell
+ * names the patience. A non-positive bound is refused: it would mean
  * "don't wait" while claiming to be a wait.
  *
  * `--no-wait` also refuses every flag that shapes or annotates the outcome —
@@ -2056,54 +2158,18 @@ after --. Handlers interpret piped input when no input argument is present.`,
     // Default view: wrapper-tier (session-UI affordances) and deprecated
     // verbs are omitted, LOUDLY — the hidden counts always print, so nothing
     // is silently invisible. Rows carry their marks in both views, and
-    // `cf piece call` never consults them.
-    const partition = partitionVerbListing(listing.verbs);
-    const hiddenCount = partition.wrapper + partition.deprecated;
-    const shown = options.all ? listing.verbs : partition.shown;
-    const omission = hiddenCount > 0 && !options.all
-      ? `${partition.wrapper} wrapper, ${partition.deprecated} deprecated hidden; --all lists them`
-      : undefined;
+    // `cf piece call` never consults them. The same rule covers the other way
+    // this listing can be short, which `verbListingNotes` prints beside them.
     if (options.json) {
-      render({
-        ...listing,
-        verbs: shown,
-        ...(omission !== undefined
-          ? {
-            hidden: {
-              wrapper: partition.wrapper,
-              deprecated: partition.deprecated,
-            },
-          }
-          : {}),
-      }, { json: true });
+      render(verbListingJson(listing, !!options.all), { json: true });
       return;
     }
-    if (shown.length === 0) {
-      render(
-        omission !== undefined
-          ? `<no callable verbs shown> (${omission})`
-          : "<no callable verbs>",
-      );
-      return;
-    }
-    if (listing.pattern) {
-      render(`PATTERN ${formatPatternIdentity(listing.pattern)}`);
-    }
-    render(
-      Table.from([
-        ["NAME", "KIND", "ON", "MARKS"],
-        ...shown.map((v) => [
-          v.name,
-          v.kind,
-          v.on,
-          [
-            ...(v.tier === "wrapper" ? ["wrapper"] : []),
-            ...(v.deprecated ? ["deprecated"] : []),
-          ].join(","),
-        ]),
-      ]).toString(),
-    );
-    if (omission !== undefined) render(`(${omission})`);
+    for (const line of verbListingLines(listing, !!options.all)) render(line);
+    const shown = options.all
+      ? listing.verbs
+      : partitionVerbListing(listing.verbs).shown;
+    // No rows means no per-verb help to point at.
+    if (shown.length === 0) return;
     hint(
       cliText(
         `TIP: --json includes each verb's input schema; 'cf piece call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,

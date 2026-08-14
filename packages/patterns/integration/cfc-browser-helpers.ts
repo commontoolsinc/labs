@@ -283,7 +283,7 @@ const fillAndVerify = async (
 /**
  * Which elements a marked click is about to be aimed at.
  *
- * A finder answers with the elements to mark, in the order their tokens were
+ * A finder returns the elements to mark, in the order their tokens were
  * supplied, or `undefined` when the page does not yet present all of them. It
  * decides only which elements qualify — being rendered, surviving a settle, and
  * carrying the mark are {@link settleAndMarkTargets}'s business, and every
