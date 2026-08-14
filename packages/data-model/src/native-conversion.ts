@@ -462,9 +462,9 @@ function fabricFromNativeValueInternal(
   }
 
   // Primitives, `null`, and `undefined` don't need recursion or freezing.
-  // Spelled as a `typeof` test rather than `!isObjectOrArray()` so the non-object
-  // arms of `FabricValueLayer` narrow: every non-object layer value is
-  // already a `FabricValue`.
+  // Written as a `typeof` test rather than `!isObjectOrArray()` so the
+  // non-object arms of `FabricValueLayer` narrow: every non-object layer
+  // value is already a `FabricValue`.
   //
   // Nothing is recorded in `converted` here. Reaching this means `original`
   // was not a record: every record the shallow conversion accepts returns an

@@ -248,7 +248,7 @@ describe("BaseCodecEngine", () => {
         expect(engine.decode(UNCLAIMED, CONTEXT)).toBeInstanceOf(UnknownValue);
       });
 
-      it("carries tag and state however the codec spelled the rejection", () => {
+      it("carries tag and state however the codec reported it", () => {
         // Throwing and returning a `ProblematicValue` are the codec author's
         // choice and say nothing about what a caller wants, so a strict
         // failure must look the same either way. It did not: the returned
