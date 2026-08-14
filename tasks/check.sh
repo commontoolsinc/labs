@@ -14,8 +14,12 @@ baseDir="${cmdDir%/*}" # Parent of `cmdDir`, repo root in this case.
 cd "${baseDir}"
 
 # The exact Deno version for this repository is pinned in mise.toml, which mise
-# installs (see README.md). Versions inside the range below are accepted, with
-# a warning when the version differs from the pin.
+# installs (see README.md). A run under any other version stops before
+# checking: different Deno versions carry different TypeScript compilers,
+# which can return different verdicts on one tree, and an off-pin verdict is
+# not the verdict this check exists to report. DENO_CHECK_VERSION_LENIENT=1
+# accepts an off-pin version inside the range below; the mismatch is then
+# reported again after the diagnostics, where it is the last thing on screen.
 # tasks/check-deno-pins.ts verifies that the range contains the pin.
 DENO_VERSION_MIN="2.8.0"
 DENO_VERSION_MAX="2.10.0"
@@ -62,8 +66,23 @@ if (( $(version_num "${DENO_VERSION}") < $(version_num "${DENO_VERSION_MIN}") ||
 fi
 
 if [[ "${DENO_VERSION}" != "${DENO_VERSION_PINNED}" ]]; then
+  if [[ "${DENO_CHECK_VERSION_LENIENT:-}" == '' ]]; then
+    echo "ERROR: Deno version is ${DENO_VERSION}; this repository pins ${DENO_VERSION_PINNED} (mise.toml)."
+    echo "ERROR: An off-pin toolchain can pass code the pin refuses, and refuse code the pin passes."
+    echo "ERROR: Install the pin with mise <https://mise.jdx.dev/> and 'mise install', then run"
+    echo "ERROR: 'mise exec -- deno task check'; or set DENO_CHECK_VERSION_LENIENT=1 to accept"
+    echo "ERROR: an off-pin verdict."
+    exit 1
+  fi
   echo "WARNING: Deno version is ${DENO_VERSION}; this repository pins ${DENO_VERSION_PINNED} (mise.toml)."
-  echo "WARNING: To use the pinned version, install mise <https://mise.jdx.dev/> and run 'mise install'."
+  echo "WARNING: DENO_CHECK_VERSION_LENIENT is set, so the check runs anyway."
+  # Repeated when the run ends, pass or fail: the lines above scroll away
+  # behind one Check line per module, and the verdict's provenance belongs
+  # next to the verdict.
+  version_mismatch_reminder() {
+    echo "WARNING: This check ran under Deno ${DENO_VERSION}, not the pinned ${DENO_VERSION_PINNED}."
+  }
+  trap version_mismatch_reminder EXIT
 fi
 
 # Collect all paths to check. Glob patterns will be expanded by bash.

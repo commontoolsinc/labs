@@ -180,7 +180,7 @@ export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
  * serves every format, and both are "for" this one. This is what a mixed
  * roster holds, what {@link CodecRegistry} stores, and what it hands back.
  *
- * Spelling the union out is unavoidable. {@link FabricCodec} is invariant in
+ * Writing the union out is unavoidable. {@link FabricCodec} is invariant in
  * `Encoded` -- the parameter sits in both an argument and a return position --
  * so a `NonterminalCodec` is assignable to no format's instantiation, and the
  * two arms have to be named separately.

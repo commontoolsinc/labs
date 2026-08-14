@@ -31,6 +31,7 @@ import type { NormalizedFullLink } from "../link-types.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
+import { issueResultContainerSetup } from "./list-result-container.ts";
 import {
   narrowestCellScope,
   outputSpotFromBinding,
@@ -39,6 +40,7 @@ import {
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import {
   type ElementRun,
+  type SetupRecord,
   trackListSetupRollback,
 } from "./list-element-rollback.ts";
 import {
@@ -89,6 +91,22 @@ export function filter(
   awaitSync?: boolean,
 ): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
+
+  // Whether the writes that make `result` reachable are owed. The coordinator
+  // keeps the container across reconciles, so one that stages those writes and
+  // then does not commit leaves it holding a container nothing links to; the
+  // next reconcile issues them again. See list-element-rollback.ts.
+  const containerSetup: SetupRecord = { needsSetup: false };
+
+  // An element's links back to this coordinator. They are setup writes like the
+  // element's pattern run: issued when the element is created, and again when
+  // the transaction carrying them did not commit. Without them the element's
+  // document names no owning piece, so nothing can start that piece for an
+  // event addressed to it.
+  const linkElementCell = (cell: Cell<any>): void => {
+    setResultCell(cell, parentCell);
+    setPatternCell(cell, parentCell.key("pattern"));
+  };
 
   // Identity-based tracking: maps element address key → element run.
   // resultCell holds the predicate boolean for this element.
@@ -223,11 +241,11 @@ export function filter(
       argumentUsage.usesParams ? inputsCell.key("params") : undefined,
     ]);
 
+    // Whether this reconcile issues the container's links: a container it
+    // mints needs them, and one whose last issuance did not commit owes them.
+    let issueLinks = containerSetup.needsSetup;
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
       const previousResult = result;
-      rollback.resultReplaced(() => {
-        result = previousResult;
-      });
       const resultSchema = listResultSchema();
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.
@@ -244,15 +262,30 @@ export function filter(
         tx,
       );
       const boundResult = scopedCell(runtime, tx, baseResult, outputScope);
-      // Link this cell to the parent cell
-      setResultCell(boundResult, parentCell);
-      // Link the new result cells to the pattern cell too
-      setPatternCell(boundResult, parentCell.key("pattern"));
-      sendResult(tx, boundResult);
       // The container outlives this reconcile's transaction; a cell bound to
       // it would pin the settled transaction and its journal for the life of
       // the coordinator. Rebind per use instead.
       result = boundResult.withTx();
+      const installedResult = result;
+      // Give back only what this reconcile installed. An overlapping reconcile
+      // that has already replaced the container owns it, and its bookkeeping
+      // matches durable writes of its own.
+      rollback.resultReplaced(() => {
+        if (result === installedResult) result = previousResult;
+      });
+      issueLinks = true;
+    }
+    // A container this coordinator holds is reachable only through the links
+    // below, and the reconcile that last issued them may not have committed.
+    if (issueLinks) {
+      issueResultContainerSetup(
+        tx,
+        result.withTx(tx),
+        parentCell,
+        sendResult,
+        rollback,
+        containerSetup,
+      );
     }
     // The coordinator's view of the result container is links-only
     // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
@@ -424,6 +457,13 @@ export function filter(
                 awaitSyncBeforeInitialRun: elementAwaitSync,
               },
             );
+            // The whole setup, every time, because issuing it takes the debt
+            // for it: an overlapping reconcile that wrote the links and has
+            // not settled hands them to this one, and a partial issuance would
+            // leave nobody owing them. Links already durable cost a
+            // comparison, since a write of the value a leaf already holds does
+            // not reach storage.
+            linkElementCell(existing.resultCell.withTx(tx));
             rollback.setupIssued(existing);
           }
         }
@@ -451,10 +491,7 @@ export function filter(
             awaitSyncBeforeInitialRun: elementAwaitSync,
           },
         );
-        // Link these individual cells to the top cell
-        setResultCell(boundResultCell, parentCell);
-        // Link the new result cells to the pattern cell too
-        setPatternCell(boundResultCell, parentCell.key("pattern"));
+        linkElementCell(boundResultCell);
 
         const entry = { resultCell, lastIndex: i, needsSetup: false };
         elementRuns.set(elementKey, entry);

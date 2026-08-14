@@ -151,10 +151,12 @@ complete rule is in
 
 Three obligations that are easy to miss:
 
-- `docs/README.md` governs everything this repository writes down. It says how
-  to write documentation, where a new document belongs, which examples belong in
-  one, and which spelling of English both documents and comments use. Read it
-  before you write either.
+- `docs/README.md` governs everything this repository writes down: how to write
+  documentation, where a new document belongs, and which examples belong in one.
+  Read it before you write a document. The words themselves — American spelling,
+  and one word per concept — are standardized under "Word choice" in
+  `docs/development/DEVELOPMENT.md`, and that reaches comments, error and log
+  messages, and test descriptions as much as it reaches documents.
 - `docs/development/EXPERIMENTAL_OPTIONS.md` is the central registry of every
   experimental flag. Read it before adding, changing, or removing a flag, and
   update it in the same change.
