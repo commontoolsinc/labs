@@ -46,9 +46,10 @@ an address answers it.
 only when a verb is called, which is what makes the verb surface the whole
 interface rather than a convenience laid over a writable document.
 
-**Five verbs, one per shape.** They are not five features. Each exists because
-a caller asks a different question about what comes back, and the tracker holds
-one of each so that no shape goes undemonstrated:
+**Six verbs, five shapes.** They are not six features. Each shape is a
+different question a caller asks about what comes back, and the tracker carries
+every one of them so that none goes undemonstrated. Only the first shape has two
+verbs, and they differ in nothing but what the new item is filed under:
 
 | Verb | The shape it exercises | Where |
 | --- | --- | --- |
