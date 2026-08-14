@@ -2,6 +2,7 @@ import type { CfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
+  isObjectNotArray,
   isObjectOrArray,
   isReadonlyObjectOrArray,
 } from "@commonfabric/utils/types";
@@ -72,7 +73,7 @@ type WriterIdentityClaim = {
 };
 
 const isWriterIdentityClaim = (value: unknown): value is WriterIdentityClaim =>
-  isObjectOrArray(value) && isObjectOrArray(value.__ctWriterIdentityOf);
+  isObjectNotArray(value) && isObjectNotArray(value.__ctWriterIdentityOf);
 
 // The per-input provenance fields a verified write may have stamped onto a
 // writer-identity claim. New claims carry only the content-addressed

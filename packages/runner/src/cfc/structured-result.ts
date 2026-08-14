@@ -1,5 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isSubschema } from "../schema-walk.ts";
 import { cfcOpaqueLinkForPath } from "./observation.ts";
 import {
   cfcCombinatorObjectSurface,
@@ -124,7 +125,7 @@ const matchingBranches = (
   }
   return branches
     .filter((branch): branch is JSONSchema =>
-      (typeof branch === "boolean" || isObjectOrArray(branch)) &&
+      isSubschema(branch) &&
       validateAgainstSchemaForSanitization(
           branch,
           value,
@@ -196,7 +197,7 @@ const matchingBranch = (
     return undefined;
   }
   const branch = branches.find((branch): branch is JSONSchema =>
-    (typeof branch === "boolean" || isObjectOrArray(branch)) &&
+    isSubschema(branch) &&
     validateAgainstSchemaForSanitization(
         branch,
         value,
@@ -294,14 +295,13 @@ const childSchemaForKey = (
   const childSchemas: JSONSchema[] = [];
   if (isObjectOrArray(resolved.properties)) {
     const child = resolved.properties[key];
-    if (typeof child === "boolean" || isObjectOrArray(child)) {
+    if (isSubschema(child)) {
       childSchemas.push(child);
     }
   }
   if (
     !(isObjectOrArray(resolved.properties) && key in resolved.properties) &&
-    (typeof resolved.additionalProperties === "boolean" ||
-      isObjectOrArray(resolved.additionalProperties))
+    isSubschema(resolved.additionalProperties)
   ) {
     childSchemas.push(resolved.additionalProperties);
   }
@@ -363,11 +363,11 @@ const itemSchemaForIndex = (
       : undefined;
     if (prefixItems !== undefined && index < prefixItems.length) {
       const slot = prefixItems[index];
-      if (typeof slot === "boolean" || isObjectOrArray(slot)) {
+      if (isSubschema(slot)) {
         itemSchemas.push(slot);
       }
     } else if (
-      typeof resolved.items === "boolean" || isObjectOrArray(resolved.items)
+      isSubschema(resolved.items)
     ) {
       itemSchemas.push(resolved.items);
     }

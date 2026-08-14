@@ -1,5 +1,5 @@
 import { isDID } from "@commonfabric/identity";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   CellRef,
   CellUpdateNotification,
@@ -22,7 +22,7 @@ import {
 } from "./types.ts";
 
 export function isCellRef(value: unknown): value is CellRef {
-  if (!isObjectOrArray(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   return Array.isArray(value.path) && typeof value.id === "string" &&
     !!value.id &&
     isDID(value.space);
@@ -32,7 +32,7 @@ export function isInitializationData(
   value: unknown,
 ): value is InitializationData {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     typeof value.apiUrl === "string" && !!value.identity &&
     typeof value.spaceDid === "string"
   );
@@ -40,7 +40,7 @@ export function isInitializationData(
 
 export function isIPCClientRequest(value: unknown): value is IPCClientRequest {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     typeof value.type === "string" &&
     Object.values(RequestType).includes(
       value.type as RequestType,
@@ -50,7 +50,7 @@ export function isIPCClientRequest(value: unknown): value is IPCClientRequest {
 
 export function isIPCClientMessage(value: unknown): value is IPCClientMessage {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     typeof value.msgId === "number" &&
     isIPCClientRequest(value.data)
   );
@@ -60,7 +60,7 @@ export function isIPCClientNotification(
   value: unknown,
 ): value is IPCClientNotification {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     typeof value.type === "string" &&
     Object.values(ClientNotificationType).includes(
       value.type as ClientNotificationType,
@@ -78,7 +78,7 @@ export function isIPCRemoteResponse(
   value: unknown,
 ): value is IPCRemoteResponse {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     typeof value.msgId === "number" &&
     ("error" in value ? typeof value.error === "string" : true)
   );
@@ -97,7 +97,7 @@ export function isCellUpdateNotification(
   value: unknown,
 ): value is CellUpdateNotification {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     value.type === NotificationType.CellUpdate &&
     typeof value.cell === "object" &&
     "value" in value
@@ -108,7 +108,7 @@ export function isConsoleNotification(
   value: unknown,
 ): value is ConsoleNotification {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     value.type === NotificationType.ConsoleMessage &&
     typeof value.method === "string" &&
     Array.isArray(value.args)
@@ -119,9 +119,9 @@ export function isNavigateRequestNotification(
   value: unknown,
 ): value is NavigateRequestNotification {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     value.type === NotificationType.NavigateRequest &&
-    isObjectOrArray(value.targetCellRef)
+    isObjectNotArray(value.targetCellRef)
   );
 }
 
@@ -129,7 +129,7 @@ export function isErrorNotification(
   value: unknown,
 ): value is ErrorNotification {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     value.type === NotificationType.ErrorReport &&
     typeof value.message === "string"
   );
@@ -139,7 +139,7 @@ export function isTelemetryNotification(
   value: unknown,
 ): value is TelemetryNotification {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     value.type === NotificationType.Telemetry &&
     typeof value.marker === "object"
   );
@@ -149,7 +149,7 @@ export function isPendingWritesNotification(
   value: unknown,
 ): value is PendingWritesNotification {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     value.type === NotificationType.PendingWritesChanged &&
     typeof value.pending === "boolean"
   );
@@ -159,7 +159,7 @@ export function isVDomBatchNotification(
   value: unknown,
 ): value is VDomBatchNotification {
   return (
-    isObjectOrArray(value) &&
+    isObjectNotArray(value) &&
     value.type === NotificationType.VDomBatch &&
     typeof value.batchId === "number" &&
     Array.isArray(value.ops)
