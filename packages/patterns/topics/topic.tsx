@@ -4,6 +4,7 @@ import {
   type ComparableCell,
   computed,
   Default,
+  entityRefToString,
   equals,
   handler,
   lift,
@@ -445,20 +446,27 @@ export const isSafeLinkUrl = (url: string): boolean =>
   /^https?:\/\//i.test((url ?? "").trim());
 
 /**
- * A six-character key over `[0-9a-z]`, the shape `cf-code-editor` mints, that
- * none of `taken` already holds.
+ * The map key a destination gets, derived from the destination itself.
  *
- * Counts up rather than choosing at random, which makes a verb-made mention
- * reproducible: the same call against the same map yields the same key, so a
- * handler that runs twice writes the same document. A random key would make the
- * write non-idempotent.
+ * Eight characters over `[0-9a-z]`, which is inside the `{6,10}` shape
+ * `cf-code-editor` parses, taken from the destination's own fid payload —
+ * base64url folded to lower case with the two non-base36 characters dropped.
+ *
+ * Derived rather than allocated, and that is what makes it safe under
+ * concurrency. Counting to the lowest free key is reproducible within one
+ * retried transaction but not across writers: two agents mentioning different
+ * pieces at the same moment both see the same free key, both take it, and one
+ * write lands on top of the other. Keyed by the destination, two writers
+ * referencing DIFFERENT pieces cannot collide, and two referencing the SAME
+ * piece write the same key with the same value, which merges instead of
+ * clobbering — and says the true thing, that one topic mentioning another twice
+ * is one edge.
+ *
+ * The payload is 43 characters of hash, so eight base36 characters of it carry
+ * far more separation than a board will ever need.
  */
-export const mintMentionKey = (taken: readonly string[]): string => {
-  for (let n = 0;; n++) {
-    const key = n.toString(36).padStart(6, "0");
-    if (!taken.includes(key)) return key;
-  }
-};
+export const mentionKeyFor = (fidPayloadOfDestination: string): string =>
+  fidPayloadOfDestination.toLowerCase().replace(/[^0-9a-z]/g, "").slice(0, 8);
 
 /** The payload of a `fid1:…` tagged hash string; "" for anything else. The
  * length floor is what distinguishes a real address (43 chars of base64url
@@ -816,24 +824,25 @@ export default pattern<TopicInput, TopicOutput>(
      */
     const mention = action<MentionEvent, MentionResult>(({ topic }) => {
       if (!topic) rejectMutation("mention", "topic must be a reference");
-      const key = mintMentionKey(
-        Object.keys((references.get() ?? {}) as TopicMentionRefMap),
-      );
+      // deno-lint-ignore no-explicit-any
+      const entity = (topic as any).resolveAsCell?.()?.entityId;
+      const payload = entity ? fidPayload(entityRefToString(entity)) : "";
+      // A destination with no resolved identity yet cannot be compared against
+      // anything, so it could never become an edge. Rejecting says so, rather
+      // than storing a reference that silently means nothing.
+      if (!payload) {
+        rejectMutation("mention", "topic has no resolved identity yet");
+      }
+      const key = mentionKeyFor(payload);
       // Written ONE KEY AT A TIME, never by setting a rebuilt copy of the map.
       // Two reasons, and both matter. A blind write of a snapshot takes any
       // entry that arrived between the read and the write down with it. And
-      // rebuilding the object flattens the destination: the cell survives being
-      // stored, but not being spread into a fresh literal, so the map would end
-      // up holding an inlined copy of the whole piece instead of a reference to
-      // it — and a copy is not equal to anything.
+      // rebuilding the object flattens every destination it carries over: a
+      // cell survives being stored, but a read of one resolves to a plain
+      // object, so the rewritten map holds inlined copies — and a copy is equal
+      // to nothing, so those references stop being edges.
       references.key(key).set({ destination: topic, modifiedTitle: false });
-      // deno-lint-ignore no-explicit-any
-      const probe = topic as any;
-      return {
-        key: `PROBE resolveAsCell=${typeof probe
-          ?.resolveAsCell} get=${typeof probe?.get} equals=${typeof probe
-          ?.equals} keys=${Object.keys(probe ?? {}).slice(0, 6).join("|")}`,
-      };
+      return { key };
     });
 
     /**
@@ -854,12 +863,12 @@ export default pattern<TopicInput, TopicOutput>(
       const keys = Object.keys(current).filter((key) =>
         equals(topic as object, references.key(key).key("destination"))
       );
-      if (keys.length === 0) return { keys };
-      const next: TopicMentionRefMap = {};
-      for (const key of Object.keys(current)) {
-        if (!keys.includes(key)) next[key] = current[key];
-      }
-      references.set(next);
+      // Removed ONE KEY AT A TIME, for the same reason `mention` writes that
+      // way. Rebuilding the map from `references.get()` and setting it back
+      // would carry every surviving entry through a read — flattening its
+      // destination into a plain object and quietly retracting those mentions
+      // too, which is the opposite of what a caller asked for.
+      for (const key of keys) references.key(key).set(undefined);
       return { keys };
     });
 
