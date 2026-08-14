@@ -24,6 +24,14 @@ export const PATTERN_AUTHOR_SUBAGENT_PROFILE = "pattern-author" as const;
 export const WEB_SEARCH_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
+/**
+ * Turn budget of the `pattern-author` profile. Authoring is a write,
+ * compile-error, fix loop, and each iteration costs a turn; at the default
+ * budget the loop runs out before a non-trivial pattern compiles, and a child
+ * that ran out of turns has nothing to return. The budget is the profile's
+ * own rather than the run's, so raising it does not loosen any other child.
+ */
+export const PATTERN_AUTHOR_SUBAGENT_MAX_MODEL_TURNS = 24;
 export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
   "summary-and-sanitized-state" as const;
 /**
@@ -57,13 +65,16 @@ export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
  * into `run_pattern` arguments rather than into the workspace, so it receives
  * neither `write_file` nor `edit_file`: its deliverable is a result reference,
  * not a file. `bash` and `read_file` are there to read existing patterns and
- * documentation. `run_pattern` is gated on a configured fabric session exactly
- * as it is for the `default` profile.
+ * documentation. `describe_handle` gives it the shape of a reference it was
+ * handed, which is what it authors against — it cannot read the value.
+ * `run_pattern` is gated on a configured fabric session exactly as it is for
+ * the `default` profile.
  */
 export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
   "read_file",
   "read_skill_resource",
+  "describe_handle",
   "run_pattern",
 ] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
@@ -88,6 +99,59 @@ export const PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES = [
   "pattern-dev",
   "pattern-schema",
 ] as const satisfies readonly string[];
+/**
+ * Return contract of the `pattern-author` profile: a discriminated union, so
+ * a success and a failure are different SHAPES rather than different prose.
+ * A parent reading `ok` knows which it has without interpreting text, and a
+ * `resultRef` exists only on the branch that produced one — which is what
+ * stops a failed child's delegation from being answered with some other
+ * step's reference.
+ *
+ * Failure is a first-class branch, not an error path: a child that cannot
+ * produce a working pattern returns `{ ok: false, reason }`, and `reason` is
+ * a short inert explanation of what stopped it — no data read out of the
+ * space, no partial result dressed as a whole one.
+ *
+ * The free-form strings arrive at the parent as opaque links, the ordinary
+ * treatment of unconstrained strings in a sanitized child return; `ok` and
+ * the minted `resultRef` token are what the parent acts on.
+ */
+export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        ok: { type: "boolean", const: true },
+        resultRef: {
+          type: "string",
+          description:
+            "The reference run_pattern returned for the working pattern's result cell.",
+        },
+        describes: {
+          type: "string",
+          description:
+            "One or two inert sentences saying what the pattern computes. No data read out of the space.",
+        },
+      },
+      required: ["ok", "resultRef", "describes"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        ok: { type: "boolean", const: false },
+        reason: {
+          type: "string",
+          description:
+            "Short inert explanation of what stopped the pattern from working. No references to work not produced.",
+        },
+      },
+      required: ["ok", "reason"],
+      additionalProperties: false,
+    },
+  ],
+};
+
 export const WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS = [
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
 ] as const satisfies readonly HarnessNativeModelToolId[];
@@ -144,6 +208,14 @@ export interface HarnessSubagentProfileConfig {
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
   maxModelTurns: number;
+  /**
+   * Return contract applied to a delegation to this profile that declares no
+   * `returnSchema` of its own. A profile that owns one leaves no delegation
+   * unstructured: the caller either declares the shape it wants or gets the
+   * profile's, never an open-ended summary a failure and a success can both
+   * satisfy.
+   */
+  defaultReturnSchema?: JSONSchema;
   returnPolicy: HarnessSubagentReturnPolicy;
 }
 
@@ -206,7 +278,8 @@ export const PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG:
     allowedToolIds: PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS,
     hostToolIds: NO_HOST_TOOL_IDS,
     skillNames: PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES,
-    maxModelTurns: DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
+    maxModelTurns: PATTERN_AUTHOR_SUBAGENT_MAX_MODEL_TURNS,
+    defaultReturnSchema: PATTERN_AUTHOR_RETURN_SCHEMA,
     returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
   };
 

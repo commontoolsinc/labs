@@ -7,6 +7,7 @@
  * writes state, and swapping never throws on text it cannot parse.
  */
 
+import type { JSONSchema } from "@commonfabric/api";
 import { sha256 } from "@commonfabric/content-hash";
 import {
   ENTITY_URI_SCHEMES,
@@ -78,6 +79,10 @@ const normalizeHandleRef = (refText: string): NormalizedFullLink => {
     path: parsed.path,
     scope: parsed.scope ?? "space",
     ...(parsed.space !== undefined ? { space: parsed.space } : {}),
+    // A link that carries its leaf schema hands the mint the referent's shape
+    // for free; link text alone never does, so this is populated only where a
+    // caller normalized a link object rather than a string.
+    ...(parsed.schema !== undefined ? { schema: parsed.schema } : {}),
   } as NormalizedFullLink;
 };
 
@@ -141,6 +146,18 @@ export const createHarnessHandleTable = (
   entries: [],
 });
 
+/** Options of {@link mintAddressHandle}. */
+export interface MintAddressHandleOptions {
+  /** Digest seam; defaults to SHA-256. */
+  hasher?: HandleTokenHasher;
+  /**
+   * Shape of the value at the address, when the caller already knows it. A
+   * mint never reads the referent to discover one, so this is only ever the
+   * schema some earlier step held anyway.
+   */
+  schema?: JSONSchema;
+}
+
 /**
  * Mints an address handle for `refText`, returning the updated table and the
  * token. Minting is idempotent per address: two spellings of one address —
@@ -151,19 +168,38 @@ export const createHarnessHandleTable = (
  * collides with a token already held by a different address, a fresh suffix
  * is re-derived with an attempt counter mixed into the hash preimage.
  *
+ * A schema fills a gap but never replaces one: minting an address whose entry
+ * carries no schema records the one supplied here, while an entry that
+ * already carries a schema keeps it. Two schemas for one address describe two
+ * views of the same cell, and the first is the one every token holder has
+ * already been told about.
+ *
  * @throws Error when `refText` does not name an entity address; see
  * `swapLinksForTokens()` for the swallow-and-skip caller.
  */
 export const mintAddressHandle = async (
   table: HarnessHandleTable,
   refText: string,
-  hasher: HandleTokenHasher = sha256Hasher,
+  options: MintAddressHandleOptions = {},
 ): Promise<{ table: HarnessHandleTable; token: string }> => {
+  const hasher = options.hasher ?? sha256Hasher;
   const link = normalizeHandleRef(refText);
   const key = addressKey(link);
+  const schema = options.schema ?? link.schema;
   const existing = table.entries.find((entry) => entry.addressKey === key);
   if (existing !== undefined) {
-    return { table, token: existing.token };
+    if (existing.schema !== undefined || schema === undefined) {
+      return { table, token: existing.token };
+    }
+    return {
+      table: {
+        ...table,
+        entries: table.entries.map((entry) =>
+          entry === existing ? { ...entry, schema } : entry
+        ),
+      },
+      token: existing.token,
+    };
   }
   let attempt = 0;
   let suffix = await deriveTokenSuffix(table.salt, key, attempt, hasher);
@@ -182,6 +218,7 @@ export const mintAddressHandle = async (
     kind: "address",
     ref: canonicalRef(link),
     addressKey: key,
+    ...(schema !== undefined ? { schema } : {}),
   };
   return {
     table: { ...table, entries: [...table.entries, entry] },
@@ -262,7 +299,7 @@ export const swapLinksForTokens = async (
     const target = record["@link"];
     if (keys.length === 1 && typeof target === "string") {
       try {
-        const minted = await mintAddressHandle(table, target, hasher);
+        const minted = await mintAddressHandle(table, target, { hasher });
         return { table: minted.table, value: minted.token };
       } catch {
         // Not an entity address — an `opaque:` handle, or malformed text.
@@ -300,7 +337,7 @@ const swapLinksInString = async (
       const minted = await mintAddressHandle(
         table,
         occurrence.startsWith("/") ? occurrence : `/${occurrence}`,
-        hasher,
+        { hasher },
       );
       table = minted.table;
       token = minted.token;
@@ -403,6 +440,15 @@ export const assertValidHarnessHandleTable = (
     if (typeof entry.addressKey !== "string" || entry.addressKey.length === 0) {
       throw new Error(
         `invalid handle table: entry \`${entry.token}\` has an empty addressKey`,
+      );
+    }
+    if (
+      entry.schema !== undefined && typeof entry.schema !== "boolean" &&
+      (typeof entry.schema !== "object" || entry.schema === null ||
+        Array.isArray(entry.schema))
+    ) {
+      throw new Error(
+        `invalid handle table: entry \`${entry.token}\` has a schema that is not a JSON Schema object or boolean`,
       );
     }
     if (tokens.has(entry.token)) {

@@ -30,6 +30,16 @@ export interface RunPatternToolSuccessOutput {
   /** Canonical LLM-friendly link to the piece's result cell. */
   resultRef: string;
   /**
+   * The compiled pattern's result schema — the shape of whatever
+   * `resultRef` names. Known here for free, since compilation produced it,
+   * and recorded on the handle minted for `resultRef` so a later
+   * `describe_handle` can answer what the reference is without reading it.
+   * Stripped from the model-facing rendering by the prompt loop: the model
+   * wrote the pattern this describes, and asks for the shape by token when
+   * it wants it back.
+   */
+  resultRefSchema?: JSONSchema;
+  /**
    * Piece id for the persisted tool-output artifact. A bare fabric
    * identifier the handle boundary never swaps, and the piece cell is the
    * result cell, so the prompt loop strips it from the model-facing
@@ -105,6 +115,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         outputId: { type: "string" },
         status: { type: "string", enum: ["ok"] },
         resultRef: { type: "string" },
+        resultRefSchema: {},
         pieceId: { type: "string" },
         value: {},
         linkedStringCount: { type: "integer", minimum: 0 },
@@ -392,6 +403,12 @@ export const runPatternTool: HarnessToolDefinition<
       outputId,
       status: "ok",
       resultRef,
+      // `resultSchema` on a compiled pattern is always present; the guard is
+      // for a pattern shape that declares nothing useful, where recording an
+      // empty schema would claim more than compilation knows.
+      ...(pattern.resultSchema !== undefined
+        ? { resultRefSchema: pattern.resultSchema }
+        : {}),
       pieceId: piece.id,
       ...(value !== undefined ? { value } : {}),
       ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),

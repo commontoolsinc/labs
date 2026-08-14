@@ -109,7 +109,10 @@ import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
-import { scrubBareFabricIdentifiers } from "./tools/run-pattern.ts";
+import {
+  isRunPatternToolSuccessOutput,
+  scrubBareFabricIdentifiers,
+} from "./tools/run-pattern.ts";
 import {
   isRunSkillScriptToolSuccessOutput,
   type RunSkillScriptToolOutput,
@@ -643,6 +646,11 @@ const parseDelegateTaskInput = (
     );
   }
   const parsedReturnSchema = parseSubagentReturnSchema(input.returnSchema);
+  // A profile that declares a return contract applies it to a delegation
+  // that declares none, so the child's return is a shape the parent can test
+  // rather than prose a failure and a success both fit.
+  const returnSchema = parsedReturnSchema?.schema ??
+    getHarnessSubagentProfileConfig(profile).defaultReturnSchema;
   return {
     goal: input.goal,
     profile,
@@ -650,9 +658,7 @@ const parseDelegateTaskInput = (
       ? { context: input.context }
       : {}),
     ...(typeof maxModelTurns === "number" ? { maxModelTurns } : {}),
-    ...(parsedReturnSchema !== undefined
-      ? { returnSchema: parsedReturnSchema.schema }
-      : {}),
+    ...(returnSchema !== undefined ? { returnSchema } : {}),
   };
 };
 
@@ -874,7 +880,10 @@ const buildSubagentSystemPrompt = (
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
+        "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
         "Return the result reference run_pattern gave you plus one or two inert sentences saying what the pattern computes. Do not return the data, sample rows, counts, names, or any other content read out of the space.",
+        "When you cannot produce a working pattern — the compile loop does not converge, the task is impossible against the references you hold, or you are running out of turns — return the failure branch of your return schema with a short reason.",
+        "A failure is a complete, correct answer. Never return a reference to something you did not produce, never hand back a reference from an earlier step as if it were your result, and never present a partial or non-compiling pattern as a finished one.",
       ]
       : []),
     ...(profileConfig.profile === WEB_FETCH_SUBAGENT_PROFILE
@@ -2398,15 +2407,17 @@ export class CfHarnessPromptLoop {
 
   /**
    * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
-   * tool input with their canonical address strings. Never applies to
-   * `delegate_task`, whose input reaches the child as the model wrote it.
-   * Returns `input` itself when no substitution applies.
+   * tool input with their canonical address strings. Two tools are exempt:
+   * `delegate_task`, whose input reaches the child as the model wrote it, and
+   * `describe_handle`, whose input names a token rather than a referent — it
+   * looks the token up in the table itself. Returns `input` itself when no
+   * substitution applies.
    */
   #resolveHandleTokensInToolInput(
     toolId: string,
     input: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (toolId === "delegate_task") {
+    if (toolId === "delegate_task" || toolId === "describe_handle") {
       return input;
     }
     const table = this.engine.handleTable;
@@ -2414,6 +2425,38 @@ export class CfHarnessPromptLoop {
       return input;
     }
     return swapTokensForRefs(table, input) as Record<string, unknown>;
+  }
+
+  /**
+   * Helper for `#invokeToolCall()`, which records the compiled pattern's
+   * result schema on the handle for a `run_pattern` result reference. The
+   * outbound swap that follows mints the same address and so returns this
+   * entry, shape already attached — which is what lets `describe_handle`
+   * answer what the reference is without any fabric read. A ref that does not
+   * parse as an address is skipped, exactly as the outbound swap skips it.
+   */
+  async #recordRunPatternResultShape(
+    toolId: BuiltinToolId,
+    output: unknown,
+  ): Promise<void> {
+    if (toolId !== "run_pattern" || !isRunPatternToolSuccessOutput(output)) {
+      return;
+    }
+    const schema = output.resultRefSchema;
+    if (schema === undefined) {
+      return;
+    }
+    const table = this.engine.handleTable ??
+      createHarnessHandleTable(this.engine.getRunState().runId);
+    let minted;
+    try {
+      minted = await mintAddressHandle(table, output.resultRef, { schema });
+    } catch {
+      return;
+    }
+    if (minted.table !== table) {
+      await this.engine.recordHandleTable(minted.table);
+    }
   }
 
   /**
@@ -2770,6 +2813,12 @@ export class CfHarnessPromptLoop {
       // without matching error-message strings.
       throw error;
     }
+    // Before the outbound swap, so the token it mints for the result cell
+    // already carries the shape the compiler knew.
+    await this.#recordRunPatternResultShape(
+      toolCall.function.name,
+      result.output,
+    );
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolCall.function.name,
       result.output,
@@ -2931,12 +2980,18 @@ export class CfHarnessPromptLoop {
       // The persisted artifact keeps the raw result value and the piece id
       // — a bare fabric identifier the handle boundary never swaps, and
       // redundant with `resultRef` since the piece cell is the result cell.
+      // It also keeps the pattern's result schema, which reaches the model
+      // through `describe_handle` on the minted token rather than inline.
       // The model sees only `resultRef` and the schema-sanitized `value`.
       // Free-text diagnostic fields can embed compiler-generated bare
       // fabric identifiers the handle boundary never swaps, so those fields
       // are scrubbed here; the artifact keeps the raw text.
-      const { rawValue: _rawValue, pieceId: _pieceId, ...publicOutput } =
-        output;
+      const {
+        rawValue: _rawValue,
+        pieceId: _pieceId,
+        resultRefSchema: _resultRefSchema,
+        ...publicOutput
+      } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };
       for (const field of ["message", "valueError"]) {
         const text = scrubbed[field];

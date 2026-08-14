@@ -1153,6 +1153,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ],
   );
   assertEquals(
@@ -1993,6 +1994,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "write_file",
       "delegate_task",
       "run_pattern",
+      "describe_handle",
     ],
   );
 });
@@ -2130,6 +2132,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ],
   );
   assertEquals(
@@ -3016,6 +3019,7 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
       "edit_file",
       "write_file",
       "delegate_task",
+      "describe_handle",
     ],
   );
   assertEquals(denied.detail, "bash-no-sandbox is not allowed in this run");

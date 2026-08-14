@@ -104,6 +104,10 @@ import type {
 } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
 import {
+  type DescribeHandleToolInput,
+  type DescribeHandleToolOutput,
+} from "./tools/describe-handle.ts";
+import {
   type EditFileToolInput,
   type EditFileToolOutput,
 } from "./tools/edit-file.ts";
@@ -149,6 +153,7 @@ export interface BuiltinToolInputMap {
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
   run_pattern: RunPatternToolInput;
+  describe_handle: DescribeHandleToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -163,6 +168,7 @@ export interface BuiltinToolOutputMap {
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
   run_pattern: RunPatternToolOutput;
+  describe_handle: DescribeHandleToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -1395,6 +1401,7 @@ export class CfHarnessEngine {
       allowedSkillScripts: this.config.allowedSkillScripts,
       skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       browserAccess: this.config.browserAccess,
+      handleTable: this.handleTable,
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),

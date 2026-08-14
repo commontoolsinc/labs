@@ -20,6 +20,10 @@ import {
   mintAddressHandle,
 } from "../src/handle-table.ts";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
+import {
+  DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
+  PATTERN_AUTHOR_SUBAGENT_MAX_MODEL_TURNS,
+} from "../src/contracts/subagent.ts";
 import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
 import {
   chatViewOfRequest,
@@ -448,6 +452,7 @@ describe("prompt-loop cross-agent address handles", () => {
       "bash",
       "read_file",
       "read_skill_resource",
+      "describe_handle",
     ]);
     const runRef = result.runState.subagentRuns?.[0];
     expect(runRef?.manifest.allowedToolIds).not.toContain("run_pattern");
@@ -488,6 +493,92 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(childSystemPrompt).toContain(
       "Return the result reference run_pattern gave you",
     );
+  });
+
+  it("runs a `pattern-author` child on the profile's own turn budget rather than the run default", async () => {
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-subagent-pattern-author-budget",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+      }),
+      allowedSubagentProfiles: ["pattern-author"],
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-delegate", {
+          goal: "Author a pattern.",
+          profile: "pattern-author",
+        }),
+        finalTurn(JSON.stringify({ ok: false, reason: "No fabric session." })),
+        finalTurn("Parent done."),
+      ]),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+
+    const runRef = result.runState.subagentRuns?.[0];
+    expect(runRef?.manifest.maxModelTurns).toBe(
+      PATTERN_AUTHOR_SUBAGENT_MAX_MODEL_TURNS,
+    );
+    expect(runRef?.manifest.maxModelTurns).not.toBe(
+      DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
+    );
+  });
+
+  it("returns the failure branch from a `pattern-author` child that cannot succeed, distinguishable from success by shape", async () => {
+    const runId = "run-subagent-pattern-author-contract";
+    const table = await parentTableOf(runId, [URI_A]);
+    const token = table.entries[0]!.token;
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    });
+    await engine.recordHandleTable(table);
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      allowedSubagentProfiles: ["pattern-author"],
+      // No delegation declares a `returnSchema`, so both children answer
+      // under the profile's own contract.
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-failing", {
+          goal: `Author a pattern over ${token}.`,
+          profile: "pattern-author",
+        }),
+        finalTurn(JSON.stringify({
+          ok: false,
+          reason: "The source never compiled.",
+        })),
+        delegateCallTurn("call-succeeding", {
+          goal: `Author a pattern over ${token}, again.`,
+          profile: "pattern-author",
+        }),
+        finalTurn(JSON.stringify({
+          ok: true,
+          resultRef: token,
+          describes: "Counts the entries.",
+        })),
+        finalTurn("Parent done."),
+      ]),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+
+    const returnedValue = (index: number): Record<string, unknown> =>
+      (result.runState.subagentRuns?.[index] as
+        | { structuredReturn?: { value?: Record<string, unknown> } }
+        | undefined)?.structuredReturn?.value ?? {};
+    const failure = returnedValue(0);
+    const success = returnedValue(1);
+    // The discriminant, not the prose, is what the parent reads: a failure
+    // carries no reference at all, so it cannot be mistaken for a result.
+    expect(failure.ok).toBe(false);
+    expect("resultRef" in failure).toBe(false);
+    expect(success.ok).toBe(true);
+    expect(success.resultRef).toBe(token);
   });
 
   it("offers `run_pattern` to the child and returns its result ref as a token the parent can pass back to a pattern", async () => {
@@ -692,7 +783,13 @@ describe("prompt-loop cross-agent address handles", () => {
             inputs: { src: firstToken(lastToolContent(1)) },
           })
           : turn === 4
-          ? finalTurn(`The copy is at ${firstToken(lastToolContent(3))}.`)
+          // The profile's own return contract applies to a delegation that
+          // declared none, so the child answers in its success branch.
+          ? finalTurn(JSON.stringify({
+            ok: true,
+            resultRef: firstToken(lastToolContent(3)),
+            describes: "Copies the doubled value.",
+          }))
           : turn === 5
           ? runPatternCallTurn("call-parent", {
             sourceText: recopySource,

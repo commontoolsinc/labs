@@ -54,6 +54,8 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
+  - `describe_handle` (shape of a handle's referent, never its value; see
+    [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
 - targeted exact-string edits plus whole-file replace/create and append writes
@@ -610,6 +612,49 @@ only the positions still sealed. Denial-path tool messages are not swapped; that
 coverage, value handles, and an explicit release/readback mechanism are listed
 in [docs/ROADMAP.md](docs/ROADMAP.md).
 
+#### Inspecting a handle's shape
+
+A token says nothing about what it refers to, and an agent that holds several
+cannot tell one from another by looking. `describe_handle` closes that gap
+without opening the data: given a token, it reports the recorded schema and the
+path segments of the referent — what field of what piece the token names — and
+never the value. It does not dereference the cell, and it needs no fabric
+session, so it is available in every run that has handles at all.
+
+```json
+{
+  "token": "cfh:a:k7m2q",
+  "known": true,
+  "hasSchema": true,
+  "schema": {
+    "type": "object",
+    "properties": { "doubled": { "type": "number" } }
+  },
+  "path": ["doubled"]
+}
+```
+
+Schemas are captured where they are already free rather than fetched. A
+`run_pattern` result reference carries the compiled pattern's result schema,
+which compilation produced anyway, and a link that arrives at the outbound swap
+already carrying its leaf schema records that. Nothing reads a cell to fill one
+in, so `hasSchema: false` means the shape was never free to capture, not that
+the referent has none. A token the run's table does not hold comes back
+`known: false` rather than as an error, since a token from another run simply
+names nothing here. A session-backed schema fetch — reading a referent's
+declared schema without reading its value — is a possible extension.
+
+This is a read of shape, not of content, and the distinction is worth stating
+plainly: a schema is itself information, property names can be as telling as
+values, and `path` names a field. The tool is currently unrestricted for any run
+that holds the token, and it is a candidate for policy gating alongside the
+other observation boundaries.
+
+Shape is what makes a chain of steps checkable. An orchestrator that passes a
+reference from one step to the next can confirm the reference is the kind of
+thing the next step expects — before it runs, and without reading the data
+flowing through it.
+
 #### Handles across a delegation
 
 A child resolves the parent's tokens through its own boundary, against a table
@@ -910,13 +955,67 @@ model-inheriting loops and do not apply to the search child.
 The `pattern-author` profile is where Common Fabric pattern source gets written
 and run. Its child receives `run_pattern` (under the ordinary fabric-session
 gate), plus `read_file`, `bash`, and `read_skill_resource` for reading existing
-patterns and documentation in the workspace. It receives neither `write_file`
-nor `edit_file`: pattern source goes inline into `run_pattern`'s `sourceText`,
-and the deliverable is a result reference rather than a file. When the run has a
+patterns and documentation in the workspace, and `describe_handle` for the shape
+of the references it was handed. It receives neither `write_file` nor
+`edit_file`: pattern source goes inline into `run_pattern`'s `sourceText`, and
+the deliverable is a result reference rather than a file. When the run has a
 skill registry, the child preloads the `pattern-dev` and `pattern-schema` skills
 from it. That preload is best-effort — a run whose skills root does not carry
 them, or that configures no skills root at all, still gets the same child with
 the same tools, just without the preloaded guidance.
+
+The profile carries its own turn budget of 24, in place of the default subagent
+cap of 8. Authoring is a write, compile-error, fix loop and each iteration costs
+a turn; at the default the loop runs out before a non-trivial pattern compiles,
+and a child that ran out of turns has nothing to return. A delegation may still
+name its own `maxModelTurns`, bounded by the same maximum of 64 every profile
+is.
+
+The profile also carries a return contract, applied to any `pattern-author`
+delegation that declares no `returnSchema` of its own — so no such delegation is
+unstructured:
+
+```json
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "resultRef": { "type": "string" },
+        "describes": { "type": "string" }
+      },
+      "required": ["ok", "resultRef", "describes"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean", "const": false },
+        "reason": { "type": "string" }
+      },
+      "required": ["ok", "reason"],
+      "additionalProperties": false
+    }
+  ]
+}
+```
+
+Success and failure are different shapes, not different prose. A child that
+cannot produce a working pattern — the compile loop does not converge, the task
+is impossible against the references it holds, its turns run out — returns the
+failure branch, and a failure carries no `resultRef` at all. That is what stops
+a failed delegation from being answered with some other step's reference: the
+parent reads `ok`, and a reference exists only on the branch that produced one.
+The free-form `describes` and `reason` strings reach the parent as opaque links,
+the ordinary treatment of unconstrained strings in a sanitized child return; the
+discriminant and the minted `resultRef` token are what the parent acts on.
+
+The same discipline is what the parent-facing guidance asks of any delegation:
+declare the return shape up front, say what the child should do when it cannot
+succeed, and treat a returned reference as meaningful only together with the
+contract it satisfied. `describe_handle` is how the parent checks that a
+returned reference is the shape the next step needs.
 
 ```bash
 deno task run -- \

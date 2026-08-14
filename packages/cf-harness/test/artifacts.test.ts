@@ -551,6 +551,7 @@ Deno.test({
           "edit_file",
           "write_file",
           "delegate_task",
+          "describe_handle",
         ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
@@ -696,7 +697,7 @@ Deno.test({
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 7,
+          toolCount: 8,
         },
       );
       assert(

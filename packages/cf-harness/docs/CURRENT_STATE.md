@@ -68,6 +68,17 @@ The current package provides:
   it while the tokens stay identical across the hierarchy; a reference the child
   produces is resolved through the child's table and minted through the parent's
   boundary, reaching the parent as a parent-resolvable token;
+- shape captured where it is free and read back by token: a handle entry may
+  carry the schema of its referent — a `run_pattern` result reference records
+  the compiled pattern's result schema, and a tokenized link records a schema it
+  already carried — and no mint reads a cell to fill one in, so an entry without
+  one means the shape was never free to capture;
+- a `describe_handle` tool, available in any run that has handles and gated on
+  no fabric session: given a token it reports the recorded schema and the path
+  segments of the referent, never the value, and reports an unknown token as
+  unknown rather than as an error. It never dereferences the cell. A schema is
+  itself information, so this is a read of shape, currently unrestricted and a
+  candidate for later policy gating;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern
@@ -95,7 +106,13 @@ The current package provides:
   returns the result reference plus an inert description rather than data. This
   is the division of labour a data question wants: the root orchestrates and
   never pays for pattern syntax or reads the data, and the child computes over
-  references it cannot read out.
+  references it cannot read out. It runs on its own turn budget of 24 rather
+  than the default subagent cap of 8, since each compile-error iteration costs a
+  turn, and it carries a return contract — a discriminated union of
+  `{ ok: true, resultRef, describes }` and `{ ok: false, reason }` — applied to
+  any `pattern-author` delegation that declares no `returnSchema` of its own, so
+  a failure and a success are different shapes and only the success branch
+  carries a reference.
 
 Run the capability probe instead of copying this list into adapters:
 
