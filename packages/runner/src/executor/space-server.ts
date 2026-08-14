@@ -98,6 +98,20 @@ export type SpaceServerPolicy = {
   /** serving-loop.md §1's IDLE_PARK_MS. */
   idleParkMs?: number;
   renewIntervalMs?: number;
+  /** Deadline on the park's runtime dispose (park LIVENESS): a serving
+   * runtime killed mid-wave can hang `runtime.dispose()` forever, and a
+   * park gated on it never resolves `whenParked` — wedging every
+   * chained recovery. On overrun the dispose is abandoned (loudly,
+   * counted) and the park completes anyway. */
+  parkDisposeTimeoutMs?: number;
+  /** The host's failure-park re-activation backoff (read by the
+   * ExecutorHost, not the SpaceServer): after N consecutive
+   * `loop-failed` parks of one space, its next re-activation is delayed
+   * `min(base·2^(N−1), max)` — a permanently failing space rebuilds at
+   * a bounded rate instead of once per admission. A successfully
+   * committed wave clears the streak. */
+  failureParkBackoffBaseMs?: number;
+  failureParkBackoffMaxMs?: number;
 };
 
 export type SpaceServerOptions = {
@@ -124,10 +138,15 @@ export type SpaceServerOptions = {
   stats: ServingLoopStats;
   policy?: SpaceServerPolicy;
   onParked?: (reason: string) => void;
+  /** Fired on each successfully committed wave — the host's
+   * failure-streak reset signal (real served progress, as opposed to an
+   * activation that merely got as far as building a runtime). */
+  onWaveCommitted?: () => void;
 };
 
 const DEFAULT_FLUSH_DEADLINE_MS = 100;
 const DEFAULT_IDLE_PARK_MS = 30_000;
+const DEFAULT_PARK_DISPOSE_TIMEOUT_MS = 5_000;
 
 /** The well-known never-a-piece id classes excluded from piece demand
  * (RULED 2026-08-07): a `computed:` doc is a derivation result, a
@@ -631,6 +650,13 @@ export class SpaceServer implements TransactionSealDestination {
         // list builtins' recovery seeds until they stamped bookkeeping.
         onUnstampedSeal: () => {
           this.#options.stats.unstampedSealRefusals += 1;
+        },
+        // Default posture ("refuse", RULED 2026-08-14 (c)): a foreign-
+        // space write refuses at ACCUMULATION, action-scoped — the wave
+        // and the loop survive a misdirected wish materialization
+        // instead of dying at the commit-step guard. Counted into §7.
+        onForeignWriteRefusal: () => {
+          this.#options.stats.foreignWriteRefusals += 1;
         },
       });
     }
@@ -1756,6 +1782,7 @@ export class SpaceServer implements TransactionSealDestination {
     }
     if (outcome.seq !== undefined) {
       stats.derivedCommits += 1;
+      this.#options.onWaveCommitted?.();
       if (!exhausted && advanceSealed) {
         this.#watermark = advanceTo;
       }
@@ -1807,6 +1834,74 @@ export class SpaceServer implements TransactionSealDestination {
         "outbox drain failed; rows kept for re-send",
         error,
       ]);
+    }
+  }
+
+  /** Dispose the serving runtime under a DEADLINE (park liveness — the
+   * lunch-wall mechanism): a serving runtime killed mid-wave can hang
+   * `runtime.dispose()` forever (its loopback loads died with the
+   * crashed wave), and a park gated on that dispose never resolves
+   * `#parked` — every recovery the host chains behind `whenParked`
+   * (`#reactivateAfterPark`, fired on each subsequent admission) then
+   * waits for eternity and the space is never served again, while
+   * events keep appending durably. By the time dispose runs, the park's
+   * semantic obligations are already met: the loop is stopped, the wave
+   * abandoned, the seal chain drained — crash-equivalent teardown is
+   * the sanctioned model for abandoned waves. So an overrunning dispose
+   * is ABANDONED: logged loudly with the park bracket diagnostics,
+   * counted (§7 `parkDisposeTimeouts`), its eventual completion or
+   * failure logged when it lands; the park completes regardless (lease
+   * released, `#parked` resolved, recovery unblocked). */
+  async #disposeRuntimeTimeboxed(reason: string): Promise<void> {
+    const dispose = this.#disposeRuntime;
+    if (dispose === undefined) return;
+    const timeoutMs = this.#options.policy?.parkDisposeTimeoutMs ??
+      DEFAULT_PARK_DISPOSE_TIMEOUT_MS;
+    const pending = dispose();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const winner = await Promise.race([
+      pending.then(
+        () => "disposed" as const,
+        () => "failed" as const,
+      ),
+      new Promise<"timeout">((resolve) => {
+        timer = setTimeout(() => resolve("timeout"), timeoutMs);
+      }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+    if (winner === "failed") {
+      // Re-await so the caller's catch logs the error (the existing
+      // park-dispose-failed arm).
+      return pending;
+    }
+    if (winner === "timeout") {
+      this.#options.stats.parkDisposeTimeouts += 1;
+      logger.error(
+        "park-dispose-timeout",
+        `space ${this.#options.space}: runtime dispose overran ` +
+          `${timeoutMs}ms during park (${reason}); abandoning the ` +
+          "factory handle and completing the park — loop stopped, " +
+          "wave abandoned, seal chain drained; lease releases and " +
+          "whenParked resolves now (park liveness)",
+      );
+      // The abandoned dispose keeps running; observe its eventual fate
+      // so a late completion is visible and a late rejection never
+      // becomes an unhandled rejection.
+      pending.then(
+        () => {
+          logger.warn("park-dispose-late", () => [
+            `space ${this.#options.space}: abandoned park dispose ` +
+            "completed late",
+          ]);
+        },
+        (error) => {
+          logger.warn("park-dispose-late-failed", () => [
+            `space ${this.#options.space}: abandoned park dispose ` +
+            "failed late",
+            error,
+          ]);
+        },
+      );
     }
   }
 
@@ -1864,7 +1959,7 @@ export class SpaceServer implements TransactionSealDestination {
           .shadowFlipObserver = undefined;
       }
       this.#runtime?.clearSealDestination();
-      await this.#disposeRuntime?.();
+      await this.#disposeRuntimeTimeboxed(reason);
     } catch (error) {
       logger.warn("park-dispose-failed", () => [
         "runtime dispose during park failed",

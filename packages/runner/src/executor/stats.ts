@@ -85,6 +85,22 @@ export type ServingLoopStats = {
    * landing, so the demanded derivation never materialized). Counted
    * here so the storm is a health-stats fact, not a log-grep. */
   unstampedSealRefusals: number;
+  /** Park-time runtime disposes that overran their deadline and were
+   * abandoned (park LIVENESS, the lunch-wall containment): a hung
+   * dispose must never wedge `whenParked` and every recovery chained
+   * behind it. Nonzero says a serving runtime refused to tear down —
+   * loud in logs, counted here. */
+  parkDisposeTimeouts: number;
+  /** Failure-park re-activations delayed by the host's streak backoff
+   * (a permanently-failing space must reactivate at a bounded rate,
+   * not as fast as admissions arrive). */
+  reactivationBackoffs: number;
+  /** Foreign-space writes refused at wave ACCUMULATION (serving-loop.md
+   * §3d, RULED 2026-08-14 (c)): action-scoped — the writing action
+   * fails, the wave and the loop keep serving. Nonzero names a pattern
+   * materializing home-space state under serving (cross-space serving
+   * is Phase 5). */
+  foreignWriteRefusals: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
   events: {
@@ -112,6 +128,9 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   structureLoadRearmed: 0,
   watermarkClamped: 0,
   unstampedSealRefusals: 0,
+  parkDisposeTimeouts: 0,
+  reactivationBackoffs: 0,
+  foreignWriteRefusals: 0,
   watermarkLag: 0,
   events: {
     appended: 0,
