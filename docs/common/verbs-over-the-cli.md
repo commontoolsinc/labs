@@ -100,6 +100,14 @@ do I get" are answerable before the first call rather than by making one:
 A value-less verb carries no `outputSchema` at all, which is how a caller tells
 the two apart without calling.
 
+The listing names every verb the piece exposes, including one the pattern's
+declared result type does not mention: a pattern whose result type is its
+argument schema reused still returns the streams it wired, and those are as
+callable as any other. What it does *not* name is a data field — a property
+with no stream stored behind it is never offered as callable. Absence from the
+listing therefore means there is nothing to call, not that the listing could
+not see it.
+
 One verb at a time, `--help` answers the same question from the callable
 itself:
 

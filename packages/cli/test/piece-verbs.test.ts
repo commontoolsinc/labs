@@ -40,6 +40,45 @@ function cell(value: unknown, schema?: JSONSchema): {
   return self;
 }
 
+/** A result cell as a `cf` command is actually handed one: `get()` and
+ * `schema` offer only what the pattern's declared result TYPE carries, while
+ * `key()` still reaches every stored property. `streams` names the properties
+ * whose stored cell answers as a stream; every other child answers no, which
+ * is what makes this double able to refuse — the forced-stream cast the
+ * listing must not use would get "yes" from all of them. */
+function schemaFilteredCell(
+  value: Record<string, unknown>,
+  schema: JSONSchema,
+  streams: ReadonlySet<string>,
+): {
+  schema: JSONSchema;
+  get: () => unknown;
+  getRaw: () => unknown;
+  asSchemaFromLinks: () => unknown;
+  key: (name: string) => unknown;
+} {
+  const child = (name: string) => {
+    const self = {
+      schema: undefined,
+      get: () => undefined,
+      getRaw: () => undefined,
+      isStream: () => streams.has(name),
+      asSchemaFromLinks: () => self,
+      key: () => self,
+    };
+    return self;
+  };
+  return {
+    schema,
+    get: () => value,
+    getRaw: () => value,
+    asSchemaFromLinks: function () {
+      return this;
+    },
+    key: child,
+  };
+}
+
 const ADD_TOPIC_EVENT: JSONSchema = {
   type: "object",
   properties: {
@@ -309,6 +348,84 @@ describe("listPieceCallables", () => {
     expect(Object.hasOwn(byName.get("touch")!, "outputSchema")).toBe(false);
     // Data stays out of the listing whatever its node declares.
     expect(byName.has("noteCount")).toBe(false);
+  });
+
+  it("lists a graph verb the result cell omits, and only if it is stored", async () => {
+    // The result cell reads through the pattern's DECLARED result type, so a
+    // verb that type omits appears in neither the value nor the durable
+    // schema — the walk is never offered the name at all, which is a different
+    // failure from classifying it wrongly. The graph names it, so the graph is
+    // a candidate source.
+    //
+    // It is a candidate source and not a verdict, which `ghostVerb` is here to
+    // hold: the graph wires a handler to it exactly as it does `hiddenVerb`,
+    // but the piece stores no stream there, so it must not be listed. Without
+    // that second gate the graph becomes a way to name rows nobody can call —
+    // the direction #5683 closed, reopened from the other end.
+    const streams = new Set(["hiddenVerb"]);
+    const resultRoot = schemaFilteredCell(
+      { noteCount: 3 },
+      { type: "object", properties: { noteCount: { type: "number" } } },
+      streams,
+    );
+    const pattern = compiledPattern({
+      result: {
+        hiddenVerb: streamAlias({ stream: "hiddenVerb" }),
+        ghostVerb: streamAlias({ stream: "ghostVerb" }),
+        noteCount: streamAlias("noteCount", { type: "number" }),
+      },
+      nodes: [
+        {
+          module: { wrapper: "handler", resultSchema: CREATE_NOTE_RESULT },
+          inputs: { $event: streamAlias({ stream: "hiddenVerb" }) },
+          outputs: {},
+        },
+        {
+          module: { wrapper: "handler" },
+          inputs: { $event: streamAlias({ stream: "ghostVerb" }) },
+          outputs: {},
+        },
+        // Ordinary data: no `$event`, so never a candidate in the first place.
+        {
+          module: { type: "javascript", resultSchema: { type: "number" } },
+          inputs: { list: streamAlias("notes") },
+          outputs: streamAlias("noteCount"),
+        },
+      ],
+    });
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
+      getCell: () => resultRoot,
+      getPattern: () => Promise.resolve(pattern),
+    };
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-791",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+
+    // One row for three graph properties. Enumerating from the result cell
+    // alone drops `hiddenVerb` and the list is empty; listing on the graph's
+    // say-so adds `ghostVerb`; classifying on the forced-stream cast adds
+    // `noteCount` as well.
+    expect(listing.verbs.map((verb) => verb.name)).toEqual(["hiddenVerb"]);
+    // The row is complete, not a stub: a graph candidate claims its declared
+    // result on the same terms a result-cell row does.
+    expect(listing.verbs[0]).toEqual({
+      name: "hiddenVerb",
+      kind: "handler",
+      on: "result",
+      inputSchema: true,
+      outputSchema: CREATE_NOTE_RESULT,
+    });
   });
 
   it("lists a piece whose pattern cannot be resolved", async () => {

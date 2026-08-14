@@ -1883,8 +1883,9 @@ function samePatternLink(left: unknown, right: unknown): boolean {
     leftAlias.scope === rightAlias.scope;
 }
 
-/** A compiled pattern's declared verb results, keyed by the result property
- * each verb is exposed under.
+/** Every verb a compiled pattern drives from a result property, keyed by that
+ * property and mapped to the verb's declared result — or to `undefined` where
+ * nothing names one.
  *
  * A handler node's `$event` input and the result property exposing that
  * handler's stream are one cell written twice in the pattern's own terms, so
@@ -1894,14 +1895,23 @@ function samePatternLink(left: unknown, right: unknown): boolean {
  * `Stream<E, R>`'s `R` is lowered (verb contract WS-C). A stream two handler
  * nodes share names no single result and so contributes none.
  *
+ * The KEYS are the graph's own account of which result properties are verbs,
+ * and that account is independent of the pattern's declared result TYPE: a
+ * pattern may wire a handler to a property its result type never mentions, and
+ * then no durable schema and no schema-filtered read ever offers the name. The
+ * listing enumerates candidates from these keys as well as from the result
+ * cell for exactly that case — but a key here says the pattern wires a handler
+ * to the property, never that the piece stores a stream at it, so every
+ * candidate is still classified against the stored signal before it is listed.
+ *
  * A compiled pattern is CALLABLE, so it is not a record and must not be tested
  * as one; only its `result` and `nodes` are read here. */
-function declaredVerbResults(
+function patternVerbResults(
   pattern: { result?: unknown; nodes?: unknown } | null | undefined,
-): Map<string, JSONSchema> {
-  const declared = new Map<string, JSONSchema>();
+): Map<string, JSONSchema | undefined> {
+  const verbs = new Map<string, JSONSchema | undefined>();
   const result = pattern?.result;
-  if (!isObjectOrArray(result)) return declared;
+  if (!isObjectOrArray(result)) return verbs;
   const nodes = Array.isArray(pattern?.nodes) ? pattern.nodes : [];
   for (const [name, link] of Object.entries(result)) {
     let resultSchema: JSONSchema | undefined;
@@ -1915,11 +1925,10 @@ function declaredVerbResults(
         resultSchema = module.resultSchema as JSONSchema;
       }
     }
-    if (matched === 1 && resultSchema !== undefined) {
-      declared.set(name, resultSchema);
-    }
+    if (matched === 0) continue;
+    verbs.set(name, matched === 1 ? resultSchema : undefined);
   }
-  return declared;
+  return verbs;
 }
 
 /** One verb's declared result, matched through the piece's compiled pattern.
@@ -1940,7 +1949,7 @@ async function declaredVerbResult(
   callableName: string,
 ): Promise<JSONSchema | undefined> {
   try {
-    return declaredVerbResults(await piece.getPattern()).get(callableName);
+    return patternVerbResults(await piece.getPattern()).get(callableName);
   } catch {
     return undefined;
   }
@@ -1948,13 +1957,19 @@ async function declaredVerbResult(
 
 /**
  * Enumerate every callable a piece exposes (verb contract: Verb discovery,
- * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
- * listed — hiding is a display default driven by the listing marks
+ * docs/plans/pattern-verb-contract.md). Nothing listed is hidden from a
+ * caller — hiding is a display default driven by the listing marks
  * (`tier: "wrapper"`, `deprecated: true`), never a capability boundary: the
  * rows carry the marks, `partitionVerbListing` decides the default view, and
- * `--all` shows the full surface. Walks result then input with the same classification
- * `cf piece call` resolves through, so the listing and the dispatcher can
- * never disagree about what is callable.
+ * `--all` shows the full surface.
+ *
+ * Candidate names come from the result cell, then the input cell, then the
+ * piece root and the compiled pattern's verb properties; every one of them is
+ * put to the same classification `cf piece call` resolves through, so the
+ * listing and the dispatcher can never disagree about what is callable. The
+ * two halves are deliberately asymmetric — enumeration is generous because a
+ * name it never proposes can never be listed, and classification is strict
+ * because a name it wrongly accepts is a verb a caller cannot call.
  */
 export async function listPieceCallables(
   config: PieceConfig,
@@ -1974,13 +1989,15 @@ export async function listPieceCallables(
   // result lives on its node in the compiled graph — so the listing resolves
   // the pattern once and matches nodes to result properties. Resolution is
   // cached by identity, so this costs one load per listing, not one per row.
-  let declaredResults = new Map<string, JSONSchema>();
+  // The same match also names every verb the graph drives, which is what the
+  // candidate sweep below enumerates from.
+  let patternVerbs = new Map<string, JSONSchema | undefined>();
   if (typeof piece.getPattern === "function") {
     try {
-      declaredResults = declaredVerbResults(await piece.getPattern());
+      patternVerbs = patternVerbResults(await piece.getPattern());
     } catch {
       // Advisory in the same way the identity above is: a piece with no
-      // reachable pattern still lists every verb it exposes.
+      // reachable pattern still lists every verb its stored surface offers.
     }
   }
 
@@ -2017,7 +2034,7 @@ export async function listPieceCallables(
       // only a result-cell row can claim one: a same-named verb reached on the
       // input cell is a different stream that merely shares its name.
       const outputSchema = spec.outputSchemaSummary ??
-        (cellProp === "result" ? declaredResults.get(name) : undefined);
+        (cellProp === "result" ? patternVerbs.get(name) : undefined);
       listings.set(name, {
         name,
         kind,
@@ -2029,12 +2046,23 @@ export async function listPieceCallables(
     }
   }
 
-  // Third resolution path, mirrored from resolvePieceCallable: a name the
-  // ordinary walk rejected can still be dispatched by name, so it is
-  // considered here too.
+  // Candidates the walk above could not offer, each still put to the same
+  // classification. Two sources, and they fail in opposite directions.
   //
-  // It is classified on the two DEFINITE stored signals the read-path guard
-  // uses — a link-derived schema that answers as a stream, or the stored
+  // The piece root's own keys mirror resolvePieceCallable's third resolution
+  // path: a name the ordinary walk REJECTED can still be dispatched by name.
+  //
+  // The graph's verb properties cover the walk never SEEING a name: the
+  // result cell reads through the pattern's declared result type, so a verb
+  // that type omits is absent from the schema-filtered value and from the
+  // durable schema alike, and no amount of classification reaches a name
+  // nothing proposed. `cf piece call` never had this problem — a dispatcher is
+  // handed the name — which is how a piece answers "no verbs" and then accepts
+  // one.
+  //
+  // Both are candidate sources and neither is a verdict. Classification stays
+  // on the two DEFINITE stored signals the read-path guard uses — a
+  // link-derived schema that answers as a stream, or the stored
   // `{$stream: true}` sentinel — and never on the dispatcher's forced-stream
   // cast. That cast asserts what it then asks: its stream schema survives link
   // resolution for an inline value, so `Cell.isStream` answers from the
@@ -2043,18 +2071,23 @@ export async function listPieceCallables(
   // in a listing, which is a statement about what exists. A listing that names
   // every data field costs more than one that misses a marker-less handler,
   // because it makes the whole surface untrustworthy — and such a handler
-  // stays dispatchable regardless.
+  // stays dispatchable regardless. Widening the enumeration is safe for the
+  // same reason narrowing the classification was necessary: a candidate that
+  // stores no stream is dropped here exactly as a data field is.
   const pieceCell = typeof piece.getCell === "function"
     ? piece.getCell()
     : undefined;
-  if (pieceCell) {
-    const pieceValue = pieceCell.get?.();
-    if (isObjectOrArray(pieceValue)) {
-      for (const name of Object.keys(pieceValue)) {
-        if (!listings.has(name)) rejected.add(name);
-      }
+  const pieceValue = pieceCell?.get?.();
+  if (isObjectOrArray(pieceValue)) {
+    for (const name of Object.keys(pieceValue)) {
+      if (!listings.has(name)) rejected.add(name);
     }
-    const resultRootValue = resultRoot?.get?.();
+  }
+  for (const name of patternVerbs.keys()) {
+    if (!listings.has(name)) rejected.add(name);
+  }
+  const resultRootValue = resultRoot?.get?.();
+  if (resultRoot) {
     for (const name of rejected) {
       if (listings.has(name)) continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
@@ -2067,7 +2100,12 @@ export async function listPieceCallables(
         continue;
       }
       const spec = callableCommandSpec(callableCell, "handler");
-      const outputSchema = declaredResults.get(name);
+      const outputSchema = patternVerbs.get(name);
+      // `result`, because that is where the row was reached and where
+      // `cf piece call` reaches it: a graph candidate is a property of the
+      // PATTERN's result, and a piece-root candidate is dispatched on the
+      // result cell too. Neither is on the input cell, whose same-named verb
+      // would be a different stream.
       listings.set(name, {
         name,
         kind: "handler",

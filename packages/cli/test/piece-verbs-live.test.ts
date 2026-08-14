@@ -3,11 +3,13 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { getResultCellWithSourceSchema } from "../../runner/src/piece-helpers.ts";
 import { listPieceCallables } from "../lib/piece.ts";
 
 /**
  * One pattern with one verb and three data fields of different shapes — a
- * scalar with a default, a computed number, and an array.
+ * scalar with a default, a computed number, and an array. Its result type
+ * DECLARES the verb, so the verb reaches the listing through the result cell.
  *
  * The listing's classification is exercised against CELLS THE RUNTIME BUILT,
  * because the defect this pins cannot be reproduced against a double: the
@@ -16,7 +18,7 @@ import { listPieceCallables } from "../lib/piece.ts";
  * from the cast. Every data field below was reported as a callable handler,
  * with the field's own schema offered as its input schema.
  */
-const PROGRAM = {
+const DECLARED_PROGRAM = {
   main: "/main.tsx",
   files: [{
     name: "/main.tsx",
@@ -47,61 +49,163 @@ const PROGRAM = {
   }],
 };
 
+/**
+ * The same shape as `packages/cli/integration/pattern/main.tsx`: the result
+ * type is the argument schema reused, so it describes the piece's DATA and
+ * mentions neither verb — while the pattern returns both, and
+ * `integration.sh` calls `increment` and asserts the counter moves.
+ *
+ * Nothing about these two verbs is hidden or unusual; they are simply absent
+ * from the type the result cell reads through, so a walk of that cell never
+ * proposes their names and never gets as far as classifying them.
+ */
+const UNDECLARED_PROGRAM = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      'import { handler, pattern, schema } from "commonfabric";',
+      'import "commonfabric/schema";',
+      "",
+      "const model = schema({",
+      "  type: 'object',",
+      "  properties: {",
+      "    value: { type: 'number', default: 0, asCell: ['cell'] },",
+      "    stringField: { type: 'string' },",
+      "    arrayField: { type: 'array', items: { type: 'number' } },",
+      "  },",
+      "  default: { value: 0 },",
+      "});",
+      "",
+      "const increment = handler({}, model, (_, state) => {",
+      "  state.value.set(state.value.get() + 1);",
+      "});",
+      "",
+      "const decrement = handler({}, model, (_, state) => {",
+      "  state.value.set(state.value.get() - 1);",
+      "});",
+      "",
+      "export default pattern((cell) => {",
+      "  return {",
+      "    increment: increment(cell),",
+      "    decrement: decrement(cell),",
+      "    value: cell.value,",
+      "    stringField: cell.stringField,",
+      "    arrayField: cell.arrayField,",
+      "  };",
+      "}, model, model);",
+    ].join("\n"),
+  }],
+};
+
+/**
+ * Compile and run `program`, then list the callables of the piece it produces.
+ *
+ * The result cell is narrowed by `getResultCellWithSourceSchema`, which is the
+ * one step `PiecesController.getPieceCell` applies before any `cf` command
+ * sees a piece: it recovers the pattern's result schema from the cell's own
+ * `schema` metadata and reads through it. Handing the lister the unnarrowed
+ * cell instead would hide the whole defect, because an unnarrowed `get()`
+ * offers every stored key including the ones the result type omits.
+ */
+async function listLivePiece(
+  program: unknown,
+  passphrase: string,
+  id: string,
+): Promise<Awaited<ReturnType<typeof listPieceCallables>>> {
+  const signer = await Identity.fromPassphrase(passphrase);
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL("https://example.com"),
+    storageManager,
+  });
+  const space = signer.did();
+
+  try {
+    const compiled = await runtime.patternManager.compilePattern(
+      program as never,
+      { space },
+    );
+    const tx = runtime.edit();
+    const rootCell = runtime.getCell(space, id, undefined, tx);
+    const root = runtime.run(tx, compiled, {}, rootCell);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    await root.pull();
+
+    // The piece surface `listPieceCallables` walks: a result cell read through
+    // the pattern's result schema, an empty input cell, the piece root it
+    // sweeps for names the walk rejected, and the compiled pattern.
+    const result = getResultCellWithSourceSchema(root);
+    const emptyInput = runtime.getCell(space, `${id}-input`);
+    const piece = {
+      result: { getCell: () => Promise.resolve(result) },
+      input: { getCell: () => Promise.resolve(emptyInput) },
+      getCell: () => result,
+      getPattern: () => Promise.resolve(compiled),
+    };
+
+    return await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:live",
+        space,
+      },
+      {
+        loadPieces: () => Promise.resolve({ getSpace: () => space } as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+  } finally {
+    await runtime.dispose?.();
+    await storageManager.close?.();
+  }
+}
+
 describe("listPieceCallables against a live piece", () => {
   it("lists the verb and none of the data fields", async () => {
-    const signer = await Identity.fromPassphrase("piece-verbs-live");
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL("https://example.com"),
-      storageManager,
+    const listing = await listLivePiece(
+      DECLARED_PROGRAM,
+      "piece-verbs-live",
+      "listing-live",
+    );
+
+    // The pattern declares exactly one verb; every other name is data. The
+    // listing must never offer data as callable, and this equality is what
+    // fails against a listing that classifies on the forced-stream cast: that
+    // cast passes `count`, `items` and `label` too.
+    expect(listing.verbs.map((verb) => verb.name)).toEqual(["add"]);
+    expect(listing.verbs[0].kind).toBe("handler");
+    // The verb's input schema is the event's, not the property's own.
+    expect(listing.verbs[0].inputSchema).toMatchObject({
+      properties: { title: { type: "string" } },
     });
-    const space = signer.did();
+  });
 
-    try {
-      const compiled = await runtime.patternManager.compilePattern(
-        PROGRAM as never,
-        { space },
-      );
-      const tx = runtime.edit();
-      const rootCell = runtime.getCell(space, "listing-live", undefined, tx);
-      const root = runtime.run(tx, compiled, {}, rootCell);
-      runtime.prepareTxForCommit(tx);
-      expect((await tx.commit()).error).toBeUndefined();
-      await root.pull();
+  it("lists a verb the pattern's declared result type omits", async () => {
+    const listing = await listLivePiece(
+      UNDECLARED_PROGRAM,
+      "piece-verbs-live-undeclared",
+      "listing-live-undeclared",
+    );
 
-      // The piece surface `listPieceCallables` walks: a result cell, an empty
-      // input cell, and the piece root it sweeps for names the walk rejected.
-      const emptyInput = runtime.getCell(space, "listing-live-input");
-      const piece = {
-        result: { getCell: () => Promise.resolve(root) },
-        input: { getCell: () => Promise.resolve(emptyInput) },
-        getCell: () => root,
-      };
-
-      const listing = await listPieceCallables(
-        {
-          apiUrl: "http://localhost:8000",
-          identity: "/tmp/test-identity.pem",
-          piece: "fid1:live",
-          space,
-        },
-        {
-          loadPieces: () => Promise.resolve({ getSpace: () => space } as never),
-          loadPiece: () => Promise.resolve(piece as never),
-        },
-      );
-
-      // The pattern declares exactly one verb; every other name is data.
-      // The listing must never offer data as callable.
-      expect(listing.verbs.map((verb) => verb.name)).toEqual(["add"]);
-      expect(listing.verbs[0].kind).toBe("handler");
-      // The verb's input schema is the event's, not the property's own.
-      expect(listing.verbs[0].inputSchema).toMatchObject({
-        properties: { title: { type: "string" } },
-      });
-    } finally {
-      await runtime.dispose?.();
-      await storageManager.close?.();
+    // Both verbs, and none of the three data fields. The two halves of this
+    // equality fail against opposite implementations, which is why they are
+    // asserted together: enumerating candidates from the result cell alone
+    // loses `decrement` and `increment` and leaves the listing EMPTY — what a
+    // caller sees today on a piece that accepts both — while classifying a
+    // candidate on the forced-stream cast rather than on a stored stream adds
+    // `arrayField`, `stringField` and `value` back.
+    expect(listing.verbs.map((verb) => verb.name)).toEqual([
+      "decrement",
+      "increment",
+    ]);
+    for (const verb of listing.verbs) {
+      expect(verb.kind).toBe("handler");
+      // The result cell is where the graph exposes them and where
+      // `cf piece call` resolves them, whatever the result TYPE says.
+      expect(verb.on).toBe("result");
     }
   });
 });
