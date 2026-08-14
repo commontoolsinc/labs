@@ -32,7 +32,10 @@ import {
 } from "../cfc/schema-sanitization.ts";
 import { uniqueCfcAtoms } from "../cfc/observation.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { markEffectCompletion } from "../executor/effect-completion.ts";
+import {
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
 import { type Cell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
@@ -50,7 +53,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -128,11 +131,11 @@ function setStampedModelOutput(
 function mergeLlmDerivedIntoNode(
   node: Record<string, unknown>,
 ): Record<string, unknown> {
-  const ifc = isRecord(node.ifc) ? node.ifc : {};
+  const ifc = isObjectOrArray(node.ifc) ? node.ifc : {};
   const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
   const stamp = cfcAtom.llmDerived();
   const already = addIntegrity.some((atom) =>
-    isRecord(atom) && isRecord(stamp) && atom.type === stamp.type
+    isObjectOrArray(atom) && isObjectOrArray(stamp) && atom.type === stamp.type
   );
   return {
     ...node,
@@ -176,11 +179,11 @@ function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
   const stampNode = (node: Record<string, unknown>): JSONSchema =>
     mapSubschemas(
       mergeLlmDerivedIntoNode(node) as JSONSchemaObj,
-      (child) => (isRecord(child) ? stampNode(child) : child),
+      (child) => (isObjectOrArray(child) ? stampNode(child) : child),
       { includeDefs: true, includeUnused: true },
     );
 
-  const base: Record<string, unknown> = isRecord(schema)
+  const base: Record<string, unknown> = isObjectOrArray(schema)
     ? schema
     : { type: "object" };
   return internSchema(stampNode(base));
@@ -317,15 +320,20 @@ function createUpdatePartialCallback(
         // v2 stage G): protocol.md §6 rules settled-result-only commits —
         // "partials never become commits" under the flag, and the interim
         // loss of token streaming is ACCEPTED (owner, 2026-08-02). In the
-        // serving posture the partial is SKIPPED before a transaction is
-        // minted — the same ruled outcome the unstamped-seal refusal
-        // produced here before, without spending a refused seal, so §3d's
-        // `unstampedSealRefusals` counter stays an undeclared-commit-path
-        // signal instead of counting this accepted baseline. The OFF arm
-        // commits it exactly as today.
+        // serving posture UNDER THE FLAG the partial is SKIPPED before a
+        // transaction is minted — the same ruled outcome the
+        // unstamped-seal refusal produced here before, without spending a
+        // refused seal, so §3d's `unstampedSealRefusals` counter stays an
+        // undeclared-commit-path signal instead of counting this accepted
+        // baseline. The OFF arm commits it exactly as today — INCLUDING a
+        // serving-posture runtime with the flag off (review thread
+        // r3756175835: posture alone dropped OFF-arm partials, an
+        // unrecorded OFF-arm delta).
         runtime.idle().then(() => {
           if (
-            completed || thisRun !== getCurrentRun() || runtime.servingPosture
+            completed || thisRun !== getCurrentRun() ||
+            (runtime.servingPosture &&
+              runtime.experimental.serverExecution === true)
           ) {
             return;
           }
@@ -569,6 +577,10 @@ function enqueuePostCommitLLMWork(
   tx: IExtendedStorageTransaction,
   sink: string,
   id: string,
+  /** The PER-TARGET outbox/dedupe key (effectTargetKey of `id` and the
+   * builtin's result cell) — distinct nodes with identical inputs must
+   * not collide on `id` alone (stage-G round-2 headline). */
+  idempotencyKey: string,
   kind: string,
   request: any,
   start: () => void,
@@ -582,6 +594,7 @@ function enqueuePostCommitLLMWork(
     () => {
       start();
     },
+    { idempotencyKey },
   );
 }
 
@@ -609,7 +622,7 @@ async function pullContextCells(
         ? getCellOrThrow(value).resolveAsCell()
         : isCell(value)
         ? value.resolveAsCell()
-        : isRecord(value) && typeof value.resolveAsCell === "function"
+        : isObjectOrArray(value) && typeof value.resolveAsCell === "function"
         ? value.resolveAsCell()
         : undefined;
       await resolved?.pull?.();
@@ -742,11 +755,21 @@ export function llm(
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
-    if (hash === previousCallHash || hash === requestHashWithLog.get()) {
-      // The §4 memo hit: the stored key matches, the stored result IS the
-      // value, no effect fires (server-execution v2; the in-flight
-      // previousCallHash match is dedupe, not a hit).
-      if (hash !== previousCallHash) {
+    const currentRequestHash = requestHashWithLog.get();
+    if (hash === previousCallHash || hash === currentRequestHash) {
+      // The §4 memo hit, gated on SETTLED state like the sibling
+      // builtins (generateText/generateObject; round-2 thread 8): a
+      // hit is a re-evaluation that resolved from a stored key WITH a
+      // result or error-shaped result landed. The old gate counted a
+      // settled same-runtime re-evaluation as in-flight dedupe (hash
+      // === previousCallHash, which completion never clears) and a
+      // bare unsettled claim (stored hash, no result yet) as a hit —
+      // both miscounts for Phase 2's gate arithmetic.
+      if (
+        hash === currentRequestHash &&
+        (resultWithLog.get() !== undefined ||
+          errorWithLog.get() !== undefined)
+      ) {
         runtime.effectMemoObserver?.({ kind: "hit", id: `llm:${hash}` });
       }
       return;
@@ -787,10 +810,12 @@ export function llm(
 
     // Build tool catalog if tools are present, then start execution after the
     // transaction commits.
+    const effectKey = effectTargetKey(`llm:${hash}`, resultCell);
     enqueuePostCommitLLMWork(
       tx,
       "llm",
       `llm:${hash}`,
+      effectKey,
       "llm-start",
       requestSnapshot,
       () => {
@@ -828,7 +853,7 @@ export function llm(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
-                    markEffectCompletion(tx, `llm:${hash}`);
+                    markEffectCompletion(tx, effectKey);
                     // D1b: attribute FIRST, then stamp the model-output fields —
                     // `result`/`partial` carry `LlmDerived`; the control-state
                     // fields (pending/error/requestHash/grounding) do not.
@@ -889,7 +914,7 @@ export function llm(
                 // may have already set previousCallHash to its own hash.
                 if (hash === previousCallHash) previousCallHash = undefined;
               },
-              `llm:${hash}`,
+              effectKey,
             )
           ),
           parentCell,
@@ -899,25 +924,6 @@ export function llm(
   };
 }
 
-/**
- * Generate text via an LLM.
- *
- * A simplified alternative to `llm` that takes a single prompt string and
- * optional system message, returning plain text rather than a structured
- * content array.
- *
- * Returns the complete result as `result` (string) and the incremental result
- * as `partial` (string). `pending` is true while a request is pending.
- *
- * @param prompt - The user prompt/message to send to the LLM.
- * @param system - Optional system message.
- * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
- * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
- *
- * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
- *   As individual docs, representing `pending` state, final `result` and
- *   incrementally updating `partial` result.
- */
 /**
  * Resolve the effective native-model-tool ids for a request from the friendly
  * `search` flag (shorthand for Google Search grounding) plus any explicit
@@ -973,6 +979,25 @@ function extractGroundingSources(
   return out.length > 0 ? out : undefined;
 }
 
+/**
+ * Generate text via an LLM.
+ *
+ * A simplified alternative to `llm` that takes a single prompt string and
+ * optional system message, returning plain text rather than a structured
+ * content array.
+ *
+ * Returns the complete result as `result` (string) and the incremental result
+ * as `partial` (string). `pending` is true while a request is pending.
+ *
+ * @param prompt - The user prompt/message to send to the LLM.
+ * @param system - Optional system message.
+ * @param model - Model to use (defaults to DEFAULT_MODEL_NAME).
+ * @param maxTokens - Maximum number of tokens to generate (defaults to 4096).
+ *
+ * @returns { pending: boolean, result?: string, partial?: string, requestHash?: string } -
+ *   As individual docs, representing `pending` state, final `result` and
+ *   incrementally updating `partial` result.
+ */
 export function generateText(
   inputsCell: Cell<BuiltInGenerateTextParams>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
@@ -1139,10 +1164,12 @@ export function generateText(
         thisRun,
       );
 
+    const effectKey = effectTargetKey(`generateText:${hash}`, resultCell);
     enqueuePostCommitLLMWork(
       tx,
       "generateText",
       `generateText:${hash}`,
+      effectKey,
       "generateText-start",
       requestSnapshot,
       () => {
@@ -1177,7 +1204,7 @@ export function generateText(
                   const groundingSources = extractGroundingSources(llmResult);
 
                   await runtime.editWithRetry((tx) => {
-                    markEffectCompletion(tx, `generateText:${hash}`);
+                    markEffectCompletion(tx, effectKey);
                     // D1b: attribute FIRST, then stamp the model-output fields.
                     attributeModelOutputWrite(tx, runtime, "generateText");
                     resultCell.key("pending").withTx(tx).set(false);
@@ -1236,7 +1263,7 @@ export function generateText(
                 // may have already set previousCallHash to its own hash.
                 if (hash === previousCallHash) previousCallHash = undefined;
               },
-              `generateText:${hash}`,
+              effectKey,
             )
           ),
           parentCell,
@@ -1395,7 +1422,7 @@ export function generateObject<T extends Record<string, unknown>>(
         observedConfidentiality: [],
       };
     // Determine whether to use the tool-calling path or the direct generateObject path
-    const hasTools = isObject(tools) && Object.keys(tools).length > 0;
+    const hasTools = isObjectNotArray(tools) && Object.keys(tools).length > 0;
     const validationSchema = schemaSanitizePromptInjection
       ? toDeepFrozenSchema(schema)
       : undefined;
@@ -1476,6 +1503,7 @@ export function generateObject<T extends Record<string, unknown>>(
         ),
       );
       const hash = hashOf(requestSnapshot).toString();
+      const effectKey = effectTargetKey(`generateObject:${hash}`, resultCell);
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -1558,6 +1586,7 @@ export function generateObject<T extends Record<string, unknown>>(
         tx,
         "generateObject",
         `generateObject:${hash}`,
+        effectKey,
         "generateObject-start",
         requestSnapshot,
         () => {
@@ -1742,7 +1771,7 @@ export function generateObject<T extends Record<string, unknown>>(
               await runtime.idle();
 
               await runtime.editWithRetry((tx) => {
-                markEffectCompletion(tx, `generateObject:${hash}`);
+                markEffectCompletion(tx, effectKey);
                 // The InjectionSafe annotations on resultSchema are minted by
                 // the trusted sanitizer; attribute this write to the builtin so
                 // the persist-time evidence gate trusts them (audit S4). The
@@ -1806,7 +1835,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 () => {
                   previousCallHash = undefined;
                 },
-                `generateObject:${hash}`,
+                effectKey,
               );
             }),
             parentCell,
@@ -1842,6 +1871,7 @@ export function generateObject<T extends Record<string, unknown>>(
         schemaSanitizePromptInjection,
       });
       const hash = hashOf(requestSnapshot).toString();
+      const effectKey = effectTargetKey(`generateObject:${hash}`, resultCell);
       const queueName = inputs.key("queue").withTx(tx).get() as unknown as
         | string
         | undefined;
@@ -1917,6 +1947,7 @@ export function generateObject<T extends Record<string, unknown>>(
         tx,
         "generateObject",
         `generateObject:${hash}`,
+        effectKey,
         "generateObject-start",
         requestSnapshot,
         () => {
@@ -2009,7 +2040,7 @@ export function generateObject<T extends Record<string, unknown>>(
                 await runtime.idle();
 
                 await runtime.editWithRetry((tx) => {
-                  markEffectCompletion(tx, `generateObject:${hash}`);
+                  markEffectCompletion(tx, effectKey);
                   // The InjectionSafe annotations on resultSchema are minted by
                   // the trusted sanitizer; attribute this write to the builtin
                   // so the persist-time evidence gate trusts them (audit S4).
@@ -2068,7 +2099,7 @@ export function generateObject<T extends Record<string, unknown>>(
                   () => {
                     previousCallHash = undefined;
                   },
-                  `generateObject:${hash}`,
+                  effectKey,
                 );
               }),
             parentCell,

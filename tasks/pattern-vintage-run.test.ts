@@ -230,7 +230,7 @@ const undeclaredSource = (storageKey: string, trailer = "") =>
  * key, which is the one the cases below are about.
  */
 const undeclaredTest = [
-  "import { action, assert, pattern } from 'commonfabric';",
+  "import { action, assert, pattern, TESTS } from 'commonfabric';",
   `import Subject from './${UNDECLARED_KEY}';`,
   "export default pattern(() => {",
   "  const subject = Subject({});",
@@ -242,7 +242,7 @@ const undeclaredTest = [
   "    subject.scribble.send({ text: 'noted' });",
   "  });",
   "  return {",
-  "    tests: [{ action: add }, { assertion: added }, { action: write }],",
+  "    [TESTS]: [{ action: add }, { assertion: added }, { action: write }],",
   "    subject,",
   "  };",
   "});",
@@ -335,7 +335,7 @@ const crossSource = (
  * what lets a case there tell a moved storage key from an intact one.
  */
 const crossTest = [
-  "import { action, assert, pattern } from 'commonfabric';",
+  "import { action, assert, pattern, TESTS } from 'commonfabric';",
   `import Subject from './${CROSS_KEY}';`,
   "export default pattern(() => {",
   "  const subject = Subject({});",
@@ -349,7 +349,7 @@ const crossTest = [
   "  });",
   "  const wrote = assert(() => subject.child.note.get() === 'written');",
   "  return {",
-  "    tests: [",
+  "    [TESTS]: [",
   "      { action: add },",
   "      { assertion: added },",
   "      { assertion: noted },",
@@ -364,7 +364,7 @@ const crossTest = [
 
 const nestedTest = (key: string) =>
   [
-    "import { action, assert, pattern } from 'commonfabric';",
+    "import { action, assert, pattern, TESTS } from 'commonfabric';",
     `import Subject from './${key}';`,
     "export default pattern(() => {",
     "  const subject = Subject({});",
@@ -378,7 +378,7 @@ const nestedTest = (key: string) =>
     "    subject.rows.length === 1 && subject.rows[0].shout === 'captured'",
     "  );",
     "  return {",
-    "    tests: [{ action: add }, { assertion: added }, { assertion: mapped }],",
+    "    [TESTS]: [{ action: add }, { assertion: added }, { assertion: mapped }],",
     "    subject,",
     "  };",
     "});",
@@ -395,7 +395,7 @@ const nestedTest = (key: string) =>
  * never record a state the pattern does not actually reach.
  */
 const SUBJECT_TEST = [
-  "import { action, assert, pattern } from 'commonfabric';",
+  "import { action, assert, pattern, TESTS } from 'commonfabric';",
   `import Subject from './${KEY}';`,
   "export default pattern(() => {",
   "  const subject = Subject({});",
@@ -404,7 +404,7 @@ const SUBJECT_TEST = [
   "  });",
   "  const added = assert(() => subject.items.get().length === 1);",
   "  return {",
-  "    tests: [{ action: add }, { assertion: added }],",
+  "    [TESTS]: [{ action: add }, { assertion: added }],",
   "    subject,",
   "  };",
   "});",
@@ -1618,12 +1618,12 @@ describe("the vintage gate, end to end", () => {
       // later generation would be replayed against it.
       await setSubjectTest(
         [
-          "import { assert, pattern } from 'commonfabric';",
+          "import { assert, pattern, TESTS } from 'commonfabric';",
           `import Subject from './${KEY}';`,
           "export default pattern(() => {",
           "  const subject = Subject({});",
           "  const never = assert(() => subject.items.get().length === 99);",
-          "  return { tests: [{ assertion: never }], subject };",
+          "  return { [TESTS]: [{ assertion: never }], subject };",
           "});",
           "",
         ].join("\n"),
@@ -1649,11 +1649,11 @@ describe("the vintage gate, end to end", () => {
       // makes a green replay meaningless.
       await setSubjectTest(
         [
-          "import { pattern } from 'commonfabric';",
+          "import { pattern, TESTS } from 'commonfabric';",
           `import Subject from './${KEY}';`,
           "export default pattern(() => {",
           "  const subject = Subject({});",
-          "  return { tests: [], subject };",
+          "  return { [TESTS]: [], subject };",
           "});",
           "",
         ].join("\n"),

@@ -1,5 +1,6 @@
 import {
   type ACL,
+  aclDocId,
   ANYONE_USER,
   type Capability,
   hasConcreteOwner,
@@ -100,8 +101,9 @@ export interface SpaceMembershipProvider {
 }
 
 /**
- * The cell whose value is the space's ACL document — entity id `of:${space}`,
- * read in-space (mirrors `ACLManager` and the server's `aclDocId`). One Cell
+ * The cell whose value is the space's ACL document — entity id
+ * `aclDocId(space)`, read in-space (the same id `ACLManager` and the server
+ * resolve through that shared helper). One Cell
  * per space, reused across `readerRole` reads and `subscribe` so both observe
  * the same reactive state.
  */
@@ -112,10 +114,9 @@ const aclCellFor = (
 ): Cell<unknown> => {
   let cell = cache.get(space);
   if (cell === undefined) {
-    // The ACL doc uses the `of:${space}` entity id (`aclDocId(space)`
-    // server-side), read in-space — the same link `ACLManager` uses.
+    // Read in-space — the same link `ACLManager` uses.
     cell = runtime.getCellFromLink<unknown>({
-      id: `of:${space}` as URI,
+      id: aclDocId(space) as URI,
       path: [],
       space: space as MemorySpace,
     });

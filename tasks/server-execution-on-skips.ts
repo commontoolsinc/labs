@@ -50,19 +50,26 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
 
 /**
  * The lists themselves. Kept to what stage F's live ON-arm runs actually
- * surfaced: with the serving loop landed the ON arm genuinely SERVES, and
- * the plan's documented two-deriver interim (server and clients both
- * deriving until Phase 2 removes the client path) is a real posture, not
- * a hypothesis. Entries name their unskipping phase — never silent
- * filtering anywhere else.
+ * surfaced: with the serving loop landed the ON arm genuinely SERVES,
+ * and CI's ON arm is exactly the plan's mid-Phase-1 local flag flip —
+ * server and still-deriving clients CAS-storming, "expected, local-only,
+ * fine" (L14), and never a shipped state. Entries name their unskipping
+ * phase — never silent filtering anywhere else.
  *
- * Stage-G re-justification (2026-08-06, per the phase-completing pass):
- * the ONE entry below was re-examined and STANDS on its original
- * Phase-2 reason — a two-browser CAS-storm bring-up failure of the
- * two-deriver interim, unrelated to effect serving. Stage G landed the
- * effect channel and added NO skips: the effectful builtins served in
- * the ON arm are exercised by the runner suite's serving-loop tests,
- * and the ON-arm integration suites run unfiltered but for this entry.
+ * History: stage G (2026-08-06) re-justified the two-browsers CFC-gate
+ * entry this file had held since stage F and added no skips of its own;
+ * Phase 2 RETIRED that entry — the client derivation-commit path is
+ * removed by construction, dissolving the two-deriver CAS storm the
+ * entry named as its unskipping condition — and ADDED the
+ * sx2-serving-loop reproducer of the demand-cycle starvation fork at
+ * `phase-2-followup`. Stage P2-F (2026-08-13) RETIRED that entry too:
+ * the demand-cycle terminal state with commit-triggered re-arm closed
+ * the fork (never-loadable roots park instead of churning per cycle;
+ * the load pass runs under the flush deadline), so the surface runs —
+ * carrying the in-CI amplification-ratio gate and the pattern-updater
+ * CHECK-half witness (verification-coverage.md's closed OW19 row).
+ * Every list is EMPTY but for the ONE Phase-4 mixed-posture entry
+ * below: the ON arm otherwise runs the full suites.
  */
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
@@ -92,24 +99,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "rather than green-by-vacuity; lifts when the ON shell build " +
         "lands in CI (verification-coverage.md OW25) AND the " +
         "inherited red is fixed.",
-    },
-    {
-      file: "integration/sx2-serving-loop.test.ts",
-      phase: "phase-2-followup",
-      reason: "reproducer of the ESCALATED demand-cycle starvation " +
-        "fork: the SpaceServer's cycle runs #loadDemandedStructure " +
-        "BEFORE the settle race with no deadline, and never-loadable " +
-        "demanded roots are re-attempted every cycle since the " +
-        "ensure-retry fix, throttling input consumption. The RULED " +
-        "id-class exclusion (2026-08-07: computed:/cid:/watermark " +
-        "roots register no piece demand) REDUCED it — post-exclusion " +
-        "the loop consumes input again — but of:-class roots without " +
-        "pattern meta (registry/home/argument docs) still churn per " +
-        "cycle pending the owed terminal-state design " +
-        "(verification-coverage.md §3's demand-cycle row), and under " +
-        "load the gate's settle window sees too few cycles. The " +
-        "sx2-speculation gate runs unskipped; this entry lifts with " +
-        "the terminal-state follow-up.",
     },
   ],
   runner: [],

@@ -1,4 +1,4 @@
-import { computed, pattern, UI } from "commonfabric";
+import { computed, pattern, TESTS, UI } from "commonfabric";
 import {
   findElement,
   findNodeByProp,
@@ -156,7 +156,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_safe_image_url_accepts_web_urls },
       { assertion: assert_safe_image_url_rejects_unsafe_or_invalid_urls },
       { assertion: assert_generated_url_encodes_title_and_size },

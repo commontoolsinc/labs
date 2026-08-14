@@ -63,6 +63,33 @@ const fetchServingLoopStats = async (): Promise<
   return body.servingLoop;
 };
 
+/** Bounded poll for a counter condition (stage P2-F, the unskip's
+ * flake diagnosis): counters lag the observable they witness by an
+ * in-process notice hop — the feed has two producers (the admission
+ * hook's async notify, the loop's sync post-commit note), so a
+ * point-read right after `waitForSettled` can catch the accounting a
+ * beat before the late notice drains. The CONDITION is unchanged;
+ * only the read is given its bounded moment to arrive. */
+const waitForStats = async (
+  predicate: (stats: ServingLoopStats) => boolean,
+  label: string,
+  timeoutMs = 10_000,
+): Promise<ServingLoopStats> => {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const stats = await fetchServingLoopStats();
+    if (stats !== undefined && predicate(stats)) return stats;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `timed out waiting for ${label} — last stats: ${
+          JSON.stringify(stats)
+        }`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+};
+
 describe("sx2 serving loop (Phase 2 gates)", () => {
   let identity: Identity;
   let cc: PiecesController;
@@ -184,18 +211,17 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     // watermark answered "when", this answers "what").
     assertEquals(latestValue, 30);
 
-    const stats1 = await fetchServingLoopStats();
-    assert(stats1 !== undefined);
+    // The three authored notices are counted within a bounded moment
+    // of the settle (the two-producer notice hop above); the
+    // amplification arithmetic then reads ONE coherent snapshot.
+    const stats1 = await waitForStats(
+      (stats) => stats.authoredSeen - stats0.authoredSeen >= 3,
+      "the authored inputs to be counted (>= 3)",
+    );
     const authored = stats1.authoredSeen - stats0.authoredSeen;
     const derived = stats1.derivedCommits - stats0.derivedCommits;
     const acks = stats1.effectAcks - stats0.effectAcks;
     const waves = stats1.waves - stats0.waves;
-    assert(
-      authored >= 3,
-      `authoredSeen delta ${authored} must cover 3 — stats0=${
-        JSON.stringify(stats0)
-      } stats1=${JSON.stringify(stats1)}`,
-    );
     assert(derived >= 1, "the loop must have derived at least one wave");
     // ONE authoritative run per upstream change, coalescing allowed:
     // waves stay in the ballpark of authored input batches
@@ -253,9 +279,36 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
       { timeoutMs: 30_000 },
     );
     assert(settledSeq >= watermarkBefore + 1);
+    // The value arrives on the ordinary subscription push, which the
+    // watermark settle does not order — same bounded wait as the first
+    // gate's value read (the settle answered "when", this answers
+    // "what").
+    {
+      const deadline = Date.now() + 10_000;
+      while (latestValue !== 41) {
+        if (Date.now() > deadline) {
+          throw new Error(
+            `client sink never observed 41 (latest: ${latestValue})`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
     assertEquals(latestValue, 41);
-    const after = await fetchServingLoopStats();
-    assert(after !== undefined);
+    // Non-vacuity first (review thread r3739139538): the failure-count
+    // equality below proves nothing if the loop did no work in this
+    // window — pin that the serving loop actually consumed the
+    // authored input and derived. Bounded waits, not point reads: the
+    // settle target derives from a pre-write watermark observation, so
+    // a background wave (the updater's own activity) can satisfy it
+    // before THIS input's wave lands — the counters are the witness
+    // that the input itself was consumed.
+    const after = await waitForStats(
+      (candidate) =>
+        candidate.authoredSeen > stats.authoredSeen &&
+        candidate.derivedCommits > stats.derivedCommits,
+      "the serving loop to consume the authored input and derive",
+    );
     assertEquals(
       after.structureLoadFailures,
       stats.structureLoadFailures,

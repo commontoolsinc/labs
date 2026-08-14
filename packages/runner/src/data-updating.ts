@@ -1,4 +1,4 @@
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,
@@ -186,7 +186,7 @@ export const schemaIfcOverlapsPath = (
       return false;
     }
     if (
-      isRecord(current.ifc) &&
+      isObjectOrArray(current.ifc) &&
       labelHasValues(current.ifc) &&
       schemaPathsOverlap(path, sourcePath)
     ) {
@@ -306,7 +306,7 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
 const _toleratesMissingCache = new WeakMap<object, boolean>();
 function schemaToleratesMissing(schema: JSONSchema | undefined): boolean {
   if (schema === undefined) return true;
-  if (!isRecord(schema)) return true;
+  if (!isObjectOrArray(schema)) return true;
   // Schemas are identity-stable (interned / deep-frozen) on the paths that
   // reach here, mirroring traverse's own ref cache — memoize the verdict so
   // per-row write loops don't re-resolve refs (a CI-visible cost otherwise).
@@ -325,10 +325,10 @@ function computeToleratesMissing(schema: JSONSchema): boolean {
   // does not make the slot tolerant, while `default: 0/""/false` do. Judged
   // on the resolved schema so a default carried by the $defs target counts.
   let resolved: JSONSchema | undefined = schema;
-  if (isRecord(schema) && "$ref" in schema) {
+  if (isObjectOrArray(schema) && "$ref" in schema) {
     resolved = resolveSchemaRefsCanonical(schema as JSONSchemaObj) ?? schema;
   }
-  if (isRecord(resolved) && resolved.default != undefined) return true;
+  if (isObjectOrArray(resolved) && resolved.default != undefined) return true;
   // Type tolerance judged with the read side's own matcher (schemaAcceptsType
   // wraps the logic extracted from SchemaObjectTraverser.isValidType,
   // including $ref resolution and allOf/anyOf/oneOf).
@@ -415,11 +415,19 @@ export function diffAndUpdate(
   // the raw write path, reached by `Cell.set()` and the collection operations;
   // the pattern-driven paths (a run's result, its argument) do the same at
   // their own boundaries.
+  //
+  // A query result is a leaf to that walk, because it is one to the diff
+  // below: `normalizeAndDiff()` replaces such a value with the sigil link it
+  // names without reading a member of it. Each member read on one resolves
+  // through this transaction and is recorded on it as a dependency the commit
+  // has to check.
   const changes = normalizeAndDiff(
     runtime,
     tx,
     link,
-    flattenBuilderArtifacts(newValue),
+    flattenBuilderArtifacts(newValue, {
+      isLeaf: isCellResultForDereferencing,
+    }),
     context,
     readOptions,
     { seen: new Map(), nextAnchorId: anchorIds },
@@ -608,7 +616,7 @@ export function normalizeAndDiff(
     if (
       state.nextAnchorId !== undefined &&
       isArrayElement &&
-      isObject(newValue) &&
+      isObjectNotArray(newValue) &&
       !(newValue instanceof FabricSpecialObject) &&
       !isCellLink(newValue) &&
       seenLink.path.length > 0
@@ -818,9 +826,11 @@ export function normalizeAndDiff(
     // re-derivations serialize the same cell again but find the doc present
     // and leave user edits alone.
     const cellSchema = newValue.schema;
-    const seedDefault = isRecord(cellSchema) ? cellSchema.default : undefined;
+    const seedDefault = isObjectOrArray(cellSchema)
+      ? cellSchema.default
+      : undefined;
     const seedTarget = seedDefault !== undefined &&
-        !(isRecord(seedDefault) &&
+        !(isObjectOrArray(seedDefault) &&
           (seedDefault as Record<string, unknown>).$stream === true)
       ? newValue.getAsNormalizedFullLink()
       : undefined;
@@ -1232,7 +1242,7 @@ export function normalizeAndDiff(
   if (
     state.nextAnchorId !== undefined &&
     isArrayElement &&
-    isObject(newValue) &&
+    isObjectNotArray(newValue) &&
     !(newValue instanceof FabricSpecialObject) &&
     !isCellLink(newValue)
   ) {
@@ -1419,6 +1429,20 @@ export function normalizeAndDiff(
       });
     }
 
+    // Authoritative container re-assert (round-2 thread 16, the F2
+    // family): an EMPTY (or all-equal-links) array produces no leaf
+    // writes at all — the element walk above has nothing to emit — so
+    // a completion writeback of an equal `[]` against a DOOMED
+    // optimistic overlay would commit only its sibling fields
+    // (pending/requestHash) and the durable result slot stays torn,
+    // exactly the elision the authoritative primitive branch below
+    // exists to prevent. Assert the container itself when the subtree
+    // emitted nothing; identical re-asserts are idempotent at the
+    // store (serving-loop.md §5).
+    if (changes.length === 0 && tx.isAuthoritativeWrites?.() === true) {
+      changes.push({ location: link, value: newValue as FabricValue });
+    }
+
     return changes;
   }
 
@@ -1426,7 +1450,7 @@ export function normalizeAndDiff(
   // leaves alike) are atomic from this layer's perspective: their
   // own-enumerable properties are implementation details, not
   // user-visible structure, and iterating them via the generic
-  // `isRecord` branch below would walk wrapper-internal fields (or, for a
+  // `isObjectOrArray` branch below would walk wrapper-internal fields (or, for a
   // primitive whose state is private, flatten it to `{}`), which
   // is meaningless at the change-emission level. Emit a single change at
   // this link with the value as-is — the storage layer's JSON encoding handles
@@ -1472,28 +1496,28 @@ export function normalizeAndDiff(
   }
 
   // Handle objects
-  if (isRecord(newValue)) {
+  if (isObjectOrArray(newValue)) {
     diffLogger.debug(
       "diff",
       () => `[BRANCH_OBJECT] Processing object at path=${pathStr}`,
     );
     // If the current value is not a (regular) object, set it to an empty object.
     // Note that the alias case is handled above.
-    // We use `isObject` (not `isRecord`) here deliberately: `isRecord` is true
-    // for arrays (`typeof [] === "object"`), whereas `isObject` excludes them.
+    // We use `isObjectNotArray` (not `isObjectOrArray`) here deliberately: `isObjectOrArray` is true
+    // for arrays (`typeof [] === "object"`), whereas `isObjectNotArray` excludes them.
     // Resetting on an array→object transition is required; otherwise per-key
     // writes land in a slot whose stored parent is still an array and storage
     // rejects them with a TypeMismatchError. This mirrors the array branch
     // above, which resets a mismatched container via `value: []`.
     //
-    // TODO(danfuzz): `isObject` is also true for a `FabricSpecialObject`, so
+    // TODO(danfuzz): `isObjectNotArray` is also true for a `FabricSpecialObject`, so
     // a stored special object (which reaches storage whole via this
     // function's `FabricSpecialObject` branch above) is treated as an
     // existing plain record: no reset is emitted, its zero keys yield no
     // removals, and the per-key child writes land in slots whose stored
     // parent is still the special object. The special-object→object
     // transition wants the same reset the array→object one gets.
-    if (!isObject(currentValue) || isPrimitiveCellLink(currentValue)) {
+    if (!isObjectNotArray(currentValue) || isPrimitiveCellLink(currentValue)) {
       diffLogger.debug(
         "diff",
         () =>
@@ -1527,7 +1551,7 @@ export function normalizeAndDiff(
     // still reject. A missed warn is acceptable for a lint; asserting
     // requiredness where there is none is not.
     const resolvedParentSchema = resolveSchema(link.schema);
-    const requiredProps = isRecord(resolvedParentSchema)
+    const requiredProps = isObjectOrArray(resolvedParentSchema)
       ? new Set(
         Array.isArray(resolvedParentSchema.required)
           ? (resolvedParentSchema.required as readonly string[])
@@ -1596,10 +1620,10 @@ export function normalizeAndDiff(
     // property values and diverges on circular values + recursive $ref
     // schemas; only the top-level property names are needed here.)
     const eagerScopedKeys = new Set<string>();
-    const schemaProperties = isRecord(resolvedParentSchema)
+    const schemaProperties = isObjectOrArray(resolvedParentSchema)
       ? resolvedParentSchema.properties
       : undefined;
-    if (isRecord(schemaProperties)) {
+    if (isObjectOrArray(schemaProperties)) {
       // `Object.keys`, not `for...in`: the latter walks the prototype chain
       // too, and these are the schema's OWN declared property names.
       for (const key of Object.keys(schemaProperties)) {
@@ -1700,6 +1724,15 @@ export function normalizeAndDiff(
           delete: true,
         });
       }
+    }
+
+    // Authoritative container re-assert — the record-branch twin of the
+    // array branch's (round-2 thread 16): an empty `{}` (or a record of
+    // only unchanged links) emits no per-key writes, so without this a
+    // completion's equal-`{}` result riding a doomed overlay is never
+    // asserted durably. See the array branch for the full rationale.
+    if (changes.length === 0 && tx.isAuthoritativeWrites?.() === true) {
+      changes.push({ location: link, value: newValue as FabricValue });
     }
 
     return changes;

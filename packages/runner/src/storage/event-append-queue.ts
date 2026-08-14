@@ -33,11 +33,13 @@
 // persistence work it depends on.
 
 import { getLogger } from "@commonfabric/utils/logger";
-import type {
-  ClientCommit,
-  EventAppendDecl,
-  StreamEventEntry,
-  StreamLinkRef,
+import {
+  type ClientCommit,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+  type EventAppendDecl,
+  type StreamEventEntry,
+  type StreamLinkRef,
 } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";
 
@@ -81,6 +83,65 @@ export const memoryEventAppendQueueStore = (): EventAppendQueueStore => {
     save: (space, entries) => {
       bySpace.set(space, [...entries]);
       return Promise.resolve();
+    },
+  };
+};
+
+/** The subset of the Web Storage API the adapter needs (structural, so
+ * hosts can hand in localStorage, sessionStorage, or a shim). */
+export type WebStorageLike = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+/**
+ * A Web-Storage-backed durable store (LT9; verdict blocker,
+ * 2026-08-12): reload keeps queued-but-undischarged user intents.
+ * Serialized through the memory boundary codec — the SAME encoding the
+ * wire uses — so FabricValue payloads (registry symbols included)
+ * round-trip with fidelity. `scope` partitions concurrent principals /
+ * managers sharing one origin (pass something identity-derived).
+ *
+ * Hosts wire this through `Options.eventAppendQueueStore` wherever a
+ * Storage API exists (browser main thread; Deno with --location). The
+ * WORKER-hosted runtime has no Web Storage — its durable adapter is
+ * the flagged OW20 follow-up (IndexedDB or a main-thread bridge).
+ */
+export const webStorageEventAppendQueueStore = (
+  storage: WebStorageLike,
+  scope: string,
+): EventAppendQueueStore => {
+  const keyOf = (space: string) => `cf:event-append-queue:${scope}:${space}`;
+  return {
+    load: (space) => {
+      try {
+        const raw = storage.getItem(keyOf(space));
+        if (raw === null) return Promise.resolve([]);
+        const decoded = decodeMemoryBoundary(raw);
+        return Promise.resolve(
+          Array.isArray(decoded)
+            ? decoded as unknown as QueuedEventAppend[]
+            : [],
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    save: (space, entries) => {
+      try {
+        if (entries.length === 0) {
+          storage.removeItem(keyOf(space));
+        } else {
+          storage.setItem(
+            keyOf(space),
+            encodeMemoryBoundary(entries as unknown as FabricValue),
+          );
+        }
+        return Promise.resolve();
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
   };
 };
@@ -201,25 +262,34 @@ export class EventAppendQueue {
   enqueue(
     append: Omit<QueuedEventAppend, "clientSeq"> & { clientSeq?: number },
   ): Promise<EventAppendOutcome> {
-    const entry: QueuedEventAppend = {
-      ...append,
-      clientSeq: append.clientSeq ?? this.nextClientSeq(),
-    };
     const { promise, resolve } = Promise.withResolvers<EventAppendOutcome>();
-    this.#queue.push(entry);
-    this.#outcomes.set(entry, resolve);
-    this.#persist();
-    // Belt (review 2026-08-11 n2): an enqueue AFTER close() must still
-    // settle its outcome — close() already swept the outcome map, so
-    // without this the promise hangs any barrier it joins. The intent
-    // itself stays queued+persisted for the next queue instance
-    // (closed is not refused), exactly like close()'s own sweep.
-    if (this.#closed) {
-      this.#outcomes.delete(entry);
-      resolve({ delivered: false, refused: "event queue closed" });
-      return promise;
-    }
-    this.#kick();
+    // Sequenced BEHIND the backlog load (review 2026-08-11 / verdict
+    // 2026-08-12): the load seeds #clientSeq past the persisted
+    // entries, so a fire allocated BEFORE it completed could re-use a
+    // persisted entry's clientSeq — breaking firedAt.clientSeq's
+    // unique per-session append order. #loaded always settles (its
+    // failure arm resolves), and same-source .then callbacks run in
+    // registration order, so relative fired order is preserved.
+    void this.#loaded.then(() => {
+      const entry: QueuedEventAppend = {
+        ...append,
+        clientSeq: append.clientSeq ?? this.nextClientSeq(),
+      };
+      this.#queue.push(entry);
+      this.#outcomes.set(entry, resolve);
+      this.#persist();
+      // Belt (review 2026-08-11 n2): an enqueue AFTER close() must still
+      // settle its outcome — close() already swept the outcome map, so
+      // without this the promise hangs any barrier it joins. The intent
+      // itself stays queued+persisted for the next queue instance
+      // (closed is not refused), exactly like close()'s own sweep.
+      if (this.#closed) {
+        this.#outcomes.delete(entry);
+        resolve({ delivered: false, refused: "event queue closed" });
+        return;
+      }
+      this.#kick();
+    });
     return promise;
   }
 

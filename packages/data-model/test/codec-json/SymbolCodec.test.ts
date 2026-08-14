@@ -1,10 +1,21 @@
+/**
+ * Symbols on the wire, which is possible only because the registry makes some
+ * of them nameable.
+ *
+ * An interned symbol is fully described by its key, so encoding is writing
+ * that key down and decoding is asking the registry for the same symbol back
+ * -- the round trip returns the identical instance rather than an equal one.
+ * A unique symbol has no key, and is refused because nothing about it could be
+ * written down and recovered.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { SymbolCodec } from "@/codec-json/SymbolCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("SymbolCodec", () => {
   const codec = new SymbolCodec();

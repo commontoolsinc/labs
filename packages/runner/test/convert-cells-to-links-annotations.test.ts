@@ -1,7 +1,9 @@
-// A schema-bearing read attaches a non-enumerable `toCell` symbol to the
-// values it returns (see `schema.ts`). That annotation is not content, so it
-// must not reach -- and be rejected by -- the fabric-conversion gate inside
-// `convertCellsToLinks()`.
+/**
+ * A schema-bearing read attaches a non-enumerable `toCell` symbol to the
+ * values it returns (see `schema.ts`). That annotation is not content, so it
+ * must not reach -- and be rejected by -- the fabric-conversion gate inside
+ * `convertCellsToLinks()`.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

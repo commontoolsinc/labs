@@ -76,6 +76,7 @@ export function transformInjectHelperModule(
       };
     }),
     mainExport: program.mainExport,
+    sourceRoots: program.sourceRoots,
   };
 }
 
@@ -104,6 +105,7 @@ export function transformProgramWithPrefix(
   return {
     main: `/index.ts`,
     files,
+    sourceRoots: program.sourceRoots?.map((root) => prefix(root, id)),
   };
 }
 
@@ -124,6 +126,9 @@ export function pretransformProgramForModules(
     })),
     ...(program.mainExport !== undefined
       ? { mainExport: program.mainExport }
+      : {}),
+    ...(program.sourceRoots !== undefined
+      ? { sourceRoots: program.sourceRoots.map((root) => prefix(root, id)) }
       : {}),
   };
 }

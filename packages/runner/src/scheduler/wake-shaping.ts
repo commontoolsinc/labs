@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,
@@ -312,7 +312,7 @@ const CLOCK_FIELD_NAMES = new Set(["timestamp", "timeStamp"]);
 
 function hasClockFieldDeep(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasClockFieldDeep);
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     for (const [key, child] of Object.entries(value)) {
       if (CLOCK_FIELD_NAMES.has(key)) return true;
       if (hasClockFieldDeep(child)) return true;
@@ -323,7 +323,7 @@ function hasClockFieldDeep(value: unknown): boolean {
 
 function scrubClockFields(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(scrubClockFields);
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
       if (CLOCK_FIELD_NAMES.has(key)) continue;
@@ -345,7 +345,7 @@ function scrubClockFields(value: unknown): unknown {
  * Returns the same reference when there is nothing to strip.
  */
 export function stripClockFields(event: unknown): unknown {
-  if (!isRecord(event)) return event;
+  if (!isObjectOrArray(event)) return event;
   if (!hasClockFieldDeep(event)) return event;
   return scrubClockFields(event);
 }
@@ -421,7 +421,23 @@ export function holdShapedEvent(
   // Injection provenance rides the hold unchanged, so a shaped delivery
   // cannot silently strip the closed-world gate's exemption.
   const runtimeInjectedEventKeys = opts.runtimeInjectedEventKeys;
+  // The served carriage rides too (round-2 thread T31): its own doc
+  // promises "carried through a held delivery unchanged", and dropping
+  // it here would strip the acting identity / stream-entry location /
+  // failure hook from a shaped served dispatch.
+  const served = opts.served;
   shaper.hold({
+    // FLAGGED (PR #5439 thread r3731191482, unresolved semantic): the
+    // fallback linkKey resolves the scope instance from the RUNTIME's
+    // identity. On a serving runtime that is the ambient service
+    // identity, so same-id scoped streams from different principals
+    // would share one throttle bucket (cross-principal budget coupling
+    // and a timing channel). The correct partition is the EVENT ACTOR's
+    // identity — which does not exist as data until Phase 3 puts events
+    // on the wire with a server-stamped `firedAt` actor (events.md;
+    // plan Phase 3). Phase 1 has no server-side event producers, so the
+    // coupling has no instances yet; when Phase 3 lands the actor
+    // carriage, thread it here in place of the runtime identity.
     groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink, identity)),
     deliver: () =>
       deliver(eventLink, stripped, retries, onCommit, {
@@ -429,6 +445,7 @@ export function holdShapedEvent(
         originTx,
         time,
         runtimeInjectedEventKeys,
+        served,
       }),
   });
 }

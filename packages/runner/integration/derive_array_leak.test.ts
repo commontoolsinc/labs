@@ -19,7 +19,6 @@ import { PiecesController } from "@commonfabric/piece/ops";
 
 const { API_URL } = env;
 const SPACE_NAME_PREFIX = "runner_integration";
-const TIMEOUT_MS = 300000;
 
 // Test parameters
 const INCREMENTS_PER_CLICK = 50; // How many times each click increments (must match .tsx file)
@@ -132,13 +131,13 @@ async function runTest() {
   });
   console.log("Piece created:", piece.entityId);
 
-  // Wait for initial state
+  // Settle the piece's initialization writes before sampling the baseline.
+  // runtime.idle() drains client-side reactivity; synced() then waits for every
+  // pending commit to be confirmed durable by the memory server. The
+  // after-measurement below settles the same way, so both samples follow the
+  // same barrier.
   await runtime.idle();
   await runtime.storageManager.synced();
-
-  // Give it 5 seconds to settle after initialization
-  console.log("Waiting 5 seconds for memory to settle...");
-  await new Promise((resolve) => setTimeout(resolve, 5000));
 
   // Measure baseline server memory (where the leak occurs)
   const serverMemoryBeforeMB = await getServerMemoryMB();
@@ -208,24 +207,11 @@ async function runTest() {
   console.log(`Counter reached ${finalValue} (expected ${expectedValue})`);
 }
 
-// Run the test with timeout
+// The test runs without a per-test deadline. See
+// docs/development/waiting-in-tests.md.
 Deno.test({
   name: "derive array leak test",
-  fn: async () => {
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
-    try {
-      await Promise.race([runTest(), timeoutPromise]);
-      console.log("Test completed successfully");
-    } finally {
-      clearTimeout(timeoutHandle!);
-    }
-  },
+  fn: runTest,
   sanitizeResources: false,
   sanitizeOps: false,
 });

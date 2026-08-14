@@ -17,6 +17,11 @@ import {
   testPrincipalSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  resetServerExecutionConfig,
+  setServerExecutionConfig,
+  streamEntriesDocId,
+} from "@commonfabric/memory/v2";
 
 class LoopbackSessionFactory implements SessionFactory {
   constructor(
@@ -166,6 +171,81 @@ describe("late space host hints", () => {
     }
   });
 
+  it("resolves the default route when a hint reads it, not at construction", async () => {
+    const signer = await Identity.fromPassphrase("deferred-default-route");
+    const targetSpace = (await Identity.fromPassphrase(
+      "deferred-default-route-target",
+    )).did();
+    const targetId = "of:deferred-default-route-target" as URI;
+    const defaultServer = makeServer("deferred-default-route");
+    const memoryHost = new URL("https://default-toolshed.test");
+    let targetSessions = 0;
+    const sessionFactory = new LoopbackSessionFactory(() => {
+      targetSessions++;
+      return defaultServer;
+    });
+
+    // Turning the memory host into the WebSocket storage endpoint an
+    // unseeded, unhinted space opens against parses the host, joins the
+    // storage path onto it, copies the result, and parses that copy again to
+    // swap the scheme. The manager holds the host as text and does none of
+    // that until registerSpaceHost() compares against the route, so a URL
+    // parsed while the constructor runs is that resolution back inside it.
+    // Counting parses is what separates the two shapes: both read the
+    // caller's host object exactly once, one to snapshot it and the other to
+    // resolve it.
+    const RealURL = globalThis.URL;
+    let parsedWhileConstructing = 0;
+    class CountingURL extends RealURL {
+      constructor(url: string | URL, base?: string | URL) {
+        parsedWhileConstructing += 1;
+        super(url, base);
+      }
+    }
+    globalThis.URL = CountingURL as unknown as typeof URL;
+    let manager: TestStorageManager;
+    try {
+      manager = TestStorageManager.create(
+        signer,
+        sessionFactory,
+        memoryHost,
+      );
+    } finally {
+      globalThis.URL = RealURL;
+    }
+
+    try {
+      expect(parsedWhileConstructing).toBe(0);
+
+      const provider = manager.open(targetSpace);
+      const provisionalReplica = provider.replica;
+      const firstRead = await provider.sync(targetId, {
+        path: [],
+        schema: true,
+      });
+      expect(firstRead.error).toBeUndefined();
+      expect(targetSessions).toBe(1);
+
+      // The hint reads the route, so by now the route has to be there. A
+      // route that was never resolved compares unequal to the hint, which
+      // makes the hint a replacement: the replica is rebuilt and a second
+      // session opens.
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://default-toolshed.test",
+        ),
+      ).toBe(true);
+      await manager.crossSpaceSettled();
+
+      expect(provider.replica).toBe(provisionalReplica);
+      expect(targetSessions).toBe(1);
+    } finally {
+      await manager.close();
+      await defaultServer.close();
+    }
+  });
+
   it("replays a read that first opened against the default host", async () => {
     const signer = await Identity.fromPassphrase("late-space-host-hint");
     const targetSpace = (await Identity.fromPassphrase(
@@ -279,6 +359,84 @@ describe("late space host hints", () => {
     }
   });
 
+  it("replays every registered document after a late hint", async () => {
+    const signer = await Identity.fromPassphrase("late-hint-many-reads");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-many-reads-target",
+    )).did();
+    const firstId = "of:late-hint-many-reads-first" as URI;
+    const secondId = "of:late-hint-many-reads-second" as URI;
+    const defaultServer = makeServer("late-hint-many-reads-default");
+    const hintedServer = makeServer("late-hint-many-reads-hinted");
+    const writer = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory(() => hintedServer),
+    );
+    let targetSessions = 0;
+    const reader = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory((space) => {
+        if (space !== targetSpace) return defaultServer;
+        targetSessions++;
+        return targetSessions === 1 ? defaultServer : hintedServer;
+      }),
+    );
+
+    try {
+      const seeded = await (writer.open(targetSpace) as unknown as {
+        send(
+          batch: { uri: URI; value: { value: { name: string } } }[],
+        ): Promise<{ error?: unknown }>;
+      }).send([
+        { uri: firstId, value: { value: { name: "first" } } },
+        { uri: secondId, value: { value: { name: "second" } } },
+      ]);
+      expect(seeded.error).toBeUndefined();
+      await writer.synced();
+
+      const provider = reader.open(targetSpace);
+      const provisionalReplica = provider.replica;
+
+      // Register both documents, and register the first one repeatedly with
+      // freshly built but structurally equal selectors. Every registration
+      // after the first is the same read, so the replay set holds one entry
+      // per document however many times each was asked for.
+      for (let index = 0; index < 64; index++) {
+        expect(
+          (await provider.sync(firstId, {
+            path: ["value", "name"],
+            schema: false,
+          })).error,
+        ).toBeUndefined();
+      }
+      expect((await provider.sync(secondId)).error).toBeUndefined();
+      expect(provider.replica.getDocument(firstId)).toBeUndefined();
+      expect(provider.replica.getDocument(secondId)).toBeUndefined();
+
+      expect(
+        reader.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(true);
+      await reader.crossSpaceSettled();
+
+      expect(provider.replica).not.toBe(provisionalReplica);
+      expect(provider.replica.getDocument(firstId)).toEqual({
+        value: { name: "first" },
+      });
+      expect(provider.replica.getDocument(secondId)).toEqual({
+        value: { name: "second" },
+      });
+      expect(targetSessions).toBe(2);
+    } finally {
+      await reader.close();
+      await writer.close();
+      await defaultServer.close();
+      await hintedServer.close();
+    }
+  });
+
   it("rejects a transaction based on the replaced provisional replica", async () => {
     const signer = await Identity.fromPassphrase("late-hint-stale-transaction");
     const targetSpace = (await Identity.fromPassphrase(
@@ -350,6 +508,152 @@ describe("late space host hints", () => {
       await writer.close();
       await defaultServer.close();
       await hintedServer.close();
+    }
+  });
+
+  it("refuses replacement after an EVENT APPEND issued on the provisional route (verdict blocker, 2026-08-12): the queue's commits are stateful route operations", async () => {
+    // Pre-fix the event queue's transact passed a no-op beforeIssue
+    // callback, skipping the writeIssuedGeneration marker ordinary
+    // commits set — so a late host hint could still approve
+    // replaceProvisionalReplica() after an event append had already
+    // targeted the original route, closing the old queue's route
+    // underneath its traffic.
+    setServerExecutionConfig(true);
+    const signer = await Identity.fromPassphrase("late-hint-event-append");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-event-append-target",
+    )).did();
+    const defaultServer = makeServer("late-hint-event-append-default");
+    const manager = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory(() => defaultServer),
+    );
+    try {
+      const provider = manager.open(targetSpace);
+      const replica = provider.replica as unknown as {
+        enqueueEventAppend(append: {
+          sidecarId: string;
+          stream: { id: string; path: readonly string[] };
+          eventId: string;
+          payload?: unknown;
+        }): Promise<{ delivered: boolean }>;
+      };
+      const stream = { id: "of:late-hint-stream", path: [] as string[] };
+      const outcome = await replica.enqueueEventAppend({
+        sidecarId: streamEntriesDocId(stream),
+        stream,
+        eventId: "evt-late-hint",
+        payload: { n: 1 },
+      });
+      expect(outcome.delivered).toBe(true);
+      // The issued append marked the route: a late hint to a DIFFERENT
+      // host may no longer replace the provisional replica.
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(false);
+    } finally {
+      resetServerExecutionConfig();
+      await manager.close();
+      await defaultServer.close();
+    }
+  });
+
+  it("a provisional-replica replacement preserves queued event intents — the manager-shared store survives the swap (LT9; verdict blocker, 2026-08-12)", async () => {
+    // Pre-fix every EventAppendQueue minted its own private in-memory
+    // store, so the replacement's fresh queue lost the old queue's
+    // undischarged user intents in-process. The manager now owns ONE
+    // store; the replacement replica's eager queue init loads the
+    // backlog and discharges it with no fresh fire.
+    setServerExecutionConfig(true);
+    const signer = await Identity.fromPassphrase("late-hint-queue-preserve");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-queue-preserve-target",
+    )).did();
+    const workingServer = makeServer("late-hint-queue-preserve-hinted");
+    // The FIRST session open fails (the provisional route is dark), so
+    // the queued intent stays undischarged and the route stays
+    // UNMARKED — replacement is still approvable.
+    let sessionAttempts = 0;
+    const factory: SessionFactory = {
+      create: (space, signerArg, mountOptions, signal) => {
+        sessionAttempts += 1;
+        if (sessionAttempts === 1) {
+          return Promise.reject(new Error("provisional host down"));
+        }
+        return new LoopbackSessionFactory(() => workingServer).create(
+          space,
+          signerArg,
+          mountOptions,
+          signal,
+        );
+      },
+    };
+    const manager = TestStorageManager.create(signer, factory);
+    try {
+      const provider = manager.open(targetSpace);
+      const replica = provider.replica as unknown as {
+        enqueueEventAppend(append: {
+          sidecarId: string;
+          stream: { id: string; path: readonly string[] };
+          eventId: string;
+          payload?: unknown;
+        }): Promise<{ delivered: boolean }>;
+        pendingEventAppends(): readonly unknown[];
+      };
+      const stream = { id: "of:preserved-stream", path: [] as string[] };
+      const sidecarId = streamEntriesDocId(stream);
+      const outcome = replica.enqueueEventAppend({
+        sidecarId,
+        stream,
+        eventId: "evt-preserved",
+        payload: { n: 7 },
+      });
+      // The intent is queued (first discharge attempt failing).
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(replica.pendingEventAppends().length).toBe(1);
+      // The late hint replaces the provisional replica (no append ever
+      // ISSUED on the dark route, so the route-write guard permits it).
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(true);
+      // registerSpaceHost triggered the replacement itself; settle it
+      // the way the neighboring tests do.
+      await manager.crossSpaceSettled();
+      // The REPLACEMENT queue discharges the preserved intent with no
+      // fresh fire; the working host's engine holds the entry.
+      const delivered = await outcome;
+      expect(delivered).toEqual({ delivered: false, refused: "event queue closed" });
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        const doc = await workingServer.readDocument(
+          targetSpace,
+          sidecarId as never,
+        );
+        const entries =
+          ((doc?.value ?? {}) as { entries?: Array<{ eventId?: string }> })
+            .entries ?? [];
+        if (entries.some((entry) => entry.eventId === "evt-preserved")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const doc = await workingServer.readDocument(
+        targetSpace,
+        sidecarId as never,
+      );
+      const entries =
+        ((doc?.value ?? {}) as { entries?: Array<{ eventId?: string }> })
+          .entries ?? [];
+      expect(entries.some((entry) => entry.eventId === "evt-preserved"))
+        .toBe(true);
+    } finally {
+      resetServerExecutionConfig();
+      await manager.close();
+      await workingServer.close();
     }
   });
 

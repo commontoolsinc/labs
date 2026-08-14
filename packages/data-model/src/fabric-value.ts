@@ -1,5 +1,12 @@
-// Re-export everything from `interface.ts` so that `fabric-value` remains the
-// canonical public surface for all type declarations and the `FabricInstance`
+/**
+ * This module is the canonical public surface for the fabric value types: the
+ * type declarations, the `FabricInstance` base class, and the functions that
+ * operate on them. Those are spread across several modules, not all of which
+ * the package exports on their own, and a caller should not have to know which
+ * is which.
+ */
+
+// Re-export everything from `interface.ts`, which declares the types and the
 // base class.
 export {
   type FabricArray,

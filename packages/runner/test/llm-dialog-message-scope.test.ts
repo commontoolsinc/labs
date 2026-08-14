@@ -1,11 +1,13 @@
-// The dialog's per-message documents must land in the same partition as the
-// messages array itself. An element anchored by `Cell.push` inherits the
-// array's scope; a document the dialog creates explicitly has to be given that
-// scope, or the document and the readers of its link disagree about the
-// partition: the stored element link is bare, a reader resolves it against the
-// array's scope, and a document minted at the default `"space"` scope is
-// simply not there. A session-scoped messages cell is what makes the
-// difference observable at all -- at `"space"` scope every choice coincides.
+/**
+ * The dialog's per-message documents must land in the same partition as the
+ * messages array itself. An element anchored by `Cell.push` inherits the
+ * array's scope; a document the dialog creates explicitly has to be given that
+ * scope, or the document and the readers of its link disagree about the
+ * partition: the stored element link is bare, a reader resolves it against the
+ * array's scope, and a document minted at the default `"space"` scope is
+ * simply not there. A session-scoped messages cell is what makes the
+ * difference observable at all -- at `"space"` scope every choice coincides.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

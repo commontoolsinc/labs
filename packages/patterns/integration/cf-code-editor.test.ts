@@ -63,6 +63,19 @@ const editorReady = (probe: ProbeApi): boolean => {
   return editor?._editorView !== undefined;
 };
 
+// In-page predicate: the editor's bound cell raw value equals `expected`. A
+// pending local edit keeps the editor document from repainting to an external
+// write, but the bound cell's own value still catches up on sync, so this is
+// how a test confirms the browser actually received an external write whose
+// delivery the editor suppressed.
+const editorCellRawIs = (probe: ProbeApi, expected: string): boolean => {
+  const editor = probe.collect("cf-code-editor")[0] as
+    | (Element & { _cellController?: { getCell(): { get(): unknown } | null } })
+    | undefined;
+  const raw = editor?._cellController?.getCell?.()?.get?.();
+  return (raw ?? "") === expected;
+};
+
 /** Wait until the editor's document text equals `expected`. */
 async function waitForEditorContent(
   page: Page,
@@ -78,6 +91,28 @@ async function waitForEditorContent(
       { cause },
     );
   }
+}
+
+/**
+ * Confirm that an external write already issued to the editor's bound cell does
+ * not repaint the editor while a local edit is pending. Waits until the browser
+ * has synced the external value into the bound cell, lets any repaint settle,
+ * then asserts the document still shows `pending` (the unsettled local edit
+ * wins). The caller issues the write first, e.g. `piece.result.set(...)`.
+ */
+async function expectExternalWriteSuppressed(
+  page: Page,
+  externalValue: string,
+  pending: string,
+): Promise<void> {
+  await waitForCondition(page, editorCellRawIs, { args: [externalValue] });
+  await awaitViewSettled(page);
+  assertEquals(
+    await getEditorContent(page),
+    pending,
+    `External write ${JSON.stringify(externalValue)} must not repaint the ` +
+      `editor while the local edit is pending`,
+  );
 }
 
 describe("cf-code-editor cursor stability", () => {
@@ -348,45 +383,54 @@ describe("cf-code-editor cursor stability", () => {
     );
   });
 
-  it("should preserve a pending local edit over an external update during the debounce window", async () => {
+  it("should preserve a pending local edit over an external update before it commits", async () => {
     // A locally-edited value that bound state has not yet confirmed wins over
     // deliveries of other values until its write settles (see CellController's
-    // pending-local-edit tracking); an external update landing mid-debounce
-    // must not repaint the editor, and the local edit commits over it.
+    // pending-local-edit tracking); an external update arriving while the edit
+    // is pending must not repaint the editor, and the local edit commits over
+    // it.
+    //
+    // The "blur" strategy commits only on an explicit blur and arms no timer,
+    // so the edit stays pending across the external write with nothing that can
+    // fire mid-test; the blur at the end flushes it.
     const page = shell.page();
 
     await resetEditorState(page);
+    await configureTiming(page, { strategy: "blur" });
     await focusEditor(page);
 
-    // Start typing
-    await page.keyboard.type("User");
+    try {
+      // Start typing; the edit stays pending until the blur below.
+      await page.keyboard.type("User");
+      await waitForEditorContent(page, "User");
+      assertEquals(await getCursorPosition(page), 4);
 
-    const cursorAfterTyping = await getCursorPosition(page);
-    assertEquals(cursorAfterTyping, 4);
+      // An external update lands while the local edit is pending: it must not
+      // repaint the editor, and the cursor must not move.
+      await piece.result.set("External Update", ["content"]);
+      await expectExternalWriteSuppressed(page, "External Update", "User");
+      assertEquals(
+        await getCursorPosition(page),
+        4,
+        "Cursor should remain in place while the local edit is pending",
+      );
 
-    // BEFORE debounce completes, simulate external update. The pause places
-    // the update partway through the component's 500ms debounce window.
-    await new Promise((r) => setTimeout(r, 200));
-    await piece.result.set("External Update", ["content"]);
-
-    // The pending local edit's debounced write commits over the external
-    // value.
-    await awaitCellContent("User");
-    await awaitEchoDelivered(page);
-
-    // The editor kept the local edit throughout; the cursor never moved.
-    const editorContent = await getEditorContent(page);
-    assertEquals(
-      editorContent,
-      "User",
-      "Editor should keep the pending local edit over the external update",
-    );
-    const cursorAfterCommit = await getCursorPosition(page);
-    assertEquals(
-      cursorAfterCommit,
-      4,
-      "Cursor should remain in place while the local edit is pending",
-    );
+      // Flushing the pending edit commits it over the external value.
+      await blurEditor(page);
+      await awaitCellContent("User");
+      await awaitEchoDelivered(page);
+      assertEquals(
+        await getEditorContent(page),
+        "User",
+        "Editor should keep the pending local edit over the external update",
+      );
+    } finally {
+      await cancelPendingEditorEdit(page);
+      await configureTiming(page, {
+        strategy: "debounce",
+        delay: DEBOUNCE_DELAY,
+      });
+    }
   });
 
   it("should apply external update when no typing is in progress", async () => {
@@ -766,168 +810,208 @@ describe("cf-code-editor cursor stability", () => {
     //
     // CORRECT BEHAVIOR: the pending local edit wins over external deliveries
     // for as long as its write has not settled, so the typed characters
-    // accumulate and the debounced write commits them over the external
-    // values.
+    // accumulate and the flushed write commits them over the external values.
+    //
+    // The "blur" strategy commits only on an explicit blur and arms no timer,
+    // so every keystroke's edit stays pending and each external write is
+    // delivered into the pending window; the blur at the end flushes the
+    // accumulated edit.
     const page = shell.page();
 
     await resetEditorState(page);
+    await configureTiming(page, { strategy: "blur" });
     await focusEditor(page);
 
-    // Alternating pattern: type → Cell → type → Cell → type. The pauses
-    // place each external update inside the debounce window opened by the
-    // keystroke before it.
-    for (let i = 0; i < 3; i++) {
-      await page.keyboard.type(`${i}`);
-      await new Promise((r) => setTimeout(r, 50));
-      await piece.result.set(`External-${i}`, ["content"]);
-      await new Promise((r) => setTimeout(r, 100));
+    try {
+      // Alternating pattern: type → Cell → type → Cell → type. Each external
+      // update lands while the local edit is pending and must not repaint the
+      // editor.
+      let typed = "";
+      for (let i = 0; i < 3; i++) {
+        await page.keyboard.type(`${i}`);
+        typed += `${i}`;
+        await waitForEditorContent(page, typed);
+
+        await piece.result.set(`External-${i}`, ["content"]);
+        await expectExternalWriteSuppressed(page, `External-${i}`, typed);
+      }
+
+      // Flushing commits the accumulated local edit over the external values.
+      await blurEditor(page);
+      await awaitCellContent("012");
+      await awaitEchoDelivered(page);
+
+      const content = await getEditorContent(page);
+      const cursor = await getCursorPosition(page);
+      assert(
+        cursor >= 0 && cursor <= content.length,
+        `Cursor ${cursor} should be valid for content length ${content.length}`,
+      );
+
+      const cellValue = await piece.result.get(["content"]) as string;
+      assertEquals(
+        content,
+        cellValue,
+        "Editor and Cell should be in sync after settling",
+      );
+
+      assertEquals(
+        content,
+        "012",
+        "Pending local edits should win over external updates while unsettled",
+      );
+    } finally {
+      await cancelPendingEditorEdit(page);
+      await configureTiming(page, {
+        strategy: "debounce",
+        delay: DEBOUNCE_DELAY,
+      });
     }
-
-    // The typed characters commit as one debounced write.
-    await awaitCellContent("012");
-    await awaitEchoDelivered(page);
-
-    // Editor should be in a consistent state
-    const content = await getEditorContent(page);
-    const cursor = await getCursorPosition(page);
-
-    assert(
-      cursor >= 0 && cursor <= content.length,
-      `Cursor ${cursor} should be valid for content length ${content.length}`,
-    );
-
-    const cellValue = await piece.result.get(["content"]) as string;
-    assertEquals(
-      content,
-      cellValue,
-      "Editor and Cell should be in sync after settling",
-    );
-
-    // The final value is the accumulated local edit
-    assertEquals(
-      content,
-      "012",
-      "Pending local edits should win over external updates while unsettled",
-    );
   });
 
-  it("ADVERSARIAL: Multiple Cell updates while user is continuously typing", async () => {
-    // User types continuously (letters every 50ms) while external updates
-    // bombard the Cell. The editor should not corrupt or crash.
+  it("keeps one debounced edit over multiple interleaved Cell updates", async () => {
+    // User types continuously while external updates bombard the Cell. The
+    // pending local edit wins over the bombarding deliveries until it settles,
+    // so the typed characters accumulate and commit as one write.
     //
-    // CORRECT BEHAVIOR: the pending local edit wins over the bombarding
-    // deliveries for as long as its write has not settled, so the typed
-    // characters accumulate and commit as one debounced write.
+    // The "blur" strategy commits only on an explicit blur and arms no timer,
+    // so the edit stays pending for the whole sequence with nothing that can
+    // fire mid-test; the blur at the end flushes the accumulated edit.
     const page = shell.page();
 
     await resetEditorState(page);
+    await configureTiming(page, { strategy: "blur" });
     await focusEditor(page);
 
-    // Interleave keystrokes and external updates on their own clocks; the
-    // pauses shape the interleaving.
-    const typingPromise = (async () => {
+    try {
+      let typed = "";
+      let bombard = 0;
       for (let i = 0; i < 10; i++) {
-        await page.keyboard.type(String.fromCharCode(65 + i)); // A, B, C...
-        await new Promise((r) => setTimeout(r, 50));
+        const character = String.fromCharCode(65 + i); // A, B, C...
+        typed += character;
+        await page.keyboard.type(character);
+        await waitForEditorContent(page, typed);
+
+        // Bombard the Cell on every other keystroke; each external write lands
+        // while the local edit is pending and must not repaint the editor.
+        if (i % 2 === 1) {
+          await piece.result.set(`Bombard-${bombard}`, ["content"]);
+          await expectExternalWriteSuppressed(
+            page,
+            `Bombard-${bombard}`,
+            typed,
+          );
+          bombard++;
+        }
       }
-    })();
 
-    const cellBombardPromise = (async () => {
-      for (let i = 0; i < 5; i++) {
-        await new Promise((r) => setTimeout(r, 80));
-        await piece.result.set(`Bombard-${i}`, ["content"]);
-      }
-    })();
+      // Blurring commits the complete local edit after every external update.
+      await blurEditor(page);
+      await awaitCellContent("ABCDEFGHIJ");
+      await awaitEchoDelivered(page);
 
-    await Promise.all([typingPromise, cellBombardPromise]);
+      // Final state should be consistent
+      const content = await getEditorContent(page);
+      const cursor = await getCursorPosition(page);
+      const cellValue = await piece.result.get(["content"]) as string;
 
-    // The typed characters commit as one debounced write over the bombards.
-    await awaitCellContent("ABCDEFGHIJ");
-    await awaitEchoDelivered(page);
+      // Cursor must be valid
+      assert(
+        cursor >= 0 && cursor <= content.length,
+        `Cursor ${cursor} should be valid for content length ${content.length}`,
+      );
 
-    // Final state should be consistent
-    const content = await getEditorContent(page);
-    const cursor = await getCursorPosition(page);
-    const cellValue = await piece.result.get(["content"]) as string;
+      // Editor and Cell should be in sync
+      assertEquals(
+        content,
+        cellValue,
+        "Editor and Cell should match after the local edit commits",
+      );
 
-    // Cursor must be valid
-    assert(
-      cursor >= 0 && cursor <= content.length,
-      `Cursor ${cursor} should be valid for content length ${content.length}`,
-    );
-
-    // Editor and Cell should be in sync
-    assertEquals(
-      content,
-      cellValue,
-      "Editor and Cell should be in sync after chaos",
-    );
-
-    assertEquals(
-      content,
-      "ABCDEFGHIJ",
-      "Typed content should win over the bombarding external updates",
-    );
+      assertEquals(
+        content,
+        "ABCDEFGHIJ",
+        "Pending local edit should survive all external updates",
+      );
+    } finally {
+      await cancelPendingEditorEdit(page);
+      await configureTiming(page, {
+        strategy: "debounce",
+        delay: DEBOUNCE_DELAY,
+      });
+    }
   });
 
   it("ADVERSARIAL: Empty string Cell update during typing", async () => {
-    // Edge case: Cell is set to empty while user is typing.
-    // This can cause cursor position > content length if not handled.
+    // Edge case: the Cell is set to empty while the user is typing. When the
+    // stored value is already empty (the pending edit has not committed), the
+    // write is a no-op that fires no delivery, so typing continues
+    // uninterrupted and commits on flush.
     //
-    // ACTUAL BEHAVIOR: If the external update does not change stored value
-    // (Cell still empty because debounce hasn't committed), no sink fires.
-    // User typing continues uninterrupted and eventually commits.
-    // The key invariants to test:
-    // 1. Cursor remains valid (no crashes from cursor > content.length)
-    // 2. Editor and Cell are eventually consistent
-    // 3. Content matches one of the valid states (empty or user's content)
+    // The invariants: the cursor stays valid (no crash from cursor >
+    // content.length) and the editor and Cell end consistent.
+    //
+    // The "blur" strategy commits only on an explicit blur and arms no timer,
+    // so the edit stays pending and the stored value stays empty throughout;
+    // the blur at the end flushes the accumulated edit.
     const page = shell.page();
 
     await resetEditorState(page);
+    await configureTiming(page, { strategy: "blur" });
     await focusEditor(page);
 
-    // Type some content
-    await page.keyboard.type("Hello World");
+    try {
+      await page.keyboard.type("Hello World");
+      await waitForEditorContent(page, "Hello World");
+      assertEquals(await getCursorPosition(page), 11);
 
-    const cursorAfterTyping = await getCursorPosition(page);
-    assertEquals(cursorAfterTyping, 11);
+      // The stored value is still empty (the pending edit has not committed),
+      // so this clears nothing; the editor keeps the pending edit.
+      await piece.result.set("", ["content"]);
+      await awaitViewSettled(page);
+      assertEquals(
+        await getEditorContent(page),
+        "Hello World",
+        "An empty no-op write must not disturb the pending edit",
+      );
 
-    // Immediately try to clear via Cell (within debounce window; the pause
-    // keeps the follow-up typing inside the same window).
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 100));
+      // Continue typing, then flush.
+      await page.keyboard.type("More");
+      await waitForEditorContent(page, "Hello WorldMore");
+      await blurEditor(page);
+      await awaitCellContent("Hello WorldMore");
+      await awaitEchoDelivered(page);
 
-    // User continues typing - editor now has "Hello WorldMore"
-    // This triggers setValue which will overwrite the Cell's ""
-    await page.keyboard.type("More");
+      const finalContent = await getEditorContent(page);
+      const cursor = await getCursorPosition(page);
 
-    // The combined edit commits after debounce.
-    await awaitCellContent("Hello WorldMore");
-    await awaitEchoDelivered(page);
+      // CRITICAL: Cursor must be valid (no crash)
+      assert(
+        cursor >= 0 && cursor <= finalContent.length,
+        `Cursor ${cursor} should be valid for content length ${finalContent.length}`,
+      );
 
-    const finalContent = await getEditorContent(page);
-    const cursor = await getCursorPosition(page);
+      // Editor and Cell should be in sync
+      const cellValue = await piece.result.get(["content"]) as string;
+      assertEquals(
+        finalContent,
+        cellValue,
+        "Editor and Cell should be in sync",
+      );
 
-    // CRITICAL: Cursor must be valid (no crash)
-    assert(
-      cursor >= 0 && cursor <= finalContent.length,
-      `Cursor ${cursor} should be valid for content length ${finalContent.length}`,
-    );
-
-    // Editor and Cell should be in sync
-    const cellValue = await piece.result.get(["content"]) as string;
-    assertEquals(
-      finalContent,
-      cellValue,
-      "Editor and Cell should be in sync",
-    );
-
-    // Content should be user's typing (external update was a no-op)
-    assertEquals(
-      finalContent,
-      "Hello WorldMore",
-      "User's typing should apply when external update is a no-op",
-    );
+      // Content should be the user's typing (the external update was a no-op)
+      assertEquals(
+        finalContent,
+        "Hello WorldMore",
+        "User's typing should apply when the external update is a no-op",
+      );
+    } finally {
+      await cancelPendingEditorEdit(page);
+      await configureTiming(page, {
+        strategy: "debounce",
+        delay: DEBOUNCE_DELAY,
+      });
+    }
   });
 
   it("ADVERSARIAL: Very long content replacement should clamp cursor correctly", async () => {
@@ -1311,21 +1395,21 @@ describe("cf-code-editor backlink title sync", () => {
   // title and NAME are the renamed values, exactly what a real title
   // subscription would call.
 
-  it("preserves a remote title change over a pending local edit in the debounce window", async () => {
+  it("preserves a remote title change over a pending local edit", async () => {
     const page = shell.page();
-    const pieceId = "backlink-debounce-piece";
+    const pieceId = "backlink-pending-edit-piece";
     const pill = `[[📝 Target (${pieceId})]]`;
     const renamedPill = `[[📝 New Target (${pieceId})]]`;
 
-    // A very long debounce parks the typed edit so nothing commits on its own
-    // timer; the test controls when it flushes (via blur).
-    await configureTiming(page, { strategy: "debounce", delay: 100000 });
+    // The "blur" strategy commits only on an explicit blur and arms no timer,
+    // so the typed edit stays pending until the test flushes it.
+    await configureTiming(page, { strategy: "blur" });
 
     await piece.result.set(pill, ["content"]);
     await waitForEditorContent(page, pill);
 
     // Begin a local edit: append a character after the pill. Its Cell write
-    // stays parked in the debounce window — nothing commits yet.
+    // stays pending until blur — nothing commits yet.
     await focusEditor(page);
     await setCursorPosition(page, pill.length);
     await page.keyboard.type("X");
@@ -1342,7 +1426,7 @@ describe("cf-code-editor backlink title sync", () => {
       "editor did not expose _handleExternalTitleChange",
     );
 
-    // Flush any pending debounced write by blurring, then let it reach storage.
+    // Flush any pending write by blurring, then let it reach storage.
     await blurEditor(page);
     await waitForRuntimeSynced(page);
     await awaitViewSettled(page);
@@ -1357,7 +1441,7 @@ describe("cf-code-editor backlink title sync", () => {
     assertEquals(
       editorContent,
       `${renamedPill}X`,
-      "Debounced write overwrote the remote title change with a stale buffer",
+      "Flushed edit overwrote the remote title change with a stale buffer",
     );
   });
 
@@ -1482,6 +1566,31 @@ async function focusEditor(page: Page): Promise<void> {
       if (cfEditor && cfEditor._editorView) {
         cfEditor._editorView.focus();
       }
+    })()
+  `);
+}
+
+/** Abandon the editor's pending local edit and scheduled write. */
+async function cancelPendingEditorEdit(page: Page): Promise<void> {
+  await page.evaluate(`
+    (() => {
+      function findCfCodeEditor(root) {
+        if (!root) return null;
+        const editor = root.querySelector?.('cf-code-editor');
+        if (editor) return editor;
+        const allElements = root.querySelectorAll?.('*') || [];
+        for (const el of allElements) {
+          if (el.shadowRoot) {
+            const found = findCfCodeEditor(el.shadowRoot);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+
+      const cfEditor = findCfCodeEditor(document);
+      if (!cfEditor) throw new Error('cf-code-editor not found');
+      cfEditor._cellController.cancel();
     })()
   `);
 }

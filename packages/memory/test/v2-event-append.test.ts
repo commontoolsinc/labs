@@ -50,6 +50,14 @@ import {
   executionLeaseHolder,
 } from "../v2/execution-lease.ts";
 import {
+  aliasForDbId,
+  attachDatabase,
+  detachDatabase,
+  ensureTables,
+  runQuery,
+} from "../v2/sqlite/exec.ts";
+import { table as sqliteTable } from "../v2/sqlite/schema.ts";
+import {
   type ClientCommit,
   EventAppendDuplicateError,
   resetServerExecutionConfig,
@@ -456,6 +464,94 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
         "carries no stream link",
       );
     });
+
+    await t.step(
+      "an entry with malformed runtimeInjectedEventKeys is refused — the persisted carriage would throw in every drain pass, churning the serving loop forever (verdict blocker, 2026-08-12)",
+      () => {
+        for (
+          const [seq, malformed] of [
+            [31, 42],
+            [32, "not-an-array"],
+            [33, [1, 2]],
+            [34, { keys: [] }],
+          ] as const
+        ) {
+          assertThrows(
+            () =>
+              authored(
+                seq,
+                appendCommit(seq, [
+                  entryOf(`evt-malformed-keys-${seq}`, {
+                    runtimeInjectedEventKeys: malformed as never,
+                  }),
+                ]),
+              ),
+            ProtocolError,
+            "runtimeInjectedEventKeys",
+          );
+        }
+        // The well-formed positive still admits — on its OWN stream, so
+        // the shared sidecar's log state stays untouched for the later
+        // creation-shape steps.
+        const keysStream = { id: "of:wellformed-keys", path: [] as string[] };
+        const keysSidecar = streamEntriesDocId(keysStream);
+        authored(35, {
+          operations: [{
+            op: "patch",
+            id: keysSidecar,
+            patches: [{
+              op: "append",
+              path: "/value/entries",
+              values: [{
+                eventId: "evt-wellformed-keys",
+                stream: keysStream,
+                payload: { vote: "green" },
+                runtimeInjectedEventKeys: ["detail"],
+              }] as never[],
+            }],
+          }],
+          eventAppends: [{
+            id: keysSidecar,
+            eventId: "evt-wellformed-keys",
+          }],
+        });
+      },
+    );
+
+    await t.step(
+      "an entry whose stream link does not derive the sidecar being written is refused — a fresh sidecar id cannot smuggle another stream's handler dispatch past that stream's event-id horizon (verdict blocker, 2026-08-12)",
+      () => {
+        // The attack: append into a FRESH sidecar doc (empty horizon)
+        // while the entry's self-describing `stream` names the REAL
+        // stream — the drain would execute the named stream's handler,
+        // and the duplicate eventId never met the real sidecar's
+        // dedupe horizon.
+        const freshSidecar = streamEntriesDocId({
+          id: "of:unrelated",
+          path: ["elsewhere"],
+        });
+        assertThrows(
+          () =>
+            authored(30, {
+              operations: [{
+                op: "patch",
+                id: freshSidecar,
+                patches: [{
+                  op: "append",
+                  path: "/value/entries",
+                  values: [entryOf("evt-horizon-bypass")] as never[],
+                }],
+              }],
+              eventAppends: [{
+                id: freshSidecar,
+                eventId: "evt-horizon-bypass",
+              }],
+            }),
+          ProtocolError,
+          "does not derive the sidecar",
+        );
+      },
+    );
 
     await t.step("an entry without an eventId is refused", () => {
       assertThrows(
@@ -1250,6 +1346,77 @@ Deno.test("maintainStreamEventWatermarks: the frontier holds below a pending ent
   } finally {
     resetServerExecutionConfig();
     await Deno.remove(path).catch(() => {});
+  }
+});
+
+Deno.test("maintainStreamEventWatermarks: a folded sqlite op before the sidecar consequence must not collide the synthetic watermark opIndex (verdict blocker, 2026-08-12)", async () => {
+  // sqlite ops consume OPERATION slots but push no revision, so a
+  // synthetic index derived from `revisions.length` re-uses the sidecar
+  // revision's own opIndex for `[sqlite, sidecar]` — a (seq, op_index)
+  // primary-key collision that rolled back the whole handler wave.
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  const dbId = "of:watermark-db";
+  const tables = {
+    notes: sqliteTable({ id: "integer primary key", body: "text" }),
+  };
+  const alias = aliasForDbId(dbId);
+  const dbPath = await Deno.makeTempFile({ suffix: ".sqlite" });
+  attachDatabase(engine.database, alias, dbPath);
+  ensureTables(engine.database, tables, alias);
+  try {
+    const holder = withLiveLease(engine);
+    applyCommit(engine, {
+      sessionId: SESSION,
+      space: SPACE,
+      principal: ALICE,
+      commit: appendCommit(1, [entryOf("evt-sqlite-1")]),
+    });
+    const [entry] = sidecarValue(engine).entries!;
+    assert(typeof entry.seq === "number");
+
+    // The wave: sqlite FIRST (operation index 0, no revision), then the
+    // consequenced sidecar rewrite (operation index 1) — the watermark
+    // recompute appends its synthetic revision after both.
+    applyWaveCommit(engine, {
+      sessionId: holder,
+      space: SPACE,
+      commitClass: "derived",
+      holder,
+      sqliteAttachments: new Map([[dbId, alias]]),
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "sqlite",
+            db: { id: dbId, tables },
+            sql: "INSERT INTO notes (body) VALUES (?)",
+            params: ["consequence"],
+          },
+          {
+            op: "set",
+            id: SIDECAR as never,
+            value: {
+              value: { entries: [{ ...entry, consequenced: true }] },
+            } as never,
+          },
+        ],
+      },
+      waveBasis: { basisSeq: headSeqOf(engine), rebasedHeads: [] },
+    });
+    // Both halves landed atomically: the watermark advanced AND the
+    // sqlite write is present (no rollback).
+    assertEquals(sidecarValue(engine).eventWatermark, entry.seq);
+    assertEquals(
+      runQuery(engine.database, "SELECT body FROM notes"),
+      [{ body: "consequence" }],
+    );
+  } finally {
+    detachDatabase(engine.database, alias);
+    resetServerExecutionConfig();
+    await Deno.remove(path).catch(() => {});
+    await Deno.remove(dbPath).catch(() => {});
   }
 });
 

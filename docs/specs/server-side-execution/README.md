@@ -307,7 +307,14 @@ arbitrary cells, CFC-at-client-commit, and conflict handling between
 client handler writes and server derivations — all machinery that
 dissolves the day handlers move. The survival test fails it.
 
-Ruled YES by the owner 2026-08-02: events-down from day one. So in v2:
+Ruled YES by the owner 2026-08-02: events-down from day one. "Day one"
+binds the ARCHITECTURE (v2 is built toward events-down; no
+client-write-admission machinery is invested in), not the flip's
+calendar: the ROLLOUT stages it as F10's interim — client handler
+WRITES keep committing authored-class until Phase 3 lands the events
+channel (protocol.md §1's `authored` row; the Phase-2 flag ON serves
+derivations while handlers stay client-committed). So in v2, at
+Phase 3:
 
 - A handler firing on the client commits **only the event** (payload +
   target stream). Admission is an append-capability check.

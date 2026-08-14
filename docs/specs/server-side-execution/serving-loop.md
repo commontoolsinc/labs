@@ -160,9 +160,12 @@ processes* (deploy overlap, partition) it holds via the lease:
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
   match the live lease. This is one equality check, not admission
-  machinery. (Stage F adds the envelope-session half of the same
-  check — protocol.md §2's derived-envelope defense-in-depth, RULED
-  2026-08-05.)
+  machinery. It binds fresh commits: an exact replay of an already-accepted
+  commit answers from the store first (replay detection precedes
+  current-authority admission), so a network retry of an accepted commit is
+  never re-admitted against current authority. (Stage F adds the
+  envelope-session half of the same check — protocol.md §2's
+  derived-envelope defense-in-depth, RULED 2026-08-05.)
 - Liveness is judged by the MEMORY SERVER's clock: admission compares
   `expiresAt` against its own clock, and an expired row matches NOBODY —
   a derived commit under an expired lease is rejected even before any
@@ -639,8 +642,21 @@ service-identity writes; earlier drafts mis-attributed it to
 stage G). Stage G's own retirement — the outbox's delivery-acked
 ROW delete — is no stamped write at all: it rides the direct-engine
 plane (c) as an engine-table delete, never a commit (§1). Declared
-at the three stamping choke points the scheduler and runner own
-(the reactive-action run, the event dispatch, the pattern swap). Its conflict class: bookkeeping writes
+at the stamping choke points the scheduler and runner own: the
+reactive-action run, the event dispatch, the pattern swap, and — the
+PIECE-START site (RULED 2026-08-13, the F1 fold-in) — the
+demanded-piece startup path's setup/instantiation writes
+(`ensurePieceRunning` → start → `startCore`: the self-minted
+instantiation tx, the missing-stream-marker setup REPAIR, the
+deferred piece-start/run transactions, and the runtime-internal
+pattern-update/rollforward writes — the same `applySetupState`
+output the pattern-swap choke point already stamps). A piece-start
+commit that FAILS after start() resolved (the path is
+fire-and-forget by design) must SURFACE — loudly logged in every
+arm and counted into §7's `structureLoadFailures` on a serving
+runtime via the installed observer — never be swallowed: a
+swallowed refusal leaves the piece silently running against setup
+writes that never landed. Its conflict class: bookkeeping writes
 are advances that commute, so they REBASE like other
 non-re-derivable writes; a rebase that conflicts semantically DROPS
 the contribution whole — there is no event to requeue, and the loop
@@ -771,17 +787,25 @@ network await).
 
 ## 3e. Pattern updates
 
-The SpaceServer owns the pattern-source watcher and the hot-swap. Today
-both halves run CLIENT-side when `systemPatternAutoUpdate` is on — on
-in shell, off in server processes (EXPERIMENTAL_OPTIONS.md): the
-post-instantiation source check and the live swap via the
+The SpaceServer owns the pattern-source watcher and the hot-swap. Off
+the flag both halves run CLIENT-side when `systemPatternAutoUpdate` is
+on — on in shell, off in server processes (EXPERIMENTAL_OPTIONS.md):
+the post-instantiation source check and the live swap via the
 `patternIdentity` meta sink, teardown + reinstantiation included. Under
-the flag that posture FLIPS: pieces run only in the SpaceServer, so the
-watcher and the swap MUST run there — a pattern-pointer write is an
-ordinary authored input that dirties the piece, and the swap is the
-server reacting to it (runtime-mapping.md N40/N41). The pointer write
-itself stays authored-class under the updater's principal. Plan
-Phase 1 carries the task.
+the flag that posture FLIPS, and stage F LANDED the flip
+(runtime-mapping.md rows 40/41): the serving-runtime factory enables
+`systemPatternAutoUpdate` server-side, and the swap runs in the
+SpaceServer — a pattern-pointer write is an ordinary authored input
+that dirties the piece, the swap is the server reacting to it, and the
+swap's setup write stamps the `bookkeeping` kind and enters the wave
+(§3d). Because a sealed setup can still be WITHDRAWN at the wave
+commit, the swap replaces the running graph only after DURABLE
+acceptance — on withdrawal the old graph stays (old-graph-plus-new-
+pointer is a coherent not-yet-swapped state; the reverse is the
+broken-setup class). The pointer write itself stays authored-class
+under the updater's principal. The CHECK half's network source probe
+against a fully-local store is the flagged stage-F residual (verified
+in the integration environment, not the unit fixture).
 
 ## 4. Effectful nodes: memoization contract
 
@@ -801,7 +825,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
 - **Miss rule**: enqueue the effect on the outbox with the key AND
   the run's identity carriage — the result-cell address including
   its instance `scope_key`, plus the run's acting identity where it
-  had one, plus the run's CFC LABEL BASIS (FP6, RULED 2026-08-03).
+  had one, plus the run's CFC LABEL BASIS (FP6, RULED 2026-08-03;
+  RULED 2026-08-05 STRUCTURAL: the carriage carries the basis
+  reference, and the completion's writeback re-reads the request
+  inputs so labels derive from the basis AS IT STANDS at writeback,
+  never from a frozen at-seal snapshot).
   The completion commit is derived-class, so it carries
   protocol.md §1's annotations like any other — but it never passes
   through §3d's sealing (the run is long over when the response
@@ -821,8 +849,17 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   commit is an ordinary self-echo and is skipped (§3). A crash between
   completion commit and consumption is covered by recovery: the basis
   index shows the consumers stale against the result doc's head (§6).
-- **In-flight dedupe**: one outstanding effect per key per space; a second
-  miss on the same key attaches to the in-flight effect.
+- **In-flight dedupe**: one outstanding effect per (key, result
+  target) per space; a second miss on the same (key, target)
+  attaches to the in-flight effect. Two DISTINCT result targets
+  carrying byte-identical inputs are two distinct requests, and
+  each egresses (RULED 2026-08-13; the earlier per-key-only
+  wording promised a cross-target sharing that §4's own miss
+  rule — exactly one result-cell address per entry — could not
+  deliver). A response-sharing layer (one egress fanned to N
+  per-target writebacks, restricted to idempotent-marked
+  effects) remains a possible future optimization, not an owed
+  item.
 - Failures commit an error-shaped result (the existing builtin error cell
   conventions) with the key, so retries are input-driven (inputs change →
   new key), never timer-driven loops.
@@ -841,7 +878,9 @@ the durable rows of §5 carry APPENDS, never effect state).
   result-cell
   address with its `scope_key`, the acting identity where the
   run had one, and the run's CFC label basis (FP6, RULED
-  2026-08-03) so the completion write's labels derive from its
+  2026-08-03; structural per the 2026-08-05 ruling — the basis
+  reference rides the entry and labels re-derive at writeback)
+  so the completion write's labels derive from its
   request's — an external result inherits its request's
   confidentiality. Process-local is SOUND here: a crash re-misses
   the effect from memo keys (§4, §6; at-least-once, already ruled).
@@ -940,14 +979,25 @@ escalate.
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
-structureLoadFailures, structureLoadDeferred, watermarkClamped,
+structureLoadFailures, structureLoadDeferred, structureLoadTerminal,
+structureLoadRearmed, watermarkClamped,
 unstampedSealRefusals, watermarkLag, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed}, lease:
 {held, lost} }` (`structureLoadFailures`/`structureLoadDeferred`
 count demanded-structure loads that threw / could not land yet —
 never-a-piece id classes are EXCLUDED from piece demand and count
-nothing, RULED 2026-08-07; `watermarkClamped` counts waves whose W
+nothing, RULED 2026-08-07; `structureLoadFailures` also counts a
+piece-start commit that failed AFTER its start resolved (the §3d
+piece-start site's surfaced fire-and-forget failure, stage P2-F);
+`structureLoadTerminal`/`structureLoadRearmed` carry the
+demand-cycle terminal state (stage P2-F, the OW19 design): a root
+confirmed synced with no pattern meta parks TERMINAL — counted per
+terminalization, no per-cycle churn — and a commit touching one of
+the load's observed docs RE-ARMS it (the retry is settle-gated so it
+reads the re-arming commit's applied state); the demanded-structure
+load pass itself runs UNDER §3's flush deadline (single-flighted
+across cycles), so a slow ensure throttles nothing; `watermarkClamped` counts waves whose W
 advance was actually clamped below the input batch head by the
 Phase-2 settle input barrier — inbound foreign novelty still
 shadowed by a parked own write; the clamp is honesty, not failure,

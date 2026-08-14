@@ -2,7 +2,10 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type {
+  CommitError,
+  IExtendedStorageTransaction,
+} from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { markEffectCompletion } from "../executor/effect-completion.ts";
@@ -126,10 +129,12 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   snapshotInputs: (cell: Cell<T>) => T,
   expectedInputHash?: string,
   timeout: number = MUTEX_STALE_AFTER,
-  /** The served-effect id this claim belongs to (`${kind}:${hash}` —
-   * the memo/outbox key). Marks the write as an effect-completion-class
-   * transaction under the serving posture (server-execution v2 stage G,
-   * serving-loop.md §4); inert everywhere else. */
+  /** The served-effect key this claim belongs to (the PER-TARGET
+   * outbox key — executor/effect-completion.ts `effectTargetKey`,
+   * `${kind}:${hash}@<result-cell id>`). Marks the write as an
+   * effect-completion-class transaction under the serving posture
+   * (server-execution v2 stage G, serving-loop.md §4); inert
+   * everywhere else. */
   effectKey?: string,
 ): Promise<{
   claimed: boolean;
@@ -146,7 +151,6 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   await runtime.idle();
 
   await runtime.editWithRetry((tx) => {
-    if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
@@ -193,6 +197,14 @@ export async function tryClaimMutex<T extends Record<string, any>>(
       (currentInternal.lastActivity < now - timeout);
 
     if (canClaim) {
+      // Marked HERE, on the arm that writes — not at the callback top:
+      // the no-write arms (completed-request short-circuit, hash
+      // mismatch, claim held elsewhere) would otherwise commit as
+      // spurious all-no-op effect-completion transactions under
+      // serving (stage-G round 2, the thread-6/-12 shape). The marker
+      // still precedes every write of this arm, which is the
+      // markEffectCompletion contract.
+      if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
       pending.withTx(tx).set(true);
       internal.withTx(tx).update({
         requestId,
@@ -210,6 +222,15 @@ export async function tryClaimMutex<T extends Record<string, any>>(
 /**
  * Performs a mutation if the inputs haven't changed. This allows any tab
  * to write the result as long as the inputs are still the same.
+ *
+ * The two "did not write" shapes are DISTINCT for the caller (stage-G
+ * round 2, thread 4): `written: false` with no `commitError` means the
+ * inputs moved — the request was SUPERSEDED and the new inputs' own
+ * request owns the cells, nothing to do. `commitError` present means
+ * the writeback's COMMIT failed after retries — the claim is still
+ * durably pending and this call was its only completion, so the caller
+ * must not treat the effect as fulfilled (fetch.ts converts it into an
+ * error-shaped result, or propagates when even that cannot commit).
  */
 export async function tryWriteResult<T extends Record<string, any>>(
   runtime: Runtime,
@@ -220,9 +241,9 @@ export async function tryWriteResult<T extends Record<string, any>>(
   snapshotInputs?: (cell: Cell<T>) => T,
   /** See {@link tryClaimMutex}'s `effectKey`. */
   effectKey?: string,
-): Promise<boolean> {
+): Promise<{ written: boolean; commitError?: CommitError }> {
   let success = false;
-  await runtime.editWithRetry((tx) => {
+  const committed = await runtime.editWithRetry((tx) => {
     if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     const inputs = snapshotInputs
       ? snapshotInputs(inputsCell.withTx(tx))
@@ -236,5 +257,8 @@ export async function tryWriteResult<T extends Record<string, any>>(
       success = true;
     }
   });
-  return success;
+  if (committed.error !== undefined) {
+    return { written: false, commitError: committed.error };
+  }
+  return { written: success };
 }

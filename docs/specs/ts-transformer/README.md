@@ -18,7 +18,7 @@ update when behavior changes.
 | [`cfc_authoring_contract.md`](cfc_authoring_contract.md) | Contract (core implemented) | CFC-aware authoring surface: alias set + lowering rules to `ifc.*`; see its status header for letter-vs-shipped deltas |
 | [`cfc_ui_helper_contract.md`](cfc_ui_helper_contract.md) | Contract (implemented) | UiAction / UiPromptSlot / UiDisclosure JSX rewrite + `ifc.uiContract` hints |
 | [`../schema-generator/ts_to_json_schema_mapping.md`](../schema-generator/ts_to_json_schema_mapping.md) | **Descriptive** | The TypeScript→JSON Schema mapping rules (the other half of the language contract) |
-| [Historical records](../../history/README.md) | Historical | Superseded designs and PR-scoped artifacts; nothing there describes the current system |
+| [Historical records](../../history/INDEX.md) | Historical | Superseded designs and PR-scoped artifacts; nothing there describes the current system |
 
 Related, outside this directory: [JSON Schema](../json_schema.md), the runtime
 schema dialect these schemas target; the `JSONSchema` type in

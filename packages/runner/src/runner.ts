@@ -12,7 +12,11 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isPlainObject, isRecord } from "@commonfabric/utils/types";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isPlainObject,
+} from "@commonfabric/utils/types";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -67,6 +71,7 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
 import { waveRunContextOf } from "./executor/wave.ts";
@@ -84,6 +89,7 @@ import {
   useDeferredCancelOwnership,
 } from "./cancel.ts";
 import type { Runtime } from "./runtime.ts";
+import { waveSettlementOf } from "./executor/wave.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
@@ -91,6 +97,7 @@ import type {
   URI,
 } from "./storage/interface.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
+import { isSchemaMismatchError } from "./schema-view.ts";
 import {
   isConflictRejection,
   isStorageTransactionInconsistent,
@@ -262,7 +269,7 @@ function schedulerActionInstanceKey(parts: {
 function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
-  return isRecord(schema) && isCellScope(schema.scope)
+  return isObjectOrArray(schema) && isCellScope(schema.scope)
     ? schema.scope
     : undefined;
 }
@@ -373,7 +380,7 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
-  // A `FabricInstance` is refused. `isRecord` admits one, and its enumerable
+  // A `FabricInstance` is refused. `isObjectOrArray` admits one, and its enumerable
   // properties are empty, so descent would stop without reaching its codec
   // contents -- and a write-redirect link nested inside one would record no
   // `kind: "schema"` entry.
@@ -396,7 +403,7 @@ const recordOutputSchemaPolicyInputs = (
     );
   }
 
-  if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
+  if (isObjectOrArray(outputBinding) && !isCellLink(outputBinding)) {
     for (const [key, child] of Object.entries(outputBinding)) {
       recordOutputSchemaPolicyInputs(
         tx,
@@ -473,10 +480,10 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
   }
 
   // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above:
-  // `isRecord` admits a `FabricSpecialObject`, whose empty entries end the
+  // `isObjectOrArray` admits a `FabricSpecialObject`, whose empty entries end the
   // descent, so a link inside a `FabricInstance`'s codec contents records no
   // policy input. Fails closed, as there.
-  if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
+  if (isObjectOrArray(outputBinding) && !isCellLink(outputBinding)) {
     for (const child of Object.values(outputBinding)) {
       recordRawBuiltinBindingSchemaPolicyInputs(
         tx,
@@ -597,12 +604,12 @@ export function firstResolvedOutputRedirect(
     }
     return undefined;
   }
-  // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose empty
+  // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose empty
   // entries end the descent, so a write-redirect link inside a
   // `FabricInstance`'s codec contents is invisible here. The caller then
   // sees no redirect and silently skips the sub-pattern's owned-cell
   // pre-sync keyed off it.
-  if (isRecord(binding) && !isCellLink(binding)) {
+  if (isObjectOrArray(binding) && !isCellLink(binding)) {
     for (const child of Object.values(binding)) {
       const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
       if (found) return found;
@@ -711,7 +718,7 @@ const recordSetupProjectionPolicyInputs = (
     );
   }
 
-  if (isRecord(projection) && !isCellLink(projection)) {
+  if (isObjectOrArray(projection) && !isCellLink(projection)) {
     for (const [key, child] of Object.entries(projection)) {
       recordSetupProjectionPolicyInputs(
         tx,
@@ -959,14 +966,17 @@ function closedWorldEventRejection(
   runtimeInjectedEventKeys?: readonly string[],
 ): string | undefined {
   if (event === undefined) return undefined;
-  if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
+  if (
+    !isObjectOrArray(argumentSchema) ||
+    !isObjectOrArray(argumentSchema.properties)
+  ) {
     return undefined;
   }
   const eventSchema = argumentSchema.properties.$event;
-  if (!isRecord(eventSchema)) return undefined;
+  if (!isObjectOrArray(eventSchema)) return undefined;
   const refTarget = localRefTarget(eventSchema, argumentSchema);
   const closed = eventSchema.additionalProperties === false ||
-    (isRecord(refTarget) && refTarget.additionalProperties === false);
+    (isObjectOrArray(refTarget) && refTarget.additionalProperties === false);
   if (!closed) return undefined;
 
   // The runtime itself merges keys into some payloads — the LLM tool-call
@@ -995,10 +1005,10 @@ function closedWorldEventRejection(
   if (
     runtimeInjectedEventKeys !== undefined &&
     runtimeInjectedEventKeys.length > 0 &&
-    isRecord(event)
+    isObjectOrArray(event)
   ) {
     const declaredProperties =
-      isRecord(refTarget) && isRecord(refTarget.properties)
+      isObjectOrArray(refTarget) && isObjectOrArray(refTarget.properties)
         ? refTarget.properties
         : undefined;
     const rest = { ...(event as Record<string, unknown>) };
@@ -1028,9 +1038,10 @@ function closedWorldEventRejection(
     );
     if (cacheable) relaxedHandlerSchemaCache.set(argumentSchema, relaxedRoot);
   }
-  const relaxedEvent = isRecord(relaxedRoot) && isRecord(relaxedRoot.properties)
-    ? relaxedRoot.properties.$event
-    : undefined;
+  const relaxedEvent =
+    isObjectOrArray(relaxedRoot) && isObjectOrArray(relaxedRoot.properties)
+      ? relaxedRoot.properties.$event
+      : undefined;
   if (relaxedEvent === undefined) return undefined;
 
   const failure = validateSchemaValue(relaxedEvent, payload, relaxedRoot, {
@@ -1070,7 +1081,7 @@ function overlayUnresolvedLinkPlaceholders(
     }
     return result ?? materialized;
   }
-  if (isRecord(raw) && isRecord(materialized)) {
+  if (isObjectOrArray(raw) && isObjectOrArray(materialized)) {
     let result: Record<string, unknown> | undefined;
     for (const [key, rawChild] of Object.entries(raw)) {
       const child = overlayUnresolvedLinkPlaceholders(
@@ -1257,12 +1268,22 @@ export class Runner {
     `${MemorySpace}/${ScopeKey}/${URI}`,
     Set<DeferredCancelOwnership>
   >();
-  // Map whose key is the result cell's full key, and whose values are a hash
+  // Two-level memo of what each result cell holds: outer key the result
+  // DOC (space/id), inner key the resolved scope INSTANCE, value a hash
   // of the pattern's encodable form -- what `writeJavaScriptActionResult`
-  // compares to decide whether a returned sub-pattern has changed.
+  // compares to decide whether a returned sub-pattern has changed. The
+  // inner key is the SAME per-run resolved ScopeKey that selects the
+  // byScope result cell (review thread r3739139481): a serving runtime
+  // materializes one child per demanded instance, and a doc-level (or
+  // service-identity-resolved) key made the SECOND demanded instance
+  // look "unchanged" and skip its child materialization. The outer
+  // doc key is what change notifications can name (they carry scope by
+  // NAME, which cannot address per-run instances), so eviction drops
+  // the whole doc's entry -- over-eviction across instances is safe:
+  // re-preparing an unchanged pattern is idempotent.
   private resultPatternCache = new Map<
-    `${MemorySpace}/${ScopeKey}/${URI}`,
-    string
+    `${MemorySpace}/${URI}`,
+    Map<ScopeKey, string>
   >();
   // Invalidates asynchronous start/resume continuations when stopAll() begins.
   // A later explicit start captures the new epoch and may proceed normally.
@@ -1300,29 +1321,21 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
-            // Same key construction as getDocKey (site 2's cache): the
-            // notification names the scope by NAME; the runtime's own
-            // identity maps it to the same instance key the cache entry
-            // was stored under. NOTE (stage E, deliberate healing):
-            // pre-re-keying, getDocKey interpolated the scope raw — an
-            // unscoped cell's cache entry carried an "undefined" scope
-            // segment this delete (which normalized) could never name,
-            // so eviction silently missed real unscoped entries. The
+            // The notification names the DOC (scope arrives by NAME,
+            // which cannot address a per-run scope instance on a
+            // serving runtime — r3739139481), so eviction drops the
+            // doc's WHOLE entry: every instance's memo clears, and the
+            // over-eviction is safe — re-preparing an unchanged
+            // pattern commits no differing bytes
+            // (writeJavaScriptActionResult's unchanged path is
+            // idempotent). This also keeps the stage-E healing: no
+            // scope segment in the key means no raw-vs-normalized
+            // mismatch can make eviction silently miss an entry. The
             // eviction-on-notification CONTRACT is what the storage
             // subscription exists for and is pinned by the "clears
-            // cached patterns when storage notifies of changes" test
-            // (with normalized keys); re-keying makes the WRITER
-            // conform to that contract. The extra work on the healed
-            // path — re-preparing an unchanged pattern — commits no
-            // differing bytes (writeJavaScriptActionResult's unchanged
-            // path is idempotent).
+            // cached patterns when storage notifies of changes" test.
             this.resultPatternCache.delete(
-              `${space}/${
-                resolveScopeKey(
-                  change.address.scope,
-                  this.runtime.scopeKeyIdentity,
-                )
-              }/${change.address.id}`,
+              `${space}/${change.address.id}`,
             );
           }
         } else if (notification.type === "reset") {
@@ -1483,8 +1496,12 @@ export class Runner {
     // A sub-pattern's argument can carry a builder artifact -- a pattern
     // handed to another pattern as an input. This is a storage boundary like
     // any other, so the artifact is replaced on the way in, once, for every
-    // write below: they must agree on what was stored.
-    const storable = flattenBuilderArtifacts(argument);
+    // write below: they must agree on what was stored. A query result is a
+    // leaf here for the same reason it is one to the writes below, which each
+    // replace such a value with the sigil link it names.
+    const storable = flattenBuilderArtifacts(argument, {
+      isLeaf: isCellResultForDereferencing,
+    });
     argumentCell.set(storable);
     // The policy recorder sees the RAW argument, as its sibling in
     // `updateResultProjection` does. Handing it the flattened one would walk
@@ -1742,7 +1759,7 @@ export class Runner {
     });
     if (
       options.preserveName &&
-      isRecord(previousResult) &&
+      isObjectOrArray(previousResult) &&
       previousResult[NAME]
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
@@ -1837,7 +1854,7 @@ export class Runner {
         // a probe read of the not-yet-loaded value would otherwise enter the
         // commit's conflict set and lose to the durable value when it streams
         // in, reverting the whole instantiation commit.
-        const schemaDefault = isRecord(descriptor.schema)
+        const schemaDefault = isObjectOrArray(descriptor.schema)
           ? descriptor.schema.default as JSONValue | undefined
           : undefined;
         if (schemaDefault !== undefined) {
@@ -2506,7 +2523,21 @@ export class Runner {
       } finally {
         if (shouldCommit) {
           this.runtime.prepareTxForCommit(actualTx);
-          actualTx.commit();
+          // Fire-and-forget by design (start() resolves before the
+          // commit settles), but NEVER swallowed (stage P2-F, the F1
+          // fold-in — RULED 2026-08-13): a refused or failed
+          // instantiation commit means the piece is running against
+          // writes that never landed, so the failure surfaces loudly
+          // and, on a serving runtime, counted.
+          const instantiateActionId =
+            `piece-instantiate/${resultCell.sourceURI}`;
+          actualTx.commit().then(({ error }) => {
+            if (error !== undefined) {
+              this.reportPieceStartCommitFailure(instantiateActionId, error);
+            }
+          }).catch((error) => {
+            this.reportPieceStartCommitFailure(instantiateActionId, error);
+          });
         }
       }
     };
@@ -2533,37 +2564,117 @@ export class Runner {
         // Server-execution v2 stage F (serving-loop.md §3d): under an
         // installed seal destination every commit path declares its run
         // context; the swap's setup write is runtime-internal
-        // bookkeeping. A no-op everywhere else.
+        // bookkeeping. A no-op everywhere else. The action identity is
+        // per PIECE (the swapped result cell's stable address), not per
+        // {identity, symbol}: two pieces swapping to one pattern must
+        // not share a basis action (their rows would overwrite each
+        // other under §3b's per-(action, instance) replacement), while
+        // consecutive swaps of ONE piece overwrite — bounded, exactly
+        // the S4-friendly shape.
+        const pieceLink = resultCell.getAsNormalizedFullLink();
         this.runtime.stampServerRun(setupTx, {
-          actionId: `pattern-swap/${newRef.identity}#${newRef.symbol}`,
+          actionId: `pattern-swap/${pieceLink.space}/${
+            pieceLink.scope ?? "space"
+          }/${pieceLink.id}`,
           kind: "bookkeeping",
         });
-        try {
-          this.applySetupState(
-            setupTx,
-            pattern,
-            newRef,
-            {
-              sameStoredSetup: false,
-              restageStoredArgument: true,
-              storedSetupMatches: false,
-            },
-            undefined,
-            resultCell,
-          );
-          this.runtime.prepareTxForCommit(setupTx);
-          setupTx.commit();
-        } catch (error) {
-          logger.error(
-            "pattern-swap-setup-error",
-            `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
-            error,
-          );
+        const finishSwap = () => {
+          cancelNodes?.();
+          instantiatePattern(pattern);
+          runningRef = newRef;
+        };
+        if (!this.runtime.sealDestinationInstalled) {
+          // The OFF arm (and ON-arm client speculation): today's
+          // behavior, byte for byte — setup commits to the store and the
+          // swap proceeds synchronously.
+          try {
+            this.applySetupState(
+              setupTx,
+              pattern,
+              newRef,
+              {
+                sameStoredSetup: false,
+                restageStoredArgument: true,
+                storedSetupMatches: false,
+              },
+              undefined,
+              resultCell,
+            );
+            this.runtime.prepareTxForCommit(setupTx);
+            setupTx.commit();
+          } catch (error) {
+            logger.error(
+              "pattern-swap-setup-error",
+              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+              error,
+            );
+            return;
+          }
+          finishSwap();
           return;
         }
-        cancelNodes?.();
-        instantiatePattern(pattern);
-        runningRef = newRef;
+        // ON-arm serving: the setup seals into the wave, and the wave
+        // can still WITHDRAW it at the commit step (a conflict drop, a
+        // lease-lost abort) AFTER commit() resolved — so the running
+        // graph is replaced only once the setup is DURABLY accepted
+        // (waveSettlementOf). On withdrawal the OLD graph stays: v2
+        // running against withdrawn setup is the "Handler used as lift"
+        // failure class, while old-graph-plus-new-pointer is a coherent
+        // not-yet-swapped state a later pointer write (or reactivation)
+        // repairs.
+        void (async () => {
+          try {
+            this.applySetupState(
+              setupTx,
+              pattern,
+              newRef,
+              {
+                sameStoredSetup: false,
+                restageStoredArgument: true,
+                storedSetupMatches: false,
+              },
+              undefined,
+              resultCell,
+            );
+            this.runtime.prepareTxForCommit(setupTx);
+            const committed = await setupTx.commit();
+            if (committed.error !== undefined) {
+              logger.error(
+                "pattern-swap-setup-error",
+                `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was refused at the seal`,
+                committed.error,
+              );
+              return;
+            }
+          } catch (error) {
+            logger.error(
+              "pattern-swap-setup-error",
+              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+              error,
+            );
+            return;
+          }
+          const settlement = waveSettlementOf(setupTx);
+          if (settlement !== undefined) {
+            const settled = await settlement;
+            if (settled.error !== undefined) {
+              logger.warn(
+                "pattern-swap-setup-withdrawn",
+                () => [
+                  `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was withdrawn by the wave; the running pattern is preserved`,
+                  settled.error,
+                ],
+              );
+              return;
+            }
+          }
+          // Liveness + supersession: the piece may have stopped, the
+          // runtime cycled, or a NEWER pointer write swapped past this
+          // one while the settlement was pending.
+          if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
+          if (currentPatternKey !== patternIdentityKey(newRef)) return;
+          finishSwap();
+        })();
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
@@ -2836,10 +2947,20 @@ export class Runner {
           this.allCancels.delete(cancel);
           cancel();
         };
+        const repairActionId = `piece-start-repair/${resultCell.sourceURI}`;
         repairTx.addCommitCallback((_committedTx, result) => {
-          if (result.error) teardownAfterFailedCommit();
+          if (result.error) {
+            // Surfaced BEFORE the teardown (stage P2-F, the F1
+            // fold-in): the pre-P2-F path tore the registration down
+            // silently — correct liveness, invisible failure.
+            this.reportPieceStartCommitFailure(repairActionId, result.error);
+            teardownAfterFailedCommit();
+          }
         });
-        repairTx.commit().catch(() => teardownAfterFailedCommit());
+        repairTx.commit().catch((error) => {
+          this.reportPieceStartCommitFailure(repairActionId, error);
+          teardownAfterFailedCommit();
+        });
       }
     };
 
@@ -3757,11 +3878,39 @@ export class Runner {
   // §2 — the resolver also normalizes the raw `undefined:` form the
   // previous string interpolation produced for scope-less links, which
   // merges with `space:`, the same instance by definition).
+  /** Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
+   * setup/instantiation commit failure is fire-and-forget by design but
+   * NEVER silent — loud in every arm, and handed to the serving
+   * runtime's installed observer (the SpaceServer counts it into §7's
+   * structureLoadFailures). */
+  private reportPieceStartCommitFailure(
+    actionId: string,
+    error: unknown,
+  ): void {
+    logger.error("piece-start-commit-failed", () => [
+      `piece-start commit ${actionId} failed; the started graph's setup ` +
+      "writes did not land (stage P2-F, F1)",
+      error,
+    ]);
+    try {
+      this.runtime.pieceStartCommitFailureObserver?.({ actionId, error });
+    } catch (observerError) {
+      logger.warn("piece-start-commit-observer-failed", () => [
+        "pieceStartCommitFailureObserver threw",
+        observerError,
+      ]);
+    }
+  }
+
   private schedulerObservationIdentity(resultCell: Cell<any>) {
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
     return {
       pieceId: `${resolveScopeKey(scope, this.runtime.scopeKeyIdentity)}:${id}`,
       ownerSpace: space,
+      // The RAW root doc id, un-prefixed, for the per-(action × instance)
+      // run supply (server-execution v2 stage P2-F): the scheduler
+      // resolves this piece's demanded instances through it.
+      pieceRootId: id,
     };
   }
 
@@ -3852,8 +4001,8 @@ export class Runner {
 
       if (link) {
         promises.add(this.runtime.getCellFromLink(link).sync());
-      } else if (isRecord(value)) {
-        // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+      } else if (isObjectOrArray(value)) {
+        // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and
         // `for..in` sees none of its state, so a link nested in a
         // `FabricInstance`'s codec contents is never synced here — the cold
         // target this pre-sync exists to warm.
@@ -3975,9 +4124,9 @@ export class Runner {
     // first locally computed, then conflicts on write and only then properly
     // received from the server.
     if (
-      isRecord(pattern.result) &&
+      isObjectOrArray(pattern.result) &&
       pattern.result[UI] &&
-      (!isRecord(pattern.resultSchema) ||
+      (!isObjectOrArray(pattern.resultSchema) ||
         !pattern.resultSchema.properties?.[UI])
     ) {
       cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
@@ -4053,8 +4202,8 @@ export class Runner {
                 )
               ),
           );
-        } else if (isRecord(value)) {
-          // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+        } else if (isObjectOrArray(value)) {
+          // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and
           // `for..in` sees none of its state, so a link inside a
           // `FabricInstance` held in a raw argument value is never pre-synced
           // — a cold target can then enter the commit basis, the exact
@@ -4244,6 +4393,7 @@ export class Runner {
   }
 
   private stopResult<T>(resultCell: Cell<T>): void {
+    this.runtime.patternUpdater.unwatch(resultCell);
     const key = this.getDocKey(resultCell);
     this.independentlyStartedResults.delete(key);
     // TODO(hixie): This reaches every pending commit-gated start for the result,
@@ -4620,7 +4770,10 @@ export class Runner {
     event: unknown,
     depTx: IExtendedStorageTransaction,
   ): void {
-    if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
+    if (
+      !isObjectOrArray(argumentSchema) ||
+      !isObjectOrArray(argumentSchema.properties)
+    ) {
       return;
     }
     const eventSchema = argumentSchema.properties.$event;
@@ -4673,7 +4826,7 @@ export class Runner {
       currentValue: unknown,
       path: readonly string[],
     ): void => {
-      if (!isRecord(schema)) return;
+      if (!isObjectOrArray(schema)) return;
       const pathKey = JSON.stringify(path);
       const seenPaths = seen.get(schema);
       if (seenPaths?.has(pathKey)) return;
@@ -4739,7 +4892,7 @@ export class Runner {
       forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
         switch (keyword) {
           case "properties":
-            if (isRecord(currentValue)) {
+            if (isObjectOrArray(currentValue)) {
               visit(child, currentValue[key!], [...path, key!]);
             }
             return;
@@ -4764,9 +4917,9 @@ export class Runner {
             }
             return;
           case "additionalProperties":
-            if (isRecord(currentValue) && !Array.isArray(currentValue)) {
+            if (isObjectNotArray(currentValue)) {
               // Covers only the keys `properties` does not declare.
-              const declaredKeys = isRecord(schema.properties)
+              const declaredKeys = isObjectOrArray(schema.properties)
                 ? new Set(Object.keys(schema.properties))
                 : undefined;
               for (const [k, v] of Object.entries(currentValue)) {
@@ -4790,7 +4943,7 @@ export class Runner {
 
   private moduleHasOpaqueResult(module: Module): boolean {
     const resultSchema = module.resultSchema;
-    return isRecord(resultSchema) &&
+    return isObjectOrArray(resultSchema) &&
       Array.isArray(resultSchema.asCell) &&
       resultSchema.asCell.includes("opaque");
   }
@@ -4807,7 +4960,7 @@ export class Runner {
     const schemaWithRootDefinitions = (
       schema: JSONSchema | undefined,
     ): JSONSchema | undefined => {
-      if (!isRecord(schema) || !isRecord(rootSchema)) {
+      if (!isObjectOrArray(schema) || !isObjectOrArray(rootSchema)) {
         return schema;
       }
       return {
@@ -4839,7 +4992,7 @@ export class Runner {
       if (isCellLink(currentValue)) {
         return;
       }
-      if (!isRecord(schema)) return;
+      if (!isObjectOrArray(schema)) return;
       const seenValues = seen.get(schema) ?? new Set<unknown>();
       if (seenValues.has(currentValue)) return;
       seenValues.add(currentValue);
@@ -4864,7 +5017,7 @@ export class Runner {
           "when collecting scheduler read links from an argument",
         );
       }
-      if (isRecord(schema.properties) && isRecord(currentValue)) {
+      if (isObjectOrArray(schema.properties) && isObjectOrArray(currentValue)) {
         for (const [key, propertySchema] of Object.entries(schema.properties)) {
           visit(propertySchema, currentValue[key]);
         }
@@ -4889,9 +5042,9 @@ export class Runner {
       }
       if (
         schema.additionalProperties !== undefined &&
-        isRecord(currentValue)
+        isObjectOrArray(currentValue)
       ) {
-        const declaredKeys = isRecord(schema.properties)
+        const declaredKeys = isObjectOrArray(schema.properties)
           ? new Set(Object.keys(schema.properties))
           : undefined;
         for (const [key, propertyValue] of Object.entries(currentValue)) {
@@ -5050,7 +5203,7 @@ export class Runner {
     streamLink?: NormalizedFullLink;
     eventTarget?: { link?: NormalizedFullLink; value: FabricValue };
   } {
-    if (!isRecord(inputs) || !("$event" in inputs)) return {};
+    if (!isObjectOrArray(inputs) || !("$event" in inputs)) return {};
 
     // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
     // link; a residual `$alias` here could only be an embedded pattern's
@@ -5181,16 +5334,16 @@ export class Runner {
    * parent (orderedCommitSpaces appends unlisted written spaces), which would
    * make the parent's link to `child1` durable before `child1`'s target.
    */
-  // Public so the pattern builder (builder/pattern.ts
-  // `optIntoInSpaceMultiSpaceCommit`) can opt a transaction into a multi-space
-  // commit the moment a handler's `.inSpace(...)` target resolves — before the
-  // cross-space write executes (e.g. appending to the home `profiles` list,
-  // whose elements live in their own spaces).
   enableCrossSpaceChildCommit(
     tx: IExtendedStorageTransaction,
     childSpace: MemorySpace,
     parentSpace: MemorySpace,
   ): void {
+    // Public so the pattern builder (builder/pattern.ts
+    // `optIntoInSpaceMultiSpaceCommit`) can opt a transaction into a
+    // multi-space commit the moment a handler's `.inSpace(...)` target
+    // resolves — before the cross-space write executes (e.g. appending to the
+    // home `profiles` list, whose elements live in their own spaces).
     let childSpaces = this.crossSpaceChildSpaces.get(tx);
     if (childSpaces === undefined) {
       childSpaces = [];
@@ -5205,6 +5358,7 @@ export class Runner {
 
   private handleJavaScriptHandlerResult(
     tx: IExtendedStorageTransaction,
+    resultSchema: JSONSchema | undefined,
     result: any,
     resultHasReactives: boolean,
     frame: Frame,
@@ -5297,7 +5451,18 @@ export class Runner {
       return result;
     }
 
-    const resultPattern = patternFromFrame(() => result);
+    // The verb's DECLARED result type (`module.resultSchema`, lowered from
+    // `action<E, R>` / `handler<E, T, R>`) becomes this synthesized pattern's
+    // result schema, which `setupInternal` records as the receipt cell's
+    // durable `schema` meta. A launched result is a link, so its settled value
+    // describes nothing; the declaration is the only description there is. An
+    // undeclared verb passes `undefined` and keeps the unconstrained schema a
+    // frame-synthesized pattern has always carried.
+    const resultPattern = patternFromFrame(
+      () => result,
+      undefined,
+      resultSchema,
+    );
     // navigateTo result patterns must start after the handler's transaction
     // commits so the navigation target is durable. Every other handler result
     // pattern runs into the canonical result/receipt cell in the handler's
@@ -5370,7 +5535,14 @@ export class Runner {
         return run.resultCell;
       })();
 
-    if (!deferForNavigate) {
+    if (!deferForNavigate && receiptsEnabled) {
+      // Gated like every other receipt write above (round-2 thread
+      // T27): under serverExecution the receipt create-only mechanism
+      // is subsumed by the stream's eventWatermark and MUST NOT ride a
+      // serving run's wave commit — an ungated mark here left the
+      // create-only precondition active alongside the watermark, so a
+      // duplicate derived run aborted on receipt-exists instead of
+      // coalescing to the watermark.
       tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
     }
 
@@ -5619,12 +5791,25 @@ export class Runner {
     const resultPatternKey = hashStringOf(
       flattenBuilderArtifacts(resultPattern),
     );
-    const cacheKey = this.getDocKey(resultCell);
-    const previousResultPatternKey = this.resultPatternCache.get(cacheKey);
+    // Keyed doc-then-INSTANCE, the instance being the SAME per-run
+    // resolved key that selected the byScope cell above (r3739139481):
+    // a doc-level or service-identity-resolved key made the second
+    // demanded instance's run read the first's memo as "unchanged" and
+    // skip its child materialization.
+    const resultDocLink = resultCell.getAsNormalizedFullLink();
+    const cacheDocKey =
+      `${resultDocLink.space}/${resultDocLink.id}` as `${MemorySpace}/${URI}`;
+    const previousResultPatternKey = this.resultPatternCache.get(cacheDocKey)
+      ?.get(effectiveOutputScopeKey);
     const patternUnchanged = previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      this.resultPatternCache.set(cacheKey, resultPatternKey);
+      let instanceMemos = this.resultPatternCache.get(cacheDocKey);
+      if (instanceMemos === undefined) {
+        instanceMemos = new Map();
+        this.resultPatternCache.set(cacheDocKey, instanceMemos);
+      }
+      instanceMemos.set(effectiveOutputScopeKey, resultPatternKey);
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
@@ -5650,8 +5835,10 @@ export class Runner {
         // A rollback carries a release's authority, not a stop's: it lets go
         // of the registration this materialization installed and is not
         // authoritative over a lifetime or a start it does not own.
-        if (this.resultPatternCache.get(cacheKey) === resultPatternKey) {
-          this.resultPatternCache.delete(cacheKey);
+        const memos = this.resultPatternCache.get(cacheDocKey);
+        if (memos?.get(effectiveOutputScopeKey) === resultPatternKey) {
+          memos.delete(effectiveOutputScopeKey);
+          if (memos.size === 0) this.resultPatternCache.delete(cacheDocKey);
         }
         this.releaseChild(resultCell, undefined);
       });
@@ -5821,6 +6008,7 @@ export class Runner {
             const normalized = normalizeSandboxResult(result, name);
             return this.handleJavaScriptHandlerResult(
               tx,
+              module.resultSchema,
               normalized.value,
               normalized.hasReactive,
               frame,
@@ -5900,7 +6088,7 @@ export class Runner {
           // is an ambient local read (it may kick off, but never await, a
           // sync); guard each access so one lazy read failing doesn't abort
           // the rest of the presync.
-          if (!isRecord(value)) return;
+          if (!isObjectOrArray(value)) return;
           if (seen.has(value)) return;
           seen.add(value);
           for (const key of Object.keys(value)) {
@@ -5933,6 +6121,9 @@ export class Runner {
           resolveScopeKey(instanceLink.scope, this.runtime.scopeKeyIdentity)
         }:${instanceLink.id}`,
         ownerSpace: instanceLink.space,
+        // Raw root id for the per-(action × instance) run supply
+        // (stage P2-F).
+        pieceRootId: instanceLink.id,
       },
       ...(presyncInputs !== undefined && { presyncInputs }),
     });
@@ -5998,7 +6189,7 @@ export class Runner {
       schedulerRehydration,
     }: JavaScriptNodeContext,
   ): void {
-    if (isRecord(inputs) && "$event" in inputs) {
+    if (isObjectOrArray(inputs) && "$event" in inputs) {
       throw new Error(
         "Handler used as lift, because $stream: true was overwritten",
       );
@@ -6068,9 +6259,20 @@ export class Runner {
       };
 
       let popFrameAfterReturn = true;
+      // Assigned inside the try, and reachable from the catch: a refusal that
+      // escaped the body is disposed of through the same result path as one
+      // the body swallowed.
+      let postRun: ((result: any) => any) | undefined;
       try {
         logger.timeStart("action", "readInputs");
         tx.resetNarrowestReadScope();
+        // A lift reads its argument, and reads through it while it runs. Both
+        // go lazily: the body materializes the paths it touches and nothing
+        // else. Turned off again before the result is written, so diffing and
+        // the scheduler's own reads keep eager semantics.
+        if (this.runtime.experimental.lazyMaterialization) {
+          tx.markLazyMaterialize(true);
+        }
         const { argument, isValidArgument } = (() => {
           try {
             return this.readJavaScriptArgument(
@@ -6135,9 +6337,29 @@ export class Runner {
             throw error;
           }
         }
-        const postRun = (result: any) => {
+        postRun = (result: any) => {
           logger.timeStart("action", "postRun");
           try {
+            tx.markLazyMaterialize(false);
+            // A refusal is recorded on the transaction as well as thrown, so a
+            // body that caught it — its own `try`/`catch`, a discarded
+            // rejection — does not get to hand back a result built on data the
+            // schema does not describe. Either way the run is disposed of as an
+            // argument that did not resolve: an undefined result through the
+            // ordinary path, not an error. The reads it took are registered,
+            // including the one that failed, so it runs again when the data
+            // changes and may then find it valid.
+            const refusal = tx.takeSchemaRefusal();
+            if (refusal !== undefined) {
+              logger.info(
+                "action",
+                () => [
+                  "action argument stopped matching its schema -- not running",
+                  refusal instanceof Error ? refusal.message : refusal,
+                ],
+              );
+              result = undefined;
+            }
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
               return this.resolvePendingSpaceNamesAndRetry(frame);
             }
@@ -6161,7 +6383,18 @@ export class Runner {
         };
 
         const postRunResult = result instanceof Promise
-          ? result.then(postRun).catch(handleErrorOutput)
+          // An async body reaches mismatching data after an `await`, so its
+          // refusal arrives as a rejection the synchronous catch below never
+          // sees. Route it to the same disposition a synchronous one gets —
+          // an undefined result through the ordinary path — before the generic
+          // error handler turns it into a reported action failure.
+          ? result
+            .then(postRun)
+            .catch((error: unknown) =>
+              isSchemaMismatchError(error)
+                ? postRun!(undefined)
+                : handleErrorOutput(error)
+            )
           : postRun(result);
         if (postRunResult instanceof Promise) {
           popFrameAfterReturn = false;
@@ -6180,6 +6413,10 @@ export class Runner {
           return this.resolvePendingSpaceNamesAndRetry(frame)
             .finally(() => popFrame(frame));
         }
+        // A refusal that escaped the body takes the same disposition as one it
+        // swallowed: the run could not proceed on the data available, which is
+        // a non-event rather than a fault.
+        if (isSchemaMismatchError(error)) return postRun?.(undefined);
         handleErrorOutput(error);
       } finally {
         if (popFrameAfterReturn) popFrame(frame);
@@ -6356,10 +6593,10 @@ export class Runner {
   ): unknown {
     const invoke = () => {
       if (module.wrapper === "handler") {
-        const event = isRecord(argument) && "$event" in argument
+        const event = isObjectOrArray(argument) && "$event" in argument
           ? argument.$event
           : undefined;
-        const context = isRecord(argument) && "$ctx" in argument
+        const context = isObjectOrArray(argument) && "$ctx" in argument
           ? argument.$ctx
           : undefined;
         return fn(event, context);
@@ -6440,9 +6677,9 @@ export class Runner {
     ) {
       return;
     }
-    if (!isRecord(inputBindings)) return;
+    if (!isObjectOrArray(inputBindings)) return;
     const op = (inputBindings as Record<string, unknown>).op;
-    if (!isRecord(op)) return;
+    if (!isObjectOrArray(op)) return;
     let ref = this.runtime.patternManager.getArtifactEntryRef(
       op as unknown as object,
     );
@@ -7153,7 +7390,7 @@ export function getPieceSourceRevisions(
   const revisions: PieceSourceRevision[] = [];
   const revisionIds = new Set<string>();
   for (const value of raw) {
-    if (!isRecord(value)) {
+    if (!isObjectOrArray(value)) {
       throw new Error("piece source history is invalid");
     }
     const pattern = asPatternIdentityRef(value.pattern);
@@ -7489,7 +7726,7 @@ export function asPatternIdentityRef(
   raw: unknown,
 ): { identity: string; symbol: string } | undefined {
   if (
-    isRecord(raw) && typeof raw.identity === "string" &&
+    isObjectOrArray(raw) && typeof raw.identity === "string" &&
     typeof raw.symbol === "string"
   ) {
     return { identity: raw.identity, symbol: raw.symbol };

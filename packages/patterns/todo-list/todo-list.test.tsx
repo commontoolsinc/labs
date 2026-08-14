@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/todo-list/todo-list.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import TodoList from "./todo-list.tsx";
 
 export default pattern(() => {
@@ -170,7 +170,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Test 1: Initial state ===
       { assertion: assert_initial_empty },
       { assertion: assert_initial_count_0 },

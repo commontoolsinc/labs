@@ -8,6 +8,7 @@
 
 import { assert, assertEquals } from "@std/assert";
 import {
+  isScopeKey,
   resolvePrincipalSessionKey,
   resolveScopeKey,
 } from "@commonfabric/memory/v2";
@@ -21,6 +22,7 @@ import {
   fanoutStateKey,
   type FanoutStep,
   holderId,
+  isCanonicalKey,
   makeFanout,
   makeWorld,
   pushRowsFor,
@@ -820,7 +822,10 @@ Deno.test("C0-guards: connection guards; no-actor space writes carry no attribut
   w4 = apply(w4, { kind: "deliver", space: "A" });
   const sessionless = w4.spaces.B.streams.t.entries[0];
   assertEquals(sessionless.firedAt.session, "server");
-  assertEquals(sessionless.firedAt.user, undefined, "no user key (OW15)");
+  // Key ABSENCE, not a present-but-undefined key (round-2 thread T32):
+  // the OW15 carve-out stamps NO user key at all, and the old
+  // value-equality read passed vacuously against `{ user: undefined }`.
+  assertEquals("user" in sessionless.firedAt, false, "no user key (OW15)");
 });
 
 // ---------- conformance bridge: model keys === the wire vocabulary ----------
@@ -857,6 +862,61 @@ Deno.test("bridge: model scope-key constructors byte-agree with the real wire vo
   // keeps the literal `:` separators exact, so these no longer collide.
   assert(sessionKey("a:b", "c") !== sessionKey("a", "b:c"));
   assert(userKey("session:x") !== sessionKey("x", "x"));
+
+  // Validator half of the bridge: the model's restated validator and the
+  // real `isScopeKey` agree POINTWISE — every constructed key is in both
+  // acceptance sets, and the rejection sets coincide over the corpus of
+  // prefix-shaped non-keys: raw delimiters inside a segment, malformed
+  // escapes, decodable-but-non-canonical escapes, missing/empty segments.
+  for (const p of principals) {
+    for (
+      const key of [
+        userKey(p),
+        ...sessionIds.map((s) => sessionKey(p, s)),
+      ]
+    ) {
+      assert(isScopeKey(key), `real validator rejects constructed ${key}`);
+      assert(isCanonicalKey(key), `model validator rejects constructed ${key}`);
+    }
+  }
+  const rejectionCorpus = [
+    "",
+    "user",
+    "session",
+    "user:",
+    "session:x",
+    "session:x:",
+    "Space",
+    " space",
+    "space ",
+    "user:a/b",
+    "session:a/b:c",
+    "session:a:b/c",
+    "user:did:key:alice",
+    "session:a:b:c",
+    "user:%",
+    "user:%2",
+    "user:%GG",
+    "session:%GG:s",
+    "user:a%2fb",
+    "user:%41",
+    "user:a b",
+    "user:a+b",
+    "user:\uD800",
+    "user:%ED%A0%80",
+  ];
+  for (const value of rejectionCorpus) {
+    assertEquals(
+      isScopeKey(value),
+      false,
+      `real validator admits ${JSON.stringify(value)}`,
+    );
+    assertEquals(
+      isCanonicalKey(value),
+      false,
+      `model validator admits ${JSON.stringify(value)}`,
+    );
+  }
 });
 
 // ---------- C11: narrowing / fan-out (Phase 2 pre-gate, OW3) ----------
@@ -928,6 +988,22 @@ Deno.test("C11a: instance sets are CLEAN PRODUCTS over principals — never ragg
       }
     }
   }
+});
+
+Deno.test("C11d: a step naming a principal outside the configured set is REJECTED — the menu cannot smuggle instances past the clean-product invariant (r3739139513)", () => {
+  const s0 = makeFanout([U1]);
+  // Pre-fix, fanNarrow/fanDemand minted the foreign user's instance:
+  // the clean-product check quantifies over `principals`, so the
+  // out-of-set state passed the violations assertion unseen.
+  assertEquals(applyFanout(s0, { kind: "fanNarrow", by: U2 }), s0);
+  assertEquals(applyFanout(s0, { kind: "fanDemand", user: U2 }), s0);
+  // And after a legitimate narrowing, a foreign demand still cannot
+  // mint an out-of-set instance key.
+  const narrowed = applyFanout(s0, { kind: "fanNarrow", by: U1 });
+  assertEquals(
+    applyFanout(narrowed, { kind: "fanDemand", user: U2 }),
+    narrowed,
+  );
 });
 
 Deno.test("C11b: the fan-out unit is the RUN — `action × instance`, one principal's writes per run, never merged (serving-loop §3c)", () => {

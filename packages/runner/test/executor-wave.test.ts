@@ -65,7 +65,14 @@ import {
   WaveAccumulator,
   type WaveCommitRejection,
   type WaveCommitSink,
+  waveRunContextOf,
+  waveSettlementOf,
 } from "../src/executor/wave.ts";
+import {
+  createChildCellTransaction,
+  createDuplicateWorkTransaction,
+  createNonReactiveTransaction,
+} from "../src/storage/extended-storage-transaction.ts";
 import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
 import {
   effectCompletionKeyOf,
@@ -1257,7 +1264,7 @@ describe("stage D seal-into-wave", () => {
     expect(outcome.requeuedEventIds).toEqual(["e-parent"]);
   });
 
-  it("the emit-path tail read is append mechanics, not a dependency (review 2026-08-11 M3, coordinator-adjudicated, vetoable): a derivation emitter neither logs nor bases on the target sidecar", async () => {
+  it("the emit-path tail read is append mechanics, not a dependency (review 2026-08-11 M3, RULED let-stand 2026-08-13): a derivation emitter neither logs nor bases on the target sidecar", async () => {
     // LT6's case: a demanded DERIVATION that emits. Pre-fix, cell.ts's
     // LT1 emission read the sidecar tail UNMARKED, so the emitting
     // run's dependency log and basis rows contained the target stream
@@ -1373,6 +1380,78 @@ describe("stage D seal-into-wave", () => {
       expect(sidecar?.entries?.length).toBe(1);
       expect(typeof sidecar?.entries?.[0].seq).toBe("number");
       expect(sidecar?.entries?.[0].firedAt?.session).toBe("server");
+    } finally {
+      lease.release();
+      await servingRuntime.dispose();
+      await servingManager.close();
+    }
+  });
+
+  it("a symbol-bearing FabricValue payload survives wave assembly and stamping — the spine clones never re-encode payloads (verdict blocker, 2026-08-12)", async () => {
+    // Registry-interned symbols are valid FabricValues
+    // (data-model/interface.ts). Pre-fix, BOTH the batch build
+    // (wave.ts) and the engine's stamping helper (engine.ts) ran
+    // `structuredClone` over the whole sidecar op: a valid symbol
+    // payload threw `DataCloneError` mid-assembly and the
+    // event-and-consequence commit aborted.
+    const lease = liveLease();
+    const servingManager = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const servingRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingManager,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const streamCell = servingRuntime.getCell<{ $stream: boolean }>(
+        space,
+        "symbol-payload-stream",
+        undefined,
+      );
+      {
+        const tx = servingRuntime.edit();
+        streamCell.withTx(tx).set({ $stream: true });
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      const wave = new WaveAccumulator({
+        space,
+        basisSeq: Engine.serverSeq(engine),
+        scopeKeyIdentity: {
+          principal: signer.did(),
+          sessionId: "symbol-session",
+        },
+        replicaFor: (s) => servingManager.open(s).replica,
+        lease,
+      });
+      servingRuntime.installSealDestination(wave);
+      const emitTx = servingRuntime.edit();
+      stampWaveRunContext(emitTx, {
+        actionId: "symbol-emitter",
+        kind: "derivation",
+      });
+      streamCell.withTx(emitTx).send(
+        { tag: Symbol.for("cf:test-tag") } as never,
+      );
+      expect((await emitTx.commit()).error).toBeUndefined();
+      servingRuntime.clearSealDestination();
+      const outcome = await wave.commitWave(newSink());
+      await wave.settled();
+      // Pre-fix: DataCloneError aborted the wave right here.
+      expect(outcome.aborted).toBeUndefined();
+      expect(outcome.seq).toBeDefined();
+      const streamLink = streamCell.getAsNormalizedFullLink();
+      const sidecarId = streamEntriesDocId({
+        id: streamLink.id,
+        path: [...streamLink.path],
+      });
+      const sidecar = Engine.readState(engine, { id: sidecarId })?.document
+        ?.value as
+          | { entries?: Array<{ seq?: number }> }
+          | undefined;
+      expect(sidecar?.entries?.length).toBe(1);
+      expect(typeof sidecar?.entries?.[0].seq).toBe("number");
     } finally {
       lease.release();
       await servingRuntime.dispose();
@@ -2267,6 +2346,47 @@ describe("stage D seal-into-wave", () => {
     expect(misKeyed).toEqual([]);
   });
 
+  it("stage F: M1 — the run context survives sample()/sink() transaction wrappers (r3739139477: the stamp is on the ORIGINAL tx; a wrapped scoped read must not fall back to the service identity)", async () => {
+    const tx = runtime.edit();
+    const context = {
+      actionId: "wrapped-read",
+      kind: "derivation" as const,
+      scopeKeyIdentity: {
+        principal: "did:key:wrap-alice",
+        sessionId: "alice-s1",
+      },
+      actionScopeKey: resolveScopeKey("user", {
+        principal: "did:key:wrap-alice",
+        sessionId: "alice-s1",
+      }),
+    };
+    stampWaveRunContext(tx, context);
+    // The three wrapper shapes Cell.sample()/Cell.sink() and the
+    // duplicate-work comparator mint. Pre-fix, waveRunContextOf keyed
+    // strictly on object identity and returned undefined for all of
+    // them — schema.ts's traversal context then resolved scoped reads
+    // against runtime.scopeKeyIdentity (the SERVICE session on a
+    // serving runtime): wrong scope instance, tracker keys recorded
+    // under the service session.
+    expect(waveRunContextOf(createNonReactiveTransaction(tx)))
+      .toBe(context);
+    expect(waveRunContextOf(createDuplicateWorkTransaction(tx)))
+      .toBe(context);
+    expect(waveRunContextOf(createChildCellTransaction(tx, runtime.edit())))
+      .toBe(context);
+    // Nested wrapping (sample() inside a sink() callback) unwraps too.
+    expect(
+      waveRunContextOf(
+        createNonReactiveTransaction(createDuplicateWorkTransaction(tx)),
+      ),
+    ).toBe(context);
+    // An UNSTAMPED tx stays undefined through a wrapper — the walk
+    // must not invent a context.
+    expect(waveRunContextOf(createNonReactiveTransaction(runtime.edit())))
+      .toBeUndefined();
+    await tx.abort();
+  });
+
   it("stage F: a bookkeeping PATCH racing a DISJOINT authored patch REBASES and commits (the live rebase arm)", async () => {
     const lease = liveLease();
 
@@ -2315,5 +2435,387 @@ describe("stage D seal-into-wave", () => {
     // Both survive: the concurrent field AND the rebased advance.
     const stored = Engine.readState(engine, { id: link.id });
     expect(stored?.document).toEqual({ value: { seq: 9, other: 7 } });
+  });
+});
+
+describe("stage F fix round: foreign-batch settle sequences and shallow reads", () => {
+  let server: MemoryV2Server.Server;
+  let storageManager: EmulatedStorageManager;
+  let runtime: Runtime;
+  let engine: Engine.Engine;
+
+  beforeEach(async () => {
+    server = newSharedServer();
+    storageManager = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: { serverExecution: true },
+    });
+    engine = await server.engineForSpace(space);
+  });
+
+  afterEach(async () => {
+    await runtime.dispose();
+    await storageManager.close();
+    await server.close();
+  });
+
+  it("waveSettlementOf: a sealed tx's settlement resolves ok on the wave commit and error on withdrawal (the durable-acceptance primitive the pattern swap gates on — thread r3731191444)", async () => {
+    const holder = executionLeaseHolder(`service:${space}`);
+    const cycle = new ExecutionLeaseCycle({ engine, space, holder });
+    if (!cycle.acquire()) throw new Error("test lease acquire failed");
+
+    // Committed arm.
+    const wave1 = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "settlement-session",
+      },
+      replicaFor: (s) => storageManager.open(s).replica,
+      lease: cycle,
+    });
+    runtime.installSealDestination(wave1);
+    const doc1 = runtime.getCell<{ n: number }>(
+      space,
+      "settlement-committed",
+      undefined,
+    );
+    const tx1 = runtime.edit();
+    stampWaveRunContext(tx1, {
+      actionId: "settlement-probe/committed",
+      kind: "bookkeeping",
+    });
+    doc1.withTx(tx1).set({ n: 1 });
+    expect((await tx1.commit()).error).toBeUndefined();
+    const settlement1 = waveSettlementOf(tx1);
+    expect(settlement1).toBeDefined();
+    runtime.clearSealDestination();
+    const sink = new EngineWaveCommitSink({
+      engineFor: () => engine,
+      sessionId: holder,
+    });
+    const outcome1 = await wave1.commitWave(sink);
+    await wave1.settled();
+    expect(outcome1.dispositions).toEqual([{ kind: "committed" }]);
+    expect((await settlement1!).error).toBeUndefined();
+
+    // Withdrawn arm: an abandoned wave withdraws the sealed setup — the
+    // settlement resolves with an error, and a swap gated on it keeps
+    // the OLD graph.
+    const wave2 = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "settlement-session-2",
+      },
+      replicaFor: (s) => storageManager.open(s).replica,
+      lease: cycle,
+    });
+    runtime.installSealDestination(wave2);
+    const doc2 = runtime.getCell<{ n: number }>(
+      space,
+      "settlement-withdrawn",
+      undefined,
+    );
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, {
+      actionId: "settlement-probe/withdrawn",
+      kind: "bookkeeping",
+    });
+    doc2.withTx(tx2).set({ n: 2 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    const settlement2 = waveSettlementOf(tx2);
+    expect(settlement2).toBeDefined();
+    runtime.clearSealDestination();
+    wave2.abandon("test-induced abort");
+    await wave2.settled();
+    expect((await settlement2!).error).toBeDefined();
+
+    // A tx that never sealed into a wave has no settlement (the OFF
+    // arm's discriminator).
+    const tx3 = runtime.edit();
+    const doc3 = runtime.getCell<{ n: number }>(
+      space,
+      "settlement-off-arm",
+      undefined,
+    );
+    doc3.withTx(tx3).set({ n: 3 });
+    expect((await tx3.commit()).error).toBeUndefined();
+    expect(waveSettlementOf(tx3)).toBeUndefined();
+  });
+
+  it("resolves each foreign contribution with ITS OWN batch's accepted seq — two delegated identities provisioning one space never share a promotion seq (thread r3731191406)", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave foreign-seq space",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+
+    // Capture the verdict promise each seal hands the replica: the
+    // promotion seq each sealed space contribution RESOLVES with is
+    // exactly what feeds replica heads and later conflict decisions.
+    const sealedVerdicts: Array<{
+      space: MemorySpace;
+      verdict: Promise<{ committed?: { seq: number } }>;
+    }> = [];
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "wave-foreign-seq-session",
+      },
+      replicaFor: (s) => {
+        const real = storageManager.open(s).replica;
+        return new Proxy(real, {
+          get(target, prop, receiver) {
+            if (prop === "sealNative") {
+              const sealNative = Reflect.get(target, prop, receiver) as (
+                ...args: unknown[]
+              ) => unknown;
+              if (typeof sealNative !== "function") return sealNative;
+              return (...args: unknown[]) => {
+                sealedVerdicts.push({
+                  space: s,
+                  verdict: args[2] as Promise<{ committed?: { seq: number } }>,
+                });
+                return sealNative.apply(target, args);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      },
+    });
+    runtime.installSealDestination(wave);
+
+    const foreignDocA = runtime.getCell<{ value: number }>(
+      foreign,
+      "foreign-seq-a",
+      undefined,
+    );
+    const foreignDocB = runtime.getCell<{ value: number }>(
+      foreign,
+      "foreign-seq-b",
+      undefined,
+    );
+    const homeA = runtime.getCell<{ value: number }>(
+      space,
+      "foreign-seq-home-a",
+      undefined,
+    );
+    const homeB = runtime.getCell<{ value: number }>(
+      space,
+      "foreign-seq-home-b",
+      undefined,
+    );
+
+    // Two event-handler contributions provisioning the SAME foreign
+    // space under DIFFERENT delegated identities: protocol.md §2b groups
+    // them into two batches (one per acting identity), each accepted
+    // with its own store seq.
+    const tx1 = runtime.edit();
+    stampWaveRunContext(tx1, {
+      actionId: "provision-as-alice",
+      kind: "event-handler",
+      eventId: "e-alice",
+      acting: { user: "did:key:alice", session: "sess-a" },
+      capabilityRef: "cap:grant-alice",
+    });
+    tx1.enableMultiSpaceWrites?.([foreign, space]);
+    foreignDocA.withTx(tx1).set({ value: 1 });
+    homeA.withTx(tx1).set({ value: 1 });
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, {
+      actionId: "provision-as-bob",
+      kind: "event-handler",
+      eventId: "e-bob",
+      acting: { user: "did:key:bob", session: "sess-b" },
+      capabilityRef: "cap:grant-bob",
+    });
+    tx2.enableMultiSpaceWrites?.([foreign, space]);
+    foreignDocB.withTx(tx2).set({ value: 2 });
+    homeB.withTx(tx2).set({ value: 2 });
+    expect((await tx2.commit()).error).toBeUndefined();
+
+    runtime.clearSealDestination();
+
+    // A stub sink accepting every batch with a DISTINCT seq, recording
+    // which batch got which.
+    let nextSeq = 100;
+    const batchSeqs: Array<{
+      space: MemorySpace;
+      home: boolean;
+      delegated?: { actingPrincipal: string };
+      seq: number;
+    }> = [];
+    const sink: WaveCommitSink = {
+      currentHeads: (_space, docs) =>
+        Promise.resolve(
+          new Map(docs.map((doc) => [
+            `${doc.id} ${doc.scopeKey}`,
+            0,
+          ])),
+        ),
+      concurrentWritePaths: () => Promise.resolve([]),
+      commitWave: (batch) => {
+        nextSeq += 1;
+        batchSeqs.push({
+          space: batch.space,
+          home: batch.home,
+          ...(batch.delegated === undefined ? {} : {
+            delegated: { actingPrincipal: batch.delegated.actingPrincipal },
+          }),
+          seq: nextSeq,
+        });
+        return Promise.resolve({ ok: { seq: nextSeq } });
+      },
+    };
+
+    const outcome = await wave.commitWave(sink);
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.dispositions).toEqual([
+      { kind: "committed" },
+      { kind: "committed" },
+    ]);
+
+    // Two foreign batches (one per delegated identity) + one home batch,
+    // each accepted at its own seq.
+    const foreignBatches = batchSeqs.filter((batch) => !batch.home);
+    expect(foreignBatches.length).toBe(2);
+    const seqByActor = new Map(
+      foreignBatches.map(
+        (batch) => [batch.delegated?.actingPrincipal, batch.seq] as const,
+      ),
+    );
+
+    // THE PIN: each contribution's foreign space resolves with the seq
+    // of the batch ITS ops rode — alice's with alice's batch seq, bob's
+    // with bob's — never the last-committed batch's seq for both.
+    const foreignVerdicts = sealedVerdicts.filter(
+      (entry) => entry.space === foreign,
+    );
+    expect(foreignVerdicts.length).toBe(2);
+    const verdictA = await foreignVerdicts[0].verdict;
+    const verdictB = await foreignVerdicts[1].verdict;
+    expect(verdictA.committed?.seq).toBe(seqByActor.get("did:key:alice"));
+    expect(verdictB.committed?.seq).toBe(seqByActor.get("did:key:bob"));
+  });
+
+  it("a NON-RECURSIVE read in a read-only space still folds the reader into the withdrawal (shallowReads ride the seal handoff — thread r3731191403)", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave shallow-read space",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const foreignEngine = await server.engineForSpace(foreign);
+    const holder = executionLeaseHolder(`service:${space}`);
+    const cycle = new ExecutionLeaseCycle({ engine, space, holder });
+    if (!cycle.acquire()) throw new Error("test lease acquire failed");
+    const engines = new Map<MemorySpace, Engine.Engine>([
+      [space, engine],
+      [foreign, foreignEngine],
+    ]);
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "wave-shallow-session",
+      },
+      replicaFor: (s) => storageManager.open(s).replica,
+      lease: cycle,
+    });
+    runtime.installSealDestination(wave);
+
+    const foreignDoc = runtime.getCell<{ value: number }>(
+      foreign,
+      "wave-shallow-foreign-input",
+      undefined,
+    );
+    const homeIn = runtime.getCell<{ value: number }>(
+      space,
+      "wave-shallow-home-in",
+      undefined,
+    );
+    const homeOut = runtime.getCell<{ value: number }>(
+      space,
+      "wave-shallow-home-out",
+      undefined,
+    );
+
+    // Contribution 0: an event handler WRITES the foreign doc and a home
+    // doc (as in the recursive-read variant above).
+    const tx1 = runtime.edit();
+    stampWaveRunContext(tx1, {
+      actionId: "shallow-write-foreign",
+      kind: "event-handler",
+      eventId: "e-shallow-fw",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    tx1.enableMultiSpaceWrites?.([foreign, space]);
+    foreignDoc.withTx(tx1).set({ value: 5 });
+    homeIn.withTx(tx1).set({ value: 5 });
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    // Contribution 1: a derivation SHALLOW-reads the foreign doc — a
+    // nonRecursive shape probe, exactly what the query proxies record
+    // for container-shape reads — and writes home. The read set of a
+    // read-only space must include these: a derived write based on a
+    // withdrawn shallow read is as blind as one based on a deep read.
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, {
+      actionId: "derive-from-shallow-foreign",
+      kind: "derivation",
+    });
+    tx2.readValueOrThrow(foreignDoc.getAsNormalizedFullLink(), {
+      nonRecursive: true,
+    });
+    homeOut.withTx(tx2).set({ value: 1 });
+    expect((await tx2.commit()).error).toBeUndefined();
+
+    // A rival authored commit moves homeIn's head past the basis, which
+    // REQUEUES contribution 0 — its foreign write withdraws with it.
+    const homeInLink = homeIn.getAsNormalizedFullLink();
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: homeInLink.id,
+          value: { value: { value: 99 } },
+        }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const sink = new EngineWaveCommitSink({
+      engineFor: (s) => engines.get(s)!,
+      sessionId: holder,
+    });
+    const outcome = await wave.commitWave(sink);
+    await wave.settled();
+
+    expect(outcome.requeuedEventIds).toEqual(["e-shallow-fw"]);
+    expect(outcome.dispositions[0]).toEqual({ kind: "requeued" });
+    // The SHALLOW reader of the withdrawn foreign write drops with it —
+    // omitting shallowReads from the handoff would commit it blind.
+    expect(outcome.dispositions[1]).toEqual({ kind: "dropped" });
+    const outLink = homeOut.getAsNormalizedFullLink();
+    expect(
+      Engine.selectDocHead(engine, { id: outLink.id, scopeKey: "space" }),
+    ).toBe(0);
   });
 });

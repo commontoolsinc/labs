@@ -78,6 +78,48 @@ before relying on any of its behavior.
 cf piece verbs --piece <piece> --json
 ```
 
+Each row carries the verb's input schema and, when the verb declares a result,
+the schema of what it hands back — so both halves of "what may I send, and what
+do I get" are answerable before the first call rather than by making one:
+
+```json
+{
+  "name": "addNote",
+  "kind": "handler",
+  "on": "result",
+  "inputSchema": { "…": "…" },
+  "outputSchema": {
+    "type": "object",
+    "properties": { "note": { "$ref": "#/$defs/NoteOutput" } },
+    "required": ["note"],
+    "$defs": { "…": "…" }
+  }
+}
+```
+
+A value-less verb carries no `outputSchema` at all, which is how a caller tells
+the two apart without calling.
+
+One verb at a time, `--help` answers the same question from the callable
+itself:
+
+```bash
+cf piece call --piece <piece> <verb> --help
+```
+
+```text
+Output:
+  The invocation's `result`:
+    note <json>
+```
+
+The section names where the value arrives rather than describing stdout,
+because a handler's result rides the Invocation JSON below. A value-less verb's
+page carries no `Output:` section at all — the same distinction the listing
+draws, drawn on the page a caller is already reading before the first call.
+`--help --json` serves the declared result as `outputSchema`, descriptions and
+all, for a client that wants the schema rather than the summary.
+
 ### Call a verb and read its result
 
 `cf piece call` prints one settled **Invocation JSON** object on stdout:
@@ -91,6 +133,7 @@ cf piece call --piece <board> addTopic \
 {
   "invocation": "0f4c…",
   "status": "settled",
+  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" },
   "result": { "topic": { "$NAME": "Ship the thing", "…": "…" } }
 }
 ```
@@ -104,23 +147,155 @@ Anything the *pattern* resolved comes back too. A verb that stamps a write time
 or derives structured authorship from the event returns those in its record;
 the caller could not have computed them.
 
+The `receipt` is where that outcome lives: the address of the cell this
+handling wrote it to. Keep it and the result is re-readable without calling
+anything again —
+
+```bash
+cf piece get --piece <the receipt id>
+```
+
+— which is an ordinary read, so the verb's body does not run a second time.
+The address is known at commit rather than at readback, so it rides every
+envelope, including `--no-wait`'s. It is absent only where the runtime wrote no
+receipt to name.
+
+### Asking for a smaller result
+
+A verb decides what it returns; the caller decides how much of it to look at.
+`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`
+takes, with the same grammar — shape the `result` before it reaches stdout, and
+go before the callable name:
+
+```bash
+cf piece call --piece <topic> --select comment.writtenAt addComment \
+  '{"body":"first","agentName":"Sol"}'
+```
+
+```json
+{
+  "invocation": "0f4c…",
+  "status": "settled",
+  "result": { "comment": { "writtenAt": "2026-08-07T09:15:27Z" } }
+}
+```
+
+This shapes a result that already exists rather than deciding what travels: the
+readback has the whole receipt in hand before the selection runs. So a
+value-less verb keeps reporting no `result` at all — there is nothing for a
+selection to be about — and `--no-wait`, which never reads the receipt back,
+refuses all three flags. `--show-links` composes with a projection, because a
+projection leaves every surviving path where it was; it does not compose with
+`--filter`, which moves the positions a link names.
+
+`packages/cli/README.md` has the grammar and the supported schema subset.
+
+### A result that points back at its container
+
+A verb that hands back the piece it created returns a value you can reach from
+inside itself, whenever that piece carries a back-reference — `parent` beside
+`children`, the shape [self-reference](concepts/self-reference.md) documents.
+A circle has no JSON rendering, so there is nothing to write for a readback
+that follows one.
+
+Ask for no shape and `cf` derives one from the verb's declared result. The
+position where the declared type re-enters itself is the position that closes
+the circle, so that position renders its address and the rest reads as it
+always did:
+
+```bash
+cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
+```
+
+```json
+{
+  "invocation": "c5df…",
+  "status": "settled",
+  "result": {
+    "item": {
+      "title": "Session cookie handling",
+      "status": "open",
+      "children": [],
+      "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+    }
+  }
+}
+```
+
+That address is the one a `$link` marker would have produced by hand, so the
+derived answer and a written one agree. A shape you asked for wins wherever it
+renders: `--filter`, `--select` and `--schema` are applied to the receipt first,
+and one that narrows past the circle — `--select item.title` — comes back
+exactly as written, with nothing derived added to it. One that keeps the circle
+— `--select item`, which names the re-entering subtree whole — is bounded on the
+way out, and the bound is a cut into what you selected rather than a shape that
+replaces it: the closing position renders its address, and no position you did
+not name comes back beside it. `--select item.parent` names the closing position
+itself, and answers with that one address alone.
+
+Where nothing bounds it — the verb declares no result, the declaration leaves
+the closing position wide, or a `--filter` is in play, whose surviving elements
+no longer say which positions they came from and so cannot carry an address —
+the call names the position the circle closes at and the receipt to collect the
+outcome from, and exits nonzero. Read that as the result being unrenderable,
+never as the mutation having failed: **the write landed**, and the message says
+so. A `--filter` reaches a renderable answer by naming a projection beside it
+that narrows past the circle.
+
 ### Retries are safe, and cheap to reason about
 
-`--invocation <id>` makes a call idempotent. Replaying a settled id returns the
-**original** result rather than re-executing:
+`--invocation <id>` makes a call idempotent. The id is your own word for the
+call — and `add-comment-1` is a word two agents both reach for, so an id on its
+own does not say whose invocation it is. An **invocation session** does. Mint
+one per agent run and carry it on every call of that run:
+
+```bash
+export CF_INVOCATION_SESSION=$(cf invocation-session new)
+```
+
+The environment is where a session belongs, because it is closer to a secret
+than a setting: it is what keeps an outcome's address out of reach of a
+stranger, and a command's arguments are readable in a process listing where its
+environment is not. `--invocation-session <id>` overrides it for one call.
+
+The pair is what names an invocation. Replaying a settled id **from the session
+that chose it** hands back the **original** result, and nothing is written a
+second time:
 
 ```bash
 cf piece call --piece <topic> --invocation add-comment-1 \
   addComment '{"body":"first","agentName":"Sol"}'
 
-# Same id, different payload: the original result comes back, and no second
-# comment is recorded.
+# Same id, same session, different payload: the original result comes back,
+# and no second comment is recorded.
 cf piece call --piece <topic> --invocation add-comment-1 \
   addComment '{"body":"different","agentName":"Sol"}'
 ```
 
 That is the property an agent depends on when it retries a call whose response
 it never saw.
+
+**A receipt witnesses the commit, not the execution.** The replay above does run
+the handler body again; it then loses the race for the create-only receipt, so
+its commit is refused and no second comment is recorded. What it cannot undo is
+anything the body did *outside* that transaction: a verb that sends mail or
+spends a model call does it twice, and a write it made into another space
+commits before the receipt is contested and is not rolled back when the receipt
+is lost. So retry freely for a verb that only writes its own space, and prefer
+reading the `receipt` address for a verb that reaches beyond it — that collects
+the same outcome without running anything.
+
+That same id under a **different** session is a different invocation: it
+executes, and returns its own result. So two agents that pick the same word are
+never told each other's calls have settled, and knowing a piece, a verb and an
+id is not enough to read someone else's outcome — the session is the part a
+stranger cannot guess.
+
+`--invocation` therefore requires a session, and a call naming an id without one
+is refused, pointing you at `cf invocation-session new` and
+`CF_INVOCATION_SESSION`. Pass neither and both are minted for that one call: a
+random id names an outcome nothing else will ask for, and a call that never
+intended to replay loses nothing.
 
 A **rejected** call is different from a settled one: it never spends its id. If
 a verb refuses the payload, correct it and retry under the same id.
@@ -160,6 +335,25 @@ timing: readback → settled 72.8ms
 
 `--await` and `--no-wait` control whether the call waits for settlement and
 readback or exits once the commit is acknowledged.
+
+### Dispatching now, collecting later
+
+`--no-wait` returns at `"committed"`: the handler has run and its write is
+durable, and only the readback is skipped. The envelope still carries the
+`receipt`, so a detached call is a handle rather than a dead end —
+
+```json
+{
+  "invocation": "add-1",
+  "status": "committed",
+  "receipt": { "space": "did:key:…", "id": "of:fid1:…", "scope": "space" }
+}
+```
+
+— and collecting the outcome later is `cf piece get --piece <the receipt id>`.
+Replaying the same id and session recovers it too, but that re-runs the handler
+body: a verb that sends mail or spends a model call does it again. Reading the
+address does not.
 
 ## Which results arrive, and when
 
@@ -203,7 +397,7 @@ API_URL=http://localhost:8000 packages/cli/integration/verbs-over-the-cli.sh
 ```
 
 CI runs it in the `piece-call` shard. It takes under half a minute and around
-twenty `cf` invocations against a warm local toolshed.
+two dozen `cf` invocations against a warm local toolshed.
 
 Each step demonstrates one use case:
 
@@ -214,12 +408,13 @@ Each step demonstrates one use case:
 | 4 | A verb returns what it wrote, including what only it could compute |
 | 5 | A call's result names the document behind each path, and that address calls |
 | 6 | A read returns an address in place of what is behind it |
-| 7 | A replayed id returns the original result; nothing runs twice |
+| 7 | A replayed id returns the original result within its session, and executes as its own call in another |
 | 8 | A piece result survives `plainResultReceipts=false`; a plain record does not — and the write lands either way |
 | 9 | A value-less verb settles with the empty witness |
 | 10 | A refused call does not spend its invocation id |
 | 11 | Reading a verb redirects to `cf piece call` |
 | 12 | Timings on stderr, Invocation JSON still clean on stdout |
+| 13 | An invocation id without a session is refused, and the refusal says how to mint one |
 
 ## Addressing a piece you were handed
 
@@ -255,6 +450,20 @@ any non-plain object: a live runtime object reached through a result gets its
 own entry and nothing below it, because its properties belong to the runtime
 rather than to the result.
 
+`links` answers a different question from the envelope's `receipt`: `"/"` names
+whatever document backs the result **value**, which is the receipt only when the
+result is not itself a reference, while `receipt` always names the handling's
+own receipt and needs no flag to appear. Where the two describe the same thing
+they carry the same address — the receipt appears in `links` as `"/"`, or under
+the reserved bare `receipt` key when `"/"` had to name something else — so under
+`--show-links` the address is simply present twice.
+
+The links describe whatever result you were handed, so a projection composes
+with them: a path `--select` or `--schema` dropped simply gets no entry.
+`--filter` is refused alongside `--show-links` — a predicate leaves the elements
+it keeps at positions that are no longer the ones they came from, and every
+address below a filtered array would name the wrong element.
+
 A pattern should not mint identifier fields to make any of this easier —
 rendering identity is the client's job, and a pattern-authored fid is a copy
 that can go stale.
@@ -262,9 +471,10 @@ that can go stale.
 ### Asking a read for an address
 
 A cell is a point in a graph, so a read that does not say where to stop follows
-links onward and hands back a copy of everything behind them. `--schema` says
-where to stop: a position marked `{"$link": true}` returns that position's
-address rather than its contents.
+links onward and hands back a copy of everything behind them. A projection says
+where to stop: a marked position returns that position's address rather than
+its contents. A field list marks with a trailing `@`, and a JSON Schema marks
+with `{"$link": true}`.
 
 ```bash
 cf piece get --piece <board> notes \
@@ -299,10 +509,38 @@ cf piece get --piece <board> notes --schema \
 [{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }]
 ```
 
+A field list unions the same way, and its two paths meet at the one position.
+`noteCount` is computed, so the read steps the piece to bring it up to date:
+
+```bash
+cf piece get --piece <board> --step --select 'notes@,noteCount'
+```
+
+```json
+{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }], "noteCount": 3 }
+```
+
+A field list applies to each element wherever it crosses an array, and an
+address is one of the things it applies: `notes@` answers with the address of
+each note rather than of the slot it sits in, which makes it the concise
+spelling of the `items` marker above. Where the marked position holds anything
+else, the address is that position's own.
+
+The suffix is special only at the end of a segment, and `\@` writes a literal
+one, so a field named `user@home` stays reachable.
+
+A path that is only `@` names the position the read is already at, which no
+field path reaches because it sits above every field. `--select '@'` returns
+the source's own address in place of its contents — one per element where the
+source is an array — and `--select '@,title'` returns the address beside the
+title.
+
 A marked position is not fetched — the address is stored in the document that
 contains it, so a marked collection of a hundred notes costs the one read that
-document already needed. Where the marker is the whole selection, nothing
-behind it is read at all.
+document already needed. It costs the same whether the marker sits on the link
+or below it: a position that asks for nothing but addresses is not read either,
+so `notes.title@` reads what holds the collection and none of the notes. Where
+the marker is the whole selection, nothing behind it is read at all.
 
 The address a marked read returns is one `cf piece call` accepts, minus the
 `of:` prefix, which is the reason to ask for it.

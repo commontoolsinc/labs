@@ -9,6 +9,7 @@ import {
   computed,
   multiUserTest,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 
@@ -21,14 +22,14 @@ export const setup = pattern<Record<string, never>, MarkerSetup>(() => ({
 }));
 
 export const alice = pattern<{ setup: MarkerSetup }>(({ setup }) => ({
-  tests: [
+  [TESTS]: [
     { action: action(() => setup.note.set("from alice")) },
     { label: "alice-wrote" },
   ],
 }));
 
 export const bob = pattern<{ setup: MarkerSetup }>(({ setup }) => ({
-  tests: [
+  [TESTS]: [
     { await: "alice-wrote" },
     { assertion: computed(() => setup.note.get() === "from nobody") },
   ],

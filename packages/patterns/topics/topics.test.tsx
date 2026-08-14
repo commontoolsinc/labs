@@ -10,7 +10,15 @@
  * in bodies, comments, and link URLs; never persisted), and the exported pure
  * helpers. UI composer wrappers keep silent guards, exercised here.
  */
-import { action, assert, Default, NAME, UI, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  Default,
+  NAME,
+  TESTS,
+  UI,
+  Writable,
+} from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, {
   crossrefLinkRow,
@@ -774,7 +782,7 @@ export default pattern(() => {
     // shared-safe TopicPiece projection and exposes no [UI]; the topic detail
     // page is driven through its own render step.
     [UI]: board[UI],
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial },
       { action: action_link_unsigned_mixed_version_sibling },
       { assertion: assert_explicit_undefined_author_projection },

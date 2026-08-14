@@ -16,7 +16,7 @@
  * instead of action() closures to avoid "reactive reference outside
  * reactive context" errors when accessing reactive proxy objects.
  */
-import { assert, Cell, handler, pattern, Stream } from "commonfabric";
+import { assert, Cell, handler, pattern, Stream, TESTS } from "commonfabric";
 import AggregatorPattern from "./folksonomy-aggregator.tsx";
 
 export interface TagEvent {
@@ -575,7 +575,7 @@ export default pattern(() => {
   // ========================================================================
 
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state: empty ===
       { assertion: assert_initial_empty },
 

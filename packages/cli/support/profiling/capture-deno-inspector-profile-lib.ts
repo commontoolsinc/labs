@@ -417,6 +417,10 @@ export async function captureDenoInspectorProfile(
   let pendingProfilerStopReason: string | undefined;
   let profilerStartError: string | undefined;
   let missingProfileStartError: string | undefined;
+  // Whether `Profiler.enable` has answered, and the start options a console
+  // marker recorded before it did.
+  let profilerEnabled = false;
+  let deferredProfilerStartOptions: { clearStop?: boolean } | undefined;
 
   const target = {
     id: websocketUrl,
@@ -491,7 +495,17 @@ export async function captureDenoInspectorProfile(
       profileStopRegex,
     );
     if (profileMessage.startedProfile) {
-      void startProfiler({ clearStop: profileMessage.hadProfileStop });
+      const startOptions = { clearStop: profileMessage.hadProfileStop };
+      // `Runtime.enable` is what makes console events flow, and it resolves
+      // before `Profiler.enable` does. A target that prints its start marker
+      // in that window reaches here against a profiler the inspector has not
+      // enabled yet, and `Profiler.start` answers -32000. Hold the marker's
+      // options instead; the enable sequence starts the profiler with them.
+      if (profilerEnabled) {
+        void startProfiler(startOptions);
+      } else {
+        deferredProfilerStartOptions ??= startOptions;
+      }
     }
     if (summaryRegex.test(text)) {
       requestProfilerStop("summary-matched");
@@ -574,9 +588,13 @@ export async function captureDenoInspectorProfile(
     await celestial.Debugger.enable({});
     await celestial.Profiler.enable();
     await celestial.Profiler.setSamplingInterval({ interval: 100 });
+    profilerEnabled = true;
 
+    // Either the run carries no start pattern, so profiling begins at attach
+    // with no marker to answer, or a marker arrived while the enable sequence
+    // was still in flight and left the options it was seen with.
     if (state.sawProfileStart) {
-      await startProfiler();
+      await startProfiler(deferredProfilerStartOptions ?? {});
     }
 
     stopResumeOnPause = resumeDebuggerOnPause(celestial, ws, -2);

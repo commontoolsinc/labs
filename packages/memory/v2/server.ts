@@ -50,6 +50,7 @@ import {
   type SqliteRegisterDiskSourceRequest,
   type SqliteRegisterDiskSourceResult,
   type SqliteResultColumn,
+  streamEntriesDocId,
   type StreamEventEntry,
   type StreamEventsDocValue,
   type StreamLinkRef,
@@ -62,8 +63,10 @@ import {
   type WatchSpec,
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
+import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
 import {
+  aclDocId,
   ANYONE_USER,
   type Capability,
   hasConcreteOwner,
@@ -120,6 +123,7 @@ import {
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
+import { type ArmedTurn, armTurn } from "./turn.ts";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
@@ -230,11 +234,6 @@ type AclState =
   | { kind: "invalid" }
   | { kind: "valid"; acl: Record<string, Capability | undefined> };
 
-/** Engine doc id of a space's ACL document: the doc whose entity id is the
- *  space DID itself, as managed by the runner's `ACLManager` / `cf acl`
- *  (runner `toURI` prefixes bare ids with `of:`). */
-const aclDocId = (space: string): string => `of:${space}`;
-
 const commitTouchesAclDoc = (
   operations: readonly Operation[],
   space: string,
@@ -280,7 +279,6 @@ function missingTableName(error: unknown): string | undefined {
  *  full-Unicode `toLowerCase()` would over-match — SQLite treats e.g. `Ü` and
  *  `ü` as distinct tables, so folding them together here would mask a genuine
  *  "no such table" error as an empty result. */
-
 function isDeclaredTable(
   tables: Record<string, unknown> | undefined,
   name: string,
@@ -912,7 +910,7 @@ export class Server {
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
-  #refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #refreshTurn: ArmedTurn | null = null;
   #refreshing: Promise<void> | null = null;
   // Transactions and fan-out share one publication turn per space. A verdict
   // is sent while its transaction owns the turn, so a sync frame cannot expose
@@ -923,6 +921,17 @@ export class Server {
   // (b)/(d)); undefined until a host attaches. One observer: there is one
   // host per process.
   #serverExecutionObserver: ServerExecutionObserver | undefined;
+  // Per-frame delivery record: the wire strips instance keys (frames
+  // carry scope NAMES), so a delivery rollback cannot recover WHICH
+  // instances a frame carried from the frame alone — a lease holder's
+  // explicit foreign instances would mis-resolve to its own. Keyed by
+  // the frame object (in-process only, never serialized), populated at
+  // frame build, consumed by rollbackUndeliveredSync; a WeakMap so
+  // delivered frames cost nothing.
+  #deliveredFrameEntries = new WeakMap<SessionEffectMessage, {
+    upserts: SessionCacheEntry[];
+    removes: SessionCacheEntry[];
+  }>();
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
@@ -1260,16 +1269,6 @@ export class Server {
     return null;
   }
 
-  /** After an ACL change, drop live sessions whose principal no longer
-   *  holds READ (enforce mode only): per-message gating alone would still
-   *  let their already-registered subscriptions receive pushes. The owning
-   *  connection gets a session/revoked("unauthorized"), which the client
-   *  treats as a terminal session close (no reopen loop — a reopen attempt
-   *  is denied at session.open). The session that made the triggering ACL
-   *  write (`writerSessionId`) is still dropped from the registry — so it
-   *  receives no further pushes — but is NOT sent the terminal revocation, so
-   *  it gets this transact's response first (a self-removal otherwise reads as
-   *  a failure). Its next message fails closed as an unknown session. */
   // Writer sessions that de-authorized themselves in a commit: their
   // session/revoked is held until after the transact verdict goes out.
   #deferredSelfRevocations = new Map<string, string | null>();
@@ -1290,6 +1289,18 @@ export class Server {
     }
   }
 
+  /**
+   * After an ACL change, drop live sessions whose principal no longer holds
+   * READ (enforce mode only): per-message gating alone would still let their
+   * already-registered subscriptions receive pushes. The owning connection
+   * gets a session/revoked("unauthorized"), which the client treats as a
+   * terminal session close (no reopen loop — a reopen attempt is denied at
+   * session.open). The session that made the triggering ACL write
+   * (`writerSessionId`) is still dropped from the registry — so it receives no
+   * further pushes — but is NOT sent the terminal revocation, so it gets this
+   * transact's response first (a self-removal otherwise reads as a failure).
+   * Its next message fails closed as an unknown session.
+   */
   #revokeDeauthorizedSessions(
     engine: Engine.Engine,
     space: string,
@@ -1393,7 +1404,7 @@ export class Server {
     // flushSessions(), so it drains them rather than returning with
     // pending work — "manual" gates the TIMER, not the explicit calls.
     if (
-      this.#refreshTimer !== null || this.#refreshing !== null ||
+      this.#refreshTurn !== null || this.#refreshing !== null ||
       this.#dirtySpaces.size > 0
     ) {
       await this.flushSessions();
@@ -1899,8 +1910,31 @@ export class Server {
     if (duplicate) {
       return { deduped: true };
     }
-    const stream: StreamLinkRef = entry.targetStreamLink ??
-      { id: entry.targetStream, path: [] };
+    // The delivered entry's self-describing link MUST derive the target
+    // sidecar (events.md §1 — one derivation; the engine's admission
+    // re-checks the same binding). A row with NO link (stage-G era) is
+    // REFUSED, not patched with a fabricated path-less link: the
+    // fabricated link hashes to a DIFFERENT sidecar id, so the target's
+    // drain would route the event to a stream nothing fired at —
+    // deferred until dropped, handler never run. The deterministic
+    // refusal takes the LT4 arm at the source: failure notice (warn log
+    // for unsourced legacy rows), row retired.
+    const stream: StreamLinkRef | undefined = entry.targetStreamLink;
+    if (stream === undefined) {
+      throw new Engine.ProtocolError(
+        `delegated append ${entry.eventId} carries no target stream ` +
+          "link — a legacy (stage-G era) outbox row cannot name the " +
+          "stream its entry stands for; refused, never fabricated " +
+          "(events.md §1)",
+      );
+    }
+    if (streamEntriesDocId(stream) !== entry.targetStream) {
+      throw new Engine.ProtocolError(
+        `delegated append ${entry.eventId} carries a stream link that ` +
+          `does not derive its target sidecar "${entry.targetStream}" ` +
+          "(events.md §1's one derivation)",
+      );
+    }
     const streamEntry: StreamEventEntry = {
       eventId: entry.eventId,
       stream,
@@ -2219,6 +2253,17 @@ export class Server {
           "taken-over",
         );
       }
+      if (opened.resumed === true) {
+        // Resume revalidates the persisted lease-holder read exemption
+        // BEFORE any catch-up evaluation runs: the bit is an
+        // authorization tied to a LIVE execution lease (protocol.md §2's
+        // read row), and a resume must never inherit it across a lapsed
+        // or moved lease. Clears the stale bit as a side effect.
+        const resumed = this.#sessions.get(message.space, opened.sessionId);
+        if (resumed !== null) {
+          await this.#currentLeaseHolderExemption(message.space, resumed);
+        }
+      }
       const catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
           message.space,
@@ -2359,26 +2404,11 @@ export class Server {
   private async decideTransaction(
     message: TransactRequest,
   ): Promise<TransactDecision> {
-    const session = this.#sessions.get(message.space, message.sessionId);
-    if (session === null) {
-      return {
-        response: respondTypedError<Engine.AppliedCommit>(
-          message.requestId,
-          toError("SessionError", "Unknown session for space"),
-        ),
-      };
-    }
     let postCommit: (() => Promise<void>) | undefined;
     const response = await tracer.startActiveSpan(
       "memory.transact",
       async (span): Promise<ResponseMessage<Engine.AppliedCommit>> => {
         span.setAttribute("space.did", message.space);
-        if (
-          session.principal !== undefined &&
-          session.principal !== ANYONE_USER
-        ) {
-          span.setAttribute("user.did", session.principal);
-        }
         if (message.requestId !== undefined) {
           span.setAttribute("request.id", message.requestId);
         }
@@ -2395,6 +2425,34 @@ export class Server {
         }
         if (message.commit.localSeq !== undefined) {
           span.setAttribute("commit.local_seq", message.commit.localSeq);
+        }
+        // Classify the request before any await or validation so conflicts and
+        // rejected attempts remain visible in the same dashboard breakdowns as
+        // successful transactions. `entity.count` keeps its existing meaning.
+        const commitTelemetry = classifyCommitTelemetry(message.commit);
+        span.setAttribute("commit.kind", commitTelemetry.kind);
+        span.setAttribute("entity.count", commitTelemetry.entityCount);
+        span.setAttribute(
+          "scheduler.observation.count",
+          commitTelemetry.schedulerObservationCount,
+        );
+        span.setAttribute(
+          "sqlite.operation.count",
+          commitTelemetry.sqliteOperationCount,
+        );
+        const session = this.#sessions.get(message.space, message.sessionId);
+        if (session === null) {
+          span.end();
+          return respondTypedError<Engine.AppliedCommit>(
+            message.requestId,
+            toError("SessionError", "Unknown session for space"),
+          );
+        }
+        if (
+          session.principal !== undefined &&
+          session.principal !== ANYONE_USER
+        ) {
+          span.setAttribute("user.did", session.principal);
         }
         try {
           const engine = await this.openEngine(message.space);
@@ -2572,12 +2630,6 @@ export class Server {
             );
           }
           span.setAttribute("commit.seq", commit.seq);
-          span.setAttribute(
-            "entity.count",
-            message.commit.operations.filter((operation) =>
-              operation.op !== "sqlite"
-            ).length,
-          );
           return {
             type: "response",
             requestId: message.requestId,
@@ -2696,7 +2748,10 @@ export class Server {
       const deny = await this.#denyExplicitInstanceReads(
         message.space,
         session,
-        message.query.roots,
+        message.query.roots.map((root) => ({
+          branch: message.query.branch ?? "",
+          root,
+        })),
       );
       if (deny) {
         return respondTypedError<GraphQueryResult>(message.requestId, deny);
@@ -2909,7 +2964,12 @@ export class Server {
       const deny = await this.#denyExplicitInstanceReads(
         message.space,
         session,
-        message.watches.flatMap((watch) => watch.query.roots),
+        message.watches.flatMap((watch) =>
+          watch.query.roots.map((root) => ({
+            branch: watch.query.branch ?? "",
+            root,
+          }))
+        ),
       );
       if (deny) {
         return respondTypedError<WatchSetResult>(message.requestId, deny);
@@ -2994,11 +3054,20 @@ export class Server {
     ) {
       // protocol.md §2's read row: explicit entity_scope_key roots are
       // lease-holder-only. Gated on the sync scan so the no-key path
-      // adds no await between authorization and evaluation.
+      // adds no await between authorization and evaluation. watch.add
+      // EXTENDS the session's watch set, so the wire-collapse guard
+      // inside the deny must see the UNION — an instance conflict
+      // between an added root and an existing watch's root is the same
+      // ambiguity as within one message.
       const deny = await this.#denyExplicitInstanceReads(
         message.space,
         session,
-        message.watches.flatMap((watch) => watch.query.roots),
+        [...message.watches, ...session.watches].flatMap((watch) =>
+          watch.query.roots.map((root) => ({
+            branch: watch.query.branch ?? "",
+            root,
+          }))
+        ),
       );
       if (deny) {
         return respondTypedError<WatchAddResult>(message.requestId, deny);
@@ -3244,18 +3313,55 @@ export class Server {
     const sync = undelivered.effect;
     const identity = this.#sessionScopeIdentity(session);
     const ids: string[] = [];
+    // The frame's OWN delivery record carries the exact instance-keyed
+    // entries it was built from (#deliveredFrameEntries — the wire form
+    // strips scope keys, so the frame alone cannot name its instances:
+    // a lease holder's explicit foreign instances would mis-resolve to
+    // its own here). The session-identity recovery below remains as the
+    // fallback for frames without a record (none are built today).
+    const record = this.#deliveredFrameEntries.get(undelivered);
     // Wire frames carry scope NAMES; the session's own identity recovers
     // the instance keys (M4). An unresolvable scope cannot have been in a
     // frame built FOR this session — skip defensively rather than throw
-    // on the rollback path. (A lease-holder session's explicit foreign
-    // instances mis-resolve to its own here; forceFullResync below and
-    // the full re-evaluation repair that conservatively.)
+    // on the rollback path.
     const instanceKeyFor = (
       scope: CellScope | undefined,
     ): ScopeKey | undefined =>
       canResolveScopeKey(scope, identity)
         ? resolveScopeKey(scope, identity)
         : undefined;
+    if (record !== undefined) {
+      for (const entry of record.upserts) {
+        session.entities.delete(
+          cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
+        );
+        ids.push(toDirtyKey(entry.id, entry.scopeKey));
+      }
+      for (const entry of record.removes) {
+        // The remove's cache entry died when the frame was built;
+        // re-insert a tombstone claiming the client still holds the doc,
+        // and force the next sync through a FULL evaluation — the
+        // incremental path never emits removes, so only a full re-diff
+        // (tombstone present, entity absent) regenerates the removal.
+        session.entities.set(
+          cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
+          {
+            branch: entry.branch,
+            id: entry.id,
+            scope: entry.scope,
+            scopeKey: entry.scopeKey,
+            seq: 0,
+            deleted: true,
+          },
+        );
+        session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
+        session.forceFullResync = true;
+        ids.push(toDirtyKey(entry.id, entry.scopeKey));
+      }
+      this.#rollbackCaughtUpMarker(session, sync);
+      this.markSpaceDirty(space, ids);
+      return;
+    }
     for (const upsert of sync.upserts) {
       const scopeKey = instanceKeyFor(upsert.scope);
       if (scopeKey === undefined) continue;
@@ -3298,22 +3404,25 @@ export class Server {
       session.forceFullResync = true;
       ids.push(toDirtyKey(remove.id, scopeKey));
     }
-    if (sync.caughtUpLocalSeq !== undefined) {
-      // The marker was consumed into `caughtUpLocalSeq` when the frame was
-      // built; rewind BOTH counters or the re-staged obligation compares
-      // as already-satisfied and never re-fires. A temporarily lowered
-      // caughtUpLocalSeq is safe to expose (resume reporting is
-      // client-side monotonic).
-      session.pendingCaughtUpLocalSeq = Math.max(
-        session.pendingCaughtUpLocalSeq,
-        sync.caughtUpLocalSeq,
-      );
-      session.caughtUpLocalSeq = Math.min(
-        session.caughtUpLocalSeq,
-        sync.caughtUpLocalSeq - 1,
-      );
-    }
+    this.#rollbackCaughtUpMarker(session, sync);
     this.markSpaceDirty(space, ids);
+  }
+
+  /** The marker half of a delivery rollback: the marker was consumed
+   * into `caughtUpLocalSeq` when the frame was built; rewind BOTH
+   * counters or the re-staged obligation compares as already-satisfied
+   * and never re-fires. A temporarily lowered caughtUpLocalSeq is safe
+   * to expose (resume reporting is client-side monotonic). */
+  #rollbackCaughtUpMarker(session: SessionState, sync: SessionSync): void {
+    if (sync.caughtUpLocalSeq === undefined) return;
+    session.pendingCaughtUpLocalSeq = Math.max(
+      session.pendingCaughtUpLocalSeq,
+      sync.caughtUpLocalSeq,
+    );
+    session.caughtUpLocalSeq = Math.min(
+      session.caughtUpLocalSeq,
+      sync.caughtUpLocalSeq - 1,
+    );
   }
 
   syncSessionForConnection(
@@ -3452,6 +3561,14 @@ export class Server {
               return await emptyCatchUp();
             }
 
+            // The lease-holder exemption is keyed on CURRENT holdership,
+            // once per pass: a former holder's foreign instances are
+            // filtered like any other session's (protocol.md §2's read
+            // row is live-lease admission; the check also clears a stale
+            // persisted bit).
+            const leaseHolderExempt = await this
+              .#currentLeaseHolderExemption(space, session);
+            const filteredKeys: string[] = [];
             const upserts: SessionCacheEntry[] = [];
             for (const [key, entry] of updates) {
               const previous = session.entities.get(key);
@@ -3460,14 +3577,19 @@ export class Server {
                 // defense-in-depth: a session's graph evaluates under
                 // its own identity, so an inapplicable instance here is
                 // structurally unreachable — unless the session is a
-                // lease holder with explicit-instance reads admitted
-                // (protocol.md §2's read row), which is exempt by
-                // design (the server legitimately receives every
+                // CURRENT lease holder with explicit-instance reads
+                // admitted (protocol.md §2's read row), which is exempt
+                // by design (the server legitimately receives every
                 // instance it serves).
                 if (
-                  session.leaseHolderReads !== true &&
+                  !leaseHolderExempt &&
                   !scopeKeyApplicableTo(entry.scopeKey, identity)
                 ) {
+                  // Never cache a filtered entry as delivered: a later
+                  // re-admission must still see the client's cache as
+                  // NOT holding it, or the withheld update is elided
+                  // forever.
+                  filteredKeys.push(key);
                   continue;
                 }
                 const dirtyKey = toDirtyKey(entry.id, entry.scopeKey);
@@ -3490,6 +3612,9 @@ export class Server {
                   upserts.push(entry);
                 }
               }
+            }
+            for (const key of filteredKeys) {
+              updates.delete(key);
             }
             // The session cache commits only after the frame is fully
             // built: a throw during marker/adoption attachment must leave
@@ -3533,6 +3658,13 @@ export class Server {
               ).map(toWireUpsert),
               removes: [],
             });
+            // The wire frame strips instance keys; retain the frame's
+            // true instance-keyed entries so a delivery failure rolls
+            // back the EXACT instances (rollbackUndeliveredSync).
+            this.#deliveredFrameEntries.set(message, {
+              upserts: [...upserts],
+              removes: [],
+            });
             commitEntities();
             session.lastSyncedSeq = toSeq;
             return message;
@@ -3547,11 +3679,30 @@ export class Server {
               sessionId,
             },
           );
+          // protocol.md §3's applicable-set filter on the FULL
+          // evaluation path: explicit foreign instances enter `entities`
+          // only through admitted lease-holder reads, and the exemption
+          // is keyed on CURRENT holdership — a former holder's foreign
+          // entries are dropped here, and their previously delivered
+          // predecessors diff out as removes below.
+          if (!(await this.#currentLeaseHolderExemption(space, session))) {
+            const identity = this.#sessionScopeIdentity(session);
+            for (const [key, entry] of [...entities]) {
+              if (!scopeKeyApplicableTo(entry.scopeKey, identity)) {
+                entities.delete(key);
+              }
+            }
+          }
+          const delivered = {
+            upserts: [] as SessionCacheEntry[],
+            removes: [] as SessionCacheEntry[],
+          };
           const sync = buildDiffSync(
             session.entities,
             entities,
             session.lastSyncedSeq,
             serverSeq,
+            delivered,
           );
           // As above: commit the re-evaluated watch state only once the
           // frame is built, so a throw leaves the diff recomputable. The
@@ -3569,6 +3720,9 @@ export class Server {
             return await emptyCatchUp(sync.fromSeq, sync.toSeq);
           }
           const message = finishCatchUp(sync);
+          // As on the incremental branch: retain the frame's true
+          // instance-keyed entries for exact delivery rollback.
+          this.#deliveredFrameEntries.set(message, delivered);
           commitWatchState();
           return message;
         } catch (error) {
@@ -3685,6 +3839,19 @@ export class Server {
    * value-granular client pull — a subscription names what to serve).
    * Distinct (id, scope) pairs across every live session's watch specs;
    * the SpaceServer loads graph structure sufficient to resolve them.
+   *
+   * `entityScopeKey` is deliberately NOT part of a demand record, and
+   * that is an INVARIANT, not an omission (PR #5439 thread
+   * r3731191476): explicit-instance roots are admissible only to
+   * sessions whose principal is the live lease holder's service
+   * identity (#denyExplicitInstanceReads), and every session of that
+   * principal is EXCLUDED here (the serving loop's own reads are not
+   * client demand). So no root that survives the exclusion can carry an
+   * explicit key — client watches cannot express one. If a later phase
+   * admits explicit-instance CLIENT demand (Phase 2's per-instance
+   * demand mapping), the record must grow the key WITH the SpaceServer
+   * side that consumes it; silently dropping it here would serve the
+   * service's own instance in place of the named one.
    */
   watchedRootsForSpace(
     space: string,
@@ -3846,20 +4013,52 @@ export class Server {
   async #denyExplicitInstanceReads(
     space: string,
     session: SessionState,
-    roots: Iterable<GraphQuery["roots"][number]>,
+    entries: Iterable<{
+      branch: string;
+      root: GraphQuery["roots"][number];
+    }>,
   ): Promise<V2Error | undefined> {
     // Synchronous fast path first: a read naming NO instance adds no
     // microtask boundary — the request's authorization and evaluation
     // keep sharing one engine turn (the ACL revocation-race invariant).
     let named = false;
-    for (const root of roots) {
-      if (root.entityScopeKey === undefined) continue;
-      named = true;
-      if (!isScopeKey(root.entityScopeKey)) {
+    // The wire collapse guard: frames and query results carry scope
+    // NAMES, so two instances of one (branch, id, scope) are
+    // indistinguishable on the wire and the client cache keeps only one
+    // (WatchView keys by branch/id/scope). Refuse the shape loudly at
+    // admission instead of silently losing an instance. Keyless roots
+    // resolve to the session's own instance, so an explicit key equal to
+    // it is fine — only two DIFFERENT effective instances conflict.
+    const identity = this.#sessionScopeIdentity(session);
+    const instanceByAddress = new Map<string, string>();
+    for (const { branch, root } of entries) {
+      if (root.entityScopeKey !== undefined) {
+        named = true;
+        if (!isScopeKey(root.entityScopeKey)) {
+          return toError(
+            "ProtocolError",
+            `malformed entity_scope_key "${root.entityScopeKey}" on read ` +
+              `root ${root.id}`,
+          );
+        }
+      }
+      const scopeName = root.scope ?? "space";
+      const instanceKey = root.entityScopeKey ??
+        (canResolveScopeKey(root.scope, identity)
+          ? resolveScopeKey(root.scope, identity)
+          : undefined);
+      if (instanceKey === undefined) continue;
+      const addressKey = `${branch}\0${scopeName}\0${root.id}`;
+      const existing = instanceByAddress.get(addressKey);
+      if (existing === undefined) {
+        instanceByAddress.set(addressKey, instanceKey);
+      } else if (existing !== instanceKey) {
         return toError(
           "ProtocolError",
-          `malformed entity_scope_key "${root.entityScopeKey}" on read ` +
-            `root ${root.id}`,
+          `read set resolves two instances of (${root.id}, ${scopeName}) ` +
+            `— "${existing}" and "${instanceKey}" — which the wire ` +
+            "cannot distinguish (frames carry scope names, protocol.md " +
+            "§1); name one instance per (branch, id, scope)",
         );
       }
     }
@@ -3887,6 +4086,35 @@ export class Server {
     }
     session.leaseHolderReads = true;
     return undefined;
+  }
+
+  /**
+   * Whether the session's lease-holder read exemption (protocol.md §2's
+   * read row) is valid NOW. The exemption is an authorization tied to
+   * holding a LIVE execution lease, so every use re-keys on CURRENT
+   * holdership: a lapsed or moved lease invalidates the persisted bit —
+   * cleared here, so lease loss clears the exemption — and only a fresh
+   * explicit-instance admission (#denyExplicitInstanceReads) re-arms it.
+   * Consulted by the push path's applicable-set filter (both the
+   * incremental and the full-evaluation branch) and by session resume,
+   * so a former holder receives no foreign scoped instances anywhere.
+   */
+  async #currentLeaseHolderExemption(
+    space: string,
+    session: SessionState,
+  ): Promise<boolean> {
+    if (session.leaseHolderReads !== true) return false;
+    const engine = await this.openEngine(space);
+    const holder = liveExecutionLeaseHolder(engine, space);
+    if (
+      holder === undefined ||
+      session.principal === undefined ||
+      serviceIdentityOfExecutionLeaseHolder(holder) !== session.principal
+    ) {
+      session.leaseHolderReads = false;
+      return false;
+    }
+    return true;
   }
 
   /** Whether any read root names an explicit instance — the sync gate
@@ -3974,13 +4202,13 @@ export class Server {
   private scheduleRefresh(): void {
     if (
       this.options.subscriptionRefreshDelayMs === "manual" ||
-      this.#dirtySpaces.size === 0 || this.#refreshTimer !== null
+      this.#dirtySpaces.size === 0 || this.#refreshTurn !== null
     ) {
       return;
     }
-    this.#refreshTimer = setTimeout(
+    this.#refreshTurn = armTurn(
       () => {
-        this.#refreshTimer = null;
+        this.#refreshTurn = null;
         void this.flushScheduledSessions();
       },
       this.options.subscriptionRefreshDelayMs ?? SUBSCRIPTION_REFRESH_DELAY_MS,
@@ -4033,9 +4261,9 @@ export class Server {
   }
 
   private cancelScheduledRefresh(): void {
-    if (this.#refreshTimer !== null) {
-      clearTimeout(this.#refreshTimer);
-      this.#refreshTimer = null;
+    if (this.#refreshTurn !== null) {
+      this.#refreshTurn.cancel();
+      this.#refreshTurn = null;
     }
     if (this.#connections.size === 0) {
       this.#dirtySpaces.clear();

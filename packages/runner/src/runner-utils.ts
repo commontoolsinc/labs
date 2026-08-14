@@ -8,7 +8,7 @@ import {
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   isModule,
   type JSONSchema,
@@ -301,9 +301,9 @@ function extractDefaultValuesInternal(
       (canonical.type === "object" ||
         Array.isArray(canonical.type) && canonical.type.includes("object")) &&
       canonical.properties &&
-      isRecord(canonical.properties)
+      isObjectOrArray(canonical.properties)
     ) {
-      // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, so a
+      // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, so a
       // fabric-valued `default` under an object-with-properties schema skips
       // this scalar return and proceeds below: `shallowMutableClone` returns
       // a `FabricPrimitive` by identity (it is inherently frozen), so the
@@ -313,12 +313,12 @@ function extractDefaultValuesInternal(
       // default. Wants a `FabricSpecialObject` test taking this return.
       if (
         Object.hasOwn(canonical, "default") &&
-        !isRecord(canonical.default)
+        !isObjectOrArray(canonical.default)
       ) {
         return canonical.default;
       }
       const hasObjectDefault = Object.hasOwn(canonical, "default") &&
-        isRecord(canonical.default);
+        isObjectOrArray(canonical.default);
       // Mutable top-level copy of the schema default, so injecting top-level
       // property defaults below doesn't mutate the schema's own default object.
       // Only top-level keys are written here, and the result is normalized
@@ -327,7 +327,7 @@ function extractDefaultValuesInternal(
       // children as inexpensive defense-in-depth against accidental deeper
       // mutation of the shared default.
       const obj = shallowMutableClone(
-        isRecord(canonical.default) ? canonical.default : {},
+        isObjectOrArray(canonical.default) ? canonical.default : {},
       ) as Record<string, FabricValue>;
       for (
         const [propKey, propSchema] of Object.entries(canonical.properties)
@@ -379,7 +379,7 @@ export function mergeObjects<T>(
   const result: Record<string, unknown> = {};
 
   for (const obj of objects) {
-    if (!isRecord(obj) || Array.isArray(obj) || isCellLink(obj)) {
+    if (!isObjectNotArray(obj) || isCellLink(obj)) {
       return obj as T;
     }
 
@@ -388,7 +388,7 @@ export function mergeObjects<T>(
       seen.add(key);
       const merged = mergeObjects<T[keyof T]>(
         ...objects.map((entry) =>
-          isRecord(entry) && Object.hasOwn(entry, key)
+          isObjectOrArray(entry) && Object.hasOwn(entry, key)
             ? (entry as Record<string, unknown>)[key] as T[keyof T]
             : undefined
         ),

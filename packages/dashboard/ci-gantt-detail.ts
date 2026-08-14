@@ -1,23 +1,26 @@
-// Job and step timings for one CI workflow attempt, held on disk rather than in
-// memory. A single labs CI attempt has around fifty jobs and seven hundred
-// steps, which is roughly forty times the size of the per-job durations the CI
-// duration history needs. One file holds one attempt, so a chart reads only the
-// attempts it draws and a duration refresh reads none of them.
-//
-// Each file is gzipped. An attempt's steps repeat the same few names and the
-// same timestamp prefixes over and over, which compresses about eighteen times:
-// a 114 KB attempt is stored in around 6 KB. At that size every attempt the run
-// index retains can keep its detail, so nothing is discarded that GitHub would
-// have to serve again.
-//
-// Which attempts to retain is the run index's decision, since it is the index
-// that knows when each attempt ran; prune is told the set to keep, and keeps
-// exactly what the index still holds.
-//
-// An attempt that cannot be read back — a format this version does not
-// recognize, or a damaged file — is reported as absent rather than as empty, so
-// the collector treats it exactly like an attempt that was never stored and
-// collects it again.
+/**
+ * Holds the job and step timings for one CI workflow attempt on disk rather
+ * than in memory. A single labs CI attempt has around fifty jobs and seven
+ * hundred steps, which is roughly forty times the size of the per-job
+ * durations the CI duration history needs. One file holds one attempt, so a
+ * chart reads only the attempts it draws and a duration refresh reads none of
+ * them.
+ *
+ * Each file is gzipped. An attempt's steps repeat the same few names and the
+ * same timestamp prefixes over and over, which compresses about eighteen
+ * times: a 114 KB attempt is stored in around 6 KB. At that size every attempt
+ * the run index retains can keep its detail, so nothing is discarded that
+ * GitHub would have to serve again.
+ *
+ * Which attempts to retain is the run index's decision, since it is the index
+ * that knows when each attempt ran; prune is told the set to keep, and keeps
+ * exactly what the index still holds.
+ *
+ * An attempt that cannot be read back — a format this version does not
+ * recognize, or a damaged file — is reported as absent rather than as empty,
+ * so the collector treats it exactly like an attempt that was never stored and
+ * collects it again.
+ */
 
 import { dirname, join } from "@std/path";
 import {

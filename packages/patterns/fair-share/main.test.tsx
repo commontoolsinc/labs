@@ -27,6 +27,7 @@ import {
   equals,
   handler,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 import { joinWithProfile } from "./main.tsx";
@@ -156,7 +157,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // Join as a new (avatar-less) person
       { action: action_join_ann_no_avatar },
       { assertion: assert_ann_added },

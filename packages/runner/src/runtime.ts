@@ -18,13 +18,14 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  acquireServerExecutionEnabler,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
   resetCommitPreconditionsConfig,
-  resetServerExecutionConfig,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
+  serverExecutionEnablerCount,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
@@ -115,6 +116,7 @@ import { ModuleRegistry } from "./module.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
@@ -238,6 +240,15 @@ export interface ExperimentalOptions {
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
+  /**
+   * Materialize a lift's argument lazily: the body reads the paths it touches
+   * and nothing else, instead of the whole of what its schema selects. A
+   * reader that touches data the schema no longer describes refuses, and the
+   * run is disposed of as an argument that did not resolve. On by default; pass
+   * `false` as a temporary rollback override. See
+   * `docs/plans/lazy-cell-materialization.md`.
+   */
+  lazyMaterialization?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -387,6 +398,20 @@ export type ServerRunInfo = {
    * same-transaction atomicity events.md §4 requires; a requeued
    * contribution takes its mark with it). */
   streamEntry?: { sidecarId: string; index: number; seq: number };
+};
+
+/**
+ * One demanded instance of a scoped run (server-execution v2 stage
+ * P2-F, the per-(action × instance) run SUPPLY): the demand registry's
+ * identity plus the resolved instance key the run serves. The scheduler
+ * consults {@link Runtime.serverRunInstancesFor} at its reactive-action
+ * choke point and runs the action once per instance — instances live in
+ * keys/basis/stamps, never as extra dependency-graph nodes (the
+ * spec-model's C11b).
+ */
+export type ServerRunInstance = {
+  scopeKeyIdentity: ScopeKeyIdentity;
+  actionScopeKey: ScopeKey;
 };
 
 export interface RuntimeOptions {
@@ -777,6 +802,12 @@ export class Runtime {
   #serverRunStamper:
     | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
     | undefined;
+  // The per-(action × instance) run-supply resolver (installed WITH the
+  // destination, stage P2-F): piece root doc id → the demanded
+  // instances the SpaceServer's registry holds for it.
+  #serverRunInstanceResolver:
+    | ((pieceRootId: string) => readonly ServerRunInstance[])
+    | undefined;
   // The client speculation overlay (server-execution v2 Phase 2,
   // speculation.md): the DEFAULT seal destination of every runtime under
   // the flag that has no wave destination installed. Created lazily on
@@ -799,12 +830,13 @@ export class Runtime {
   // process-global ambient lifecycle — see the constructor's propagation
   // note).
   #explicitServerExecution: boolean | undefined;
-  // Live runtimes that explicitly ENABLED serverExecution, process-wide.
-  // Dispose resets the ambient flag only when the LAST of them goes: a
-  // serving process runs one runtime per active space, and a parked
-  // space's dispose must not un-claim `derived` for every other space's
-  // in-flight wave commit (the admission plane reads the ambient value).
-  static #liveServerExecutionEnablers = 0;
+  // The enabler release for an explicitly-ENABLED runtime. The count
+  // itself lives with the flag (memory/v2.ts, shared with the
+  // ExecutorHost): dispose releases and the flag resets only when the
+  // LAST live enabler goes — a parked space's dispose must not un-claim
+  // `derived` for every other owner's in-flight wave commit (the
+  // admission plane reads the ambient value).
+  #serverExecutionRelease: (() => void) | undefined;
   /** Serving posture (RuntimeOptions.servingPosture): true only for the
    * SpaceServer's own runtime. Gates the Phase-2 speculation-overlay
    * default (a serving runtime never speculates). */
@@ -1101,6 +1133,7 @@ export class Runtime {
       commitPreconditions: undefined,
       plainResultReceipts: undefined,
       computedCellIds: undefined,
+      lazyMaterialization: undefined,
       eagerSourceAnnotation: undefined,
       serverExecution: undefined,
       ...options.experimental,
@@ -1131,6 +1164,7 @@ export class Runtime {
     // `true` override.
     this.experimental.computedCellIds ??= true;
     this.experimental.plainResultReceipts ??= true;
+    this.experimental.lazyMaterialization ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -1152,184 +1186,205 @@ export class Runtime {
     if (this.experimental.serverExecution !== undefined) {
       this.#explicitServerExecution = this.experimental.serverExecution;
       if (this.experimental.serverExecution === true) {
-        Runtime.#liveServerExecutionEnablers += 1;
+        this.#serverExecutionRelease = acquireServerExecutionEnabler();
+      } else if (serverExecutionEnablerCount() === 0) {
+        // Explicit false writes the ambient flag ONLY while no enabler
+        // is live: a co-hosted non-serving runtime must not un-claim
+        // `derived` for a live serving runtime's in-flight wave commits.
+        // (With no enabler the ambient default is already false; the
+        // write keeps the direct-set test seam overridable.)
+        setServerExecutionConfig(false);
       }
-      setServerExecutionConfig(this.experimental.serverExecution);
     }
-    this.experimental.serverExecution = getServerExecutionConfig();
+    // The runtime's OWN posture: its explicit value verbatim; only a
+    // flag-less construction reads the ambient state through.
+    this.experimental.serverExecution = this.#explicitServerExecution ??
+      getServerExecutionConfig();
     this.servingPosture = options.servingPosture === true;
-    // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
-    // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
-    // directly around runtime construction), and an unconditional
-    // `undefined -> default` write would stomp it.
-    if (this.experimental.eagerSourceAnnotation !== undefined) {
-      setEagerSourceAnnotation(this.experimental.eagerSourceAnnotation);
-    }
-    this.experimental.eagerSourceAnnotation = isEagerSourceAnnotationEnabled();
-
-    this.commitBackpressure = resolveCommitBackpressure(
-      options.commitBackpressure,
-    );
-
-    this.id = options.storageManager.id;
-    this.apiUrl = new URL(options.apiUrl);
-    // Validate eagerly, mirroring the storage layer's resolver: a
-    // malformed host should fail at configuration time naming the
-    // space, not mid-builtin as a bare Invalid URL.
-    const normalizedSpaceHostMap: Record<string, string> = {};
-    for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
-      let route: URL;
-      try {
-        route = normalizeSpaceHost(host);
-      } catch (cause) {
-        if (!(cause instanceof SpaceHostValidationError)) throw cause;
-        throw new Error(
-          `Invalid spaceHostMap entry for ${space}`,
-          { cause },
-        );
+    // Everything below can throw (URL parsing, host validation, engine
+    // construction). The enabler claimed above is process-global state,
+    // so a THROWING construction must roll it back — a leaked enabler
+    // would pin the ambient flag for the process lifetime.
+    try {
+      // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
+      // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
+      // directly around runtime construction), and an unconditional
+      // `undefined -> default` write would stomp it.
+      if (this.experimental.eagerSourceAnnotation !== undefined) {
+        setEagerSourceAnnotation(this.experimental.eagerSourceAnnotation);
       }
-      normalizedSpaceHostMap[space] = route.toString();
-    }
-    // Snapshot + freeze: the map is fixed for the runtime's lifetime
-    // (the per-space provider cache and routing decisions assume
-    // space → host never changes), so a caller mutating their object
-    // after construction must not change routing.
-    this.spaceHostMap = options.spaceHostMap
-      ? Object.freeze(normalizedSpaceHostMap)
-      : undefined;
-    // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
-    // preserving the existing behavior where a test overrides the global AFTER
-    // constructing the runtime (e.g. fetch-mutex-core.test.ts). An injected
-    // mock is used as-is.
-    this.fetch = options.fetch ??
-      ((input, init) => globalThis.fetch(input, init));
-    this.staticCache = isDeno()
-      ? StaticCache.fromFileSystem()
-      : new StaticCache(new URL("/static", this.apiUrl));
+      this.experimental.eagerSourceAnnotation =
+        isEagerSourceAnnotationEnabled();
 
-    this.telemetry = options.telemetry ?? new RuntimeTelemetry();
+      this.commitBackpressure = resolveCommitBackpressure(
+        options.commitBackpressure,
+      );
 
-    // Create harness first (no dependencies on other services)
-    this.harness = new Engine(this, {
-      hideInternalStackFrames: options.hideInternalStackFrames,
-    });
-
-    this.storageManager = options.storageManager;
-    // Hand the storage layer the telemetry bus so it can emit the
-    // storage.push/pull markers (duck-typed: only the v2 StorageManager
-    // implements it; emulated/test managers simply don't have the method).
-    (this.storageManager as {
-      setTelemetry?: (telemetry: RuntimeTelemetry) => void;
-    }).setTelemetry?.(this.telemetry);
-    this.moduleByteCache = options.moduleByteCache;
-    this.patternCoverage = options.patternCoverage;
-    // Validated + digested + frozen before the trust-snapshot provider
-    // default below, whose `revision` covers the config digest (a trust
-    // config change must invalidate prepared digests like any other
-    // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
-    this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
-    const actingPrincipal = options.storageManager.as.did() as DID;
-    const trustRevision = this.cfcTrustConfig === undefined
-      ? this.id
-      : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
-    this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
-      id: `principal:${actingPrincipal}`,
-      actingPrincipal,
-      revision: trustRevision,
-    }));
-    this.userIdentityDID = options.storageManager.as.did() as DID;
-    this.moduleRegistry = new ModuleRegistry(this);
-    this.patternManager = new PatternManager(this);
-    this.patternUpdater = new PatternUpdater(this);
-    this.runner = new Runner(this);
-    this.onPatternInstantiated = options.onPatternInstantiated;
-    this.cfcEnforcementMode = options.cfcEnforcementMode ??
-      "enforce-explicit";
-    this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
-    this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
-    this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
-    this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
-    this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
-      "off";
-    this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
-    this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
-    // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
-    // be able to mutate it (per-sink array or the map) after construction to
-    // change what egresses are allowed (review on #3993).
-    this.cfcSinkMaxConfidentiality = Object.freeze(
-      Object.fromEntries(
-        Object.entries(
-          options.cfcSinkMaxConfidentiality ?? DEFAULT_SINK_MAX_CONFIDENTIALITY,
-        ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
-      ),
-    );
-    // Validates + digests + deep-freezes; throws on malformed records so a
-    // config error surfaces at boot, not as a silently inert rule (same
-    // eager-validation posture as the spaceHostMap URLs above).
-    this.cfcPolicySnapshot = buildCfcPolicySnapshot(options.cfcPolicyRecords);
-
-    // Create core services with dependencies injected
-    this.scheduler = new Scheduler(
-      this,
-      options.consoleHandler,
-      options.errorHandlers,
-    );
-
-    // Register built-in modules with runtime injection
-    registerBuiltins(this);
-
-    // Set this runtime as the current runtime for global cell compatibility
-    // Removed setCurrentRuntime call - no longer using singleton pattern
-
-    // Set the navigate callback
-    this.navigateCallback = options.navigateCallback;
-    this.pieceCreatedCallback = options.pieceCreatedCallback;
-
-    // The client-effect channel (server-execution v2 Phase 4,
-    // protocol.md §5): every flag-ON NON-serving runtime subscribes to
-    // its session's effects-doc instance per space — the enact/ack duty
-    // the Phase-4 posture adds. The serving runtime never enacts (the
-    // SpaceServer computes intents; clients enact), and the OFF arm
-    // pays nothing here.
-    if (
-      this.experimental.serverExecution === true && !this.servingPosture
-    ) {
-      const channel = new EffectsChannel(this);
-      this.#effectsChannel = channel;
-      const manager = this.storageManager;
-      const observer = (space: MemorySpace) => channel.ensureSubscribed(space);
-      this.#installedSpaceOpenObserver = observer;
-      manager.spaceOpenObserver = observer;
-      for (const space of manager.openedSpaces?.() ?? []) {
-        channel.ensureSubscribed(space);
+      this.id = options.storageManager.id;
+      this.apiUrl = new URL(options.apiUrl);
+      // Validate eagerly, mirroring the storage layer's resolver: a
+      // malformed host should fail at configuration time naming the
+      // space, not mid-builtin as a bare Invalid URL.
+      const normalizedSpaceHostMap: Record<string, string> = {};
+      for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
+        let route: URL;
+        try {
+          route = normalizeSpaceHost(host);
+        } catch (cause) {
+          if (!(cause instanceof SpaceHostValidationError)) throw cause;
+          throw new Error(
+            `Invalid spaceHostMap entry for ${space}`,
+            { cause },
+          );
+        }
+        normalizedSpaceHostMap[space] = route.toString();
       }
-    }
+      // Snapshot + freeze: the map is fixed for the runtime's lifetime
+      // (the per-space provider cache and routing decisions assume
+      // space → host never changes), so a caller mutating their object
+      // after construction must not change routing.
+      this.spaceHostMap = options.spaceHostMap
+        ? Object.freeze(normalizedSpaceHostMap)
+        : undefined;
+      // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
+      // preserving the existing behavior where a test overrides the global AFTER
+      // constructing the runtime (e.g. fetch-mutex-core.test.ts). An injected
+      // mock is used as-is.
+      this.fetch = options.fetch ??
+        ((input, init) => globalThis.fetch(input, init));
+      this.staticCache = isDeno()
+        ? StaticCache.fromFileSystem()
+        : new StaticCache(new URL("/static", this.apiUrl));
 
-    // Handle pattern environment configuration. Only set the (process-global)
-    // pattern environment when a host explicitly provides one — setting it
-    // unconditionally from every Runtime would let the last-constructed runtime
-    // clobber the apiUrl other runtimes' patterns see. Hosts that run patterns
-    // server-side (the toolshed) pass `patternEnvironment` so handler `fetch`es
-    // reach the right toolshed rather than the hardcoded `localhost:<port>`
-    // fallback in builder/env.ts. This is still a singleton. TODO(seefeld).
-    if (options.patternEnvironment) {
-      setPatternEnvironment(options.patternEnvironment);
-    }
+      this.telemetry = options.telemetry ?? new RuntimeTelemetry();
 
-    if (options.debug) {
-      console.log("Runtime initialized with services:", {
-        scheduler: !!this.scheduler,
-        storageManager: !!this.storageManager,
-        patternManager: !!this.patternManager,
-        moduleRegistry: !!this.moduleRegistry,
-        harness: !!this.harness,
-        runner: !!this.runner,
-        telemetry: !!this.telemetry,
+      // Create harness first (no dependencies on other services)
+      this.harness = new Engine(this, {
+        hideInternalStackFrames: options.hideInternalStackFrames,
       });
-    }
 
-    // Push a default frame with this runtime so builder functions can access it
-    this.defaultFrame = pushFrame({ runtime: this });
+      this.storageManager = options.storageManager;
+      // Hand the storage layer the telemetry bus so it can emit the
+      // storage.push/pull markers (duck-typed: only the v2 StorageManager
+      // implements it; emulated/test managers simply don't have the method).
+      (this.storageManager as {
+        setTelemetry?: (telemetry: RuntimeTelemetry) => void;
+      }).setTelemetry?.(this.telemetry);
+      this.moduleByteCache = options.moduleByteCache;
+      this.patternCoverage = options.patternCoverage;
+      // Validated + digested + frozen before the trust-snapshot provider
+      // default below, whose `revision` covers the config digest (a trust
+      // config change must invalidate prepared digests like any other
+      // trust-snapshot change — see RuntimeOptions.cfcTrustConfig).
+      this.cfcTrustConfig = buildCfcTrustConfig(options.cfcTrustConfig);
+      const actingPrincipal = options.storageManager.as.did() as DID;
+      const trustRevision = this.cfcTrustConfig === undefined
+        ? this.id
+        : `${this.id}/trust:${this.cfcTrustConfig.digest}`;
+      this.trustSnapshotProvider = options.trustSnapshotProvider ?? (() => ({
+        id: `principal:${actingPrincipal}`,
+        actingPrincipal,
+        revision: trustRevision,
+      }));
+      this.userIdentityDID = options.storageManager.as.did() as DID;
+      this.moduleRegistry = new ModuleRegistry(this);
+      this.patternManager = new PatternManager(this);
+      this.patternUpdater = new PatternUpdater(this);
+      this.runner = new Runner(this);
+      this.onPatternInstantiated = options.onPatternInstantiated;
+      this.cfcEnforcementMode = options.cfcEnforcementMode ??
+        "enforce-explicit";
+      this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
+      this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
+      this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
+      this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
+      this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
+        "off";
+      this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
+      this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
+      // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
+      // be able to mutate it (per-sink array or the map) after construction to
+      // change what egresses are allowed (review on #3993).
+      this.cfcSinkMaxConfidentiality = Object.freeze(
+        Object.fromEntries(
+          Object.entries(
+            options.cfcSinkMaxConfidentiality ??
+              DEFAULT_SINK_MAX_CONFIDENTIALITY,
+          ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
+        ),
+      );
+      // Validates + digests + deep-freezes; throws on malformed records so a
+      // config error surfaces at boot, not as a silently inert rule (same
+      // eager-validation posture as the spaceHostMap URLs above).
+      this.cfcPolicySnapshot = buildCfcPolicySnapshot(options.cfcPolicyRecords);
+
+      // Create core services with dependencies injected
+      this.scheduler = new Scheduler(
+        this,
+        options.consoleHandler,
+        options.errorHandlers,
+      );
+
+      // Register built-in modules with runtime injection
+      registerBuiltins(this);
+
+      // Set this runtime as the current runtime for global cell compatibility
+      // Removed setCurrentRuntime call - no longer using singleton pattern
+
+      // Set the navigate callback
+      this.navigateCallback = options.navigateCallback;
+      this.pieceCreatedCallback = options.pieceCreatedCallback;
+
+      // The client-effect channel (server-execution v2 Phase 4,
+      // protocol.md §5): every flag-ON NON-serving runtime subscribes to
+      // its session's effects-doc instance per space — the enact/ack duty
+      // the Phase-4 posture adds. The serving runtime never enacts (the
+      // SpaceServer computes intents; clients enact), and the OFF arm
+      // pays nothing here.
+      if (
+        this.experimental.serverExecution === true && !this.servingPosture
+      ) {
+        const channel = new EffectsChannel(this);
+        this.#effectsChannel = channel;
+        const manager = this.storageManager;
+        const observer = (space: MemorySpace) =>
+          channel.ensureSubscribed(space);
+        this.#installedSpaceOpenObserver = observer;
+        manager.spaceOpenObserver = observer;
+        for (const space of manager.openedSpaces?.() ?? []) {
+          channel.ensureSubscribed(space);
+        }
+      }
+
+      // Handle pattern environment configuration. Only set the (process-global)
+      // pattern environment when a host explicitly provides one — setting it
+      // unconditionally from every Runtime would let the last-constructed runtime
+      // clobber the apiUrl other runtimes' patterns see. Hosts that run patterns
+      // server-side (the toolshed) pass `patternEnvironment` so handler `fetch`es
+      // reach the right toolshed rather than the hardcoded `localhost:<port>`
+      // fallback in builder/env.ts. This is still a singleton. TODO(seefeld).
+      if (options.patternEnvironment) {
+        setPatternEnvironment(options.patternEnvironment);
+      }
+
+      if (options.debug) {
+        console.log("Runtime initialized with services:", {
+          scheduler: !!this.scheduler,
+          storageManager: !!this.storageManager,
+          patternManager: !!this.patternManager,
+          moduleRegistry: !!this.moduleRegistry,
+          harness: !!this.harness,
+          runner: !!this.runner,
+          telemetry: !!this.telemetry,
+        });
+      }
+
+      // Push a default frame with this runtime so builder functions can access it
+      this.defaultFrame = pushFrame({ runtime: this });
+    } catch (error) {
+      this.#releaseServerExecutionEnabler();
+      throw error;
+    }
   }
 
   /**
@@ -1401,6 +1456,22 @@ export class Runtime {
    * the builtin either way).
    */
   notifyServedIntentSealFailure: (() => void) | undefined;
+
+  /**
+   * Server-execution v2 stage P2-F (the F1 fold-in, RULED 2026-08-13):
+   * a PIECE-START setup/instantiation commit that fails — refused at
+   * the wave seal, withdrawn, or rejected — surfaces here. The start
+   * path is deliberately fire-and-forget (start() resolves before its
+   * commit settles), so without this seam the refusal Result was
+   * SWALLOWED and the piece silently ran against stale setup. The
+   * SpaceServer installs the observer at activation and counts the
+   * failure into §7's `structureLoadFailures` (a demanded-structure
+   * load that failed, asynchronously); the runner's loud error log
+   * rides the same reporting call in every arm.
+   */
+  pieceStartCommitFailureObserver:
+    | ((failure: { actionId: string; error: unknown }) => void)
+    | undefined;
 
   /**
    * Register an in-flight async builtin operation so `settled()` waits for it
@@ -1584,6 +1655,19 @@ export class Runtime {
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},
   ): Promise<void> {
+    try {
+      await this.#disposeInner(closeStorage);
+    } finally {
+      // Exception-safe: a rejecting teardown step must not leak the
+      // process-global enabler (the reset would then never fire).
+      this.#releaseServerExecutionEnabler();
+    }
+
+    // Clear the current runtime reference
+    // Removed setCurrentRuntime call - no longer using singleton pattern
+  }
+
+  async #disposeInner(closeStorage: boolean): Promise<void> {
     // A kept store keeps RECORDING, so this path drains what could still write
     // into it. In-flight async builtin work is that shape: a fetch / llm call or
     // a sqlite RPC runs from a post-commit outbox flush and writes its result
@@ -1675,29 +1759,26 @@ export class Runtime {
     // Dispose the Engine (clears compiler/runtime state and the console hook)
     this.harness.dispose();
 
-    // Reset experimental config to defaults. serverExecution resets only
-    // when THIS runtime explicitly enabled it AND it is the LAST live
-    // enabler (stage F): disposing a flag-less runtime — or parking one
-    // serving runtime of several — must not clear the ambient flag other
-    // runtimes and the memory server's admission still depend on
-    // (mid-wave `derived` commits would be refused as unclaimable). A
-    // single-runtime test keeps its stage-A cleanup contract: the last
-    // enabler's dispose resets.
+    // Reset experimental config to defaults. serverExecution releases
+    // this runtime's ENABLER (stage F): the flag resets only when the
+    // last live enabler process-wide goes — disposing a flag-less
+    // runtime, or parking one serving runtime of several, must not clear
+    // the ambient flag other owners and the memory server's admission
+    // still depend on (mid-wave `derived` commits would be refused as
+    // unclaimable). A single-runtime test keeps its stage-A cleanup
+    // contract: the last enabler's dispose resets. Released in
+    // #releaseServerExecutionEnabler (also called from the dispose
+    // catch), so a REJECTING async teardown cannot leak the enabler.
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
-    if (this.#explicitServerExecution === true) {
-      this.#explicitServerExecution = undefined; // dispose() may re-enter
-      Runtime.#liveServerExecutionEnablers = Math.max(
-        0,
-        Runtime.#liveServerExecutionEnablers - 1,
-      );
-      if (Runtime.#liveServerExecutionEnablers === 0) {
-        resetServerExecutionConfig();
-      }
-    }
+  }
 
-    // Clear the current runtime reference
-    // Removed setCurrentRuntime call - no longer using singleton pattern
+  /** Release this runtime's server-execution enabler (idempotent — the
+   * handle guards re-entry; dispose() may run twice). */
+  #releaseServerExecutionEnabler(): void {
+    const release = this.#serverExecutionRelease;
+    this.#serverExecutionRelease = undefined;
+    release?.();
   }
 
   async [Symbol.asyncDispose]() {
@@ -1851,6 +1932,17 @@ export class Runtime {
         tx: IExtendedStorageTransaction,
         info: ServerRunInfo,
       ) => void;
+      /** The per-(action × instance) run SUPPLY (server-execution v2
+       * stage P2-F): resolves a piece root doc id to the demanded
+       * instances the SpaceServer's demand registry holds for it. The
+       * scheduler consults this at its reactive-action choke point and
+       * runs the action once per instance, stamping each run with that
+       * instance's identity (scopes.md §5: the DEMAND supplies the run
+       * identity). Absent (or returning nothing) the run keeps the
+       * wave-level fallback — the Phase-1 cardinality-1 posture. */
+      runInstanceResolver?: (
+        pieceRootId: string,
+      ) => readonly ServerRunInstance[];
     } = {},
   ): void {
     if (this.experimental.serverExecution !== true) {
@@ -1868,6 +1960,7 @@ export class Runtime {
     }
     this.#transactionSealDestination = destination;
     this.#serverRunStamper = options.runStamper;
+    this.#serverRunInstanceResolver = options.runInstanceResolver;
   }
 
   /** The installed seal destination (the serving loop), if any —
@@ -1877,10 +1970,34 @@ export class Runtime {
     return this.#transactionSealDestination;
   }
 
+  /** Whether a seal destination is installed — the ON-arm SERVING
+   * posture (a flag-ON client speculating has none). Consumers branch
+   * durability-sensitive side effects on this (the pattern swap defers
+   * teardown to wave settlement only when sealing is in effect). */
+  get sealDestinationInstalled(): boolean {
+    return this.#transactionSealDestination !== undefined;
+  }
+
   /** Remove the installed seal destination (the wave closed or aborted). */
   clearSealDestination(): void {
     this.#transactionSealDestination = undefined;
     this.#serverRunStamper = undefined;
+    this.#serverRunInstanceResolver = undefined;
+  }
+
+  /**
+   * The demanded instances a scheduler action's piece root currently has
+   * (the per-(action × instance) run SUPPLY, stage P2-F). Undefined
+   * everywhere except a serving runtime whose SpaceServer installed a
+   * resolver — the OFF arm and client speculation pay one undefined
+   * check. The scheduler runs the action once per returned instance
+   * (instances live in keys/basis/stamps, never as extra graph nodes —
+   * C11b); an empty return keeps the single wave-identity run.
+   */
+  serverRunInstancesFor(
+    pieceRootId: string,
+  ): readonly ServerRunInstance[] | undefined {
+    return this.#serverRunInstanceResolver?.(pieceRootId);
   }
 
   /**
@@ -2030,7 +2147,19 @@ export class Runtime {
    * locally replicated memory spaces. Transaction allows reading from many
    * multiple spaces but writing only to one space.
    *
-   * If the transaction fails, it will be retried up to maxRetries times.
+   * If the transaction fails with a RETRYABLE commit rejection, it will be
+   * retried up to maxRetries times. Retryability is decided by the shared
+   * rejection vocabulary (`isRetryableCommitRejection`, storage/rejection.ts),
+   * which is an allow-list: a stale basis (server conflict or the local
+   * inconsistency guard), a liveness failure the memory client heals on its own
+   * (a transport failure, an undecodable frame), a discarded attempt
+   * (`tx.abort()` or a CFC pre-storage refusal), or an authorization denial the
+   * server itself marked `retriable`. Every other rejection — an ACL/protocol
+   * refusal, an authorization denial, a precondition failure, a commit-rule
+   * violation, a `SessionError` (nothing on this path remounts the session, so
+   * every attempt reuses the handle the server just refused) — is returned on
+   * the FIRST attempt, because re-running cannot change the outcome and each
+   * doomed attempt costs a round-trip plus a subscriber revert notification.
    *
    * @param fn - Function to execute with the transaction.
    * @param maxRetries - Maximum number of retries.
@@ -2064,7 +2193,7 @@ export class Runtime {
     this.prepareTxForCommit(tx);
     return tx.commit().then(async ({ error }) => {
       if (error) {
-        if (maxRetries > 0) {
+        if (maxRetries > 0 && isRetryableCommitRejection(error)) {
           // A CONFLICT means this replica is behind the authoritative
           // version: re-running immediately re-reads the same stale local
           // state and fails identically, so without waiting the retries all
@@ -2419,7 +2548,9 @@ export class Runtime {
     // artifact's encodable form is walked in turn, so a cell inside one is
     // reached as well.
     const asDataURI = dataUriFromValue(
-      fabricFromNativeValue(flattenBuilderArtifacts(data, cellAsLink)),
+      fabricFromNativeValue(
+        flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
+      ),
     );
     return createCell(
       this,

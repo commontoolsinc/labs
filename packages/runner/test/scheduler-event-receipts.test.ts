@@ -18,12 +18,20 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { markRuntimeInjectedEventKeys } from "../src/cell.ts";
+import {
+  markRuntimeInjectedEventKeys,
+  sanitizeRuntimeInjectedEventKeys,
+} from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
 import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+
+// The session a caller-supplied id is chosen within, for the sends whose
+// subject is something else: the pair is what a stream send accepts, and one
+// session is all a test needs whose ids never repeat across it.
+const callerSession = "ses:scheduler-event-receipts";
 
 type TransactMessage = { requestId: string };
 type TransactResponse = {
@@ -989,9 +997,11 @@ describe("scheduler event receipts", () => {
     tx = runtime.edit();
     await root.pull();
 
-    // Ingress-caller path (verb contract WS-D): the id rides cell.send's
-    // internal options instead of queueEvent directly — the CLI's route.
+    // Ingress-caller path (verb contract WS-D): the id and the session that
+    // chose it ride cell.send's internal options instead of queueEvent
+    // directly — the CLI's route.
     const eventId = "evt:receipt-cell-send:0:caller-id-root";
+    const session = "ses:receipt-cell-send";
     const outcomes: Array<{
       status: string;
       precondition?: string;
@@ -1007,16 +1017,16 @@ describe("scheduler event receipts", () => {
       });
     };
     const streamCell = root.key("stream") as Cell<unknown>;
-    streamCell.send({}, record, { eventId });
+    streamCell.send({}, record, { eventId, session });
     await waitForSchedulerCondition(
       runtime,
       () => handlerInvocations === 1 && outcomes.length === 1,
       "cell-send event did not settle",
     );
-    // Same id again: the body re-runs (exactly-once is per commit) but the
-    // create-only receipt collides, and the loser's callback still carries
-    // the SAME receipt address — the winner's original outcome.
-    streamCell.send({}, record, { eventId });
+    // Same id, same session: the body re-runs (exactly-once is per commit)
+    // but the create-only receipt collides, and the loser's callback still
+    // carries the SAME receipt address — the winner's original outcome.
+    streamCell.send({}, record, { eventId, session });
     await waitForSchedulerCondition(
       runtime,
       () => handlerInvocations === 2 && outcomes.length === 2,
@@ -1024,11 +1034,16 @@ describe("scheduler event receipts", () => {
     );
     await runtime.scheduler.idleWithPendingCommits();
 
-    // The caller's id is scoped to the stream before it becomes the durable
-    // event id, so the receipt address derives from the scoped form.
+    // The caller's id is scoped to its session and to the stream before it
+    // becomes the durable event id, so the receipt address derives from the
+    // scoped form.
     const expectedLink = receiptCellForEvent<Record<string, never>>(
       runtime,
-      scopeCallerEventId(eventId, resolvedStreamLink(streamCell, runtime)),
+      scopeCallerEventId(
+        eventId,
+        session,
+        resolvedStreamLink(streamCell, runtime),
+      ),
     ).getAsNormalizedFullLink();
 
     expect(outcomes[0].status).toBe("done");
@@ -1075,16 +1090,24 @@ describe("scheduler event receipts", () => {
           ?.precondition,
       });
     };
-    // The SAME caller id addressed at two different verbs. Each is a distinct
-    // invocation of a distinct verb; neither may deduplicate onto the other.
+    // The SAME caller id, from the same session, addressed at two different
+    // verbs. Each is a distinct invocation of a distinct verb; neither may
+    // deduplicate onto the other.
     const eventId = "caller-shared-id";
-    (root.key("increment") as Cell<unknown>).send({}, record, { eventId });
+    const session = "ses:cross-verb";
+    (root.key("increment") as Cell<unknown>).send({}, record, {
+      eventId,
+      session,
+    });
     await waitForSchedulerCondition(
       runtime,
       () => incremented === 1 && outcomes.length === 1,
       "increment did not settle",
     );
-    (root.key("decrement") as Cell<unknown>).send({}, record, { eventId });
+    (root.key("decrement") as Cell<unknown>).send({}, record, {
+      eventId,
+      session,
+    });
     await waitForSchedulerCondition(
       runtime,
       () => outcomes.length === 2,
@@ -1096,6 +1119,97 @@ describe("scheduler event receipts", () => {
     expect(outcomes[1].precondition).toBeUndefined();
     expect(outcomes[1].status).toBe("done");
     expect(decremented).toBe(1);
+  });
+
+  it("two sessions sharing one caller-supplied id do not collide", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    let handlerInvocations = 0;
+    const addComment = handler<unknown, Record<string, never>>(() => {
+      handlerInvocations++;
+    }, { proxy: true });
+    const rootPattern = pattern(() => ({ stream: addComment({}) }));
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "receipts cross-session caller id root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const outcomes: Array<{
+      status: string;
+      precondition?: string;
+      receiptLink?: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>;
+    }> = [];
+    const record = (t: IExtendedStorageTransaction) => {
+      const status = t.status();
+      outcomes.push({
+        status: status.status,
+        precondition: (status as { error?: { precondition?: string } }).error
+          ?.precondition,
+        receiptLink: t.handlingReceiptLink,
+      });
+    };
+    // One word, two callers: an invocation id is the caller's own, and
+    // `add-comment-1` is the word two agents both reach for. Each names one
+    // invocation of one verb, and neither may deduplicate onto the other.
+    const eventId = "add-comment-1";
+    const streamCell = root.key("stream") as Cell<unknown>;
+    streamCell.send({}, record, { eventId, session: "ses:agent-one" });
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 1 && outcomes.length === 1,
+      "the first session's event did not settle",
+    );
+    streamCell.send({}, record, { eventId, session: "ses:agent-two" });
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 2 && outcomes.length === 2,
+      "the second session's event did not settle",
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+
+    expect(outcomes[0].status).toBe("done");
+    // The second commits its own handling rather than losing the race for a
+    // receipt it has no call in, so it is told what its own call did.
+    expect(outcomes[1].precondition).toBeUndefined();
+    expect(outcomes[1].status).toBe("done");
+    expect(outcomes[0].receiptLink?.id).toBeDefined();
+    expect(outcomes[1].receiptLink?.id).not.toBe(outcomes[0].receiptLink?.id);
+  });
+
+  it("refuses a caller-supplied id sent without its session", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    let handlerInvocations = 0;
+    const noLaunch = handler<unknown, Record<string, never>>(() => {
+      handlerInvocations++;
+    }, { proxy: true });
+    const rootPattern = pattern(() => ({ stream: noLaunch({}) }));
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "receipts unsessioned caller id root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    // Derived without one, the address would be reachable by anyone who
+    // guessed the id, and the guarantee the id buys — a retry settling on
+    // the original outcome — would be handed to whoever got there first.
+    const streamCell = root.key("stream") as Cell<unknown>;
+    expect(() => streamCell.send({}, undefined, { eventId: "add-comment-1" }))
+      .toThrow(/requires the `session`/);
+    await runtime.idle();
+    // Refused at the send, so no delivery was queued for the handler.
+    expect(handlerInvocations).toBe(0);
   });
 
   it("creates a receipt document for handlers that launch nothing", async () => {
@@ -1664,6 +1778,7 @@ describe("scheduler event receipts", () => {
           (t: IExtendedStorageTransaction) => resolve(t.status().status),
           {
             eventId,
+            session: callerSession,
             runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(["result"]),
           },
         );
@@ -1708,7 +1823,11 @@ describe("scheduler event receipts", () => {
         streamCell.send(
           { value: 7, result: holder },
           (t: IExtendedStorageTransaction) => resolve(t.status().status),
-          { eventId, runtimeInjectedEventKeys: ["result"] },
+          {
+            eventId,
+            session: callerSession,
+            runtimeInjectedEventKeys: ["result"],
+          },
         );
       });
 
@@ -1750,6 +1869,7 @@ describe("scheduler event receipts", () => {
           (t: IExtendedStorageTransaction) => resolve(t.status().status),
           {
             eventId,
+            session: callerSession,
             runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(["result"]),
           },
         );
@@ -1795,7 +1915,7 @@ describe("scheduler event receipts", () => {
         streamCell.send(
           { value: 7, result: smuggled },
           (t: IExtendedStorageTransaction) => resolve(t.status().status),
-          { eventId },
+          { eventId, session: callerSession },
         );
       });
 
@@ -1876,7 +1996,10 @@ describe("scheduler event receipts", () => {
     const streamCell = root.key("stream") as Cell<unknown>;
     streamCell.send({}, (t: IExtendedStorageTransaction) => {
       receiptLinks.push(t.handlingReceiptLink);
-    }, { eventId: "evt:receipt-link-off:0:flag-off-root" });
+    }, {
+      eventId: "evt:receipt-link-off:0:flag-off-root",
+      session: callerSession,
+    });
 
     await waitForSchedulerCondition(
       runtime,
@@ -1986,4 +2109,25 @@ Deno.test("navigateTo handler results navigate once and deduplicate redelivery",
     await runtime.dispose();
     await storageManager.close();
   }
+});
+
+Deno.test("sanitizeRuntimeInjectedEventKeys: malformed persisted carriage degrades to absent instead of throwing in the drain (verdict blocker, 2026-08-12)", () => {
+  // Pre-fix the drain spread malformed carriage straight into the
+  // mint: `[...42]` threw on EVERY scan pass — perpetual serving churn
+  // from one poisoned entry. The sanitize maps malformed to absent;
+  // well-formed carriage passes through for re-minting.
+  expect(sanitizeRuntimeInjectedEventKeys(undefined)).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys(42)).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys("detail")).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys([1, 2])).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys({ keys: [] })).toBe(undefined);
+  expect(sanitizeRuntimeInjectedEventKeys(null)).toBe(undefined);
+  const wellFormed = ["detail", "result"];
+  expect(sanitizeRuntimeInjectedEventKeys(wellFormed)).toEqual(wellFormed);
+  // The sanitized value re-mints without throwing.
+  expect(
+    markRuntimeInjectedEventKeys(
+      sanitizeRuntimeInjectedEventKeys(wellFormed)!,
+    ),
+  ).toEqual(wellFormed);
 });

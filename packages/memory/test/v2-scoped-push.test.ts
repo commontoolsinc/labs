@@ -192,15 +192,17 @@ Deno.test("scoped push is per-instance: a user-scoped commit refreshes the SAME 
     });
     assertExists(write.ok, JSON.stringify(write.error));
 
-    // Drain the scheduled refresh, then poll briefly: delivery rides
-    // the batched refresh pass, which may requeue once internally.
-    const deadline = Date.now() + 5_000;
-    while (
-      !effectUpsertIds(aliceWatcher.messages, aliceFrom).includes(DOC) &&
-      Date.now() < deadline
-    ) {
+    // Drive delivery deterministically: each idle() drains the pending
+    // refresh pass (which may requeue once internally — hence the
+    // bounded loop, macrotask-yielding so a deferred requeue can arm
+    // before the next drain). Iteration-bounded, never wall-clock-
+    // bounded, so machine load cannot flake it.
+    for (let pass = 0; pass < 50; pass++) {
+      if (effectUpsertIds(aliceWatcher.messages, aliceFrom).includes(DOC)) {
+        break;
+      }
       await server.idle();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
     // Half 1 — per-instance MARKING: the written instance's watcher

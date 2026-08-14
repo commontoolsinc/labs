@@ -367,8 +367,12 @@ Success criteria (flag OFF — the ON gates are Phase 2's):
       runs in CI from stage A with explicit skip lists, never silent
       filtering (ticked with stage G, the phase's last stage,
       2026-08-06: every stage's PR carried its OFF-arm witness — the
-      full runner + memory suites — and the ON-arm skip list holds
-      ONE entry, the two-browsers Phase 2 gate).
+      full runner + memory suites — and the ON-arm skip list AT THAT
+      POINT held ONE entry, the two-browsers Phase 2 gate. Phase 2
+      then retired that entry — the gate runs, and passes, ON — and
+      listed its own: sx2-serving-loop, the demand-cycle starvation
+      reproducer, at phase-2-followup; see
+      tasks/server-execution-on-skips.ts for the current list).
 - [x] Stage C leaves no `completeSchedulerScopeSummary` or
       `completeActionScopeSummary` reference on
       main, no full-JSON observation payload tables, and no
@@ -461,37 +465,40 @@ W):
       network source-check the unit fixture cannot serve — the
       stage-F flagged residual in `executor-serving-loop.test.ts`):
       verify it in the integration environment's `sx2-serving-loop`
-      surface, not a unit fixture. The surface is AUTHORED
-      (`packages/patterns/integration/sx2-serving-loop.test.ts`) and
-      the machinery observation was made in the live bring-up runs
-      (quiescence with the server-side updater posture against
-      toolshed's real routes); stated honestly, that surface is
-      currently ON-skip-listed as the demand-cycle starvation fork's
-      reproducer (verification-coverage.md OW19 — it un-skips with
-      the terminal-state follow-on below), so CI witness rides the
-      serving-loop unit suite until then. A full stale-pointer
+      surface, not a unit fixture. DONE with stage P2-F (2026-08-13):
+      the surface (`packages/patterns/integration/
+      sx2-serving-loop.test.ts`) is UN-SKIPPED — the demand-cycle
+      terminal state removed the starvation fork it reproduced
+      (verification-coverage.md's closed OW19 row) — and its
+      updater-posture gate runs in CI's ON arm. A full stale-pointer
       roll-forward journey stays the named follow-up.
 
 **Follow-on stage (APPROVED — owner nod, 2026-08-07; its own PR
 after this phase's, the way stage C's train was cut):**
 
-- [ ] **P2-F — the scheduler instance dimension + demand-cycle
-      terminal state**: per-(action × instance) read-set/dirtiness
-      state and the N-run settle loop over demanded identities
-      (consuming the SpaceServer's demanded-identity registry through
-      the widened `#stampRun` seam — verification-coverage.md OW17,
-      approved), the replica-level per-instance READ keying, AND the
-      demand-cycle terminal state with commit-triggered re-arm plus
-      the load pass moved under the flush deadline
-      (verification-coverage.md OW19 — lifts the `sx2-serving-loop`
-      ON-skip). Until it lands, scoped runs resolve via the
-      wave-level identity unless per-run identities arrive through
-      the seam (the Phase-1 fallback, cardinality-2-pinned at the
-      seam level in this phase's PR). P2-F is part of PHASE 2's gate
-      closure — it carries the suspended `sx2-serving-loop` surface
-      and, with it, the in-CI amplification-ratio gate — not optional
-      hardening (the Phase-2 independent review's assessment,
-      2026-08-07).
+- [x] **P2-F — the scheduler instance dimension + demand-cycle
+      terminal state**: LANDED 2026-08-13. The per-(action ×
+      instance) run SUPPLY: the N-run settle loop over demanded
+      identities (the scheduler's reactive-action choke point
+      consumes the SpaceServer's demanded-identity registry through
+      the widened seam and runs a demanded action once per instance,
+      each run stamped with its instance's identity and ACTING pair —
+      instances live in keys/basis rows/stamps, never as extra graph
+      nodes, C11b), the LT6 acting inheritance at the event-dispatch
+      choke point, and the F1 piece-start surfacing (§3d's
+      piece-start site, RULED 2026-08-13). The demand-cycle terminal
+      state with commit-triggered re-arm (settle-gated retry) landed
+      with the load pass moved under the flush deadline
+      (verification-coverage.md's closed OW19 row), and the
+      `sx2-serving-loop` ON-skip is LIFTED — the in-CI
+      amplification-ratio gate runs. Deliberately narrowed, flagged
+      not filled: the replica-level per-instance READ keying (one
+      doc, N instances read locally) and per-(action × instance)
+      LOCAL read-set/dirtiness precision remain owed together —
+      they are one leg (a scoped doc's local state still collapses
+      per scope name at cardinality > 1), tracked as the narrowed
+      OW17 residue; engine-side instancing (keys, basis rows,
+      annotations, carriages) is exact at any cardinality.
 
 Success criteria (the old Phase-1 ON gates land here, merged):
 

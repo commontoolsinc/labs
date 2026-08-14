@@ -1,6 +1,136 @@
 import { expect } from "@std/expect";
+import * as path from "@std/path";
 import { describe, it } from "@std/testing/bdd";
-import { HttpProgramResolver } from "../program.ts";
+import {
+  FileSystemProgramResolver,
+  HttpProgramResolver,
+  InMemoryProgram,
+} from "../program.ts";
+
+describe("InMemoryProgram", () => {
+  it("resolves empty main and dependency sources", async () => {
+    const resolver = new InMemoryProgram("/main.ts", {
+      "/main.ts": "",
+      "/dependency.ts": "",
+    });
+
+    expect(await resolver.main()).toEqual({
+      name: "/main.ts",
+      contents: "",
+    });
+    expect(await resolver.resolveSource("/dependency.ts")).toEqual({
+      name: "/dependency.ts",
+      contents: "",
+    });
+    expect(await resolver.resolveSource("/missing.ts")).toBeUndefined();
+  });
+});
+
+describe("FileSystemProgramResolver", () => {
+  it("keeps entry and dependency names grounded under filesystem root", async () => {
+    const directory = await Deno.makeTempDir();
+    const mainPath = `${directory}/main.ts`;
+    const dependencyPath = `${directory}/dependency.ts`;
+    await Deno.writeTextFile(mainPath, "export default 1;");
+    await Deno.writeTextFile(dependencyPath, "export default 2;");
+
+    try {
+      const resolver = new FileSystemProgramResolver(mainPath, directory);
+      expect(await resolver.main()).toEqual({
+        name: "/main.ts",
+        contents: "export default 1;",
+      });
+      expect(await resolver.resolveSource("/dependency.ts")).toEqual({
+        name: "/dependency.ts",
+        contents: "export default 2;",
+      });
+
+      const filesystemRoot = path.parse(directory).root;
+      const mainSpecifier = `/${
+        path.relative(filesystemRoot, mainPath)
+          .split(path.SEPARATOR).join("/")
+      }`;
+      const dependencySpecifier = `/${
+        path.relative(filesystemRoot, dependencyPath)
+          .split(path.SEPARATOR).join("/")
+      }`;
+      const rootResolver = new FileSystemProgramResolver(
+        mainPath,
+        filesystemRoot,
+      );
+      expect((await rootResolver.main()).name).toBe(mainSpecifier);
+      expect(await rootResolver.resolveSource(dependencySpecifier)).toEqual({
+        name: dependencySpecifier,
+        contents: "export default 2;",
+      });
+    } finally {
+      await Deno.remove(directory, { recursive: true });
+    }
+  });
+
+  it("rejects a main path that only shares the root's text prefix", async () => {
+    const root = await Deno.makeTempDir();
+    try {
+      expect(() =>
+        new FileSystemProgramResolver(`${root}-sibling/main.ts`, root)
+      ).toThrow("must be within root directory");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("rejects entry and dependency symlinks that leave the root", async () => {
+    const root = await Deno.makeTempDir();
+    const outside = await Deno.makeTempDir();
+    const mainPath = `${root}/main.ts`;
+    const outsideMainPath = `${outside}/main.ts`;
+    const outsideDependencyPath = `${outside}/dependency.ts`;
+    await Deno.writeTextFile(mainPath, "export default 1;");
+    await Deno.writeTextFile(outsideMainPath, "export default 2;");
+    await Deno.writeTextFile(outsideDependencyPath, "export default 3;");
+    await Deno.symlink(outsideMainPath, `${root}/linked-main.ts`, {
+      type: "file",
+    });
+    await Deno.symlink(outsideDependencyPath, `${root}/dependency.ts`, {
+      type: "file",
+    });
+
+    try {
+      expect(() =>
+        new FileSystemProgramResolver(`${root}/linked-main.ts`, root)
+      ).toThrow("must be within root directory");
+
+      const resolver = new FileSystemProgramResolver(mainPath, root);
+      expect(() => resolver.resolveSource("/dependency.ts")).toThrow(
+        "resolves outside of root directory",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+      await Deno.remove(outside, { recursive: true });
+    }
+  });
+
+  it("retains logical names for symlinks whose targets remain inside the root", async () => {
+    const root = await Deno.makeTempDir();
+    const mainPath = `${root}/main.ts`;
+    const dependencyPath = `${root}/dependency.ts`;
+    await Deno.writeTextFile(mainPath, "export default 1;");
+    await Deno.writeTextFile(dependencyPath, "export default 2;");
+    await Deno.symlink(dependencyPath, `${root}/linked-dependency.ts`, {
+      type: "file",
+    });
+
+    try {
+      const resolver = new FileSystemProgramResolver(mainPath, root);
+      expect(await resolver.resolveSource("/linked-dependency.ts")).toEqual({
+        name: "/linked-dependency.ts",
+        contents: "export default 2;",
+      });
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+});
 
 describe("HttpProgramResolver", () => {
   it("invokes the default fetch with the host global as receiver", async () => {

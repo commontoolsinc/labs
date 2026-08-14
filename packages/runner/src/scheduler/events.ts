@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import { ensurePieceRunning } from "../ensure-piece-running.ts";
+import { waveRunContextOf } from "../executor/wave.ts";
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
@@ -1042,10 +1043,35 @@ export async function dispatchQueuedEvent(state: {
   // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
   // choke point — a serving runtime's installed stamper attaches the wave
   // run context (kind event-handler, the durable event id) before the
-  // handler runs. A no-op everywhere else.
+  // handler runs. A no-op everywhere else. The action identity is the
+  // HANDLER's durable id (`handlerId`, computed above): the queued
+  // `action` is a per-event wrapper closure, and stamping IT hands the
+  // basis index a non-durable identity — the wrapper's inferred name
+  // collapses every handler onto one constant id (rows overwrite across
+  // handlers), while the requeue paths' anonymous wrappers split rows
+  // per event; scheduler_basis requires "durable ... restart-stable"
+  // (serving-loop.md §3b).
   const served = queuedEvent.served;
+  //
+  // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
+  // 2026-08-03: "an event emitted by ANY run carries that run's acting
+  // identity — events run as the session they originated from"): a
+  // server-side event whose ORIGIN transaction ran under a stamped
+  // per-run identity hands that identity to the handler run, so a
+  // cascade rooted in a demanded (user, session) derivation preserves
+  // the acting pair hop by hop instead of blanking to the userless
+  // service fallback. Off the serving posture `waveRunContextOf` finds
+  // no stamp and this is inert. Phase 3's events carry the
+  // server-stamped `firedAt` through their own carriage (`served`,
+  // below), and that explicit carriage WINS where it speaks: a drained
+  // entry's stamp is the event's own durable actor, while the origin
+  // inheritance covers the in-process queueEvent shapes that carry no
+  // served stamp.
+  const originContext = queuedEvent.originTx !== undefined
+    ? waveRunContextOf(queuedEvent.originTx)
+    : undefined;
   state.runtime.stampServerRun(tx, {
-    actionId: state.getActionId(action),
+    actionId: handlerId,
     kind: "event-handler",
     eventId: queuedEvent.id,
     // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
@@ -1090,6 +1116,11 @@ export async function dispatchQueuedEvent(state: {
             : served.firedAt.session,
         } as never,
       }
+      : originContext?.scopeKeyIdentity !== undefined
+      ? { scopeKeyIdentity: originContext.scopeKeyIdentity }
+      : {}),
+    ...(originContext?.actionScopeKey !== undefined
+      ? { actionScopeKey: originContext.actionScopeKey }
       : {}),
     ...(served?.streamEntry !== undefined
       ? { streamEntry: served.streamEntry }

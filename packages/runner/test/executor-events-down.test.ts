@@ -35,6 +35,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   decodeMemoryBoundary,
+  streamEntriesDocId,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -269,9 +270,20 @@ describe("Phase 3 events-down (serving side)", () => {
 
     host = newHost();
     const before = Engine.serverSeq(engine);
-    result.key("bump").send({});
+    // The durable-ack coupling (verdict blocker, 2026-08-12): the send's
+    // settle callback fires from the append + authoritative consequence
+    // outcome — captured here, asserted after the consequence lands.
+    let ackStatus: string | undefined;
+    (result.key("bump") as unknown as {
+      send(value: unknown, onCommit?: (tx: { status(): { status: string } }) => void): unknown;
+    }).send({}, (ackTx) => {
+      ackStatus = ackTx.status().status;
+    });
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
+    // The speculative echo alone is NOT the acknowledgment: nothing has
+    // consequenced yet.
+    expect(ackStatus).toBeUndefined();
 
     // The serving side processes the event: the sidecar entry is
     // marked consequenced and the per-stream watermark advances to its
@@ -339,6 +351,13 @@ describe("Phase 3 events-down (serving side)", () => {
     const stats = host!.stats();
     expect(stats.events.appended).toBeGreaterThanOrEqual(1);
     expect(stats.events.processed).toBeGreaterThanOrEqual(1);
+    // The durable ack settled — from the DELIVERED append and the
+    // consequenced handling, not the local echo — and reads non-error.
+    await waitUntil(
+      () => ackStatus !== undefined,
+      "the durable-ack settle callback",
+    );
+    expect(ackStatus).not.toBe("error");
     cancelDemand();
   });
 
@@ -415,13 +434,30 @@ describe("Phase 3 events-down (serving side)", () => {
       () => host!.spaceServer(space)?.active === true,
       "reactivation",
     );
-    // Give the loop a settle: the value must never reach 2.
+    // Give the loop a settle: the value must never reach 2. The
+    // negative is sharpened past the bare value read (round-2 thread
+    // T24): a wrong re-run's consequence commit carries
+    // consequence_of = [the event] — so count those DIRECTLY. Exactly
+    // ONE such commit may ever exist, whatever else the loop commits
+    // (watermark advances move the seq legitimately, so seq stability
+    // is NOT the observable).
+    const eventId = (Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue).entries![0].eventId;
+    const consequenceCommitsFor = () =>
+      (engine.database.prepare(
+        `SELECT consequence_of FROM "commit"
+         WHERE class = 'derived' AND consequence_of IS NOT NULL`,
+      ).all() as Array<{ consequence_of: string }>).filter((row) =>
+        row.consequence_of.includes(eventId)
+      ).length;
+    expect(consequenceCommitsFor()).toBe(1);
     await new Promise((resolve) => setTimeout(resolve, 500));
     {
       const doc = Engine.read(engine, {
         id: argument.getAsNormalizedFullLink().id,
       });
       expect((doc?.value as { value?: number })?.value).toBe(1);
+      expect(consequenceCommitsFor()).toBe(1);
     }
     cancelDemand();
   });
@@ -658,10 +694,11 @@ describe("Phase 3 events-down (serving side)", () => {
     // An entry whose stream points at a doc that IS no piece and never
     // will be: the drain defers (cold-view creation race) for the
     // bounded window, then hardens into the drop notice.
+    const neverAPieceStream = { id: "of:no-such-piece", path: ["stream"] };
     const delivered = await server.commitDelegatedAppend({
       targetSpace: space,
-      targetStream: "of:stream-events:never-a-piece",
-      targetStreamLink: { id: "of:no-such-piece", path: ["stream"] },
+      targetStream: streamEntriesDocId(neverAPieceStream),
+      targetStreamLink: neverAPieceStream,
       eventId: "evt-unrunnable",
       payload: {},
       actingPrincipal: aliceSigner.did(),
@@ -674,7 +711,7 @@ describe("Phase 3 events-down (serving side)", () => {
     await waitUntil(
       () => {
         const value = Engine.read(engine, {
-          id: "of:stream-events:never-a-piece",
+          id: streamEntriesDocId(neverAPieceStream),
         })?.value as StreamEventsDocValue | undefined;
         const entry = value?.entries?.[0];
         return entry?.status === "dropped" &&
@@ -685,12 +722,114 @@ describe("Phase 3 events-down (serving side)", () => {
       30_000,
     );
     const entry = (Engine.read(engine, {
-      id: "of:stream-events:never-a-piece",
+      id: streamEntriesDocId(neverAPieceStream),
     })?.value as StreamEventsDocValue).entries![0];
     expect(entry.reason).toContain("no runnable handler");
     // The space can PARK again: the drop cleared the undelivered-events
     // criterion (a perpetual deferral would wedge it active forever).
     expect(Engine.selectPendingStreamEventDocs(engine).length).toBe(0);
+  });
+
+  it("a deferral consumes REAL TIME, never back-to-back waves: the drop cannot land inside the creation-race window (verdict blocker, 2026-08-12)", async () => {
+    // Pre-fix, a deferral set #eventScanOwed synchronously, #hasWork()
+    // spun the next wave at once, and the whole 8-slot budget burned
+    // in immediate succession — an event whose creation input was
+    // milliseconds away was permanently dropped. Post-fix each retry
+    // waits for input or the 250ms backstop tick, so the budget spans
+    // >= threshold * tick of wall clock. The pin: at +500ms the entry
+    // must still be PENDING (at most ~2 ticks consumed); the drop
+    // still arrives eventually (the DROP-arm test above).
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    host = newHost();
+    const laggardStream = { id: "of:laggard-piece", path: ["stream"] };
+    const delivered = await server.commitDelegatedAppend({
+      targetSpace: space,
+      targetStream: streamEntriesDocId(laggardStream),
+      targetStreamLink: laggardStream,
+      eventId: "evt-laggard",
+      payload: {},
+      actingPrincipal: aliceSigner.did(),
+      actingSession: "laggard-session",
+      capabilityRef: "cap-laggard",
+      sessionId: `service:${space}`,
+      localSeq: 990_200,
+    });
+    expect(delivered.deduped).toBe(false);
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "activation on the delivered event",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const value = Engine.read(engine, {
+      id: streamEntriesDocId(laggardStream),
+    })?.value as StreamEventsDocValue | undefined;
+    const entry = value?.entries?.[0];
+    // Still pending: NOT consequenced, NOT dropped — the budget has
+    // structurally not had time to exhaust (8 ticks x 250ms >> 500ms).
+    expect(entry?.eventId).toBe("evt-laggard");
+    expect(entry?.status).toBeUndefined();
+    expect(entry?.consequenced).not.toBe(true);
+    // The event is still discoverable work (nothing wedged, nothing
+    // lost): the drop (or a late-arriving piece) resolves it later.
+    expect(Engine.selectPendingStreamEventDocs(engine).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  it("an event-only admission RACING a park reactivates the space — the fire-time gate honors the undelivered-events criterion, not just live sessions (verdict blocker, 2026-08-12)", async () => {
+    // Pre-fix, #reactivateAfterPark's fire-time gate required a live
+    // client session: a delegated cross-space delivery (no client
+    // anywhere) that raced a park chained the reactivation, which then
+    // DECLINED — the delivered event sat unserved until some unrelated
+    // trigger. serving-loop.md §1's ACTIVE criterion is sessions OR
+    // undelivered events; the gate must check both.
+    const engine = await server.engineForSpace(space);
+    host = newHost();
+    const parkRaceStream = { id: "of:park-race-piece", path: ["stream"] };
+    const first = await server.commitDelegatedAppend({
+      targetSpace: space,
+      targetStream: streamEntriesDocId(parkRaceStream),
+      targetStreamLink: parkRaceStream,
+      eventId: "evt-park-race-1",
+      payload: {},
+      actingPrincipal: aliceSigner.did(),
+      actingSession: "park-race-session",
+      capabilityRef: "cap-park-race",
+      sessionId: `service:${space}`,
+      localSeq: 990_300,
+    });
+    expect(first.deduped).toBe(false);
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "activation on the first delivered event",
+    );
+    const spaceServer = host!.spaceServer(space)!;
+    // Start the park, then deliver DURING it: the admission hook sees a
+    // registered, no-longer-active server and chains reactivation
+    // behind the park.
+    const parked = spaceServer.park("test-park-race");
+    const second = await server.commitDelegatedAppend({
+      targetSpace: space,
+      targetStream: streamEntriesDocId(parkRaceStream),
+      targetStreamLink: parkRaceStream,
+      eventId: "evt-park-race-2",
+      payload: {},
+      actingPrincipal: aliceSigner.did(),
+      actingSession: "park-race-session",
+      capabilityRef: "cap-park-race",
+      sessionId: `service:${space}`,
+      localSeq: 990_301,
+    });
+    expect(second.deduped).toBe(false);
+    await parked;
+    // The chained reactivation must FIRE despite zero client sessions:
+    // the engine holds undelivered events.
+    expect(Engine.selectPendingStreamEventDocs(engine).length)
+      .toBeGreaterThanOrEqual(1);
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "reactivation on the event-only admission racing the park",
+    );
   });
 
   it("same-space cascade (LT1): the served handler's send commits a durable wave-carried entry with the INHERITED actor — processed exactly once", async () => {

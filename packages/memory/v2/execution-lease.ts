@@ -70,12 +70,13 @@ export const liveExecutionLeaseHolder = (
   space: string,
   now: number = Date.now(),
 ): string | undefined => {
-  const row = engine.database.prepare(`
-SELECT holder
-FROM execution_lease
-WHERE space = :space
-  AND expires_at > :now
-`).get({ space, now }) as { holder: string } | undefined;
+  // The engine's own prepared admission statement — ONE copy of the
+  // liveness query, so read-side and commit-side liveness semantics
+  // cannot drift.
+  const row = engine.statements.selectLiveExecutionLease.get({
+    space,
+    now,
+  }) as { holder: string } | undefined;
   return row?.holder;
 };
 

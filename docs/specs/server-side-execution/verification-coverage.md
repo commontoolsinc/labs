@@ -417,6 +417,31 @@ sentences, one recorded acceptance, three owed entries):
   (inline flushing already made in-process ordering safe). (A SECOND
   recorded acceptance — Phase 2's R4 written-subtree narrowing — is
   recorded in the Phase-2 independent-review delta below.)
+- FIVE MORE recorded rows ride stage G's 2026-08-12 review round
+  (ALL RATIFIED by the owner 2026-08-13, alongside the §4
+  per-(key, result target) amendment):
+  (1) per-target idempotency keys make the OFF arm's tx-level
+  outbox dedupe (`outboxIdempotencyKeys`) finer — two distinct
+  nodes enqueueing byte-identical inputs in ONE transaction now
+  BOTH flush where the second was silently dropped (reachable
+  only when one tx runs multiple actions; a bug-fix delta);
+  (2) OFF-arm fetch writebacks whose commit fails terminally now
+  REJECT the tracked-work promise (previously silent), and the
+  error-shaped-result conversion applies OFF-arm too;
+  (3) tryClaimMutex marker placement is OFF-inert (a WeakMap
+  write plus a destination-gated authoritative call) — listed
+  for completeness;
+  (4) the authoritative-write completion path (container
+  assertions + whole-doc set/delete) is gated on the serving
+  posture — OFF byte-identical — with ONE ratified ON-arm
+  widening: a serving completion's whole-doc write of a builtin
+  `internal` doc can stomp a concurrent CLIENT replica's mutex
+  claim fields (requestId/lastActivity); it self-heals via the
+  5s staleness bound and is strictly better than the wedged
+  completion it replaces;
+  (5) llm hit-observer gating shifts OFF-arm counters only
+  (settled re-evaluations now count as hits; no behavioral
+  consumer today).
 - FP6's register row (field-provenance.md): the label basis is
   STRUCTURAL, not frozen (RULED 2026-08-05) — tightening mid-flight
   yields the stricter label, loosening matches the OFF arm's
@@ -509,7 +534,14 @@ population):
 Delta 2026-08-07 — Phase 2 lands (flag ON: the server derives, the
 client does not; this PR):
 
-- speculation §1/§2/§4/§6's impl-gate rows: → COVERED. The overlay is
+- speculation §1/§2/§4/§6's impl-gated rules: the implementation they
+  gated on LANDED, with the pins cited below. Stated precisely
+  (r3739139527 — the earlier "impl-gate rows → COVERED" overstated
+  against the §1 map, whose speculation row still counts them
+  impl-gate): this delta records the landing evidence; the map's
+  COLUMN moves (impl-gate → instrument-covered where the cited pins
+  bind the rule text) belong to the next full mapping pass, which §4's
+  standing rule already schedules. The overlay is
   the runtime's DEFAULT seal destination under the flag for every
   non-serving runtime (`packages/runner/src/speculation/
   overlay-destination.ts`): stamped derivation-kind runs redirect into
@@ -581,17 +613,20 @@ client does not; this PR):
   journey whose per-run outbox carriages carry two DIFFERENT keys
   into the completions — the m-4 note's "arrives with Phase 2's
   stamper" DISCHARGED). The per-run SUPPLY — the scheduler running a
-  scoped action once per demanded instance (per-(action × instance)
-  read-set/dirtiness state) and the replica-level per-instance read
-  keying — is the owed scheduler-instance-dimension follow-up,
-  reported to the plan as a proposed train cut (OW17 below).
+  scoped action once per demanded instance — LANDED with stage P2-F
+  (the N-run settle loop through the `runInstanceResolver` seam;
+  OW17 below carries the narrowed residue: the replica-level
+  per-instance read keying and the local dirtiness precision that
+  depends on it).
 - The ON-arm skip list: Phase 2 RETIRED the two-browsers entry (its
   named unskipping condition — the client derivation-commit path
   removed — is this PR; that gate now runs and passes ON) and ADDED
   one entry, `sx2-serving-loop`, under `phase-2-followup` — the
-  demand-cycle starvation fork's reproducer (the owed row below
-  carries the durable record; the skip reason carries the mechanism
-  and the ruled id-class exclusion that reduced it).
+  demand-cycle starvation fork's reproducer. Stage P2-F
+  (2026-08-13) RETIRED that entry too: the terminal state closed
+  the fork (the OW19 row below records the closure), and the ON-arm
+  skip list is EMPTY again — the full patterns suite runs both
+  arms.
 - testing §4's single-deriver envelope gate: impl-covered — the
   store-attribution query pinned in `speculation-overlay.test.ts`
   (every derived commit's holder is the service identity; none from a
@@ -854,34 +889,76 @@ pre-flight):**
 **Phase 2 follow-up (APPROVED as its own follow-on stage — owner
 nod, 2026-08-07; recorded in the plan's stage list):**
 
-- OW17 — the scheduler instance dimension: per-(action × instance)
-  read-set/dirtiness state, the N-run settle loop over demanded
-  identities (consuming the SpaceServer's demanded-identity
-  registry through the widened `#stampRun` seam), and the
-  replica-level per-instance READ keying (one doc, N instances read
-  locally — today's replica keys scoped docs by scope NAME, the
-  cardinality-1 collapse the sink-level fold test documents). Until
-  it lands, a scoped node's runs resolve via the wave-level identity
-  (the Phase-1 fallback) unless a caller supplies per-run identities
-  through the seam. Trigger: the approved follow-on stage (the plan's
-  Phase 2 tail); no later than Phase 3's events (handler runs
-  already carry per-run actors).
-- OW19 — the demand-cycle terminal state (RULED direction,
-  2026-08-07; the durable record for the starvation fork the
-  `sx2-serving-loop` skip reproduces): the COMPLETE design is
-  terminal-on-loaded-doc-without-pattern-meta with COMMIT-TRIGGERED
-  re-arm — a loaded doc whose meta is absent stops retrying until a
-  commit touches it — plus moving the demanded-structure load pass
-  under the wave's flush deadline (today it runs before the settle
-  race, unbounded, so a slow ensure throttles input consumption).
-  The ruled id-class exclusion (computed:/cid:/watermark — landed
-  with Phase 2, counter-exempt) removed the structurally-futile
-  classes; the conflation hazard that makes the rest non-trivial:
-  a not-yet-created piece and a never-a-piece `of:` value doc are
-  indistinguishable by id, so a terminal state without the
-  commit-triggered re-arm would break the creation race the
-  ensure-retry fix exists for. Trigger: the Phase-2 follow-on PR
-  (with OW17 or before it); the skip-list entry lifts with it.
+- OW17 — the scheduler instance dimension, NARROWED by stage P2-F
+  (2026-08-13; the supply LANDED): the N-run settle loop over
+  demanded identities is BUILT — the scheduler's reactive-action
+  choke point resolves an action's piece root against the
+  SpaceServer's demanded-identity registry (the
+  `runInstanceResolver` seam installed beside the §3d stamper) and
+  runs once per demanded instance, each run stamped with that
+  instance's identity AND acting pair; the LT6 inheritance hands an
+  emitting run's identity to its dispatched handler run. Pinned:
+  `executor-run-supply.test.ts` (the N-run loop at cardinality 2
+  through the production choke point; LT6 inheritance; both
+  red-first at the P2 base), `executor-serving-loop.test.ts`
+  ("supplies the demanded (user, session) identity … END TO END" —
+  registry → auto-stamped run → acting annotations + per-instance
+  basis rows in the engine, red-first;
+  `executor-space-server.test.ts` adds the argument-doc demand — the
+  ensure-resolved owning root differs from the demanded id — reaching
+  the same observable through the resolved-root mapping). What
+  REMAINS owed — one leg,
+  together: the replica-level per-instance READ keying (one doc, N
+  instances read locally — the replica still keys scoped docs by
+  scope name, the cardinality-1 collapse the sink-level fold test
+  documents) and the per-(action × instance) LOCAL read-set/
+  dirtiness precision that depends on it (until the replica holds
+  distinct instances, per-instance local dirtiness is
+  behaviorally unobservable; the node re-runs its current instance
+  set and equality cutoffs/memo hits absorb the siblings — those two
+  are the ONLY absorbers: event ids mint per origin transaction, so
+  sibling instance runs mint DISTINCT ids and a derivation body
+  calling `.send()` would dispatch once per demanded instance, with
+  no eventId-level dedupe absorbing it. Handler dispatch is a
+  separate non-fanned path (C11b), and derivation-emitted events are
+  an anti-pattern today; that surface is unpinned either way — a pin
+  is owed when they become legal). The read collapse has a VALUE
+  half, stated explicitly so Phase 5's trigger is legible: sibling
+  runs read the SAME collapsed local scoped doc, so at
+  cardinality ≥ 2 with genuinely divergent scoped inputs one user's
+  per-instance engine rows hold values derived from the OTHER user's
+  data, stamped acting = the wrong user — a consequence stage P2-F
+  SHARPENS (pre-P2-F, scoped writes never landed in user instances
+  at all). Trigger:
+  no later than Phase 5's cross-space serving (foreign scoped
+  instances make the local collapse load-bearing); flag-don't-fill
+  until then.
+- OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
+  (2026-08-13; the RULED 2026-08-07 direction, built whole). A
+  demanded root CONFIRMED synced with no pattern meta parks TERMINAL
+  (`structureLoadTerminal`) — no per-cycle ensure churn — and a
+  commit touching one of the load's observed docs RE-ARMS it
+  (`structureLoadRearmed`); the re-armed retry is SETTLE-GATED
+  (retrying inside the re-arming cycle reads the replica's stale
+  pre-commit state and would re-terminalize the not-yet case the
+  re-arm exists to keep sound — caught red during the build). The
+  demanded-structure load pass moved UNDER the wave's flush deadline
+  (single-flighted across cycles; completion wakes the loop), so a
+  slow ensure no longer throttles input consumption. The conflation
+  hazard is discharged exactly as ruled: not-yet (creation race —
+  the instantiation commit re-arms, the settled retry loads and the
+  piece serves) vs never (a plain value doc stays parked) are
+  distinguished by the re-arm, never by id. Pinned red-first:
+  `executor-space-server.test.ts` ("terminalizes … STOPS the
+  per-cycle churn" — deferred/terminal counters flat across driven
+  cycles; "re-arms … and LOADS a piece created after the terminal
+  decision" — the full terminal → re-arm → settle-gated retry →
+  serve journey), and the serving-loop E2E's creation-race test
+  reconciled to the new classification (terminal + re-arm counters,
+  failures still zero). The `sx2-serving-loop` skip-list entry is
+  RETIRED with this row — the surface runs in CI's ON arm, carrying
+  the amplification-ratio gate and the pattern-updater CHECK-half
+  witness (the plan's Phase-2 revisit (b), now ticked).
 
 - OW18 — the ensurer move (owner direction, 2026-08-07; recorded with
   the scheduler-tell batch, NOT implemented by it):
@@ -1143,7 +1220,14 @@ sentence, coverage below):
   kind at the runtime's posture-gated stamping seam
   (`stampServerRun` — a no-op on the OFF arm; under client
   speculation bookkeeping commits exactly as unstamped txs do), for
-  the full audited class: the six list-builtin recovery writes, the
+  the full audited class: the six list-builtin recovery writes
+  (2026-08-13 amendment, review thread r3756175819: the three
+  resume-SETTLE writes are bookkeeping ONLY on the serving posture —
+  on a flag-ON client they write DERIVED content and now stamp
+  `derivation`, diverting to the overlay; the shared decision is
+  `resumeSettleRunKind` in resume-republish.ts, unit-pinned; the
+  three resume-SEEDs stay bookkeeping on both postures as
+  container-materialization, setup-class under the scheduler tell), the
   shared list republisher, the compile-cache writebacks + pattern
   annotation (pattern-manager), the piece
   instantiate/start/repair/run-synced/pointer-roll-forward family
@@ -1151,9 +1235,12 @@ sentence, coverage below):
   interval tick / error-UI / sidecar-run / ready writes, and the
   fetch / fetchProgram / llmDialog teardown claims-release txs.
   NOT stamped, per existing rulings: llm partial-stream writes
-  (partials never become commits — the serving posture now SKIPS
-  the write before minting a tx, the same ruled outcome the
-  refusal produced, keeping the new counter clean),
+  (partials never become commits — the serving posture UNDER THE
+  FLAG now SKIPS the write before minting a tx, the same ruled
+  outcome the refusal produced, keeping the new counter clean; the
+  2026-08-13 round scoped the skip to `serverExecution === true` —
+  posture alone had dropped OFF-arm partials, an unrecorded OFF-arm
+  delta, review thread r3756175835),
   compile-and-run's async writebacks (stage-G deferral, documented
   in-file), and llm-dialog's pin/unpin/updateArgument/invoke
   tool-call writes (ruled completion-/handler-class — Phase-3
@@ -1174,8 +1261,109 @@ sentence, coverage below):
 
 This closes leg A of the lunch-gate triage arc (the unstamped
 recovery-seed storm). Leg B — the OW19 demand spin
-(`structureLoadDeferred` climbing) — is separately owned; leg C
-(the speculative-pending-basis design fix) awaits an owner ruling.
+(`structureLoadDeferred` climbing) — is closed by stage P2-F's
+demand-cycle terminal state (the closed OW19 row above); leg C
+(the speculative-pending-basis design fix) is closed by the
+2026-08-13 delta below.
+
+Delta 2026-08-13 — lunch-gate triage leg C: the speculative-basis
+export refusal (RULED 2026-08-13; speculation.md §6's "process-local
+principle and the export refusal" carries the rule and the owner
+blockquote; this PR):
+
+- speculation.md §6's "a commit basis MUST NOT name a speculative
+  layer" (the export refusal): → COVERED, impl-gate, red-first.
+  `packages/runner/test/speculation-overlay.test.ts` ("an authored tx
+  that read a speculative echo is refused LOUDLY at the client")
+  drives a real client-flag-ON runtime to a live echo, commits an
+  unstamped tx that read it, and pins the terminal client-side
+  `SpeculativeBasisError` (isTerminalRejection true), the unchanged
+  engine commit count (nothing exported), the intact overlay entry,
+  and the never-rendered refused write. At the pre-fix tree the same
+  scenario exported the seq and red-failed with the server's
+  `ConflictError: pending dependency not resolved: 4` after a wire
+  round trip.
+- The bounded-and-loud convergence half (the ruling's "fix infinitely
+  stuck things"): → COVERED, red-first. The same file's "a handler
+  that read a speculative echo fails terminal on the FIRST attempt"
+  pins exactly ONE handler run per event (console-channel counting —
+  the sandbox globalThis is isolated); pre-fix the backoff loop
+  re-ran the handler throughout the observation window (17 runs / 5s
+  observed; production shape ~43 attempts / 30.5s to
+  CommitConvergenceError). The push-boundary belt (a ConflictError
+  naming a known-speculative layer upgrades to the terminal refusal)
+  is unreachable-by-construction behind the build-time refusal and
+  carries no separate pin — `speculative-basis-exported` in the log
+  names any future reach.
+- The origin-ack retirement wake (speculation.md §6's closing
+  paragraph; the verdict-lifetime sub-defect): → COVERED, impl-gate,
+  red-first. The same file's "an entry whose origin's accept verdict
+  lands AFTER the covering watermark still retires" scripts the race
+  destination-level (watermark event first, ack after; no further
+  watermark event) and pins retirement on the ack wake alone;
+  pre-fix the entry stayed pending forever (red: the observer was
+  never installed and the sweep never re-ran).
+
+One ATTEMPTED-AND-REVERTED fix rides this round, recorded per
+flag-don't-fill (review thread r3739139506 — stage D's documented
+third bound, the read-only-space seal dependencies): an overlay
+implementation of the sealSpaceReads handoff (per-entry read-only-space
+floors; retirement additionally gated on EACH read-only space's
+watermark; cross-space re-sweeps on watermark/ack/settled events) was
+built red-first and REVERTED the same day. CORRECTED RATIONALE (the
+revert commit's original "bisect-verified gate regression" claim was
+INVALIDATED hours later: the two-browsers Phase-2 gate proved
+BIMODALLY FLAKY on the from-source local harness independent of
+commit — the UNMODIFIED merge base failed the same "Bob sees Alice"
+300s stall twice in a row under clean single-engine fresh-store
+conditions, and a runtime-identical tree to an earlier passing
+configuration also failed — so the gate discriminates nothing
+locally; CI's compiled-binary harness is its arbiter). The revert is
+RETAINED on design-risk grounds identified during the investigation:
+the machinery makes flag-ON client runtimes open watermark
+subscriptions into foreign — possibly unauthorized — spaces reached
+through links (AuthorizationError sync-load noise observed), and its
+conservative blocking can pin entries on never-covered floors
+forever. That risk profile wants an owner-reviewed design, not a
+fix-batch patch. The BOUND THEREFORE STANDS as documented: a
+cross-space speculation can retire on its written space's coverage
+while a read-only input is still uncovered. Owed: the redesign,
+flagged for the owner alongside P2-F's follow-ups.
+
+Two adjacency closures ride the same 2026-08-13 round (stage-G
+round-2 follow-ups):
+
+- `tryClaimMutex` swallows a TERMINAL claim-commit failure (row only;
+  no code change): the claim callback sets `claimed = true`, but the
+  surrounding `editWithRetry`'s outcome is not consulted — a commit
+  that terminally fails after retries still returns
+  `{ claimed: true }`, the builtin proceeds as claim-holder, and the
+  effect can complete locally WITHOUT its claim/completion egress
+  ever becoming durable. Bounded by design: recovery is §6 step 3's
+  re-miss — the next demanded run finds no durable result, re-misses
+  the memo, and re-claims (the completed-request guard reads the
+  durable view, so nothing wedges on the phantom claim). Recorded as
+  a known-swallow with a ruled recovery path; a loud disposition
+  (consulting the editWithRetry outcome) is follow-up material, not
+  Phase-2 gate material.
+- The wave-replay reachability closure (stage-G round-2's flag,
+  checked against the spec-model): `applyWaveCommit` runs the
+  per-doc CAS re-verification BEFORE `applyCommitTransaction`'s
+  replay return, so an exact replay at its ORIGINAL basisSeq can
+  never reach replay service — the first application advanced the
+  heads past that basis and the re-verification throws
+  `WaveCommitConflictError`. Only a re-drive with a RE-DERIVED
+  (current) basis reaches the stored-result return (the FP1
+  insert-skip's test shape). VERIFIED AGREEING with the spec-model's
+  crash-recovery arms: the model's `crash` step nulls the in-memory
+  `pendingWave` (nothing retains an old basis), `recover` recomputes
+  at current state per the ruled §6 no-replay recovery, and no arm
+  re-submits an already-admitted wave — the model never expects
+  original-basis replay service, so the engine's reachability
+  restriction and the model agree by construction. (The
+  admitted-but-unacked re-drive window G's engine test pins sits
+  below the model's step granularity — the wave step is atomic
+  there; noted, accepted.)
 
 Delta 2026-08-11 — the Phase-3 INDEPENDENT review's fix batch (this
 PR; every finding probe- or repro-verified by the reviewer, all
@@ -1197,16 +1385,23 @@ red-first-evidenced where the batch required it):
   `memory/test/v2-event-append.test.ts` (the reviewer's repro shapes:
   admit-then-TypeError, the set-arm coercion, the OFF-arm refusal,
   the derived-garbage recompute wedge).
-- A THIRD RECORDED OFF-arm acceptance rides the m4 half (PENDING
-  OWNER RATIFICATION — coordinator-adjudicated 2026-08-11: the
-  defect-flavored freedom removed; the OFF-written garbage poisons
-  the ON flip): authored writes into `of:stream-events:`-prefixed
-  docs under the OFF flag, which formerly SUCCEEDED unvalidated (no
-  admission exists OFF — including forged `firedAt` actors that the
-  first ON activation would deliver as-stamped), now REFUSE
-  prefix-keyed. No legitimate OFF-arm producer writes the reserved
-  prefix; the ratification lands separately, and testing §2's gate
-  clause already names this register's recorded-acceptance rows.
+- A THIRD RECORDED OFF-arm acceptance rides the m4 half (RATIFIED
+  2026-08-13 — owner ruling: BOTH deltas stand, the both-arms
+  non-array refusal AND the OFF-arm `of:stream-events:` id-prefix
+  refusal; coordinator-adjudicated 2026-08-11: the defect-flavored
+  freedom removed; the OFF-written garbage poisons the ON flip):
+  authored writes into `of:stream-events:`-prefixed docs under the
+  OFF flag, which formerly SUCCEEDED unvalidated (no admission
+  exists OFF — including forged `firedAt` actors that the first ON
+  activation would deliver as-stamped), now REFUSE prefix-keyed. No
+  legitimate OFF-arm producer writes the reserved prefix; testing
+  §2's gate clause already names this register's recorded-acceptance
+  rows. The ruling's simplicity lean was applied as a review of
+  `refuseMalformedAuthoredStreamWrites` (engine.ts): no
+  behavior-preserving simplification was worth taking — folding the
+  patch-op arms or replacing the `"entries" in` narrowing changes
+  edge behavior (explicit-`undefined` payloads flip from refused to
+  admitted), so the guard stands as written.
 - M2 — the C8d parent fold WIRED FOR REAL. The fold keyed on
   `context.parentEventId`, which nothing in production set: cell.ts's
   same-wave cascade queued `{eventId, served:{firedAt}}` only, so a
@@ -1220,7 +1415,8 @@ red-first-evidenced where the batch required it):
   raced-cascade test: a predicate-scoped settle gate holds the
   sealed wave open, a rival races the parent's consequence — child
   lands exactly once, never doubled).
-- M3 (coordinator-adjudicated 2026-08-11, VETOABLE) — the emit-path
+- M3 (RULED let-stand 2026-08-13; coordinator-adjudicated
+  2026-08-11) — the emit-path
   tail-read excluded from the dependency log and basis rows: a
   sender does not re-send because someone else sent. cell.ts's LT1
   emission read `/entries` unmarked, putting the target sidecar in

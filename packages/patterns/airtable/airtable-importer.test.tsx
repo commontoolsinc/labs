@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/airtable/airtable-importer.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern, UI } from "commonfabric";
+import { assert, pattern, TESTS, UI } from "commonfabric";
 import { hasText } from "../test/vnode-helpers.ts";
 import AirtableImporter from "./airtable-importer.tsx";
 
@@ -43,7 +43,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_data_empty },
       { assertion: assert_selected_names_empty },
       { assertion: assert_waiting_message_is_rendered },

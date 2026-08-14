@@ -31,7 +31,7 @@
  *
  * Run: deno task cf test packages/patterns/record-llm-streams.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 import RecordPattern from "./record.tsx";
 
 interface ModuleTypeInfo {
@@ -238,7 +238,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_list_types },
       { assertion: assert_list_types },
 

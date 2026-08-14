@@ -2,7 +2,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   bigintFromMinimalTwosComplement,
+  bigintFromUnpaddedBase64url,
   bigintToMinimalTwosComplement,
+  bigintToUnpaddedBase64url,
 } from "@commonfabric/utils/bigint";
 import {
   bigintFromMtcDirect,
@@ -320,3 +322,86 @@ for (
     });
   });
 }
+
+//
+// The base64url-string convenience pair
+//
+
+/**
+ * Fixtures for the base64url convenience functions. The strings are written
+ * out directly, so that neither `toUnpaddedBase64url()` nor the reference
+ * encoder above is trusted to produce them.
+ */
+const base64urlFixtures: readonly { value: bigint; encoded: string }[] = [
+  { value: 0n, encoded: "AA" },
+  { value: 1n, encoded: "AQ" },
+  { value: -1n, encoded: "_w" },
+  { value: 42n, encoded: "Kg" },
+  { value: 127n, encoded: "fw" },
+  { value: 128n, encoded: "AIA" },
+  { value: -128n, encoded: "gA" },
+  { value: -129n, encoded: "_38" },
+  { value: 255n, encoded: "AP8" },
+  { value: 256n, encoded: "AQA" },
+  { value: -256n, encoded: "_wA" },
+  { value: 0x0123_4567_89ab_cdefn, encoded: "ASNFZ4mrze8" },
+];
+
+describe("bigintToUnpaddedBase64url()", () => {
+  it("encodes all base64url fixtures as expected", () => {
+    for (const { value, encoded } of base64urlFixtures) {
+      try {
+        expect(bigintToUnpaddedBase64url(value)).toBe(encoded);
+      } catch (e) {
+        throw new Error(`Failed on ${value}n.`, { cause: e });
+      }
+    }
+  });
+
+  it("encodes all fixtures as the reference encoding does, in base64url", () => {
+    for (const { value, encoded, label } of fixtures) {
+      try {
+        expect(bigintToUnpaddedBase64url(value))
+          .toBe(toUnpaddedBase64url(encoded));
+      } catch (e) {
+        throw new Error(`Failed on ${label}.`, { cause: e });
+      }
+    }
+  });
+});
+
+describe("bigintFromUnpaddedBase64url()", () => {
+  it("decodes all base64url fixtures as expected", () => {
+    for (const { value, encoded } of base64urlFixtures) {
+      try {
+        expect(bigintFromUnpaddedBase64url(encoded)).toBe(value);
+      } catch (e) {
+        throw new Error(`Failed on ${value}n.`, { cause: e });
+      }
+    }
+  });
+
+  it("decodes all fixtures from the reference encoding, via base64url", () => {
+    for (const { value, encoded, label } of fixtures) {
+      try {
+        expect(bigintFromUnpaddedBase64url(toUnpaddedBase64url(encoded)))
+          .toBe(value);
+      } catch (e) {
+        throw new Error(`Failed on ${label}.`, { cause: e });
+      }
+    }
+  });
+
+  it("accepts padded input", () => {
+    expect(bigintFromUnpaddedBase64url("AA==")).toBe(0n);
+    expect(bigintFromUnpaddedBase64url("AP8=")).toBe(255n);
+  });
+
+  it("throws on an empty string", () => {
+    expect(() => bigintFromUnpaddedBase64url("")).toThrow("empty input");
+  });
+
+  it("throws on a non-base64url character", () => {
+    expect(() => bigintFromUnpaddedBase64url("A/8")).toThrow();
+  });
+});

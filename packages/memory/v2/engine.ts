@@ -40,6 +40,7 @@ import {
   EventAppendDuplicateError,
   getServerExecutionConfig,
   isEntityDocument,
+  isScopeKey,
   type Operation,
   type PatchOp,
   ProtocolError,
@@ -53,9 +54,11 @@ import {
   type SessionId,
   type SqliteOperation,
   STREAM_ENTRIES_DOC_PREFIX,
+  streamEntriesDocId,
   type StreamEventEntry,
   type StreamEventFiredAt,
   type StreamEventsDocValue,
+  type StreamLinkRef,
   tableDeclaresRowLabel,
 } from "../v2.ts";
 
@@ -308,6 +311,13 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_basis_entity
 -- from memo keys). References nothing; nothing references it. The
 -- writer/reader module is execution-outbox.ts.
 CREATE TABLE IF NOT EXISTS execution_outbox (
+  id                INTEGER PRIMARY KEY, -- declared alias of rowid: the
+                                      --   delivery-ack handle. Declared so
+                                      --   it is STABLE across VACUUM —
+                                      --   an implicit rowid can be
+                                      --   renumbered by maintenance,
+                                      --   letting an ack delete the
+                                      --   wrong row (a lost append).
   branch            TEXT    NOT NULL,
   target_space      TEXT    NOT NULL,
   target_stream     TEXT    NOT NULL, -- the target stream SIDECAR doc id
@@ -587,7 +597,7 @@ FROM "commit"
 `;
 
 const SELECT_EXISTING_COMMIT = `
-SELECT seq, branch, original, resolution
+SELECT seq, branch, original, resolution, class, holder
 FROM "commit"
 WHERE session_id = :session_id
   AND local_seq = :local_seq
@@ -950,6 +960,14 @@ export type AppliedCommit = {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
+  /** True when the commit was an exact REPLAY of one this session
+   * already applied — the stored result was returned and NOTHING was
+   * inserted. Side-effect carriage riding the apply (the wave commit's
+   * outbox rows, FP1) keys off this: a replay must not re-run inserts
+   * whose originals rode the first application (the rows may since
+   * have been delivered and retired — re-inserting resurrects
+   * delivered appends as duplicate delivery work). */
+  replayed?: true;
 };
 
 export type ReadOptions = {
@@ -1003,6 +1021,8 @@ type CommitRow = {
   branch: string;
   original: string;
   resolution: string;
+  class: string;
+  holder: string | null;
 };
 
 type RevisionRow = {
@@ -1525,11 +1545,21 @@ export const entityIdExists = (
 
 export const read = (
   engine: Engine,
-  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }:
+  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId, scopeKey }:
     ReadOptions,
 ): EntityDocument | null => {
-  return readState(engine, { id, branch, seq, scope, principal, sessionId })
-    ?.document ?? null;
+  return readState(engine, {
+    id,
+    branch,
+    seq,
+    scope,
+    principal,
+    sessionId,
+    // Forward the explicit instance (protocol.md §2's read row): dropping
+    // it here would silently resolve the scope from (principal,
+    // sessionId) and read the WRONG document.
+    ...(scopeKey === undefined ? {} : { scopeKey }),
+  })?.document ?? null;
 };
 
 export const readState = (
@@ -1886,8 +1916,8 @@ const entryFiredAtMatches = (
  *   ever validated — would sit durable and poison the FIRST ON
  *   activation. This is a recorded OFF-arm acceptance (writes that
  *   formerly succeeded now refuse): defect-flavored freedom removed;
- *   see verification-coverage.md's recorded-acceptance row (pending
- *   owner ratification — coordinator-adjudicated 2026-08-11).
+ *   see verification-coverage.md's recorded-acceptance row (RATIFIED
+ *   2026-08-13, both deltas — coordinator-adjudicated 2026-08-11).
  *
  * Derived commits stay exempt (one trust environment — the
  * SpaceServer's own serialization); the pending scan and the watermark
@@ -2205,6 +2235,41 @@ const validateEventAppends = (
             "entries are self-describing (events.md §1)",
         );
       }
+      // The link must DERIVE the sidecar being written (events.md §1:
+      // the sidecar id is the hash every party derives from the stream
+      // link with no coordination). Without this binding, an append
+      // into a FRESH sidecar id can name ANOTHER stream in its
+      // self-describing link: the drain executes the named stream's
+      // handler while the eventId only ever met the fresh doc's empty
+      // dedupe horizon — a per-stream exactly-once bypass (verdict
+      // blocker, 2026-08-12). Derived REWRITES of already-stamped
+      // entries never reach here (their admission happened at append).
+      if (streamEntriesDocId(entry.stream as StreamLinkRef) !== operation.id) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} carries a stream link that ` +
+            `does not derive the sidecar doc being written ` +
+            `("${operation.id}") — the self-describing link and the ` +
+            "sidecar id are one derivation (events.md §1)",
+        );
+      }
+      // A PRESENT runtimeInjectedEventKeys must be a string array
+      // (verdict blocker, 2026-08-12): the drain re-mints the carried
+      // keys per entry, and a persisted malformed value would throw
+      // there on EVERY scan pass — perpetual serving churn from one
+      // poisoned entry. Refused at the door instead.
+      if (
+        entry.runtimeInjectedEventKeys !== undefined &&
+        (!Array.isArray(entry.runtimeInjectedEventKeys) ||
+          entry.runtimeInjectedEventKeys.some((key) =>
+            typeof key !== "string"
+          ))
+      ) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} carries malformed ` +
+            "runtimeInjectedEventKeys — a present value must be an " +
+            "array of strings (events.md §1's entry shape)",
+        );
+      }
 
       // The firedAt stamp, per admitting class (protocol.md §2).
       let firedAt: StreamEventFiredAt;
@@ -2320,6 +2385,77 @@ const validateEventAppends = (
   return plan;
 };
 
+/** A fresh entry list whose OBJECT entries are shallow-copied — the
+ * stamping writes (seq, firedAt) land on the copies; every deeper value
+ * (payload included) stays SHARED by reference. */
+const spineCloneEntryList = (entries: readonly unknown[]): unknown[] =>
+  entries.map((entry) =>
+    entry !== null && typeof entry === "object" && !Array.isArray(entry)
+      ? { ...(entry as Record<string, unknown>) }
+      : entry
+  );
+
+/** Clone exactly the SPINE the stamping mutates: the operation object,
+ * the containers down to `/value/entries`, and the entry objects
+ * themselves. NEVER `structuredClone` (verdict blocker, 2026-08-12):
+ * the co-hosted wave sink hands this path the runner's own op objects,
+ * whose FabricValue payloads can carry registry symbols —
+ * `structuredClone` throws `DataCloneError` on those and demotes
+ * fabric classes it can copy. Payload values are never mutated here,
+ * so sharing them is sound. */
+const spineCloneSidecarOperation = <
+  Op extends Exclude<Operation, SqliteOperation>,
+>(operation: Op): Op => {
+  if (operation.op === "set") {
+    const outer = (operation.value ?? undefined) as
+      | Record<string, unknown>
+      | undefined;
+    const inner = (outer?.value ?? undefined) as
+      | Record<string, unknown>
+      | undefined;
+    if (inner === undefined || !Array.isArray(inner.entries)) {
+      return { ...operation };
+    }
+    return {
+      ...operation,
+      value: {
+        ...outer,
+        value: { ...inner, entries: spineCloneEntryList(inner.entries) },
+      },
+    } as Op;
+  }
+  if (operation.op === "patch") {
+    return {
+      ...operation,
+      patches: operation.patches.map((patch) => {
+        if (
+          (patch.op === "append" || patch.op === "add-unique") &&
+          patch.path === STREAM_ENTRIES_POINTER
+        ) {
+          return {
+            ...patch,
+            values: spineCloneEntryList(patch.values as unknown[]) as never,
+          };
+        }
+        if (
+          (patch.op === "add" || patch.op === "replace") &&
+          patch.path === STREAM_ENTRIES_POINTER &&
+          Array.isArray((patch as unknown as { value?: unknown }).value)
+        ) {
+          return {
+            ...patch,
+            value: spineCloneEntryList(
+              (patch as unknown as { value: unknown[] }).value,
+            ) as never,
+          };
+        }
+        return patch;
+      }),
+    } as Op;
+  }
+  return { ...operation };
+};
+
 /** Apply one op's stamp plan onto a CLONE (the input operation object is
  * shared with replica overlays and must never be mutated). */
 const stampEventAppendOperation = <
@@ -2329,7 +2465,7 @@ const stampEventAppendOperation = <
   stamps: readonly EventAppendStamp[],
   seq: number,
 ): Op => {
-  const cloned = structuredClone(operation) as Op;
+  const cloned = spineCloneSidecarOperation(operation);
   for (const stamp of stamps) {
     let entry: StreamEventEntry | undefined;
     if (cloned.op === "set") {
@@ -2708,6 +2844,30 @@ export const applyWaveCommit = (
     (txEngine: Engine, txOptions: typeof options) => {
       const { waveBasis, basisInstances, outboxAppends, ...restOptions } =
         txOptions;
+      // Basis rows are ADDRESSING (recovery's re-mark scan matches
+      // storage rows against these instance values), so their keys meet
+      // the same admission bar as annotated scope keys: a non-canonical
+      // key would store rows no canonical key ever matches — a silent
+      // liveness hole rather than a loud one. Refused up front, before
+      // any head query runs.
+      for (const instance of basisInstances ?? []) {
+        if (!isScopeKey(instance.actionScopeKey)) {
+          throw new ProtocolError(
+            `wave commit rejected: basis action instance key ` +
+              `"${instance.actionScopeKey}" is not a canonical scope_key ` +
+              "(key-vocabulary.md §3)",
+          );
+        }
+        for (const row of instance.rows) {
+          if (!isScopeKey(row.entityScopeKey)) {
+            throw new ProtocolError(
+              `wave commit rejected: basis row entity instance key ` +
+                `"${row.entityScopeKey}" is not a canonical scope_key ` +
+                "(key-vocabulary.md §3)",
+            );
+          }
+        }
+      }
       // An appends-only wave commits with zero operations: the durable
       // rows ride this transaction (FP1), so the emptiness guard below
       // must not refuse it.
@@ -2823,7 +2983,17 @@ export const applyWaveCommit = (
       // inside this same transaction — atomically with the wave commit,
       // so a crash either has both (rows re-sent, deduped at the
       // target's eventId horizon) or neither (the wave never happened).
-      if (outboxAppends !== undefined && outboxAppends.length > 0) {
+      // Gated on a NEWLY INSERTED commit: an exact replay returns the
+      // stored result without applying anything, and its original
+      // application already carried these rows — re-inserting would
+      // resurrect rows the drain may have delivered and retired,
+      // producing duplicate durable delivery work (the target's
+      // eventId horizon dedupes the duplicates, but each one costs a
+      // delegated-append round trip and a dedupe pass).
+      if (
+        applied.replayed !== true &&
+        outboxAppends !== undefined && outboxAppends.length > 0
+      ) {
         insertExecutionOutboxRows(txEngine, {
           branch,
           createdSeq: applied.seq,
@@ -2852,23 +3022,68 @@ const applyCommitTransaction = (
     allowEmptyOperations,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
+  // The derived-class posture gate (protocol.md §1): off the flag NOTHING
+  // may claim the class — retries included — because `derived` names the
+  // single-deriver posture and nothing outside EXPERIMENTAL_SERVER_EXECUTION
+  // may claim it. Only this gate precedes replay detection; the LIVE-lease
+  // equality check sits after it below, on the fresh-commit path.
+  if (commitClass === "derived" && !getServerExecutionConfig()) {
+    throw new ProtocolError(
+      "derived-class commits are unclaimable while " +
+        "EXPERIMENTAL_SERVER_EXECUTION is off (protocol.md §1)",
+    );
+  }
+  const sessionKey = resolveCommitSessionKey(sessionId, principal);
+  // Replay detection FIRST — ahead of every current-authority admission
+  // check, the live-lease equality check included (owner review on #5349,
+  // 2026-08-12): a commit this session already applied returns its stored
+  // result without re-validating preconditions — re-checking entity-absent
+  // against the state the original application created would wrongly reject
+  // the replay — and without consulting the live `execution_lease`: the
+  // lease authorizes NEW derived commits, and a network retry of an
+  // already-ACCEPTED one must keep its stored answer after the producing
+  // lease was released, expired, or succeeded by a new holder. The stored
+  // identity spans the payload bytes (sameStoredOriginal) AND the admission
+  // envelope (class; for derived, the producing holder): a same-key
+  // resubmission differing in either is a DIFFERENT submission and is
+  // refused, never answered.
+  const existing = engine.statements.selectExistingCommit.get({
+    session_id: sessionKey,
+    local_seq: commit.localSeq,
+  }) as CommitRow | undefined;
+  if (existing) {
+    if (!sameStoredOriginal(existing.original, commit)) {
+      throw new ProtocolError(
+        `commit replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
+      );
+    }
+    // Envelope identity, normalized exactly as the insert below persists
+    // it: a holder sticks to derived commits only, so a stray holder that
+    // was inert on the original stays inert on the retry.
+    const incomingHolder = commitClass === "derived" ? holder ?? null : null;
+    if (existing.class !== commitClass || existing.holder !== incomingHolder) {
+      throw new ProtocolError(
+        `commit replay mismatch for session ${sessionId} localSeq ` +
+          `${commit.localSeq}: stored class/holder differ from the resubmission`,
+      );
+    }
+    return {
+      seq: existing.seq,
+      branch: existing.branch,
+      revisions: selectCommitRevisions(engine, existing.seq),
+      replayed: true,
+    };
+  }
+
   // The derived-class admission rule (serving-loop.md §2, protocol.md §2's
   // `derived` row): the producer holds the space's live `execution_lease` —
   // ONE equality check against the row's holder, not admission machinery.
-  // Enforced only under EXPERIMENTAL_SERVER_EXECUTION; off the flag the
-  // class stays unclaimable in this arm too, because `derived` names the
-  // single-deriver posture and nothing outside the flag may claim it
-  // (protocol.md §1). Liveness is judged by THIS process's clock — the
-  // memory server's own, never the holder's: the select excludes expired
-  // rows, so an expired lease matches nobody and a derived commit under one
+  // Fresh commits only: an exact replay already answered from the store
+  // above. Liveness is judged by THIS process's clock — the memory
+  // server's own, never the holder's: the select excludes expired rows, so
+  // an expired lease matches nobody and a fresh derived commit under one
   // is rejected even before any successor acquires.
   if (commitClass === "derived") {
-    if (!getServerExecutionConfig()) {
-      throw new ProtocolError(
-        "derived-class commits are unclaimable while " +
-          "EXPERIMENTAL_SERVER_EXECUTION is off (protocol.md §1)",
-      );
-    }
     const lease = space === undefined
       ? undefined
       : engine.statements.selectLiveExecutionLease.get({
@@ -2994,44 +3209,10 @@ const applyCommitTransaction = (
           "protocol.md §2)",
       );
     }
-    // A sessionless delegated chain has NO session instance (scopes.md
-    // §5: a sessionless actor's session-scoped write is an ERROR —
-    // neither falling back to another identity nor minting a session is
-    // permitted). Without this refusal the writeOperation fallback
-    // below would key such a write from the DELEGATING envelope's
-    // session — `session:<actingPrincipal>:<sink session>`, a chimera
-    // instance no party ever acted as. Refused at admission, loudly.
-    if (
-      delegated.actingSession === undefined || delegated.actingSession === ""
-    ) {
-      const userless = delegated.actingPrincipal === undefined ||
-        delegated.actingPrincipal === "";
-      for (const operation of commit.operations) {
-        if (operation.op === "sqlite") continue;
-        const declared = normalizeScope(operation.scope);
-        if (declared === "session") {
-          throw new ProtocolError(
-            "delegated admission rejected: a sessionless delegated " +
-              "batch (no actingSession) carries a session-scoped write " +
-              "— a sessionless actor has no session instance " +
-              "(scopes.md §5, protocol.md §2's delegated row)",
-          );
-        }
-        // The user-scope twin under the OW15 carve-out: a USERLESS batch
-        // (declared sessionless-space-scope) carrying a user-scoped write
-        // would key it from the DELEGATING envelope's principal below —
-        // the same chimera trap, user edition (events.md §2: user-scoped
-        // writes under a sessionless event are equally an error unless
-        // the event carries an acting user).
-        if (userless && declared === "user") {
-          throw new ProtocolError(
-            "delegated admission rejected: a userless delegated batch " +
-              "carries a user-scoped write — a sessionless-space-scope " +
-              "chain has no user instance (events.md §2, scopes.md §5)",
-          );
-        }
-      }
-    }
+    // NOTE: the sessionless/userless scoped-write refusals (session-scope
+    // chimera + the OW15 user-scope twin) moved BELOW the exact-replay
+    // return per the stage-B replay-ordering rule — see the combined
+    // block after the replay check.
   }
 
   // Derived commits key scoped writes by their EXPLICIT annotation
@@ -3075,6 +3256,18 @@ const applyCommitTransaction = (
             "annotation (protocol.md §1)",
         );
       }
+      // The annotated key becomes the row's key VERBATIM (writeOperation's
+      // scopeKeyOverride below), so admission requires the canonical
+      // grammar, not just the scope prefix: a raw delimiter or malformed
+      // escape here would store a row that corrupts delimited composite
+      // addressing or throws when a serving surface percent-decodes it.
+      if (!isScopeKey(annotated)) {
+        throw new ProtocolError(
+          `derived-class commit rejected: annotated scope_key ` +
+            `"${annotated}" (op ${opIndex}) is not a canonical scope_key ` +
+            "(key-vocabulary.md §3)",
+        );
+      }
       if (scopeOfScopeKey(annotated) !== declared) {
         throw new ProtocolError(
           `derived-class commit rejected: annotated scope_key ` +
@@ -3084,7 +3277,6 @@ const applyCommitTransaction = (
       }
     }
   }
-  const sessionKey = resolveCommitSessionKey(sessionId, principal);
   const hasPreconditions = (commit.preconditions?.length ?? 0) > 0;
   if (
     commit.operations.length === 0 && !hasPreconditions &&
@@ -3096,25 +3288,71 @@ const applyCommitTransaction = (
   const branch = commit.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
 
-  // Replay detection first: a commit this session already applied returns
-  // its stored result without re-validating preconditions — re-checking
-  // entity-absent against the state the original application created would
-  // wrongly reject the replay.
-  const existing = engine.statements.selectExistingCommit.get({
-    session_id: sessionKey,
-    local_seq: commit.localSeq,
-  }) as CommitRow | undefined;
-  if (existing) {
-    if (!sameStoredOriginal(existing.original, commit)) {
-      throw new ProtocolError(
-        `commit replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
-      );
+  // A sessionless delegated chain has NO session instance (scopes.md
+  // §5: a sessionless actor's session-scoped write is an ERROR —
+  // neither falling back to another identity nor minting a session is
+  // permitted). Without this refusal the writeOperation fallback
+  // below would key such a write from the DELEGATING envelope's
+  // session — `session:<actingPrincipal>:<sink session>`, a chimera
+  // instance no party ever acted as. Refused at admission, loudly.
+  // Placed AFTER the replay return (the stage-B ordering rule): the
+  // check is payload-pure, so a first attempt refuses identically, and
+  // a replay of a commit the store already admitted returns its stored
+  // result rather than being re-adjudicated.
+  if (
+    delegated !== undefined &&
+    (delegated.actingSession === undefined || delegated.actingSession === "")
+  ) {
+    // The user-scope twin under the OW15 carve-out: a USERLESS batch
+    // (declared sessionless-space-scope) carrying a user-scoped write
+    // would key it from the DELEGATING envelope's principal below —
+    // the same chimera trap, user edition (events.md §2: user-scoped
+    // writes under a sessionless event are equally an error unless
+    // the event carries an acting user).
+    const userless = delegated.actingPrincipal === undefined ||
+      delegated.actingPrincipal === "";
+    for (const operation of commit.operations) {
+      if (operation.op === "sqlite") {
+        // The same rule for folded SQLite writes: a session-scoped
+        // cell-db resolves its on-disk file from a session identity a
+        // sessionless actor does not have — admitting it would key the
+        // file from the delegating ENVELOPE's session, the same
+        // chimera instance the entity-write refusal below prevents.
+        if (operation.db.scope === "session") {
+          throw new ProtocolError(
+            "delegated admission rejected: a sessionless delegated " +
+              "batch (no actingSession) carries a session-scoped " +
+              "SQLite write — a sessionless actor has no session " +
+              "instance (scopes.md §5, protocol.md §2's delegated row)",
+          );
+        }
+        if (userless && operation.db.scope === "user") {
+          throw new ProtocolError(
+            "delegated admission rejected: a userless delegated batch " +
+              "carries a user-scoped SQLite write — a " +
+              "sessionless-space-scope chain has no user instance " +
+              "(events.md §2, scopes.md §5)",
+          );
+        }
+        continue;
+      }
+      const declared = normalizeScope(operation.scope);
+      if (declared === "session") {
+        throw new ProtocolError(
+          "delegated admission rejected: a sessionless delegated " +
+            "batch (no actingSession) carries a session-scoped write " +
+            "— a sessionless actor has no session instance " +
+            "(scopes.md §5, protocol.md §2's delegated row)",
+        );
+      }
+      if (userless && declared === "user") {
+        throw new ProtocolError(
+          "delegated admission rejected: a userless delegated batch " +
+            "carries a user-scoped write — a sessionless-space-scope " +
+            "chain has no user instance (events.md §2, scopes.md §5)",
+        );
+      }
     }
-    return {
-      seq: existing.seq,
-      branch: existing.branch,
-      revisions: selectCommitRevisions(engine, existing.seq),
-    };
   }
 
   validateCommitPreconditions(engine, sessionKey, branch, commit, {
@@ -3308,6 +3546,16 @@ const maintainStreamEventWatermarks = (
       touched.set(`${revision.id}\0${revision.scopeKey}`, revision);
     }
   }
+  // Synthetic ops slot BEYOND the commit's own highest revision opIndex
+  // — NOT `revisions.length` (verdict blocker, 2026-08-12): sqlite ops
+  // consume operation indices without pushing revisions, so for
+  // `[sqlite, sidecar]` the length re-uses the sidecar revision's own
+  // index and the (seq, op_index) primary key collides, rolling back
+  // the whole wave. Max+1 is collision-free: entity revisions occupy
+  // exactly their operation indices, and sqlite slots write no
+  // revision rows.
+  let nextSyntheticOpIndex =
+    revisions.reduce((max, r) => Math.max(max, r.opIndex), -1) + 1;
   for (const revision of touched.values()) {
     const state = readStateForScopeKey(engine, {
       id: revision.id,
@@ -3360,14 +3608,14 @@ const maintainStreamEventWatermarks = (
       continue;
     }
     // A synthetic op BEYOND the commit's own operations (op_index is
-    // unique per (seq, opIndex), and revisions.length grows with each
-    // frontier write, so slots never collide). The returned revision
-    // JOINS the commit's revision list: snapshot materialization, head
-    // maintenance, and subscriber push all ride it.
+    // unique per (seq, opIndex); see nextSyntheticOpIndex above). The
+    // returned revision JOINS the commit's revision list: snapshot
+    // materialization, head maintenance, and subscriber push all ride
+    // it.
     revisions.push(writeOperation(engine, {
       branch,
       seq,
-      opIndex: revisions.length,
+      opIndex: nextSyntheticOpIndex++,
       operation: {
         op: "patch",
         id: revision.id as never,

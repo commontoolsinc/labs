@@ -116,6 +116,18 @@ export type EventIntentOutcome = {
   reason: string;
 };
 
+/** A fired intent's terminal consequence, as awaited by the send
+ * path's durable-ack coupling (verdict blocker, 2026-08-12):
+ * `consequenced` is the SUCCESS arm (the authoritative server handling
+ * committed — signaled by the consequence mark, or by watermark-sweep
+ * coverage, the same two signals that retire the echo); the other
+ * three mirror EventIntentOutcome. `unsettled` reports a teardown
+ * before any signal (runtime dispose). */
+export type IntentConsequence = {
+  kind: "consequenced" | "errored" | "dropped" | "refused" | "unsettled";
+  reason?: string;
+};
+
 type OverlayEntry = {
   space: MemorySpace;
   localSeq: number;
@@ -164,6 +176,12 @@ export class SpeculationOverlayDestination
   readonly #entries = new Map<MemorySpace, Map<number, OverlayEntry>>();
   /** space -> cancel fn for the watermark-doc sink driving retirement. */
   readonly #watermarkSinks = new Map<MemorySpace, () => void>();
+  /** space -> release fn for the origin-accept wake installed on the
+   * replica (speculation.md §4; leg-C 2026-08-13): a sweep that ran
+   * while an origin's verdict was in flight skipped its entries as
+   * blocked, and the covering watermark event has already passed — the
+   * ack wake re-sweeps so a then-quiet space cannot strand them. */
+  readonly #ackObserverReleases = new Map<MemorySpace, () => void>();
   /** space -> last observed watermark (for registration-time sweeps). */
   readonly #watermarks = new Map<MemorySpace, number>();
   /** Fired-intent notice watch (events.md §5, speculation.md §5):
@@ -181,6 +199,18 @@ export class SpeculationOverlayDestination
   readonly #intentOutcomeSubscribers = new Set<
     (outcome: EventIntentOutcome) => void
   >();
+  /** Per-intent consequence waiters (verdict blocker, 2026-08-12): the
+   * send path's durable-ack coupling awaits an intent's TERMINAL
+   * consequence — consequenced (server handling committed), errored,
+   * dropped, or refused — so a caller's commit callback can no longer
+   * report the speculative local run as durable success. Memoized
+   * until consumed: the consequence may land before the waiter
+   * registers. */
+  readonly #intentConsequenceWaiters = new Map<
+    string,
+    Array<(outcome: IntentConsequence) => void>
+  >();
+  readonly #intentConsequenceMemo = new Map<string, IntentConsequence>();
   #closed = false;
 
   constructor(runtime: Runtime) {
@@ -333,8 +363,37 @@ export class SpeculationOverlayDestination
         sealedSpaces.push({ space, entry });
         return Promise.resolve({ ok: {} });
       },
+      // Read-only-space dependencies (review thread r3739139506; stage
+      // D's documented third bound): an implementation that gated
+      // retirement on EACH read-only space's watermark was built and
+      // REVERTED 2026-08-13 — the cross-space watermark subscriptions
+      // and conservative blocking it added regressed the two-browsers
+      // Phase-2 gate (bisect-verified: the gate stalls with the
+      // machinery in, passes with it out). The bound therefore STANDS
+      // as documented: a cross-space speculation can retire on its
+      // written space's coverage while a read-only input is still
+      // uncovered. `sealSpaceReads` is deliberately not implemented
+      // here until a design that does not gate on foreign-space
+      // watermark subscriptions exists (flagged in
+      // verification-coverage.md's 2026-08-13 delta).
     };
-    const result = await inner.sealInto(collector);
+    let result: Result<Unit, CommitError>;
+    try {
+      result = await inner.sealInto(collector);
+    } catch (cause) {
+      // A REJECTED sealInto (review thread r3739139536): without the
+      // catch, entries already collected kept unresolved verdicts and
+      // live pending writes forever. Withdraw them and surface a
+      // CommitError like any other seal failure.
+      const message = cause instanceof Error ? cause.message : String(cause);
+      result = {
+        error: {
+          name: "StorageTransactionAborted",
+          message: `speculative seal rejected: ${message}`,
+          reason: cause,
+        },
+      };
+    }
     if (result.error) {
       for (const { entry } of sealedSpaces) {
         entry.resolveVerdict({
@@ -344,6 +403,23 @@ export class SpeculationOverlayDestination
         });
       }
       return result;
+    }
+    if (this.#closed) {
+      // The dispose race (review thread r3739139501): close() ran while
+      // sealInto was in flight, so registering now would RESURRECT
+      // entries close() can no longer withdraw (and their effects could
+      // still enact). Same disposition as the early-closed arm: the
+      // writes roll back (best-effort — the replica may be closing) and
+      // the seal reports success (the run's results are re-derivable).
+      for (const { entry } of sealedSpaces) {
+        entry.resolveVerdict({
+          withdrawn: {
+            message: "speculation overlay closed (runtime dispose)",
+            superseded: true,
+          },
+        });
+      }
+      return { ok: {} };
     }
     for (const { space, entry } of sealedSpaces) {
       let entries = this.#entries.get(space);
@@ -383,6 +459,15 @@ export class SpeculationOverlayDestination
     const kind = speculationRunContextOf(tx)?.kind;
     if (kind !== "derivation" && kind !== "event-handler") {
       return false;
+    }
+    if (this.#closed) {
+      // The dispose race's effect half (review thread r3739139501): the
+      // run's writes were (or will be) dropped by the closed seal path,
+      // so even the reversible allowlisted kinds must not enact — an
+      // optimistic navigation for a commit that was never accepted.
+      // Still OWNED (true): a derivation's effects never take the
+      // ordinary inline flush.
+      return true;
     }
     const enactable = effects.filter((effect) =>
       SPECULATION_ENACTABLE_EFFECT_KINDS.has(effect.kind)
@@ -474,7 +559,22 @@ export class SpeculationOverlayDestination
           value as StreamEventsDocValue | undefined,
         );
       });
-      this.#intentSinks.set(sinkKey, cancel);
+      // The sink's IMMEDIATE callback may have resolved the last
+      // tracked id (a duplicate fire whose consequence already landed
+      // — round-2 thread T25): #untrackIntent then found no stored
+      // cancel to release, so storing it NOW would leak the sidecar
+      // subscription for the runtime's lifetime. Store only while ids
+      // remain tracked; cancel otherwise.
+      const stillTracked = this.#trackedIntents.get(space)?.get(sidecarId);
+      if (stillTracked === undefined || stillTracked.size === 0) {
+        try {
+          cancel();
+        } catch {
+          // best-effort: the sink resolved everything it was for
+        }
+      } else {
+        this.#intentSinks.set(sinkKey, cancel);
+      }
     } catch (error) {
       logger.warn("intent-sink-failed", () => [
         `intent sidecar sink for ${space} failed; echo retirement for ` +
@@ -495,6 +595,10 @@ export class SpeculationOverlayDestination
     if (this.#closed) return;
     this.#untrackIntent(space, sidecarId, eventId);
     this.retireIntent(space, eventId);
+    this.#settleIntentConsequence(space, eventId, {
+      kind: "refused",
+      reason: outcome.reason,
+    });
     this.#notifyIntentOutcome({
       space,
       eventId,
@@ -510,6 +614,47 @@ export class SpeculationOverlayDestination
   ): () => void {
     this.#intentOutcomeSubscribers.add(subscriber);
     return () => this.#intentOutcomeSubscribers.delete(subscriber);
+  }
+
+  /** Await a fired intent's terminal consequence (see
+   * IntentConsequence). Resolves immediately when the consequence
+   * already landed; on overlay close, pending waiters settle
+   * `unsettled`. */
+  waitForIntentConsequence(
+    space: MemorySpace,
+    eventId: string,
+  ): Promise<IntentConsequence> {
+    const key = `${space}\0${eventId}`;
+    const memo = this.#intentConsequenceMemo.get(key);
+    if (memo !== undefined) {
+      this.#intentConsequenceMemo.delete(key);
+      return Promise.resolve(memo);
+    }
+    if (this.#closed) return Promise.resolve({ kind: "unsettled" });
+    return new Promise((resolve) => {
+      const waiters = this.#intentConsequenceWaiters.get(key) ?? [];
+      waiters.push(resolve);
+      this.#intentConsequenceWaiters.set(key, waiters);
+    });
+  }
+
+  #settleIntentConsequence(
+    space: MemorySpace,
+    eventId: string,
+    outcome: IntentConsequence,
+  ): void {
+    const key = `${space}\0${eventId}`;
+    const waiters = this.#intentConsequenceWaiters.get(key);
+    if (waiters !== undefined && waiters.length > 0) {
+      this.#intentConsequenceWaiters.delete(key);
+      for (const resolve of waiters) resolve(outcome);
+      return;
+    }
+    // Nobody waiting yet: memoize the FIRST terminal signal (bounded by
+    // in-flight fires; consumed by the next waiter).
+    if (!this.#intentConsequenceMemo.has(key)) {
+      this.#intentConsequenceMemo.set(key, outcome);
+    }
   }
 
   #notifyIntentOutcome(outcome: EventIntentOutcome): void {
@@ -543,6 +688,10 @@ export class SpeculationOverlayDestination
         // UI is signaled.
         this.#untrackIntent(space, sidecarId, entry.eventId);
         this.retireIntent(space, entry.eventId);
+        this.#settleIntentConsequence(space, entry.eventId, {
+          kind: "dropped",
+          reason: entry.reason ?? "dropped",
+        });
         this.#notifyIntentOutcome({
           space,
           eventId: entry.eventId,
@@ -552,6 +701,13 @@ export class SpeculationOverlayDestination
       } else if (entry.consequenced === true) {
         this.#untrackIntent(space, sidecarId, entry.eventId);
         this.retireIntent(space, entry.eventId);
+        this.#settleIntentConsequence(
+          space,
+          entry.eventId,
+          entry.error !== undefined
+            ? { kind: "errored", reason: entry.error }
+            : { kind: "consequenced" },
+        );
         if (entry.error !== undefined) {
           // The handler threw server-side: the error IS the consequence
           // (events.md §5) — the echo still retires, and subscribers
@@ -623,6 +779,7 @@ export class SpeculationOverlayDestination
   }
 
   #ensureWatermarkSink(space: MemorySpace): void {
+    this.#ensureAckObserver(space);
     if (this.#watermarkSinks.has(space)) return;
     try {
       // Constructed INLINE from the wire-module constant rather than
@@ -651,6 +808,37 @@ export class SpeculationOverlayDestination
       logger.warn("watermark-sink-failed", () => [
         `watermark sink for ${space} failed; overlay retirement for the ` +
         "space will rely on entry re-runs",
+        error,
+      ]);
+    }
+  }
+
+  /** Install the origin-accept wake (ISpaceReplica.speculationAckObserver)
+   * on the space's replica: an entry whose sweep ran while its origin's
+   * verdict was still in flight is BLOCKED at that sweep (unacked layer
+   * below), and the covering watermark event has passed — on a
+   * then-quiet space nothing else re-sweeps. Rejected origins reach the
+   * overlay through the dependency cascade; accepts need this wake
+   * (speculation.md §4; leg-C 2026-08-13). */
+  #ensureAckObserver(space: MemorySpace): void {
+    if (this.#ackObserverReleases.has(space)) return;
+    try {
+      const replica = this.#runtime.storageManager.open(space).replica;
+      if (!("speculationAckObserver" in replica)) return;
+      const observable = replica as {
+        speculationAckObserver: (() => void) | undefined;
+      };
+      observable.speculationAckObserver = () => {
+        if (this.#closed) return;
+        this.#sweep(space, this.#watermarks.get(space) ?? 0);
+      };
+      this.#ackObserverReleases.set(space, () => {
+        observable.speculationAckObserver = undefined;
+      });
+    } catch (error) {
+      logger.warn("ack-observer-failed", () => [
+        `origin-accept observer for ${space} failed; retirement of ` +
+        "verdict-raced entries will rely on later watermark events",
         error,
       ]);
     }
@@ -775,5 +963,18 @@ export class SpeculationOverlayDestination
     this.#intentSinks.clear();
     this.#trackedIntents.clear();
     this.#intentOutcomeSubscribers.clear();
+    for (const waiters of this.#intentConsequenceWaiters.values()) {
+      for (const resolve of waiters) resolve({ kind: "unsettled" });
+    }
+    this.#intentConsequenceWaiters.clear();
+    this.#intentConsequenceMemo.clear();
+    for (const release of this.#ackObserverReleases.values()) {
+      try {
+        release();
+      } catch {
+        // observer release is best-effort during teardown
+      }
+    }
+    this.#ackObserverReleases.clear();
   }
 }

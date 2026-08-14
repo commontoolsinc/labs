@@ -4,10 +4,10 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 // Relative import (not "@commonfabric/utils/types") for the same rollup
 // reason as traverse.ts.
-import { isRecord } from "../../utils/src/types.ts";
+import { isObjectOrArray } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell, isStream } from "./cell.ts";
-import { isSigilLink } from "./link-types.ts";
+import { isSigilLink, linkPathSegmentToCellPathSegment } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
 import {
   normalizePatternSource,
@@ -26,17 +26,17 @@ const logger = getLogger("piece-helpers");
 
 export type CellPath = (string | number)[];
 
+/**
+ * Splits a slash-separated cell path into its segments, converting each one
+ * through {@link linkPathSegmentToCellPathSegment} so that a path written on
+ * the command line addresses the same cells as the same path embedded in a
+ * reference. An empty path is no segments at all.
+ */
 export function parseCellPath(path: string): CellPath {
   if (!path || path.trim() === "") {
     return [];
   }
-  return path.split("/").map((segment) => {
-    if (segment === "") {
-      return segment;
-    }
-    const num = Number(segment);
-    return Number.isInteger(num) && num >= 0 ? num : segment;
-  });
+  return path.split("/").map(linkPathSegmentToCellPathSegment);
 }
 
 export function resolveCellPath<T>(
@@ -145,7 +145,8 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   tx?: IExtendedStorageTransaction,
 ): JSONSchema | undefined {
   if (
-    !isRecord(schema) || !isRecord(rawValue) || isSigilLink(rawValue) ||
+    !isObjectOrArray(schema) || !isObjectOrArray(rawValue) ||
+    isSigilLink(rawValue) ||
     Array.isArray(rawValue)
   ) {
     return schema;
@@ -219,7 +220,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   }
 
   let properties = schema.properties;
-  if (isRecord(properties)) {
+  if (isObjectOrArray(properties)) {
     let newProperties: Record<string, JSONSchema> | undefined;
     for (const [key, propSchema] of Object.entries(properties)) {
       const propValue = (rawValue as Record<string, unknown>)[key];
@@ -313,7 +314,7 @@ export function isLegacyPieceRegistryRoot(
   const patternIdentity = root.getMetaRaw("patternIdentity");
   const patternSource = root.getMetaRaw("patternSource");
   if (
-    !isRecord(patternIdentity) ||
+    !isObjectOrArray(patternIdentity) ||
     typeof patternIdentity.identity !== "string" ||
     typeof patternIdentity.symbol !== "string" ||
     (patternSource !== undefined &&

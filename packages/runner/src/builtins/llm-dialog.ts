@@ -34,7 +34,11 @@ import {
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  isBoolean,
+  isObjectNotArray,
+  isObjectOrArray,
+} from "@commonfabric/utils/types";
 import type { JSONSchemaObj } from "../builder/types.ts";
 import {
   ARRAY_SUBSCHEMA_KEYS,
@@ -185,7 +189,7 @@ function normalizeInputSchema(schemaLike: unknown): JSONSchema {
       additionalProperties: inputSchema,
     };
   }
-  if (!isObject(inputSchema)) inputSchema = { type: "object" };
+  if (!isObjectNotArray(inputSchema)) inputSchema = { type: "object" };
   const stripped = stripInjectedResult(inputSchema);
   return prepareSchemaForLLM(stripped);
 }
@@ -407,7 +411,7 @@ function simplifySchemaForContext(
   depth: number = 0,
   maxDepth: number = 3,
 ): JSONSchema {
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     return schema;
   }
 
@@ -446,7 +450,7 @@ function simplifySchemaForContext(
 
     // Keep properties, dropping $-prefixed ones ($UI, $TYPE, etc. are
     // internal/VDOM); their values are simplified by the walk below
-    if (key === "properties" && isRecord(value)) {
+    if (key === "properties" && isObjectOrArray(value)) {
       simplified[key] = Object.fromEntries(
         Object.entries(value).filter(([name]) => !name.startsWith("$")),
       );
@@ -608,7 +612,7 @@ function serializeForLLMObservation(
     }
   }
 
-  if (!isRecord(value)) {
+  if (!isObjectOrArray(value)) {
     return {
       value,
       observedConfidentiality: nodeConfidentiality,
@@ -718,7 +722,7 @@ function serializeForLLMObservation(
       });
       observedParts.push(child.observedConfidentiality);
 
-      if (isRecord(child.value) && isCellResultForDereferencing(v)) {
+      if (isObjectOrArray(child.value) && isCellResultForDereferencing(v)) {
         const link = getCellOrThrow(v).resolveAsCell()
           .getAsNormalizedFullLink();
         if (!hasDataUriScheme(link.id)) {
@@ -817,7 +821,7 @@ function traverseAndCellify(
       try {
         const parsed = JSON.parse(trimmed);
         if (
-          isRecord(parsed) && typeof parsed["@link"] === "string" &&
+          isObjectOrArray(parsed) && typeof parsed["@link"] === "string" &&
           Object.keys(parsed).length === 1 &&
           matchLLMFriendlyLink.test(parsed["@link"])
         ) {
@@ -834,7 +838,7 @@ function traverseAndCellify(
   // - it's a record with a single key "/"
   // - the value of the "/" key is a string that matches the URI pattern
   if (
-    isRecord(value) && typeof value["@link"] === "string" &&
+    isObjectOrArray(value) && typeof value["@link"] === "string" &&
     Object.keys(value).length === 1 && matchLLMFriendlyLink.test(value["@link"])
   ) {
     const link = parseLLMFriendlyLink(value["@link"], space);
@@ -869,7 +873,7 @@ function traverseAndCellify(
     );
   }
 
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     return Object.fromEntries(
       Object.entries(value).map((
         [key, value],
@@ -939,7 +943,7 @@ function resolveDirectContextCellRef(cell: unknown): Cell<any> | undefined {
     ? getCellOrThrow(cell).resolveAsCell()
     : isCell(cell)
     ? cell.resolveAsCell()
-    : isRecord(cell) && typeof cell.resolveAsCell === "function"
+    : isObjectOrArray(cell) && typeof cell.resolveAsCell === "function"
     ? cell.resolveAsCell()
     : undefined;
 }
@@ -1169,7 +1173,7 @@ function ensureString(
   field: string,
   example: string,
 ): string {
-  if (isRecord(value) && typeof value["@link"] === "string") {
+  if (isObjectOrArray(value) && typeof value["@link"] === "string") {
     return ensureString(value["@link"], field, example);
   }
   if (typeof value === "string") {
@@ -1614,7 +1618,7 @@ function buildAvailableCellsDocumentationWithObservation(
         : concreteCell.get() ?? concreteCell.getRaw();
       if (
         value === undefined &&
-        isRecord(schemaInfo) &&
+        isObjectOrArray(schemaInfo) &&
         Object.hasOwn(schemaInfo, "default")
       ) {
         value = (schemaInfo as Record<string, unknown>).default;
@@ -2092,9 +2096,10 @@ function toolAllowsObservedConfidentiality(
   }
 
   const toolSchema = toolCatalog.llmTools[toolName]?.inputSchema;
-  const maxConfidentiality = isRecord(toolSchema) && isRecord(toolSchema.ifc)
-    ? toolSchema.ifc.maxConfidentiality
-    : undefined;
+  const maxConfidentiality =
+    isObjectOrArray(toolSchema) && isObjectOrArray(toolSchema.ifc)
+      ? toolSchema.ifc.maxConfidentiality
+      : undefined;
   // A non-array ceiling means none was declared. A declared (even empty) ceiling
   // is enforced: an empty array is "public only". Delegate to
   // cfcObservationFitsCeiling rather than special-casing empty as allow-all,
@@ -2140,11 +2145,11 @@ function toolInputRequiredIntegrityFailure(
   path: string,
   trust: CfcFloorTrustContext,
 ): string | undefined {
-  if (!isRecord(schema)) {
+  if (!isObjectOrArray(schema)) {
     return undefined;
   }
   const ifc = schema.ifc;
-  if (isRecord(ifc) && Array.isArray(ifc.requiredIntegrity)) {
+  if (isObjectOrArray(ifc) && Array.isArray(ifc.requiredIntegrity)) {
     const required = ifc.requiredIntegrity;
     if (required.length > 0) {
       const integrity = toolInputValueIntegrity(runtime, space, value);
@@ -2164,14 +2169,14 @@ function toolInputRequiredIntegrityFailure(
       }
     }
   }
-  if (isRecord(schema.properties)) {
+  if (isObjectOrArray(schema.properties)) {
     for (const [key, childSchema] of Object.entries(schema.properties)) {
       // Only gate fields the model actually supplied. An absent (e.g. optional)
       // field carries no value to gate; treating it as `undefined` would fail
       // an optional field's floor and over-block the call. A required field the
       // model omitted is a structural error handled by ordinary input
       // validation, not a floor bypass — there is no injected value to gate.
-      if (!isRecord(value) || !Object.hasOwn(value, key)) {
+      if (!isObjectOrArray(value) || !Object.hasOwn(value, key)) {
         continue;
       }
       const failure = toolInputRequiredIntegrityFailure(
@@ -2201,7 +2206,7 @@ function toolInputRequiredIntegrityFailure(
       const slotSchema = prefixItems !== undefined && index < prefixItems.length
         ? prefixItems[index]
         : schema.items;
-      if (!isRecord(slotSchema)) continue;
+      if (!isObjectOrArray(slotSchema)) continue;
       const failure = toolInputRequiredIntegrityFailure(
         runtime,
         space,
@@ -2469,11 +2474,16 @@ async function safelyPerformUpdate(
   action: (tx: IExtendedStorageTransaction) => void,
 ) {
   const { ok } = await runtime.editWithRetry((tx) => {
-    markEffectCompletion(tx, `llmDialog:${requestId}`);
     if (
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
     ) {
+      // Marked on the arm that writes (round-2 thread 6): a bail-out
+      // (pending=false or a superseded requestId) writes nothing and
+      // must not commit as a spurious no-op effect-completion for
+      // `llmDialog:<requestId>` on every canceled/superseded turn. The
+      // marker still precedes every write of this arm.
+      markEffectCompletion(tx, `llmDialog:${requestId}`);
       action(tx);
       internal.withTx(tx).key("lastActivity").set(Date.now());
       return true;
@@ -2489,12 +2499,43 @@ async function safelyPerformUpdate(
 }
 
 /**
+ * `editWithRetry` bound to the turn's abort signal (round-2 thread 14):
+ * a stopped or replaced turn must not persist pin/unpin/argument state
+ * from a tool call that was mid-flight when the cancel landed. Checked
+ * before starting AND inside the callback (a retry attempt after the
+ * cancel aborts too — the throw makes editWithRetry abort the tx and
+ * return the error without committing).
+ */
+function editWithRetryUnlessAborted(
+  runtime: Runtime,
+  abortSignal: AbortSignal | undefined,
+  fn: (tx: IExtendedStorageTransaction) => void,
+): ReturnType<Runtime["editWithRetry"]> {
+  if (abortSignal?.aborted) {
+    return Promise.resolve({
+      error: {
+        name: "StorageTransactionAborted" as const,
+        message: "Tool call cancelled",
+        reason: new Error("turn-aborted"),
+      },
+    });
+  }
+  return runtime.editWithRetry((tx) => {
+    if (abortSignal?.aborted) {
+      throw new Error("Tool call cancelled");
+    }
+    fn(tx);
+  });
+}
+
+/**
  * Handles the pin tool call.
  */
 async function handlePin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "pin" },
   pinnedCells: Cell<PinnedCell[]>,
+  abortSignal?: AbortSignal,
 ): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
 
@@ -2517,14 +2558,20 @@ async function handlePin(
   // The lifecycle subkey is deliberately NOT the turn's own effect key:
   // retiring `llmDialog:<requestId>` mid-turn would tear the turn's
   // in-flight dedupe entry.
-  // NOTE (review 2026-08-11): the completion path's identity
-  // annotations fall back to the WAVE-LEVEL identity when no outbox
-  // carriage is live (space-server.ts's effect-completion comment). If
-  // `pinnedCells` is ever SCOPED (per-user/per-session), this commit
-  // would resolve against the serving session's identity, not the
-  // acting user's instance — revisit the completion key's identity
-  // sourcing then. Applies to unpin below identically.
-  const committed = await runtime.editWithRetry((tx) => {
+  // NOTE (review 2026-08-11; T17 pinned 2026-08-14): the completion
+  // path's identity annotations fall back to the WAVE-LEVEL identity
+  // when no outbox carriage is live (space-server.ts's
+  // effect-completion comment) — and these lifecycle subkeys carry no
+  // carriage by construction. Sound while `pinnedCells` is
+  // space-scope. If it is ever SCOPED (per-user/per-session), this
+  // commit would resolve against the serving session's identity, not
+  // the acting user's instance — the T17 lifecycle-carriage pin in
+  // executor-serving-loop.test.ts binds exactly that fallback (scoped
+  // op under the wave key, no attribution) and is the test such a
+  // change must flip. Applies to unpin below identically.
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
     markEffectCompletion(tx, "llmDialog:lifecycle:pin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     pinnedCells.withTx(tx).set([
@@ -2556,6 +2603,7 @@ async function handleUnpin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "unpin" },
   pinnedCells: Cell<PinnedCell[]>,
+  abortSignal?: AbortSignal,
 ): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
   const filtered = current.filter((p) => p.path !== resolved.path);
@@ -2571,7 +2619,9 @@ async function handleUnpin(
   // handlePin (Flag 4). Classification (RULED 2026-08-05;
   // IMPLEMENTED with Phase 3): unpin is COMPLETION-CLASS
   // turn-lifecycle state.
-  const committed = await runtime.editWithRetry((tx) => {
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
     markEffectCompletion(tx, "llmDialog:lifecycle:unpin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     const filteredInTx = currentInTx.filter((p) => p.path !== resolved.path);
@@ -2667,6 +2717,7 @@ async function handleRead(
 async function handleUpdateArgument(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "updateArgument" },
+  abortSignal?: AbortSignal,
 ): Promise<{ type: string; value: any }> {
   const cell = resolved.cellRef;
   const updates = resolved.updates;
@@ -2697,13 +2748,23 @@ async function handleUpdateArgument(
   // tool-call consequence, not a stream event — a raced rebase that
   // conflicts semantically rolls it back with nothing to requeue,
   // which is the class's inherent no-event corner.
-  const committed = await runtime.editWithRetry((tx) => {
+  const committed = await editWithRetryUnlessAborted(runtime, abortSignal, (
+    tx,
+  ) => {
     runtime.stampServerRun(tx, {
-      actionId: "llm-dialog/update-argument",
+      // Keyed per TARGET instance (round-2 thread T28): one global id
+      // made the wave's §3b overwrite unit treat CONCURRENT
+      // updateArgument calls against different targets as re-runs of
+      // one action — a later contribution's basis/rebase rows replaced
+      // an earlier unrelated one's as a set. The argument doc id is
+      // durable and retry-stable.
+      actionId: `llm-dialog/update-argument:${
+        argumentCell.getAsNormalizedFullLink().id
+      }`,
       kind: "event-handler",
     });
     if (
-      isRecord(cellifiedValue) && !Array.isArray(cellifiedValue) &&
+      isObjectNotArray(cellifiedValue) &&
       !isCell(cellifiedValue)
     ) {
       argumentCell.withTx(tx).update(cellifiedValue);
@@ -2889,7 +2950,8 @@ async function handleInvoke(
       // the caller's ordinary field. The advertised schema hides `result`
       // (stripInjectedResult), so a well-behaved caller never sends one and
       // always gets the injected cell.
-      const injectResult = !(isRecord(input) && Object.hasOwn(input, "result"));
+      const injectResult =
+        !(isObjectOrArray(input) && Object.hasOwn(input, "result"));
       handler.withTx(tx).send(
         injectResult
           ? {
@@ -3060,14 +3122,14 @@ async function invokeToolCall(
   // Handle pinned cell tools
   if (resolved.type === "pin") {
     return {
-      result: await handlePin(runtime, resolved, pinnedCells!),
+      result: await handlePin(runtime, resolved, pinnedCells!, abortSignal),
       observedConfidentiality: [],
     };
   }
 
   if (resolved.type === "unpin") {
     return {
-      result: await handleUnpin(runtime, resolved, pinnedCells!),
+      result: await handleUnpin(runtime, resolved, pinnedCells!, abortSignal),
       observedConfidentiality: [],
     };
   }
@@ -3100,7 +3162,7 @@ async function invokeToolCall(
   // Handle run-type tools (external, run with pattern/handler)
   if (resolved.type === "updateArgument") {
     return {
-      result: await handleUpdateArgument(runtime, resolved),
+      result: await handleUpdateArgument(runtime, resolved, abortSignal),
       observedConfidentiality: [],
     };
   }
@@ -4144,7 +4206,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
 function getSchemaTypeString(schema: JSONSchema): string {
   let defs;
-  if (isRecord(schema)) {
+  if (isObjectOrArray(schema)) {
     // Convert schema to TypeScript-like string for readability
     defs = (schema as Record<string, unknown>).$defs as
       | Record<string, JSONSchema>

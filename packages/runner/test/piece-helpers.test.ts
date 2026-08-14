@@ -1,4 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -50,6 +51,16 @@ describe("parseCellPath", () => {
       "negative",
     ]);
     assertEquals(parseCellPath(""), []);
+  });
+
+  it("converts only the segments that are canonical array indexes", () => {
+    expect(parseCellPath("items/01/1e3/ 1 /4294967295")).toEqual([
+      "items",
+      "01",
+      "1e3",
+      " 1 ",
+      "4294967295",
+    ]);
   });
 });
 

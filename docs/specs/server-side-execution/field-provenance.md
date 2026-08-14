@@ -3,11 +3,11 @@
 **Verification instrument, NON-NORMATIVE** — the second of the pair
 (see [scenario-traces.md](scenario-traces.md), which owns the
 shared execution protocol). Traces evaluate the spec top-down along
-twelve hand-picked journeys; this audit is the bottom-up
+thirteen hand-picked journeys; this audit is the bottom-up
 complement: for each load-bearing FIELD, enumerate every producer,
 every carrier hop, every consumer, and every retirement, and check
 that the chain CLOSES on every path family — mechanically, over
-all paths, not twelve samples.
+all paths, not thirteen samples.
 
 Origin (2026-08-03): every heavyweight defect of the review week
 was one shape — *a value needed downstream, destroyed or dropped

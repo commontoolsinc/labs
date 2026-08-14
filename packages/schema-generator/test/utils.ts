@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { StaticCache } from "@commonfabric/static";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import type { JSONSchemaObj } from "@commonfabric/api";
 
@@ -460,7 +460,7 @@ function normalizeAnyOf(node: any): any {
   if (node.anyOf.length === 2) {
     const a = node.anyOf[0];
     const b = node.anyOf[1];
-    const isNull = (x: any) => isRecord(x) && x.type === "null";
+    const isNull = (x: any) => isObjectOrArray(x) && x.type === "null";
     if (isNull(b) && !isNull(a)) {
       node.anyOf = [b, a];
     }
@@ -491,7 +491,7 @@ function deepCanonicalize(node: unknown): unknown {
   // descend into. There is no faithful way to do that through `Object.entries`
   // either, so a `FabricInstance` still flattens to `{}` here. Handling it is
   // left for when the golden path needs to carry one.
-  if (!isRecord(node) || node instanceof FabricPrimitive) return node;
+  if (!isObjectOrArray(node) || node instanceof FabricPrimitive) return node;
 
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node)) {

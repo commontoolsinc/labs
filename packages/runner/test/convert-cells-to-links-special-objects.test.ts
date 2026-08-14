@@ -1,8 +1,10 @@
-// The two special-object kinds get opposite treatment, and neither is the
-// object branch. A `FabricPrimitive` is a leaf and stands whole, where a walk
-// that rebuilt it from its entries would give a bare `{}`. A `FabricInstance`
-// is a container reached by its codec contents, which this walk cannot do, so
-// it refuses rather than converting one wrongly.
+/**
+ * The two special-object kinds get opposite treatment, and neither is the
+ * object branch. A `FabricPrimitive` is a leaf and stands whole, where a walk
+ * that rebuilt it from its entries would give a bare `{}`. A `FabricInstance`
+ * is a container reached by its codec contents, which this walk cannot do, so
+ * it refuses rather than converting one wrongly.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

@@ -13,7 +13,11 @@ import type { VDomBatch, VDomOp } from "../vdom-ops.ts";
 import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { provideElementSpace } from "./space-context.ts";
+import {
+  clearPieceBoundary,
+  provideElementSpace,
+  providePieceBoundary,
+} from "./space-context.ts";
 
 const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 
@@ -122,7 +126,6 @@ export class DomApplicator {
     if (batch.rootId !== undefined) {
       this.rootNodeId = batch.rootId;
     }
-
     const elapsed = logger.timeEnd("apply-batch");
     logger.debug("apply-batch", () => [
       `Applied ${opCount} ops in ${elapsed?.toFixed(2)}ms`,
@@ -167,6 +170,14 @@ export class DomApplicator {
 
       case "set-binding":
         this.setBinding(op.nodeId, op.propName, op.cellRef);
+        break;
+
+      case "set-piece-boundary":
+        this.setPieceBoundary(op.nodeId, op.cellRef);
+        break;
+
+      case "clear-piece-boundary":
+        this.clearPieceBoundary(op.nodeId);
         break;
 
       case "insert-child":
@@ -229,6 +240,7 @@ export class DomApplicator {
     // Remove all nodes except the container (it's owned by the caller)
     for (const [nodeId, node] of this.nodes) {
       if (nodeId === CONTAINER_NODE_ID) continue;
+      if (isElementNode(node)) clearPieceBoundary(node);
       if (
         node.parentNode &&
         typeof (node.parentNode as ParentNode & { removeChild?: unknown })
@@ -416,6 +428,17 @@ export class DomApplicator {
     this.notifyBoundProperty(node, propName);
   }
 
+  private setPieceBoundary(nodeId: number, cellRef: CellRef): void {
+    const node = this.nodes.get(nodeId);
+    if (!isElementNode(node) || !this.runtimeClient) return;
+    providePieceBoundary(node, new CellHandle(this.runtimeClient, cellRef));
+  }
+
+  private clearPieceBoundary(nodeId: number): void {
+    const node = this.nodes.get(nodeId);
+    if (isElementNode(node)) clearPieceBoundary(node);
+  }
+
   private notifyBoundProperty(
     node: HTMLElement,
     propName: string,
@@ -549,6 +572,8 @@ export class DomApplicator {
       this.eventListeners.delete(nodeId);
     }
 
+    if (isElementNode(node)) clearPieceBoundary(node);
+
     // Remove from DOM
     if (node.parentNode) {
       node.parentNode.removeChild(node);
@@ -592,6 +617,8 @@ export class DomApplicator {
 
       // Clean up this child
       const childNode = this.nodes.get(childId);
+
+      if (isElementNode(childNode)) clearPieceBoundary(childNode);
 
       // Remove event listeners
       const listeners = this.eventListeners.get(childId);

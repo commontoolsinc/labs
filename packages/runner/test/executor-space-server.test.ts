@@ -26,9 +26,19 @@ import {
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
 import { liveExecutionLeaseHolder } from "@commonfabric/memory/v2/execution-lease";
+import {
+  decodeMemoryBoundary,
+  resolveScopeKey,
+  streamEntriesDocId,
+  type StreamEventsDocValue,
+} from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../src/storage/interface.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { SpaceServer } from "../src/executor/space-server.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
@@ -60,9 +70,12 @@ const waitUntil = async (
   }
 };
 
+const pendingRowStream = { id: "of:space-server-stream", path: [] as string[] };
+const pendingRowSidecar = streamEntriesDocId(pendingRowStream);
 const pendingRow = (eventId: string) => ({
   targetSpace,
-  targetStream: "of:stream-events:space-server",
+  targetStream: pendingRowSidecar,
+  targetStreamLink: pendingRowStream,
   eventId,
   payload: { via: "recovery seam" },
   actingPrincipal: "user:alice",
@@ -88,13 +101,17 @@ describe("stage G SpaceServer recovery seams", () => {
     await server.close();
   });
 
+  let lastStats = emptyServingLoopStats();
+
   const newSpaceServer = (
     options: {
       serverFacade?: MemoryV2Server.Server;
       stats?: ServingLoopStats;
+      policy?: ConstructorParameters<typeof SpaceServer>[0]["policy"];
     } = {},
   ): SpaceServer => {
     const stats = options.stats ?? emptyServingLoopStats();
+    lastStats = stats;
     const created = new SpaceServer({
       space,
       server: options.serverFacade ?? server,
@@ -121,7 +138,7 @@ describe("stage G SpaceServer recovery seams", () => {
       },
       localSeqRef: { value: 0 },
       stats,
-      policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+      policy: options.policy ?? { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
     });
     spaceServer = created;
     return created;
@@ -215,7 +232,7 @@ describe("stage G SpaceServer recovery seams", () => {
     );
     const targetEngine = await server.engineForSpace(targetSpace);
     const doc = Engine.read(targetEngine, {
-      id: "of:stream-events:space-server",
+      id: pendingRowSidecar,
     });
     const entries = (doc?.value as { entries?: Array<Record<string, unknown>> })
       ?.entries ?? [];
@@ -265,7 +282,7 @@ describe("stage G SpaceServer recovery seams", () => {
     );
     const targetEngine = await server.engineForSpace(targetSpace);
     const doc = Engine.read(targetEngine, {
-      id: "of:stream-events:space-server",
+      id: pendingRowSidecar,
     });
     const entries = (doc?.value as { entries?: Array<unknown> })?.entries ?? [];
     expect(entries.length).toBe(1);
@@ -493,5 +510,735 @@ describe("stage G SpaceServer recovery seams", () => {
       15_000,
     );
     expect(stats.watermarkClamped).toBe(3);
+  });
+
+  it("fires an EFFECT-ONLY batch on a quiet space: an all-no-op tx's deferred effects close a vacuous wave instead of starving until park (round-2 thread 1)", async () => {
+    // The §6-step-3 recovery shape: an activation re-run of an
+    // effectful node whose claim is already durable seals an ALL-NO-OP
+    // transaction (its claim writes elide) that carries only the
+    // effect. It mints NO contribution, so the pre-fix loop — which
+    // closed waves only for contributions or watermark movement —
+    // never closed the wave holding the batch: on a quiet space the
+    // effect starved, and the eventual idle park dropped it.
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+
+    const runtime = servingRuntime!;
+    let flushed = 0;
+    const seqBefore = Engine.serverSeq(engine);
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "test/effect-only-reissue",
+      kind: "derivation",
+    });
+    // NO writes: the tx seals empty (contributes nothing) and carries
+    // one deferred effect.
+    tx.enqueuePostCommitEffect({
+      id: "fetchTest:effect-only",
+      kind: "fetchTest-start",
+      flush: () => {
+        flushed += 1;
+      },
+    });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // The effect must FIRE with no further input: the loop counts the
+    // deferred batch as work, closes the (vacuous, zero-contribution)
+    // wave, and admits the batch to the outbox.
+    await waitUntil(
+      () => flushed === 1,
+      "the effect-only batch to fire on the quiet space",
+    );
+    // Vacuous close: nothing was committed for it.
+    expect(Engine.serverSeq(engine)).toBe(seqBefore);
+    expect(created.deferredEffectWaveCount).toBe(0);
+  });
+
+  it("discards a REJECTED wave's effects: a terminal engine-side rejection withdraws the claims, so the batch must not egress (round-2 thread 3)", async () => {
+    const created = newSpaceServer({
+      // Renewals must not repair the lease mid-test: the rejection is
+      // staged by deleting the engine-side lease row while the
+      // in-process tenure stays valid.
+      policy: {
+        flushDeadlineMs: 2_000,
+        idleParkMs: 600_000,
+        renewIntervalMs: 600_000,
+      },
+    });
+    expect(await created.activate()).toBe(true);
+    const runtime = servingRuntime!;
+
+    // Pull the engine-side lease row out from under the ACTIVE server:
+    // the in-process tenure check still passes (no renew ran), so the
+    // wave proceeds to its commit — where the engine's derived-class
+    // admission (holder must hold the LIVE execution_lease) refuses it
+    // with a conflict-less rejection: the accumulator's terminal
+    // `aborted: "rejected"` arm, exactly the failed-wave shape the
+    // admission gate must discard effects for.
+    engine.database.prepare(
+      `DELETE FROM execution_lease WHERE space = :space`,
+    ).run({ space });
+
+    let flushed = 0;
+    const probe = runtime.getCell<{ n: number }>(
+      space,
+      "rejected-wave-probe",
+      undefined,
+    );
+    await probe.sync();
+    const seqBefore = Engine.serverSeq(engine);
+    const wavesBefore = lastStats.waves;
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "test/rejected-wave",
+      kind: "derivation",
+    });
+    probe.withTx(tx).set({ n: 1 });
+    tx.enqueuePostCommitEffect({
+      id: "fetchTest:rejected-wave",
+      kind: "fetchTest-start",
+      flush: () => {
+        flushed += 1;
+      },
+    });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // The wave closes (counted) but commits nothing and — the pin —
+    // its effects are DISCARDED, not admitted: the sealed claim writes
+    // were withdrawn with the rejection, so firing would egress work
+    // whose claim never became durable (pre-fix, every non-lease-lost
+    // abort admitted the batch).
+    await waitUntil(
+      () => lastStats.waves > wavesBefore,
+      "the rejected wave to be counted",
+    );
+    // Give a wrongly-admitted flush every chance to run before the
+    // negative assertion.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(flushed).toBe(0);
+    expect(Engine.serverSeq(engine)).toBe(seqBefore);
+  });
+
+  // ---- stage P2-F: late-notice accounting (the sx2 unskip flake) ----
+
+  it("counts an authored notice that arrives AFTER a higher-seq echo (the two-producer notice race): late records still count and re-arm, and coverage stays in-order", async () => {
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({ stats });
+    expect(await created.activate()).toBe(true);
+
+    // Two REAL commits, enqueued out of order — the loop's own
+    // post-commit notice (seq S+1) landing before the transact
+    // path's async admission notice (seq S), exactly the in-process
+    // race the unskipped sx2 gate exposed (authoredSeen undercounted
+    // while W stayed honest).
+    const first = await server.writeDocument(space, "of:p2f-late-a", {
+      n: 1,
+    });
+    const second = await server.writeDocument(space, "of:p2f-late-b", {
+      n: 2,
+    });
+    const authoredBefore = stats.authoredSeen;
+    created.enqueueCommit({
+      space,
+      seq: second.seq,
+      class: "authored",
+      sessionId: "session:p2f-late",
+      writes: [{ id: "of:p2f-late-b", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => created.watermark >= second.seq,
+      "the in-order record to drain and settle",
+    );
+    // The LATE notice: seq below the drained head. Pre-fix it was
+    // silently skipped (never counted); post-fix it counts exactly
+    // once — a replayed duplicate stays skipped.
+    created.enqueueCommit({
+      space,
+      seq: first.seq,
+      class: "authored",
+      sessionId: "session:p2f-late",
+      writes: [{ id: "of:p2f-late-a", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => stats.authoredSeen === authoredBefore + 2,
+      "the late authored notice to be counted",
+    );
+    created.enqueueCommit({
+      space,
+      seq: first.seq,
+      class: "authored",
+      sessionId: "session:p2f-late",
+      writes: [{ id: "of:p2f-late-a", scopeKey: "space" }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(stats.authoredSeen).toBe(authoredBefore + 2);
+    // Coverage math stayed in-order: W never regressed.
+    expect(created.watermark).toBeGreaterThanOrEqual(second.seq);
+  });
+
+  // ---- stage P2-F: the demand-cycle terminal state (OW19) ----
+
+  /** A facade whose watch registry names exactly the given demanded
+   * roots — the unit-level stand-in for client sessions' watches (the
+   * production feed is pinned in the serving-loop E2E). */
+  const demandFacade = (
+    roots: Array<{
+      id: string;
+      scope?: string;
+      identity?: { principal?: string; sessionId?: string };
+    }>,
+  ): typeof server =>
+    new Proxy(server, {
+      get(target, prop, receiver) {
+        if (prop === "watchedRootsForSpace") {
+          return () => roots;
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof server;
+
+  it("terminalizes a confirmed no-meta demanded root and STOPS the per-cycle churn (OW19's terminal half)", async () => {
+    // A doc that EXISTS durably with a plain value and NO pattern meta
+    // — the never-a-piece `of:` class (registry/home/argument docs)
+    // that id classes cannot exclude.
+    await server.writeDocument(space, "of:p2f-terminal-root", { plain: 1 });
+
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({
+      stats,
+      serverFacade: demandFacade([{ id: "of:p2f-terminal-root" }]),
+    });
+    expect(await created.activate()).toBe(true);
+
+    // The root terminalizes: attempted, confirmed synced-no-meta,
+    // parked — counted once.
+    await waitUntil(
+      () => stats.structureLoadTerminal === 1,
+      "the demanded root to terminalize",
+    );
+
+    // THE CHURN STOPS (the starvation fork's fix): further cycles —
+    // driven by unrelated commits — re-attempt NOTHING for the parked
+    // root. Pre-P2-F every input-driven cycle re-ran the ensure
+    // (structureLoadDeferred grew per cycle, unbounded).
+    const deferredAtTerminal = stats.structureLoadDeferred;
+    const terminalAtTerminal = stats.structureLoadTerminal;
+    for (let i = 0; i < 4; i++) {
+      const applied = await server.writeDocument(
+        space,
+        `of:p2f-unrelated-${i}`,
+        { n: i },
+      );
+      created.enqueueCommit({
+        space,
+        seq: applied.seq,
+        class: "system",
+        sessionId: "session:p2f-unrelated",
+        writes: [{ id: `of:p2f-unrelated-${i}`, scopeKey: "space" }],
+      });
+      await waitUntil(
+        () => created.watermark >= applied.seq,
+        `unrelated cycle ${i} to settle`,
+      );
+    }
+    expect(stats.structureLoadDeferred).toBe(deferredAtTerminal);
+    expect(stats.structureLoadTerminal).toBe(terminalAtTerminal);
+    expect(stats.structureLoadRearmed).toBe(0);
+    expect(stats.structureLoadFailures).toBe(0);
+  });
+
+  it("re-arms a terminal root on a commit touching it and LOADS a piece created after the terminal decision (OW19's not-yet half)", async () => {
+    const stats = emptyServingLoopStats();
+    const rootName = "p2f-created-later";
+    const created = newSpaceServer({ stats });
+    expect(await created.activate()).toBe(true);
+    const runtime = servingRuntime!;
+
+    // The demanded root's id BEFORE anything exists at it — the
+    // creation race's first half: demand precedes the piece.
+    const rootCell = runtime.getCell<{ total?: number }>(
+      space,
+      rootName,
+      undefined,
+    );
+    const rootId = rootCell.getAsNormalizedFullLink().id;
+
+    // Point the demand facade at it (swapped in via the server's
+    // observer seam: the SpaceServer reads watchedRootsForSpace on
+    // every demand pass, so overriding the method on the shared server
+    // object works mid-flight).
+    const originalWatched = server.watchedRootsForSpace.bind(server);
+    (server as { watchedRootsForSpace: unknown }).watchedRootsForSpace =
+      () => [{ id: rootId }];
+    try {
+      // Fire a demand pass; the absent root confirms no-meta and
+      // terminalizes (not-yet and never are indistinguishable HERE —
+      // the re-arm below is what distinguishes them). Poll-fired: the
+      // wake resolves the loop's input wait, which is re-armed between
+      // cycles (the clamp test's idiom).
+      await waitUntil(
+        () => {
+          created.noteDemandChanged();
+          return stats.structureLoadTerminal === 1;
+        },
+        "the not-yet-created root to terminalize",
+      );
+
+      // NOW create the piece at that root through a CLIENT runtime —
+      // the scheduler tell's creation shape (an outside-scheduler
+      // authored act; protocol.md §1): its commit is a fresh authored
+      // admission whose notice the admission hook would deliver — this
+      // direct-drive harness hand-feeds the same notice with the
+      // commit's REAL seq.
+      const creatorManager = EmulatedStorageManager.connectTo(server, {
+        as: spaceSigner,
+      });
+      const creator = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: creatorManager,
+      });
+      try {
+        const compiled = await creator.patternManager.compilePattern({
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents: [
+              "import { computed, pattern } from 'commonfabric';",
+              "export default pattern<{ n: number }, { total: number }>(",
+              "  ({ n }) => ({ total: computed(() => n + 7) }),",
+              ");",
+            ].join("\n"),
+          }],
+        }, { space });
+        const argument = creator.getCell<{ n: number }>(
+          space,
+          "p2f-created-later-arg",
+          undefined,
+        );
+        const creatorRoot = creator.getCell<{ total?: number }>(
+          space,
+          rootName,
+          undefined,
+        );
+        await argument.sync();
+        await creatorRoot.sync();
+        const argTx = creator.edit();
+        argument.withTx(argTx).set({ n: 1 });
+        creator.run(argTx, compiled, argument, creatorRoot);
+        expect((await argTx.commit()).error).toBeUndefined();
+        await creator.idle();
+        await creator.storageManager.synced();
+      } finally {
+        await creator.dispose();
+        await creatorManager.close();
+      }
+      const creationSeq = Engine.serverSeq(engine);
+      created.enqueueCommit({
+        space,
+        seq: creationSeq,
+        class: "authored",
+        sessionId: "session:p2f-creator",
+        writes: [{ id: rootId, scopeKey: "space" }],
+      });
+
+      await waitUntil(
+        () => stats.structureLoadRearmed === 1,
+        "the terminal root to re-arm on the creation commit",
+      );
+      // The settle-gated retry LOADS the piece: no re-terminalization,
+      // and the piece's derivation serves — the derived total lands in
+      // the engine under a derived-class commit.
+      await waitUntil(
+        () => {
+          const row = engine.database.prepare(
+            `SELECT c.class AS class FROM revision r
+             JOIN "commit" c ON c.seq = r.commit_seq
+             WHERE r.id LIKE 'computed:%' ORDER BY r.seq DESC LIMIT 1`,
+          ).get() as { class: string } | undefined;
+          return row?.class === "derived";
+        },
+        "the re-armed piece to derive server-side",
+        15_000,
+      );
+      expect(stats.structureLoadTerminal).toBe(1);
+      expect(stats.structureLoadFailures).toBe(0);
+    } finally {
+      (server as { watchedRootsForSpace: unknown }).watchedRootsForSpace =
+        originalWatched;
+    }
+  });
+
+  // ---- stage P2-F: the argument-doc demand → owning-piece run supply ----
+
+  it("supplies a scoped ARGUMENT-doc demand's identity to the owning piece's derivation runs: the ensure-resolved root differs from the demanded id, and the derived commit still carries the demanding actor (the #pieceRootByDemandKey arm)", async () => {
+    // An ordinary nested-doc watch: the client's scoped subscription
+    // names the piece's ARGUMENT doc, not its result root. The demand
+    // key therefore never matches the piece root by suffix — the run
+    // supply finds the demand's identity ONLY through the structure
+    // load's resolved-root mapping. If that mapping silently breaks,
+    // the demanded derivation falls back to the wave identity and its
+    // writes classify USERLESS — the exact misclassification stage
+    // P2-F exists to end, which is why this pin binds the OBSERVABLE
+    // (the derived commit's acting annotations), not the map.
+    //
+    // The piece, created BEFORE serving starts, via a client runtime.
+    // The demanded doc is the piece's argument META doc (the runner's
+    // own argument cell, which carries the `result` backlink the
+    // ensure traversal follows to the owning root).
+    const creatorManager = EmulatedStorageManager.connectTo(server, {
+      as: spaceSigner,
+    });
+    const creator = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: creatorManager,
+    });
+    let pieceRootId: string;
+    let argMetaDocId: string;
+    let inputDocId: string;
+    try {
+      const compiled = await creator.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            "  ({ n }) => ({ total: computed(() => n + 7) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const input = creator.getCell<{ n: number }>(
+        space,
+        "p2f-argdemand-input",
+        undefined,
+      );
+      const root = creator.getCell<{ total?: number }>(
+        space,
+        "p2f-argdemand-root",
+        undefined,
+      );
+      await input.sync();
+      await root.sync();
+      const tx = creator.edit();
+      input.withTx(tx).set({ n: 1 });
+      creator.run(tx, compiled, input, root);
+      expect((await tx.commit()).error).toBeUndefined();
+      await creator.idle();
+      await creator.storageManager.synced();
+      pieceRootId = root.getAsNormalizedFullLink().id;
+      inputDocId = input.getAsNormalizedFullLink().id;
+      argMetaDocId = getMetaLink(root, "argument")!.id;
+    } finally {
+      await creator.dispose();
+      await creatorManager.close();
+    }
+    // The mapping premise: the demanded id is NOT the owning root.
+    expect(argMetaDocId).not.toBe(pieceRootId);
+
+    // The demander's scoped watch on the argument doc (identity-
+    // bearing) coexists with a plain space demand on the piece root
+    // (the value subscription that pulls the derivation; it carries no
+    // identity and mints no run of its own — scopes.md §5: the run set
+    // is exactly the identity-bearing demand entries, and a coexisting
+    // space demand rides those runs).
+    const demander = {
+      principal: "did:key:p2f-argdemander",
+      sessionId: "argdemander-s1",
+    };
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({
+      stats,
+      serverFacade: demandFacade([
+        { id: pieceRootId },
+        { id: argMetaDocId, scope: "user", identity: demander },
+      ]),
+    });
+    expect(await created.activate()).toBe(true);
+
+    // The authored input: a client writes the piece's argument value;
+    // the notice drives the cycle whose wave re-derives `total` — as
+    // the DEMANDING instance.
+    const pokerManager = EmulatedStorageManager.connectTo(server, {
+      as: spaceSigner,
+    });
+    const poker = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: pokerManager,
+    });
+    try {
+      const input = poker.getCell<{ n: number }>(
+        space,
+        "p2f-argdemand-input",
+        undefined,
+      );
+      await input.sync();
+      const pokeTx = poker.edit();
+      input.withTx(pokeTx).set({ n: 2 });
+      expect((await pokeTx.commit()).error).toBeUndefined();
+      await poker.storageManager.synced();
+    } finally {
+      await poker.dispose();
+      await pokerManager.close();
+    }
+    created.enqueueCommit({
+      space,
+      seq: Engine.serverSeq(engine),
+      class: "authored",
+      sessionId: "session:p2f-argdemand-poker",
+      writes: [{ id: inputDocId, scopeKey: "space" }],
+    });
+
+    // THE PIN (neutralization red: with the `#pieceRootByDemandKey`
+    // match removed from `#runInstancesFor` — or the setter that feeds
+    // it dropped — no instance resolves for the owning root, the run
+    // falls back to the wave identity, and no acting annotation ever
+    // lands): the derived commit's write annotations carry the
+    // demanding (user, session).
+    const actingRows = () => {
+      const rows = engine.database.prepare(
+        `SELECT annotations FROM "commit" WHERE class = 'derived' AND
+         annotations IS NOT NULL`,
+      ).all() as Array<{ annotations: string }>;
+      return rows.flatMap((row) =>
+        decodeMemoryBoundary(row.annotations) as unknown as Array<{
+          actingUser?: string;
+          actingSession?: string;
+        }>
+      ).filter((annotation) => annotation.actingUser !== undefined);
+    };
+    await waitUntil(
+      () => actingRows().some((a) => a.actingUser === demander.principal),
+      "the argument-demand derivation to act as the demanding user",
+      15_000,
+    );
+    expect(
+      actingRows().some((a) =>
+        a.actingUser === demander.principal &&
+        a.actingSession === demander.sessionId
+      ),
+    ).toBe(true);
+
+    // The same run's basis rows key under the demander's INSTANCE
+    // (serving-loop.md §3b's action_scope_key) — the supply reached
+    // keys, not only stamps.
+    const expectedInstanceKey = resolveScopeKey("user", demander as never);
+    const basisKeys = new Set(
+      (engine.database.prepare(
+        `SELECT DISTINCT action_scope_key FROM scheduler_basis`,
+      ).all() as Array<{ action_scope_key: string }>).map((row) =>
+        row.action_scope_key
+      ),
+    );
+    expect(basisKeys.has(expectedInstanceKey)).toBe(true);
+
+    // The argument-doc demand RESOLVED (started through the owning
+    // root) — it neither terminalized nor failed.
+    expect(stats.structureLoadTerminal).toBe(0);
+    expect(stats.structureLoadFailures).toBe(0);
+  });
+
+  it("LT6 at the events-down layer: an event emitted by a DEMANDED (user, session) derivation run carries the demanding actor on its durable entry — and with the supply neutral (no demanded instance) the same emission classifies userless", async () => {
+    // The cross-stack blocker this pin closes (round-2, STEP 3): under
+    // Phase 3 a serving-arm emission stamps the entry's `firedAt` from
+    // the RUN's acting identity (cell.ts, events.md §2) — but before
+    // stage P2-F no derivation run ever HAD one, so a demanded user's
+    // derivation emitted userless events (`firedAt.session = "server"`,
+    // no user), and delivery destroyed the actor. With the
+    // per-(action × instance) run supply below us, the whole
+    // production chain is drivable: demand registry → run.ts's
+    // per-instance fan-out → #stampRun's acting derivation → the
+    // serving-arm same-space emission → the durable entry → the drain's
+    // dispatch → the handler's attribution. The pin binds the DURABLE
+    // OBSERVABLES (the sidecar entry's `firedAt`, the handler
+    // consequence's acting annotations), with the supply-neutral arm
+    // first: the SAME emission machinery, run without a demanded
+    // instance, emits the userless shape — restore the supply and the
+    // actor is carried. (events.md §2; scopes.md §5; LT6 RULED
+    // 2026-08-03: "events run as the session they originated from".)
+    const demander = {
+      principal: "did:key:lt6-demander",
+      sessionId: "lt6-s1",
+    };
+    const demandedRoot = "of:lt6-demanded-root";
+    await server.writeDocument(space, demandedRoot, { plain: 1 });
+
+    // Stream + probe docs, created by a CLIENT runtime (client commits
+    // land natively; the serving runtime's own writes must ride stamped
+    // waves).
+    const creatorManager = EmulatedStorageManager.connectTo(server, {
+      as: spaceSigner,
+    });
+    const creator = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: creatorManager,
+    });
+    try {
+      for (
+        const name of [
+          "lt6-stream-userless",
+          "lt6-stream-demanded",
+        ]
+      ) {
+        const stream = creator.getCell<unknown>(space, name, undefined);
+        await stream.sync();
+        const tx = creator.edit();
+        stream.withTx(tx).setRaw({ $stream: true });
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      for (const name of ["lt6-probe-userless", "lt6-probe-demanded"]) {
+        const probe = creator.getCell<{ handled?: number }>(
+          space,
+          name,
+          undefined,
+        );
+        await probe.sync();
+        const tx = creator.edit();
+        probe.withTx(tx).set({});
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      await creator.storageManager.synced();
+    } finally {
+      await creator.dispose();
+      await creatorManager.close();
+    }
+
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({
+      stats,
+      serverFacade: demandFacade([
+        { id: demandedRoot, scope: "user", identity: demander },
+      ]),
+    });
+    expect(await created.activate()).toBe(true);
+    const serving = servingRuntime!;
+    // The demand registry has absorbed the identity-bearing demand —
+    // the run supply's input.
+    await waitUntil(
+      () => created.demandedIdentitiesOf(demandedRoot).length === 1,
+      "the demanded identity to register",
+    );
+
+    const cancels: Array<() => void> = [];
+    try {
+      const runArm = async (arm: {
+        stream: string;
+        probe: string;
+        pieceRootId: string;
+        actionId: string;
+      }): Promise<{
+        entry: NonNullable<StreamEventsDocValue["entries"]>[number];
+      }> => {
+        const streamCell = serving.getCell<unknown>(
+          space,
+          arm.stream,
+          undefined,
+        );
+        const probeCell = serving.getCell<{ handled?: number }>(
+          space,
+          arm.probe,
+          undefined,
+        );
+        await streamCell.sync();
+        await probeCell.sync();
+        const streamLink = streamCell.getAsNormalizedFullLink();
+        cancels.push(serving.scheduler.addEventHandler(
+          (tx: IExtendedStorageTransaction, _event: unknown) => {
+            probeCell.withTx(tx).set({ handled: 1 });
+          },
+          streamLink,
+        ));
+        // The emitting derivation, through the PRODUCTION choke points:
+        // scheduler.run → run.ts's demanded-instance fan-out →
+        // stampServerRun → the SpaceServer's #stampRun → the
+        // serving-arm send.
+        const action = Object.assign(
+          (tx: IExtendedStorageTransaction) => {
+            streamCell.withTx(tx).send({ ping: 1 } as never);
+          },
+          {
+            schedulerObservationIdentity: {
+              pieceId: `space:${arm.pieceRootId}`,
+              pieceRootId: arm.pieceRootId,
+            },
+          },
+        );
+        await serving.scheduler.run(action as never);
+        const sidecarId = streamEntriesDocId({
+          id: streamLink.id,
+          path: [...streamLink.path],
+        } as never);
+        const entriesOf = () =>
+          ((Engine.read(engine, { id: sidecarId })?.value ??
+            {}) as StreamEventsDocValue).entries ?? [];
+        await waitUntil(
+          () =>
+            entriesOf().length === 1 &&
+            entriesOf()[0].consequenced === true,
+          `the ${arm.stream} emission to commit and consequence`,
+          20_000,
+        );
+        return { entry: entriesOf()[0] };
+      };
+
+      // ARM 1 — the supply NEUTRAL (no demand entry for this root): the
+      // run keeps the wave identity and the emission classifies
+      // USERLESS — the pre-P2-F misclassification, still the truthful
+      // shape for a chain with no actor (OW15's omitted-key posture:
+      // no `user` KEY at all, session "server").
+      const userless = await runArm({
+        stream: "lt6-stream-userless",
+        probe: "lt6-probe-userless",
+        pieceRootId: "of:lt6-undemanded-root",
+        actionId: "test/lt6-userless-emitter",
+      });
+      expect(userless.entry.firedAt).toBeDefined();
+      expect("user" in userless.entry.firedAt!).toBe(false);
+      expect(userless.entry.firedAt!.session).toBe("server");
+
+      // ARM 2 — the supply LIVE: the demanded root's action runs AS the
+      // demanding (user, session) instance, and its emission carries
+      // that actor on the durable entry.
+      const demanded = await runArm({
+        stream: "lt6-stream-demanded",
+        probe: "lt6-probe-demanded",
+        pieceRootId: demandedRoot,
+        actionId: "test/lt6-demanded-emitter",
+      });
+      expect(demanded.entry.firedAt?.user).toBe(demander.principal);
+      expect(demanded.entry.firedAt?.session).toBe(demander.sessionId);
+
+      // The classification CARRIES to the handler run (LD1: handlers
+      // keep the event's actor): its consequence commit's write
+      // annotations name the demanding pair.
+      const actingAnnotations = () =>
+        (engine.database.prepare(
+          `SELECT annotations FROM "commit"
+           WHERE class = 'derived' AND annotations IS NOT NULL`,
+        ).all() as Array<{ annotations: string }>).flatMap((row) =>
+          decodeMemoryBoundary(row.annotations) as unknown as Array<{
+            actingUser?: string;
+            actingSession?: string;
+          }>
+        ).filter((annotation) => annotation.actingUser !== undefined);
+      await waitUntil(
+        () =>
+          actingAnnotations().some((a) =>
+            a.actingUser === demander.principal &&
+            a.actingSession === demander.sessionId
+          ),
+        "the handler consequence to carry the demanding actor",
+        20_000,
+      );
+      // And the userless arm never manufactured an actor anywhere.
+      expect(
+        actingAnnotations().every((a) =>
+          a.actingUser === demander.principal
+        ),
+      ).toBe(true);
+    } finally {
+      for (const cancel of cancels) cancel();
+    }
   });
 });

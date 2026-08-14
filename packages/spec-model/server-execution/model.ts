@@ -48,6 +48,40 @@ export const userKey = (u: UserId): string => `user:${encodeKeyPart(u)}`;
 export const sessionKey = (u: UserId, s: SessionId): string =>
   `session:${encodeKeyPart(u)}:${encodeKeyPart(s)}`;
 
+/**
+ * Validator mirror — RESTATED from the real `isScopeKey`
+ * (`packages/memory/v2.ts`), never imported. Accepts exactly the
+ * constructors' image: `space`, `user:<seg>`, `session:<seg>:<seg>`,
+ * every segment non-empty and CANONICAL — byte-identical to what
+ * `encodeKeyPart` emits for the segment's own decoding. So raw `/` or
+ * `:` inside a segment, malformed percent escapes, and decodable but
+ * non-canonical escapes (`%2f` where the encoder emits `%2F`, `%41`
+ * for plain `A`) all refuse; malformed input returns false, never
+ * throws. The conformance bridge test in properties.test.ts asserts
+ * pointwise agreement with the real validator on the acceptance AND
+ * rejection sets.
+ */
+export const isCanonicalKey = (value: string): boolean => {
+  const canonicalSegment = (segment: string): boolean => {
+    if (segment.length === 0) return false;
+    try {
+      return encodeKeyPart(decodeURIComponent(segment)) === segment;
+    } catch {
+      return false;
+    }
+  };
+  if (value === SPACE_KEY) return true;
+  if (value.startsWith("user:")) {
+    return canonicalSegment(value.slice("user:".length));
+  }
+  if (value.startsWith("session:")) {
+    const segments = value.split(":");
+    return segments.length === 3 && canonicalSegment(segments[1]) &&
+      canonicalSegment(segments[2]);
+  }
+  return false;
+};
+
 /** The scope kinds a handler write can declare (scopes.md §2). */
 export type ScopeKind = "space" | "user" | "session";
 
@@ -381,7 +415,13 @@ function admitDelegatedAppend(w: World, entry: OutboxEntry): void {
     seq: sp.seq,
     eventId: entry.eventId,
     firedAt: {
-      user: entry.actingPrincipal,
+      // A userless (OW15 sessionless-space-scope) delivery stamps NO
+      // user key at all — key ABSENCE, not `user: undefined` (round-2
+      // thread T32: the pinned carve-out is "no user key", and a
+      // present-but-undefined key let the pin pass vacuously).
+      ...(entry.actingPrincipal === undefined
+        ? {}
+        : { user: entry.actingPrincipal }),
       session: entry.actingSession ?? "server",
     },
     consequenced: false,
@@ -1165,6 +1205,12 @@ export function applyFanout(s0: FanoutState, step: FanoutStep): FanoutState {
       // instance value. Sibling instances materialize on THEIR OWN
       // demand. The broad slot stops being a value instance the same
       // moment for every reader — the clean-product shape.
+      // A step naming a principal OUTSIDE the configured set is
+      // REJECTED (no-op; review thread r3739139513): it would mint an
+      // instance outside the clean product the invariants quantify
+      // over, so the violation checker could never see it — the menu
+      // must not be able to smuggle states past the properties.
+      if (!s.principals.includes(step.by)) return s;
       if (s.narrowed) return s;
       s.narrowed = true;
       delete s.instances[SPACE_KEY];
@@ -1177,6 +1223,8 @@ export function applyFanout(s0: FanoutState, step: FanoutStep): FanoutState {
       return s;
     }
     case "fanDemand": {
+      // Same out-of-set rejection as fanNarrow (r3739139513).
+      if (!s.principals.includes(step.user)) return s;
       const key = s.narrowed ? userKey(step.user) : SPACE_KEY;
       if (!s.demanded.includes(key)) {
         s.demanded.push(key);

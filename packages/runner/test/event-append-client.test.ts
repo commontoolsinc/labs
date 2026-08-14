@@ -29,6 +29,7 @@ import {
   type EventAppendQueueStore,
   memoryEventAppendQueueStore,
   type QueuedEventAppend,
+  webStorageEventAppendQueueStore,
 } from "../src/storage/event-append-queue.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
@@ -332,7 +333,140 @@ describe("event-append queue (events.md §5, LT9)", () => {
     });
     expect(sent).toEqual(["evt-old-1", "evt-old-2", "evt-new"]);
     // Everything delivered ⇒ the store drained (a queue that empties).
+    // Durability is OBSERVED through `persisted` (its documented
+    // purpose): the settle-side saves are chained, not synchronous.
+    await revived.persisted;
     expect((await store.load(space)).length).toBe(0);
+    revived.close();
+  });
+
+  it("a fire racing the backlog load never re-uses a persisted clientSeq (verdict blocker, 2026-08-12): allocation waits for the load", async () => {
+    const store: EventAppendQueueStore = memoryEventAppendQueueStore();
+    // Persist a backlog with clientSeqs 0 and 1.
+    await store.save(space, [
+      { ...appendOf("evt-persisted-0"), clientSeq: 0 },
+      { ...appendOf("evt-persisted-1"), clientSeq: 1 },
+    ]);
+    // A store whose LOAD is slow: the fire arrives mid-load.
+    let releaseLoad: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseLoad = resolve;
+    });
+    const slowStore: EventAppendQueueStore = {
+      load: async (loadSpace) => {
+        await gate;
+        return store.load(loadSpace);
+      },
+      save: (saveSpace, entries) => store.save(saveSpace, entries),
+    };
+    const sent: number[] = [];
+    const queue = new EventAppendQueue({
+      space,
+      transact: (commit: ClientCommit) => {
+        const entry = ((commit.operations[0] as {
+          patches?: Array<{ values?: Array<{ firedAt?: { clientSeq?: number } }> }>;
+        }).patches ?? [])[0]?.values?.[0];
+        sent.push(entry?.firedAt?.clientSeq ?? -1);
+        return Promise.resolve();
+      },
+      nextLocalSeq: (() => {
+        let seq = 1;
+        return () => seq++;
+      })(),
+      store: slowStore,
+    });
+    // Fire BEFORE the load completes. Pre-fix this allocated clientSeq 0
+    // synchronously — colliding with evt-persisted-0's.
+    const outcome = queue.enqueue(appendOf("evt-racing"));
+    releaseLoad();
+    expect(await outcome).toEqual({ delivered: true });
+    await waitUntil(() => sent.length === 3, "all three to discharge");
+    // Persisted 0, 1 first (fired order), then the racer at an UNUSED
+    // seq (2) — never a duplicate.
+    expect(sent).toEqual([0, 1, 2]);
+    expect(new Set(sent).size).toBe(3);
+    queue.close();
+  });
+
+  it("webStorageEventAppendQueueStore round-trips FabricValue payloads (symbols included) through the memory boundary codec; an empty save clears the key", async () => {
+    const backing = new Map<string, string>();
+    const fakeStorage = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        backing.set(key, value);
+      },
+      removeItem: (key: string) => {
+        backing.delete(key);
+      },
+    };
+    const store = webStorageEventAppendQueueStore(fakeStorage, "did:test:me");
+    const entries: QueuedEventAppend[] = [
+      { ...appendOf("evt-a"), clientSeq: 0 },
+      {
+        ...appendOf("evt-b"),
+        clientSeq: 1,
+        payload: { tag: Symbol.for("cf:test-tag"), n: 2 },
+      },
+    ];
+    await store.save(space, entries);
+    expect(backing.size).toBe(1);
+    const loaded = await store.load(space);
+    expect(loaded.length).toBe(2);
+    expect(loaded[0].eventId).toBe("evt-a");
+    expect(loaded[1].clientSeq).toBe(1);
+    expect((loaded[1].payload as { tag: symbol }).tag).toBe(
+      Symbol.for("cf:test-tag"),
+    );
+    // Scope partitions principals sharing one origin.
+    const other = webStorageEventAppendQueueStore(fakeStorage, "did:test:you");
+    expect((await other.load(space)).length).toBe(0);
+    // A drained queue clears its key (a queue that empties, LT9).
+    await store.save(space, []);
+    expect(backing.size).toBe(0);
+    expect((await store.load(space)).length).toBe(0);
+  });
+
+  it("a successor queue over a WEB-STORAGE store discharges a dead predecessor's intents with NO fresh fire (reload self-start; LT9)", async () => {
+    const backing = new Map<string, string>();
+    const fakeStorage = {
+      getItem: (key: string) => backing.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        backing.set(key, value);
+      },
+      removeItem: (key: string) => {
+        backing.delete(key);
+      },
+    };
+    const store = webStorageEventAppendQueueStore(fakeStorage, "did:test:me");
+    const dead = new EventAppendQueue({
+      space,
+      transact: () => Promise.reject(namedError("ConnectionError", "offline")),
+      nextLocalSeq: () => 1,
+      store,
+    });
+    void dead.enqueue(appendOf("evt-reload-1"));
+    await waitUntil(() => dead.pending.length === 1, "the intent to queue");
+    await dead.persisted;
+    dead.close();
+
+    const sent: string[] = [];
+    const revived = new EventAppendQueue({
+      space,
+      transact: (commit: ClientCommit) => {
+        sent.push((commit.eventAppends ?? [])[0]?.eventId ?? "?");
+        return Promise.resolve();
+      },
+      nextLocalSeq: (() => {
+        let seq = 1;
+        return () => seq++;
+      })(),
+      store,
+    });
+    // NO enqueue: the constructor's load must kick the discharge.
+    await waitUntil(() => sent.length === 1, "the reload self-start");
+    expect(sent).toEqual(["evt-reload-1"]);
+    await revived.persisted;
+    expect(backing.size).toBe(0);
     revived.close();
   });
 });
