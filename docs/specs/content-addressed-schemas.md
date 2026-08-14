@@ -110,10 +110,13 @@ whose cross-references form a DAG:
      reference each other with ordinary local `#/$defs/<name>` refs.
      References from outside use a fragment: `cid:<hash>#/$defs/<name>`.
 4. Rewrite: within each document, refs to definitions in other documents
-   become external refs; the `$defs` entries they replaced are removed.
-   Definition names are kept as authored (they come from TypeScript type
-   names via the schema generator, which are stable across patterns that
-   share types).
+   become external refs; the `$defs` entries they replaced are removed. A
+   singleton document carries no definition name — the definition's schema
+   is the document — so structurally identical standalone definitions
+   deduplicate regardless of what their schemas called them. Cyclic-group
+   members keep their authored names (they come from TypeScript type names
+   via the schema generator, which are stable across patterns that share
+   types), because the internal `#/$defs/<name>` refs need them.
 5. The **root** — the original schema minus its externalized `$defs` — is
    itself a schema document, and its id is what the link or selector
    carries.
@@ -126,6 +129,11 @@ same reason module identity condenses import cycles.
 Because the external refs are part of a document's content, the reference
 closure is a Merkle DAG: the root document's hash pins the exact content of
 every document reachable from it.
+
+Decomposition refuses input it cannot represent faithfully — a `$ref`
+outside the `#/$defs/<name>` and external vocabularies, a dangling local
+ref, a nested `$defs` scope, the deprecated `definitions` keyword — and a
+writer falls back to carrying such a schema inline, as today.
 
 An external ref is a `$ref` whose value is a `cid:` URI:
 
@@ -358,7 +366,9 @@ phased on the op-migration playbook:
    schema documents accumulate like `pattern:` and CFC `cid:` documents do.
    Net bytes still fall (each document replaces many inline copies), so
    this stays in the existing GC-design bucket rather than blocking here.
-6. **Definition naming.** Authored names are kept, so two structurally
-   identical definitions with different names are different documents.
-   Acceptable (names are stable per shared TypeScript type); canonical
-   renaming would buy marginal dedup at real debuggability cost.
+6. **Definition naming.** Singleton documents are name-free and so
+   deduplicate name-independently; only cyclic-group members keep their
+   authored names, so two structurally identical cyclic groups with
+   different member names are different documents. Acceptable (names are
+   stable per shared TypeScript type); canonical renaming inside groups
+   would buy marginal dedup at real debuggability cost.

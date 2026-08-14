@@ -20,20 +20,25 @@ resolution; transport-compression retirement.
 
 ### Stage 1 — decomposition as a pure library, unwired
 
-- [ ] `decomposeSchema(schema)`: sanitized interned schema in, the set of
+- [x] `decomposeSchema(schema)`: sanitized interned schema in, the set of
       schema documents out — `$defs` reference graph, strongly-connected-
       component condensation, singleton and cyclic-group document forms,
       external-ref rewriting, root document — per the spec's Decomposition
-      section. Pure, deterministic, memoized on the interned input. Lives in
-      `packages/data-model` beside `schema-hash.ts`, since it is defined
-      entirely in terms of schema values and their hashes.
-- [ ] `recomposeSchema(rootDocument, lookup)`: inline expansion of a
-      document closure back into one self-contained schema. This is the
-      reference implementation the resolver is tested against, and the
-      recomposition half of the round-trip property test.
-- [ ] Property tests: recompose ∘ decompose round-trips to the input;
-      decomposition is invariant under key order; SCC grouping pinned on
-      fixtures with a self-cycle, a mutual cycle, and a diamond.
+      section. Pure, deterministic, memoized on the interned input. Lives at
+      `packages/runner/src/schema-decompose.ts`: the walks must be complete
+      over the subschema-keyword vocabulary, whose single source of truth is
+      `packages/runner/src/schema-walk.ts`, and `data-model` cannot depend
+      on the runner.
+- [x] `recomposeSchema(rootRef, lookup)`: inline expansion of a document
+      closure back into one self-contained schema. This is the reference
+      implementation the resolver is tested against, and the recomposition
+      half of the round-trip property test.
+- [x] Property tests: decompose ∘ recompose ∘ decompose reaches a fixpoint
+      (singleton documents are name-free, so recomposition assigns derived
+      names and byte-exact round-tripping is not the contract — the fixpoint
+      on document sets is); decomposition is invariant under key order and
+      under a singleton definition's name; SCC grouping pinned on fixtures
+      with a self-cycle, a mutual cycle, and a diamond.
 
 Nothing imports these functions outside tests yet. Landing them first pins
 the canonical document forms every later stage must accept.
