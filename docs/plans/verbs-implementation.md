@@ -10,6 +10,8 @@ and
 
 **The designs are unchanged and are not restated here.**
 [The pattern verb contract](pattern-verb-contract.md) says what a verb is.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for how a verb's interface changes once pieces are deployed against it.
 [Reading Fabric data](fabric-read-model.md) and the two documents it points at
 say how a caller reads. Read those for reasoning; read this for order.
 
@@ -62,6 +64,7 @@ a driver needs to know what is already moving before scheduling anything new.
 | PR | What | State |
 | --- | --- | --- |
 | #5307 | closed-world verb event schemas | **ruled against** on #5589 and in review. Retreating leaves nothing to land — the emission and the goldens and baselines recording it are the whole branch — so this closes rather than merges |
+| #5746 | the `Demand<T>` marker and the foreign-output embedding warning, prototyping the demand substrate in [designing verbs so they can change](verb-evolution.md) | open. It edits `packages/ts-transformers/src/transformers/schema-injection.ts`, which is the file item 11's fourth part edits, so the one-file rule queues the two rather than running them in parallel — a driver picking up item 11 schedules against this branch before starting. It also adds `demand` to `ANNOTATION_KEYS` (`packages/piece/src/schema-compatibility.ts`), the set item 2 derives its tolerated tier from |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
 #5500 are on main. #5458 is closed rather than merged because its rename was
@@ -160,11 +163,12 @@ reader keeps deriving `required` from the source schema, and that derivation
 must survive the item intact.
 
 *Three things the coupling to the compatibility checker has to respect.*
-**Derivation is not one-to-one:** 3 of `ANNOTATION_KEYS`' 12 members —
-`default`, `$defs`, `definitions` — are refused by projection on purpose, so the
-relation is `ANNOTATION_KEYS` minus a stated exception set, and a fallback test
-asserting plain non-refusal of every annotation key would be red the day it is
-written. It asserts the exception relation in both directions instead.
+**Derivation is not one-to-one:** three members of `ANNOTATION_KEYS` —
+`default`, `$defs`, `definitions` — are refused by projection on purpose, so
+the relation is `ANNOTATION_KEYS` minus a stated exception set, whatever that
+set grows to, and a fallback test asserting plain non-refusal of every
+annotation key would be red the day it is written. It asserts the exception
+relation in both directions instead.
 **The validation half must not derive:** the checker's `handled` set is a union
 including `allOf`, `if`/`then`/`else`, `patternProperties`, `asCell`, `ifc` and
 `scope`, every one of which projection refuses deliberately — so derive the

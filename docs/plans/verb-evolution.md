@@ -76,11 +76,21 @@ listed here because it shapes how much the gate can be trusted while open.
 
 **A verb's output is not checked at all.** The shape records a verb's input
 and discards its output, so renaming a field of what a verb hands back
-passes every check and breaks callers silently. This is a deliberate
-deferral: recording outputs now would commit to a format that
-**Fabric-types** — the planned design stream that gives verbs declared,
-checkable result types in the shape — is expected to replace. Until it
-lands, output changes are governed by convention alone.
+passes every check and breaks callers silently. The deferral is narrower
+than "recording outputs": what would commit to a format **Fabric-types** —
+the planned design stream that gives verbs declared, checkable result types
+in the shape — is expected to replace is recording an output *in the durable
+shape*. Recording one at all is already done. A verb's declared result
+travels on `module.resultSchema`, a module field that enters no durable
+schema and that no baseline under `packages/patterns/baselines/` records,
+which is what made that road passable while the durable one was not; and it
+is resolvable per deployed piece, because `cf piece verbs` publishes it as a
+row's `outputSchema` and `cf piece call <verb> --help` publishes it for a
+single verb (`listPieceCallables`, `declaredVerbResults` and
+`withDeclaredResult`, `packages/cli/lib/piece.ts`). What is still deferred is
+the durable record and the comparison it would feed: nothing holds one
+deploy's output beside the next, so output changes are governed by convention
+alone.
 
 The same gate also governs the *holder* — what a pattern may change about
 what it demands from the pieces it stores — and there is the fourth bad
@@ -356,7 +366,13 @@ down, and read the cells. Five kinds of demand are reachable: embedding the
 provider's whole **Output** type (today's default), a narrow demand naming
 **fields only**, one naming a **required verb**, one naming an **optional
 verb**, and a **versioned** interface demand. Probing callers are omitted —
-they bind late and survive every row.
+they bind late and survive every *evolution* row, which is what the table
+scores. What late binding does not survive is an enumeration defect: [#5698]
+measures 8 callable verbs across 4 files that `cf piece verbs` and
+tab-completion both miss, because candidate names are built from the declared
+result type rather than from what the piece stores. A probing caller is
+therefore only as good as the listing it probes, and absence from one today
+is ambiguous between deprecated, retired, and never enumerated.
 
 | Provider evolution | Full Output | Fields only | Req. verb | Opt. verb | Versioned |
 | --- | --- | --- | --- | --- | --- |
@@ -516,13 +532,18 @@ in practice — is for whoever builds it to settle.
 
 Retirement policy is guesswork without usage data; deprecation windows work
 in other systems because usage is observable. The planned invocation-record
-work is the natural place for this to ride. Counting also sees past the
-blast-radius horizon: a call executes against the provider's piece, in the
-provider's space, so invocation records catch the cross-space and
-third-party callers no static enumeration can reach. The two signals are
-complementary and both partial — enumeration sees recorded demands within
-its horizon, dormant holders included; counting sees live callers beyond
-it, and misses anyone who has not called lately.
+work is the natural place for this to ride, and that work —
+[retention and CFC execution provenance](retention-and-provenance.md) — is
+**gated on a CFC review that has not happened**, with nothing behind the gate
+started. So call-count-driven retirement is not near-term at any price: its
+carrier waits on a review rather than on a queue position.
+
+Counting also sees past the blast-radius horizon: a call executes against the
+provider's piece, in the provider's space, so invocation records catch the
+cross-space and third-party callers no static enumeration can reach. The two
+signals are complementary and both partial — enumeration sees recorded
+demands within its horizon, dormant holders included; counting sees live
+callers beyond it, and misses anyone who has not called lately.
 
 ## The longer arc
 
@@ -609,9 +630,15 @@ person, a recipe for a tool. Where it lives matters most: askable of the
 piece itself, so an agent watching a holding piece's errors can ask the
 held piece for upgrade instructions and decide whether to apply them. The
 channel exists — the shape already lifts deprecation out of JSDoc into
-listings. Scoped acknowledgment is the natural place to ask for it: a
-deliberate break proceeds when it says what those it breaks should do
-instead.
+listings — and it carries a named precondition, because that channel is the
+listing surface: while [#5698] holds, the listing omits verbs the piece
+really has, and instructions served over a surface that drops their subject
+arrive incomplete. Closing that enumeration gap is on this direction's
+critical path; where it sits in the order is the owner of
+[the verbs implementation plan](verbs-implementation.md) to decide, not this
+document. Scoped acknowledgment is the natural place to ask for the
+instructions themselves: a deliberate break proceeds when it says what those
+it breaks should do instead.
 
 The anchors are the systems that permit breakage and manage it rather than
 forbid it. Kubernetes deprecates an API, keeps serving it for a published
@@ -635,14 +662,32 @@ Five smaller calls belong to whoever does the work:
   recorded shapes under `packages/patterns/baselines/` that updates are
   checked against), and how it is sequenced against the append-only
   baselines gate.
-- Whether an interim output check is possible before Fabric-types, given
-  that the shape discards verb outputs today.
+- Where an interim output check runs before Fabric-types, and what it does
+  on a mismatch. Availability is not the question: a verb's declared result
+  resolves from a deployed piece's compiled graph and from a candidate's, so
+  a comparison has both of its sides. `setPattern`
+  (`packages/piece/src/ops/piece-controller.ts`) loads the deployed pattern
+  and compiles the candidate before it asserts compatibility, so both graphs
+  are in hand at that point. What is **not** established is what comparing
+  them costs there, or what a graph compiled before `module.resultSchema`
+  existed offers to compare against — so the site (`setsrc`, a pre-deploy
+  report, a lint) and the response (refuse, warn, record) are both open, and
+  none of them should be priced as cheap before that is measured.
 - Whether a version bump is author-declared or derived from the shape diff;
   the Versioned column's red rows depend on the answer.
 - When the `Demand<T>` marker grows interface and version fields: the
   growth is free — annotation values are never compared across updates —
   but only until a binding check reads them, at which point the key stops
-  being annotation-neutral. A real design step, not an extension.
+  being annotation-neutral. A real design step, not an extension — and a
+  two-registry one. [#5746] adds `demand` to `ANNOTATION_KEYS`
+  (`packages/piece/src/schema-compatibility.ts`), and item 2 of
+  [the verbs implementation plan](verbs-implementation.md) derives the
+  projection reader's *tolerated* keys from that same set, so a key
+  reclassified out of it lands in projection's *refused* tier by default and
+  starts rejecting reads that carry it. Whoever reclassifies `demand`
+  changes both registries deliberately, which is what keeping them siblings
+  rather than one list is for.
 
 [#5663]: https://github.com/commontoolsinc/labs/issues/5663
+[#5698]: https://github.com/commontoolsinc/labs/issues/5698
 [#5746]: https://github.com/commontoolsinc/labs/pull/5746
