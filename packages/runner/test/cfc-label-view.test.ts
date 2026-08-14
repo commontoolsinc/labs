@@ -117,6 +117,15 @@ describe("CFC label view helpers", () => {
     expect(cfcLabelViewFromSchema({ ifc: null } as never)).toBeUndefined();
   });
 
+  it("ignores IFC label fields that are not arrays", () => {
+    expect(cfcLabelViewFromSchema({
+      ifc: { confidentiality: 7, integrity: { trusted: true } },
+    } as never)).toBeUndefined();
+    expect(cfcLabelViewFromSchema({
+      ifc: { integrity: "trusted" },
+    } as never)).toBeUndefined();
+  });
+
   it("ignores a properties value that is not an object", () => {
     expect(cfcLabelViewFromSchema({
       ifc: { confidentiality: ["workspace"] },

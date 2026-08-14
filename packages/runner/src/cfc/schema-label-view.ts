@@ -62,10 +62,10 @@ export const cfcSchemaEntries = (
     entries.push({
       path,
       label: {
-        integrity: resolved.ifc.integrity
+        integrity: Array.isArray(resolved.ifc.integrity)
           ? [...resolved.ifc.integrity]
           : undefined,
-        confidentiality: resolved.ifc.confidentiality
+        confidentiality: Array.isArray(resolved.ifc.confidentiality)
           ? [...resolved.ifc.confidentiality]
           : undefined,
       },
