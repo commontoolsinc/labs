@@ -1,7 +1,9 @@
-// A value reachable twice by different paths is SHARED, not circular. The
-// conversion answers an ancestor with a back-link -- that is what makes a cycle
-// representable -- and must not answer a sibling the same way, which would
-// rewrite one of the two positions into a pointer at the other.
+/**
+ * A value reachable twice by different paths is SHARED, not circular. The
+ * conversion answers an ancestor with a back-link -- that is what makes a cycle
+ * representable -- and must not answer a sibling the same way, which would
+ * rewrite one of the two positions into a pointer at the other.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

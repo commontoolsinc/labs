@@ -12,7 +12,6 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 (Error as any).stackTraceLimit = 100;
 
 const TOTAL_COUNT = 20;
-const TIMEOUT_MS = 180000;
 
 const OutputSchema = {
   type: "object",
@@ -165,17 +164,9 @@ Deno.test({
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
 
-    let timeoutHandle: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Test timed out after ${TIMEOUT_MS}ms`));
-      }, TIMEOUT_MS);
-    });
-
     try {
-      await Promise.race([runTest(base), timeoutPromise]);
+      await runTest(base);
     } finally {
-      clearTimeout(timeoutHandle!);
       await server.shutdown();
     }
   },

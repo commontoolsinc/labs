@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Pattern } from "../builder/types.ts";
 import type { MemorySpace } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
@@ -29,9 +29,9 @@ export interface PatternRefSentinel {
 export function isPatternRefSentinel(
   value: unknown,
 ): value is PatternRefSentinel {
-  if (!isRecord(value)) return false;
+  if (!isObjectOrArray(value)) return false;
   const ref = (value as { $patternRef?: unknown }).$patternRef;
-  return isRecord(ref) && typeof ref.identity === "string" &&
+  return isObjectOrArray(ref) && typeof ref.identity === "string" &&
     typeof ref.symbol === "string";
 }
 

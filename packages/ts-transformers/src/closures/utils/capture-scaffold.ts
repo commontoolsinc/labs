@@ -29,6 +29,12 @@ export function buildCapturedHandlerClosureCall(
   options?: {
     readonly eventParamName?: string;
     readonly paramsParamName?: string;
+    /**
+     * The verb's declared result type, carried into `handler`'s third
+     * type-argument slot so SchemaInjection can lower it to the module's
+     * result schema. Omitted for a value-less verb.
+     */
+    readonly resultTypeNode?: ts.TypeNode;
   },
 ): ts.CallExpression {
   const builder = new PatternBuilder(context);
@@ -48,7 +54,9 @@ export function buildCapturedHandlerClosureCall(
   const handlerCall = context.cfHelpers.createHelperCall(
     "handler",
     originalNode,
-    [eventTypeNode, stateTypeNode],
+    options?.resultTypeNode
+      ? [eventTypeNode, stateTypeNode, options.resultTypeNode]
+      : [eventTypeNode, stateTypeNode],
     [handlerCallback],
   );
 

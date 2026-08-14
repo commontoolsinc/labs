@@ -22,6 +22,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [First-class serializable factories](first-class-serializable-factories.md)
   sequences the implementation of durable pattern, module, and handler
   factories.
+- [Hosted pattern authoring](hosted-pattern-authoring.md) sequences the shared
+  server operation and the piece menu, Home, and `cf` entry points for changing
+  a piece or creating a space from a request.
+- [Developer-tooling feedback for hosted authoring](hosted-pattern-authoring-tooling-feedback.md)
+  adds a separate, non-blocking way for an authoring agent to report missing or
+  defective development capabilities.
 - [Ingest channels and the journal sink](ingest-channels-journal-sink.md)
   proposes a minted, bearer-authed inbound endpoint that accumulates what it
   receives as a provenance-marked, append-only log — the shared capability
@@ -30,8 +36,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [`../features/vouched-ingest-channel-mint.md`](../features/vouched-ingest-channel-mint.md).
 - [Integration-test video demos](integration-test-video-demos.md) tracks
   optional CI adoption and further fixture hardening.
-- [Inverting the physics of trust](inverting-the-physics-of-trust.md) explains
-  the runtime's trust model and the work that follows from it.
+- [Lazy cell materialization](lazy-cell-materialization.md) sequences a
+  schema-observing lazy view over a cell, a transaction mode that hands one back
+  from every read, and the runner disposition for a reader that touches data the
+  schema no longer describes.
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes.
@@ -59,6 +67,26 @@ a record: archive it to `docs/history/plans/` following the procedure in
   calling a verb adds — and at
   [CLI surface shape](cli-surface-shape.md) for the command surface and an
   additive path to it. Start here rather than at either part.
+- [References as arguments](references-as-arguments.md) proposes lifting
+  address resolution out of the LLM dialog builtin, which already does it, and
+  into the boundary every external caller crosses. An LLM can hand a pattern a
+  reference; the CLI, a webhook, and the ingest path cannot reach the same
+  handler the same way, and three encodings for "an address goes here" have
+  already diverged. It carries the measurement, the size, and the gate-by-gate
+  evidence that the refusal is drift rather than policy — the dispatch gate
+  already accepts link values; the outer gates never got the option.
+- [Designing verbs so they can change](verb-evolution.md) records how verbs are
+  declared so that adding to and changing them later is possible: verbs are
+  promises and their names are stable by default — an owner may break their
+  own pattern deliberately, so what a caller holds is a commitment rather than
+  a guarantee — a holder declares only what it uses, an optional member's
+  maybe is resolved once at binding, and an output change gets a new verb
+  name. It states what the update gate enforces today, what
+  the transformer and authoring tools should carry so a one-off author never
+  has to learn a rule, and the open stream — named versioned interfaces,
+  per-piece upgrade policy, migrations that run code — that everything else
+  stands as the interim for. Written to be followable by anyone on the team,
+  not only by pattern authors.
 - [Verb calls: working notes](verb-result-selection.md) holds the call-specific
   investigation those documents do not carry: what produces a receipt and what
   its existence proves, how a receipt's address is derived, and the error and
@@ -67,13 +95,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   work on verbs across both arcs that produced it: what a verb declares, what a
   caller may ask for, and what comes back. Read it for order; read the designs
   it points at for reasoning.
-- [What a declared verb result buys](declared-verb-results-case.md) is the case
-  for the one decision the verbs plan waits behind: whether a verb's declared
-  result reaches the runtime now, on an interim module field, or only when the
-  Fabric-types stream supplies a durable one. It argues timing rather than
-  principle — every consumer is already built and already working for tools, and
-  the interim road commits nothing durable, so replacing it later is an
-  assignment rather than a migration.
+- [Projection keys, and the schema a read is handed](projection-key-classification.md)
+  designs the refusal of an unrecognized `--schema` key and the rule it is half
+  of — the projection reader never hands the read boundary a schema it did not
+  construct. Four tiers rather than three, because the keys that decide an
+  untyped position's container change behavior, so a caller's copy of one is
+  consumed rather than carried onward. Carries the measured blast radius, and
+  separates a constraint a caller supplies from the same keyword the reader
+  derives from the source schema.
 - [The CLI surface — implementation plan](cli-surface-implementation.md) builds
   the rest of the command surface: positional addresses, the honest top-level
   names, deprecating the spellings they replace, and merging the commands that

@@ -16,6 +16,7 @@
  *                 If not set, picks a random offset and cleans up after.
  */
 
+import { walk } from "@std/fs/walk";
 import * as path from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 
@@ -146,8 +147,8 @@ function getCfCommand(rootDir: string): string[] {
 
 /**
  * Finds all `.test.tsx` pattern tests that match the given filter (if any). A
- * filter of the form `<chunk>/<total-chunks>` produces the indicated "chunk" of
- * the tests, to allow for separate parallel tasks to handle all the chunks.
+ * filter of the form `<chunk>/<total-chunks>` selects the files whose stable
+ * filename hash belongs to that chunk.
  */
 async function findPatternTests(
   rootDir: string,
@@ -169,30 +170,58 @@ async function findPatternTests(
 
   // Find all .test.tsx files
   const testFiles: string[] = [];
-  for await (const entry of walkDir(patternsDir)) {
-    if (entry.endsWith(".test.tsx")) {
-      const relative = path.relative(rootDir, entry);
-      if (!nameFilter || relative.includes(nameFilter)) {
-        testFiles.push(relative);
-      }
+  for await (
+    const entry of walk(patternsDir, {
+      includeDirs: false,
+      exts: [".test.tsx"],
+    })
+  ) {
+    const relative = path.relative(rootDir, entry.path);
+    if (!nameFilter || relative.includes(nameFilter)) {
+      testFiles.push(relative);
     }
   }
-
-  testFiles.sort();
 
   if (chunk && totalChunks) {
     if (chunk > totalChunks) {
       throw new Error(`Nonsensical chunk demand: ${chunk}/${totalChunks}`);
     }
-    const perChunk = testFiles.length / totalChunks;
-    const first = Math.floor((chunk - 1) * perChunk);
-    const afterLast = Math.floor(chunk * perChunk);
     console.log(`Testing pattern chunk ${chunk} of ${totalChunks}.`);
     console.log(`${testFiles.length} tests in total across all chunks.`);
-    return testFiles.slice(first, afterLast);
+    return selectPatternTestFiles(testFiles, {
+      index: chunk,
+      total: totalChunks,
+    });
   } else {
-    return testFiles;
+    return selectPatternTestFiles(testFiles);
   }
+}
+
+const FNV1A_OFFSET_BASIS = 0x811c9dc5;
+const FNV1A_PRIME = 0x01000193;
+const UTF8_ENCODER = new TextEncoder();
+
+function fnv1a32(value: string): number {
+  let hash = FNV1A_OFFSET_BASIS;
+  for (const byte of UTF8_ENCODER.encode(value)) {
+    hash ^= byte;
+    hash = Math.imul(hash, FNV1A_PRIME) >>> 0;
+  }
+  return hash;
+}
+
+export function selectPatternTestFiles(
+  files: string[],
+  shard?: { index: number; total: number },
+): string[] {
+  const sorted = files.map((file) => file.replaceAll("\\", "/")).toSorted();
+  if (!shard) return sorted;
+  if (shard.index < 1 || shard.index > shard.total) {
+    throw new Error(`Nonsensical chunk demand: ${shard.index}/${shard.total}`);
+  }
+  return sorted.filter((file) =>
+    fnv1a32(file) % shard.total === shard.index - 1
+  );
 }
 
 /**
@@ -471,18 +500,6 @@ export async function runFilteredIntegration(
     env,
     inheritStdio: true,
   });
-}
-
-/** Recursively walk a directory yielding file paths. */
-async function* walkDir(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory) {
-      yield* walkDir(fullPath);
-    } else {
-      yield fullPath;
-    }
-  }
 }
 
 export async function runPackageIntegration(

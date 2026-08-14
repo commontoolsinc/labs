@@ -23,6 +23,7 @@ import {
   parseHarnessInteractiveChatStdioCliOptions,
   runHarnessInteractiveChatNdjsonTransport,
   runHarnessInteractiveChatStdio,
+  runHarnessInteractiveChatStdioCli,
 } from "../src/interactive-chat-stdio.ts";
 import type { HarnessPromptLoopResult } from "../src/prompt-loop.ts";
 
@@ -1154,4 +1155,8 @@ Deno.test("interactive NDJSON transport rejects invalid Browser Access profile m
     "ok" in response && response.ok === false ? response.error.code : "",
     "invalid_request",
   );
+});
+
+Deno.test("interactive stdio CLI help returns without starting the transport", async () => {
+  assertEquals(await runHarnessInteractiveChatStdioCli(["--help"]), undefined);
 });

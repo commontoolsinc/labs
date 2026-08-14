@@ -96,8 +96,19 @@ export function utf8SortedKeysOf(value: object): readonly string[] {
     return cached;
   }
 
-  const unsorted = Object.keys(value);
-  const sorted = Object.freeze(unsorted.sort(utf8Compare));
+  // `Array.prototype.sort()` costs more to set up than the comparisons it
+  // performs on a short array, and object keys usually arrive already in
+  // order.
+  const keys = Object.keys(value);
+  let ordered = true;
+  for (let at = 1; at < keys.length; at++) {
+    if (utf8Compare(keys[at - 1]!, keys[at]!) > 0) {
+      ordered = false;
+      break;
+    }
+  }
+
+  const sorted = Object.freeze(ordered ? keys : keys.sort(utf8Compare));
 
   if (Object.isFrozen(value)) {
     sortedKeyCache.set(value, sorted);

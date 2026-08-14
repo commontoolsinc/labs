@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/test/non-idempotent/accumulator.test.tsx --verbose
  */
-import { assert, computed, pattern, Writable } from "commonfabric";
+import { assert, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const value = new Writable("hello");
@@ -23,7 +23,7 @@ export default pattern(() => {
   const hasEntries = assert(() => log.get().length > 0);
 
   return {
-    tests: [{ assertion: hasEntries }],
+    [TESTS]: [{ assertion: hasEntries }],
     expectNonIdempotent: true,
   };
 });

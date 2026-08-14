@@ -18,6 +18,11 @@
  *   3. update cost: whole-array re-set with one item changed vs a targeted
  *      per-index write — bytes written per transaction (history growth)
  *
+ * The first two group names say how the write is issued, not how many
+ * documents it makes. Both report N+1: the runtime gives every object element
+ * of an array a document of its own, and the parent array holds a link per
+ * element.
+ *
  * Interpretation guide: if stored bytes ≈ raw JSON and per-tx update bytes
  * ≈ one item, the runtime is efficient for this shape and the production
  * bloat is usage (item shape redundancy + per-instance copies). Superlinear
@@ -28,7 +33,8 @@
  * - FLAT_INDEX_LIST_SIZES: comma-separated Ns, default "100,1000,3000"
  * - FLAT_INDEX_LIST_UPDATE_TXS: update transactions per bench, default 20
  * - FLAT_INDEX_LIST_REPORT: "1" (default) prints a one-line stored-bytes/doc
- *   accounting per bench+N to stderr (outside the timed window); "0" silences
+ *   accounting per bench+N to stderr, from one extra untimed run of that
+ *   benchmark's scenario; "0" silences the reports and skips those runs
  */
 
 import { Identity } from "@commonfabric/identity";
@@ -42,6 +48,13 @@ import {
   type JSONSchema,
 } from "../src/builder/types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { benchDiagnostic } from "./bench-diagnostics.ts";
+import {
+  accountNovelty,
+  addAccounts,
+  jsonBytes,
+  type WriteAccount,
+} from "./bench-write-accounting.ts";
 
 const signer = await Identity.fromPassphrase("bench flat index list");
 const space = signer.did();
@@ -145,106 +158,148 @@ async function cleanup(
   await storageManager.close();
 }
 
-// --- write accounting (outside timed windows) -------------------------------
-// tx.journal.novelty(space) yields the attestations a commit wrote. Count
-// distinct doc ids and JSON bytes so each bench can report stored size vs the
-// raw-JSON floor. Printed once per bench name.
+// --- write accounting -------------------------------------------------------
+// A transaction holds its journal only while it is open: commit() releases it
+// on the way to settling, so tx.journal.novelty(space) is empty afterwards.
+// Each write scenario below therefore takes an `account` callback and hands it
+// the transaction while the writes are still on it, just before committing.
+//
+// A benchmark cannot afford that call inside its timed window, so it does not
+// pass one. Instead it runs the same scenario once more, untimed and with the
+// callback, and reports what came back. The reports are per bench name, once.
+type Account = (tx: IExtendedStorageTransaction) => void;
+
 const reported = new Set<string>();
-function accountNovelty(tx: IExtendedStorageTransaction): {
-  docs: number;
-  bytes: number;
-} {
-  const ids = new Set<string>();
-  let bytes = 0;
-  for (const att of tx.journal.novelty(space)) {
-    ids.add(String((att.address as { id?: unknown }).id ?? "?"));
-    if (att.value !== undefined) bytes += JSON.stringify(att.value).length;
-  }
-  return { docs: ids.size, bytes };
-}
-function reportOnce(name: string, detail: string) {
+
+/**
+ * Runs `scenario` once with an accounting callback and writes one line for
+ * `name`. Repeat calls for the same name do nothing, so a benchmark can ask on
+ * every iteration and pay for one run.
+ */
+async function reportOnce(
+  name: string,
+  scenario: (account: Account) => Promise<void>,
+  format: (account: WriteAccount) => string,
+): Promise<void> {
   if (!REPORT || reported.has(name)) return;
   reported.add(name);
-  console.error(`[flat-index-list] ${name}: ${detail}`);
+  let total: WriteAccount = { docs: 0, bytes: 0 };
+  await scenario((tx) => {
+    total = addAccounts(total, accountNovelty(tx.journal.novelty(space)));
+  });
+  benchDiagnostic(`[flat-index-list] ${name}: ${format(total)}`);
+}
+
+/** The accounting line for a scenario that stores a list from nothing. */
+function creationLine(
+  N: number,
+  rawBytes: number,
+): (a: WriteAccount) => string {
+  return ({ docs, bytes }) =>
+    `docs=${docs} storedBytes=${bytes} rawJSON=${rawBytes} ` +
+    `overhead=${(bytes / rawBytes).toFixed(2)}x ` +
+    `perItem=${Math.round(bytes / N)}B`;
+}
+
+/** The accounting line for a scenario that runs UPDATE_TXS transactions. */
+function updateLine({ docs, bytes }: WriteAccount): string {
+  return `txs=${UPDATE_TXS} avgBytes/tx=${Math.round(bytes / UPDATE_TXS)} ` +
+    `avgDocs/tx=${(docs / UPDATE_TXS).toFixed(1)} ` +
+    `(one raw item≈${jsonBytes(makeItem(0))}B)`;
 }
 
 // =============================================================================
 // 1. WRITE: one flat array in ONE doc, via a single Cell.set()
 // =============================================================================
+async function writeOneDoc(
+  N: number,
+  b?: Deno.BenchContext,
+  account?: Account,
+): Promise<void> {
+  const { runtime, storageManager, tx } = setup();
+  const cell = runtime.getCell<IndexItem[]>(
+    space,
+    `bench-flat-index-one-doc-${N}`,
+    undefined,
+    tx,
+  );
+  const list = makeList(N);
+  try {
+    b?.start();
+    cell.set(list);
+    account?.(tx);
+    await tx.commit();
+    b?.end();
+  } finally {
+    await cleanup(runtime, storageManager, tx);
+  }
+}
+
+// =============================================================================
+// 2. WRITE: one doc PER ITEM (parent array holds cell links)
+// =============================================================================
+async function writePerItem(
+  N: number,
+  b?: Deno.BenchContext,
+  account?: Account,
+): Promise<void> {
+  const { runtime, storageManager, tx } = setup();
+  const frame: Frame = pushFrame({
+    cause: { type: "bench-flat-index-per-item", n: N },
+    runtime,
+    tx,
+    space,
+    inHandler: true,
+  });
+  const parent = runtime.getCell<Cell<IndexItem>[]>(
+    space,
+    `bench-flat-index-per-item-${N}`,
+    undefined,
+    tx,
+  );
+  try {
+    b?.start();
+    const cells = makeList(N).map((item, i) =>
+      Writable.for<IndexItem>(`bench-flat-index-item-${N}-${i}`)
+        .set(item) as unknown as Cell<IndexItem>
+    );
+    parent.set(cells);
+    account?.(tx);
+    await tx.commit();
+    b?.end();
+  } finally {
+    popFrame(frame);
+    await cleanup(runtime, storageManager, tx);
+  }
+}
+
 for (const N of SIZES) {
-  const rawBytes = JSON.stringify(makeList(N)).length;
+  const rawBytes = jsonBytes(makeList(N));
+
   Deno.bench({
     name: `flat list ONE doc - cell.set(${N} items) + commit`,
     group: `write-${N}`,
     baseline: true,
     async fn(b) {
-      const { runtime, storageManager, tx } = setup();
-      const cell = runtime.getCell<IndexItem[]>(
-        space,
-        `bench-flat-index-one-doc-${N}`,
-        undefined,
-        tx,
+      await reportOnce(
+        `one-doc write N=${N}`,
+        (account) => writeOneDoc(N, undefined, account),
+        creationLine(N, rawBytes),
       );
-      const list = makeList(N);
-      try {
-        b.start();
-        cell.set(list);
-        await tx.commit();
-        b.end();
-        const { docs, bytes } = accountNovelty(tx);
-        reportOnce(
-          `one-doc write N=${N}`,
-          `docs=${docs} storedBytes=${bytes} rawJSON=${rawBytes} ` +
-            `overhead=${(bytes / rawBytes).toFixed(2)}x ` +
-            `perItem=${Math.round(bytes / N)}B`,
-        );
-      } finally {
-        await cleanup(runtime, storageManager, tx);
-      }
+      await writeOneDoc(N, b);
     },
   });
 
-  // ===========================================================================
-  // 2. WRITE: one doc PER ITEM (parent array holds cell links)
-  // ===========================================================================
   Deno.bench({
     name: `flat list PER-ITEM docs - ${N} Writable.set + parent set + commit`,
     group: `write-${N}`,
     async fn(b) {
-      const { runtime, storageManager, tx } = setup();
-      const frame: Frame = pushFrame({
-        cause: { type: "bench-flat-index-per-item", n: N },
-        runtime,
-        tx,
-        space,
-        inHandler: true,
-      });
-      const parent = runtime.getCell<Cell<IndexItem>[]>(
-        space,
-        `bench-flat-index-per-item-${N}`,
-        undefined,
-        tx,
+      await reportOnce(
+        `per-item write N=${N}`,
+        (account) => writePerItem(N, undefined, account),
+        creationLine(N, rawBytes),
       );
-      try {
-        b.start();
-        const cells = makeList(N).map((item, i) =>
-          Writable.for<IndexItem>(`bench-flat-index-item-${N}-${i}`)
-            .set(item) as unknown as Cell<IndexItem>
-        );
-        parent.set(cells);
-        await tx.commit();
-        b.end();
-        const { docs, bytes } = accountNovelty(tx);
-        reportOnce(
-          `per-item write N=${N}`,
-          `docs=${docs} storedBytes=${bytes} rawJSON=${rawBytes} ` +
-            `overhead=${(bytes / rawBytes).toFixed(2)}x ` +
-            `perItem=${Math.round(bytes / N)}B`,
-        );
-      } finally {
-        popFrame(frame);
-        await cleanup(runtime, storageManager, tx);
-      }
+      await writePerItem(N, b);
     },
   });
 }
@@ -361,8 +416,7 @@ for (const N of SIZES) {
 
 // =============================================================================
 // 4. UPDATE: three writer profiles for "one item changed", distinguished
-//    because they have wildly different write footprints (novelty accounting
-//    runs AFTER b.end(), on the retained per-tx journals):
+//    because they have wildly different write footprints:
 //      a. REGENERATE from scratch (what a derivation/lift recompute does):
 //         fresh objects carry no doc identity → every element re-minted.
 //      b. READ-MODIFY-WRITE (the idiomatic handler edit): objects returned
@@ -370,26 +424,107 @@ for (const N of SIZES) {
 //         the parent write.
 //      c. TARGETED key(i).set: bypasses the array diff entirely.
 // =============================================================================
-type UpdateAccount = { docs: number; bytes: number };
+async function updateRegenerate(
+  N: number,
+  b?: Deno.BenchContext,
+  account?: Account,
+): Promise<void> {
+  const { runtime, storageManager, tx: setupTx } = setup();
+  const cell0 = runtime.getCell<IndexItem[]>(
+    space,
+    `bench-flat-index-update-set-${N}`,
+    undefined,
+    setupTx,
+  );
+  cell0.set(makeList(N));
+  await setupTx.commit();
 
-function accountAll(txs: IExtendedStorageTransaction[]): UpdateAccount {
-  let docs = 0;
-  let bytes = 0;
-  for (const tx of txs) {
-    const a = accountNovelty(tx);
-    docs += a.docs;
-    bytes += a.bytes;
+  b?.start();
+  for (let t = 0; t < UPDATE_TXS; t++) {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<IndexItem[]>(
+      space,
+      `bench-flat-index-update-set-${N}`,
+      undefined,
+      tx,
+    );
+    const list = makeList(N);
+    list[t % N] = makeItem(t % N, `-mut${t}`);
+    cell.set(list);
+    account?.(tx);
+    await tx.commit();
   }
-  return { docs, bytes };
+  b?.end();
+  await cleanup(runtime, storageManager);
 }
 
-function reportUpdate(label: string, N: number, acc: UpdateAccount) {
-  reportOnce(
-    `${label} N=${N}`,
-    `txs=${UPDATE_TXS} avgBytes/tx=${Math.round(acc.bytes / UPDATE_TXS)} ` +
-      `avgDocs/tx=${(acc.docs / UPDATE_TXS).toFixed(1)} ` +
-      `(one raw item≈${JSON.stringify(makeItem(0)).length}B)`,
+async function updateReadModifyWrite(
+  N: number,
+  b?: Deno.BenchContext,
+  account?: Account,
+): Promise<void> {
+  const { runtime, storageManager, tx: setupTx } = setup();
+  const cell0 = runtime.getCell<IndexItem[]>(
+    space,
+    `bench-flat-index-update-rmw-${N}`,
+    undefined,
+    setupTx,
   );
+  cell0.set(makeList(N));
+  await setupTx.commit();
+
+  b?.start();
+  for (let t = 0; t < UPDATE_TXS; t++) {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<IndexItem[]>(
+      space,
+      `bench-flat-index-update-rmw-${N}`,
+      undefined,
+      tx,
+    );
+    // Idiomatic edit: read the current array (elements carry their doc
+    // identity), replace ONE element, write the array back.
+    const current = cell.get();
+    const list = [...current];
+    list[t % N] = makeItem(t % N, `-mut${t}`);
+    cell.set(list);
+    account?.(tx);
+    await tx.commit();
+  }
+  b?.end();
+  await cleanup(runtime, storageManager);
+}
+
+async function updateTargeted(
+  N: number,
+  b?: Deno.BenchContext,
+  account?: Account,
+): Promise<void> {
+  const { runtime, storageManager, tx: setupTx } = setup();
+  const cell0 = runtime.getCell<IndexItem[]>(
+    space,
+    `bench-flat-index-update-key-${N}`,
+    undefined,
+    setupTx,
+  );
+  cell0.set(makeList(N));
+  await setupTx.commit();
+
+  b?.start();
+  for (let t = 0; t < UPDATE_TXS; t++) {
+    const tx = runtime.edit();
+    const cell = runtime.getCell<IndexItem[]>(
+      space,
+      `bench-flat-index-update-key-${N}`,
+      undefined,
+      tx,
+    );
+    cell.key(t % N).set(makeItem(t % N, `-mut${t}`));
+    account?.(tx);
+    await tx.commit();
+  }
+  b?.end();
+  await cleanup(runtime, storageManager);
 }
 
 for (const N of SIZES) {
@@ -399,35 +534,12 @@ for (const N of SIZES) {
     group: `update-${N}`,
     baseline: true,
     async fn(b) {
-      const { runtime, storageManager, tx: setupTx } = setup();
-      const cell0 = runtime.getCell<IndexItem[]>(
-        space,
-        `bench-flat-index-update-set-${N}`,
-        undefined,
-        setupTx,
+      await reportOnce(
+        `update regenerate N=${N}`,
+        (account) => updateRegenerate(N, undefined, account),
+        updateLine,
       );
-      cell0.set(makeList(N));
-      await setupTx.commit();
-
-      const txs: IExtendedStorageTransaction[] = [];
-      b.start();
-      for (let t = 0; t < UPDATE_TXS; t++) {
-        const tx = runtime.edit();
-        const cell = runtime.getCell<IndexItem[]>(
-          space,
-          `bench-flat-index-update-set-${N}`,
-          undefined,
-          tx,
-        );
-        const list = makeList(N);
-        list[t % N] = makeItem(t % N, `-mut${t}`);
-        cell.set(list);
-        await tx.commit();
-        txs.push(tx);
-      }
-      b.end();
-      reportUpdate("update regenerate", N, accountAll(txs));
-      await cleanup(runtime, storageManager);
+      await updateRegenerate(N, b);
     },
   });
 
@@ -435,38 +547,12 @@ for (const N of SIZES) {
     name: `flat list update - READ-MODIFY-WRITE, 1 item changed (${N} items)`,
     group: `update-${N}`,
     async fn(b) {
-      const { runtime, storageManager, tx: setupTx } = setup();
-      const cell0 = runtime.getCell<IndexItem[]>(
-        space,
-        `bench-flat-index-update-rmw-${N}`,
-        undefined,
-        setupTx,
+      await reportOnce(
+        `update read-modify-write N=${N}`,
+        (account) => updateReadModifyWrite(N, undefined, account),
+        updateLine,
       );
-      cell0.set(makeList(N));
-      await setupTx.commit();
-
-      const txs: IExtendedStorageTransaction[] = [];
-      b.start();
-      for (let t = 0; t < UPDATE_TXS; t++) {
-        const tx = runtime.edit();
-        const cell = runtime.getCell<IndexItem[]>(
-          space,
-          `bench-flat-index-update-rmw-${N}`,
-          undefined,
-          tx,
-        );
-        // Idiomatic edit: read the current array (elements carry their doc
-        // identity), replace ONE element, write the array back.
-        const current = cell.get();
-        const list = [...current];
-        list[t % N] = makeItem(t % N, `-mut${t}`);
-        cell.set(list);
-        await tx.commit();
-        txs.push(tx);
-      }
-      b.end();
-      reportUpdate("update read-modify-write", N, accountAll(txs));
-      await cleanup(runtime, storageManager);
+      await updateReadModifyWrite(N, b);
     },
   });
 
@@ -474,33 +560,12 @@ for (const N of SIZES) {
     name: `flat list update - targeted key(i).set, 1 item changed (${N} items)`,
     group: `update-${N}`,
     async fn(b) {
-      const { runtime, storageManager, tx: setupTx } = setup();
-      const cell0 = runtime.getCell<IndexItem[]>(
-        space,
-        `bench-flat-index-update-key-${N}`,
-        undefined,
-        setupTx,
+      await reportOnce(
+        `update targeted N=${N}`,
+        (account) => updateTargeted(N, undefined, account),
+        updateLine,
       );
-      cell0.set(makeList(N));
-      await setupTx.commit();
-
-      const txs: IExtendedStorageTransaction[] = [];
-      b.start();
-      for (let t = 0; t < UPDATE_TXS; t++) {
-        const tx = runtime.edit();
-        const cell = runtime.getCell<IndexItem[]>(
-          space,
-          `bench-flat-index-update-key-${N}`,
-          undefined,
-          tx,
-        );
-        cell.key(t % N).set(makeItem(t % N, `-mut${t}`));
-        await tx.commit();
-        txs.push(tx);
-      }
-      b.end();
-      reportUpdate("update targeted", N, accountAll(txs));
-      await cleanup(runtime, storageManager);
+      await updateTargeted(N, b);
     },
   });
 }

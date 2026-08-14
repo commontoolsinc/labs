@@ -1,50 +1,52 @@
-// Reports every part of a runtime value that ordinary JSON serialization
-// (`JSON.stringify`) would silently alter, drop, or fail to represent -- so a
-// caller that must hand a value across a JSON boundary can refuse or repair it
-// before the loss happens, rather than discovering a mangled value downstream.
-//
-// This is a positive whitelist, not a search for known-bad leaves. Only the
-// shapes JSON round-trips by identity are accepted -- `null`, booleans,
-// strings, finite numbers other than `-0`, dense arrays of accepted values,
-// and plain objects whose values are accepted. Everything else is reported:
-// `undefined` (dropped from an object, `null` in an array), `NaN` and
-// `±Infinity` (both become `null`), `-0` (loses its sign), `bigint` /
-// `symbol` / `function` (not representable), array holes (`null`), a
-// non-index property on an array (dropped), symbol-keyed properties
-// (dropped), a `toJSON` hook (replaces the value before JSON sees it),
-// non-plain objects such as a class instance (flattened -- `JSON.stringify`
-// finds no data in its private fields), and cycles (`JSON.stringify` throws).
-//
-// A blacklist that only hunted bad numbers would pass every one of those: they
-// leave no offending numeric leaf, yet JSON still alters them. Whitelisting is
-// the only framing that makes an empty result actually mean "JSON serialization
-// will not change this."
-//
-// Known limitations. The walk reads enumerable own keys (`Object.keys` /
-// `Object.entries`) and an own `toJSON` data property, which certifies the
-// ordinary values it is meant for. It does _not_ fully certify
-// adversarially-shaped objects, so for these the empty result is not a
-// guarantee (all confirmed to pass here while `JSON.stringify` alters them):
-//
-//   - A non-enumerable string data property on a _plain object_ is dropped by
-//     JSON but not seen here (that walk is enumerable-only). An array's
-//     properties are read with `Object.getOwnPropertyNames`, so the same
-//     property on an array _is_ reported.
-//   - An accessor-based `toJSON` (a getter) is missed: the own-descriptor check
-//     matches a data property whose value is a function, not an accessor -- and
-//     a plain read could fire the getter, which the check avoids on purpose.
-//   - An inherited `toJSON` (e.g. on a custom array prototype) is missed: the
-//     check looks at own descriptors only.
-//   - The array-hole test uses `i in obj`, which consults the prototype, so an
-//     inherited numeric property masks a hole; this also does not match JSON's
-//     own-vs-inherited element read.
-//
-// TODO(danfuzz): Close those four gaps, by inspecting own property
-// descriptors for plain objects instead of using `Object.entries`, rejecting
-// accessors and non-enumerable data properties, using `Object.hasOwn` for
-// array slots, and rejecting a nonstandard array prototype or an inherited
-// `toJSON`. Required once a caller has to certify a value it did not
-// construct.
+/**
+ * Reports every part of a runtime value that ordinary JSON serialization
+ * (`JSON.stringify`) would silently alter, drop, or fail to represent -- so a
+ * caller that must hand a value across a JSON boundary can refuse or repair it
+ * before the loss happens, rather than discovering a mangled value downstream.
+ *
+ * This is a positive whitelist, not a search for known-bad leaves. Only the
+ * shapes JSON round-trips by identity are accepted -- `null`, booleans,
+ * strings, finite numbers other than `-0`, dense arrays of accepted values,
+ * and plain objects whose values are accepted. Everything else is reported:
+ * `undefined` (dropped from an object, `null` in an array), `NaN` and
+ * `±Infinity` (both become `null`), `-0` (loses its sign), `bigint` /
+ * `symbol` / `function` (not representable), array holes (`null`), a
+ * non-index property on an array (dropped), symbol-keyed properties
+ * (dropped), a `toJSON` hook (replaces the value before JSON sees it),
+ * non-plain objects such as a class instance (flattened -- `JSON.stringify`
+ * finds no data in its private fields), and cycles (`JSON.stringify` throws).
+ *
+ * A blacklist that only hunted bad numbers would pass every one of those: they
+ * leave no offending numeric leaf, yet JSON still alters them. Whitelisting is
+ * the only framing that makes an empty result actually mean "JSON serialization
+ * will not change this."
+ *
+ * Known limitations. The walk reads enumerable own keys (`Object.keys` /
+ * `Object.entries`) and an own `toJSON` data property, which certifies the
+ * ordinary values it is meant for. It does _not_ fully certify
+ * adversarially-shaped objects, so for these the empty result is not a
+ * guarantee (all confirmed to pass here while `JSON.stringify` alters them):
+ *
+ *   - A non-enumerable string data property on a _plain object_ is dropped by
+ *     JSON but not seen here (that walk is enumerable-only). An array's
+ *     properties are read with `Object.getOwnPropertyNames`, so the same
+ *     property on an array _is_ reported.
+ *   - An accessor-based `toJSON` (a getter) is missed: the own-descriptor check
+ *     matches a data property whose value is a function, not an accessor -- and
+ *     a plain read could fire the getter, which the check avoids on purpose.
+ *   - An inherited `toJSON` (e.g. on a custom array prototype) is missed: the
+ *     check looks at own descriptors only.
+ *   - The array-hole test uses `i in obj`, which consults the prototype, so an
+ *     inherited numeric property masks a hole; this also does not match JSON's
+ *     own-vs-inherited element read.
+ *
+ * TODO(danfuzz): Close those four gaps, by inspecting own property
+ * descriptors for plain objects instead of using `Object.entries`, rejecting
+ * accessors and non-enumerable data properties, using `Object.hasOwn` for
+ * array slots, and rejecting a nonstandard array prototype or an inherited
+ * `toJSON`. Required once a caller has to certify a value it did not
+ * construct.
+ */
 
 import type { JSONValue } from "@commonfabric/api";
 

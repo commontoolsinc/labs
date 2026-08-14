@@ -259,20 +259,6 @@ function composeBundleSourceMapTextual(
 }
 
 /**
- * Compose a single bundle source map for the concatenated module bodies
- * (`[...bodies].join("\n")`) from each module's own source map, offsetting each
- * module's generated lines by its starting line in the concatenation.
- *
- * The module-record loader resolves a function's location by `indexOf`-ing
- * its source into the concatenated bundle `script`, then calling
- * `mapPosition(bundleFilename, line, col)`. Without a registered map that stays
- * a raw bundle coordinate (`<loadId>.js:..`), which CFC verified-source identity
- * rejects. Registering this composed map resolves it back to the original
- * authored source (e.g. `/main.tsx:6:2`).
- *
- * Returns `undefined` if no module contributed a map.
- */
-/**
  * A module's contribution to a composed bundle map. Exactly one of `body` /
  * `bodyLineCount` must describe the module's generated-line extent —
  * composition only ever needs the LINE COUNT of the body, so callers that
@@ -293,6 +279,20 @@ export function getComposeBundleSourceMapCallsForTesting(): number {
   return composeCallsForTesting;
 }
 
+/**
+ * Compose a single bundle source map for the concatenated module bodies
+ * (`[...bodies].join("\n")`) from each module's own source map, offsetting each
+ * module's generated lines by its starting line in the concatenation.
+ *
+ * The module-record loader resolves a function's location by `indexOf`-ing
+ * its source into the concatenated bundle `script`, then calling
+ * `mapPosition(bundleFilename, line, col)`. Without a registered map that stays
+ * a raw bundle coordinate (`<loadId>.js:..`), which CFC verified-source identity
+ * rejects. Registering this composed map resolves it back to the original
+ * authored source (e.g. `/main.tsx:6:2`).
+ *
+ * Returns `undefined` if no module contributed a map.
+ */
 export function composeBundleSourceMap(
   // `source`, when set, overrides the map's recorded source path for ALL of that
   // module's mappings. The per-module compiler maps record only the basename

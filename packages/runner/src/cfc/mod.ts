@@ -1,4 +1,8 @@
-export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
+export type {
+  CfcLabelView,
+  CfcLabelViewEntry,
+  CfcLabelViewStatus,
+} from "./label-view.ts";
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
@@ -25,6 +29,8 @@ export {
 } from "./label-representation.ts";
 export {
   cfcLabelViewForCell,
+  cfcLabelViewForCellFailClosed,
+  cfcLabelViewForCellWithStatus,
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,
   cfcLabelViewFromMetadata,
@@ -147,7 +153,6 @@ export {
   MATERIAL_RISK_DISCHARGE_KINDS,
   MATERIAL_RISK_DISCHARGE_POLICY,
   MATERIAL_RISK_KINDS,
-  PROMPT_INJECTION_RISK_LEGACY,
   STANDARD_PROMPT_CAVEAT_POLICY,
 } from "./standard-profile.ts";
 export type {

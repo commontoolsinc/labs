@@ -1,5 +1,11 @@
 /// <cts-enable />
-import { computed, multiUserTest, pattern, Writable } from "commonfabric";
+import {
+  computed,
+  multiUserTest,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import {
   addSelfToLobby,
   commitTrustedLobbyAction,
@@ -79,7 +85,7 @@ export const alice = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { action: addSelf },
       { label: "alice-joined" },
       { await: "bob-joined" },
@@ -141,7 +147,7 @@ export const bob = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-joined" },
       { action: addSelf },
       { label: "bob-joined" },

@@ -1719,6 +1719,102 @@ describe("data-updating", () => {
       expect(cell.withTx(tx).get().value).toBe(42);
     });
   });
+
+  describe("writing back what a read handed out", () => {
+    /** The list shape a search index or an autocomplete list has. */
+    const list = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        label: `entry-${i}`,
+        nested: { id: `id-${i}` },
+      }));
+
+    /** Writes a list back with one element replaced, counting reads. */
+    const rewriteOneElement = (n: number) => {
+      const cell = runtime.getCell<ReturnType<typeof list>>(
+        space,
+        `write back ${n}`,
+        undefined,
+        tx,
+      );
+      cell.set(list(n));
+
+      const written = [...cell.get()];
+      written[7] = { label: "changed", nested: { id: "changed" } };
+      const before = tx.getReactivityLog!().reads.length;
+      cell.set(written);
+      const reads = tx.getReactivityLog!().reads.length - before;
+
+      return { reads, value: cell.get() };
+    };
+
+    it("records the same reads however long the list is", () => {
+      // Each element a read hands out is a query result, and the diff replaces
+      // one with the link it names rather than reading into it. Nothing ahead
+      // of the diff reads into one either, so what a write-back costs does not
+      // follow the length: a member read resolves through the transaction and
+      // is recorded on it as a dependency the commit has to check.
+      const short = rewriteOneElement(50);
+      const long = rewriteOneElement(500);
+
+      expect(long.reads).toBe(short.reads);
+      // And what it records is a handful, not a number that merely happens to
+      // match at both lengths: fewer reads than the shorter list has
+      // elements, and more than none. A write-back records the dependencies
+      // its commit is checked against, so a count of zero is a write that
+      // conflicts with nothing, which two equal counts alone would accept.
+      expect(long.reads).toBeGreaterThan(0);
+      expect(long.reads).toBeLessThan(50);
+    });
+
+    it("stores a value answering `toCell` as the link it names", () => {
+      // What the walk stops at, the diff replaces with a link -- which is
+      // what makes an unchanged element of a read-back list cost nothing to
+      // write, and is the property the walk stopping must not disturb. Both
+      // kinds of value answer `toCell` and both land the same way: the live
+      // view a schemaless read hands out, and the frozen result a read
+      // through a schema annotates.
+      const source = runtime.getCell<{ inner: { deep: number } }>(
+        space,
+        "toCell source",
+        undefined,
+        tx,
+      );
+      source.set({ inner: { deep: 1 } });
+      const innerLink = source.key("inner").getAsNormalizedFullLink();
+
+      const live = (source.get() as { inner: unknown }).inner;
+      const frozen = (runtime.getCell(
+        space,
+        "toCell source",
+        {
+          type: "object",
+          properties: { inner: { type: "object" } },
+        } as JSONSchema,
+        tx,
+      ).get() as { inner: unknown }).inner;
+
+      const storedFor = (name: string, held: unknown) => {
+        const holder = runtime.getCell(space, name, undefined, tx);
+        holder.set({ held });
+        return (holder.getRaw() as { held: unknown }).held;
+      };
+      const fromLive = storedFor("toCell holder live", live);
+      const fromFrozen = storedFor("toCell holder frozen", frozen);
+
+      expect(isSigilLink(fromLive)).toBe(true);
+      expect(areNormalizedLinksSame(parseLink(fromLive)!, innerLink)).toBe(
+        true,
+      );
+      expect(fromFrozen).toEqual(fromLive);
+    });
+
+    it("writes the changed element and leaves its neighbor", () => {
+      const { value } = rewriteOneElement(50);
+
+      expect(value[7].label).toBe("changed");
+      expect(value[8].label).toBe("entry-8");
+    });
+  });
 });
 
 /**

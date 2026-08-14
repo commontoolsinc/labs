@@ -1,4 +1,12 @@
-import { action, assert, pattern, UI, wish, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  pattern,
+  TESTS,
+  UI,
+  wish,
+  Writable,
+} from "commonfabric";
 import { findElementByText, hasText, propsOf } from "./test/vnode-helpers.ts";
 import RecordBackup, { type RecordPiece } from "./record-backup.tsx";
 
@@ -83,7 +91,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_empty },
       { action: action_import },
       { assertion: assert_each_imported_record_is_registered },

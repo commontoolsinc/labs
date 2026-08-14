@@ -14,7 +14,15 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, assert, computed, pattern, UI, wish } from "commonfabric";
+import {
+  action,
+  assert,
+  computed,
+  pattern,
+  TESTS,
+  UI,
+  wish,
+} from "commonfabric";
 import {
   findNodeById,
   findNodeByProp,
@@ -973,7 +981,7 @@ export default pattern(() => {
   // ============================================================
 
   return {
-    tests: [
+    [TESTS]: [
       // People management
       { assertion: assert_s1_no_people },
       { assertion: assert_s1_three_spots },

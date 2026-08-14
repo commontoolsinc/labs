@@ -4,7 +4,10 @@ import {
   assertExists,
   assertStrictEquals,
 } from "@std/assert";
-import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
@@ -416,13 +419,13 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
   // The commit payloads carry full FabricValues; decode with a context that
   // FAILS on cell reconstruction rather than the default memory context.
   protected override decode(payload: string): ScriptedTransportMessage {
-    return valueFromJson(
+    return fabricFromJsonValue(
       payload,
       testReconstructionContext,
     ) as ScriptedTransportMessage;
   }
   protected override encode(message: unknown): string {
-    return jsonFromValue(message as FabricValue);
+    return jsonFromFabricValue(message as FabricValue);
   }
 
   // The harness owns teardown; closing the session must not signal a

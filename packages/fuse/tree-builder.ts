@@ -28,7 +28,69 @@ function encodeJsonEntryName(
 }
 
 /**
- * JSON.stringify that replaces circular references with "[Circular]".
+ * The staging entries a rebuild builds under, and the name each one's contents
+ * take once the rebuild reconciles them onto the live tree. A prop's staging
+ * root becomes the prop; the `[FS]` staging container maps to nothing, since
+ * its children move onto the piece directory itself.
+ *
+ * A user key that looks like one of these is encoded by `encodeJsonEntryName`,
+ * so a path component spelled this way is always the internal entry.
+ */
+const STAGING_ENTRY_MOUNTED_NAMES: ReadonlyArray<[string, string | null]> = [
+  [".input.pending", "input"],
+  [".result.pending", "result"],
+  [".fs.pending", null],
+];
+
+/** Where a path component lands once a rebuild reconciles, or null if it goes. */
+function mountedPathComponent(component: string): string | null {
+  for (const [staging, mounted] of STAGING_ENTRY_MOUNTED_NAMES) {
+    if (component === staging) return mounted;
+    if (component === `${staging}.json`) {
+      return mounted === null ? null : `${mounted}.json`;
+    }
+  }
+  return component;
+}
+
+/**
+ * The path an entry mounts at, for a build that may still be running under a
+ * staging root. Reports where a reader will find the entry rather than where
+ * the rebuild happens to be assembling it.
+ */
+function mountedEntryPath(
+  tree: FsTree,
+  parentIno: bigint,
+  fsName: string,
+): string {
+  return tree.childPath(parentIno, fsName)
+    .split("/")
+    .map(mountedPathComponent)
+    .filter((component) => component !== null)
+    .join("/");
+}
+
+/**
+ * How many levels of nested objects and arrays a `.json` file spells out. A
+ * value below the last of them is written as `MAX_DEPTH_MARKER`.
+ *
+ * `JSON.stringify` descends one call frame per level of nesting, so an
+ * unbounded value would exhaust the call stack. The bound also holds the size
+ * of a single `.json` file down, since a directory at every level of a deep
+ * value carries a `.json` sibling spelling out everything beneath it.
+ *
+ * The bound is measured from the value being serialized, not from the root of
+ * the piece, so data below it stays readable through the `.json` sibling of a
+ * directory closer to it.
+ */
+export const MAX_JSON_DEPTH = 128;
+
+/** Written in place of a value nested deeper than `MAX_JSON_DEPTH`. */
+export const MAX_DEPTH_MARKER = "[Max depth exceeded]";
+
+/**
+ * JSON.stringify that replaces circular references with "[Circular]" and
+ * values nested deeper than `MAX_JSON_DEPTH` with `MAX_DEPTH_MARKER`.
  *
  * TODO(danfuzz): this is an unsafe use of `stringify()` for fabric values:
  * the piece prop values this file renders are live in-process cell reads,
@@ -49,13 +111,42 @@ export function safeStringify(value: unknown, indent = 2): string {
         ) {
           ancestors.pop();
         }
+        // Circularity is a property of the value and the depth bound is a
+        // property of this rendering, so a value that is both reads as
+        // circular: there is nothing below it that a deeper bound would show.
         if (ancestors.includes(val)) return "[Circular]";
+        if (ancestors.length >= MAX_JSON_DEPTH) return MAX_DEPTH_MARKER;
         ancestors.push(val);
       }
       return val;
     },
     indent,
   );
+}
+
+/**
+ * `safeStringify` for a value bound for the filesystem entry `fsName` under
+ * `parentIno`. A value that cannot be serialized fails with the mounted path
+ * of that entry, which names the piece holding the value and the path to it
+ * within the piece.
+ */
+export function stringifyEntryValue(
+  tree: FsTree,
+  parentIno: bigint,
+  fsName: string,
+  value: unknown,
+): string {
+  try {
+    return safeStringify(value);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `Cannot serialize ${
+        mountedEntryPath(tree, parentIno, fsName)
+      }: ${detail}`,
+      { cause },
+    );
+  }
 }
 
 /**
@@ -158,14 +249,19 @@ export function buildFsProjection(
   if (fsValue.type === "application/json") {
     const { entityId: _skipEntityId, ...safeContent } = fsValue.content ?? {};
     const obj = { entityId, ...safeContent };
-    return tree.addFile(parentIno, "index.json", safeStringify(obj), "object");
+    return tree.addFile(
+      parentIno,
+      "index.json",
+      stringifyEntryValue(tree, parentIno, "index.json", obj),
+      "object",
+    );
   }
 
   // Fallback: unknown type
   return tree.addFile(
     parentIno,
     "index.txt",
-    safeStringify(fsValue),
+    stringifyEntryValue(tree, parentIno, "index.txt", fsValue),
     "object",
   );
 }
@@ -304,7 +400,7 @@ function addJsonAggregateSibling(
   const ino = tree.addFile(
     parentIno,
     jsonName,
-    safeStringify(value),
+    stringifyEntryValue(tree, parentIno, jsonName, value),
     jsonType,
   );
   annotation?.annotator.annotateJsonAggregate(ino, annotation.path, value);
@@ -511,7 +607,10 @@ async function drainJsonTreeBuildAsync(
  * - array → directory with an entry per index (jsonType "array")
  *
  * Circular references are replaced with "[Circular]".
- * Also synthesizes `.json` sibling files for directory nodes.
+ * Also synthesizes `.json` sibling files for directory nodes. A `.json`
+ * sibling spells out `MAX_JSON_DEPTH` levels of nesting beneath itself and
+ * writes `MAX_DEPTH_MARKER` below that; the directory tree carries the whole
+ * value regardless of how deep it goes.
  *
  * Entries are created level by level, and the whole value is projected before
  * this returns. Callers that must not block the event loop for a large value

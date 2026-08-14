@@ -14,7 +14,7 @@
  *
  * Run: deno task cf test packages/patterns/card-piles/main.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import CardPiles, { defaultPile1, defaultPile2 } from "./main.tsx";
 
 export default pattern(() => {
@@ -267,7 +267,7 @@ export default pattern(() => {
   // Test sequence
   // =========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // --- Initial state: defaults ---
       { assertion: assert_defaults_pile1_count },
       { assertion: assert_defaults_pile2_count },

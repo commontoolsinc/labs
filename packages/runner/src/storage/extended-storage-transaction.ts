@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -8,6 +8,7 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { aclDocId } from "@commonfabric/memory/acl";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
@@ -50,8 +51,14 @@ import {
   getTransactionWriteDetails,
 } from "./transaction-inspection.ts";
 import {
+  clearSchemaRefusalTx,
   isInternalVerifierRead,
+  isLazyMaterializationTx,
+  markLazyMaterializationTx,
+  noteSchemaRefusalTx,
   reactivityLogFromActivities,
+  takeSchemaRefusalTx,
+  unmarkLazyMaterializationTx,
 } from "./reactivity-log.ts";
 
 import {
@@ -819,6 +826,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       );
       return;
     }
+    // The space ACL document has a non-standard write contract: the memory
+    // server accepts only an ACL-only commit carrying a single whole-document
+    // `set` (INV-12, docs/specs/memory-v2/09-invariants.md). A write through
+    // the value surface is decomposed per key by `normalizeAndDiff` and
+    // emitted as `op: "patch"`, which the server refuses — so it fails after a
+    // round-trip, with an error about commit shape that the author of the
+    // write has no reason to understand. Refuse it here instead, in-process,
+    // naming the one sanctioned writer. `ACLManager` addresses the whole
+    // document (path `[]`) and so passes; genesis bypasses this transaction
+    // entirely via a raw `session.transact`; hydration delivers path-`[]`
+    // shapes; the CFC space-membership reader only reads.
+    if (address.path.length > 0 && address.id === aclDocId(address.space)) {
+      throw new Error(
+        `${address.id} is the space ACL document: mutate it through ` +
+          `ACLManager, which replaces the whole document. A value-path write ` +
+          `is emitted as a patch and rejected by the memory server.`,
+      );
+    }
     // The ["cfc"] document field holds the persisted label map. A value-path
     // write (path[0] is a user key) or a path-[] full-document write is not it.
     if (address.path[0] !== "cfc") return;
@@ -910,6 +935,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.narrowestReadScope = scope;
   }
 
+  markLazyMaterialize(enabled = true): void {
+    if (enabled) markLazyMaterializationTx(this);
+    else unmarkLazyMaterializationTx(this);
+  }
+
+  isLazyMaterialize(): boolean {
+    return isLazyMaterializationTx(this);
+  }
+
+  noteSchemaRefusal(refusal: unknown): void {
+    noteSchemaRefusalTx(this, refusal);
+  }
+
+  takeSchemaRefusal(): unknown {
+    return takeSchemaRefusalTx(this);
+  }
+
+  clearSchemaRefusal(refusal: unknown): void {
+    clearSchemaRefusalTx(this, refusal);
+  }
+
   private recordReadScope(address: Pick<IMemorySpaceAddress, "scope">): void {
     const scope = normalizeCellScope(address.scope);
     if (scopeRank(scope) > scopeRank(this.narrowestReadScope)) {
@@ -967,6 +1013,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       sets: this.readResultCacheSets,
       entries,
     };
+  }
+
+  hasWrites(): boolean {
+    return this.#hasWrites;
+  }
+
+  #hasWrites = false;
+
+  /**
+   * Record that this transaction has written.
+   *
+   * Called from every write path rather than inferred from one of their side
+   * effects: a mergeable op and a folded SQLite write are both writes, and
+   * neither drops the read-result cache — the value write a mergeable op
+   * annotates has already done that, and a SQLite op changes no cell value
+   * locally. Deriving "has written" from cache invalidation would miss both.
+   */
+  private noteWrite(): void {
+    this.#hasWrites = true;
   }
 
   private invalidateReadResultCache(): void {
@@ -1183,7 +1248,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // one concrete thing — no wildcards, no empty identifiers, no non-string
     // path segments. A rejected marker leaves the gate fully in force.
     if (
-      !isRecord(exemption) ||
+      !isObjectOrArray(exemption) ||
       typeof exemption.space !== "string" || exemption.space.length === 0 ||
       typeof exemption.id !== "string" || exemption.id.length === 0 ||
       !Array.isArray(exemption.path) ||
@@ -1555,6 +1620,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
     this.assertWritable("recordMergeableOp");
+    this.noteWrite();
     const address = toMemorySpaceAddress(link);
     // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
     // write. The ["cfc"]-path arm is structurally unreachable here (a
@@ -1581,6 +1647,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // A folded SQLite write is a write — honor the wrapper's read-only mode the
     // same way cell writes do, instead of silently recording it.
     this.assertWritable("recordSqliteWrite");
+    this.noteWrite();
     if (!this.tx.recordSqliteWrite) {
       throw new Error(
         "storage transaction does not support recordSqliteWrite()",
@@ -1679,6 +1746,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
+    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1694,6 +1762,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.assertWritable("writeOrThrow()");
+    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1727,7 +1796,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           ...address,
           path: lastExistingPath,
         }, { meta: ignoreReadForScheduling });
-        if (!isRecord(currentValue)) {
+        if (!isObjectOrArray(currentValue)) {
           // This should have already been caught as type mismatch error
           throw new Error(
             `Value at path ${address.path.join("/")} is not an object`,
@@ -1791,21 +1860,39 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.invalidateReadResultCache();
     if (this.tx.writeBatch) {
       // Keep the batch path on the same noteSystemWrite chokepoint as single
-      // writes (S18). Structurally inert today — the NormalizedFullLink
-      // signature means toMemorySpaceAddress always yields path ["value", ...]
-      // — but the guard must not silently fall away if the signature is ever
-      // widened to document-root addresses.
+      // writes (S18). This is not inert, and never was: `noteSystemWrite`'s
+      // ID-keyed arms do not care about the path at all. The
+      // `cfcPolicyManifest` immutability guard has always been reachable here,
+      // and the space-ACL guard now joins it — that one fires on exactly
+      // `path.length > 0`, and `toMemorySpaceAddress` prefixes "value", so
+      // EVERY link-shaped write to the ACL document throws from here,
+      // including one whose link path is [].
+      //
+      // That throw escapes mid-batch. `writeBatch` groups the generator's
+      // writes into same-document runs and applies each run as it pulls the
+      // next write, so a throw on write k leaves runs 1..k-1 already applied to
+      // the transaction while the call fails: a partial write plus a throw, not
+      // an atomic refusal. Nothing rolls those writes back — the transaction is
+      // still open and still writable, so a caller that swallows the error and
+      // commits anyway lands the prefix. Callers must treat a throw from
+      // `writeValuesOrThrow` as poisoning the transaction (abort it, or let the
+      // throw propagate past the commit, which is what every caller does
+      // today). See `writeValuesOrThrow` partial-batch coverage in
+      // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
       const noteSystemWrite = (address: IMemorySpaceAddress) =>
         this.noteSystemWrite(address);
-      // Note the write identity per yielded write (not once up front): an
-      // empty batch must not mark the tx as written-to.
+      // Note the write per yielded write (not once up front): an empty batch
+      // must not mark the tx as written-to, for the identity or for the
+      // has-written flag lazy materialization reads.
       const noteWriteIdentity = () => this.noteWriteIdentity();
+      const noteWrite = () => this.noteWrite();
       const result = this.tx.writeBatch(
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
             noteWriteIdentity();
+            noteWrite();
             yield { address, value: write.value, delete: write.delete };
           }
         })(),
@@ -2265,6 +2352,36 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T {
     return this.wrapped.runWithAmbientReadMeta(meta, fn);
+  }
+
+  markLazyMaterialize(enabled = true): void {
+    // Mark this layer as well as what it wraps: a reader holding the wrapper
+    // asks the wrapper, and a reader holding the inner transaction asks that.
+    if (enabled) markLazyMaterializationTx(this);
+    else unmarkLazyMaterializationTx(this);
+    this.wrapped.markLazyMaterialize(enabled);
+  }
+
+  isLazyMaterialize(): boolean {
+    return isLazyMaterializationTx(this) || this.wrapped.isLazyMaterialize();
+  }
+
+  hasWrites(): boolean {
+    return this.wrapped.hasWrites();
+  }
+
+  noteSchemaRefusal(refusal: unknown): void {
+    noteSchemaRefusalTx(this, refusal);
+    this.wrapped.noteSchemaRefusal(refusal);
+  }
+
+  takeSchemaRefusal(): unknown {
+    return takeSchemaRefusalTx(this) ?? this.wrapped.takeSchemaRefusal();
+  }
+
+  clearSchemaRefusal(refusal: unknown): void {
+    clearSchemaRefusalTx(this, refusal);
+    this.wrapped.clearSchemaRefusal(refusal);
   }
 
   markCfcRelevant(reason?: string): void {

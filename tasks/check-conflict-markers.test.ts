@@ -1,3 +1,14 @@
+/**
+ * These pin the recognizer that decides what counts as a merge-conflict
+ * marker, which is a gate that fails CI and so has to be exact in both
+ * directions.
+ *
+ * Most of the cases are the ones that must NOT match, since a false positive
+ * blocks a pull request over ordinary text: a Markdown setext heading
+ * underline, a run of the wrong length, and a marker anywhere but column
+ * zero all look like the real thing to a loose pattern.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assert } from "@std/assert";

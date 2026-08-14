@@ -12,7 +12,10 @@ import {
   setPatternSource,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { readPieceSourceState } from "../src/ops/piece-origin.ts";
+import {
+  readPieceSourceRevision,
+  readPieceSourceState,
+} from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece source lifecycle");
@@ -252,11 +255,19 @@ describe("piece source lifecycle", () => {
 
     expect(webFetches).toBe(0);
     expect(getPatternSource(piece.getCell())).toBeUndefined();
-    expect(
-      (await readPieceSourceState(runtime, piece.getCell())).history.map(
-        (revision) => revision.operation,
-      ),
-    ).toEqual(["create"]);
+    const sourceState = await readPieceSourceState(runtime, piece.getCell());
+    expect(sourceState.history.map((revision) => revision.operation)).toEqual([
+      "create",
+    ]);
+    const revisionSource = await readPieceSourceRevision(
+      runtime,
+      piece.getCell(),
+      sourceState.history[0].revisionId,
+    );
+    expect(revisionSource.files).toEqual(program.files);
+    await expect(
+      readPieceSourceRevision(runtime, piece.getCell(), "missing-revision"),
+    ).rejects.toThrow("source revision missing-revision was not found");
     expect(await piece.result.get(["version"])).toBe("local");
   });
 

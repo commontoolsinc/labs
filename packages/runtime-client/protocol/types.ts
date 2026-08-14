@@ -90,7 +90,12 @@ export enum RequestType {
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
   PieceGetSource = "piece:getSource",
+  PieceGetSourceRevision = "piece:getSourceRevision",
+  PieceClone = "piece:clone",
   PieceUpdateSource = "piece:updateSource",
+  SpaceGetAcl = "space:getAcl",
+  SpaceSetAclEntry = "space:setAclEntry",
+  SpaceRemoveAclEntry = "space:removeAclEntry",
 
   // VDOM operations (main -> worker)
   VDomMount = "vdom:mount",
@@ -269,7 +274,7 @@ export interface CellGetRequest extends BaseRequest {
  * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
  * is `postMessage` rather than JSON, so that is a gap rather than a limit --
  * though structured clone alone does not close it, a class instance arriving
- * with its prototype and private fields gone. `JsonCodec`
+ * with its prototype and private fields gone. `JsonCodecEngine`
  * (`@commonfabric/data-model/codec-json`) is the mechanism, already used for
  * blob-upload bodies in `backends/runtime-processor.ts`. Until then
  * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
@@ -691,6 +696,24 @@ export interface PieceGetSourceRequest extends BaseRequest {
   pieceId: string;
 }
 
+/** Read the authored files retained for one recorded source revision. */
+export interface PieceGetSourceRevisionRequest extends BaseRequest {
+  type: RequestType.PieceGetSourceRevision;
+  space: DID;
+  pieceId: string;
+  revisionId: string;
+}
+
+/** Create a copy of a piece in another space. */
+export interface PieceCloneRequest extends BaseRequest {
+  type: RequestType.PieceClone;
+  sourceSpace: DID;
+  pieceId: string;
+  destinationSpace: DID;
+  /** Seed the clone with snapshots of the source piece's durable data. */
+  copyData?: boolean;
+}
+
 /** How a piece's origin URL resolves. */
 export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
 
@@ -744,6 +767,15 @@ export interface PieceSourceResponse {
   source: PieceSourceView;
 }
 
+export interface PieceSourceRevisionSourceView {
+  pattern: PiecePatternRefView;
+  files: PatternSourceFile[];
+}
+
+export interface PieceSourceRevisionResponse {
+  source: PieceSourceRevisionSourceView;
+}
+
 export type PieceSourceAction =
   | { kind: "detach" }
   | { kind: "restore"; revisionId: string }
@@ -762,6 +794,43 @@ export interface PieceUpdateSourceResponse extends PieceSourceResponse {
   compatibilityWarning?: string;
   confirmationToken?: string;
   executionWarning?: string;
+}
+
+/** One access level in a space ACL. */
+export type SpaceAclCapability = "READ" | "WRITE" | "OWNER";
+
+/** The space ACL and the current principal's ability to administer it. */
+export interface SpaceAclView {
+  space: DID;
+  principal: DID;
+  acl: Record<string, SpaceAclCapability>;
+  canEdit: boolean;
+}
+
+/** Response carrying a space's access-control view. */
+export interface SpaceAclResponse {
+  access: SpaceAclView;
+}
+
+/** Reads the ACL for one space. */
+export interface SpaceGetAclRequest extends BaseRequest {
+  type: RequestType.SpaceGetAcl;
+  space: DID;
+}
+
+/** Adds or replaces one explicit ACL entry in a space. */
+export interface SpaceSetAclEntryRequest extends BaseRequest {
+  type: RequestType.SpaceSetAclEntry;
+  space: DID;
+  user: string;
+  capability: SpaceAclCapability;
+}
+
+/** Removes one explicit ACL entry from a space. */
+export interface SpaceRemoveAclEntryRequest extends BaseRequest {
+  type: RequestType.SpaceRemoveAclEntry;
+  space: DID;
+  user: string;
 }
 
 /** Common shape for one-way main -> worker notifications. */
@@ -915,7 +984,12 @@ export type IPCClientRequest =
   | PageGetAllRequest
   | PageSyncedRequest
   | PieceGetSourceRequest
+  | PieceGetSourceRevisionRequest
+  | PieceCloneRequest
   | PieceUpdateSourceRequest
+  | SpaceGetAclRequest
+  | SpaceSetAclEntryRequest
+  | SpaceRemoveAclEntryRequest
   | RuntimeSyncedRequest
   | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
@@ -1081,7 +1155,9 @@ export type RemoteResponse =
   | WriteStackTraceResponse
   | PageResponse
   | PieceSourceResponse
+  | PieceSourceRevisionResponse
   | PieceUpdateSourceResponse
+  | SpaceAclResponse
   | SlugResponse
   | SpaceResponse
   | VDomMountResponse
@@ -1277,9 +1353,29 @@ export type Commands = {
     request: PieceGetSourceRequest;
     response: PieceSourceResponse;
   };
+  [RequestType.PieceGetSourceRevision]: {
+    request: PieceGetSourceRevisionRequest;
+    response: PieceSourceRevisionResponse;
+  };
+  [RequestType.PieceClone]: {
+    request: PieceCloneRequest;
+    response: PageResponse;
+  };
   [RequestType.PieceUpdateSource]: {
     request: PieceUpdateSourceRequest;
     response: PieceUpdateSourceResponse;
+  };
+  [RequestType.SpaceGetAcl]: {
+    request: SpaceGetAclRequest;
+    response: SpaceAclResponse;
+  };
+  [RequestType.SpaceSetAclEntry]: {
+    request: SpaceSetAclEntryRequest;
+    response: SpaceAclResponse;
+  };
+  [RequestType.SpaceRemoveAclEntry]: {
+    request: SpaceRemoveAclEntryRequest;
+    response: SpaceAclResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;

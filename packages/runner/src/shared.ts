@@ -5,10 +5,16 @@
  */
 
 export {
+  addressKey,
+  CELL_SCOPE_VALUES,
+  createLLMFriendlyLink,
   isAliasBinding,
   isSigilLink,
+  linkPathSegmentToCellPathSegment,
+  matchLLMFriendlyLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,
+  parseScopedIdSegment,
 } from "./link-types.ts";
 export {
   isLinkRef,
@@ -37,6 +43,7 @@ export {
   UI,
 } from "./builder/types.ts";
 export { type Cancel, useCancelGroup } from "./cancel.ts";
+export { parseFabricRef } from "./sandbox/fabric-import-specifier.ts";
 export type {
   CycleReport,
   NonIdempotentReport,
