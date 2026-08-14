@@ -54,6 +54,7 @@ import {
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
+import { runContractLints } from "../lints/mod.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -3014,6 +3015,7 @@ function handlePatternSchemaInjection(
   }
 
   const originalInputTypeNode = inputTypeNode;
+  const originalInputType = inputType;
   inputTypeNode = applyCapabilitySummaryToArgument(
     builderFunction,
     inputTypeNode,
@@ -3064,6 +3066,19 @@ function handlePatternSchemaInjection(
   if (resultType && typeRegistry) {
     typeRegistry.set(resultSchemaCall, resultType);
   }
+
+  // The contract lints get the ORIGINAL argument node and type: capability
+  // shrinking may have replaced `inputTypeNode` with a synthetic literal
+  // (and nulled `inputType`), and a lint's subject is the contract the
+  // author declared.
+  runContractLints({
+    context,
+    callNode: node,
+    inputType: originalInputType,
+    inputTypeNode: originalInputTypeNode,
+    resultType,
+    resultTypeNode,
+  });
 
   const updated = buildCallExpression(inputSchemaCall, resultSchemaCall);
   const visited = ts.visitEachChild(updated, visit, transformation);

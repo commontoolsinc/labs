@@ -1,0 +1,310 @@
+import ts from "typescript";
+import { getLogger } from "@commonfabric/utils/logger";
+import { detectCallKind, getTypeFromTypeNodeWithFallback } from "../ast/mod.ts";
+import type { ContractLintFinding, ContractLintInput } from "./mod.ts";
+
+/**
+ * Foreign-output embedding check (prototype for the verb-evolution brief,
+ * PR #5682).
+ *
+ * A pattern that stores pieces of another pattern and types them with that
+ * pattern's own Output type embeds the provider's WHOLE contract — verbs
+ * included — into its own schema. The update gate then refuses the provider's
+ * most ordinary evolution step (adding a verb) as a change to the *holder*.
+ * The documented alternative is a consumer-owned narrow type: declare only
+ * the fields read and the verbs called (composition.md, "Keep External Data
+ * Contracts Narrow").
+ *
+ * The unenforceable spelling of that rule is "don't export your Output type"
+ * — export is required for factory nameability, and the refusal reproduces
+ * same-file with no import at all. The enforceable spelling is checked here:
+ * no pattern's argument or result schema may embed a type that is the
+ * Output-position type argument of a DIFFERENT pattern factory call anywhere
+ * in the program.
+ *
+ * Self-reference stays legal (a TreeNode whose children are TreeNodeOutput[]
+ * is the documented shape), and a provider can opt a type out with a
+ * `@sharedContract` JSDoc tag when the type itself is the intended protocol.
+ *
+ * Severity belongs to the registry's policy map (`lints/mod.ts`), advisory
+ * while this is a prototype: the coupling is surfaced without failing
+ * anyone's build.
+ *
+ * Scope: the check reasons over declared TYPE symbols. The schema-argument
+ * form (`pattern(fn, inputSchemaLiteral)`) is outside it — a hand-authored
+ * schema literal has no type-symbol provenance to index, the same boundary
+ * the transformer's schema stamps draw. And marker detection is
+ * best-effort by node or alias name, the same exposure the scope wrappers
+ * carry.
+ */
+
+export const FOREIGN_OUTPUT_EMBEDDING_DIAGNOSTIC =
+  "contract:foreign-output-embedding";
+
+const SHARED_CONTRACT_TAG = "sharedContract";
+
+// Depth cap for the type walk in `collectEmbeddingHits`. The visited set
+// already breaks cycles; this bounds non-cyclic explosion through deeply
+// instantiated generics. A realistic contract costs one to two depth per
+// structural level, so 8 covers what the fleet writes — and when it trips
+// anyway, the disabled-by-default logger below records a debug note, so
+// the truncation is observable (in counts, and in output when the logger
+// is enabled) rather than silent.
+const WALK_DEPTH_LIMIT = 8;
+
+const lintLogger = getLogger("contract-lints", { enabled: false });
+
+interface IndexedOutput {
+  readonly typeName: string;
+  readonly fileName: string;
+}
+
+type OutputSymbolIndex = Map<ts.Symbol, IndexedOutput>;
+
+const indexCache = new WeakMap<ts.Program, OutputSymbolIndex>();
+
+/** Resolve the named symbol a type-argument node refers to, if any. */
+function namedSymbolForTypeNode(
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  if (!ts.isTypeReferenceNode(node)) return undefined;
+  return namedSymbolForType(getTypeFromTypeNodeWithFallback(node, checker));
+}
+
+function namedSymbolForType(type: ts.Type): ts.Symbol | undefined {
+  const withInternals = type as ts.Type & { aliasSymbol?: ts.Symbol };
+  const symbol = withInternals.aliasSymbol ?? type.getSymbol();
+  // Anonymous shapes (inline literals, `__type`/`__object`) have no name to
+  // hold anyone to, and a symbol without declarations has no tag to read.
+  if (
+    !symbol || symbol.name === "__type" || symbol.name === "__object" ||
+    !symbol.declarations || symbol.declarations.length === 0
+  ) {
+    return undefined;
+  }
+  return symbol;
+}
+
+function hasSharedContractTag(symbol: ts.Symbol): boolean {
+  return (symbol.declarations ?? []).some((declaration) =>
+    ts.getJSDocTags(declaration).some(
+      (tag) => tag.tagName.text === SHARED_CONTRACT_TAG,
+    )
+  );
+}
+
+/**
+ * Collect the Output-position symbol of every pattern factory call in the
+ * program. Cached per program: the set is a fact about the whole compile,
+ * not about the file currently being transformed.
+ */
+function outputSymbolIndex(
+  program: ts.Program,
+  checker: ts.TypeChecker,
+): OutputSymbolIndex {
+  const cached = indexCache.get(program);
+  if (cached) return cached;
+
+  const index: OutputSymbolIndex = new Map();
+  for (const sourceFile of program.getSourceFiles()) {
+    if (sourceFile.isDeclarationFile) continue;
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isCallExpression(node) &&
+        node.typeArguments && node.typeArguments.length > 0
+      ) {
+        const callKind = detectCallKind(node, checker);
+        if (
+          callKind?.kind === "builder" && callKind.builderName === "pattern"
+        ) {
+          // Only `pattern<Input, Output>` names an Output — it rides
+          // second. The one-generic form's argument is the INPUT (the api
+          // overload returns `PatternFactory<StripCell<T>, any>`), and an
+          // inferred result has no name to index.
+          const outputNode = node.typeArguments[1];
+          const symbol = outputNode
+            ? namedSymbolForTypeNode(outputNode, checker)
+            : undefined;
+          if (symbol && !hasSharedContractTag(symbol)) {
+            index.set(symbol, {
+              typeName: symbol.name,
+              fileName: sourceFile.fileName,
+            });
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+
+  indexCache.set(program, index);
+  return index;
+}
+
+interface EmbeddingHit {
+  readonly symbol: ts.Symbol;
+  readonly info: IndexedOutput;
+}
+
+/**
+ * Walk a type's reachable structure looking for references to indexed Output
+ * symbols. Stops at the first hit per symbol and does not recurse into a hit
+ * — one report per foreign type is enough, and its members are the
+ * provider's business.
+ */
+function collectEmbeddingHits(
+  root: ts.Type,
+  checker: ts.TypeChecker,
+  location: ts.Node,
+  index: OutputSymbolIndex,
+  ownSymbols: ReadonlySet<ts.Symbol>,
+): { hits: EmbeddingHit[]; capTripped: boolean } {
+  const hits = new Map<ts.Symbol, EmbeddingHit>();
+  const visited = new Set<ts.Type>();
+  let capTripped = false;
+
+  const visit = (type: ts.Type, depth: number): void => {
+    // Visited wins over the depth cap: a type first explored at a shallow
+    // depth expanded to the absolute cap from there, which is strictly
+    // more than a deeper re-encounter could reach — so meeting it again
+    // past the cap truncates nothing, and must not count as truncation.
+    if (visited.has(type)) return;
+    if (depth > WALK_DEPTH_LIMIT) {
+      capTripped = true;
+      return;
+    }
+    visited.add(type);
+
+    const symbol = namedSymbolForType(type);
+    if (symbol && index.has(symbol) && !ownSymbols.has(symbol)) {
+      if (!hits.has(symbol)) {
+        hits.set(symbol, { symbol, info: index.get(symbol)! });
+      }
+      return;
+    }
+
+    if (type.isUnionOrIntersection()) {
+      for (const member of type.types) visit(member, depth + 1);
+      return;
+    }
+
+    const withInternals = type as ts.Type & {
+      aliasTypeArguments?: readonly ts.Type[];
+    };
+    for (const argument of withInternals.aliasTypeArguments ?? []) {
+      visit(argument, depth + 1);
+    }
+
+    if (
+      (type.flags & ts.TypeFlags.Object) !== 0 &&
+      ((type as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0
+    ) {
+      for (
+        const argument of checker.getTypeArguments(type as ts.TypeReference)
+      ) {
+        visit(argument, depth + 1);
+      }
+    }
+
+    if ((type.flags & ts.TypeFlags.Object) !== 0) {
+      for (const property of checker.getPropertiesOfType(type)) {
+        visit(checker.getTypeOfSymbolAtLocation(property, location), depth + 1);
+      }
+    }
+  };
+
+  visit(root, 0);
+  return { hits: [...hits.values()], capTripped };
+}
+
+/** Best-effort syntactic anchor: the reference node that names the symbol. */
+function referenceNodeForSymbol(
+  typeNode: ts.TypeNode,
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): ts.Node | undefined {
+  let found: ts.Node | undefined;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (
+      ts.isTypeReferenceNode(node) &&
+      namedSymbolForTypeNode(node, checker) === symbol
+    ) {
+      found = node;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(typeNode);
+  return found;
+}
+
+/**
+ * One finding for every foreign pattern Output type embedded in this
+ * pattern call's argument or result contract. Pure detection: severity is
+ * the registry's business (`lints/mod.ts`).
+ */
+export function foreignOutputEmbeddingLint(
+  input: ContractLintInput,
+): ContractLintFinding[] {
+  const { context, callNode } = input;
+  const { checker, program } = context;
+
+  const index = outputSymbolIndex(program, checker);
+  if (index.size === 0) return [];
+
+  // Only the pattern's own RESULT contract is exempt: an output
+  // referencing itself is the documented self-reference shape. For
+  // `pattern<I, O>` the result node IS the second type argument; for the
+  // one-generic form the single argument is the INPUT (the api overload
+  // returns `PatternFactory<StripCell<T>, any>`), so nothing explicit is
+  // exempt and a foreign Output used as that input stays eligible — the
+  // anti-pattern at its largest, the whole contract embedded as the
+  // argument.
+  const ownSymbols = new Set<ts.Symbol>();
+  const resultSymbol = namedSymbolForTypeNode(input.resultTypeNode, checker);
+  if (resultSymbol) ownSymbols.add(resultSymbol);
+
+  // Argument side only, by ruling: result-side re-exposure
+  // (`BoardOutput { notes: NoteOutput[] }`) is the documented composition
+  // shape, the design's cost table has no result-side refusal, and most
+  // result hits would duplicate the argument-side hit on the same pattern.
+  // The result branch can return with its own message and evidence once
+  // Fabric-types makes result contracts load-bearing.
+  const type = input.inputType ??
+    getTypeFromTypeNodeWithFallback(input.inputTypeNode, checker);
+
+  const walk = collectEmbeddingHits(type, checker, callNode, index, ownSymbols);
+  if (walk.capTripped) {
+    // The note composes from context.sourceFile, never from the call
+    // node: earlier pipeline stages can hand this lint a synthetic node
+    // with no source file attached.
+    lintLogger.debug(
+      "walk-depth-cap",
+      `type walk stopped at depth ${WALK_DEPTH_LIMIT} in the argument ` +
+        `contract of a pattern call in ${context.sourceFile.fileName}; ` +
+        "deeper structure was not scanned for foreign outputs",
+    );
+  }
+
+  const findings: ContractLintFinding[] = [];
+  for (const hit of walk.hits) {
+    const anchor =
+      referenceNodeForSymbol(input.inputTypeNode, hit.symbol, checker) ??
+        callNode;
+    findings.push({
+      type: FOREIGN_OUTPUT_EMBEDDING_DIAGNOSTIC,
+      node: anchor,
+      message: `Pattern argument embeds ${hit.info.typeName}, the ` +
+        `output type of another pattern. A holder should declare only its ` +
+        `demand — the fields it reads and the verbs it calls — as its own ` +
+        `narrow type (optionally marked Demand<T>); embedding the full ` +
+        `output ties this pattern's update gate to the provider's whole ` +
+        `shape. If ${hit.info.typeName} is itself the intended shared ` +
+        `protocol, tag its declaration @sharedContract.`,
+    });
+  }
+  return findings;
+}

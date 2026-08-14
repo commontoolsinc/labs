@@ -54,6 +54,22 @@ interface CompatibilityContext {
    * must not read as a contract break.
    */
   verbEvent?: boolean;
+  /**
+   * True below a node BOTH contracts mark `demand: true` — a holder-side
+   * demand subtree (the `Demand<T>` marker). There, in the argument role,
+   * a property the candidate no longer names is a demand given up, not a
+   * contract broken: the holder asks less of the pieces it stores, which
+   * only widens what it accepts — plain subset logic, which the evolution
+   * removal rule is deliberately stricter than. Requiring the marker on
+   * BOTH sides is a TIMING requirement — the declaration must predate any
+   * drop beneath it by one deploy — not laundering prevention: the marker
+   * is a self-declaration the gate cannot verify, and
+   * `collectNewDemandDeclarationAdvisories` is what makes that first
+   * deploy loud. The allowance never applies inside a verb event, and
+   * never to the result role: what a pattern re-exposes from a demand is
+   * still something its readers rely on.
+   */
+  demandSubtree?: boolean;
 }
 
 export interface SchemaSubsetOptions {
@@ -66,13 +82,25 @@ type ActivePairsByRoot = WeakMap<
   WeakMap<object, WeakMap<object, WeakSet<object>>>
 >;
 
-const ANNOTATION_KEYS = new Set([
+// Exported because the link-proof safe-ancestor set in
+// `ops/piece-controller.ts` derives from it: annotation-class means
+// validation-neutral, and validation-neutral is exactly "constrains
+// nothing", which is what that set's membership asserts. Deriving replaced
+// hand-listing after `deprecated`, `tier`, and `demand` each missed the
+// hand list in turn.
+export const ANNOTATION_KEYS = new Set([
   "$comment",
   "$defs",
   "$id",
   "$schema",
   "default",
   "definitions",
+  // Holder-side demand marker (`Demand<T>` in the API): records that a
+  // subtree is what a holder requires of a stored piece rather than state
+  // it owns. Validation-neutral by construction, so it must add and remove
+  // freely across pattern updates — classified here BEFORE the generator
+  // emits it anywhere, per the C3 append-only lesson.
+  "demand",
   // Standard JSON Schema annotation. The generator emits it from
   // `@deprecated` JSDoc so `cf piece verbs` can hide legacy streams by
   // default; it is validation-neutral by spec, so it must add and remove
@@ -310,11 +338,19 @@ function schemaSubsetIssue(
   const entersVerbEvent = !context.verbEvent &&
     (declaresVerbStream(sourceInput) || declaresVerbStream(source)) &&
     (declaresVerbStream(targetInput) || declaresVerbStream(target));
+  // The demand marker rides the referencing node the same way. Both
+  // contracts must agree the subtree is a demand — the deployed shape
+  // declared it one and the candidate still does; a one-sided marker is a
+  // shape change the ordinary rules judge, not an exemption.
+  const entersDemandSubtree = !context.demandSubtree &&
+    (schemaMarksDemand(sourceInput) || schemaMarksDemand(source)) &&
+    (schemaMarksDemand(targetInput) || schemaMarksDemand(target));
   context = {
     ...context,
     sourceRoot: sourceResolution.root,
     targetRoot: targetResolution.root,
     ...(entersVerbEvent ? { verbEvent: true } : {}),
+    ...(entersDemandSubtree ? { demandSubtree: true } : {}),
   };
   if (
     context.defaultComparison === "target" &&
@@ -510,23 +546,40 @@ function objectSubsetIssue(
     ? source.patternProperties
     : target.patternProperties;
 
+  const allowEvolutionPolicy = context.allowEvolutionPolicy &&
+    !hasComplexSameInstanceConstraints(source) &&
+    !hasComplexSameInstanceConstraints(target);
+
   // Pattern evolution preserves named fields as part of the public contract,
   // even when the candidate object is otherwise open. A durable-link subset
   // proof is different: a source may name additional fields that an open
   // target accepts through patternProperties/additionalProperties. Treating
   // those fields as "removed" rejects valid Fabric projections such as $FS.
+  //
+  // Beneath a demand marker the argument role reads the other way: a
+  // property the candidate no longer names is a demand given up, which only
+  // widens what the holder accepts (see `demandSubtree`). The removed
+  // property may also BE the demand — its own referencing node carries the
+  // marker on the deployed side — and giving up a whole demand is the same
+  // narrowing. The result role keeps the strict rule, and verb events keep
+  // their own.
   if (context.defaultComparison === "evolution") {
     for (const property of Object.keys(previousProperties)) {
       if (Object.hasOwn(candidateProperties, property)) continue;
+      if (
+        context.role === "argument" && !context.verbEvent &&
+        allowEvolutionPolicy &&
+        (context.demandSubtree === true ||
+          schemaMarksDemand(previousProperties[property]))
+      ) {
+        continue;
+      }
       return `${path}.${property}: existing ${context.role} field was removed`;
     }
   }
 
   const sourceRequired = new Set(source.required ?? []);
   const targetRequired = new Set(target.required ?? []);
-  const allowEvolutionPolicy = context.allowEvolutionPolicy &&
-    !hasComplexSameInstanceConstraints(source) &&
-    !hasComplexSameInstanceConstraints(target);
   const allowEvolutionDefaults = allowEvolutionPolicy &&
     context.allowEvolutionDefaults;
   if (context.role === "argument") {
@@ -725,6 +778,116 @@ function declaresVerbStream(schema: JSONSchema): boolean {
   if (typeof schema !== "object" || schema === null) return false;
   const asCell = (schema as SchemaObject).asCell;
   return Array.isArray(asCell) && asCell.includes("stream");
+}
+
+/** The demand marker rides a referencing node, like the stream marker. */
+function schemaMarksDemand(schema: JSONSchema | undefined): boolean {
+  return typeof schema === "object" && schema !== null &&
+    (schema as SchemaObject).demand === true;
+}
+
+/**
+ * Advisory scan: name every argument node the candidate newly declares a
+ * demand over deployed, previously unmarked contract.
+ *
+ * The two-sided condition on `demandSubtree` is a TIMING requirement — the
+ * declaration must predate any drop beneath it by one deploy — not
+ * laundering prevention: the marker is a self-declaration the gate cannot
+ * verify. This scan makes the first step of that two-step loud, so an
+ * operator reviewing an update sees "this subtree may narrow next deploy"
+ * at the moment it becomes true. It reports at the boundary node only
+ * (everything beneath a new demand is implied), skips properties the
+ * previous contract never carried (nothing deployed is being re-labeled),
+ * and graduates into scoped acknowledgment when that mechanism exists.
+ */
+export function collectNewDemandDeclarationAdvisories(
+  previous: Pattern,
+  candidate: Pattern,
+): string[] {
+  const advisories: string[] = [];
+  const visited = new Set<object>();
+
+  const walk = (
+    previousInput: JSONSchema,
+    candidateInput: JSONSchema,
+    path: string,
+    previousRoot: JSONSchema,
+    candidateRoot: JSONSchema,
+  ): void => {
+    const previousResolution = resolveSchema(previousInput, previousRoot);
+    const candidateResolution = resolveSchema(candidateInput, candidateRoot);
+    const previousSchema = previousResolution.schema;
+    const candidateSchema = candidateResolution.schema;
+    if (
+      typeof candidateSchema !== "object" || candidateSchema === null ||
+      visited.has(candidateSchema)
+    ) {
+      return;
+    }
+    visited.add(candidateSchema);
+
+    const candidateMarks = schemaMarksDemand(candidateInput) ||
+      schemaMarksDemand(candidateSchema);
+    const previousMarks = schemaMarksDemand(previousInput) ||
+      schemaMarksDemand(previousSchema);
+    if (candidateMarks && !previousMarks) {
+      advisories.push(
+        `${path} is newly declared a demand; a future update may narrow ` +
+          `beneath it`,
+      );
+      return;
+    }
+    if (typeof previousSchema !== "object" || previousSchema === null) return;
+
+    const previousProperties = previousSchema.properties ?? {};
+    const candidateProperties = candidateSchema.properties ?? {};
+    for (const property of Object.keys(candidateProperties)) {
+      if (!Object.hasOwn(previousProperties, property)) continue;
+      walk(
+        previousProperties[property]!,
+        candidateProperties[property]!,
+        `${path}.${property}`,
+        previousResolution.root,
+        candidateResolution.root,
+      );
+    }
+    if (
+      typeof previousSchema.items === "object" &&
+      typeof candidateSchema.items === "object"
+    ) {
+      walk(
+        previousSchema.items,
+        candidateSchema.items,
+        `${path}[]`,
+        previousResolution.root,
+        candidateResolution.root,
+      );
+    }
+    const previousPrefix = previousSchema.prefixItems ?? [];
+    const candidatePrefix = candidateSchema.prefixItems ?? [];
+    for (
+      let i = 0;
+      i < Math.min(previousPrefix.length, candidatePrefix.length);
+      i++
+    ) {
+      walk(
+        previousPrefix[i]!,
+        candidatePrefix[i]!,
+        `${path}[${i}]`,
+        previousResolution.root,
+        candidateResolution.root,
+      );
+    }
+  };
+
+  walk(
+    previous.argumentSchema,
+    candidate.argumentSchema,
+    "argument",
+    previous.argumentSchema,
+    candidate.argumentSchema,
+  );
+  return advisories;
 }
 
 function additionalPropertiesSubsetIssue(

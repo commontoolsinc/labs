@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { shouldPreserveBindingDeclaredTypeNode } from "../src/ast/type-building.ts";
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import {
@@ -1147,4 +1148,41 @@ Deno.test("lift-applied untyped callback using Cell.get on a Cell input recovers
   const [input] = callSchemas(parseModule(output), "lift");
   assertEquals((input.properties as Obj).n.type, "number");
   assertEquals(input.asCell, ["readonly"]);
+});
+
+// ---------------------------------------------------------------------------
+// Demand<T> — the end-to-end seam: a pattern WRITTEN with the api's marker
+// yields a schema carrying `demand: true` on the referencing node.
+// ---------------------------------------------------------------------------
+
+Deno.test("pattern input Demand<T> emits demand on the referencing node", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { type Demand, pattern } from "commonfabric";',
+    "interface NotePreview { title?: string }",
+    "interface In { notes?: Demand<NotePreview>[] }",
+    "interface Out { count: number }",
+    "export default pattern<In, Out>(() => ({ count: 0 }));",
+  ].join("\n");
+  const output = await t(source);
+  const { input } = patternSchemas(parseModule(output));
+  const notes = (input.properties as Obj).notes as Obj;
+  assertEquals(notes.items.demand, true);
+  // The marker records use-site provenance only: the inner shape survives
+  // unchanged, and nothing else in the property gains the key.
+  assertEquals(notes.demand, undefined);
+});
+
+Deno.test("shouldPreserveBindingDeclaredTypeNode keeps marker wrapper nodes", () => {
+  const reference = (name: string): ts.TypeNode =>
+    ts.factory.createTypeReferenceNode(name, [
+      ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+    ]);
+  for (const name of ["Demand", "Default", "PerSession"]) {
+    assert(
+      shouldPreserveBindingDeclaredTypeNode(reference(name)),
+      `${name} node must survive binding-type shrinking`,
+    );
+  }
+  assert(!shouldPreserveBindingDeclaredTypeNode(reference("NotePreview")));
 });

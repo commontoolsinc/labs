@@ -50,9 +50,17 @@ import type { PiecesController } from "./pieces-controller.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { compileProgram } from "./utils.ts";
 import {
+  ANNOTATION_KEYS,
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  collectNewDemandDeclarationAdvisories,
 } from "../schema-compatibility.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+
+const pieceUpdateLogger = getLogger("piece.update", {
+  enabled: true,
+  level: "warn",
+});
 import {
   qualifyFabricOrigin,
   readPieceOrigin,
@@ -386,6 +394,15 @@ export interface PieceSourceCompatibilityIssues {
    * this one reasons about what is physically at rest.
    */
   cfc?: string;
+  /**
+   * Non-blocking findings the update proceeds over. Today: argument nodes
+   * the candidate newly declares a demand — the loud first step of the
+   * two-step adoption path, since a later update may narrow beneath them
+   * (`collectNewDemandDeclarationAdvisories`). Excluded from
+   * `hasPieceSourceCompatibilityIssues` by construction; graduates into
+   * scoped acknowledgment when that mechanism exists.
+   */
+  advisories?: string[];
 }
 
 /**
@@ -446,18 +463,17 @@ function storedCellTopology(
   }
 }
 
-const LINK_PATH_SAFE_ANCESTOR_KEYS = new Set([
-  "$comment",
-  "$defs",
-  "$id",
+// Structural keys a link-path ancestor may carry without correlating the
+// linked field with its parent value. The annotation-class keys are safe
+// here BY DEFINITION — validation-neutral is exactly "constrains nothing" —
+// so the set below unions this list with `ANNOTATION_KEYS` instead of
+// re-listing it: `deprecated`, `tier`, and `demand` each missed the old
+// hand list in turn, and every one was a link-proof regression the gate's
+// own classification had already ruled out.
+const LINK_PATH_STRUCTURAL_ANCESTOR_KEYS = [
   "$ref",
-  "$schema",
   "additionalProperties",
   "asCell",
-  "default",
-  "definitions",
-  "description",
-  "examples",
   "ifc",
   "items",
   "maxItems",
@@ -468,10 +484,13 @@ const LINK_PATH_SAFE_ANCESTOR_KEYS = new Set([
   "readOnly",
   "required",
   "scope",
-  "tags",
-  "title",
   "type",
   "writeOnly",
+] as const;
+
+const LINK_PATH_SAFE_ANCESTOR_KEYS = new Set<string>([
+  ...ANNOTATION_KEYS,
+  ...LINK_PATH_STRUCTURAL_ANCESTOR_KEYS,
 ]);
 
 const SCHEMA_ANNOTATION_KEYS = new Set([
@@ -3909,6 +3928,17 @@ async function pieceSourceCompatibilityReview(
     assertPatternSchemasBackwardCompatible(previousPattern, candidate);
   } catch (error) {
     issues.schema = error instanceof Error ? error.message : String(error);
+  }
+
+  const advisories = collectNewDemandDeclarationAdvisories(
+    previousPattern,
+    candidate,
+  );
+  if (advisories.length > 0) {
+    issues.advisories = advisories;
+    for (const advisory of advisories) {
+      pieceUpdateLogger.warn("new-demand-declaration", advisory);
+    }
   }
 
   const argumentCell = pieces.getArgument(piece);

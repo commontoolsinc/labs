@@ -96,6 +96,23 @@ const resolveScopeWrapperNode = (
   return scope === undefined ? undefined : { scope, node: typeNode };
 };
 
+const DEMAND_WRAPPER_NAME = "Demand";
+
+const isDemandWrapperName = (name: string | undefined): boolean =>
+  name === DEMAND_WRAPPER_NAME;
+
+const resolveDemandWrapperNode = (
+  typeNode: ts.TypeNode | undefined,
+): ts.TypeReferenceNode | undefined => {
+  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+    return undefined;
+  }
+  const name = ts.isIdentifier(typeNode.typeName)
+    ? typeNode.typeName.text
+    : typeNode.typeName.right.text;
+  return isDemandWrapperName(name) ? typeNode : undefined;
+};
+
 const applyScopeToAsCellEntry = (
   entry: AsCellEntry,
   scope: SchemaScope,
@@ -131,6 +148,13 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     if (resolveScopeWrapperNode(context.typeNode)) {
+      return true;
+    }
+
+    if (
+      isDemandWrapperName(aliasName) ||
+      resolveDemandWrapperNode(context.typeNode) !== undefined
+    ) {
       return true;
     }
 
@@ -208,6 +232,25 @@ export class CommonFabricFormatter implements TypeFormatter {
         undefined,
       );
       return this.applyScopeWrapperSemantics(innerSchema, aliasScope);
+    }
+
+    const resolvedDemandWrapper = resolveDemandWrapperNode(n);
+    if (resolvedDemandWrapper) {
+      return this.formatDemandWrapperTypeFromNode(
+        resolvedDemandWrapper,
+        context,
+      );
+    }
+
+    if (isDemandWrapperName(aliasType.aliasSymbol?.name)) {
+      const innerType = aliasType.aliasTypeArguments?.[0];
+      if (!innerType) throw new Error(`Demand<T> requires type argument`);
+      const innerSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+      return this.applyDemandWrapperSemantics(innerSchema);
     }
 
     const resolvedCfcAlias = this.resolveCfcAliasInstantiation(
@@ -494,14 +537,20 @@ export class CommonFabricFormatter implements TypeFormatter {
     return this.applyWrapperSemantics(innerSchema, wrapperKind);
   }
 
-  private formatScopeWrapperTypeFromNode(
+  /**
+   * Inner schema of a single-argument marker wrapper node (`PerUser<T>`,
+   * `Demand<T>`): the registry's resolution when it has one, the checker's
+   * otherwise, degrading to `any` rather than aborting generation when the
+   * checker cannot resolve the node.
+   */
+  private formatMarkerWrapperInner(
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
-    scope: SchemaScope,
+    wrapperLabel: string,
   ): MutableJSONSchema {
     const innerTypeNode = typeRefNode.typeArguments?.[0];
     if (!innerTypeNode) {
-      throw new Error(`Scoped wrapper requires type argument`);
+      throw new Error(`${wrapperLabel} requires type argument`);
     }
 
     let innerType: ts.Type;
@@ -512,13 +561,45 @@ export class CommonFabricFormatter implements TypeFormatter {
       innerType = context.typeChecker.getAnyType();
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    return this.schemaGenerator.formatChildType(
       innerType,
       context,
       innerTypeNode,
     );
+  }
 
-    return this.applyScopeWrapperSemantics(innerSchema, scope);
+  private formatScopeWrapperTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+    scope: SchemaScope,
+  ): MutableJSONSchema {
+    return this.applyScopeWrapperSemantics(
+      this.formatMarkerWrapperInner(typeRefNode, context, "Scoped wrapper"),
+      scope,
+    );
+  }
+
+  private formatDemandWrapperTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+  ): MutableJSONSchema {
+    return this.applyDemandWrapperSemantics(
+      this.formatMarkerWrapperInner(typeRefNode, context, "Demand<T>"),
+    );
+  }
+
+  /**
+   * `demand: true` marks the subtree as a holder-side demand. Unlike scope,
+   * nesting is harmless (`Demand<Demand<T>>` is one demand), and the marker
+   * stays on the subtree root rather than riding an `asCell` entry: it
+   * records the contract's provenance, not the cell's capability.
+   */
+  private applyDemandWrapperSemantics(
+    schema: MutableJSONSchema,
+  ): MutableJSONSchema {
+    return typeof schema === "boolean"
+      ? (schema === false ? { not: true, demand: true } : { demand: true })
+      : { ...schema, demand: true };
   }
 
   private applyScopeWrapperSemantics(

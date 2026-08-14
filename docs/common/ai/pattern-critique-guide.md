@@ -291,6 +291,13 @@ invalid element voids the entire array read. See
 `packages/runner/test/traverse-required-links.test.ts` and
 `docs/common/patterns/composition.md#keep-external-data-contracts-narrow`.
 
+A consumer-owned type for stored pieces should be wrapped in `Demand<T>`, so
+the schema records it as a demand (`demand: true`) and the update gate can
+treat later narrowing as safe; suggest the wrapper when it is missing. The
+compiler already warns when an argument embeds another pattern's output type
+(`contract:foreign-output-embedding`); a genuinely shared protocol type
+opts out with a `@sharedContract` JSDoc tag on its declaration.
+
 Do not flag a genuinely shared protocol (for example, a stream event or enum),
 a cohesive domain model co-owned by one pattern family, a test intentionally
 checking the complete public result, or a wrapper whose stated purpose is to

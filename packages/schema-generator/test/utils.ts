@@ -38,6 +38,12 @@ declare type PerSpace<T> = T & { readonly [SCOPE_BRAND]?: "space" };
 declare type PerUser<T> = T & { readonly [SCOPE_BRAND]?: "user" };
 declare type PerSession<T> = T & { readonly [SCOPE_BRAND]?: "session" };
 declare type PerAny<T> = T & { readonly [SCOPE_BRAND]?: "any" };
+
+declare const DEMAND_BRAND: unique symbol;
+declare interface DemandMarker {
+  readonly [DEMAND_BRAND]?: true;
+}
+declare type Demand<T> = T & DemandMarker;
 `;
 
 /**

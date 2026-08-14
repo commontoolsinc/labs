@@ -617,10 +617,14 @@ One question is open by design, and it is the one the cross product exposes:
 **how a deployed holder moves.** Narrow demands, required-verb demands and
 versioned demands are all reachable when a holder is written and none of
 them afterwards, so every adoption path runs through a scoped acknowledgment
-or a migration that rewrites holders. Which carries it — and whether the
-gate should learn that removal beneath a demand marker is narrowing rather
-than breakage — decides how much of this design applies to what is already
-running.
+or a migration that rewrites holders. Which carries it decides how much of
+this design applies to what is already running. One half is now decided:
+the gate learned that removal beneath a demand marker is narrowing rather
+than breakage (#5746), with a timing condition — the marker must be present
+on both the deployed and candidate contracts, so a declaration predates any
+drop beneath it by one deploy — and an advisory that names an update newly
+marking already-deployed state as a demand, which is what a two-step
+adoption sounds like until scoped acknowledgment exists.
 
 One direction belongs in that conversation, recorded as intent rather than
 mechanism: **the provider tells holders how to move.** A pattern that

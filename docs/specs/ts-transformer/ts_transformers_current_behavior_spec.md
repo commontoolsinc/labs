@@ -754,6 +754,28 @@ report these through the same collector (deduplicated via §2.2's
   rework); the internal throw remains only for compiler-synthesized culprits
   (a true pipeline bug) and for the culprit-already-compute disagreement
   shape.
+- **Warning** `contract:foreign-output-embedding`
+  (`src/lints/foreign-output-embedding.ts`) — the first **contract lint**:
+  a read-only, program-scoped analysis whose subject is a design rule
+  rather than compiler correctness. Lints live behind
+  `src/lints/mod.ts` — pure detection returning findings, severity mapped
+  in the registry's policy table (advisory by default), one
+  `runContractLints` hook called from the pattern branch of
+  `schema-injection.ts` after contract resolution, and never any effect on
+  emission. This one fires when a pattern's argument contract — argument
+  side only, by review ruling: result-side re-exposure is the documented
+  composition shape, and the branch returns when Fabric-types makes result
+  contracts load-bearing —
+  embeds a type that is the Output-position type argument of a DIFFERENT
+  `pattern<I, O>` call somewhere in the program (Output symbols are indexed
+  program-wide, WeakMap-cached per `ts.Program`). The pattern's own
+  output-position symbol is exempt (self-reference is the documented
+  shape), a `@sharedContract` JSDoc tag on the declaration opts a genuine
+  protocol type out, and anonymous shapes are never indexed. Advisory
+  severity while the demand-substrate prototype (#5746) is evaluated. The
+  schema-argument form (`pattern(fn, schemaLiteral)`) is outside the check:
+  a hand-authored literal has no type-symbol provenance to index, the same
+  boundary the transformer's schema stamps draw.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 

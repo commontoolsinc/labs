@@ -6,6 +6,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  collectNewDemandDeclarationAdvisories,
 } from "../src/schema-compatibility.ts";
 
 function pattern(
@@ -2155,5 +2156,213 @@ describe("listing marks are annotation-class", () => {
         verbArgument({ mysteryDial: 7 }),
       )
     ).toThrow(/mysteryDial|unknown/i);
+  });
+});
+
+// The demand marker (`Demand<T>`, PR #5746) makes a holder's demand on the
+// pieces it stores distinguishable from its own state. Beneath a marker BOTH
+// contracts carry, argument-role property removal is a demand given up —
+// narrowing, which plain subset logic already proves safe — rather than the
+// contract removal the evolution rule refuses elsewhere.
+describe("demand-marked narrowing", () => {
+  const emptyResult: JSONSchema = { type: "object", properties: {} };
+
+  const appendVerb: JSONSchema = {
+    type: "object",
+    properties: { text: { type: "string" } },
+    required: ["text"],
+    asCell: ["stream"],
+  };
+
+  const noteDemand = (
+    overrides: Partial<Record<string, JSONSchema>>,
+    marked: boolean,
+  ): JSONSchema => ({
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      append: appendVerb,
+      ...overrides,
+    } as Record<string, JSONSchema>,
+    ...(marked ? { demand: true } : {}),
+  });
+
+  const holderArgument = (note: JSONSchema): JSONSchema => ({
+    type: "object",
+    properties: { notes: { type: "array", items: note } },
+  });
+
+  const dropped = (note: JSONSchema, name: string): JSONSchema => {
+    const properties = {
+      ...(note as Record<string, unknown>).properties as Record<
+        string,
+        JSONSchema
+      >,
+    };
+    delete properties[name];
+    return { ...(note as object), properties } as JSONSchema;
+  };
+
+  it("allows dropping a demanded verb beneath a two-sided marker", () => {
+    const previous = noteDemand({}, true);
+    const candidate = dropped(previous, "append");
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(holderArgument(previous), emptyResult),
+        pattern(holderArgument(candidate), emptyResult),
+      )
+    ).not.toThrow();
+  });
+
+  it("refuses the same drop when nothing is marked", () => {
+    const previous = noteDemand({}, false);
+    const candidate = dropped(previous, "append");
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(holderArgument(previous), emptyResult),
+        pattern(holderArgument(candidate), emptyResult),
+      )
+    ).toThrow(/existing argument field was removed/);
+  });
+
+  it("refuses when only the candidate carries the marker", () => {
+    const previous = noteDemand({}, false);
+    const candidate = dropped(noteDemand({}, true), "append");
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(holderArgument(previous), emptyResult),
+        pattern(holderArgument(candidate), emptyResult),
+      )
+    ).toThrow(/existing argument field was removed/);
+  });
+
+  it("allows giving up a whole property whose deployed node is the demand", () => {
+    const previousArgument: JSONSchema = {
+      type: "object",
+      properties: {
+        label: { type: "string" },
+        notes: { type: "array", items: noteDemand({}, false), demand: true },
+      },
+    };
+    const candidateArgument: JSONSchema = {
+      type: "object",
+      properties: { label: { type: "string" } },
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(previousArgument, emptyResult),
+        pattern(candidateArgument, emptyResult),
+      )
+    ).not.toThrow();
+  });
+
+  it("keeps the strict rule on the result role", () => {
+    const previous = noteDemand({}, true);
+    const candidate = dropped(previous, "append");
+    const exposing = (note: JSONSchema): JSONSchema => ({
+      type: "object",
+      properties: { notes: { type: "array", items: note } },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object", properties: {} }, exposing(previous)),
+        pattern({ type: "object", properties: {} }, exposing(candidate)),
+      )
+    ).toThrow(/existing result field was removed/);
+  });
+
+  it("still checks retypes inside a demand subtree", () => {
+    const previous = noteDemand({}, true);
+    const candidate = noteDemand({ title: { type: "number" } }, true);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(holderArgument(previous), emptyResult),
+        pattern(holderArgument(candidate), emptyResult),
+      )
+    ).toThrow(/not backward compatible/);
+  });
+
+  it("keeps verb-event rules inside a demanded verb", () => {
+    const widerEvent: JSONSchema = {
+      ...appendVerb,
+      properties: {
+        text: { type: "string" },
+        note: { type: "string" },
+      },
+    };
+    const previous = noteDemand({ append: widerEvent }, true);
+    const candidate = noteDemand({}, true);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(holderArgument(previous), emptyResult),
+        pattern(holderArgument(candidate), emptyResult),
+      )
+    ).toThrow(/existing argument field was removed/);
+  });
+});
+
+// The two-sided narrowing condition is a timing requirement: the marker
+// must predate any drop by one deploy. This scan makes the first deploy
+// loud — an update newly marking deployed contract as a demand is named,
+// so "a future update may narrow beneath it" is said when it becomes true.
+describe("new-demand declaration advisories", () => {
+  const emptyResult: JSONSchema = { type: "object", properties: {} };
+
+  const holder = (
+    marked: boolean,
+    inner?: Record<string, JSONSchema>,
+  ): JSONSchema => ({
+    type: "object",
+    properties: {
+      notes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { title: { type: "string" }, ...(inner ?? {}) },
+          ...(marked ? { demand: true } : {}),
+        },
+      },
+    },
+  });
+
+  it("names a deployed subtree the candidate newly marks", () => {
+    expect(collectNewDemandDeclarationAdvisories(
+      pattern(holder(false), emptyResult),
+      pattern(holder(true), emptyResult),
+    )).toEqual([
+      "argument.notes[] is newly declared a demand; a future update may " +
+      "narrow beneath it",
+    ]);
+  });
+
+  it("stays silent when the deployed contract already marked it", () => {
+    expect(collectNewDemandDeclarationAdvisories(
+      pattern(holder(true), emptyResult),
+      pattern(holder(true), emptyResult),
+    )).toEqual([]);
+  });
+
+  it("stays silent for a property the previous contract never carried", () => {
+    expect(collectNewDemandDeclarationAdvisories(
+      pattern({ type: "object", properties: {} }, emptyResult),
+      pattern(holder(true), emptyResult),
+    )).toEqual([]);
+  });
+
+  it("reports the boundary node only", () => {
+    const inner: Record<string, JSONSchema> = {
+      meta: {
+        type: "object",
+        properties: { origin: { type: "string" } },
+        demand: true,
+      },
+    };
+    expect(collectNewDemandDeclarationAdvisories(
+      pattern(holder(false), emptyResult),
+      pattern(holder(true, inner), emptyResult),
+    )).toEqual([
+      "argument.notes[] is newly declared a demand; a future update may " +
+      "narrow beneath it",
+    ]);
   });
 });

@@ -99,7 +99,17 @@ Do not import another pattern's entire `FooInput` or `FooOutput`, or derive a
 `Pick`/`Omit` from it, merely because it contains the needed fields. Spelling
 the minimal local shape is intentional duplication: the producer can evolve
 unrelated state, UI, and mutation streams without changing this consumer's
-contract.
+contract. The compiler warns when a pattern's argument embeds another
+pattern's output type (`contract:foreign-output-embedding`).
+
+A demand can say so in the type: wrap it in `Demand<T>` and the generated
+schema marks that subtree `demand: true`, so tooling can tell a demand from
+owned state. The update gate then treats dropping fields beneath the marker
+as the narrowing it is (once the marker has been deployed for at least one
+update), and an update that newly marks already-deployed state is called
+out as an advisory. The narrow-demand exemplar is the verb walkthrough's
+board (`packages/cli/integration/pattern/verb-results.tsx`), which demands
+only the note title it projects.
 
 An output type must be exported so TypeScript can name the default pattern
 factory's return contract. That visibility requirement is not an invitation for
@@ -128,7 +138,10 @@ protocol: for example, a stream event, an enum, or a cohesive domain model
 co-owned by one pattern family. A wrapper that deliberately forwards a complete
 contract may also use that complete contract. The test is whether every named
 field and capability belongs to the relationship, not whether centralizing the
-type removes duplicate TypeScript.
+type removes duplicate TypeScript. A type that passes that test can say so:
+a `@sharedContract` JSDoc tag on its declaration exempts it from the
+embedding warning. Reserve the tag for genuine protocol types —
+`MentionablePiece` is the exhibit of what qualifies.
 
 ## Merging Complex Objects from Pattern Inputs
 

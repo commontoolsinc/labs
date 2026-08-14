@@ -4866,6 +4866,102 @@ describe("piece pull materialization", () => {
     ).rejects.toThrow(/anyOf correlates the linked field/);
   });
 
+  // Annotation-class keys constrain nothing, so a link-path ancestor may
+  // carry them: the safe-ancestor set derives from ANNOTATION_KEYS.
+  // `deprecated`, `tier`, and `demand` each missed the old hand list in
+  // turn; the two below pin the derivation from both directions of that
+  // history.
+  it("proves path links beneath demand-marked ancestors", async () => {
+    const sourcePiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          required: ["value"],
+        },
+        result: { value: "linked" },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            notes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { title: { type: "string" } },
+                demand: true,
+              },
+            },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { notes: [{ title: "seed" }] },
+      undefined,
+      { start: true },
+    );
+
+    const controller = new PieceController(pieces, targetPiece);
+    await controller.input.set(sourcePiece.key("value"), [
+      "notes",
+      "0",
+      "title",
+    ]);
+    expect(await controller.input.get(["notes", "0", "title"])).toBe("linked");
+  });
+
+  it("proves path links beneath deprecated-marked ancestors", async () => {
+    const sourcePiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          required: ["value"],
+        },
+        result: { value: "linked" },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            profile: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              deprecated: true,
+            },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { profile: { name: "seed" } },
+      undefined,
+      { start: true },
+    );
+
+    const controller = new PieceController(pieces, targetPiece);
+    await controller.input.set(sourcePiece.key("value"), ["profile", "name"]);
+    expect(await controller.input.get(["profile", "name"])).toBe("linked");
+  });
+
   it("uses destination scope as a follow cap for every durable link", async () => {
     const sourcePattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },

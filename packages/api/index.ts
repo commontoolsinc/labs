@@ -451,6 +451,24 @@ export type PerUser<T> = Scoped<T, "user">;
 export type PerSession<T> = Scoped<T, "session">;
 export type PerAny<T> = Scoped<T, "any">;
 
+export declare const DEMAND_BRAND: unique symbol;
+/** The brand rides a NAMED exported interface, not an inline literal: an
+ * anonymous symbol-keyed type in an exported position trips TypeScript's
+ * private-name check (`Default export of the module has or is using
+ * private name 'DEMAND_BRAND'`) the moment a pattern's contract expands
+ * through `Demand<T>`. */
+export interface DemandMarker {
+  readonly [DEMAND_BRAND]?: true;
+}
+/**
+ * Marks a holder-side demand: the shape this pattern requires of a piece it
+ * stores or binds, as distinct from state the pattern owns. Compile-time
+ * only — at runtime `Demand<T>` is just `T`. The schema generator stamps
+ * `demand: true` on the marked subtree so tooling can tell a demand from
+ * owned state; validation is unaffected.
+ */
+export type Demand<T> = T & DemandMarker;
+
 type ScopedConstructorResult<
   Scope extends CellScope,
   T,
@@ -1602,7 +1620,15 @@ type StripCellInner<T> = [T] extends [AnyStream] ? T // Preserve the stream whol
   : [T] extends [ReadonlyArray<infer U>] ? readonly StripCell<U>[]
   // deno-lint-ignore ban-types
   : [T] extends [Function] ? T // Preserve function types
-  : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
+  // The demand brand is erased here the way Default's brand is stripped in
+  // its own machinery: it is a compile-time marker for schema generation,
+  // and mapping it through would re-expose DEMAND_BRAND as a private name
+  // on every exported factory whose contract mentions a demand.
+  : [T] extends [object] ? {
+      [K in keyof T as K extends typeof DEMAND_BRAND ? never : K]: StripCell<
+        T[K]
+      >;
+    }
   : T;
 
 /**
@@ -1960,6 +1986,10 @@ export type JSONSchemaObj = {
   readonly tags?: readonly string[];
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: readonly AsCellType[];
+  // Holder-side demand marker: this subtree describes what the pattern
+  // requires of a piece it stores or binds, not state it owns. Emitted by
+  // the schema generator from `Demand<T>`; validation-neutral.
+  readonly demand?: true;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
     readonly confidentiality?: readonly JSONValue[];
