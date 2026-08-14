@@ -2119,6 +2119,25 @@ class SpaceReplica implements ISpaceReplica {
   // oldest pruned) — the overlay only ever asks about recent origins.
   readonly #ackedSeqsByLocalSeq = new Map<number, number>();
   static readonly #MAX_RETAINED_ACK_SEQS = 4096;
+  // localSeqs of live SPECULATIVE sealed commits (server-execution v2
+  // Phase 2, speculation.md §1/§6): overlay entries exist only in this
+  // process — the client never pushes them — so a PUSHED commit whose
+  // read basis names one can NEVER have that dependency resolve
+  // server-side. commitOperations refuses such an export loudly
+  // (RULED 2026-08-13); membership ends when the speculative commit
+  // settles (retirement/withdrawal drops its pending layers first, so
+  // no stack names a seq after it leaves this set).
+  readonly #speculativeLocalSeqs = new Set<number>();
+  // The overlay destination's retirement WAKE for origin accepts
+  // (ISpaceReplica.speculationAckObserver, speculation.md §4): fired
+  // when a pushed commit's accept records its ack seq. Without it, an
+  // entry whose sweep ran while its origin's verdict was still in
+  // flight (blocked on the unacked layer) — and whose covering
+  // watermark event therefore passed — stayed pending forever on a
+  // then-quiet space: rejected origins cascade into the entry, but
+  // ACCEPTED origins had no client-side wake. Guarded at the call
+  // site — an observer throw must not corrupt accept settlement.
+  speculationAckObserver: (() => void) | undefined;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -3057,6 +3076,17 @@ class SpaceReplica implements ISpaceReplica {
       settled.finally(() => {
         this.#commitPromises.delete(settled);
       });
+    } else {
+      // Track the speculative seq for the export refusal (speculation.md
+      // §6, RULED 2026-08-13): while any pending stack carries this
+      // layer, a pushed commit's read basis naming it is refused in
+      // commitOperations. Settlement (retirement or withdrawal) drops
+      // the pending layers before `settled` resolves, so removal here
+      // never races a stack that still names the seq.
+      this.#speculativeLocalSeqs.add(localSeq);
+      settled.catch(() => {}).finally(() => {
+        this.#speculativeLocalSeqs.delete(localSeq);
+      });
     }
     return { localSeq, commit, settled };
   }
@@ -3440,6 +3470,42 @@ class SpaceReplica implements ISpaceReplica {
           : {}),
       }),
     );
+    // The export refusal (server-execution v2 Phase 2, speculation.md
+    // §6; RULED 2026-08-13): a commit basis naming a SPECULATIVE
+    // overlay layer must not reach the wire — the layer exists only in
+    // this process, so the server would reject the dependency as
+    // unresolved on every attempt (pre-fix: the observed
+    // `pending dependency not resolved` convergence-retry loop, ~43
+    // attempts across the 30s window per event). Refused HERE, before
+    // the optimistic apply, with a terminal-classified error: nothing
+    // renders, nothing reverts, nothing retries.
+    const speculativeLayers = this.speculativeLayersOf(commit);
+    if (speculativeLayers.length > 0) {
+      const rejection = this.makeSpeculativeBasisRefusal(
+        commit,
+        speculativeLayers,
+      );
+      logger.error("speculative-basis-refused", () => [
+        "commit refused before export: read basis names speculative " +
+        "overlay layer(s) (speculation.md §6)",
+        {
+          localSeq,
+          speculativeLayers: [...speculativeLayers],
+          reads: commit.reads.pending
+            .filter((read) => {
+              const layers = Array.isArray(read.localSeq)
+                ? read.localSeq
+                : [read.localSeq];
+              return layers.some((layer) => speculativeLayers.includes(layer));
+            })
+            .map((read) => read.id),
+        },
+      ]);
+      if (source !== undefined) {
+        notifyCommitRejected(source, rejection);
+      }
+      return { error: rejection };
+    }
     const touched = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
@@ -3831,9 +3897,34 @@ class SpaceReplica implements ISpaceReplica {
         }
         const schedulerDependencyRejection =
           cause instanceof StorageTransactionRejectionError ? cause : undefined;
-        const rejection = schedulerDependencyRejection !== undefined
+        let rejection = schedulerDependencyRejection !== undefined
           ? schedulerDependencyRejection.rejection
           : toRejectedError(cause, commit, this.#space);
+        // Leg-C belt (speculation.md §6): a ConflictError whose commit
+        // names one of THIS replica's speculative layers can never
+        // converge — the dependency never reaches the wire.
+        // commitOperations refuses the export up front, so reaching
+        // here means a build path slipped through; upgrade to the
+        // terminal refusal rather than letting the caller spin its
+        // retry window against a dependency that is never coming.
+        if (
+          schedulerDependencyRejection === undefined &&
+          rejection.name === "ConflictError"
+        ) {
+          const speculativeLayers = this.speculativeLayersOf(commit);
+          if (speculativeLayers.length > 0) {
+            logger.error("speculative-basis-exported", () => [
+              "a commit naming speculative overlay layer(s) reached the " +
+              "wire (the build-time refusal should have caught this); " +
+              "upgrading the rejection to the terminal refusal",
+              { localSeq, speculativeLayers },
+            ]);
+            rejection = this.makeSpeculativeBasisRefusal(
+              commit,
+              speculativeLayers,
+            );
+          }
+        }
         telemetry?.submit({
           type: "storage.push.error",
           id: pushOpId,
@@ -4476,6 +4567,53 @@ class SpaceReplica implements ISpaceReplica {
     );
   }
 
+  /** The SPECULATIVE overlay layers a commit's read basis names, if any
+   * (server-execution v2 Phase 2, speculation.md §6). Non-empty means
+   * the commit must not export: those localSeqs exist only in this
+   * process, so as wire pending-read dependencies they can NEVER
+   * resolve. */
+  private speculativeLayersOf(commit: ClientCommit): number[] {
+    if (this.#speculativeLocalSeqs.size === 0) return [];
+    const named = new Set<number>();
+    for (const read of commit.reads.pending) {
+      const layers = Array.isArray(read.localSeq)
+        ? read.localSeq
+        : [read.localSeq];
+      for (const layer of layers) {
+        if (this.#speculativeLocalSeqs.has(layer)) named.add(layer);
+      }
+    }
+    return [...named].sort((left, right) => left - right);
+  }
+
+  // The loud export refusal (speculation.md §6; RULED 2026-08-13): an
+  // authored/pushed commit whose read basis names a speculative overlay
+  // layer fails OUTRIGHT — terminal, never retried. Only the client can
+  // make this call: it knows which of its layers are speculative, while
+  // the server cannot distinguish a dependency that is never coming
+  // from one that has not arrived yet. Modeled on toRejectedError's
+  // terminal-name arm (RowLabelCommitError): a TransactionError shape
+  // whose name is in TERMINAL_REJECTION_NAMES, so the scheduler's
+  // disposition is `terminal` instead of a doomed backoff window.
+  private makeSpeculativeBasisRefusal(
+    commit: ClientCommit,
+    speculativeLayers: readonly number[],
+  ): StorageTransactionRejected {
+    const message =
+      `authored commit refused: its read basis names speculative overlay ` +
+      `layer(s) ${speculativeLayers.join(", ")} — client speculation ` +
+      `entries exist only in this process and can never resolve as wire ` +
+      `pending-read dependencies (server-execution v2 speculation.md §6). ` +
+      `The write is failed outright instead of retried; re-derivation ` +
+      `after the authoritative value lands is the recovery path.`;
+    return {
+      name: "SpeculativeBasisError",
+      message,
+      cause: { name: "SystemError", message, code: 409 },
+      transaction: commit,
+    } as unknown as StorageTransactionRejected;
+  }
+
   /**
    * CT-1872 1b: when a commit's optimistic writes are dropped, every
    * in-flight commit whose pending reads name that localSeq is provably
@@ -4623,6 +4761,24 @@ class SpaceReplica implements ISpaceReplica {
       const key = docKey(operation.id, operation.scope);
       if (this.#shadowedForeignSeqs.get(key) === applied.seq) {
         this.#shadowedForeignSeqs.delete(key);
+      }
+    }
+    // The retirement wake for origin accepts (speculation.md §4;
+    // leg-C 2026-08-13): a sweep that ran while this verdict was in
+    // flight skipped its entries as blocked (unacked layer below), and
+    // the covering watermark event has already passed — without this
+    // wake a then-quiet space strands them forever. Rejected origins
+    // reach the overlay through the dependency cascade; ACCEPTS need
+    // this explicit signal. Guarded: an observer throw must not abort
+    // accept settlement (same containment posture as notifySinks).
+    if (this.speculationAckObserver !== undefined) {
+      try {
+        this.speculationAckObserver();
+      } catch (error) {
+        logger.error("speculation-ack-observer-error", () => [
+          "speculationAckObserver threw during accept settlement",
+          error,
+        ]);
       }
     }
     // Parking requires a live marker channel: a server that stages
@@ -4817,9 +4973,21 @@ class SpaceReplica implements ISpaceReplica {
     // The wake (see the field doc): fired on the flip regardless of
     // notification subscribers AND regardless of a value diff — an
     // echo-equal flip still lifts `unappliedForeignSeqFloor`, which is
-    // the state the serving loop's clamped wait is parked on.
+    // the state the serving loop's clamped wait is parked on. Guarded:
+    // the observer is externally installed (SpaceServer), and a throw
+    // here would abort the caller's settlement loop over parked
+    // accepts mid-batch — some confirmed, others already deleted from
+    // the parked set with unresolved whenApplied waiters (same
+    // containment posture as notifySinksForIds' per-subscriber guard).
     if (shadowTouched.length > 0) {
-      this.shadowFlipObserver?.();
+      try {
+        this.shadowFlipObserver?.();
+      } catch (error) {
+        logger.error("shadow-flip-observer-error", () => [
+          "shadowFlipObserver threw during promotion",
+          error,
+        ]);
+      }
     }
   }
 

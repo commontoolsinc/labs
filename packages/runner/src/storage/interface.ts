@@ -1955,6 +1955,20 @@ export interface ISpaceReplica extends ISpace {
    * the idle timeout.
    */
   shadowFlipObserver?: (() => void) | undefined;
+
+  /**
+   * The overlay's retirement WAKE for origin accepts (server-execution
+   * v2 Phase 2, speculation.md §4; leg-C 2026-08-13): when set, invoked
+   * whenever a pushed commit's accept records its ack seq. The
+   * speculation overlay destination installs it beside its watermark
+   * sink: a sweep evaluated while an origin's verdict was still in
+   * flight skips its entries as blocked (unacked pending layer below),
+   * and if the covering watermark event has already passed, nothing
+   * else re-sweeps on a then-quiet space — a REJECTED origin cascades
+   * into the entry through the dependency machinery, but an ACCEPTED
+   * one had no client-side wake, so the entry stayed pending forever.
+   */
+  speculationAckObserver?: (() => void) | undefined;
 }
 
 /**

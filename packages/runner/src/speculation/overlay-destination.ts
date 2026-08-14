@@ -137,6 +137,12 @@ export class SpeculationOverlayDestination
   readonly #entries = new Map<MemorySpace, Map<number, OverlayEntry>>();
   /** space -> cancel fn for the watermark-doc sink driving retirement. */
   readonly #watermarkSinks = new Map<MemorySpace, () => void>();
+  /** space -> release fn for the origin-accept wake installed on the
+   * replica (speculation.md §4; leg-C 2026-08-13): a sweep that ran
+   * while an origin's verdict was in flight skipped its entries as
+   * blocked, and the covering watermark event has already passed — the
+   * ack wake re-sweeps so a then-quiet space cannot strand them. */
+  readonly #ackObserverReleases = new Map<MemorySpace, () => void>();
   /** space -> last observed watermark (for registration-time sweeps). */
   readonly #watermarks = new Map<MemorySpace, number>();
   #closed = false;
@@ -317,6 +323,7 @@ export class SpeculationOverlayDestination
   }
 
   #ensureWatermarkSink(space: MemorySpace): void {
+    this.#ensureAckObserver(space);
     if (this.#watermarkSinks.has(space)) return;
     try {
       // Constructed INLINE from the wire-module constant rather than
@@ -345,6 +352,37 @@ export class SpeculationOverlayDestination
       logger.warn("watermark-sink-failed", () => [
         `watermark sink for ${space} failed; overlay retirement for the ` +
         "space will rely on entry re-runs",
+        error,
+      ]);
+    }
+  }
+
+  /** Install the origin-accept wake (ISpaceReplica.speculationAckObserver)
+   * on the space's replica: an entry whose sweep ran while its origin's
+   * verdict was still in flight is BLOCKED at that sweep (unacked layer
+   * below), and the covering watermark event has passed — on a
+   * then-quiet space nothing else re-sweeps. Rejected origins reach the
+   * overlay through the dependency cascade; accepts need this wake
+   * (speculation.md §4; leg-C 2026-08-13). */
+  #ensureAckObserver(space: MemorySpace): void {
+    if (this.#ackObserverReleases.has(space)) return;
+    try {
+      const replica = this.#runtime.storageManager.open(space).replica;
+      if (!("speculationAckObserver" in replica)) return;
+      const observable = replica as {
+        speculationAckObserver: (() => void) | undefined;
+      };
+      observable.speculationAckObserver = () => {
+        if (this.#closed) return;
+        this.#sweep(space, this.#watermarks.get(space) ?? 0);
+      };
+      this.#ackObserverReleases.set(space, () => {
+        observable.speculationAckObserver = undefined;
+      });
+    } catch (error) {
+      logger.warn("ack-observer-failed", () => [
+        `origin-accept observer for ${space} failed; retirement of ` +
+        "verdict-raced entries will rely on later watermark events",
         error,
       ]);
     }
@@ -459,5 +497,13 @@ export class SpeculationOverlayDestination
       }
     }
     this.#watermarkSinks.clear();
+    for (const release of this.#ackObserverReleases.values()) {
+      try {
+        release();
+      } catch {
+        // observer release is best-effort during teardown
+      }
+    }
+    this.#ackObserverReleases.clear();
   }
 }

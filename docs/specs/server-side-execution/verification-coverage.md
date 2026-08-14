@@ -959,7 +959,46 @@ sentence, coverage below):
 This closes leg A of the lunch-gate triage arc (the unstamped
 recovery-seed storm). Leg B — the OW19 demand spin
 (`structureLoadDeferred` climbing) — is separately owned; leg C
-(the speculative-pending-basis design fix) awaits an owner ruling.
+(the speculative-pending-basis design fix) is closed by the
+2026-08-13 delta below.
+
+Delta 2026-08-13 — lunch-gate triage leg C: the speculative-basis
+export refusal (RULED 2026-08-13; speculation.md §6's "process-local
+principle and the export refusal" carries the rule and the owner
+blockquote; this PR):
+
+- speculation.md §6's "a commit basis MUST NOT name a speculative
+  layer" (the export refusal): → COVERED, impl-gate, red-first.
+  `packages/runner/test/speculation-overlay.test.ts` ("an authored tx
+  that read a speculative echo is refused LOUDLY at the client")
+  drives a real client-flag-ON runtime to a live echo, commits an
+  unstamped tx that read it, and pins the terminal client-side
+  `SpeculativeBasisError` (isTerminalRejection true), the unchanged
+  engine commit count (nothing exported), the intact overlay entry,
+  and the never-rendered refused write. At the pre-fix tree the same
+  scenario exported the seq and red-failed with the server's
+  `ConflictError: pending dependency not resolved: 4` after a wire
+  round trip.
+- The bounded-and-loud convergence half (the ruling's "fix infinitely
+  stuck things"): → COVERED, red-first. The same file's "a handler
+  that read a speculative echo fails terminal on the FIRST attempt"
+  pins exactly ONE handler run per event (console-channel counting —
+  the sandbox globalThis is isolated); pre-fix the backoff loop
+  re-ran the handler throughout the observation window (17 runs / 5s
+  observed; production shape ~43 attempts / 30.5s to
+  CommitConvergenceError). The push-boundary belt (a ConflictError
+  naming a known-speculative layer upgrades to the terminal refusal)
+  is unreachable-by-construction behind the build-time refusal and
+  carries no separate pin — `speculative-basis-exported` in the log
+  names any future reach.
+- The origin-ack retirement wake (speculation.md §6's closing
+  paragraph; the verdict-lifetime sub-defect): → COVERED, impl-gate,
+  red-first. The same file's "an entry whose origin's accept verdict
+  lands AFTER the covering watermark still retires" scripts the race
+  destination-level (watermark event first, ack after; no further
+  watermark event) and pins retirement on the ack wake alone;
+  pre-fix the entry stayed pending forever (red: the observer was
+  never installed and the sweep never re-ran).
 
 ## 4. Standing rule
 

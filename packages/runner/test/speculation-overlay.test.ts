@@ -39,6 +39,7 @@ import {
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
+import { isTerminalRejection } from "../src/storage/rejection.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 
 const spaceSigner = await Identity.fromPassphrase("speculation overlay space");
@@ -411,6 +412,282 @@ describe("Phase 2 speculation overlay", () => {
     });
     expect(destination.deferSealedEffects(handlerTx, [effectOf("fetch")]))
       .toBe(false);
+  });
+
+  it("an authored tx that read a speculative echo is refused LOUDLY at the client, terminal, with no wire export (speculation.md §6; leg-C RULED 2026-08-13)", async () => {
+    // Pre-fix: the commit exported the echo's overlay-only localSeq as
+    // a wire pending-read dependency; the server — which cannot
+    // distinguish never-coming from not-yet-arrived — rejected it
+    // `pending dependency not resolved: <seq>` (observed here before
+    // the fix), and the scheduler's convergence loop spun its whole
+    // retry window against the same live echo.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const engine = await server.engineForSpace(space);
+
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_PATTERN }],
+    }, { space });
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "basis-arg",
+      undefined,
+    );
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "basis-result",
+      compiled.resultSchema,
+    );
+    await clientArg.sync();
+    await clientResult.sync();
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, clientArg, clientResult);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = clientResult.sink(() => {});
+    await clientRuntime.idle();
+    {
+      const tx = clientRuntime.edit();
+      clientArg.withTx(tx).set({ n: 6 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => clientResult.key("total").get() === 42,
+      "the speculative echo to render",
+    );
+    const overlay = clientRuntime.speculationOverlay!;
+    expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
+    const commitsBefore =
+      Engine.selectCommitsSince(engine, { fromSeq: 0 }).length;
+
+    // The authored act: an unstamped tx reads the echo and writes a
+    // copy elsewhere.
+    const copyCell = clientRuntime.getCell<{ copied: number }>(
+      space,
+      "basis-copy",
+      undefined,
+    );
+    await copyCell.sync();
+    const authoredTx = clientRuntime.edit();
+    const observed = clientResult.withTx(authoredTx).key("total").get();
+    expect(observed).toBe(42);
+    copyCell.withTx(authoredTx).set({ copied: observed as number });
+    const outcome = await authoredTx.commit();
+
+    // LOUD and terminal-classified — the client's own refusal, not a
+    // server round trip.
+    expect(outcome.error).toBeDefined();
+    expect(outcome.error!.name).toBe("SpeculativeBasisError");
+    expect(outcome.error!.message).toContain("speculative overlay layer");
+    expect(isTerminalRejection(outcome.error)).toBe(true);
+    // Nothing reached the wire: the engine saw no commit attempt land,
+    // and the echo is untouched (the refusal is not a withdrawal).
+    expect(Engine.selectCommitsSince(engine, { fromSeq: 0 }).length).toBe(
+      commitsBefore,
+    );
+    expect(overlay.entryCount(space)).toBeGreaterThanOrEqual(1);
+    // The refused write never rendered (refusal precedes the
+    // optimistic apply) — no flicker, no revert.
+    expect(copyCell.get()?.copied).toBeUndefined();
+    cancelDemand();
+  });
+
+  it("a handler that read a speculative echo fails terminal on the FIRST attempt — no convergence-retry loop against a dependency that is never coming (leg-C 1b)", async () => {
+    // Pre-fix: 17+ re-runs in a 5s window (observed), each re-reading
+    // the live echo, until CommitConvergenceError after the full 30s
+    // retry window. Post-fix: the terminal refusal classifies the
+    // commit `terminal` at the scheduler, so the handler runs ONCE.
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    // Handler-run counting rides the console channel: the pattern
+    // sandbox's globalThis is isolated from the test's, but its
+    // console routes through the runtime's consoleHandler.
+    let handlerRuns = 0;
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+      consoleHandler: (message) => {
+        if (String(message.args?.[0]).includes("leg-c-handler-run")) {
+          handlerRuns += 1;
+          return [];
+        }
+        return message.args ?? [];
+      },
+    });
+
+    const HANDLER_COPY_PATTERN = [
+      "import { computed, handler, pattern, Stream, Writable } from 'commonfabric';",
+      "const copy = handler<unknown, { total: number; copied: Writable<number> }>(",
+      "  (_ev, { total, copied }) => {",
+      "    console.log('leg-c-handler-run');",
+      "    copied.set(total);",
+      "  },",
+      ");",
+      "export default pattern<",
+      "  { n: number; copied: Writable<number> },",
+      "  { total: number; copy: Stream<unknown>; copied: number }",
+      ">(({ n, copied }) => {",
+      "  const total = computed(() => n * 7);",
+      "  return { total, copy: copy({ total, copied }), copied };",
+      "});",
+    ].join("\n");
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: HANDLER_COPY_PATTERN }],
+    }, { space });
+    const clientArg = clientRuntime.getCell<{ n: number; copied: number }>(
+      space,
+      "loop-arg",
+      undefined,
+    );
+    const clientResult = clientRuntime.getCell<
+      { total: number; copy: unknown; copied: number }
+    >(
+      space,
+      "loop-result",
+      compiled.resultSchema,
+    );
+    await clientArg.sync();
+    await clientResult.sync();
+    {
+      const seed = clientRuntime.edit();
+      clientArg.withTx(seed).set({ n: 6, copied: 0 });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, clientArg, clientResult);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = clientResult.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => clientResult.key("total").get() === 42,
+      "the speculative echo to render",
+    );
+
+    handlerRuns = 0;
+    clientResult.key("copy").send({});
+    await clientRuntime.idle();
+    // Observation window: with the terminal refusal the handler runs
+    // exactly once; the pre-fix backoff loop re-ran it 10+ times here.
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await clientRuntime.idle();
+    expect(handlerRuns).toBe(1);
+    // The refused write dropped (never committed, never rendered).
+    expect(clientArg.key("copied").get()).toBe(0);
+    cancelDemand();
+  });
+
+  it("an entry whose origin's accept verdict lands AFTER the covering watermark still retires — the ack wake re-sweeps; no further watermark event needed (leg-C 1c)", async () => {
+    // Destination-level pin with a scripted replica: deterministic
+    // control over the verdict-vs-watermark race. Pre-fix: the sweep at
+    // W ran while the origin was unacked (blocked), the verdict landed
+    // after, and nothing re-swept — the entry stayed pending forever on
+    // the then-quiet space.
+    const doc = "of:verdict-race" as never;
+    let ackedSeq: number | undefined = undefined;
+    const pendingLocalSeqs = [10, 30];
+    let watermarkCallback: ((value: unknown) => void) | undefined;
+    const replica = {
+      sealNative: (
+        _native: unknown,
+        _source: unknown,
+        verdict: Promise<unknown>,
+        options?: { speculative?: boolean },
+      ) => {
+        expect(options?.speculative).toBe(true);
+        return {
+          localSeq: 30,
+          commit: {
+            localSeq: 30,
+            reads: {
+              confirmed: [],
+              // The origin layer BELOW the entry: localSeq 10, still
+              // unacked at seal time.
+              pending: [{ id: doc, localSeq: [10], basisSeq: 0 }],
+            },
+            operations: [],
+          },
+          settled: verdict.then(() => undefined, () => undefined),
+        };
+      },
+      speculationRetirementView: () => ({
+        confirmedSeq: 0,
+        pendingLocalSeqs,
+      }),
+      ackedSeqOf: (localSeq: number) => localSeq === 10 ? ackedSeq : undefined,
+      speculationAckObserver: undefined as (() => void) | undefined,
+    };
+    const runtime = {
+      storageManager: { open: () => ({ replica }) },
+      getCellFromLink: () => ({
+        sink: (callback: (value: unknown) => void) => {
+          watermarkCallback = callback;
+          return () => {};
+        },
+      }),
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+
+    // Seal the speculative entry through the destination.
+    const sealTx = {
+      tx: {
+        sealInto: (collector: {
+          sealSpaceCommit: (
+            space: MemorySpace,
+            native: unknown,
+            source: unknown,
+          ) => Promise<unknown>;
+        }) => {
+          return collector.sealSpaceCommit(space, {
+            operations: [],
+            preconditions: [],
+          }, undefined).then(() => ({ ok: {} }));
+        },
+      },
+    } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(sealTx, {
+      actionId: "verdict-race",
+      kind: "derivation",
+    });
+    expect((await destination.seal(sealTx)).ok).toBeDefined();
+    expect(destination.entryCount(space)).toBe(1);
+    // The seal installed both hooks.
+    expect(watermarkCallback).toBeDefined();
+    expect(replica.speculationAckObserver).toBeDefined();
+
+    // The covering watermark arrives FIRST (W=50 covers everything the
+    // entry consumed) — but the origin's verdict is still in flight, so
+    // the sweep skips the entry as blocked.
+    watermarkCallback!({ seq: 50 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(destination.entryCount(space)).toBe(1);
+
+    // The verdict lands: origin 10 acked at store seq 5; its layer
+    // promotes off the pending stack. NO further watermark event.
+    ackedSeq = 5;
+    pendingLocalSeqs.splice(0, pendingLocalSeqs.length, 30);
+    replica.speculationAckObserver?.();
+    await waitUntil(
+      () => destination.entryCount(space) === 0,
+      "the verdict-raced entry to retire on the ack wake",
+      5_000,
+    );
+    destination.close();
   });
 
   it("an effectful builtin reached by client speculation never fires egress: pending renders, zero client fetch calls (README §3.5's never-execute rule)", async () => {
