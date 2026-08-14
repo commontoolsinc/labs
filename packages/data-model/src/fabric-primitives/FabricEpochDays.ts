@@ -131,7 +131,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
 
   /**
    * The codec for instances of this class in the realm-crossing format. The
-   * `bigint` travels as itself, where JSON has to spell it as base64url text
+   * `bigint` travels as itself, where JSON has to encode it as base64url text
    * over its two's-complement bytes.
    */
   static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {

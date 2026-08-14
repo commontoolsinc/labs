@@ -220,7 +220,7 @@ export class FabricBytes extends BaseFabricPrimitive {
 
   /**
    * The codec for instances of this class in the realm-crossing format. The
-   * bytes travel as bytes, where JSON has to spell them as base64url text.
+   * bytes travel as bytes, where JSON has to encode them as base64url text.
    */
   static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
     return this.#realmCodec;

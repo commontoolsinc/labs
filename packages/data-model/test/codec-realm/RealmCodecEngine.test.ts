@@ -131,7 +131,7 @@ describe("RealmCodecEngine", () => {
 
     it("encodes an interned symbol to its registry key", () => {
       // Cloning refuses every symbol, so this is the one JavaScript primitive
-      // the format has to spell out at all.
+      // the format has to encode at all.
       const payload = realmFromFabricValue(Symbol.for("k") as FabricValue);
 
       expect((payload as RealmTaggedValue).get("Symbol@1")).toBe("k");

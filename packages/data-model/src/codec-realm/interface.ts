@@ -17,7 +17,7 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
  * * `bigint` and `undefined` appear directly, as do `-0`, `NaN` and
  *   `±Infinity` under `number`. Cloning carries each as itself.
  * * `ArrayBuffer` and `Uint8Array` both appear, because bytes cross as bytes.
- *   This is the whole point of a second format: JSON has to spell a
+ *   This is the whole point of a second format: JSON has to represent a
  *   `FabricBytes` as base64url text, and a receiver that wants bytes back has
  *   to rebuild them. The two forms are not interchangeable. A `FabricBytes`
  *   encodes to a bare `ArrayBuffer`, that being what `postMessage()` can

@@ -229,7 +229,8 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
    * TODO(danfuzz): A nonterminal state of `{ tag, hash: FabricBytes }` is
    * available too, reaching the bytes through whichever codec this format
    * binds for `FabricBytes` instead of naming `Uint8Array` here, and so
-   * keeping the spelling of bytes in one place per format rather than two. It
+   * keeping the representation of bytes in one place per format rather than
+   * two. It
    * is a different encoding rather than the same one reached differently: the
    * bytes would arrive under their own tag nested inside this one, a level
    * deeper than the state below puts them.

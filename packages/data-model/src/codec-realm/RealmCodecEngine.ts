@@ -15,7 +15,7 @@ import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
  * The counterpart to `JsonCodecEngine`, and the two divide along what their
  * transports carry. JSON reaches a `string`, so every type JavaScript has and
  * JSON lacks -- `bigint`, `undefined`, the special numbers, bytes, patterns --
- * is spelled out as tagged text, and a `/`-prefixed key in user data has to be
+ * is written out as tagged text, and a `/`-prefixed key in user data has to be
  * escaped clear of the tags. Cloning carries all of those but `symbol`, and
  * carries them with their types intact, so most of a value passes through
  * untouched and tagging is reserved for what genuinely needs it.

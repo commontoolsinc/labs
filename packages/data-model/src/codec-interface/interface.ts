@@ -60,7 +60,7 @@ export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodecEngine");
  * `bigint` and `RegExp` as themselves, so a class built on any of those has an
  * answer here that JSON cannot express: `FabricBytes` terminates into a
  * `Uint8Array` rather than base64url text, and both epoch types into a
- * `bigint` rather than a base64url spelling of one.
+ * `bigint` rather than a base64url encoding of one.
  *
  * A class binding a format-neutral `[CODEC]` needs nothing here. Every
  * `FabricInstance` is in that position, its codec expanding an instance into

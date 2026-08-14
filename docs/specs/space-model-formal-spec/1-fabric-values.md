@@ -1396,7 +1396,7 @@ objects are `===` to each other is a further promise, which an engine states
 only if it makes it.
 
 Cycles *across* documents are a separate matter, and are supported whatever an
-engine does within one. They are spelled with explicit links (fabric instances
+engine does within one. They are written as explicit links (fabric instances
 referencing other documents), so two cells may reference each other and form a
 cycle in the broader data graph without any single cell's content containing
 one.

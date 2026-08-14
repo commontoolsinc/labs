@@ -32,7 +32,7 @@ import { CODEC_META_TAGS } from "@/codec-interface/codec-meta-tags.ts";
  *
  * **Cycles are refused** and **shared references are flattened**, per Section
  * 1.6 of the formal spec, which requires an engine to say which of these it
- * does. Both follow from reaching text: JSON has no way to spell a reference,
+ * does. Both follow from reaching text: JSON cannot represent a reference,
  * so a cycle has no encoding at all and is raised at the walk, and a value
  * held at two positions is written out twice, arriving as two objects that a
  * receiver cannot tell from two that were always distinct.
