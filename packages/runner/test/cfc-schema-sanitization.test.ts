@@ -1455,6 +1455,80 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     );
   });
 
+  it("terminates on a self-recursive combinator branch surface", () => {
+    const recursiveUnion = (keyword: "anyOf" | "oneOf" | "allOf") => ({
+      type: "object",
+      [keyword]: [{ $ref: "#/$defs/Node" }],
+      $defs: {
+        Node: {
+          type: "object",
+          [keyword]: [
+            { type: "object", properties: { leaf: { type: "number" } } },
+            { $ref: "#/$defs/Node" },
+          ],
+        },
+      },
+    } as unknown as JSONSchema);
+
+    for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
+      const schema = recursiveUnion(keyword);
+      // The walk that reads a union's property surface follows the same
+      // `$ref` the union declares, so without a visited set this overflows
+      // the stack instead of answering.
+      expect(() => validateAgainstSchema(schema, { leaf: 1 })).not.toThrow();
+      // A cycle contributes nothing rather than opening the surface, so a key
+      // no branch models is still refused.
+      expect(validateAgainstSchema(schema, { leaf: 1, smuggled: "x" }))
+        .toBeDefined();
+    }
+
+    // The branches carry the shape, so a union node still admits what they
+    // declare — the guard cuts the cycle, not the surface.
+    expect(validateAgainstSchema(recursiveUnion("anyOf"), { leaf: 1 }))
+      .toBeUndefined();
+  });
+
+  it("terminates on a branch surface that cycles through a nested ref", () => {
+    const schema = {
+      type: "object",
+      anyOf: [{ $ref: "#/$defs/Node" }],
+      $defs: {
+        Node: {
+          type: "object",
+          anyOf: [
+            { type: "object", properties: { leaf: { type: "number" } } },
+            { $ref: "#/$defs/Wrapper" },
+          ],
+        },
+        Wrapper: {
+          type: "object",
+          allOf: [{ $ref: "#/$defs/Node" }],
+        },
+      },
+    } as unknown as JSONSchema;
+
+    expect(validateAgainstSchema(schema, { leaf: 1 })).toBeUndefined();
+    expect(validateAgainstSchema(schema, { leaf: 1, smuggled: "x" }))
+      .toBeDefined();
+  });
+
+  it("takes an explicitly closed object at its word over its branches", () => {
+    const schema = {
+      type: "object",
+      properties: { kind: { type: "string" } },
+      additionalProperties: false,
+      oneOf: [{
+        type: "object",
+        properties: { kind: { type: "string" }, count: { type: "number" } },
+      }],
+    } as const satisfies JSONSchema;
+
+    expect(validateAgainstSchema(schema, { kind: "a" })).toBeUndefined();
+    expect(validateAgainstSchema(schema, { kind: "a", count: 1 })).toContain(
+      "additional property count",
+    );
+  });
+
   it("recognizes material-risk caveats without treating prompt influence as clearable", () => {
     expect(isPromptInjectionMaterialRiskAtom(promptRisk)).toBe(true);
     expect(isPromptInjectionMaterialRiskAtom(promptInfluence)).toBe(false);
