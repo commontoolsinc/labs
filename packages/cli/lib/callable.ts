@@ -952,10 +952,14 @@ export async function executeResolvedCallable(
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
       const value = await receipt.pull();
-      // A value-less verb's receipt is an empty record — existence-only.
+      // A value-less verb's receipt is an empty record — existence-only. The
+      // witness is a PLAIN empty record specifically: a keyless instance (a
+      // fabric primitive whose slots are private, `FabricBytes`) is a verb's
+      // result, and counting enumerable keys alone would swallow it.
       if (
         value !== undefined &&
-        !(isRecord(value) && Object.keys(value).length === 0)
+        !(isRecord(value) && !isInstance(value) &&
+          Object.keys(value).length === 0)
       ) {
         result = value;
       }

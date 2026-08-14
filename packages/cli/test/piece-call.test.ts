@@ -1207,6 +1207,45 @@ describe("executePieceCallable", () => {
     });
   });
 
+  it("returns a keyless instance result instead of reading it as value-less", async () => {
+    // The value-less witness is a PLAIN empty record. A fabric primitive
+    // whose slots are private — FabricBytes — has no enumerable keys, and a
+    // key-count test alone would swallow it as "no result".
+    class FakeBytes {
+      #bytes = "private";
+      describe(): string {
+        return this.#bytes;
+      }
+    }
+    const bytes = new FakeBytes();
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "exportBytes",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: bytes,
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "exportBytes",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocation: { id: "inv-bytes", session: callerSession },
+      },
+    );
+
+    expect(result.invocation?.status).toBe("settled");
+    expect(result.invocation?.result).toBe(bytes);
+  });
+
   it("sends without options and returns no invocation when no id is supplied", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
