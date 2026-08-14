@@ -80,15 +80,16 @@ The current package provides:
   inert text so it cannot resolve later in the parent's own table;
 - shape captured where it is free and read back by token: a handle entry may
   carry the schema of its referent — a `run_pattern` result reference records
-  the compiled pattern's result schema, and a tokenized link records a schema it
-  already carried — and no mint reads a cell to fill one in, so an entry without
-  one means the shape was never free to capture;
+  the compiled pattern's result schema, marked `schemaSource: "harness"` — while
+  no mint takes a schema off the reference it is handed or reads a cell to fill
+  one in, so an entry without one means the shape was never free to capture;
 - a `describe_handle` tool, available in any run that has handles and gated on
-  no fabric session: given a token it reports the recorded schema and the path
-  segments of the referent, never the value, and reports an unknown token as
-  unknown rather than as an error. It never dereferences the cell. A schema is
-  itself information, so this is a read of shape, currently unrestricted and a
-  candidate for later policy gating;
+  no fabric session: given a token it reports the harness-derived schema and the
+  path segments of the referent, never the value, and reports an unknown token
+  as unknown rather than as an error. It never dereferences the cell. Disclosing
+  shape is a policy-governed read whose current default is permissive; a schema
+  without harness provenance is not disclosed, closing the encoding channel a
+  data-carried schema would open;
 - an opt-in `run_pattern` tool (`--fabric-api-url`, `--fabric-identity`, and
   `--fabric-space` configured together, or their `CF_HARNESS_FABRIC_*`
   environment fallbacks): compiles and runs an inline `sourceText` pattern

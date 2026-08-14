@@ -70,12 +70,24 @@ export interface HarnessHandleEntry {
   addressKey: string;
   /**
    * Shape of the value at the referent, when a mint knew it — the compiled
-   * pattern's result schema behind a `run_pattern` result reference, or the
-   * schema a parsed link carried. Absent means the shape was never free to
-   * capture, not that the referent has none: no mint reads the cell to fill
-   * this in.
+   * pattern's result schema behind a `run_pattern` result reference. Absent
+   * means the shape was never free to capture, not that the referent has none:
+   * no mint reads the cell to fill this in.
    */
   schema?: JSONSchema;
+  /**
+   * Where {@link HarnessHandleEntry.schema} came from. `harness` means a
+   * harness step supplied it out of its own work — the schema a pattern WE
+   * compiled and ran declares — which is the only provenance a mint records.
+   *
+   * A schema is disclosed to a model only under that provenance. The
+   * difference is not fussiness: a schema that arrived with data is data, and
+   * property names are a channel wide enough to carry whatever whoever wrote
+   * them wanted said. An entry whose schema has no provenance — one adopted
+   * from state this code did not write — reads as shapeless rather than as
+   * trusted.
+   */
+  schemaSource?: "harness";
 }
 
 /**

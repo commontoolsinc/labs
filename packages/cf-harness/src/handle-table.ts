@@ -79,10 +79,6 @@ const normalizeHandleRef = (refText: string): NormalizedFullLink => {
     path: parsed.path,
     scope: parsed.scope ?? "space",
     ...(parsed.space !== undefined ? { space: parsed.space } : {}),
-    // A link that carries its leaf schema hands the mint the referent's shape
-    // for free; link text alone never does, so this is populated only where a
-    // caller normalized a link object rather than a string.
-    ...(parsed.schema !== undefined ? { schema: parsed.schema } : {}),
   } as NormalizedFullLink;
 };
 
@@ -151,9 +147,13 @@ export interface MintAddressHandleOptions {
   /** Digest seam; defaults to SHA-256. */
   hasher?: HandleTokenHasher;
   /**
-   * Shape of the value at the address, when the caller already knows it. A
-   * mint never reads the referent to discover one, so this is only ever the
-   * schema some earlier step held anyway.
+   * Shape of the value at the address, when the caller already knows it out of
+   * its OWN work — the result schema of a pattern this harness compiled and
+   * ran, say. A mint never reads the referent to discover one, and never takes
+   * one off the reference it is given: a schema that arrived with data is
+   * data, and the entry it would land on is one a model can ask about. What
+   * this records is marked `schemaSource: "harness"`, and that is the only
+   * provenance `describe_handle` discloses.
    */
   schema?: JSONSchema;
 }
@@ -185,7 +185,7 @@ export const mintAddressHandle = async (
   const hasher = options.hasher ?? sha256Hasher;
   const link = normalizeHandleRef(refText);
   const key = addressKey(link);
-  const schema = options.schema ?? link.schema;
+  const schema = options.schema;
   const existing = table.entries.find((entry) => entry.addressKey === key);
   if (existing !== undefined) {
     if (existing.schema !== undefined || schema === undefined) {
@@ -195,7 +195,9 @@ export const mintAddressHandle = async (
       table: {
         ...table,
         entries: table.entries.map((entry) =>
-          entry === existing ? { ...entry, schema } : entry
+          entry === existing
+            ? { ...entry, schema, schemaSource: "harness" as const }
+            : entry
         ),
       },
       token: existing.token,
@@ -218,7 +220,9 @@ export const mintAddressHandle = async (
     kind: "address",
     ref: canonicalRef(link),
     addressKey: key,
-    ...(schema !== undefined ? { schema } : {}),
+    ...(schema !== undefined
+      ? { schema, schemaSource: "harness" as const }
+      : {}),
   };
   return {
     table: { ...table, entries: [...table.entries, entry] },
@@ -449,6 +453,13 @@ export const assertValidHarnessHandleTable = (
     ) {
       throw new Error(
         `invalid handle table: entry \`${entry.token}\` has a schema that is not a JSON Schema object or boolean`,
+      );
+    }
+    if (entry.schemaSource !== undefined && entry.schemaSource !== "harness") {
+      throw new Error(
+        `invalid handle table: entry \`${entry.token}\` has an unknown schemaSource \`${
+          String(entry.schemaSource)
+        }\``,
       );
     }
     if (tokens.has(entry.token)) {

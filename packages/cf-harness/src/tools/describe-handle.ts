@@ -14,9 +14,9 @@ export interface DescribeHandleToolOutput {
   token: string;
   /** Whether this run's handle table holds the token. */
   known: boolean;
-  /** Whether the entry carries a recorded schema. */
+  /** Whether the entry carries a harness-derived schema to report. */
   hasSchema: boolean;
-  /** The recorded schema, when the entry carries one. */
+  /** The recorded schema, when the entry carries a harness-derived one. */
   schema?: JSONSchema;
   /**
    * Path segments of the referent within its piece — which field of which
@@ -35,18 +35,30 @@ export interface DescribeHandleToolOutput {
  * the data flowing through it: a reference plus its shape is checkable, a
  * bare token is not.
  *
- * Privacy posture, stated plainly: a schema is itself information — property
- * names can be as telling as values, and `path` names a field. This is a read
- * of shape rather than of content, currently unrestricted for any run that
- * holds the token, and a candidate for policy gating alongside the other
- * observation boundaries.
+ * Posture, stated plainly. Disclosing shape is a POLICY-GOVERNED read, and
+ * the current default is permissive: any run that holds the token gets an
+ * answer. That is defensible on the same ground declassification stands on
+ * elsewhere — for a cell whose pattern this harness compiled and ran, the
+ * shape is ours to state — and it is the contract patterns already work under
+ * internally: you cannot see the data, you can only describe the data flow.
+ * The dial belongs beside the other observation boundaries, and moving it is a
+ * policy change rather than a redesign.
+ *
+ * What is NOT permissive is what counts as a schema worth reporting. Property
+ * names are a channel: whoever writes them chooses the words, and a schema
+ * that arrived with data would let a writer put text into the reader's context
+ * through this tool. Only a HARNESS-derived schema is disclosed — one recorded
+ * by a step that knew the shape out of its own work, marked
+ * `schemaSource: "harness"` on the entry. An entry carrying a schema without
+ * that provenance reads as shapeless, and no mint takes a schema off a
+ * reference it was handed, so the channel is closed at both ends.
  *
  * A schema the table does not hold is reported as absent rather than fetched.
  * Resolving one from the session's fabric — reading the referent's declared
  * schema without reading its value — is a possible future extension; it would
  * need the fabric-session gate `run_pattern` carries, which this tool
  * deliberately does not, so that shape stays inspectable in every run that has
- * handles at all.
+ * handles at all. It would arrive with a provenance of its own to answer for.
  */
 export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
@@ -119,12 +131,14 @@ export const describeHandleTool: HarnessToolDefinition<
       });
     }
     const path = pathSegmentsOf(entry.ref);
+    // Provenance decides disclosure: a schema without it reads as absent.
+    const schema = entry.schemaSource === "harness" ? entry.schema : undefined;
     return Promise.resolve({
       outputId,
       token: entry.token,
       known: true,
-      hasSchema: entry.schema !== undefined,
-      ...(entry.schema !== undefined ? { schema: entry.schema } : {}),
+      hasSchema: schema !== undefined,
+      ...(schema !== undefined ? { schema } : {}),
       ...(path !== undefined ? { path } : {}),
     });
   },

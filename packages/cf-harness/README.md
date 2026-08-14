@@ -634,21 +634,31 @@ session, so it is available in every run that has handles at all.
 }
 ```
 
-Schemas are captured where they are already free rather than fetched. A
-`run_pattern` result reference carries the compiled pattern's result schema,
-which compilation produced anyway, and a link that arrives at the outbound swap
-already carrying its leaf schema records that. Nothing reads a cell to fill one
-in, so `hasSchema: false` means the shape was never free to capture, not that
-the referent has none. A token the run's table does not hold comes back
-`known: false` rather than as an error, since a token from another run simply
-names nothing here. A session-backed schema fetch — reading a referent's
-declared schema without reading its value — is a possible extension.
+Schemas are captured where they are already free rather than fetched, and only
+from the harness's own work: a `run_pattern` result reference carries the
+compiled pattern's result schema, which compilation produced anyway. Such an
+entry is marked `schemaSource: "harness"`, and that mark is what
+`describe_handle` discloses. A mint never takes a schema off the reference it is
+handed and never reads a cell to fill one in, so `hasSchema: false` means the
+shape was never free to capture, not that the referent has none. A token the
+run's table does not hold comes back `known: false` rather than as an error,
+since a token from another run simply names nothing here. A session-backed
+schema fetch — reading a referent's declared schema without reading its value —
+is a possible extension, and would arrive with a provenance of its own to answer
+for.
 
-This is a read of shape, not of content, and the distinction is worth stating
-plainly: a schema is itself information, property names can be as telling as
-values, and `path` names a field. The tool is currently unrestricted for any run
-that holds the token, and it is a candidate for policy gating alongside the
-other observation boundaries.
+Disclosing shape is a policy-governed read, and the current default is
+permissive: any run holding the token gets an answer. That is the same ground
+declassification stands on elsewhere — for a cell whose pattern this harness
+compiled and ran, the shape is ours to state — and it is the contract patterns
+already work under internally: you cannot see the data, you can only describe
+the data flow. The dial belongs beside the other observation boundaries, and
+moving it is a policy change rather than a redesign.
+
+What is not permissive is what counts as a schema worth reporting. Property
+names are a channel — whoever writes them chooses the words — so a schema that
+arrived with data is never disclosed, and none is ever recorded from one. An
+entry carrying a schema with no harness provenance reads as shapeless.
 
 Shape is what makes a chain of steps checkable. An orchestrator that passes a
 reference from one step to the next can confirm the reference is the kind of
