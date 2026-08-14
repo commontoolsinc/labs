@@ -640,6 +640,43 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(success.resultRef).toBe(token);
   });
 
+  it("reports a well-formed failure branch as the child's answer rather than as a broken return", async () => {
+    const runId = "run-subagent-pattern-author-valid-failure";
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    });
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      allowedSubagentProfiles: ["pattern-author"],
+      fetchFn: scriptedFetch([
+        delegateCallTurn("call-failing", {
+          goal: "Author a pattern that cannot be written.",
+          profile: "pattern-author",
+        }),
+        // The profile's contract, answered exactly: a failure branch that
+        // FITS the schema is a complete answer, not a validation problem.
+        finalTurn(JSON.stringify({ ok: false, code: "compile-error" })),
+        finalTurn("Parent done."),
+      ]),
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+
+    const subagentRun = result.runState.subagentRuns?.[0] as {
+      summary?: string;
+      structuredReturn?: { status?: string; failureCode?: string };
+    };
+    expect(subagentRun.structuredReturn?.status).toBe("valid");
+    expect(subagentRun.structuredReturn?.failureCode).toBe("compile-error");
+    expect(subagentRun.summary).toBe(
+      "Subagent reported failure (compile-error).",
+    );
+  });
+
   it("offers `run_pattern` to the child and returns its result ref as a token the parent can pass back to a pattern", async () => {
     const runId = "run-subagent-handles-run-pattern";
     const signer = await Identity.fromPassphrase(

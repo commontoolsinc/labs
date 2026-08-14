@@ -1512,6 +1512,47 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       .toBeDefined();
   });
 
+  it("leaves a union open when a branch of it is open", () => {
+    // The node itself closes only by the implicit default, so it defers to
+    // its branches: one branch that admits anything leaves the whole surface
+    // open, and the node stops policing keys its branches will judge.
+    const openBranch = {
+      type: "object",
+      anyOf: [{
+        type: "object",
+        properties: { a: { type: "number" } },
+        additionalProperties: true,
+      }],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(openBranch, { a: 1, extra: "x" }))
+      .toBeUndefined();
+
+    // A boolean branch is the same answer by a shorter route: `true` models
+    // nothing and refuses nothing.
+    const booleanBranch = {
+      type: "object",
+      anyOf: [true],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(booleanBranch, { extra: "x" }))
+      .toBeUndefined();
+
+    // `false` admits nothing, so it contributes nothing — neither property
+    // names nor openness. The closed branch beside it decides the surface.
+    const rejectingBranch = {
+      type: "object",
+      anyOf: [
+        false,
+        { type: "object", properties: { a: { type: "number" } } },
+      ],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(rejectingBranch, { a: 1 })).toBeUndefined();
+    // The branch judges the key before the node's own surface check does, so
+    // the refusal reads as the branch's rather than the node's — refused
+    // either way.
+    expect(validateAgainstSchema(rejectingBranch, { a: 1, extra: "x" }))
+      .toBeDefined();
+  });
+
   it("takes an explicitly closed object at its word over its branches", () => {
     const schema = {
       type: "object",
