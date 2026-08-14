@@ -55,12 +55,25 @@ import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
  * needs encoding rather than to the size of the value. `JsonCodecEngine` never
  * faces the choice, having to reach text.
  *
- * TODO(danfuzz): Cycles. `JsonCodecEngine` throws on one, having no way to
- * spell it; this throws too, which is a choice rather than a necessity, since
- * cloning reproduces a cyclic graph faithfully. Allowing one costs a memo from
- * each visited object to its encoded counterpart, so that a repeat visit
- * yields the same node instead of recursing -- and that memo would also
- * preserve shared acyclic structure, which a rebuild currently duplicates.
+ * **Cycles are refused**, and **a shared reference survives exactly where
+ * nothing beneath it needed encoding**, per Section 1.6 of the formal spec,
+ * which requires an engine to say which of these it does. Neither answer comes
+ * from the transport, which would carry either faithfully; both come from the
+ * walk.
+ *
+ * Copy-on-write is what preserves the sharing it preserves. A subtree needing
+ * no encoding comes back by identity, so every position that held the one
+ * object still holds it. Where a shared subtree does need encoding, each
+ * position rebuilds it on its own, and the encoding has two equal objects
+ * where the value had one -- structure that a receiver cannot tell from two
+ * that were always distinct.
+ *
+ * TODO(danfuzz): A memo from each visited object to its encoded counterpart
+ * closes both at once: a repeat visit yields the node already built for it,
+ * which preserves sharing through a rebuild and lets a back-edge resolve
+ * instead of recursing. It has to reach `BaseCodecEngine`'s walk state rather
+ * than living here, since a cycle can run through a codec-matched object as
+ * readily as through a container.
  */
 export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
   //

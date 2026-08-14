@@ -158,6 +158,33 @@ describe("RealmCodecEngine", () => {
       expect([...bytes.slice()]).toEqual([1, 2, 3]);
     });
 
+    it("keeps a shared subtree shared when it needs no encoding", () => {
+      const shared = { s: 1 };
+      const payload = realmFromFabricValue({ a: shared, b: shared }) as Record<
+        string,
+        RealmCodecValue
+      >;
+
+      // Copy-on-write does this rather than any memo: `shared` comes back by
+      // identity from both positions, so both still hold the one object.
+      expect(payload.a).toBe(shared);
+      expect(payload.a).toBe(payload.b);
+    });
+
+    it("rebuilds a shared subtree separately when it needs encoding", () => {
+      const shared = { bytes: new FabricBytes(new Uint8Array([1, 2])) };
+      const payload = realmFromFabricValue({ a: shared, b: shared }) as Record<
+        string,
+        RealmCodecValue
+      >;
+
+      // The other half of the contract, and the reason it is worth stating:
+      // each position rebuilds on its own, so the encoding has two equal
+      // objects where the value had one.
+      expect(payload.a).not.toBe(payload.b);
+      expect(payload.a).toEqual(payload.b);
+    });
+
     it("throws given a circular reference", () => {
       const value: Record<string, FabricValue> = { a: 1 };
       value.self = value;
