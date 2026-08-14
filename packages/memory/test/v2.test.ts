@@ -17,11 +17,9 @@ import {
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
-  resetInferredPendingDependenciesConfig,
   resetPersistentSchedulerStateConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
-  setInferredPendingDependenciesConfig,
   setPersistentSchedulerStateConfig,
   setSyncSchemaTableConfig,
   toDocumentPath,
@@ -145,7 +143,6 @@ describe("memory v2 flags", () => {
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
-      inferredPendingDependencies: true,
       verdictCatchUpMarkers: true,
       entityIdListing: true,
       entityIdPagination: true,
@@ -164,7 +161,6 @@ describe("memory v2 flags", () => {
       commitPreconditions: true,
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
-      inferredPendingDependencies: true,
       verdictCatchUpMarkers: true,
       entityIdListing: true,
       entityIdPagination: true,
@@ -187,7 +183,6 @@ describe("memory v2 flags", () => {
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: true,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: true,
         entityIdPagination: true,
@@ -203,7 +198,6 @@ describe("memory v2 flags", () => {
         // relaxation, never the connection.
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -222,7 +216,6 @@ describe("parseMemoryProtocolFlags", () => {
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
-      inferredPendingDependencies: false,
       verdictCatchUpMarkers: false,
       entityIdListing: false,
       entityIdPagination: false,
@@ -235,7 +228,6 @@ describe("parseMemoryProtocolFlags", () => {
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
-      inferredPendingDependencies: false,
       verdictCatchUpMarkers: false,
       entityIdListing: false,
       entityIdPagination: false,
@@ -255,7 +247,6 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -276,7 +267,6 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -297,7 +287,6 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -318,7 +307,6 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: false,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -335,48 +323,6 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags(wire), flags);
   });
 
-  it("round-trips inferredPendingDependencies through the wire flags shape", () => {
-    const flags = getMemoryProtocolFlags();
-    assertEquals(flags.inferredPendingDependencies, true);
-    const wire = wireMemoryProtocolFlags(flags);
-    assertEquals(wire.inferredPendingDependencies, true);
-    assertEquals(parseMemoryProtocolFlags(wire), flags);
-  });
-
-  it("accepts the inferredPendingDependencies capability key", () => {
-    assertEquals(
-      parseMemoryProtocolFlags({
-        inferredPendingDependencies: true,
-      }),
-      {
-        modernCellRep: false,
-        persistentSchedulerState: false,
-        commitPreconditions: false,
-        syncSchemaTableV2: false,
-        sqliteCommitRowLabelEval: false,
-        pendingReadStacks: false,
-        inferredPendingDependencies: true,
-        verdictCatchUpMarkers: false,
-        entityIdListing: false,
-        entityIdPagination: false,
-        entityIdLookup: false,
-      },
-    );
-  });
-
-  it("stops advertising inferredPendingDependencies when the config is off", () => {
-    setInferredPendingDependenciesConfig(false);
-    try {
-      assertEquals(
-        getMemoryProtocolFlags().inferredPendingDependencies,
-        false,
-      );
-    } finally {
-      resetInferredPendingDependenciesConfig();
-    }
-    assertEquals(getMemoryProtocolFlags().inferredPendingDependencies, true);
-  });
-
   it("accepts the verdictCatchUpMarkers capability key", () => {
     assertEquals(
       parseMemoryProtocolFlags({
@@ -389,7 +335,6 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: true,
         entityIdListing: false,
         entityIdPagination: false,
@@ -402,7 +347,6 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(
       parseMemoryProtocolFlags({
         pendingReadStacks: true,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
       }),
       {
@@ -412,7 +356,6 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: true,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: false,
@@ -431,7 +374,6 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: true,
         entityIdPagination: false,
@@ -453,7 +395,6 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
-        inferredPendingDependencies: false,
         verdictCatchUpMarkers: false,
         entityIdListing: false,
         entityIdPagination: true,

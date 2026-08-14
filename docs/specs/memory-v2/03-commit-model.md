@@ -132,15 +132,6 @@ interface MergeContext {
 
 interface ClientCommit {
   localSeq: number;
-  // Verdict watermark (CT-1910): the highest localSeq W such that EVERY
-  // same-session commit at or below W had its fate fully processed by the
-  // client's pending-stack bookkeeping — verdict applied, or rejection
-  // dropped and cascaded — when this commit's reads were BUILT. REQUIRED
-  // when any pending read uses the inferred (localSeq-less) shape of
-  // §3.6.3; otherwise an optional retention-pruning hint. Snapshotted at
-  // build time: a send-time value would attest knowledge the composite did
-  // not have.
-  verdictsThrough?: number;
   reads: {
     confirmed: ConfirmedRead[];
     pending: PendingRead[];
@@ -167,12 +158,7 @@ interface PendingRead {
   // read, from the basis §3.6.3 selects. A scalar is the single-layer
   // form, and the only form a client may send to a server that has not
   // advertised the `pendingReadStacks` capability in the hello exchange.
-  // ABSENT is the INFERRED shape (§3.6.3), valid only toward a server
-  // advertising `inferredPendingDependencies`, only with `basisSeq`
-  // present and a commit-level `verdictsThrough` attestation: the server
-  // computes the dependency set from its own record of the session's
-  // decided commits instead of checking declared resolution edges.
-  localSeq?: number | number[];
+  localSeq: number | number[];
   // The reader's confirmed basis for THIS document, in the SERVER's seq
   // space: the seq of the last accepted write to the document that the
   // client's confirmed view reflected at build time (0 for a document its
@@ -215,17 +201,33 @@ The cascade cannot rely on each pending layer reading the layer beneath it:
 zero-read operations (mergeable collection writes) legally interleave into a
 stack without any read edge. A commit that reads through a pending stack
 therefore records its FULL dependency set directly: the read's `localSeq`
-array names every pending layer of the document below the reader, in
-ascending order. Each element imposes a resolution requirement; the highest
-element — the document's top-of-stack layer — is the legacy staleness basis
-when no `basisSeq` is declared (§3.6.3). The
+array names every pending layer of the document that the reader's
+materialized view sat on, in ascending order. Each element imposes a
+resolution requirement; the highest element — the view's top-of-stack layer
+— is the legacy staleness basis when no `basisSeq` is declared (§3.6.3). The
 client mirrors the server cascade at drop time: when a pending commit's
 optimistic writes are dropped, every queued or in-flight commit whose
 recorded dependency set names the dropped `localSeq` is locally rejected
 without waiting for the server's per-commit verdict.
 
-The dependency array MUST include the document's top-of-stack pending layer
-below the reader. For a read that declares no `basisSeq`, the staleness
+Completeness is relative to the VIEW, not to the session's commit history,
+so the array may be non-contiguous in the session's `localSeq` space. A
+layer the client removed from its overlay before the read view was built — a
+rejection verdict honored, the view rebuilt without it — contributed nothing
+to the observed value and is legitimately absent from the array, and the
+server imposes no resolution requirement on a layer that is not named. This
+is what lets a client process a rejection eagerly and still commit later
+work built over the surviving layers, rather than dooming every dependent
+minted after the verdict. The soundness burden sits with the client:
+omitting a layer whose optimistic value DID contribute to the observed view
+fabricates an observation (the CT-1872 1c phantom shape — an INV-1
+violation, `09-invariants.md`), exactly as a fabricated confirmed read
+would. Omission means "my view did not include this layer", never "I would
+rather not mention it".
+
+The dependency array MUST include the view's top-of-stack pending layer
+below the reader — the highest layer surviving in the overlay when the view
+was built. For a read that declares no `basisSeq`, the staleness
 basis is the stack top (implicitly, the array's highest element), and basing
 the scan at a lower layer is unsound, not merely conservative: the session's
 own newer stacked commits then land inside the scan interval, where the
@@ -236,16 +238,6 @@ what lets the scan start at the true confirmed basis — but the top-of-stack
 element remains REQUIRED in the array for its resolution edge. Any narrowing
 of the dependency set (for example, pruning layers whose write footprint
 provably cannot influence the read path) may drop only NON-top layers.
-
-The recorded dependency set has two consumers: the client's own drop-time
-cascade, and — for the declared wire shapes — the server's resolution
-check. Toward a server advertising `inferredPendingDependencies`, the WIRE
-declaration is omitted entirely (§3.6.3's inferred shape); the client-side
-recording and cascade remain load-bearing regardless, because they are what
-keeps never-sent layers safe: a commit whose composite included a layer
-that was cascade-dropped before sending is dropped with it and never
-reaches the wire, which is exactly the case server-side inference cannot
-see.
 
 The array form is a negotiated capability (`pendingReadStacks` in the hello
 flags). Toward a server that does not advertise it, the client MUST send
@@ -372,75 +364,6 @@ by the read's shape:
   (CT-1910), retained verbatim for old clients and recorded as an INV-1
   known deviation in `09-invariants.md`. The deviation retires when clients
   that omit `basisSeq` do.
-
-#### Inferred dependencies (`inferredPendingDependencies`)
-
-Toward a server that advertised the `inferredPendingDependencies`
-capability, a pending read MAY omit `localSeq` entirely. Such a read MUST
-declare `basisSeq`, and its commit MUST carry `verdictsThrough` — both
-absences are protocol errors. Dependency soundness then comes from
-server-side inference instead of declared resolution edges:
-
-> Reject commit N iff some same-session commit L with
-> `N.verdictsThrough < L.localSeq < N.localSeq` wrote a document N reads
-> through its pending overlay and was REJECTED.
-
-A rejected L at or below the watermark was dropped by the client's cascade
-before N's composite was built — N legitimately excludes it, and a retry
-re-derived after a rejection always attests a fresher watermark, so a
-processed rejection can never doom the same work twice (the rule without
-the watermark dooms every retry forever). A rejected L above the watermark
-was still part of the composite when it was built: a fabricated premise,
-rejected. Accepted candidates need no action, and the staleness scan for
-the inferred shape is the true-basis scan above, unchanged.
-
-Server obligations and premises:
-
-- The server retains each REJECTED commit's write footprint per session —
-  every rejection kind, including those that never stage a catch-up marker
-  — until the session's attested watermark passes it. Retention is
-  in-memory and bounded: past the bound the oldest entries fold into a
-  floor, and a commit attesting a watermark below the floor is rejected as
-  a CONFLICT (the sound direction; its retry attests past the floor).
-  Accepted candidates are consulted from the commit log.
-- Watermarks are per-session MONOTONIC: the server prunes retention at the
-  highest value ever attested, whatever the fate of the commit that
-  carried it, so a later stale attestation cannot resurrect a retired
-  entry. A watermark at or past its own commit's `localSeq` is a protocol
-  error. Lying corrupts only the session's own data — the same trust model
-  as a fabricated read.
-- Inference is complete only under in-order delivery — the same-session
-  ordering this section and INV-5 state: by the time N is decided, every
-  same-session commit below it is decided too, so "decided and
-  retained-rejected" is the whole candidate set. The server enforces the
-  premise defensively: an inferred-shape commit at or below the session's
-  highest decided localSeq is a protocol error — unless it re-sends a
-  RETAINED rejection's localSeq, the lost-verdict replay, which is
-  revalidated afresh (and, if it now lands, retires its retention entry).
-  KNOWN DEVIATION: the scheduler-observation batch envelope allocates its
-  wrapper localSeq at flush time and can deliver ahead of a semantic
-  commit held behind it, so while persistent scheduler state is enabled
-  the premise does not hold; the client fences by declaring full arrays
-  instead of the inferred shape whenever that feature is on. The fence
-  (and the deviation) retire when observation batches move to their own
-  unnumbered request.
-- Judgment uses the session's MONOTONIC watermark: the rule evaluates at
-  the max of the commit's own attestation and the highest watermark the
-  session has ever attested (the same bound retention prunes at). Sound
-  because watermark-CARRYING commits — semantic commits — deliver in
-  localSeq order among themselves even under the envelope deviation: a
-  commit whose attestation raised the high-water was built and submitted
-  before this one, so this one's composite also postdates the processing
-  that attestation proved.
-- Layers that never reached the wire are invisible to inference and safe
-  by the client cascade (§3.5): a composite that included a never-sent
-  layer was dropped client-side with it and never sent.
-
-The declared-array invariants — the top-of-stack MUST and the max-basis
-monotonicity — bind the declared shapes only; the inferred shape has no
-client-chosen dependency set left to get wrong. Scheduler observations
-(§3.5) keep declaring arrays: their entries ride a batch envelope and
-carry no per-entry watermark.
 
 ### 3.6.4 Conflict Response
 

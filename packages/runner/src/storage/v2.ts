@@ -703,9 +703,9 @@ const scalarizeLocalSeq = (localSeq: number | number[]): number =>
   Array.isArray(localSeq) ? Math.max(...localSeq) : localSeq;
 
 const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
-  const hasStack = (reads: { localSeq?: number | number[] }[]): boolean =>
+  const hasStack = (reads: { localSeq: number | number[] }[]): boolean =>
     reads.some((read) => Array.isArray(read.localSeq));
-  const scalarizeReads = <Read extends { localSeq?: number | number[] }>(
+  const scalarizeReads = <Read extends { localSeq: number | number[] }>(
     reads: Read[],
   ): Read[] =>
     reads.map((read) =>
@@ -747,51 +747,6 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
         ),
       }
       : {}),
-  };
-};
-
-// Wire-compat helper for pre-CT-1910 traffic: the internal commit carries the
-// verdict watermark unconditionally, but a wire shape that still declares its
-// dependency arrays has no use for it, and keeping those bytes identical to
-// pre-watermark clients keeps replay comparison and old-server behavior
-// byte-for-byte unchanged.
-const stripVerdictsThrough = (commit: ClientCommit): ClientCommit => {
-  if (commit.verdictsThrough === undefined) {
-    return commit;
-  }
-  const { verdictsThrough: _verdictsThrough, ...rest } = commit;
-  return rest;
-};
-
-// The CT-1910 inferred wire shape: pending reads drop their declared
-// dependency arrays (the server infers them from its own decided-commit
-// record, judged against the commit's verdict watermark) and keep only the
-// true confirmed basis for the staleness scan. Client-side machinery is
-// untouched — the in-flight registry and drop cascade still run on the
-// internal commit's arrays, which remain the load-bearing guard for layers
-// that never reach the wire. Scheduler-observation batches keep their
-// declared arrays: observation entries carry no per-entry watermark, and
-// they are droppable bookkeeping, not semantic writes.
-const inferPendingDependencyShape = (commit: ClientCommit): ClientCommit => {
-  if (
-    commit.reads.pending.length === 0 ||
-    commit.verdictsThrough === undefined ||
-    commit.reads.pending.every((read) => read.localSeq === undefined)
-  ) {
-    return commit;
-  }
-  return {
-    ...commit,
-    reads: {
-      confirmed: commit.reads.confirmed,
-      pending: commit.reads.pending.map((read) => {
-        if (read.localSeq === undefined) {
-          return read;
-        }
-        const { localSeq: _localSeq, ...rest } = read;
-        return rest;
-      }),
-    },
   };
 };
 
@@ -2132,18 +2087,6 @@ class SpaceReplica implements ISpaceReplica {
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
-  // LocalSeqs allocated from #nextLocalSeq whose fate the pending-stack
-  // bookkeeping has not fully processed: an accept's verdict not yet
-  // received, or a rejection's drop-and-cascade not yet run. The verdict
-  // watermark a commit attests (CT-1910, `verdictsThrough`) is the largest
-  // W with every localSeq at or below W settled — one entry unsettled at
-  // build time caps W below it, because that entry could still turn out to
-  // be an unprocessed rejection. This is deliberately NOT
-  // #caughtUpLocalSeq: markers cover only accepts and conflict rejections,
-  // so a marker-based watermark would never pass a ProtocolError-rejected
-  // commit and every later reader of its documents would be doomed forever
-  // — the livelock the watermark exists to break.
-  #unsettledFates = new Set<number>();
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
@@ -3083,35 +3026,24 @@ class SpaceReplica implements ISpaceReplica {
     ) {
       return Promise.resolve({ ok: {} });
     }
-    const localSeq = this.allocateLocalSeq();
+    const localSeq = this.#nextLocalSeq++;
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
     >();
-    let entry: SchedulerObservationBatchEntry;
-    try {
-      entry = {
-        commit: {
-          localSeq,
-          reads: this.buildReads(source, localSeq),
-          schedulerObservation,
-        },
-        pending,
-        source,
-        batchGeneration: this.#schedulerObservationBatchGeneration,
-      };
-    } catch (error) {
-      // A throw during build (the read-activity provider) would otherwise
-      // abandon this fate and freeze the verdict frontier below it.
-      this.settleFate(localSeq);
-      throw error;
-    }
+    const entry: SchedulerObservationBatchEntry = {
+      commit: {
+        localSeq,
+        reads: this.buildReads(source, localSeq),
+        schedulerObservation,
+      },
+      pending,
+      source,
+      batchGeneration: this.#schedulerObservationBatchGeneration,
+    };
     this.#schedulerObservationBatch.push(entry);
     this.#unsettledSchedulerObservations.add(entry);
     void pending.promise.then(() => {
       this.#unsettledSchedulerObservations.delete(entry);
-      // The entry's fate rides its batch envelope's verdict (or a
-      // capability-gated drop); either way it is processed here.
-      this.settleFate(localSeq);
     });
     this.scheduleSchedulerObservationFlush();
     return pending.promise;
@@ -3175,7 +3107,7 @@ class SpaceReplica implements ISpaceReplica {
         ? this.#schedulerObservationBatch.length
         : nextGeneration,
     );
-    const localSeq = this.allocateLocalSeq();
+    const localSeq = this.#nextLocalSeq++;
     const commit: ClientCommit = {
       localSeq,
       reads: { confirmed: [], pending: [] },
@@ -3276,42 +3208,12 @@ class SpaceReplica implements ISpaceReplica {
     this.#schedulerObservationFlushPromise = promise;
     this.#commitPromises.add(promise);
     promise.finally(() => {
-      // Covers the envelope's capability-gated early returns, which never
-      // reach settleAccept/finalizeRejection; settling twice is a no-op.
-      this.settleFate(localSeq);
       this.#commitPromises.delete(promise);
       if (this.#schedulerObservationFlushPromise === promise) {
         this.#schedulerObservationFlushPromise = undefined;
       }
     });
     return promise;
-  }
-
-  private allocateLocalSeq(): number {
-    const localSeq = this.#nextLocalSeq++;
-    this.#unsettledFates.add(localSeq);
-    return localSeq;
-  }
-
-  private settleFate(localSeq: number): void {
-    this.#unsettledFates.delete(localSeq);
-  }
-
-  /** The verdict watermark to attest on a commit being built at `localSeq`
-   * (CT-1910): every fate strictly below the lowest still-unsettled
-   * allocation has been processed, so W is that bound minus one — or
-   * everything below the commit itself when nothing else is outstanding.
-   * Snapshotted at BUILD time; a fate settling between build and send must
-   * not raise it, because the composite was captured before that verdict
-   * was processed. */
-  private verdictFrontierBefore(localSeq: number): number {
-    let lowest = localSeq;
-    for (const unsettled of this.#unsettledFates) {
-      if (unsettled < lowest) {
-        lowest = unsettled;
-      }
-    }
-    return lowest - 1;
   }
 
   private async commitOperations(
@@ -3336,130 +3238,116 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
-    const localSeq = this.allocateLocalSeq();
+    const localSeq = this.#nextLocalSeq++;
     // Observations created after this direct commit form a later batch.
     this.#schedulerObservationBatchGeneration++;
     if (source !== undefined) {
       recordCommitLocalSeq(source, this.#space, localSeq);
     }
-    // Any throw between the allocation above and pushCommit's own
-    // settlement paths (a read-activity provider throwing during build, a
-    // subscriber throwing during the optimistic notify) must still settle
-    // this fate: an abandoned entry freezes the verdict frontier below
-    // this localSeq forever, and every later retained rejection would
-    // become a permanent spurious-doom source.
-    try {
-      const commit = withCommitTiming(
-        ["commitOperations", "buildCommit"],
-        (): ClientCommit => ({
-          localSeq,
-          verdictsThrough: this.verdictFrontierBefore(localSeq),
-          reads: this.buildReads(source, localSeq),
-          // Cell ops first, folded SQLite ops last (applied in array order by the
-          // engine; sqlite ops are not entity revisions and carry no id/scope).
-          operations: [
-            ...operations.map((operation) => {
-              switch (operation.op) {
-                case "delete":
-                  return operation;
-                case "patch":
-                  return {
-                    op: "patch" as const,
-                    id: operation.id,
-                    scope: operation.scope,
-                    patches: operation.patches,
-                  };
-                case "set":
-                  return {
-                    op: "set" as const,
-                    id: operation.id,
-                    scope: operation.scope,
-                    value: operation.value,
-                  };
-              }
-            }),
-            ...sqliteOps,
-          ],
-          ...(schedulerObservation !== undefined
-            ? { schedulerObservation }
-            : {}),
-          ...(activePreconditions.length > 0
-            ? { preconditions: [...activePreconditions] }
-            : {}),
-        }),
-      );
-      const touched = operations.map((operation) => ({
-        id: operation.id,
-        scope: operation.scope,
-      }));
-      const hasSemanticOperations = operations.length > 0;
-      const shouldNotifySubscribers = hasSemanticOperations &&
-        this.hasNotificationSubscribers();
-      const shouldNotifySinks = hasSemanticOperations &&
-        this.hasSinkSubscribers(touched);
-      const before = withCommitTiming(
-        ["commitOperations", "snapshotBefore"],
-        () =>
-          shouldNotifySubscribers
-            ? Differential.checkout(
-              this,
-              touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-            )
-            : undefined,
-      );
-
-      withCommitTiming(["commitOperations", "applyPending"], () => {
-        for (const operation of operations) {
-          this.applyPending(operation, localSeq);
-        }
-      });
-
-      withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
-        if (before !== undefined) {
-          const optimistic = before.compare(this);
-          this.#subscription.next({
-            type: "commit",
-            space: this.#space,
-            changes: optimistic,
-            source,
-          });
-          if (shouldNotifySinks) {
-            this.notifySinks(optimistic);
-          }
-        } else if (shouldNotifySinks) {
-          this.notifySinksForIds(touched);
-        }
-      });
-
-      const promise = withCommitTiming(
-        ["commitOperations", "pushCommitStart"],
-        () =>
-          this.pushCommit(
-            localSeq,
-            operations,
-            commit,
-            source,
-            { waitForSchedulerObservations: true, commitOptions },
-          ),
-      );
-      this.#commitPromises.add(promise);
-      // Keyed registration for the old-server scalarization hold: a later
-      // stacked commit awaits its omitted lower dependencies' outcomes here.
-      // Removed on settlement (absent key = settled); the .catch keeps the
-      // tracking copy from surfacing as an unhandled rejection.
-      this.#commitOutcomeBySeq.set(
+    const commit = withCommitTiming(
+      ["commitOperations", "buildCommit"],
+      (): ClientCommit => ({
         localSeq,
-        promise.catch(() => {}).finally(() => {
-          this.#commitOutcomeBySeq.delete(localSeq);
-        }),
-      );
-      const result = await promise;
-      this.#commitPromises.delete(promise);
-      return result;
-    } catch (error) {
-      this.settleFate(localSeq);
-      throw error;
-    }
+        reads: this.buildReads(source, localSeq),
+        // Cell ops first, folded SQLite ops last (applied in array order by the
+        // engine; sqlite ops are not entity revisions and carry no id/scope).
+        operations: [
+          ...operations.map((operation) => {
+            switch (operation.op) {
+              case "delete":
+                return operation;
+              case "patch":
+                return {
+                  op: "patch" as const,
+                  id: operation.id,
+                  scope: operation.scope,
+                  patches: operation.patches,
+                };
+              case "set":
+                return {
+                  op: "set" as const,
+                  id: operation.id,
+                  scope: operation.scope,
+                  value: operation.value,
+                };
+            }
+          }),
+          ...sqliteOps,
+        ],
+        ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
+        ...(activePreconditions.length > 0
+          ? { preconditions: [...activePreconditions] }
+          : {}),
+      }),
+    );
+    const touched = operations.map((operation) => ({
+      id: operation.id,
+      scope: operation.scope,
+    }));
+    const hasSemanticOperations = operations.length > 0;
+    const shouldNotifySubscribers = hasSemanticOperations &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = hasSemanticOperations &&
+      this.hasSinkSubscribers(touched);
+    const before = withCommitTiming(
+      ["commitOperations", "snapshotBefore"],
+      () =>
+        shouldNotifySubscribers
+          ? Differential.checkout(
+            this,
+            touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+          )
+          : undefined,
+    );
+
+    withCommitTiming(["commitOperations", "applyPending"], () => {
+      for (const operation of operations) {
+        this.applyPending(operation, localSeq);
+      }
+    });
+
+    withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
+      if (before !== undefined) {
+        const optimistic = before.compare(this);
+        this.#subscription.next({
+          type: "commit",
+          space: this.#space,
+          changes: optimistic,
+          source,
+        });
+        if (shouldNotifySinks) {
+          this.notifySinks(optimistic);
+        }
+      } else if (shouldNotifySinks) {
+        this.notifySinksForIds(touched);
+      }
+    });
+
+    const promise = withCommitTiming(
+      ["commitOperations", "pushCommitStart"],
+      () =>
+        this.pushCommit(
+          localSeq,
+          operations,
+          commit,
+          source,
+          { waitForSchedulerObservations: true, commitOptions },
+        ),
+    );
+    this.#commitPromises.add(promise);
+    // Keyed registration for the old-server scalarization hold: a later
+    // stacked commit awaits its omitted lower dependencies' outcomes here.
+    // Removed on settlement (absent key = settled); the .catch keeps the
+    // tracking copy from surfacing as an unhandled rejection.
+    this.#commitOutcomeBySeq.set(
+      localSeq,
+      promise.catch(() => {}).finally(() => {
+        this.#commitOutcomeBySeq.delete(localSeq);
+      }),
+    );
+    const result = await promise;
+    this.#commitPromises.delete(promise);
+    return result;
   }
 
   /**
@@ -3486,7 +3374,7 @@ class SpaceReplica implements ISpaceReplica {
         for (const layer of read.localSeq) {
           dependencies.add(layer);
         }
-      } else if (read.localSeq !== undefined) {
+      } else {
         dependencies.add(read.localSeq);
       }
     }
@@ -3657,33 +3545,13 @@ class SpaceReplica implements ISpaceReplica {
         ) {
           return { ok: {} };
         }
-        // Wire-shape ladder, newest capability first. Inferred dependencies
-        // (CT-1910): the server reconstructs the dependency set itself, so
-        // the arrays stay client-side and the commit's verdict watermark
-        // rides instead — but only while persistent scheduler state is OFF
-        // client-side. The scheduler-observation batch envelope allocates
-        // its wrapper localSeq at FLUSH time and can deliver ahead of a
-        // semantic commit held behind it, violating the in-order delivery
-        // premise the engine's inference guard rests on; while that
-        // machinery can run, this client declares full arrays instead
-        // (which carry their own resolution edges and are order-immune).
-        // The fence retires when observation batches move to their own
-        // unnumbered request. Declared arrays: only a server advertising
-        // `pendingReadStacks` can resolve them — otherwise collapse each to
-        // its top-of-stack element before sending. The two legacy shapes
-        // strip the watermark to stay byte-identical to pre-CT-1910
-        // clients.
-        const inferredCapable =
-          client.serverFlags?.inferredPendingDependencies === true &&
-          !getPersistentSchedulerStateConfig();
-        const scalarized = !inferredCapable &&
-          client.serverFlags?.pendingReadStacks !== true;
-        const wireCommit = inferredCapable
-          ? inferPendingDependencyShape(commit)
-          : scalarized
-          ? scalarizePendingReadStacks(stripVerdictsThrough(commit))
-          : stripVerdictsThrough(commit);
-        if (scalarized && inFlight !== undefined) {
+        // Wire-compat: only a server advertising `pendingReadStacks` can
+        // resolve array dependency sets — otherwise collapse each to its
+        // top-of-stack element before sending.
+        const wireCommit = client.serverFlags?.pendingReadStacks === true
+          ? commit
+          : scalarizePendingReadStacks(commit);
+        if (wireCommit !== commit && inFlight !== undefined) {
           // Old-server hold (split-brain guard): the scalarized wire omits
           // the lower layers, so the server could durably ACCEPT a commit
           // this client is about to cascade-reject — the caller would see a
@@ -3948,10 +3816,6 @@ class SpaceReplica implements ISpaceReplica {
     // the drop catches every dependant; transitivity emerges from recursion
     // (a victim's own finalizeRejection lands back here with its localSeq).
     this.cascadeDroppedDependency(localSeq);
-    // Only now is this rejection "processed" in the verdict-watermark sense
-    // (CT-1910): the drop and its cascade have run, so a commit built after
-    // this point provably excludes the rejected layer.
-    this.settleFate(localSeq);
     if (before !== undefined) {
       const changes = before.compare(this);
       // The revert snapshots CURRENT confirmed state (which already includes
@@ -4515,11 +4379,6 @@ class SpaceReplica implements ISpaceReplica {
     applied: AppliedCommit,
     resolveAtVerdict = false,
   ): Promise<void> {
-    // The fate is known here even when the APPLICATION parks on marker
-    // coverage: the verdict watermark only has to prove rejections were
-    // processed before a composite was built, and an accepted layer imposes
-    // no such premise.
-    this.settleFate(localSeq);
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
     // no subscribed watch view, no frames arrive at all — there is no

@@ -43,7 +43,6 @@ import {
   naiveApply,
   naivePathsOverlap,
   naiveRecord,
-  naiveRecordRejected,
   toNaiveOps,
 } from "./naive-admission.ts";
 
@@ -158,10 +157,6 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       naiveApply(values, commit.operations);
       accepted.push({ seq: engineSeq, sessionId: session.sessionId, commit });
       headSeq = engineSeq;
-    } else {
-      // Mirror the engine's per-session retention of rejected commits: the
-      // inference candidates a later inferred-shape read is judged against.
-      naiveRecordRejected(history, session.sessionId, commit);
     }
     return engineSeq;
   };
@@ -226,40 +221,23 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       // Reads: sometimes none (blind write), sometimes a confirmed read at
       // the session's (possibly stale) watermark, sometimes a pending read
       // through the session's own prior commits on this entity.
-      const localSeq = session.nextLocalSeq++;
       const reads: ClientCommit["reads"] = { confirmed: [], pending: [] };
       const stack = session.stacks.get(id) ?? [];
-      let verdictsThrough: number | undefined;
       if (chance(rng, 0.6)) {
         const readLeaf = chance(rng, 0.5)
           ? pick(rng, KEY_LEAVES)
           : (["value", "items"] as const);
         if (stack.length > 0 && chance(rng, 0.5)) {
-          // Three wire generations share differential coverage: the
-          // inferred CT-1910 shape (no declared array; the commit attests
-          // a possibly-STALE verdict watermark, modeling a composite built
-          // while earlier verdicts were still in flight), the declared
-          // array with its true confirmed basis, and the legacy
-          // max-dependency array.
-          const shapeRoll = rng();
-          if (shapeRoll < 1 / 3) {
-            reads.pending.push({
-              id,
-              path: toDocumentPath([...readLeaf]),
-              basisSeq: session.integratedSeq,
-            });
-            verdictsThrough = Math.max(
-              0,
-              localSeq - 1 - Math.floor(rng() * 3),
-            );
-          } else {
-            reads.pending.push({
-              id,
-              path: toDocumentPath([...readLeaf]),
-              localSeq: [...stack],
-              ...(shapeRoll < 2 / 3 ? { basisSeq: session.integratedSeq } : {}),
-            });
-          }
+          reads.pending.push({
+            id,
+            path: toDocumentPath([...readLeaf]),
+            localSeq: [...stack],
+            // Half the pending reads declare the reader's true confirmed
+            // basis (the CT-1910 repaired shape, scanned with own-session
+            // exclusion); the rest stay legacy max-dependency so both
+            // admission paths keep differential coverage.
+            ...(chance(rng, 0.5) ? { basisSeq: session.integratedSeq } : {}),
+          });
         } else {
           reads.confirmed.push({
             id,
@@ -270,10 +248,9 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       }
 
       const commit: ClientCommit = {
-        localSeq,
+        localSeq: session.nextLocalSeq++,
         reads,
         operations,
-        ...(verdictsThrough !== undefined ? { verdictsThrough } : {}),
       };
       const engineSeq = admitBoth(session, commit, step);
 

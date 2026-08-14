@@ -177,14 +177,8 @@ export type PendingRead = {
    * MUST include. A scalar is the degenerate single-layer form (also what
    * pre-`pendingReadStacks` peers emit: top-of-stack only, carrying no
    * lower-layer dependencies).
-   *
-   * ABSENT is the CT-1910 inferred shape, valid only with `basisSeq` present
-   * and a commit-level {@link ClientCommit.verdictsThrough} attestation: the
-   * server infers the dependency set from its own record of the session's
-   * prior commits instead of checking declared resolution edges. Emitted
-   * only toward servers advertising `inferredPendingDependencies`.
    */
-  localSeq?: number | number[];
+  localSeq: number | number[];
   /**
    * The reader's confirmed basis for THIS document, in the SERVER's
    * space-log seq space (an accepted-commit `seq`, NOT the session's
@@ -242,23 +236,6 @@ export type CommitPrecondition =
 
 export type ClientCommit = {
   localSeq: number;
-  /**
-   * Verdict watermark (CT-1910): the highest localSeq W such that EVERY
-   * same-session commit at or below W had a fate the client's pending-stack
-   * bookkeeping had fully processed — verdict applied or locally
-   * cascade-dropped — when this commit's reads were BUILT. Under
-   * server-inferred dependencies the server rejects this commit iff some
-   * same-session commit L with W < L < localSeq touched a document this
-   * commit reads through its pending overlay and was rejected: the composite
-   * was built on a premise the client had not yet learned was false. A
-   * retry re-derives with a fresher W, so a processed rejection never dooms
-   * it again. Snapshotted at build time — a send-time value would attest
-   * knowledge the composite did not have. Lying corrupts only the session's
-   * own data (the same trust model as a fabricated read). REQUIRED when any
-   * pending read omits `localSeq`; meaningless (and ignored) otherwise
-   * except as a retention-pruning hint.
-   */
-  verdictsThrough?: number;
   reads: {
     confirmed: ConfirmedRead[];
     pending: PendingRead[];
@@ -320,20 +297,6 @@ export type MemoryProtocolFlags = {
    */
   pendingReadStacks: boolean;
   /**
-   * Server capability (CT-1910): pending reads may OMIT `localSeq` and carry
-   * only `basisSeq`, with the commit attesting a verdict watermark
-   * ({@link ClientCommit.verdictsThrough}). The server then infers the
-   * dependency set from its own record of the session's prior commits —
-   * accepted ones from the commit log, rejected ones from a per-session
-   * in-memory retention — and rejects a commit built over a rejection the
-   * watermark shows the client had not processed. A client that sees this
-   * absent (an older server) keeps declaring the full `localSeq` array.
-   * Advertisement is configuration (`setInferredPendingDependenciesConfig`);
-   * VALIDATION of the inferred shape is build-inherent — a server of this
-   * version always accepts it.
-   */
-  inferredPendingDependencies: boolean;
-  /**
    * Server capability (CT-1927): the server stages a `caughtUpLocalSeq`
    * catch-up obligation for every accept and every conflict rejection —
    * other rejection kinds carry none — so the batched fan-out's next frame to the
@@ -366,7 +329,6 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
-  inferredPendingDependencies?: boolean;
   verdictCatchUpMarkers?: boolean;
   entityIdListing?: boolean;
   entityIdPagination?: boolean;
@@ -901,7 +863,6 @@ let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
 let ownWriteEchoEnabled = true;
-let inferredPendingDependenciesEnabled = true;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -975,25 +936,6 @@ export function resetOwnWriteEchoConfig(): void {
   ownWriteEchoEnabled = true;
 }
 
-/**
- * Ambient ADVERTISEMENT lever for server-inferred pending dependencies
- * (CT-1910). Off stops the server advertising `inferredPendingDependencies`
- * in `hello.ok`, so new clients fall back to declaring `localSeq` arrays;
- * the server keeps ACCEPTING the inferred shape either way — validation is
- * build-inherent, the config only steers what clients emit.
- */
-export function setInferredPendingDependenciesConfig(enabled?: boolean): void {
-  inferredPendingDependenciesEnabled = enabled ?? true;
-}
-
-export function getInferredPendingDependenciesConfig(): boolean {
-  return inferredPendingDependenciesEnabled;
-}
-
-export function resetInferredPendingDependenciesConfig(): void {
-  inferredPendingDependenciesEnabled = true;
-}
-
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
@@ -1007,10 +949,6 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // pending reads (resolvePendingReads), so it always advertises it. Clients
   // that see it absent scalarize to top-of-stack before sending.
   pendingReadStacks: true,
-  // Validation of the inferred shape is build-inherent, but the
-  // advertisement is a rollout lever: off sends new clients back to
-  // declared arrays without a redeploy of either side.
-  inferredPendingDependencies: getInferredPendingDependenciesConfig(),
   // Likewise build-inherent: this build's server stages the catch-up
   // obligation for every verdict (accepts included), so it always
   // advertises it. Clients that see it absent apply verdicts immediately.
@@ -1093,14 +1031,6 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
-  const inferredPendingDependencies = value.inferredPendingDependencies;
-  if (
-    inferredPendingDependencies !== undefined &&
-    typeof inferredPendingDependencies !== "boolean"
-  ) {
-    return null;
-  }
-
   const verdictCatchUpMarkers = value.verdictCatchUpMarkers;
   if (
     verdictCatchUpMarkers !== undefined &&
@@ -1144,9 +1074,6 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older server) parses to false: clients scalarize pending
     // reads to top-of-stack unless the array capability is advertised.
     pendingReadStacks: pendingReadStacks === true,
-    // Absent (an older server, or advertisement turned off) parses to
-    // false: clients keep declaring full localSeq arrays.
-    inferredPendingDependencies: inferredPendingDependencies === true,
     // Absent (an older server that stamps markers only for conflicts)
     // parses to false: clients apply verdicts immediately instead of
     // parking them on marker coverage.
@@ -1169,7 +1096,6 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
-  inferredPendingDependencies: flags.inferredPendingDependencies,
   verdictCatchUpMarkers: flags.verdictCatchUpMarkers,
   entityIdListing: flags.entityIdListing,
   entityIdPagination: flags.entityIdPagination,

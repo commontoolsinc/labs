@@ -120,12 +120,14 @@ generator test asserting the runner's array-op discipline
 
 > A commit that reads a document through a pending stack records a dependency
 > set that (a) includes every pending layer whose acceptance or rejection can
-> change the observed value, and (b) includes the document's top-of-stack
-> layer below the reader. For a read declaring its true confirmed basis
+> change the observed value, and (b) includes the top-of-stack layer of the
+> reader's materialized view. For a read declaring its true confirmed basis
 > (`basisSeq`), the staleness scan runs from that basis with predecessor-only
 > own-session exclusion; for a legacy read, the top-of-stack layer's
 > resolution is the staleness basis. Narrowing may drop only non-top layers
-> whose write footprint provably cannot influence the read path.
+> that provably cannot influence the observed value: a layer whose write
+> footprint misses the read path, or a layer the overlay removed before the
+> view was built (a processed rejection — see below).
 
 Clause (a) is what makes rejection cascades reach every semantically
 dependent commit (see INV-4); recording fewer layers than the value's true
@@ -145,37 +147,35 @@ TLA+ config `PendingStacks_Filtered.cfg` certifies that shape in the bounded
 model. Dropping a layer that overlaps the read path instead re-creates the
 CT-1872 phantom — an INV-1 violation.
 
+Completeness is relative to the reader's VIEW, not to the session's commit
+history (`03-commit-model.md` §3.5): a layer the overlay removed before the
+view was built — a rejection verdict honored, the view rebuilt without it —
+is not a contributor under clause (a), so its absence is a sound narrowing
+and the recorded array may be non-contiguous in the session's `localSeq`
+space. The server cannot check completeness (it does not know the client's
+view); it imposes per-element resolution on what is named and nothing on
+what is not, so the soundness burden for an omission sits entirely with the
+client, in the same trust class as a fabricated read. The interleaving this
+permits — rejections honored eagerly while an accept's promotion is still
+parked — lives in the decided-but-not-yet-applied window the TLA+ model does
+not yet cover; the delayed-verdict refinement recorded under INV-6 is what
+would bring it into scope.
+
 Layer: client dependency recording (`packages/runner/src/storage/v2.ts`
 pending-stack bookkeeping); server resolution (`resolvePendingReads`).
 
 Soundness direction: MAY record more layers than semantically necessary;
-MUST NOT drop a layer that overlaps the read path, and MUST NOT drop the
-top-of-stack layer. A legacy read MUST NOT base its staleness scan below
+MAY omit a layer the overlay dropped before the view was built (a processed
+rejection is no longer a contributor); MUST NOT omit a layer of the view
+that overlaps the read path, and MUST NOT omit the view's top-of-stack
+layer. A legacy read MUST NOT base its staleness scan below
 the top of stack; a `basisSeq` read scans from its declared basis and MUST
 exclude only true predecessor own-session commits (localSeq below the
 reader's — an own write accepted out of submission order conflicts like a
 foreign write).
 
-The WIRE-declaration clauses above bind the declared shapes only. Under
-the `inferredPendingDependencies` capability (03-commit-model.md §3.6.3)
-the server computes the dependency set itself — rejected candidates from
-its per-session retention judged against the commit's `verdictsThrough`
-watermark, staleness from the declared true basis — so there is no
-client-chosen array left to get wrong. The client-side RECORDING clause
-(a) still binds in full: the drop cascade runs on the recorded set, and it
-is the sole guard for layers that never reached the wire. The inference
-rule's own soundness obligations — retention until watermark passage,
-monotonic watermarks, conservative overflow dooming, the in-order
-submission premise — are stated in §3.6.3 and pinned by
-`packages/memory/test/v2-inferred-pending-dependencies.test.ts` and the
-differential harness's inferred-shape traffic.
-
-Checked by: the TLA+ model (all three DECLARED recording modes — the
-inferred shape sits outside current model coverage until the model grows
-an in-flight verdict channel, the INV-6 refinement); stacked-commit unit
-tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`); the
-differential harness (`v2-differential-consistency.test.ts`), whose
-generator emits legacy, declared-basis, and inferred shapes.
+Checked by: the TLA+ model (all three recording modes); stacked-commit unit
+tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`).
 
 ### INV-4 — Cascade totality
 
@@ -209,26 +209,6 @@ This ordering is what makes the top-of-stack staleness basis sound (INV-3(b)
 depends on it): every own-session layer below a reader resolves at or before
 the basis layer's seq, so the scan interval past the basis contains no
 own-session commits.
-
-It is also the completeness premise of inferred pending dependencies and
-of the monotonic-watermark judgment (03-commit-model.md §3.6.3). Known
-deviation: the scheduler-observation batch envelope allocates its wrapper
-localSeq at flush time, above semantic commits held behind it, so its
-delivery legitimately reorders while persistent scheduler state is
-enabled; write-class commits still resolve in increasing localSeq order
-among themselves, which the watermark judgment leans on. The client
-fences inference off entirely while the feature is on (declared arrays,
-pinned in `packages/runner/test/memory-v2-stacked-commit.test.ts`); the
-deviation and its fence retire when observation batches move to their
-own unnumbered request.
-
-It is also the completeness premise of inferred pending dependencies
-(03-commit-model.md §3.6.3): at an inferred-shape commit's decision, every
-lower same-session localSeq is decided, so the server's decided-commit
-record is the whole candidate set. The engine enforces the premise for
-that shape — an inferred-shape commit at or below the session's highest
-decided localSeq is a protocol error unless it re-sends a retained
-rejection (the lost-verdict replay).
 
 Layer: server session queueing (`03-commit-model.md` §3.6.3 — the current
 implementation rejects rather than holds, which preserves the ordering

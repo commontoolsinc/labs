@@ -180,16 +180,10 @@ export abstract class ScriptedSessionTransport
    * (e.g. one without `pendingReadStacks`) or a newer one. Scripted
    * transports do NOT advertise `verdictCatchUpMarkers` by default: a
    * client that believed it would park every accept's promotion on markers
-   * a hand-rolled script never emits. `inferredPendingDependencies` is
-   * likewise off: the scripted models mirror the DECLARED dependency
-   * shape, and advertising inference would strip the arrays they validate.
-   * Tests exercising the inferred wire shape opt in by overriding this. */
+   * a hand-rolled script never emits. Tests that script markers
+   * (pushSync with caughtUpLocalSeq) opt in by overriding this. */
   protected helloFlags(): ReturnType<typeof getMemoryProtocolFlags> {
-    return {
-      ...getMemoryProtocolFlags(),
-      verdictCatchUpMarkers: false,
-      inferredPendingDependencies: false,
-    };
+    return { ...getMemoryProtocolFlags(), verdictCatchUpMarkers: false };
   }
 
   /** Wire codec seams — override together when a harness needs a specific

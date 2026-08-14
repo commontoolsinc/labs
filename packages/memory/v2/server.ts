@@ -1039,11 +1039,6 @@ export class Server {
     },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
-    // Registered on injected registries too — a session that leaves the
-    // registry by any route releases its engine-held inference retention.
-    this.#sessions.onSessionRemoved((session) =>
-      this.#releaseSessionInference(session)
-    );
     this.#store = options.store;
   }
 
@@ -1308,21 +1303,6 @@ export class Server {
         "unauthorized",
       );
     }
-  }
-
-  /** Releases the engine-held CT-1910 inference retention when a session
-   * leaves the registry: a removed session can never submit again, so its
-   * retained rejections prove nothing to any future commit. The engine
-   * promise resolves asynchronously; a space whose engine never opened (or
-   * already closed) simply has no state to release. */
-  #releaseSessionInference(
-    session: { space: string; id: string; principal?: string },
-  ): void {
-    this.#engines.get(session.space)?.then((engine) =>
-      Engine.clearSessionInference(engine, session.id, session.principal)
-    ).catch(() => {
-      // An engine that failed to open holds no inference state.
-    });
   }
 
   /**
@@ -2127,30 +2107,6 @@ export class Server {
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
     return await this.withSpacePublicationLock(message.space, async () => {
       const decision = await this.decideTransaction(message);
-      // CT-1910: every verdict that retires the client's optimistic layer
-      // must reach inference retention, INCLUDING those decided before the
-      // engine was ever called — ACL-shape and authorization denials, and
-      // SQLite attachment failures. This is the one point every transact
-      // verdict passes through exactly once. SessionError responses are
-      // excluded: the client keeps those commits for replay, so they are
-      // not fates. Recording is idempotent with the engine's own
-      // rejection-path recording.
-      if (
-        decision.response.error !== undefined &&
-        decision.response.error.name !== "SessionError"
-      ) {
-        try {
-          const engine = await this.openEngine(message.space);
-          Engine.recordRejectedCommit(engine, {
-            sessionId: message.sessionId,
-            principal: this.#sessions.get(message.space, message.sessionId)
-              ?.principal,
-            commit: message.commit,
-          });
-        } catch {
-          // The engine never opened; nothing to retain.
-        }
-      }
       let verdictError: { value: unknown } | undefined;
       try {
         publishVerdict?.(decision.response);
