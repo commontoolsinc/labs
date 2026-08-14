@@ -1893,7 +1893,8 @@ function samePatternLink(left: unknown, right: unknown): boolean {
  * — a structural comparison inside one compiled object, with no live cell to
  * resolve. The declared result rides on that node's module, which is where
  * `Stream<E, R>`'s `R` is lowered (verb contract WS-C). A stream two handler
- * nodes share names no single result and so contributes none.
+ * nodes share is still a verb and still keyed here, but it names no single
+ * result, so it maps to `undefined` rather than to one node's arbitrarily.
  *
  * The KEYS are the graph's own account of which result properties are verbs,
  * and that account is independent of the pattern's declared result TYPE: a
