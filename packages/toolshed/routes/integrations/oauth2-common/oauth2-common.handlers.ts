@@ -30,7 +30,7 @@ import {
 } from "./oauth2-common.utils.ts";
 
 /**
- * Strip the `schema` field from a serialised cell-link JSON string.
+ * Strip the `schema` field from a serialized cell-link JSON string.
  *
  * The frontend sends the full CellRef (including the JSON Schema) inside
  * `authCellId`.  The schema is large and redundant here – the callback
@@ -68,7 +68,7 @@ function encodeOAuthState(data: {
   codeVerifier: string;
   scopes?: string[];
 }): string {
-  // Single-letter keys to minimise payload:
+  // Single-letter keys to minimize payload:
   // a = authCellId (schema-stripped), p = integrationPieceId,
   // v = codeVerifier, s = scopes
   const compact: Record<string, unknown> = {

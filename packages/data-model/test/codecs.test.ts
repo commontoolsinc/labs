@@ -46,10 +46,10 @@ function roundTrip(value: FabricValue): FabricValue {
 }
 
 /**
- * Asserts that encoding a value produces the expected JSON wire format,
+ * Asserts that encoding a value produces the expected JSON encoded form,
  * compared as parsed structure, after stripping the modern encoding prefix.
  */
-function expectWireFormat(value: FabricValue, expected: unknown): void {
+function expectEncodedFormat(value: FabricValue, expected: unknown): void {
   const json = jsonFromFabricValue(value);
   expect(seemsLikeJsonEncodedFabricValue(json)).toBe(true);
   expect(
@@ -82,11 +82,11 @@ describe("codecs", () => {
   });
 
   it("`jsonFromFabricValue()` encodes `undefined` to tagged JSON", () => {
-    expectWireFormat(undefined, { "/Undefined@1": null });
+    expectEncodedFormat(undefined, { "/Undefined@1": null });
   });
 
   it("`jsonFromFabricValue()` encodes `bigint` to tagged JSON", () => {
-    expectWireFormat(42n, { "/BigInt@1": "Kg" });
+    expectEncodedFormat(42n, { "/BigInt@1": "Kg" });
   });
 
   it("`fabricFromJsonValue()` decodes tagged `undefined`", () => {

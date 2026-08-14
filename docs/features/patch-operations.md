@@ -112,7 +112,7 @@ The runtime/commit half of a mergeable op. Each op appears once and owns:
 
 - how repeated deltas fold into one intent (`foldMergeableIntent`);
 - how an intent becomes wire ops and the diff-suppression it implies, or is
-  abandoned in favour of the plain diff (`buildMergeableIntent`).
+  abandoned in favor of the plain diff (`buildMergeableIntent`).
 
 The transaction records intent through the single
 `recordMergeableOp(address, delta)` method (a discriminated `MergeableOpDelta`),

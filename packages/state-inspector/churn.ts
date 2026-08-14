@@ -8,7 +8,7 @@
 // of all commits, peaking at ~1,598 commits/minute) is invisible to a total and
 // obvious in a rate curve.
 //
-// Two neighbours exist and neither fills this slot: the OTel commit telemetry
+// Two neighbors exist and neither fills this slot: the OTel commit telemetry
 // reports live rates, but only where a collector was attached when it mattered;
 // the workload diagnostics (labs#4950) instrument an orchestrated run of a live
 // runtime. This reads the durable store after the fact — any space, any window,

@@ -430,7 +430,7 @@ the difference between success, known failure, and timed-out unknown state.
 2. **Extract request slots.** Centralize exactly-once replies and timeout paths
    in `mod.ts`; add tests for reply races using fake callbacks where possible.
 3. **Add mutation coordinator for handle writes.** Keep `write(2)` as
-   buffer-copy acknowledgement, but make `flush` and `fsync` wait for commit or
+   buffer-copy acknowledgment, but make `flush` and `fsync` wait for commit or
    return errno.
 4. **Move namespace mutations behind the coordinator.** Stop optimistic shared
    tree updates for create/mkdir/unlink/rmdir/rename/symlink; update or

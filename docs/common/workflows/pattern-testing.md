@@ -163,7 +163,7 @@ const action_setup_game = action(() => {
 ### Firing a handler the pattern does not export
 
 A handler bound only in JSX can still be fired, so a pattern that keeps its
-behaviour behind a button does not have to change to be tested. The prop carries
+behavior behind a button does not have to change to be tested. The prop carries
 a stream whether the handler was written inline or bound from module scope. Walk
 the rendered tree to the node, read the prop, and send it an event:
 
@@ -238,7 +238,7 @@ failure:
       budget = 30
 ```
 
-Each operand is labelled with the source text you wrote. `assert()` reports:
+Each operand is labeled with the source text you wrote. `assert()` reports:
 
 - the operands of the top-level operator — `total` and `budget` above
 - the arguments of a call — `assert(() => inRange(value, low, high))` reports

@@ -468,7 +468,7 @@ export function getCapabilitySummaryCallbackArgument(
  * if `call` doesn't have the lift-applied shape (no inner call expression).
  *
  * Uses `stripWrappers` so a parenthesized or as-cast callee is still
- * recognised, matching how `getLiftAppliedInputAndCallback` reads the same
+ * recognized, matching how `getLiftAppliedInputAndCallback` reads the same
  * shape. Use this in preference to bare `ts.isCallExpression(call.expression)`
  * at all sites that need the inner call — TS rarely emits parens around
  * synthesized calls today, but routing through one helper makes any future
@@ -491,7 +491,7 @@ export function getLiftAppliedInnerCall(
  * handler-applied call continues to classify as `{ kind: "builder",
  * builderName: "handler" }` so handler-specific dispatchers (stream causes in
  * ReactiveVariableFor, capture-schema injection, write-authorization, etc.) are
- * unaffected. This predicate exists solely so the hoisting stage can recognise
+ * unaffected. This predicate exists solely so the hoisting stage can recognize
  * the unit to relocate without minting a new kind or widening the lift-applied
  * gate.
  *

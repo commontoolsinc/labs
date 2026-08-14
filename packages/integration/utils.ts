@@ -306,7 +306,7 @@ function installWaiter(
   registry.get(bindingName)?.();
 
   let stopped = false;
-  let signalled = false;
+  let signaled = false;
   let running = false;
   let rerun = false;
 
@@ -409,7 +409,7 @@ function installWaiter(
   const fire = (): boolean => {
     const notify = (globalThis as Record<string, unknown>)[bindingName];
     if (typeof notify !== "function") return false;
-    signalled = true;
+    signaled = true;
     let payload: string;
     try {
       payload = JSON.stringify({
@@ -449,7 +449,7 @@ function installWaiter(
     // outer timeout.
     let attempts = 0;
     const tryFire = () => {
-      if (signalled) return;
+      if (signaled) return;
       if (fire()) {
         registry.delete(bindingName);
       } else if (++attempts < 100) {
@@ -538,7 +538,7 @@ export const waitForCondition = async <
   let answer: R | undefined;
   let answerError: string | undefined;
   let resolveSignal!: () => void;
-  const signalled = new Promise<void>((resolve) => {
+  const signaled = new Promise<void>((resolve) => {
     resolveSignal = resolve;
   });
   const unsubscribe = page.onBindingCalled((name, payload) => {
@@ -573,7 +573,7 @@ export const waitForCondition = async <
         WAIT_FOR_CONDITION_TIMEOUT,
       );
     });
-    await Promise.race([signalled, timedOut]);
+    await Promise.race([signaled, timedOut]);
     if (answerError !== undefined) {
       throw new Error(
         `The condition held, but its answer did not reach the test: ` +

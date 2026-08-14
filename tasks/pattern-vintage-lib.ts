@@ -179,7 +179,7 @@ export function parseVintagePath(
   // as the identity. Neither field can be found by splitting on a dash: the
   // stamp contains them (`2026-07-29T16-40-22.484Z`) and so does a base64url
   // identity (`xaLUAd...vaXYy-P8PAkh...`). An earlier version cut at the LAST
-  // dash and silently failed to recognise its own freshly-written fixture for
+  // dash and silently failed to recognize its own freshly-written fixture for
   // home.tsx — whose identity happens to contain one — reporting the pattern
   // as uncovered while the file sat right there.
   //
@@ -322,7 +322,7 @@ export async function removeVintages(
  *
  * That is deliberately NOT the deepest evidence. The newest generation is the
  * one a future version has the LEAST to migrate across, and the oldest — the
- * one retention deletes first — is the strongest test. Promotion optimises for
+ * one retention deletes first — is the strongest test. Promotion optimizes for
  * "what shipped" rather than for depth, and pinning an older generation
  * instead is a `git mv` anyone can do by hand.
  */
@@ -433,7 +433,7 @@ export function requiredPatternKeys(
 /**
  * The URLs `requiredPatternKeys` could not turn into a pattern key.
  *
- * `requiredPatternKeys` skips what it does not recognise, which is right for a
+ * `requiredPatternKeys` skips what it does not recognize, which is right for a
  * derivation and catastrophic for a gate: reroute the patterns endpoint and
  * every required key silently disappears, leaving a gate that insists on
  * nothing. The caller checks this and refuses to run rather than passing an
@@ -730,7 +730,7 @@ export function describeCaptureOutcome(
 export const KNOWN_FLAGS = ["--update", "--capture-changed", "--pin"] as const;
 
 /**
- * Flags the task does not recognise.
+ * Flags the task does not recognize.
  *
  * A misspelled flag is silently a DIFFERENT COMMAND here, and the difference
  * is invisible: `--capture-chnged` matches no branch, so the run falls through
@@ -741,7 +741,7 @@ export const KNOWN_FLAGS = ["--update", "--capture-changed", "--pin"] as const;
  *
  * For a gate whose every other design decision is about never reading as
  * success by accident — `armVerdictGuard`, the `replayed`/`candidates`/
- * `targets` floors, the per-fixture root control — accepting an unrecognised
+ * `targets` floors, the per-fixture root control — accepting an unrecognized
  * flag and exiting 0 is the same failure in the argument parser.
  */
 export function unknownFlags(args: readonly string[]): string[] {
@@ -764,7 +764,7 @@ export function unknownFlags(args: readonly string[]): string[] {
 /** What the task prints when it was handed a flag it does not know. */
 export function reportUnknownFlags(unknown: readonly string[]): string {
   return [
-    `Unrecognised flag(s): ${unknown.join(", ")}.`,
+    `Unrecognized flag(s): ${unknown.join(", ")}.`,
     "",
     "Stopping rather than guessing. An unknown flag matches no command here,",
     "so the run would fall through to the plain gate, replay everything and",

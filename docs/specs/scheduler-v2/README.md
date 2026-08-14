@@ -1505,7 +1505,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
     `isMine`, an aggregate), it **evaluated that computed inline inside the aborted
     tx — value produced, but no commit, no separate `run()`, no counted run** — so
     those sites report literal 0 in `actionStats` while still computing. v2 deleted
-    that whole run-to-observe path in favour of the transformer's *declared* reads
+    that whole run-to-observe path in favor of the transformer's *declared* reads
     annotation + pure P3 demand-gating. With no collect pass there is no
     inline-fold: when the live apex render propagates `liveRefs` up to the
     computeds it reads, each becomes live → demanded → **run in its own transaction
@@ -1519,7 +1519,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
     does not produce discretely. Coarsening it back inline — the only lever for the
     +73 — would forfeit exactly that per-row incremental-edit granularity, per-node
     provenance, and rehydration. So the 2.2× is the genuine price of v2 making
-    every reactive value a persisted, independently-incremental, CFC-labelled,
+    every reactive value a persisted, independently-incremental, CFC-labeled,
     rehydratable node, not extra re-execution (actions +123% but wall only +12–16%).
 
     *Levers ruled out — do not re-try without new evidence.* The surplus is

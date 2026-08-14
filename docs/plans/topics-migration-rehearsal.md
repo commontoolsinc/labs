@@ -102,7 +102,7 @@ the live attempt — Estuary redeploys, and a rollback could move it backwards.
 `#4916` (cross-version generated-cell identities) remains open. The board's
 own tracking topic records it as **no longer a prerequisite** for this
 migration: old/new overlap alone produced a finite write burst, not the
-sustained storm. That judgement is Gideon's; revisit it if the rehearsal shows
+sustained storm. That judgment is Gideon's; revisit it if the rehearsal shows
 a sustained plateau rather than a burst.
 
 ## Open decisions — resolve before running

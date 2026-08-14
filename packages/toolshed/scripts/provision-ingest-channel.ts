@@ -110,7 +110,7 @@ export function validateProvisionRequest(
 
 /**
  * The provisioning write itself. BORROWS the runtime rather than owning it —
- * `main` below constructs and disposes one, but the lifecycle behaviour here
+ * `main` below constructs and disposes one, but the lifecycle behavior here
  * (carrying expiry and revocation history forward, refusing to overwrite a
  * concurrent revoke) is what a test needs to reach, and a function that
  * disposes its caller's runtime cannot be tested against stored state.

@@ -1498,7 +1498,7 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       "yes",
     );
 
-    // The click aims at the centre of the control's own rect, and an offset
+    // The click aims at the center of the control's own rect, and an offset
     // aims from its content-box origin. This control has no border or padding,
     // so both points are direct arithmetic on the pinned rect above.
     let mousePoint: { x: number; y: number } | undefined;

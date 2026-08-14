@@ -51,7 +51,7 @@ What the trend still cannot see is a change confined above the 75th percentile,
 and on a user-facing timing that tail is what a person actually notices. Reading
 it from these runs would first need the runner's stalls told apart from the tail
 the code itself produces, which the current sample counts do not allow: on the
-busiest processor `p99` puts 11% of neighbouring run pairs more than a quarter
+busiest processor `p99` puts 11% of neighboring run pairs more than a quarter
 apart with no change behind them, against 2% for the 75th percentile. Until
 that is separable, the drill-down's ladder from `min` to `max` is where the tail
 is visible. A benchmark that measures a whole user-facing journey rather than
@@ -106,7 +106,7 @@ validation step fails the run when the artifact is not valid JSON, lists no
 benches, or carries no machine calibration, so each of those shows up as a red
 run in the Actions tab. What keeps corruption off the charts is the dashboard
 applying the same test to the artifact it downloads, rather than the run's
-colour: a red run's measurements are charted like any other run's. This
+color: a red run's measurements are charted like any other run's. This
 applies to module-scope code as well as bench bodies. Write diagnostics to
 stderr. Module-scope diagnostics may use `console.error`. The JSON reporter
 captures console output from benchmark bodies, so body diagnostics that need

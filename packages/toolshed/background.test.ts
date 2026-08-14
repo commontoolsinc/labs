@@ -183,7 +183,7 @@ Deno.test("runBackgroundParent finds a marker split across reads", async () => {
     // A non-matching first read longer than the marker forces the rolling-tail
     // slice; the marker then straddles the two reads.
     stdout: stdoutOf([
-      "initialising the server runtime\ntoolshed-",
+      "initializing the server runtime\ntoolshed-",
       "listening\n",
     ]),
     status: new Promise<Deno.CommandStatus>(() => {}),

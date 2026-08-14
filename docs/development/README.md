@@ -23,7 +23,7 @@ mapped in [`../README.md`](../README.md).
   integration tests are structured. This is the hub that links the other
   testing documents
 - [`debugging/`](debugging/README.md) — the error reference and the debugging
-  workflows, including a large catalogue of specific gotchas
+  workflows, including a large catalog of specific gotchas
 
 ## Dependencies and configuration
 

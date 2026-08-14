@@ -1546,7 +1546,7 @@ export default pattern<Record<string, never>>(() => {
           properties: { note: { type: "string" } },
         } as const satisfies JSONSchema,
       );
-      await cell.set({ note: "labelled" });
+      await cell.set({ note: "labeled" });
       await rt.idle();
 
       await assertRejects(

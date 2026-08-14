@@ -624,7 +624,7 @@ describe("failureHint", () => {
     }
   });
 
-  it("claims nothing about a status it does not recognise", () => {
+  it("claims nothing about a status it does not recognize", () => {
     for (const status of [401, 403, 404, 418]) {
       const hint = failureHint(status, PARAMETERS);
       expect(hint).not.toContain(PARAMETERS);

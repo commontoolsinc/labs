@@ -30,7 +30,7 @@ the checker splices the block into the matching scaffold before running
 ```
 
 A block with no marker is checked as a standalone module (the previous
-behaviour). The scaffold supplies the `commonfabric` surface and ambient
+behavior). The scaffold supplies the `commonfabric` surface and ambient
 declarations for the example identifiers listed in `check.vocabulary.json`.
 
 ## When the check fails on a block you added

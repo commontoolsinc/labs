@@ -54,7 +54,7 @@ const failureResponses = {
   ),
   [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
     ErrorSchema,
-    "This service is misconfigured, or failed for a reason it does not recognise.",
+    "This service is misconfigured, or failed for a reason it does not recognize.",
   ),
   [HttpStatusCodes.BAD_GATEWAY]: jsonContent(
     ErrorSchema,
