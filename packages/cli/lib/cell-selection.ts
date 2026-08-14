@@ -24,6 +24,7 @@ import {
   isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
 } from "@commonfabric/runner/cfc/schema-refs";
+import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
 
@@ -597,6 +598,179 @@ const ARRAY_PROJECTION_KEYS = [
 ];
 
 /**
+ * What the reader does with a projection keyword. A registry that recorded a
+ * spelling rather than a class could not tell `consulted` from `tolerated`:
+ * both are accepted and neither reaches the schema the reader hands on, but
+ * only one of them changed the read on the way. A key admitted without its
+ * kind has its treatment decided by whatever the reader happens to default to.
+ */
+export type ProjectionKeyTier =
+  | "honored"
+  | "consulted"
+  | "tolerated"
+  | "refused";
+
+/**
+ * The keywords the projection drives itself from. These are the only ones the
+ * reader carries into the schema it constructs, and `type` is why that
+ * construction reads the classified projection rather than the mask: a scalar
+ * leaf's declared `type` is the whole of what filters that leaf, and a mask
+ * reduces every scalar position to `true`.
+ */
+const HONORED_PROJECTION_KEYS = new Set([
+  "type",
+  "properties",
+  "items",
+  "additionalProperties",
+  LINK_MARKER_KEY,
+]);
+
+/**
+ * The keywords {@link impliedProjectionType} reads to decide which container an
+ * untyped position describes, less the three tier H already claims. They
+ * change the read — a position naming only `minItems` reads as an array — and
+ * are then consumed: nothing the caller wrote in one reaches the read
+ * boundary. The reader may still emit `required` there on its own authority
+ * and with the source's meaning, which is a different key of the same
+ * spelling; {@link outputSchemaWithSourceRequired} is where that happens.
+ */
+const CONSULTED_PROJECTION_KEYS = new Set([
+  "required",
+  "minProperties",
+  "maxProperties",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+]);
+
+/**
+ * The annotation keywords projection refuses anyway. `default` is the source
+ * schema's to state, and the two definition keys have no meaning without the
+ * `$ref` projection also refuses. Every member is refused by one of the two
+ * denylists above, which is what the coupling test asserts in both directions:
+ * a key dropped from `ANNOTATION_KEYS` and left stranded here is drift a
+ * one-directional assertion misses.
+ *
+ * @internal Exported for the `ANNOTATION_KEYS` coupling test.
+ */
+export const PROJECTION_ANNOTATION_EXCEPTIONS: ReadonlySet<string> = new Set([
+  "default",
+  "$defs",
+  "definitions",
+]);
+
+/**
+ * The keywords a caller may write that change nothing. Derived rather than
+ * restated, so that admitting a keyword to the durable dialect's annotations
+ * admits it here too — unless it is one of the three
+ * {@link PROJECTION_ANNOTATION_EXCEPTIONS} names.
+ */
+const TOLERATED_PROJECTION_KEYS: ReadonlySet<string> = new Set(
+  [...ANNOTATION_KEYS].filter((key) =>
+    !PROJECTION_ANNOTATION_EXCEPTIONS.has(key)
+  ),
+);
+
+/**
+ * The tolerated keywords the reader accepts and drops rather than carries.
+ * Membership in `ANNOTATION_KEYS` makes a key a candidate; that the checker
+ * may ignore it when comparing two schemas says nothing about what the
+ * **runner** does with it on a read, and only the second question decides
+ * whether carrying it is inert.
+ *
+ * `$id` and `$schema` declare the identity and dialect of a document, and the
+ * reader is not producing the caller's document. `$comment` is not inert at
+ * all: `packages/runner/src/schema-view.ts` reserves `"emptyProperties"`,
+ * `"missingProperty"` and `"rejectedProperty"` as control markers and
+ * `packages/runner/src/traverse.ts` acts on the first two, so a carried
+ * `$comment` is caller-forgeable control flow at the read boundary. Dropping
+ * needs to know nothing about which values are reserved, and a marker the
+ * runner reserves later cannot re-open the hole behind it.
+ */
+const DROPPED_TOLERATED_KEYS: ReadonlySet<string> = new Set([
+  "$comment",
+  "$id",
+  "$schema",
+]);
+
+/** The tolerated keywords that do reach the schema the reader constructs. */
+const CARRIED_TOLERATED_KEYS: readonly string[] = [
+  ...TOLERATED_PROJECTION_KEYS,
+].filter((key) => !DROPPED_TOLERATED_KEYS.has(key));
+
+/**
+ * What the projection reader does with `key`.
+ *
+ * @internal Exported for the classification and coupling tests.
+ */
+export function projectionKeyTier(key: string): ProjectionKeyTier {
+  if (HONORED_PROJECTION_KEYS.has(key)) return "honored";
+  if (CONSULTED_PROJECTION_KEYS.has(key)) return "consulted";
+  if (
+    FORBIDDEN_PROJECTION_KEYS.has(key) || UNSUPPORTED_PROJECTION_KEYS.has(key)
+  ) {
+    return "refused";
+  }
+  return TOLERATED_PROJECTION_KEYS.has(key) ? "tolerated" : "refused";
+}
+
+/** The honored vocabulary, as a refusal names it. */
+const HONORED_PROJECTION_VOCABULARY = [...HONORED_PROJECTION_KEYS]
+  .map((key) => `"${key}"`)
+  .join(", ");
+
+/**
+ * The edit distance between `left` and `right`, for the near-miss below.
+ * Adjacent transposition counts as one edit rather than two, because it is the
+ * typo the refusal exists for: `itmes` is one slip from `items` however many
+ * substitutions it takes to spell as substitutions.
+ */
+function keyEditDistance(left: string, right: string): number {
+  const rows: number[][] = [
+    Array.from({ length: right.length + 1 }, (_, j) => j),
+  ];
+  for (let i = 1; i <= left.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= right.length; j++) {
+      const previous = rows[i - 1];
+      current[j] = left[i - 1] === right[j - 1]
+        ? previous[j - 1]
+        : 1 + Math.min(previous[j - 1], previous[j], current[j - 1]);
+      if (
+        i > 1 && j > 1 && left[i - 1] === right[j - 2] &&
+        left[i - 2] === right[j - 1]
+      ) {
+        current[j] = Math.min(current[j], rows[i - 2][j - 2] + 1);
+      }
+    }
+    rows.push(current);
+  }
+  return rows[left.length][right.length];
+}
+
+/**
+ * The keyword `key` was most likely meant to be, or `undefined` where nothing
+ * is close enough to name. No read-side surface prints the source schema, so
+ * for a misspelled key the accepted vocabulary is the entire remediation, and
+ * the one keyword a caller transposed two letters of is the useful half of it.
+ */
+function nearestProjectionKey(key: string): string | undefined {
+  const lowered = key.toLowerCase();
+  let best: string | undefined;
+  let bestDistance = Infinity;
+  for (const candidate of HONORED_PROJECTION_KEYS) {
+    const distance = keyEditDistance(lowered, candidate.toLowerCase());
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return bestDistance <= Math.max(1, Math.floor(key.length / 4))
+    ? best
+    : undefined;
+}
+
+/**
  * The container a projection position describes but did not state. Schema
  * traversal descends `properties` only under `type: "object"` and `items` only
  * under `type: "array"`, so an omitted `type` silently empties the position —
@@ -654,6 +828,19 @@ function normalizeProjectionSchema(
         `Invalid --schema at ${path}: "${key}" is not supported by projection schemas`,
       );
     }
+    if (projectionKeyTier(key) === "refused") {
+      // No read-side surface prints the schema a read runs against, so a
+      // refusal cannot send a caller off to lift one and prune it. What it
+      // says is what the reader knows without any source at all: the key, the
+      // position, and the vocabulary that position accepts.
+      const nearest = nearestProjectionKey(key);
+      throw new CellSelectionError(
+        `Invalid --schema at ${path}: "${key}" is not a projection schema ` +
+          "keyword. " +
+          (nearest === undefined ? "" : `Did you mean "${nearest}"? `) +
+          `Projection reads ${HONORED_PROJECTION_VOCABULARY}`,
+      );
+    }
   }
   const marker = schema[LINK_MARKER_KEY];
   if (marker !== undefined && marker !== true) {
@@ -665,13 +852,27 @@ function normalizeProjectionSchema(
   const { [LINK_MARKER_KEY]: _marker, ...declared } = schema;
   const markers: LinkMarkers = marker === true ? { marked: true } : {};
   const implied = impliedProjectionType(declared);
+  // The reader constructs what it hands on rather than forwarding what a
+  // caller typed. An honored key is written out below; a consulted key was
+  // read by `impliedProjectionType()` just above and goes no further, so no
+  // constraint of the caller's reaches a schema the runner acts on; a
+  // tolerated key is carried only where carrying it is inert past the read
+  // boundary; a refused key never reaches here, the projection naming it
+  // having been rejected.
+  //
   // An implied `type` leads the result, so a normalized schema reads the way a
   // caller would have written it out in full. A position that declared nothing
   // gains nothing: `{}` stays the wildcard it already is, and a bare marker
   // still reduces to `false` below.
-  const result: Record<string, unknown> = implied === undefined
-    ? { ...declared }
-    : { type: implied, ...declared };
+  const result: Record<string, unknown> = {};
+  if (implied !== undefined) result.type = implied;
+  else if (declared.type !== undefined) result.type = declared.type;
+  for (const key of CARRIED_TOLERATED_KEYS) {
+    if (declared[key] !== undefined) result[key] = declared[key];
+  }
+  if (typeof declared.additionalProperties === "boolean") {
+    result.additionalProperties = declared.additionalProperties;
+  }
   if (declared.properties !== undefined) {
     if (!isObjectNotArray(declared.properties)) {
       throw new CellSelectionError(
@@ -1785,6 +1986,14 @@ export function selectSourceSchema(
   // A rejected position holds nothing to require. Keeping it required makes
   // the object unsatisfiable, which reads as an absent value for the whole
   // selection rather than for the one position that declined to be read.
+  //
+  // That test is {@link requiredSurvivesProjection} over the only part of
+  // itself a MASK can state. A mask records `false`, the two containers and
+  // `true`, so a caller's own scalar type is already gone by the time it
+  // reaches here, and "the caller rejected the position outright" is the whole
+  // of what is left to ask. A schema built from the classified projection has
+  // those types in hand and applies the rule entire, in
+  // {@link outputSchemaWithSourceRequired}.
   const selectedRequired = required?.filter((key) =>
     key in properties && properties[key] !== false
   );
@@ -1793,6 +2002,146 @@ export function selectSourceSchema(
     properties,
     ...(selectedRequired?.length ? { required: selectedRequired } : {}),
     additionalProperties: false,
+  };
+}
+
+/**
+ * Whether the container `named` can be read at a position the source declares
+ * as `source`. A source that declares no type at all admits either container;
+ * one that names a different type has narrowed the position to nothing
+ * readable, whichever container the caller stated.
+ */
+function containerReadableInSource(
+  named: "object" | "array",
+  source: JSONSchema | undefined,
+): boolean {
+  const declared = schemaTypes(source);
+  return declared.length === 0 || declared.includes(named);
+}
+
+/**
+ * Whether a source-`required` property stays required in the schema the reader
+ * constructs. It stays only where nothing the caller wrote inside that
+ * property can cause the property **itself** to be rejected: a position the
+ * caller narrowed may be omitted, but the object holding it must not be voided
+ * because it was.
+ *
+ * The two containers do not decide that the same way, and that is why this is
+ * not one case. `traverseObjectWithSchema`
+ * (`packages/runner/src/traverse.ts`) assembles an object out of the
+ * properties whose traversal returned no error and carries on past one that
+ * failed; `traverseArrayWithSchema` carries a single `valid` flag across every
+ * element and returns `undefined` when any element fails. **A rejected object
+ * property is omitted; a rejected array element voids the array around it.**
+ *
+ * So, against the classified projection at that property:
+ *
+ * - No stated type — `true`, or `{}`. The constructed child is the unprojected
+ *   one, declining exactly the values an unprojected read declines, which is
+ *   the source's meaning `required` is being derived to carry. Stays.
+ * - A scalar `type`. The constraint is the caller's, and declining a value is
+ *   what a caller writes one for. Drops. This is the case a mask cannot see,
+ *   every scalar position reducing to `true` in one.
+ * - An object. What the caller wrote inside narrows a descendant, which is
+ *   omitted rather than rejecting the object — on the condition that each
+ *   descendant's own derived `required` follows this same rule, which
+ *   {@link outputSchemaWithSourceRequired} discharges by recursing.
+ * - An array. What the caller wrote does not stay where it was written: it
+ *   constrains elements, and one rejected element voids the array. So the
+ *   answer follows the ELEMENT schema, by the same rule one level down. An
+ *   array carries no `required` of its own for that recursion to empty, so
+ *   there is nothing below it to absorb a rejection.
+ * - `false`. Drops, as it did before any of this: a rejected position holds
+ *   nothing to require.
+ *
+ * The rule only ever declines to require. Dropping a key that would have
+ * survived costs nothing; keeping one that would not costs the entire read.
+ */
+function requiredSurvivesProjection(
+  projection: JSONSchema | undefined,
+  source: JSONSchema | undefined,
+): boolean {
+  if (projection === false) return false;
+  if (projection === undefined || projection === true) return true;
+  const types = schemaTypes(projection);
+  // Arrays are tested first, matching {@link impliedProjectionType} and
+  // {@link projectionMask}, so a position naming both vocabularies is read as
+  // the array the selector built from it reads.
+  if (types.includes("array") || projection.items !== undefined) {
+    return containerReadableInSource("array", source) &&
+      requiredSurvivesProjection(projection.items, schemaAtArrayItem(source));
+  }
+  if (
+    types.includes("object") || projection.properties !== undefined ||
+    projection.additionalProperties !== undefined
+  ) {
+    return containerReadableInSource("object", source);
+  }
+  return types.length === 0;
+}
+
+/**
+ * The schema a JSON projection hands the read boundary: the classified
+ * projection the reader constructed, plus the one key it supplies from
+ * somewhere other than the caller — `required`, taken from the SOURCE schema
+ * and filtered by {@link requiredSurvivesProjection}.
+ *
+ * {@link selectSourceSchema} already derives `required` this way for the
+ * schemas it builds out of the mask, and for the same reason. This extends
+ * that derivation to the position a JSON projection reaches, which is the
+ * position where the caller's own scalar types are in play — so the filter
+ * here is the survival rule rather than the projection membership a mask is
+ * the whole of. Both spell `required`, over two origins, and only one of them
+ * is the caller's to supply.
+ *
+ * A key is derived only for a property the constructed schema names. An open
+ * position keeps whatever the source holds there without the reader vouching
+ * for it, which declines to require rather than risking an unsatisfiable one.
+ */
+function outputSchemaWithSourceRequired(
+  projection: JSONSchema,
+  source: JSONSchema | undefined,
+): JSONSchema {
+  if (typeof projection === "boolean") return projection;
+  const types = schemaTypes(projection);
+  if (types.includes("array") || projection.items !== undefined) {
+    if (projection.items === undefined) return projection;
+    return {
+      ...projection,
+      items: outputSchemaWithSourceRequired(
+        projection.items,
+        schemaAtArrayItem(source),
+      ),
+    };
+  }
+  const declared = projection.properties;
+  if (!isObjectNotArray(declared)) return projection;
+  const sourceRequired =
+    isObjectOrArray(source) && Array.isArray(source.required)
+      ? source.required
+      : [];
+  const properties: Record<string, JSONSchema> = {};
+  const required: string[] = [];
+  for (const [key, child] of Object.entries(declared)) {
+    const sourceChild = isObjectOrArray(source)
+      ? ContextualFlowControl.schemaAtPath(source, [key])
+      : undefined;
+    const childSource = sourceChild === false ? undefined : sourceChild;
+    properties[key] = outputSchemaWithSourceRequired(
+      child as JSONSchema,
+      childSource,
+    );
+    if (
+      sourceRequired.includes(key) &&
+      requiredSurvivesProjection(child as JSONSchema, childSource)
+    ) {
+      required.push(key);
+    }
+  }
+  return {
+    ...projection,
+    properties,
+    ...(required.length > 0 ? { required } : {}),
   };
 }
 
@@ -1882,8 +2231,16 @@ function resolveProjection(
   const itemSchema = projectsArrayItems
     ? (projection.schema as Exclude<JSONSchema, boolean>).items ?? true
     : undefined;
+  // The projector applies the caller's shape to a value already in hand and
+  // reads only `properties`, `items` and `additionalProperties` off it, so the
+  // constructed projection is what it wants. The OUTPUT schema is the one the
+  // runner acts on, and it carries the source's `required` besides.
+  const outputSchema = outputSchemaWithSourceRequired(
+    projection.schema,
+    sourceSchema,
+  );
   return {
-    outputSchema: projection.schema,
+    outputSchema,
     projectionSchema: projection.schema,
     mask,
     projectsArrayItems,
@@ -1892,7 +2249,8 @@ function resolveProjection(
     markers: projection.markers,
     ...(projectsArrayItems
       ? {
-        itemOutputSchema: itemSchema,
+        itemOutputSchema:
+          (outputSchema as Exclude<JSONSchema, boolean>).items ?? true,
         itemProjectionSchema: itemSchema,
         itemMask: projectionMask(itemSchema!),
       }

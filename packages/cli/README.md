@@ -241,21 +241,21 @@ schemas. A position that names an object keyword (`properties`,
 `items` projects an array, at every level of nesting and whether or not it also
 states `type` — `{"properties":{"topic":{"properties":{"title":true}}}}` returns
 `topic.title`. Neither `true` nor `{}` names a container, and both keep
-everything at the position they sit at. In an array-item projection, a scalar
-leaf whose declared type does not match the stored value is omitted by the
-runtime rather than reported as an error; prefer `true` leaves unless that type
-filtering is intentional. Schema combinators and references are rejected in
-caller-supplied projection schemas. Concise dotted paths follow the declared
-source schema through nested arrays, so `comments.body` selects `body` from
-every comment without retaining comment siblings. The projection preserves
-source-declared nullable items and properties, including `type` arrays and
-`anyOf` unions. When the source schema does not identify a nested container, the
-concise form applies the same field mask across arrays encountered in the value
-so siblings still cannot leak; use an explicit JSON Schema when the output
-schema itself must be fixed. If a present source value cannot materialize the
-transform, the command exits nonzero and states that the failure is not JSON
-`null`. An absent optional source remains the ordinary successful `null` CLI
-response, as does a valid projected null.
+everything at the position they sit at. A scalar leaf whose declared type does
+not match the stored value is omitted by the runtime rather than reported as an
+error, at any position; prefer `true` leaves unless that type filtering is
+intentional. Schema combinators and references are rejected in caller-supplied
+projection schemas. Concise dotted paths follow the declared source schema
+through nested arrays, so `comments.body` selects `body` from every comment
+without retaining comment siblings. The projection preserves source-declared
+nullable items and properties, including `type` arrays and `anyOf` unions. When
+the source schema does not identify a nested container, the concise form applies
+the same field mask across arrays encountered in the value so siblings still
+cannot leak; use an explicit JSON Schema when the output schema itself must be
+fixed. If a present source value cannot materialize the transform, the command
+exits nonzero and states that the failure is not JSON `null`. An absent optional
+source remains the ordinary successful `null` CLI response, as does a valid
+projected null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 When the declared source schema fixes the root container shape, the pattern
@@ -275,6 +275,35 @@ Nested non-stream Cell handles are materialized before the predicate/projection
 JavaScript runs; stream handles remain capabilities. The source cell's schema
 remains authoritative for Common Fabric metadata. A caller cannot introduce or
 override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
+
+#### Which keywords a `--schema` projection may contain
+
+**The reader constructs the schema it applies rather than forwarding the one a
+caller typed**, keyword by keyword. Four things can happen to a keyword.
+
+- **Honored** — `type`, `properties`, `items`, `additionalProperties`, `$link`.
+  These drive the projection and are what the constructed schema is built from.
+- **Consulted** — `required`, `minProperties`, `maxProperties`, `minItems`,
+  `maxItems`, `uniqueItems`. Each names a container, so writing one at an
+  untyped position says which container that position describes. The constraint
+  itself goes no further: nothing a caller writes in one reaches the read.
+  `{"required":["id"]}` therefore projects an object without requiring `id` of
+  it, and `{"minItems":2}` projects an array without imposing a length.
+- **Tolerated** — the annotation keywords, `title`, `description`, `examples`,
+  `deprecated`, `tags`, `tier`, `$id`, `$schema`, `$comment`. Accepted, and a
+  read through a projection carrying one returns what the same projection
+  returns without it.
+- **Refused** — everything else, by name and with the position it sat at, plus
+  the keyword it is nearest to. A misspelled `properties` is refused rather than
+  silently returning the whole object or nothing at all.
+
+The `required` a projected read applies comes from the **source** schema rather
+than from the caller, restricted to the projected properties whose narrowing
+cannot reject the property itself: a property the caller narrows to a scalar
+type the value does not match drops out, and so does an array whose `items` the
+caller narrows the same way, because one rejected element rejects the array
+holding it. A narrowed position is then simply omitted from what comes back
+instead of emptying the read around it.
 
 #### Asking for an address instead of contents
 
