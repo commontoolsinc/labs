@@ -38,8 +38,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   /**
    * Private byte storage. Guaranteed to be backed by an exact-sized and
-   * unshared `ArrayBuffer`, which is what lets a codec hand out a copy
-   * covering exactly these bytes and nothing else.
+   * unshared `ArrayBuffer`.
    */
   readonly #hash: Uint8Array<ArrayBuffer>;
   readonly #tag: string;
