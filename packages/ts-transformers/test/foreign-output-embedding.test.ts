@@ -104,6 +104,47 @@ Deno.test("Foreign-output embedding check", async (t) => {
   );
 
   await t.step(
+    "warns when a foreign Output is the input-position type argument",
+    async () => {
+      // Using another pattern's Output as your own INPUT is the embedding
+      // at its largest — the whole contract as the argument — and must not
+      // ride the self-reference exemption, which covers only the pattern's
+      // own output position.
+      const source = [
+        'import { pattern } from "commonfabric";',
+        "",
+        "export interface NoteOutput {",
+        "  title: string;",
+        "}",
+        "",
+        "interface NoteInput {",
+        "  title?: string;",
+        "}",
+        "",
+        "export const Note = pattern<NoteInput, NoteOutput>(({ title }) => ({",
+        "  title,",
+        "}));",
+        "",
+        "interface WrapperOutput {",
+        "  wrapped: number;",
+        "}",
+        "",
+        "export default pattern<NoteOutput, WrapperOutput>(({ title }) => ({",
+        "  wrapped: title.length,",
+        "}));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const warnings = embeddingWarnings(diagnostics);
+      assertEquals(warnings.length, 1);
+      assertStringIncludes(warnings[0]!.message, "NoteOutput");
+      assertStringIncludes(warnings[0]!.message, "argument");
+    },
+  );
+
+  await t.step(
     "stays silent for inline-literal type arguments",
     async () => {
       // An anonymous output shape has no name to hold anyone to, so it is

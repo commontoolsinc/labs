@@ -27,6 +27,13 @@ import type { TransformationContext } from "../core/mod.ts";
  *
  * Severity is "warning" while this is a prototype: it surfaces the coupling
  * without failing anyone's build.
+ *
+ * Scope: the check reasons over declared TYPE symbols. The schema-argument
+ * form (`pattern(fn, inputSchemaLiteral)`) is outside it — a hand-authored
+ * schema literal has no type-symbol provenance to index, the same boundary
+ * the transformer's schema stamps draw. And marker detection is
+ * best-effort by node or alias name, the same exposure the scope wrappers
+ * carry.
  */
 
 export const FOREIGN_OUTPUT_EMBEDDING_DIAGNOSTIC =
@@ -232,9 +239,19 @@ export function checkForeignOutputEmbedding(
   const index = outputSymbolIndex(program, checker);
   if (index.size === 0) return;
 
+  // Only the OUTPUT-position type argument is exempt: a pattern's own
+  // output referencing itself is the documented self-reference shape. A
+  // foreign Output in the INPUT position is the anti-pattern at its
+  // largest — the whole contract embedded as the argument — and stays
+  // eligible. (`pattern<T>`'s single argument serves both positions, so
+  // its self-reference stays exempt through the same expression.)
   const ownSymbols = new Set<ts.Symbol>();
-  for (const typeArg of callNode.typeArguments ?? []) {
-    const symbol = namedSymbolForTypeNode(typeArg, checker);
+  const typeArgs = callNode.typeArguments;
+  if (typeArgs && typeArgs.length > 0) {
+    const symbol = namedSymbolForTypeNode(
+      typeArgs[1] ?? typeArgs[0]!,
+      checker,
+    );
     if (symbol) ownSymbols.add(symbol);
   }
 

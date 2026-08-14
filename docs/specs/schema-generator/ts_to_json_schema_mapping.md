@@ -564,6 +564,25 @@ both survive: `PerUser<Cell<PerSession<string>>>` → `{ asCell: [{ kind:
 "cell", scope: "user" }], scope: "session", type: "string" }` (fixture
 `scoped-wrappers`).
 
+### Demand Marker (`Demand<T>`)
+
+`Demand<T>` (api: optional `DEMAND_BRAND`-typed intersection) marks a
+holder-side demand — the shape a pattern requires of a piece it stores, as
+distinct from state it owns — and lowers to a bare `demand: true` key on
+the wrapped subtree's schema (`applyDemandWrapperSemantics`,
+`common-fabric-formatter.ts`). Detection is this section's mechanism: node
+name or aliasSymbol name (`DEMAND_WRAPPER_NAME`); the node path shares
+`formatMarkerWrapperInner` with the scope wrappers. Placement rides the
+REFERENCING node — `note: Demand<NotePreview>` → `{ "$ref":
+"#/$defs/NotePreview", "demand": true }` — so a hoisted def stays neutral
+and each use site declares its own demand-ness. Unlike scope, the key never
+merges into `asCell` (it records the contract's provenance, not the cell's
+capability), and nesting collapses: `Demand<Demand<T>>` is one demand
+(demand-wrapper.test.ts). The key is annotation-class for the update gate
+(`ANNOTATION_KEYS`, `packages/piece/src/schema-compatibility.ts`), where a
+two-sided marker also relaxes evolution-mode removal to narrowing
+(`demandSubtree`; introduced with the #5746 prototype).
+
 ## 11. CFC Alias Lowering (`ifc` Metadata)
 
 The canonical authoring surface contains 18 names. The inventory is
@@ -860,6 +879,7 @@ canonical; update prose from it, not the other way around. Paths relative to
 | Capability-kind subset (§6.3) | `CELL_CAPABILITY_KIND_MAP` (`src/formatters/common-fabric-formatter.ts`) | exhaustive over `CellWrapperKind` |
 | `asCell` entry shape (§6.2, §10) | `AsCellEntry` / `CellKind` / `SchemaScope` (`packages/api/index.ts`) | — |
 | Scope wrapper map (§10) | `SCOPE_WRAPPER_SCOPES` (`src/formatters/common-fabric-formatter.ts`) | scoped-wrappers fixture |
+| Demand marker (§10) | `DEMAND_WRAPPER_NAME` / `applyDemandWrapperSemantics` (`src/formatters/common-fabric-formatter.ts`) | demand-wrapper.test.ts |
 | CFC alias set (§11) | `CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts`) | — |
 | CFC payload map (§11) | `buildIfcMetadataForAlias` switch (`src/formatters/common-fabric-formatter.ts`) | cfc-authoring tests |
 | `ifc` key vocabulary (§11) | `JSONSchemaObj.ifc` (`packages/api/index.ts`) | — |

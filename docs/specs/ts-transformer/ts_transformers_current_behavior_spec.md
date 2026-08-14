@@ -754,6 +754,19 @@ report these through the same collector (deduplicated via §2.2's
   rework); the internal throw remains only for compiler-synthesized culprits
   (a true pipeline bug) and for the culprit-already-compute disagreement
   shape.
+- **Warning** `contract:foreign-output-embedding`
+  (`foreign-output-embedding.ts`, invoked from the pattern branch of
+  `schema-injection.ts`) — a pattern's argument or result contract embeds
+  a type that is the Output-position type argument of a DIFFERENT
+  `pattern<I, O>` call somewhere in the program (Output symbols are indexed
+  program-wide, WeakMap-cached per `ts.Program`). The pattern's own
+  output-position symbol is exempt (self-reference is the documented
+  shape), a `@sharedContract` JSDoc tag on the declaration opts a genuine
+  protocol type out, and anonymous shapes are never indexed. Advisory
+  severity while the demand-substrate prototype (#5746) is evaluated. The
+  schema-argument form (`pattern(fn, schemaLiteral)`) is outside the check:
+  a hand-authored literal has no type-symbol provenance to index, the same
+  boundary the transformer's schema stamps draw.
 
 ## 7. JSX Expression Site Routing And Early Rewriting
 

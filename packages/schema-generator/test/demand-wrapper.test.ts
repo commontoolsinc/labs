@@ -43,7 +43,7 @@ interface SchemaRoot {
     expect(note.demand).toBe(true);
     expect(note.$ref).toBe("#/$defs/NotePreview");
     const def = (schema.$defs as Record<string, JSONSchemaObj>).NotePreview!;
-    expect(def.demand).toBeUndefined();
+    expect(def).not.toHaveProperty("demand");
     expect((def.properties as Record<string, JSONSchemaObj>).title).toEqual(
       { type: "string" },
     );
