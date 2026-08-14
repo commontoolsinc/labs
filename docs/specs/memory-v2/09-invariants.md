@@ -120,12 +120,14 @@ generator test asserting the runner's array-op discipline
 
 > A commit that reads a document through a pending stack records a dependency
 > set that (a) includes every pending layer whose acceptance or rejection can
-> change the observed value, and (b) includes the document's top-of-stack
-> layer below the reader. For a read declaring its true confirmed basis
+> change the observed value, and (b) includes the top-of-stack layer of the
+> reader's materialized view. For a read declaring its true confirmed basis
 > (`basisSeq`), the staleness scan runs from that basis with predecessor-only
 > own-session exclusion; for a legacy read, the top-of-stack layer's
 > resolution is the staleness basis. Narrowing may drop only non-top layers
-> whose write footprint provably cannot influence the read path.
+> that provably cannot influence the observed value: a layer whose write
+> footprint misses the read path, or a layer the overlay removed before the
+> view was built (a processed rejection — see below).
 
 Clause (a) is what makes rejection cascades reach every semantically
 dependent commit (see INV-4); recording fewer layers than the value's true
@@ -145,12 +147,32 @@ TLA+ config `PendingStacks_Filtered.cfg` certifies that shape in the bounded
 model. Dropping a layer that overlaps the read path instead re-creates the
 CT-1872 phantom — an INV-1 violation.
 
+Completeness is relative to the reader's VIEW, not to the session's commit
+history (`03-commit-model.md` §3.5): a layer the overlay removed before the
+view was built — a rejection verdict honored, the view rebuilt without it —
+is not a contributor under clause (a), so its absence is a sound narrowing
+and the recorded array may be non-contiguous in the session's `localSeq`
+space. The server cannot check completeness (it does not know the client's
+view); it imposes per-element resolution on what is named and nothing on
+what is not, so the soundness burden for an omission sits entirely with the
+client, in the same trust class as a fabricated read. The interleaving this
+permits — rejections honored eagerly while an accept's promotion is still
+parked — is already reachable in the TLA+ model's existing `fullstack`
+recording mode: `Reject` removes the doomed layers from the pending stack at
+the verdict, an accepted layer stays pending until `Integrate`, and a later
+`Build` records only the survivors — a sparse set relative to session
+history. What stays outside the model is verdict DELIVERY timing, the
+client-side window between the server deciding and the client learning it,
+recorded as the standing refinement under INV-6.
+
 Layer: client dependency recording (`packages/runner/src/storage/v2.ts`
 pending-stack bookkeeping); server resolution (`resolvePendingReads`).
 
 Soundness direction: MAY record more layers than semantically necessary;
-MUST NOT drop a layer that overlaps the read path, and MUST NOT drop the
-top-of-stack layer. A legacy read MUST NOT base its staleness scan below
+MAY omit a layer the overlay dropped before the view was built (a processed
+rejection is no longer a contributor); MUST NOT omit a layer of the view
+that overlaps the read path, and MUST NOT omit the view's top-of-stack
+layer. A legacy read MUST NOT base its staleness scan below
 the top of stack; a `basisSeq` read scans from its declared basis and MUST
 exclude only true predecessor own-session commits (localSeq below the
 reader's — an own write accepted out of submission order conflicts like a
