@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -24,6 +25,7 @@ import {
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
+  type CfcFlowLabelsMode,
 } from "../src/cfc/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import {
@@ -295,14 +297,18 @@ describe("CFC canonicalization helpers", () => {
 });
 
 describe("ExtendedStorageTransaction CFC gate", () => {
-  const createRuntime = (cfcEnforcementMode?: CfcEnforcementMode) => {
+  const createRuntime = (
+    cfcEnforcementMode: CfcEnforcementMode = "enforce-explicit",
+    cfcFlowLabels: CfcFlowLabelsMode = "off",
+  ) => {
     const storageManager = StorageManager.emulate({
       as: signer,
     });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      ...(cfcEnforcementMode ? { cfcEnforcementMode } : {}),
+      cfcEnforcementMode,
+      cfcFlowLabels,
     });
     return { runtime, storageManager };
   };
@@ -2422,7 +2428,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           expect.objectContaining({
             path: [],
             label: expect.objectContaining({
-              confidentiality: ["shared-space"],
+              confidentiality: [
+                "shared-space",
+                cfcAtom.space(signer.did()),
+              ],
               integrity: expect.arrayContaining([
                 "authored-by-bob",
                 expect.objectContaining({
@@ -2487,7 +2496,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           expect.objectContaining({
             path: [],
             label: expect.objectContaining({
-              confidentiality: ["same-tx-secret"],
+              confidentiality: [
+                "same-tx-secret",
+                cfcAtom.space(signer.did()),
+              ],
               integrity: expect.arrayContaining([
                 "same-tx-integrity",
                 expect.objectContaining({
@@ -2633,7 +2645,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           expect.objectContaining({
             path: [],
             label: expect.objectContaining({
-              confidentiality: ["redirect-source-secret"],
+              confidentiality: [
+                "redirect-source-secret",
+                cfcAtom.space(signer.did()),
+              ],
               integrity: expect.arrayContaining([
                 "redirect-source-integrity",
                 expect.objectContaining({
@@ -2831,7 +2846,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const rootEntry = metadata?.labelMap.entries.find((entry) =>
         entry.path.length === 0 && entry.origin === "link"
       );
-      expect(rootEntry?.label.confidentiality).toEqual(["personal-space"]);
+      expect(rootEntry?.label.confidentiality).toEqual(
+        expect.arrayContaining([
+          "personal-space",
+          cfcAtom.space(signer.did()),
+        ]),
+      );
       verify.abort?.();
     } finally {
       await runtime.dispose();
@@ -2902,7 +2922,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const rootEntry = metadata?.labelMap.entries.find((entry) =>
         entry.path.length === 0 && entry.origin === "link"
       );
-      expect(rootEntry?.label.confidentiality).toEqual(["card-space"]);
+      expect(rootEntry?.label.confidentiality).toEqual(
+        expect.arrayContaining([
+          "card-space",
+          cfcAtom.space(signer.did()),
+        ]),
+      );
       verify.abort?.();
     } finally {
       await runtime.dispose();
@@ -3427,7 +3452,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           expect.objectContaining({
             path: ["linked"],
             label: expect.objectContaining({
-              confidentiality: ["linked-secret"],
+              confidentiality: [
+                "linked-secret",
+                cfcAtom.space(signer.did()),
+              ],
               integrity: expect.arrayContaining([
                 "linked-integrity",
                 expect.objectContaining({
@@ -3439,7 +3467,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           expect.objectContaining({
             path: ["title"],
             label: expect.objectContaining({
-              confidentiality: ["title-public"],
+              confidentiality: [
+                "title-public",
+                cfcAtom.space(signer.did()),
+              ],
             }),
           }),
         ]),
@@ -3450,6 +3481,98 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await storageManager.close();
     }
   });
+
+  for (const flowMode of ["off", "observe"] as const) {
+    it(`drops replaced per-value labels when flow persistence is ${flowMode}`, async () => {
+      const { runtime, storageManager } = createRuntime(
+        "enforce-explicit",
+        flowMode,
+      );
+      try {
+        const schema = internSchema(
+          {
+            type: "object",
+            properties: {
+              title: {
+                type: "string",
+                ifc: { integrity: ["declared-integrity"] },
+              },
+            },
+          } satisfies JSONSchema,
+          true,
+        );
+        const seed = runtime.edit();
+        const target = runtime.getCell(
+          signer.did(),
+          `cfc-per-value-replace-${flowMode}`,
+          undefined,
+          seed,
+        );
+        const targetLink = target.getAsNormalizedFullLink();
+        seed.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: targetLink.id,
+          path: [],
+        }, {
+          value: { title: "old" },
+          cfc: {
+            version: 1,
+            schemaHash: schema.taggedHashString,
+            labelMap: {
+              version: 1,
+              entries: [
+                {
+                  path: ["title"],
+                  label: { integrity: ["declared-integrity"] },
+                  origin: "declared",
+                },
+                {
+                  path: ["title"],
+                  label: { integrity: ["stale-derived-integrity"] },
+                  origin: "derived",
+                },
+              ],
+            },
+          },
+        });
+        seed.writeOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: `cid:${schema.taggedHashString}`,
+          path: [],
+        }, { value: schema.schema });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const update = runtime.edit();
+        runtime.getCell(
+          signer.did(),
+          `cfc-per-value-replace-${flowMode}`,
+          schema.schema,
+          update,
+        ).key("title").set("new");
+        update.prepareCfc();
+        expect((await update.commit()).ok).toBeDefined();
+
+        const verify = runtime.edit();
+        const stored = verify.readOrThrow({
+          space: signer.did(),
+          scope: "space",
+          id: targetLink.id,
+          path: [],
+        }) as {
+          cfc?: { labelMap?: { entries?: Array<{ origin?: string }> } };
+        };
+        expect(stored.cfc?.labelMap?.entries).not.toContainEqual(
+          expect.objectContaining({ origin: "derived" }),
+        );
+        verify.abort();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  }
 
   it("does not record link-write provenance when a link is collapsed to a snapshot", async () => {
     const { runtime, storageManager } = createRuntime("observe");
@@ -4013,7 +4136,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: [],
         label: {
-          confidentiality: ["public"],
+          confidentiality: ["public", cfcAtom.space(signer.did())],
         },
         origin: "declared",
       });
@@ -4108,6 +4231,52 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           type: "string",
           default: "",
         });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("keeps ambient-only alias policy from inventing object shape", async () => {
+    const { runtime, storageManager } = createRuntime(
+      "enforce-strict",
+      "persist",
+    );
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ambient-alias-shape",
+        { type: "array", items: { type: "string" } },
+        tx,
+      );
+      cell.set([]);
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: { ...target, path: ["result"] },
+        schema: {
+          ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+        },
+        schemaRole: "output",
+      });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: unknown;
+          cfc?: { schemaHash: string };
+        } | undefined;
+      };
+      const stored = replica.getDocument(target.id);
+      const schema = replica.getDocument(`cid:${stored!.cfc!.schemaHash}`)
+        ?.value;
+      expect(schema).toMatchObject({
+        type: "array",
+        ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+      });
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -5374,6 +5543,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(persisted?.cfc?.labelMap?.entries).toContainEqual({
         path: ["value"],
         label: {
+          confidentiality: [cfcAtom.space(signer.did())],
           integrity: [
             "target-integrity",
             "derived-integrity",

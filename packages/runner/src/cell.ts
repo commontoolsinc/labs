@@ -93,6 +93,7 @@ import {
   storedCfcMetadataAppliesToPath,
 } from "./cfc/metadata.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
+import { cfcSchemaEntries } from "./cfc/schema-label-view.ts";
 import { addRootConfidentiality } from "./cfc/schema-merge.ts";
 import { spaceRootConfidentiality } from "./cfc/space-root-policy.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
@@ -269,16 +270,44 @@ export const recordRelevantSchemaWritePolicyInput = (
   schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema);
-  const cfcRelevant = schemaHasIfc(resolvedSchema) ||
+  const schemaCarriesIfc = schemaHasIfc(resolvedSchema);
+  const schemaCarriesPolicy = resolvedSchema !== undefined &&
+    cfcSchemaEntries(resolvedSchema).some((entry) =>
+      isObjectOrArray(entry.schema) && isObjectOrArray(entry.schema.ifc) &&
+      Object.keys(entry.schema.ifc).some((key) => key !== "flowPrecisionClaim")
+    );
+  const state = tx.getCfcState();
+  const rootConfidentiality = spaceRootConfidentiality(
+    state.enforcementMode,
+    state.flowLabelsMode,
+    link.space,
+  );
+  const initializesScopedInstance = link.scope !== "space" &&
+    rootConfidentiality !== undefined;
+  const cfcRelevant = schemaCarriesIfc || initializesScopedInstance ||
     storedCfcMetadataAppliesToPath(tx, link, ignoreReadForScheduling);
   if (!cfcRelevant) {
     return;
   }
   tx.markCfcRelevant(`schema-ifc-write:${link.id}`);
+  if (
+    initializesScopedInstance && (link.path.length > 0 || !schemaCarriesPolicy)
+  ) {
+    recordSchemaWritePolicyInput(
+      tx,
+      { ...link, path: [] },
+      { ifc: { confidentiality: [...rootConfidentiality] } },
+      schemaRole,
+    );
+  }
   recordSchemaWritePolicyInput(
     tx,
     link,
-    schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+    schemaCarriesPolicy && rootConfidentiality !== undefined
+      ? addRootConfidentiality(resolvedSchema, rootConfidentiality)
+      : schemaCarriesIfc
+      ? resolvedSchema
+      : undefined,
     schemaRole,
   );
 };
@@ -2601,7 +2630,7 @@ export class CellImpl<T extends FabricValue>
       this.link,
       "writeRedirect",
     );
-    const value = this.tx.readValueOrThrow(writeLink, {
+    this.tx.readValueOrThrow(writeLink, {
       meta: {
         ...markReadAsAttemptedWrite,
         ...allowMutableTransactionRead,
@@ -2609,9 +2638,6 @@ export class CellImpl<T extends FabricValue>
         ...internalVerifierRead,
       },
     });
-    if (value === undefined) {
-      throw new Error("Cannot apply a CFC schema to an absent value");
-    }
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       writeLink,

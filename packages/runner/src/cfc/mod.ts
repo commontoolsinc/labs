@@ -99,6 +99,7 @@ export {
 } from "./migration-reason.ts";
 export { LABEL_METADATA_OBSERVATION } from "./observation-classes.ts";
 export type { LabelMetadataObservationClass } from "./observation-classes.ts";
+export { spaceRootConfidentiality } from "./space-root-policy.ts";
 export {
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
@@ -235,7 +236,7 @@ export type {
   StoredCfcEnvelope,
 } from "./prepare.ts";
 export { readStoredCfcMetadata } from "./metadata.ts";
-export { cfcSchemaMergeIssue } from "./schema-merge.ts";
+export { addRootConfidentiality, cfcSchemaMergeIssue } from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue } from "./schema-merge.ts";
 export {
   createSinkRequestPolicyInput,

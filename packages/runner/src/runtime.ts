@@ -35,6 +35,7 @@ import type {
   AnyCell,
   Frame,
   JSONSchema,
+  JSONValue,
   Module,
   NodeFactory,
   Pattern,
@@ -610,6 +611,7 @@ type RuntimeSetupOptions = {
   initialPieceSourceOrigin?: string;
   reapplyStoredSetup?: boolean;
   prepareForResume?: boolean;
+  cfcRootConfidentiality?: readonly JSONValue[];
 };
 
 function isMemorySpaceDID(value: string): boolean {
@@ -2198,21 +2200,30 @@ export class Runtime {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { schedulePatternUpdate?: boolean },
+    options?: {
+      schedulePatternUpdate?: boolean;
+      cfcRootConfidentiality?: readonly JSONValue[];
+    },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { schedulePatternUpdate?: boolean },
+    options?: {
+      schedulePatternUpdate?: boolean;
+      cfcRootConfidentiality?: readonly JSONValue[];
+    },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options: { schedulePatternUpdate?: boolean } = {},
+    options: {
+      schedulePatternUpdate?: boolean;
+      cfcRootConfidentiality?: readonly JSONValue[];
+    } = {},
   ): Cell<R> {
     return this.runner.run<T, R>(
       tx,
@@ -2238,6 +2249,7 @@ export class Runtime {
       ) => void;
       patternRepository?: string;
       pieceSourceTransition?: PieceSourceTransition;
+      cfcRootConfidentiality?: readonly JSONValue[];
     },
   ) {
     return this.runner.runSynced(resultCell, pattern, inputs, options);

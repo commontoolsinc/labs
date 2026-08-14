@@ -50,7 +50,12 @@ import {
   useCancelGroup,
   useDeferredCancelOwnership,
 } from "./cancel.ts";
-import { type Cell, createCell, isCell } from "./cell.ts";
+import {
+  type Cell,
+  createCell,
+  isCell,
+  recordRelevantSchemaWritePolicyInput,
+} from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   recordGeneratedWritePolicy,
@@ -89,7 +94,11 @@ import {
 import { PatternManager } from "./pattern-manager.ts";
 import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import type { Runtime } from "./runtime.ts";
-import { type Action, ignoreReadForScheduling } from "./scheduler.ts";
+import {
+  type Action,
+  ignoreReadForScheduling,
+  markReadAsAttemptedWrite,
+} from "./scheduler.ts";
 import {
   isSchedulerActionObservation,
   type PersistedSchedulerObservationSnapshot,
@@ -108,6 +117,7 @@ import type {
   URI,
 } from "./storage/interface.ts";
 import {
+  internalVerifierRead,
   machineryRead,
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
@@ -656,6 +666,7 @@ const recordSetupProjectionPolicyInputs = (
   resultSchema: JSONSchema | undefined,
   projection: unknown,
   schemaPath: readonly string[] = [],
+  rootConfidentiality?: readonly CfcAtom[],
 ): void => {
   if (resultSchema === undefined) {
     return;
@@ -696,13 +707,46 @@ const recordSetupProjectionPolicyInputs = (
         path: [...source.path],
       }],
     });
-    if (isObjectOrArray(schema) && isObjectOrArray(schema.ifc)) {
+    const effectiveSchema = rootConfidentiality === undefined
+      ? schema
+      : addRootConfidentiality(schema, rootConfidentiality);
+    if (
+      isObjectOrArray(effectiveSchema) &&
+      isObjectOrArray(effectiveSchema.ifc)
+    ) {
       // The projected cell owns the field's policy. Record only that policy
       // here because the cell's generated value schema supplies its shape.
       recordGeneratedWritePolicyForLink(
         tx,
         source,
-        { ifc: schema.ifc },
+        { ifc: effectiveSchema.ifc },
+        "output",
+      );
+    }
+    return;
+  }
+
+  if (isCellLink(projection)) {
+    const target = resultCell.getAsNormalizedFullLink();
+    const source = parseLink(projection, target);
+    const sourceRootConfidentiality = spaceRootConfidentiality(
+      tx.getCfcState().enforcementMode,
+      tx.getCfcState().flowLabelsMode,
+      source.space,
+    );
+    const effectiveSchema = sourceRootConfidentiality === undefined
+      ? schema
+      : addRootConfidentiality(schema, sourceRootConfidentiality);
+    if (
+      isObjectOrArray(effectiveSchema) &&
+      isObjectOrArray(effectiveSchema.ifc)
+    ) {
+      // The projected cell owns the field's policy. Record only that policy
+      // here because the source cell supplies its own value shape.
+      recordGeneratedWritePolicyForLink(
+        tx,
+        source,
+        { ifc: effectiveSchema.ifc },
         "output",
       );
     }
@@ -718,6 +762,7 @@ const recordSetupProjectionPolicyInputs = (
         resultSchema,
         child,
         [...schemaPath, String(index)],
+        rootConfidentiality,
       )
     );
     return;
@@ -747,6 +792,7 @@ const recordSetupProjectionPolicyInputs = (
         resultSchema,
         child,
         [...schemaPath, key],
+        rootConfidentiality,
       );
     }
   }
@@ -778,6 +824,8 @@ type SetupValidationOptions = {
   reapplyStoredSetup?: boolean;
   /** Keep the next start on the persisted-result dependency-sync path. */
   prepareForResume?: boolean;
+  /** Confidentiality maintained on the result document during setup. */
+  cfcRootConfidentiality?: readonly JSONValue[];
 };
 
 export type PieceSourceRevisionOperation =
@@ -921,6 +969,8 @@ type RunnerRunOptions = {
   // compiled from that source during creation), so their caller suppresses
   // the otherwise-automatic lazy check while retaining identity hot-swaps.
   schedulePatternUpdate?: boolean;
+  /** Confidentiality maintained on the result document during setup. */
+  cfcRootConfidentiality?: readonly JSONValue[];
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
@@ -1552,6 +1602,7 @@ export class Runner {
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema | undefined,
+    rootConfidentiality?: readonly CfcAtom[],
   ): void {
     const argumentCell = this.runtime.getCellFromLink(
       argumentLink,
@@ -1567,7 +1618,15 @@ export class Runner {
     const storable = flattenBuilderArtifacts(argument, {
       isLeaf: isCellResultForDereferencing,
     });
-    argumentCell.set(storable);
+    const policySchema = rootConfidentiality === undefined
+      ? argumentSchema ?? {}
+      : addRootConfidentiality(argumentSchema, rootConfidentiality);
+    const effectiveArgumentSchema = recordGeneratedWritePolicy(
+      tx,
+      argumentCell,
+      policySchema,
+    );
+    argumentCell.asSchema(effectiveArgumentSchema).set(storable);
     // The policy recorder sees the RAW argument, as its sibling in
     // `updateResultProjection` does. Handing it the flattened one would walk
     // a serialized pattern graph it previously stopped at -- a function halts
@@ -1577,8 +1636,10 @@ export class Runner {
       tx,
       this.runtime,
       argumentCell,
-      argumentSchema,
+      effectiveArgumentSchema,
       argument,
+      [],
+      rootConfidentiality,
     );
     diffAndUpdate(
       this.runtime,
@@ -1603,8 +1664,15 @@ export class Runner {
     argumentSchema: JSONSchema,
     defaults: FabricValue,
     options: { unresolvedLinkRaw?: unknown } = {},
+    rootConfidentiality?: readonly CfcAtom[],
   ): void {
-    this.updateArgument(tx, argumentLink, argument, argumentSchema);
+    this.updateArgument(
+      tx,
+      argumentLink,
+      argument,
+      argumentSchema,
+      rootConfidentiality,
+    );
     this.validateArgument(
       tx,
       argumentLink,
@@ -1748,6 +1816,8 @@ export class Runner {
     argument: T,
     pattern: Pattern,
     setupState: SetupStateReuse,
+    resultSchema: JSONSchema,
+    rootConfidentiality: readonly CfcAtom[] | undefined,
   ): SetupResult<R> | undefined {
     const key = this.getDocKey(resultCell);
     if (!this.cancels.has(key)) return undefined;
@@ -1764,7 +1834,7 @@ export class Runner {
     // re-run a running piece WITH an argument (`PiecesController.runWithPattern`),
     // and that piece's metadata is no less worth repairing.
     if (setupState.storedSetupMatches) {
-      this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
+      this.updateResultSchemaMeta(tx, resultCell, resultSchema);
     }
 
     if (argument === undefined && setupState.sameStoredSetup) {
@@ -1793,6 +1863,7 @@ export class Runner {
         argumentLink,
         nextArgument,
         pattern.argumentSchema,
+        rootConfidentiality,
       );
       return { resultCell, needsStart: false };
     }
@@ -1804,7 +1875,10 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     resultCell: Cell<R>,
-    options: { preserveName: boolean },
+    options: {
+      preserveName: boolean;
+      rootConfidentiality?: readonly CfcAtom[];
+    },
   ): void {
     const writableResultCell = pattern.resultSchema === undefined
       ? resultCell.withTx(tx)
@@ -1851,6 +1925,8 @@ export class Runner {
         resultCell,
         pattern.resultSchema,
         result,
+        [],
+        options.rootConfidentiality,
       );
       // The result root marks the whole result document as generated: setup
       // rewrites the complete projection.
@@ -1872,6 +1948,7 @@ export class Runner {
     pattern: Pattern,
     resultCell: Cell<R>,
     internal: FabricValue,
+    rootConfidentiality: readonly CfcAtom[] | undefined,
   ): FabricValue {
     const descriptors = pattern.derivedInternalCells;
     if (!descriptors?.length) return [];
@@ -1900,9 +1977,29 @@ export class Runner {
       // every setup. A compatible setsrc may narrow an internal schema while
       // retaining the same partial cause; preserving the old manifest entry
       // would leave stale producer authority attached to that cell.
-      const derivedSigilLink = derivedCell.getAsWriteRedirectLink({
+      const effectiveSchema = rootConfidentiality === undefined
+        ? descriptor.schema ?? {}
+        : addRootConfidentiality(
+          descriptor.schema,
+          rootConfidentiality,
+        );
+      const policyCell = derivedCell.asSchema(effectiveSchema);
+      const derivedSigilLink = policyCell.getAsWriteRedirectLink({
         base: resultCell,
         includeSchema: true,
+      });
+      recordGeneratedWritePolicy(
+        tx,
+        policyCell,
+        effectiveSchema,
+        "setup-output",
+      );
+      tx.readValueOrThrow(policyCell.getAsNormalizedFullLink(), {
+        meta: {
+          ...markReadAsAttemptedWrite,
+          ...internalVerifierRead,
+          ...ignoreReadForScheduling,
+        },
       });
       manifest.push({
         partialCause: descriptor.partialCause,
@@ -1927,7 +2024,11 @@ export class Runner {
             meta: ignoreReadForScheduling,
           });
           if (currentValue === undefined) {
-            derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
+            derivedCell.setRawUntyped(
+              fabricFromNativeValue(schemaDefault),
+              false,
+              "output",
+            );
           }
         }
       }
@@ -1947,18 +2048,36 @@ export class Runner {
     setupState: SetupStateReuse,
     argument: T,
     resultCell: Cell<R>,
+    rootConfidentiality: readonly CfcAtom[] | undefined,
   ): void {
     const { sameStoredSetup, restageStoredArgument } = setupState;
+    recordGeneratedWritePolicy(
+      tx,
+      resultCell,
+      pattern.resultSchema ?? {},
+      "output",
+    );
     const defaults = extractDefaultValues(pattern.argumentSchema);
+    const storedArgumentSchema = rootConfidentiality === undefined
+      ? pattern.argumentSchema
+      : addRootConfidentiality(
+        pattern.argumentSchema,
+        rootConfidentiality,
+      );
     let argumentLink = getMetaLink(resultCell, "argument");
     const previousInternal = resultCell.getMetaRaw("internal", {
-      meta: ignoreReadForScheduling,
+      meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
     });
-    const internalManifest = this.materializeDerivedInternalCells(
-      tx,
-      pattern,
-      resultCell,
-      previousInternal,
+    const internalManifest = tx.runWithAmbientReadMeta(
+      internalVerifierRead,
+      () =>
+        this.materializeDerivedInternalCells(
+          tx,
+          pattern,
+          resultCell,
+          previousInternal,
+          rootConfidentiality,
+        ),
     );
     resultCell.withTx(tx).setMetaRaw("internal", internalManifest);
 
@@ -1966,7 +2085,7 @@ export class Runner {
     let argumentUpdated = false;
     // The argument meta field of the result cell should be a link to the
     // argument cell. If it doesn't exist, we need to apply the defaults
-    // I don't include the schema here, since I don't want cfc enforcement yet
+    // The argument cell's schema is carried by the link stored in metadata.
     if (argumentLink === undefined) {
       let newArgumentCell = getMetaCell(
         resultCell,
@@ -1981,7 +2100,7 @@ export class Runner {
       );
       //newArgumentCell.set(nextArgument);
 
-      newArgumentCell = newArgumentCell.asSchema(pattern.argumentSchema);
+      newArgumentCell = newArgumentCell.asSchema(storedArgumentSchema);
       const newArgumentSigilLink = newArgumentCell.getAsWriteRedirectLink({
         base: resultCell,
         includeSchema: true,
@@ -2004,7 +2123,7 @@ export class Runner {
       }) as T | undefined;
 
       const nextArgumentCell = previousArgumentCell.asSchema(
-        pattern.argumentSchema,
+        storedArgumentSchema,
       );
       const nextArgumentSigilLink = nextArgumentCell.getAsWriteRedirectLink({
         base: resultCell,
@@ -2052,6 +2171,7 @@ export class Runner {
           pattern.argumentSchema,
           defaults,
           argument === undefined ? { unresolvedLinkRaw: nextArgument } : {},
+          rootConfidentiality,
         );
         argumentUpdated = true;
       }
@@ -2066,6 +2186,7 @@ export class Runner {
         argumentLink,
         nextArgument,
         pattern.argumentSchema,
+        rootConfidentiality,
       );
     }
 
@@ -2109,6 +2230,7 @@ export class Runner {
 
     this.updateResultProjection(tx, pattern, resultCell.withTx(tx), {
       preserveName: sameStoredSetup,
+      rootConfidentiality,
     });
 
     // This completion marker records the identity whose schema, arguments,
@@ -2153,6 +2275,14 @@ export class Runner {
     }
 
     const { pattern, entryRef, resolvedPatternOrModule } = resolvedPattern;
+    const rootConfidentiality = validationOptions.cfcRootConfidentiality ??
+      this.cfcSpaceRootConfidentiality(resultCell);
+    const cfcRootSchema = rootConfidentiality === undefined
+      ? undefined
+      : addRootConfidentiality(
+        pattern.resultSchema,
+        rootConfidentiality,
+      );
     // "Same pattern between runs" — drives name preservation and
     // reuse-running-setup. Compare the new pattern pointer against the stored
     // one. A keyless pattern carries a stable session-synthetic ref (minted per
@@ -2250,8 +2380,20 @@ export class Runner {
       argument,
       pattern,
       setupState,
+      cfcRootSchema ?? pattern.resultSchema,
+      rootConfidentiality,
     );
     if (runningSetup) {
+      if (cfcRootSchema !== undefined) {
+        resultCell.withTx(tx).asSchema(cfcRootSchema)
+          .applyCfcSchemaToExistingValue();
+        recordRelevantSchemaWritePolicyInput(
+          tx,
+          resultCell.getAsNormalizedFullLink(),
+          cfcRootSchema,
+          "output",
+        );
+      }
       return runningSetup;
     }
 
@@ -2262,7 +2404,11 @@ export class Runner {
     // version that is not running. A piece that is NOT reused reaches
     // `applySetupState` below, which stages the matching projection in the same
     // transaction, so the schema and the projection cannot disagree.
-    this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
+    this.updateResultSchemaMeta(
+      tx,
+      resultCell,
+      cfcRootSchema ?? pattern.resultSchema,
+    );
 
     this.applySetupState(
       tx,
@@ -2271,7 +2417,19 @@ export class Runner {
       setupState,
       argument,
       resultCell,
+      rootConfidentiality,
     );
+
+    if (cfcRootSchema !== undefined) {
+      resultCell.withTx(tx).asSchema(cfcRootSchema)
+        .applyCfcSchemaToExistingValue();
+      recordRelevantSchemaWritePolicyInput(
+        tx,
+        resultCell.getAsNormalizedFullLink(),
+        cfcRootSchema,
+        "output",
+      );
+    }
 
     if (validationOptions.validateArgumentLinks !== undefined) {
       // applySetupState() either installs this link or throws.
@@ -2622,6 +2780,7 @@ export class Runner {
             },
             undefined,
             resultCell,
+            this.cfcSpaceRootConfidentiality(resultCell),
           );
           this.runtime.prepareTxForCommit(setupTx);
           setupTx.commit();
@@ -2864,6 +3023,7 @@ export class Runner {
             },
             undefined,
             resultCell,
+            this.cfcSpaceRootConfidentiality(resultCell),
           );
           // Instantiate into the SAME tx: it reads the just-staged setup writes,
           // so the once-missing markers resolve and node wiring succeeds.
@@ -3514,6 +3674,7 @@ export class Runner {
       patternOrModule,
       argument,
       resultCell,
+      { cfcRootConfidentiality: options.cfcRootConfidentiality },
     );
 
     let installedCancel: Cancel | undefined;
@@ -3587,6 +3748,7 @@ export class Runner {
       validateArgumentLinks?: SetupValidationOptions["validateArgumentLinks"];
       patternRepository?: string;
       pieceSourceTransition?: PieceSourceTransition;
+      cfcRootConfidentiality?: readonly JSONValue[];
     },
   ) {
     await resultCell.sync();
@@ -3634,6 +3796,7 @@ export class Runner {
         {
           patternRepository: options?.patternRepository,
           pieceSourceTransition: options?.pieceSourceTransition,
+          cfcRootConfidentiality: options?.cfcRootConfidentiality,
           validateCurrentArgument: options?.validateCurrentArgument,
           validateArgumentLinks: options?.validateArgumentLinks,
         },
@@ -3649,6 +3812,7 @@ export class Runner {
           {
             patternRepository: options?.patternRepository,
             pieceSourceTransition: options?.pieceSourceTransition,
+            cfcRootConfidentiality: options?.cfcRootConfidentiality,
             validateCurrentArgument: options?.validateCurrentArgument,
             validateArgumentLinks: options?.validateArgumentLinks,
           },

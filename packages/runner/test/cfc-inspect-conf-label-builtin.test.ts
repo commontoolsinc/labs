@@ -253,8 +253,9 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       expect(confidentiality).toContainEqual("query-secret");
     });
 
-    it("normalizes hidden outcomes end to end", async () => {
-      // Missing metadata (a doc with no cfc envelope at all).
+    it("reports an empty match on an ambient-labeled document", async () => {
+      // The default root label creates a CFC envelope for this otherwise plain
+      // document. The query is therefore observable and has no matching atom.
       const bare = runtime.edit();
       const bareId = parseLink(
         runtime.getCell(space, "inspect-bare", { type: "object" }).getAsLink(),
@@ -287,7 +288,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
 
       const value = await waitForStatus(runtime, result);
       await runtime.idle();
-      expect(value).toEqual({ status: "notAvailable" });
+      expect(value).toEqual({ status: "ok", atoms: [] });
     });
 
     it("fails closed on declared-entry source projections (unreadable match)", async () => {

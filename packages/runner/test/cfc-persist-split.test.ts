@@ -2,7 +2,8 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
@@ -238,7 +239,10 @@ describe("CFC observation classes (C2 persist split)", () => {
     const derived = second.entries.filter((e) => e.origin === "derived");
     expect(derived.map((e) => e.observes).sort()).toEqual(["shape", "value"]);
     for (const entry of derived) {
-      expect(entry.label.confidentiality).toEqual(["secret"]);
+      expect(entry.label.confidentiality).toEqual([
+        "secret",
+        cfcAtom.space(space),
+      ]);
     }
   });
 
@@ -271,7 +275,10 @@ describe("CFC observation classes (C2 persist split)", () => {
 
     const derived = entriesOf(outId).filter((e) => e.origin === "derived");
     const valueEntry = derived.find((e) => e.observes === "value")!;
-    expect(valueEntry.label.confidentiality).toEqual(["secret"]);
+    expect(valueEntry.label.confidentiality).toEqual([
+      "secret",
+      cfcAtom.space(space),
+    ]);
     // No PolicyCertified inherited through a shape-only observation.
     expect(
       (valueEntry.label.integrity ?? []).filter((atom) =>

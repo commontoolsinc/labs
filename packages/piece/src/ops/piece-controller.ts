@@ -1,4 +1,5 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   applyPieceSourceTransition,
@@ -1630,6 +1631,7 @@ function assertContractSubset(
   sources: readonly PathSchemaContract[],
   targets: readonly PathSchemaContract[],
   label: string,
+  ambientSpace?: string,
 ): void {
   for (const target of targets) {
     let lastError: unknown;
@@ -1646,14 +1648,25 @@ function assertContractSubset(
       // it, optional slot or not. (Injecting `undefined` into the target
       // instead would trip the union-with-default "not stable under default
       // insertion" fail-close.)
-      const sourceSchema: JSONSchema = source.mayBeMissing === true &&
+      let sourceSchema: JSONSchema = source.mayBeMissing === true &&
           target.mayBeMissing !== true
         ? { anyOf: [source.schema, { type: "undefined" }] }
         : source.schema;
+      let targetSchema = target.schema;
+      if (ambientSpace !== undefined) {
+        sourceSchema = withoutAmbientSpaceConfidentiality(
+          sourceSchema,
+          ambientSpace,
+        );
+        targetSchema = withoutAmbientSpaceConfidentiality(
+          targetSchema,
+          ambientSpace,
+        );
+      }
       try {
         assertSchemaSubset(
           withoutTopLevelScope(sourceSchema),
-          withoutTopLevelScope(target.schema),
+          withoutTopLevelScope(targetSchema),
           label,
           { sourceRoot: source.root, targetRoot: target.root },
         );
@@ -1665,6 +1678,32 @@ function assertContractSubset(
     });
     if (!proved) throw lastError;
   }
+}
+
+function withoutAmbientSpaceConfidentiality(
+  schema: JSONSchema,
+  space: string,
+): JSONSchema {
+  if (typeof schema === "boolean" || schema.ifc === undefined) return schema;
+  const ifc = schema.ifc as Record<string, unknown>;
+  if (!Array.isArray(ifc.confidentiality)) return schema;
+  const confidentiality = ifc.confidentiality.filter((atom) =>
+    !deepEqual(atom, cfcAtom.space(space))
+  );
+  if (confidentiality.length === ifc.confidentiality.length) return schema;
+  const nextIfc = { ...ifc };
+  if (confidentiality.length === 0) {
+    delete nextIfc.confidentiality;
+  } else {
+    nextIfc.confidentiality = confidentiality;
+  }
+  const next = { ...schema };
+  if (Object.keys(nextIfc).length === 0) {
+    delete next.ifc;
+  } else {
+    next.ifc = nextIfc;
+  }
+  return next;
 }
 
 /** Drop the `mayBeMissing` flag for proofs where absence cannot occur. */
@@ -2094,7 +2133,12 @@ export function assertSuppliedLinkSchemasCompatible(
           ),
           root: sanitizeSchemaForLinks(contract.root, KeepAsCell.OnlyStream),
         }));
-      assertContractSubset(sourceContracts, proofTargets, label);
+      assertContractSubset(
+        sourceContracts,
+        proofTargets,
+        label,
+        linkedCell.space === baseCell.space ? baseCell.space : undefined,
+      );
     }
     if (preservesDirectHandle && cellKindCanWrite(targetOuter.kind)) {
       // A writable handle can send values back to the producer, so the
@@ -2106,6 +2150,7 @@ export function assertSuppliedLinkSchemasCompatible(
         targetContracts.map(withoutMissingFlag),
         sourceContracts.map(withoutMissingFlag),
         label,
+        linkedCell.space === baseCell.space ? baseCell.space : undefined,
       );
     }
   }

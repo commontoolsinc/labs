@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { cfcAtom } from "@commonfabric/api/cfc";
 
 const signer = await Identity.fromPassphrase("runner-cfc-writer-fit");
@@ -152,6 +153,46 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       expect((await tx.commit()).error?.message).toContain(
         "writer-fit confidentiality misfit",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("admits the destination space's ambient label", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      await seedSpaceSource(
+        runtime,
+        "writer-fit-ambient-space-source",
+        signer.did(),
+      );
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(
+        signer.did(),
+        "writer-fit-ambient-space-source",
+        undefined,
+        tx,
+      );
+      const raw = source.getRaw() as { secret?: string };
+      const derived = runtime.getCell(
+        signer.did(),
+        "writer-fit-ambient-space-derived",
+        undefined,
+        tx,
+      );
+      derived.set({ copied: raw.secret });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+      expect(
+        tx.getCfcState().diagnostics.filter((diagnostic) =>
+          diagnostic.includes("writer-fit")
+        ),
+      ).toEqual([]);
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -336,6 +377,76 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     }
   });
 
+  it("initializes an absent user-scoped destination with its space ceiling", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      await seedSpaceSource(runtime, "writer-fit-user-source", signer.did());
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(
+        signer.did(),
+        "writer-fit-user-source",
+        undefined,
+        tx,
+      );
+      const secret = (source.getRaw() as { secret: string }).secret;
+      const target = runtime.getCell(
+        signer.did(),
+        "writer-fit-user-target",
+        undefined,
+        tx,
+        "user",
+      );
+      target.set({ value: secret });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("labels a scoped instance with only a flow-precision claim", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const target = runtime.getCell<{ value: string }>(
+        signer.did(),
+        "writer-fit-flow-precision-user-target",
+        {
+          ifc: { flowPrecisionClaim: { path: ["legacy"] } },
+        } as never,
+        tx,
+        "user",
+      );
+      target.set({ value: "created" });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+      const verify = runtime.edit();
+      const metadata = readStoredCfcMetadata(
+        verify,
+        target.getAsNormalizedFullLink(),
+      );
+      expect(metadata?.labelMap.entries).toContainEqual({
+        path: [],
+        label: {
+          confidentiality: [cfcAtom.space(signer.did())],
+          integrity: undefined,
+        },
+        origin: "declared",
+      });
+      verify.abort?.();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("ignores pointer-classed declared policy for a value write under enforce-strict", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
@@ -420,7 +531,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     }
   });
 
-  it("leaves untainted writes untouched under enforce-strict", async () => {
+  it("leaves untainted writes at their ambient ceiling under enforce-strict", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
     try {
@@ -436,7 +547,16 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       const plainId = plain.getAsNormalizedFullLink().id;
       tx.prepareCfc();
       expect((await tx.commit()).ok).toBeDefined();
-      expect(replicaEntries(storageManager, plainId)).toEqual([]);
+      const entries = replicaEntries(storageManager, plainId);
+      expect(entries).toContainEqual({
+        path: [],
+        label: {
+          confidentiality: [cfcAtom.space(signer.did())],
+          integrity: undefined,
+        },
+        origin: "declared",
+      });
+      expect(entries.some((entry) => entry.origin === "derived")).toBe(false);
       expect(
         tx.getCfcState().diagnostics.filter((d) => d.includes("writer-fit")),
       ).toEqual([]);

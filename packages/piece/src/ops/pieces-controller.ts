@@ -56,6 +56,10 @@ import {
   pieceListSchema,
 } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
+import {
+  addRootConfidentiality,
+  spaceRootConfidentiality,
+} from "@commonfabric/runner/cfc";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
@@ -94,6 +98,14 @@ const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
   default: [],
   ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
 });
+
+const spacePieceCfcSchema = (
+  space: MemorySpace,
+  resultSchema: JSONSchema | undefined,
+): JSONSchema =>
+  internSchema(
+    addRootConfidentiality(resultSchema, [cfcAtom.space(space)]),
+  );
 
 // Default roots have a stronger update policy than ordinary pieces: an
 // existing root is reconciled before start, while a new root is compiled from
@@ -237,6 +249,14 @@ export class PiecesController<T = unknown> {
     // Default pattern creation is handled by ensureDefaultPattern(), which is
     // called by CLI/shell entry points. Construction doesn't auto-create it.
     this.ready = syncSpaceCellContents.then(() => {});
+  }
+
+  private cfcRootConfidentiality() {
+    return spaceRootConfidentiality(
+      this.runtime.cfcEnforcementMode,
+      this.runtime.cfcFlowLabels,
+      this.space,
+    );
   }
 
   static async initialize(
@@ -1176,6 +1196,7 @@ export class PiecesController<T = unknown> {
         pieceSourceTransition: options?.sourceTransition,
         validateCurrentArgument: options?.validateCurrentArgument,
         validateArgumentLinks: options?.validateArgumentLinks,
+        cfcRootConfidentiality: this.cfcRootConfidentiality(),
       });
     } else {
       if (options?.expectedPatternIdentity) {
@@ -1183,6 +1204,7 @@ export class PiecesController<T = unknown> {
       }
       await this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
         patternRepository: options?.repository,
+        cfcRootConfidentiality: this.cfcRootConfidentiality(),
       });
     }
     await this.syncPattern(currentPiece);
@@ -1231,6 +1253,7 @@ export class PiecesController<T = unknown> {
           patternRepository: options?.repository,
           initializePieceSourceHistory: true,
           initialPieceSourceOrigin: options?.origin,
+          cfcRootConfidentiality: this.cfcRootConfidentiality(),
         }),
     );
     await timePiecePhase(
@@ -1541,7 +1564,10 @@ export class PiecesController<T = unknown> {
         pattern,
         {},
         pieceCell,
-        DEFAULT_ROOT_RUN_OPTIONS,
+        {
+          ...DEFAULT_ROOT_RUN_OPTIONS,
+          cfcRootConfidentiality: this.cfcRootConfidentiality(),
+        },
       );
 
       // Stamp the provenance the piece tracks for updates, mirroring
@@ -1696,7 +1722,10 @@ export class PiecesController<T = unknown> {
             pattern,
             {},
             pieceCell,
-            DEFAULT_ROOT_RUN_OPTIONS,
+            {
+              ...DEFAULT_ROOT_RUN_OPTIONS,
+              cfcRootConfidentiality: this.cfcRootConfidentiality(),
+            },
           );
 
           // Stamp the provenance the piece tracks for updates (the source it
@@ -1821,6 +1850,7 @@ export class PiecesController<T = unknown> {
           () =>
             runtime.runSynced(writableRoot, repairPattern, undefined, {
               expectedPatternIdentity: ref,
+              cfcRootConfidentiality: this.cfcRootConfidentiality(),
             }),
         );
       } catch (repairError) {
@@ -2121,6 +2151,7 @@ export class PiecesController<T = unknown> {
         () =>
           runtime.runSynced(swappedRoot.withTx(), officialPattern, undefined, {
             expectedPatternIdentity: officialRef,
+            cfcRootConfidentiality: this.cfcRootConfidentiality(),
           }),
       );
     } catch (materializeError) {

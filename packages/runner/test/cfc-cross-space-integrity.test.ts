@@ -500,7 +500,10 @@ describe("CFC cross-space integrity", () => {
         readDoc(storageManager, spaceA, docId),
         ["latitude"],
       );
-      expect(entry?.label.confidentiality).toEqual(["location"]);
+      expect(entry?.label.confidentiality).toEqual([
+        cfcAtom.space(spaceA),
+        "location",
+      ]);
       expect(entry?.label.integrity).toEqual([
         { type: "gps-reading", scope: { projection: "/lat" } },
       ]);

@@ -32,6 +32,7 @@ import {
   isConflictRejection,
   isStorageTransactionInconsistent,
 } from "./storage/rejection.ts";
+import { spaceRootConfidentiality } from "./cfc/space-root-policy.ts";
 
 const logger = getLogger("runner.pattern-update", {
   enabled: true,
@@ -605,9 +606,17 @@ export class PatternUpdater {
           });
         }
         if (mode.kind === "default-root") {
+          const cfcRootConfidentiality = spaceRootConfidentiality(
+            runtime.cfcEnforcementMode,
+            runtime.cfcFlowLabels,
+            space,
+          );
           void runtime.setup(tx, pattern, undefined, candidate, {
             prepareForResume: true,
             ...(setupNeedsRepair ? { reapplyStoredSetup: true } : {}),
+            ...(cfcRootConfidentiality === undefined
+              ? {}
+              : { cfcRootConfidentiality }),
           });
         } else {
           candidate.setMetaRaw("patternIdentity", entryRef);

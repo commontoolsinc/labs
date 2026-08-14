@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import { KeepAsCell, Runtime } from "@commonfabric/runner";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
@@ -1029,6 +1030,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
               entries: [{
                 path: [],
                 label: {
+                  confidentiality: [cfcAtom.space(signer.did())],
                   integrity: [{
                     kind: "authored-by",
                     subject: "alice",

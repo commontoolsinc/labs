@@ -29,6 +29,8 @@ import {
   getCarriedCfcLabelView,
 } from "./cfc/label-view-state.ts";
 import { recordGeneratedWritePolicyForLink } from "./cfc/generated-write-policy.ts";
+import { addRootConfidentiality } from "./cfc/schema-merge.ts";
+import { spaceRootConfidentiality } from "./cfc/space-root-policy.ts";
 import {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
@@ -66,7 +68,11 @@ import {
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import { forEachSubschema } from "./schema-walk.ts";
-import { resolveSchema, resolveSchemaForValue } from "./schema.ts";
+import {
+  resolveSchema,
+  resolveSchemaForValue,
+  schemaHasIfc,
+} from "./schema.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import type {
@@ -241,6 +247,21 @@ const recordLinkWritePolicyInput = (
   }
 
   tx.markCfcRelevant(`link-write:${target.id}`);
+  if (!targetRelevant && target.path.length > 0) {
+    const state = tx.getCfcState();
+    const rootConfidentiality = spaceRootConfidentiality(
+      state.enforcementMode,
+      state.flowLabelsMode,
+      target.space,
+    );
+    if (rootConfidentiality !== undefined) {
+      recordRelevantSchemaWritePolicyInput(
+        tx,
+        { ...target, path: [] },
+        { ifc: { confidentiality: [...rootConfidentiality] } },
+      );
+    }
+  }
   tx.recordCfcWritePolicyInput({
     kind: "link-write",
     target: cfcAddressFromLink(target),
@@ -343,6 +364,26 @@ function declaredCellScope(
   const cap = ContextualFlowControl.getSchemaScopeCap(schema);
   return isCellScope(cap) ? cap : undefined;
 }
+
+const recordScopedInstanceRootPolicy = (
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schemaRole?: "output",
+): void => {
+  const confidentiality = spaceRootConfidentiality(
+    runtime.cfcEnforcementMode,
+    runtime.cfcFlowLabels,
+    link.space,
+  );
+  if (confidentiality === undefined) return;
+  recordRelevantSchemaWritePolicyInput(
+    tx,
+    { ...link, path: [] },
+    { ifc: { confidentiality: [...confidentiality] } },
+    schemaRole,
+  );
+};
 
 export type DiffAndUpdateOptions = IReadOptions & {
   /**
@@ -524,10 +565,23 @@ function anchorValueAsEntity(
       "output",
     );
   } else {
+    const cfcState = tx.getCfcState();
+    const rootConfidentiality = schemaHasIfc(link.schema)
+      ? spaceRootConfidentiality(
+        cfcState.enforcementMode,
+        cfcState.flowLabelsMode,
+        newEntryLink.space,
+      )
+      : undefined;
     recordRelevantSchemaWritePolicyInput(
       tx,
       newEntryLink,
-      newEntryLink.schema,
+      rootConfidentiality === undefined
+        ? newEntryLink.schema
+        : addRootConfidentiality(
+          newEntryLink.schema,
+          rootConfidentiality,
+        ),
     );
   }
 
@@ -717,6 +771,18 @@ export function normalizeAndDiff(
     !isCell(newValue)
   ) {
     const scopedLink: NormalizedFullLink = { ...link, scope: declaredScope };
+    recordRelevantSchemaWritePolicyInput(
+      tx,
+      scopedLink,
+      scopedLink.schema,
+      options?.schemaRole,
+    );
+    recordScopedInstanceRootPolicy(
+      runtime,
+      tx,
+      scopedLink,
+      options?.schemaRole,
+    );
     return [
       // Content goes into the narrower-scope instance (its missing container
       // structure is created by the storage write, which builds parents for the
@@ -1595,6 +1661,18 @@ export function normalizeAndDiff(
           ...childLink,
           scope: childScope,
         };
+        recordRelevantSchemaWritePolicyInput(
+          tx,
+          scopedLink,
+          scopedLink.schema,
+          options?.schemaRole,
+        );
+        recordScopedInstanceRootPolicy(
+          runtime,
+          tx,
+          scopedLink,
+          options?.schemaRole,
+        );
         changes.push(
           ...normalizeAndDiff(
             runtime,

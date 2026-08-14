@@ -16,6 +16,7 @@ import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/c
 import { createSession, Identity } from "@commonfabric/identity";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   DEFAULT_APP_PATTERN_SOURCE,
   HOME_PATTERN_SOURCE,
@@ -483,7 +484,15 @@ describe("checkAndUpdateDefaultPattern", () => {
       currentPattern,
     )!;
     expect(currentRef.identity).toBe(await identityForSource(SOURCE_V2));
-    expect(currentPattern.resultSchema).toEqual(root.getMetaRaw("schema"));
+    const labeledResultSchema = root.getMetaRaw("schema") as Record<
+      string,
+      unknown
+    >;
+    expect(labeledResultSchema.ifc).toEqual({
+      confidentiality: [cfcAtom.space(controller.getSpace())],
+    });
+    const { ifc: _ifc, ...unlabeledResultSchema } = labeledResultSchema;
+    expect(unlabeledResultSchema).toEqual(currentPattern.resultSchema);
 
     const metadataUpdate = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw("patternIdentity", currentRef);

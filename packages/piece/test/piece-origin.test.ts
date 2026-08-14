@@ -1,6 +1,8 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { cfcAtom } from "@commonfabric/api/cfc";
+import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { FabricInstance } from "@commonfabric/data-model/fabric-value";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
@@ -14,7 +16,9 @@ import {
   preparePieceSourceTransitionBaseline,
   resolveSystemPatternSource,
   Runtime,
+  runtimePresets,
 } from "@commonfabric/runner";
+import type { JSONSchemaObj } from "../../runner/src/builder/types.ts";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
@@ -175,6 +179,30 @@ function installFetchStub(sources: Record<string, string>): () => void {
 
 const HASH = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const SPACE = "did:key:z6MkspaceAAAA" as MemorySpace;
+
+function expectSpaceRootLabel(
+  piece: Cell<unknown>,
+  space: MemorySpace,
+): void {
+  const schema = piece.getMetaRaw("schema") as JSONSchemaObj | undefined;
+  expect(schema?.ifc?.confidentiality).toContainEqual(cfcAtom.space(space));
+}
+
+function expectPersistedSpaceRootLabel(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+  piece: Cell<unknown>,
+  space: MemorySpace,
+): void {
+  const replica = storageManager.open(space).replica as unknown as {
+    getDocument(id: string): {
+      schema?: JSONSchemaObj;
+    } | undefined;
+  };
+  const schema = replica.getDocument(
+    piece.getAsNormalizedFullLink().id,
+  )?.schema;
+  expect(schema?.ifc?.confidentiality).toContainEqual(cfcAtom.space(space));
+}
 
 describe("classifyOrigin", () => {
   const runtime = {
@@ -1953,5 +1981,96 @@ describe("reading a piece's source state", () => {
       release.resolve();
       manager.getPatternSourceProgramByIdentity = original;
     }
+  });
+});
+describe("space piece CFC labels", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let controller: PiecesController;
+  let restoreFetch: () => void;
+
+  beforeEach(async () => {
+    restoreFetch = installFetchStub({
+      [DEFAULT_APP_PATTERN_PATH]: DEFAULT_APP_SOURCE,
+    });
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime(runtimePresets.unitTest({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    }));
+    controller = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `cfc-space-root-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await controller.synced();
+  });
+
+  afterEach(async () => {
+    await runtime.dispose();
+    await storageManager.close();
+    restoreFetch();
+  });
+
+  it("labels a directly-created piece for its space", async () => {
+    const piece = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+
+    expectSpaceRootLabel(piece.getCell(), controller.getSpace());
+    expectPersistedSpaceRootLabel(
+      storageManager,
+      piece.getCell(),
+      controller.getSpace(),
+    );
+  });
+
+  it("keeps a persistent piece labeled when its running setup is reused", async () => {
+    const pattern = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { space: controller.getSpace() });
+    const piece = await controller.runPersistent(
+      pattern,
+      { label: "initial" },
+    );
+
+    await controller.runWithPattern(
+      pattern,
+      entityRefToString(piece.entityId),
+      { label: "updated" },
+    );
+
+    expectSpaceRootLabel(piece, controller.getSpace());
+    expectPersistedSpaceRootLabel(
+      storageManager,
+      piece,
+      controller.getSpace(),
+    );
+  });
+
+  it("labels a newly initialized space root for its space", async () => {
+    const root = await controller.ensureDefaultPattern();
+
+    expectSpaceRootLabel(root.getCell(), controller.getSpace());
+    expectPersistedSpaceRootLabel(
+      storageManager,
+      root.getCell(),
+      controller.getSpace(),
+    );
+  });
+
+  it("labels a recreated space root for its space", async () => {
+    const root = await controller.recreateDefaultPattern();
+
+    expectSpaceRootLabel(root.getCell(), controller.getSpace());
+    expectPersistedSpaceRootLabel(
+      storageManager,
+      root.getCell(),
+      controller.getSpace(),
+    );
   });
 });

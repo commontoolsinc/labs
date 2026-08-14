@@ -98,7 +98,10 @@ import {
 } from "./observation.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
-import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
+import {
+  addRootConfidentiality,
+  mergeCfcSchemaEnvelopes,
+} from "./schema-merge.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
@@ -900,11 +903,61 @@ const generatedSetupInitializationPathsByTarget = (
   return result;
 };
 
+const ambientSpaceRootConfidentiality = (
+  schema: JSONSchema,
+  space: MemorySpace,
+): readonly CfcAtom[] | undefined => {
+  if (!isObjectOrArray(schema) || Object.keys(schema).length !== 1) {
+    return undefined;
+  }
+  const ifc = schema.ifc;
+  if (!isObjectOrArray(ifc) || Object.keys(ifc).length !== 1) {
+    return undefined;
+  }
+  const confidentiality = ifc.confidentiality;
+  const ambient = cfcAtom.space(space);
+  return Array.isArray(confidentiality) && confidentiality.length === 1 &&
+      deepEqual(confidentiality[0], ambient)
+    ? [ambient]
+    : undefined;
+};
+
+const retainedAmbientSpaceRootConfidentiality = (
+  schema: JSONSchema | undefined,
+  space: MemorySpace,
+): readonly CfcAtom[] | undefined => {
+  if (schema === undefined) return undefined;
+  const ambient = cfcAtom.space(space);
+  return cfcSchemaEntries(schema).some((entry) =>
+      entry.path.length === 0 &&
+      entry.label.confidentiality?.some((clause) => deepEqual(clause, ambient))
+    )
+    ? [ambient]
+    : undefined;
+};
+
+const rootConfidentiality = (
+  schema: JSONSchema | undefined,
+): readonly CfcConfClause[] => {
+  if (schema === undefined) return [];
+  const result: CfcConfClause[] = [];
+  for (const entry of cfcSchemaEntries(schema)) {
+    if (entry.path.length !== 0) continue;
+    for (const clause of entry.label.confidentiality ?? []) {
+      if (!result.some((existing) => deepEqual(existing, clause))) {
+        result.push(clause);
+      }
+    }
+  }
+  return result;
+};
+
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
   identityForInput: (input: WritePolicyInput) =>
     | ImplementationIdentity
     | undefined,
+  storedSchemaForTarget: (target: CfcAddress) => JSONSchema | undefined,
   generatedOutputPaths: ReadonlyMap<
     string,
     readonly (readonly string[])[]
@@ -920,15 +973,52 @@ const candidateSchemasByTarget = (
       input.schema,
       identityForInput(input),
     );
-    const candidate = schemaEnvelopeForTargetPath(
-      schema,
-      input.target.path,
-    );
     const existing = result.get(key);
+    const stored = storedSchemaForTarget(input.target);
+    const ambientConfidentiality = ambientSpaceRootConfidentiality(
+      schema,
+      input.target.space,
+    );
+    const retainedAmbientConfidentiality = ambientConfidentiality ??
+      retainedAmbientSpaceRootConfidentiality(existing, input.target.space) ??
+      retainedAmbientSpaceRootConfidentiality(stored, input.target.space);
+    let candidate = ambientConfidentiality === undefined
+      ? schemaEnvelopeForTargetPath(
+        schema,
+        input.target.path,
+      )
+      : schema;
+    if (
+      ambientConfidentiality === undefined &&
+      retainedAmbientConfidentiality !== undefined
+    ) {
+      candidate = addRootConfidentiality(
+        candidate,
+        retainedAmbientConfidentiality,
+      );
+    }
+    const candidateRootConfidentiality = rootConfidentiality(candidate);
+    if (
+      existing !== undefined && candidateRootConfidentiality.length === 1 &&
+      retainedAmbientConfidentiality !== undefined &&
+      deepEqual(
+        candidateRootConfidentiality[0],
+        retainedAmbientConfidentiality[0],
+      )
+    ) {
+      candidate = addRootConfidentiality(
+        candidate,
+        rootConfidentiality(existing),
+      );
+    }
     result.set(
       key,
       existing === undefined
         ? internSchema(candidate)
+        : ambientConfidentiality !== undefined
+        ? internSchema(
+          addRootConfidentiality(existing, ambientConfidentiality),
+        )
         : schemasEqualIgnoringWriterStamp(existing, candidate)
         ? existing
         : mergeCfcSchemaEnvelopes(existing, candidate, {
@@ -4335,8 +4425,21 @@ const derivePersistedLinkLabel = (
     input.source.scope,
     "application/json",
   );
-  let pendingSourceSchema = candidateSchemas.get(targetKey(input.source)) ??
-    setupResultSchemaFor(tx, input.source);
+  const setupResultSchema = setupResultSchemaFor(tx, input.source);
+  const recordedSourceSchema = candidateSchemas.get(targetKey(input.source));
+  const ambientSourceConfidentiality = recordedSourceSchema === undefined
+    ? undefined
+    : ambientSpaceRootConfidentiality(
+      recordedSourceSchema,
+      input.source.space,
+    );
+  let pendingSourceSchema = ambientSourceConfidentiality !== undefined &&
+      setupResultSchema !== undefined
+    ? addRootConfidentiality(
+      setupResultSchema,
+      ambientSourceConfidentiality,
+    )
+    : recordedSourceSchema ?? setupResultSchema;
   let pendingSourceLabel = pendingSourceSchema !== undefined
     ? persistedLabelFromSchemaAtPath(
       tx,
@@ -5227,9 +5330,26 @@ export const prepareBoundaryCommit = (
   );
   const generatedSetupInitializationPaths =
     generatedSetupInitializationPathsByTarget(state.writePolicyInputs);
+  const storedEnvelopeCache = new Map<
+    string,
+    ReturnType<typeof loadStoredCfcEnvelope>
+  >();
+  const storedEnvelopeForTarget = (target: CfcAddress) => {
+    const key = targetKey(target);
+    let stored = storedEnvelopeCache.get(key);
+    if (stored === undefined) {
+      stored = loadStoredCfcEnvelope(tx, target);
+      storedEnvelopeCache.set(key, stored);
+    }
+    return stored;
+  };
   const candidates = candidateSchemasByTarget(
     state.writePolicyInputs,
     identityForInput,
+    (target) => {
+      const stored = storedEnvelopeForTarget(target);
+      return stored.status === "loaded" ? stored.schema : undefined;
+    },
     generatedOutputPaths,
   );
   const writeAuthorIdentities = writePolicyIdentitiesByTarget(
@@ -6233,7 +6353,10 @@ export const prepareBoundaryCommit = (
       // outs are writing to a fitting store or not writing. Link-covered
       // writes carry per-slot link labels instead of the join and are
       // outside this v1 check, as is the pure-link-structure shape channel.
-      const declaredPolicyEntries = flowConfidentiality.length > 0
+      const writerFitConfidentiality = flowConfidentiality.filter((atom) =>
+        !deepEqual(atom, cfcAtom.space(target.space))
+      );
+      const declaredPolicyEntries = writerFitConfidentiality.length > 0
         ? persistedLabelEntries.filter((entry) =>
           (entry.origin === undefined || entry.origin === "declared") &&
           readConsumesEntry("value", entry)
@@ -6337,7 +6460,7 @@ export const prepareBoundaryCommit = (
         ) {
           continue;
         }
-        if (flowConfidentiality.length > 0) {
+        if (writerFitConfidentiality.length > 0) {
           // A generated output has the fixed confidentiality ceiling of its
           // destination space. This does not derive authority from the flow it
           // is checking. Other absent declarations remain public stores.
@@ -6348,7 +6471,7 @@ export const prepareBoundaryCommit = (
               ?.confidentiality ??
               (generatedOutputCoversPath ? [cfcAtom.space(target.space)] : []);
           const offending = atomsOutsideCeiling(
-            flowConfidentiality,
+            writerFitConfidentiality,
             declaredCeiling as readonly CfcConfClause[],
           );
           if (offending.length > 0) {

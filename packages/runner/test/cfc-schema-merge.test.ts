@@ -2,12 +2,66 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchemaObj } from "../src/builder/types.ts";
 import {
+  addRootConfidentiality,
   cfcSchemaMergeIssue,
   mergeCfcSchemaEnvelopes,
 } from "../src/cfc/schema-merge.ts";
 import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
 
 describe("mergeCfcSchemaEnvelopes", () => {
+  it("keeps an authored false schema impossible", () => {
+    expect(addRootConfidentiality(false, ["space"])).toEqual({
+      not: {},
+      ifc: { confidentiality: ["space"] },
+    });
+  });
+
+  it("adds root confidentiality without weakening an authored label", () => {
+    const authored = {
+      type: "object",
+      properties: { value: { type: "string" } },
+      ifc: { confidentiality: ["authored"] },
+    } as const;
+    const augmented = addRootConfidentiality(authored, ["space"]);
+
+    expect(augmented).toEqual({
+      type: "object",
+      properties: { value: { type: "string" } },
+      ifc: { confidentiality: ["authored", "space"] },
+    });
+    const merged = mergeCfcSchemaEnvelopes(
+      authored,
+      augmented,
+    ) as JSONSchemaObj;
+    expect(merged.ifc?.confidentiality).toEqual(["authored", "space"]);
+  });
+
+  it("adds root confidentiality after resolving an authored root reference", () => {
+    const authored = {
+      $ref: "#/$defs/Result",
+      $defs: {
+        Result: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          ifc: { confidentiality: ["authored"] },
+        },
+      },
+    } as const;
+    const augmented = addRootConfidentiality(authored, ["space"]);
+
+    expect(augmented).toEqual({
+      $defs: authored.$defs,
+      type: "object",
+      properties: { value: { type: "string" } },
+      ifc: { confidentiality: ["authored", "space"] },
+    });
+    const merged = mergeCfcSchemaEnvelopes(
+      authored.$defs.Result,
+      augmented,
+    ) as JSONSchemaObj;
+    expect(merged.ifc?.confidentiality).toEqual(["authored", "space"]);
+  });
+
   // C5: `observes` is a scalar consumption class, not a set-like claim.
   // Agreement keeps the class through a merge; any disagreement (including
   // one covering side) merges to covering — the widest consumption, the
