@@ -13,7 +13,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
-import { jsonFromValue } from "@/codecs.ts";
+import { jsonFromFabricValue } from "@/codecs.ts";
 
 describe("impl", () => {
   describe("seemsLikeJsonEncodedFabricValue", () => {
@@ -27,8 +27,8 @@ describe("impl", () => {
       expect(seemsLikeJsonEncodedFabricValue("fvj1:")).toBe(true);
     });
 
-    it("recognizes the actual output of `jsonFromValue()` (round-trip check)", () => {
-      const encoded = jsonFromValue({ a: 1, b: 42n });
+    it("recognizes the actual output of `jsonFromFabricValue()` (round-trip check)", () => {
+      const encoded = jsonFromFabricValue({ a: 1, b: 42n });
       expect(seemsLikeJsonEncodedFabricValue(encoded)).toBe(true);
     });
 

@@ -73,7 +73,7 @@ const jsonCodecEngine = newDefaultJsonCodecEngine();
  * singleton (`shouldDeepFreeze` is `true`); only the `getCell()` throw
  * message is decode-framed, so an unexpected cell reference during a
  * context-less decode produces a message that names the situation. This
- * single instance covers both public entry points (`valueFromJson()` and
+ * single instance covers both public entry points (`fabricFromJsonValue()` and
  * `plainObjectFromJson()`, the latter delegating to the former).
  */
 const JSON_DECODE_EMPTY_CONTEXT = Object.freeze(
@@ -87,7 +87,7 @@ const JSON_DECODE_EMPTY_CONTEXT = Object.freeze(
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  */
-export function jsonFromValue(value: FabricValue): string {
+export function jsonFromFabricValue(value: FabricValue): string {
   return jsonCodecEngine.encode(value);
 }
 
@@ -95,14 +95,14 @@ export function jsonFromValue(value: FabricValue): string {
  * Decodes a string in the `FabricValue` JSON-embedded encoding format, which is
  * expected to be a plain object. Throws if it turns out to be something else.
  * If `context` is omitted, a shared decode-framed empty context is
- * substituted (via `valueFromJson()`), which throws if any reconstruction
+ * substituted (via `fabricFromJsonValue()`), which throws if any reconstruction
  * is needed.
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
   context?: ReconstructionContext,
 ): T {
-  const result = valueFromJson(json, context);
+  const result = fabricFromJsonValue(json, context);
 
   if ((result === null) || (typeof result !== "object")) {
     throw new Error(
@@ -127,7 +127,7 @@ export function plainObjectFromJson<T extends object = object>(
  * (`JSON_DECODE_EMPTY_CONTEXT`) is substituted, which throws if any
  * reconstruction is needed.
  */
-export function valueFromJson(
+export function fabricFromJsonValue(
   json: string,
   context?: ReconstructionContext | undefined,
 ): FabricValue {

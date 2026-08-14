@@ -18,9 +18,9 @@ import { expect } from "@std/expect";
 
 import {
   createDefaultJsonRegistry,
-  jsonFromValue,
+  fabricFromJsonValue,
+  jsonFromFabricValue,
   plainObjectFromJson,
-  valueFromJson,
 } from "@/codecs.ts";
 import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
 import { JsonCodecEngine } from "@/codec-json/JsonCodecEngine.ts";
@@ -42,7 +42,7 @@ const mockRuntime = new MockRuntime();
 
 /** Encodes and then decodes a value, per the current dispatch configuration. */
 function roundTrip(value: FabricValue): FabricValue {
-  return valueFromJson(jsonFromValue(value), mockRuntime);
+  return fabricFromJsonValue(jsonFromFabricValue(value), mockRuntime);
 }
 
 /**
@@ -50,7 +50,7 @@ function roundTrip(value: FabricValue): FabricValue {
  * compared as parsed structure, after stripping the modern encoding prefix.
  */
 function expectWireFormat(value: FabricValue, expected: unknown): void {
-  const json = jsonFromValue(value);
+  const json = jsonFromFabricValue(value);
   expect(seemsLikeJsonEncodedFabricValue(json)).toBe(true);
   expect(
     JSON.parse(JsonCodecEngine.unwrapEncodedValueForTesting(json)),
@@ -81,22 +81,22 @@ describe("codecs", () => {
     expect(roundTrip(42n)).toBe(42n);
   });
 
-  it("`jsonFromValue()` encodes `undefined` to tagged JSON", () => {
+  it("`jsonFromFabricValue()` encodes `undefined` to tagged JSON", () => {
     expectWireFormat(undefined, { "/Undefined@1": null });
   });
 
-  it("`jsonFromValue()` encodes `bigint` to tagged JSON", () => {
+  it("`jsonFromFabricValue()` encodes `bigint` to tagged JSON", () => {
     expectWireFormat(42n, { "/BigInt@1": "Kg" });
   });
 
-  it("`valueFromJson()` decodes tagged `undefined`", () => {
+  it("`fabricFromJsonValue()` decodes tagged `undefined`", () => {
     const json = 'fvj1:{"\/Undefined@1":null}';
-    expect(valueFromJson(json, mockRuntime)).toBe(undefined);
+    expect(fabricFromJsonValue(json, mockRuntime)).toBe(undefined);
   });
 
-  it("`valueFromJson()` decodes tagged `bigint`", () => {
+  it("`fabricFromJsonValue()` decodes tagged `bigint`", () => {
     const json = 'fvj1:{"\/BigInt@1":"Kg"}';
-    expect(valueFromJson(json, mockRuntime)).toBe(42n);
+    expect(fabricFromJsonValue(json, mockRuntime)).toBe(42n);
   });
 
   it("round-trips plain objects", () => {
@@ -114,10 +114,10 @@ describe("codecs", () => {
   });
 
   it("JSON-safe primitives stringify normally (under the encoding prefix)", () => {
-    expect(jsonFromValue(42)).toBe("fvj1:42");
-    expect(jsonFromValue("hello")).toBe('fvj1:"hello"');
-    expect(jsonFromValue(true)).toBe("fvj1:true");
-    expect(jsonFromValue(null)).toBe("fvj1:null");
+    expect(jsonFromFabricValue(42)).toBe("fvj1:42");
+    expect(jsonFromFabricValue("hello")).toBe('fvj1:"hello"');
+    expect(jsonFromFabricValue(true)).toBe("fvj1:true");
+    expect(jsonFromFabricValue(null)).toBe("fvj1:null");
   });
 
   describe("edge case", () => {
@@ -234,28 +234,30 @@ describe("codecs", () => {
     });
   });
 
-  describe("`valueFromJson()` without a runtime argument", () => {
+  describe("`fabricFromJsonValue()` without a runtime argument", () => {
     it("decodes a plain object", () => {
-      expect(valueFromJson('fvj1:{"a":1}')).toEqual({ a: 1 });
+      expect(fabricFromJsonValue('fvj1:{"a":1}')).toEqual({ a: 1 });
     });
 
     it("decodes a primitive", () => {
-      expect(valueFromJson("fvj1:42")).toBe(42);
+      expect(fabricFromJsonValue("fvj1:42")).toBe(42);
     });
 
     it("decodes tagged values that don't need cell reconstruction", () => {
-      expect(valueFromJson('fvj1:{"\/Undefined@1":null}')).toBe(undefined);
-      expect(valueFromJson('fvj1:{"\/BigInt@1":"Kg"}')).toBe(42n);
+      expect(fabricFromJsonValue('fvj1:{"\/Undefined@1":null}')).toBe(
+        undefined,
+      );
+      expect(fabricFromJsonValue('fvj1:{"\/BigInt@1":"Kg"}')).toBe(42n);
     });
 
     it("explicit `undefined` runtime is equivalent to omission", () => {
-      expect(valueFromJson('fvj1:{"a":1}', undefined)).toEqual({ a: 1 });
+      expect(fabricFromJsonValue('fvj1:{"a":1}', undefined)).toEqual({ a: 1 });
     });
   });
 
   describe("plainObjectFromJson", () => {
     it("returns the decoded plain object", () => {
-      const json = jsonFromValue({ a: 1, b: 42n });
+      const json = jsonFromFabricValue({ a: 1, b: 42n });
       const result = plainObjectFromJson<{ a: number; b: bigint }>(json);
       expect(result.a).toBe(1);
       expect(result.b).toBe(42n);
@@ -263,18 +265,18 @@ describe("codecs", () => {
 
     it("throws on a class instance (`FabricError`)", () => {
       const err = FabricError.fromNativeError(new Error("test"));
-      const json = jsonFromValue(err);
+      const json = jsonFromFabricValue(err);
       expect(() => plainObjectFromJson(json)).toThrow(/instance/);
     });
 
     it("throws on an array", () => {
-      const json = jsonFromValue(["whoops"]);
+      const json = jsonFromFabricValue(["whoops"]);
       expect(() => plainObjectFromJson(json)).toThrow(/array/);
     });
 
     for (const prim of [null, 123, "florp", true]) {
       it(`throws on primitive \`${prim}\``, () => {
-        const json = jsonFromValue(prim);
+        const json = jsonFromFabricValue(prim);
         expect(() => plainObjectFromJson(json)).toThrow(/primitive/);
       });
     }

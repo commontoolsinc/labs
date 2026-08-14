@@ -5,7 +5,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 
 import {
   convergence,
@@ -68,7 +68,7 @@ function makeSpace(
   entries.forEach((e, i) => {
     const seq = i + 1;
     commit.run(seq, `session-${i}`, 1, JSON.stringify({ seq }));
-    rev.run(e.id, seq, jsonFromValue({ value: e.value }), seq);
+    rev.run(e.id, seq, jsonFromFabricValue({ value: e.value }), seq);
   });
   db.close();
 }
