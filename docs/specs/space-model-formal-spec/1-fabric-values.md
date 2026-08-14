@@ -2425,10 +2425,15 @@ This is the trade against `UnknownValue`'s behavior, and it is deliberate.
 Because the wire form is `Problematic@1` rather than the preserved tag, a
 later reader that *does* have a codec for that tag will not silently decode
 the real value: it reads back a `ProblematicValue` and can see, in `error`,
-why the value was never built. `UnknownValue` is the type that heals that way,
-which it can because its tag is known to be a real one; a `ProblematicValue`
-may hold a tag that names nothing, and a form that only works for some of them
-would be worse than one that works for all.
+why the value was never built.
+
+Healing is not available to this class in any case. A preserved tag is kept
+only when it is a string, and is otherwise a *rendering* of whatever sat in
+tag position — so re-emitting under it would sometimes name the original tag
+and sometimes name a description of it, and a reader could not tell which. A
+form that heals for some inputs and silently produces a different value for
+others is worse than one that heals for none. `UnknownValue` is the type that
+heals, and it can because its tag is checked to be a real one.
 
 Whether a decode failure surfaces as a `ProblematicValue` or as a throw is the
 encoding context's `lenient` setting alone, not the codec's: a strict context
