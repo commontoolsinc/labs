@@ -4,7 +4,7 @@
  *
  * `type` and `name` are stored separately, and the encoding leans on their
  * usual agreement: `name` is written as `null` when it matches `type`, and
- * spelled out only when it does not. Decoding has to invert that, rebuild the
+ * written out only when it does not. Decoding has to invert that, rebuild the
  * right `Error` subclass from `type`, and still accept older state in which
  * only `name` was present.
  *
