@@ -157,9 +157,13 @@ view); it imposes per-element resolution on what is named and nothing on
 what is not, so the soundness burden for an omission sits entirely with the
 client, in the same trust class as a fabricated read. The interleaving this
 permits — rejections honored eagerly while an accept's promotion is still
-parked — lives in the decided-but-not-yet-applied window the TLA+ model does
-not yet cover; the delayed-verdict refinement recorded under INV-6 is what
-would bring it into scope.
+parked — is already reachable in the TLA+ model's existing `fullstack`
+recording mode: `Reject` removes the doomed layers from the pending stack at
+the verdict, an accepted layer stays pending until `Integrate`, and a later
+`Build` records only the survivors — a sparse set relative to session
+history. What stays outside the model is verdict DELIVERY timing, the
+client-side window between the server deciding and the client learning it,
+recorded as the standing refinement under INV-6.
 
 Layer: client dependency recording (`packages/runner/src/storage/v2.ts`
 pending-stack bookkeeping); server resolution (`resolvePendingReads`).
