@@ -7,7 +7,6 @@
  */
 
 import { createSession, Identity, isDID } from "@commonfabric/identity";
-import { setLLMUrl } from "@commonfabric/llm";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   experimentalOptionsFromEnv,
@@ -62,10 +61,6 @@ async () => {
     await Deno.readFile(config.identityKeyPath),
   );
   const apiUrl = new URL(config.apiUrl);
-  // A pattern that calls `llm` reaches the model through the same deployed API
-  // this session speaks to, so language-model work stays inside the space
-  // rather than passing through the harness.
-  setLLMUrl(config.apiUrl);
   if (!isDID(config.space)) {
     const pieces = await PiecesController.initialize({
       apiUrl,
