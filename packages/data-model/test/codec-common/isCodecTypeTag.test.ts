@@ -52,13 +52,15 @@ describe("isCodecTypeTag", () => {
     expect(isCodecTypeTag("/Bytes@1")).toBe(false);
   });
 
-  it("returns `false` for a string that contains a tag without being one", () => {
-    // The syntax is anchored at both ends, so neither a prefix nor a suffix
-    // sneaks a tag past a check made on data off a channel.
+  it("returns `false` for a tag padded with whitespace or a newline", () => {
+    // The syntax is anchored at both ends and is not multiline, so padding a
+    // tag does not make the string one. The newline pair is the only case in
+    // this file that catches a stray `m` flag; an unanchored match would let
+    // all four through.
     expect(isCodecTypeTag(" Bytes@1")).toBe(false);
     expect(isCodecTypeTag("Bytes@1 ")).toBe(false);
-    expect(isCodecTypeTag("x\nBytes@1")).toBe(false);
-    expect(isCodecTypeTag("Bytes@1\nx")).toBe(false);
+    expect(isCodecTypeTag("\nBytes@1")).toBe(false);
+    expect(isCodecTypeTag("Bytes@1\n")).toBe(false);
   });
 
   it("returns `false` for a value that is not a string", () => {
