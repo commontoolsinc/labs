@@ -283,3 +283,79 @@ Deno.test("flag ON: a pattern run whose output scope is DISCOVERED session-narro
     assertEquals(result.key("echo").get() as unknown, "narrow me");
   });
 });
+
+Deno.test("flag ON: rewriting a parent that omits an ALREADY-materialized session property re-enqueues no redirect writes (thread r3731191457 probe)", async () => {
+  await run(true, async (runtime) => {
+    const schema = {
+      type: "object",
+      properties: {
+        draft: {
+          type: "object",
+          properties: { text: { type: "string" } },
+          asCell: [{ kind: "cell", scope: "session" }],
+        },
+        title: { type: "string" },
+      },
+    } as const;
+    const tx = runtime.edit();
+    const cell = runtime.getCell(
+      space,
+      "via-user-hop-repeat",
+      schema,
+      tx,
+    );
+    cell.set({ title: "first" } as never);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+
+    // The chain is materialized. Rewrite the parent, again omitting the
+    // scoped property: the eager pass must recognize BOTH redirects as
+    // unchanged — a second write-attempt of the same sigil every parent
+    // rewrite would be redundant write/reactivity churn.
+    const tx2 = runtime.edit();
+    const cell2 = runtime.getCell(
+      space,
+      "via-user-hop-repeat",
+      schema,
+      tx2,
+    );
+    cell2.set({ title: "second" } as never);
+    runtime.prepareTxForCommit(tx2);
+    const log = (tx2.tx as unknown as {
+      getReactivityLog: () => { writes: Array<{ id: string; path: string[] }> };
+    }).getReactivityLog();
+    const draftWrites = log.writes.filter((write) =>
+      write.path.length > 0 && write.path[0] === "draft"
+    );
+    assertEquals(
+      draftWrites,
+      [],
+      "a parent rewrite omitting a materialized scoped property must " +
+        "not re-write its redirect chain",
+    );
+    await tx2.commit();
+    await runtime.idle();
+
+    // And the chain still stands.
+    const baseLink = cell.key("draft").getAsNormalizedFullLink();
+    const schemaless = createCell<{ draft: { text: string } }>(
+      runtime,
+      { ...cell.getAsNormalizedFullLink(), schema: undefined },
+    );
+    const spaceSlot = parseLink(
+      schemaless.key("draft").getRaw({ lastNode: "writeRedirect" }),
+      schemaless.key("draft"),
+    );
+    assertEquals(spaceSlot?.scope, "user");
+    const userInstance = createCell<{ text: string }>(
+      runtime,
+      { ...baseLink, schema: undefined, scope: "user" },
+    );
+    const userSlot = parseLink(
+      userInstance.getRaw({ lastNode: "writeRedirect" }),
+      userInstance,
+    );
+    assertEquals(userSlot?.scope, "session");
+  });
+});

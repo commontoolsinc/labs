@@ -77,6 +77,30 @@ export type ScopeKeyIdentity = {
 };
 
 const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
+const decodeScopeKeyPart = (part: string): string => decodeURIComponent(part);
+
+/**
+ * Whether `part` is a CANONICAL scope-key segment: non-empty and
+ * byte-identical to what {@link encodeScopeKeyPart} emits for the
+ * segment's own decoding — i.e. an element of the encoder's image, the
+ * fixed points of encode∘decode. This is what makes accepted keys safe
+ * to embed in delimited composite keys and to percent-decode: no raw
+ * `/`, `:`, or any other character the encoder escapes; no malformed
+ * escape (decoding an accepted segment never throws); no decodable but
+ * non-canonical escape (`%2f` where the encoder emits `%2F`, `%41` for
+ * plain `A`), so one identity has exactly ONE accepted spelling and
+ * construction stays injective. Malformed input — a bad escape (decode
+ * throws) or a lone surrogate (re-encode throws) — REFUSES with false,
+ * never a URIError.
+ */
+const isCanonicalScopeKeyPart = (part: string): boolean => {
+  if (part.length === 0) return false;
+  try {
+    return encodeScopeKeyPart(decodeScopeKeyPart(part)) === part;
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Constructor for the `session:<principal>:<sessionId>` key form, shared
@@ -178,13 +202,28 @@ export const scopeKeyApplicableTo = (
   return resolveScopeKey(scope, identity) === scopeKey;
 };
 
-/** Whether a string is a well-formed {@link ScopeKey}. */
+/**
+ * Whether a string is a CANONICAL {@link ScopeKey} — one
+ * {@link resolveScopeKey} could have constructed: `space`, or
+ * `user:`/`session:` with every identity segment satisfying
+ * {@link isCanonicalScopeKeyPart}. Prefix-shaped keys with raw
+ * delimiters (`user:a/b`, `user:did:key:x`), malformed escapes
+ * (`%`, `%GG`), or non-canonical escapes (`%2f` for the encoder's
+ * `%2F`) are REJECTED, not just unusual: admission surfaces gate on
+ * this predicate, and descendant surfaces place admitted keys into
+ * `/`-delimited composite keys and percent-decode their segments, so
+ * a merely prefix-shaped key corrupts that addressing or throws
+ * mid-serving. Refusal, never a throw.
+ */
 export const isScopeKey = (value: string): value is ScopeKey => {
   if (value === "space") return true;
-  if (value.startsWith("user:")) return value.length > "user:".length;
+  if (value.startsWith("user:")) {
+    return isCanonicalScopeKeyPart(value.slice("user:".length));
+  }
   if (value.startsWith("session:")) {
     const parts = value.split(":");
-    return parts.length === 3 && parts[1].length > 0 && parts[2].length > 0;
+    return parts.length === 3 && isCanonicalScopeKeyPart(parts[1]) &&
+      isCanonicalScopeKeyPart(parts[2]);
   }
   return false;
 };
@@ -984,6 +1023,44 @@ export function getServerExecutionConfig(): boolean {
 
 export function resetServerExecutionConfig(): void {
   serverExecutionEnabled = false;
+  serverExecutionEnablers = 0;
+}
+
+// The flag is a process-global admission input with SEVERAL owners in a
+// serving process (each explicitly-enabled Runtime, plus the
+// ExecutorHost itself), so its production lifecycle is reference-counted
+// HERE — beside the flag — rather than in any one owner: an owner-local
+// count cannot see the others, and an unconditional reset from one owner
+// un-claims `derived` for every other owner's in-flight commit. The
+// direct set/reset functions above remain the test seam (reset is a HARD
+// reset: flag off, count zero).
+let serverExecutionEnablers = 0;
+
+/** Live enabler count — consulted by the one sanctioned explicit-disable
+ * arm (a Runtime constructed with `serverExecution: false` writes the
+ * ambient flag only when NO enabler is live). */
+export function serverExecutionEnablerCount(): number {
+  return serverExecutionEnablers;
+}
+
+/**
+ * Claim the ambient server-execution flag, reference-counted. Returns
+ * the matching release; the flag resets only when the LAST live enabler
+ * releases. The release is idempotent per handle, so exception-safe
+ * callers can release from both a rollback and a finally.
+ */
+export function acquireServerExecutionEnabler(): () => void {
+  serverExecutionEnablers += 1;
+  serverExecutionEnabled = true;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    serverExecutionEnablers = Math.max(0, serverExecutionEnablers - 1);
+    if (serverExecutionEnablers === 0) {
+      serverExecutionEnabled = false;
+    }
+  };
 }
 
 /**

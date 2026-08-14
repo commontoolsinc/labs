@@ -49,11 +49,11 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
 
 /**
  * The lists themselves. Kept to what stage F's live ON-arm runs actually
- * surfaced: with the serving loop landed the ON arm genuinely SERVES, and
- * the plan's documented two-deriver interim (server and clients both
- * deriving until Phase 2 removes the client path) is a real posture, not
- * a hypothesis. Entries name their unskipping phase — never silent
- * filtering anywhere else.
+ * surfaced: with the serving loop landed the ON arm genuinely SERVES,
+ * and CI's ON arm is exactly the plan's mid-Phase-1 local flag flip —
+ * server and still-deriving clients CAS-storming, "expected, local-only,
+ * fine" (L14), and never a shipped state. Entries name their unskipping
+ * phase — never silent filtering anywhere else.
  *
  * Stage-G re-justification (2026-08-06, per the phase-completing pass):
  * the ONE entry below was re-examined and STANDS on its original

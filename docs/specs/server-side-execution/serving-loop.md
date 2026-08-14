@@ -748,17 +748,25 @@ network await).
 
 ## 3e. Pattern updates
 
-The SpaceServer owns the pattern-source watcher and the hot-swap. Today
-both halves run CLIENT-side when `systemPatternAutoUpdate` is on — on
-in shell, off in server processes (EXPERIMENTAL_OPTIONS.md): the
-post-instantiation source check and the live swap via the
+The SpaceServer owns the pattern-source watcher and the hot-swap. Off
+the flag both halves run CLIENT-side when `systemPatternAutoUpdate` is
+on — on in shell, off in server processes (EXPERIMENTAL_OPTIONS.md):
+the post-instantiation source check and the live swap via the
 `patternIdentity` meta sink, teardown + reinstantiation included. Under
-the flag that posture FLIPS: pieces run only in the SpaceServer, so the
-watcher and the swap MUST run there — a pattern-pointer write is an
-ordinary authored input that dirties the piece, and the swap is the
-server reacting to it (runtime-mapping.md N40/N41). The pointer write
-itself stays authored-class under the updater's principal. Plan
-Phase 1 carries the task.
+the flag that posture FLIPS, and stage F LANDED the flip
+(runtime-mapping.md rows 40/41): the serving-runtime factory enables
+`systemPatternAutoUpdate` server-side, and the swap runs in the
+SpaceServer — a pattern-pointer write is an ordinary authored input
+that dirties the piece, the swap is the server reacting to it, and the
+swap's setup write stamps the `bookkeeping` kind and enters the wave
+(§3d). Because a sealed setup can still be WITHDRAWN at the wave
+commit, the swap replaces the running graph only after DURABLE
+acceptance — on withdrawal the old graph stays (old-graph-plus-new-
+pointer is a coherent not-yet-swapped state; the reverse is the
+broken-setup class). The pointer write itself stays authored-class
+under the updater's principal. The CHECK half's network source probe
+against a fully-local store is the flagged stage-F residual (verified
+in the integration environment, not the unit fixture).
 
 ## 4. Effectful nodes: memoization contract
 
@@ -778,7 +786,11 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
 - **Miss rule**: enqueue the effect on the outbox with the key AND
   the run's identity carriage — the result-cell address including
   its instance `scope_key`, plus the run's acting identity where it
-  had one, plus the run's CFC LABEL BASIS (FP6, RULED 2026-08-03).
+  had one, plus the run's CFC LABEL BASIS (FP6, RULED 2026-08-03;
+  RULED 2026-08-05 STRUCTURAL: the carriage carries the basis
+  reference, and the completion's writeback re-reads the request
+  inputs so labels derive from the basis AS IT STANDS at writeback,
+  never from a frozen at-seal snapshot).
   The completion commit is derived-class, so it carries
   protocol.md §1's annotations like any other — but it never passes
   through §3d's sealing (the run is long over when the response
@@ -818,7 +830,9 @@ the durable rows of §5 carry APPENDS, never effect state).
   result-cell
   address with its `scope_key`, the acting identity where the
   run had one, and the run's CFC label basis (FP6, RULED
-  2026-08-03) so the completion write's labels derive from its
+  2026-08-03; structural per the 2026-08-05 ruling — the basis
+  reference rides the entry and labels re-derive at writeback)
+  so the completion write's labels derive from its
   request's — an external result inherits its request's
   confidentiality. Process-local is SOUND here: a crash re-misses
   the effect from memo keys (§4, §6; at-least-once, already ruled).

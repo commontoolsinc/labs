@@ -8,6 +8,7 @@
 
 import { assert, assertEquals } from "@std/assert";
 import {
+  isScopeKey,
   resolvePrincipalSessionKey,
   resolveScopeKey,
 } from "@commonfabric/memory/v2";
@@ -21,6 +22,7 @@ import {
   fanoutStateKey,
   type FanoutStep,
   holderId,
+  isCanonicalKey,
   makeFanout,
   makeWorld,
   pushRowsFor,
@@ -838,6 +840,61 @@ Deno.test("bridge: model scope-key constructors byte-agree with the real wire vo
   // keeps the literal `:` separators exact, so these no longer collide.
   assert(sessionKey("a:b", "c") !== sessionKey("a", "b:c"));
   assert(userKey("session:x") !== sessionKey("x", "x"));
+
+  // Validator half of the bridge: the model's restated validator and the
+  // real `isScopeKey` agree POINTWISE — every constructed key is in both
+  // acceptance sets, and the rejection sets coincide over the corpus of
+  // prefix-shaped non-keys: raw delimiters inside a segment, malformed
+  // escapes, decodable-but-non-canonical escapes, missing/empty segments.
+  for (const p of principals) {
+    for (
+      const key of [
+        userKey(p),
+        ...sessionIds.map((s) => sessionKey(p, s)),
+      ]
+    ) {
+      assert(isScopeKey(key), `real validator rejects constructed ${key}`);
+      assert(isCanonicalKey(key), `model validator rejects constructed ${key}`);
+    }
+  }
+  const rejectionCorpus = [
+    "",
+    "user",
+    "session",
+    "user:",
+    "session:x",
+    "session:x:",
+    "Space",
+    " space",
+    "space ",
+    "user:a/b",
+    "session:a/b:c",
+    "session:a:b/c",
+    "user:did:key:alice",
+    "session:a:b:c",
+    "user:%",
+    "user:%2",
+    "user:%GG",
+    "session:%GG:s",
+    "user:a%2fb",
+    "user:%41",
+    "user:a b",
+    "user:a+b",
+    "user:\uD800",
+    "user:%ED%A0%80",
+  ];
+  for (const value of rejectionCorpus) {
+    assertEquals(
+      isScopeKey(value),
+      false,
+      `real validator admits ${JSON.stringify(value)}`,
+    );
+    assertEquals(
+      isCanonicalKey(value),
+      false,
+      `model validator admits ${JSON.stringify(value)}`,
+    );
+  }
 });
 
 // ---------- C11: narrowing / fan-out (Phase 2 pre-gate, OW3) ----------

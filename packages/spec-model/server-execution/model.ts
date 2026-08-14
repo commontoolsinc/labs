@@ -48,6 +48,40 @@ export const userKey = (u: UserId): string => `user:${encodeKeyPart(u)}`;
 export const sessionKey = (u: UserId, s: SessionId): string =>
   `session:${encodeKeyPart(u)}:${encodeKeyPart(s)}`;
 
+/**
+ * Validator mirror — RESTATED from the real `isScopeKey`
+ * (`packages/memory/v2.ts`), never imported. Accepts exactly the
+ * constructors' image: `space`, `user:<seg>`, `session:<seg>:<seg>`,
+ * every segment non-empty and CANONICAL — byte-identical to what
+ * `encodeKeyPart` emits for the segment's own decoding. So raw `/` or
+ * `:` inside a segment, malformed percent escapes, and decodable but
+ * non-canonical escapes (`%2f` where the encoder emits `%2F`, `%41`
+ * for plain `A`) all refuse; malformed input returns false, never
+ * throws. The conformance bridge test in properties.test.ts asserts
+ * pointwise agreement with the real validator on the acceptance AND
+ * rejection sets.
+ */
+export const isCanonicalKey = (value: string): boolean => {
+  const canonicalSegment = (segment: string): boolean => {
+    if (segment.length === 0) return false;
+    try {
+      return encodeKeyPart(decodeURIComponent(segment)) === segment;
+    } catch {
+      return false;
+    }
+  };
+  if (value === SPACE_KEY) return true;
+  if (value.startsWith("user:")) {
+    return canonicalSegment(value.slice("user:".length));
+  }
+  if (value.startsWith("session:")) {
+    const segments = value.split(":");
+    return segments.length === 3 && canonicalSegment(segments[1]) &&
+      canonicalSegment(segments[2]);
+  }
+  return false;
+};
+
 /** The scope kinds a handler write can declare (scopes.md §2). */
 export type ScopeKind = "space" | "user" | "session";
 

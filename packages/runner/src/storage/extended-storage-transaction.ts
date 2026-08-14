@@ -2219,6 +2219,19 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.tx;
   }
 
+  // Effect-completion writebacks can be marked through a wrapper
+  // (markEffectCompletion calls these on whatever tx shape it is
+  // handed). Forward both, or a wrapped completion silently skips
+  // authoritative mode and the F2 no-op-elision wedge reopens for
+  // exactly those paths (stage-G round-2 thread 18).
+  markAuthoritativeWrites(): void {
+    this.wrapped.markAuthoritativeWrites?.();
+  }
+
+  isAuthoritativeWrites(): boolean {
+    return this.wrapped.isAuthoritativeWrites?.() === true;
+  }
+
   getCfcState(): Readonly<CfcTxState> {
     return this.wrapped.getCfcState();
   }

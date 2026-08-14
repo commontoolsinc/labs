@@ -37,6 +37,7 @@ import {
   type EntityId,
   getServerExecutionConfig,
   isEntityDocument,
+  isScopeKey,
   type Operation,
   type PatchOp,
   ProtocolError,
@@ -299,6 +300,13 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_basis_entity
 -- from memo keys). References nothing; nothing references it. The
 -- writer/reader module is execution-outbox.ts.
 CREATE TABLE IF NOT EXISTS execution_outbox (
+  id                INTEGER PRIMARY KEY, -- declared alias of rowid: the
+                                      --   delivery-ack handle. Declared so
+                                      --   it is STABLE across VACUUM —
+                                      --   an implicit rowid can be
+                                      --   renumbered by maintenance,
+                                      --   letting an ack delete the
+                                      --   wrong row (a lost append).
   branch            TEXT    NOT NULL,
   target_space      TEXT    NOT NULL,
   target_stream     TEXT    NOT NULL, -- the target stream doc id
@@ -921,6 +929,14 @@ export type AppliedCommit = {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
+  /** True when the commit was an exact REPLAY of one this session
+   * already applied — the stored result was returned and NOTHING was
+   * inserted. Side-effect carriage riding the apply (the wave commit's
+   * outbox rows, FP1) keys off this: a replay must not re-run inserts
+   * whose originals rode the first application (the rows may since
+   * have been delivered and retired — re-inserting resurrects
+   * delivered appends as duplicate delivery work). */
+  replayed?: true;
 };
 
 export type ReadOptions = {
@@ -1468,11 +1484,21 @@ export const entityIdExists = (
 
 export const read = (
   engine: Engine,
-  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }:
+  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId, scopeKey }:
     ReadOptions,
 ): EntityDocument | null => {
-  return readState(engine, { id, branch, seq, scope, principal, sessionId })
-    ?.document ?? null;
+  return readState(engine, {
+    id,
+    branch,
+    seq,
+    scope,
+    principal,
+    sessionId,
+    // Forward the explicit instance (protocol.md §2's read row): dropping
+    // it here would silently resolve the scope from (principal,
+    // sessionId) and read the WRONG document.
+    ...(scopeKey === undefined ? {} : { scopeKey }),
+  })?.document ?? null;
 };
 
 export const readState = (
@@ -1798,6 +1824,30 @@ export const applyWaveCommit = (
     (txEngine: Engine, txOptions: typeof options) => {
       const { waveBasis, basisInstances, outboxAppends, ...restOptions } =
         txOptions;
+      // Basis rows are ADDRESSING (recovery's re-mark scan matches
+      // storage rows against these instance values), so their keys meet
+      // the same admission bar as annotated scope keys: a non-canonical
+      // key would store rows no canonical key ever matches — a silent
+      // liveness hole rather than a loud one. Refused up front, before
+      // any head query runs.
+      for (const instance of basisInstances ?? []) {
+        if (!isScopeKey(instance.actionScopeKey)) {
+          throw new ProtocolError(
+            `wave commit rejected: basis action instance key ` +
+              `"${instance.actionScopeKey}" is not a canonical scope_key ` +
+              "(key-vocabulary.md §3)",
+          );
+        }
+        for (const row of instance.rows) {
+          if (!isScopeKey(row.entityScopeKey)) {
+            throw new ProtocolError(
+              `wave commit rejected: basis row entity instance key ` +
+                `"${row.entityScopeKey}" is not a canonical scope_key ` +
+                "(key-vocabulary.md §3)",
+            );
+          }
+        }
+      }
       // An appends-only wave commits with zero operations: the durable
       // rows ride this transaction (FP1), so the emptiness guard below
       // must not refuse it.
@@ -1913,7 +1963,17 @@ export const applyWaveCommit = (
       // inside this same transaction — atomically with the wave commit,
       // so a crash either has both (rows re-sent, deduped at the
       // target's eventId horizon) or neither (the wave never happened).
-      if (outboxAppends !== undefined && outboxAppends.length > 0) {
+      // Gated on a NEWLY INSERTED commit: an exact replay returns the
+      // stored result without applying anything, and its original
+      // application already carried these rows — re-inserting would
+      // resurrect rows the drain may have delivered and retired,
+      // producing duplicate durable delivery work (the target's
+      // eventId horizon dedupes the duplicates, but each one costs a
+      // delegated-append round trip and a dedupe pass).
+      if (
+        applied.replayed !== true &&
+        outboxAppends !== undefined && outboxAppends.length > 0
+      ) {
         insertExecutionOutboxRows(txEngine, {
           branch,
           createdSeq: applied.seq,
@@ -2044,28 +2104,6 @@ const applyCommitTransaction = (
           "row) — partial carriage is refused, never defaulted",
       );
     }
-    // A sessionless delegated chain has NO session instance (scopes.md
-    // §5: a sessionless actor's session-scoped write is an ERROR —
-    // neither falling back to another identity nor minting a session is
-    // permitted). Without this refusal the writeOperation fallback
-    // below would key such a write from the DELEGATING envelope's
-    // session — `session:<actingPrincipal>:<sink session>`, a chimera
-    // instance no party ever acted as. Refused at admission, loudly.
-    if (
-      delegated.actingSession === undefined || delegated.actingSession === ""
-    ) {
-      for (const operation of commit.operations) {
-        if (operation.op === "sqlite") continue;
-        if (normalizeScope(operation.scope) === "session") {
-          throw new ProtocolError(
-            "delegated admission rejected: a sessionless delegated " +
-              "batch (no actingSession) carries a session-scoped write " +
-              "— a sessionless actor has no session instance " +
-              "(scopes.md §5, protocol.md §2's delegated row)",
-          );
-        }
-      }
-    }
   }
 
   // Derived commits key scoped writes by their EXPLICIT annotation
@@ -2109,6 +2147,18 @@ const applyCommitTransaction = (
             "annotation (protocol.md §1)",
         );
       }
+      // The annotated key becomes the row's key VERBATIM (writeOperation's
+      // scopeKeyOverride below), so admission requires the canonical
+      // grammar, not just the scope prefix: a raw delimiter or malformed
+      // escape here would store a row that corrupts delimited composite
+      // addressing or throws when a serving surface percent-decodes it.
+      if (!isScopeKey(annotated)) {
+        throw new ProtocolError(
+          `derived-class commit rejected: annotated scope_key ` +
+            `"${annotated}" (op ${opIndex}) is not a canonical scope_key ` +
+            "(key-vocabulary.md §3)",
+        );
+      }
       if (scopeOfScopeKey(annotated) !== declared) {
         throw new ProtocolError(
           `derived-class commit rejected: annotated scope_key ` +
@@ -2148,7 +2198,51 @@ const applyCommitTransaction = (
       seq: existing.seq,
       branch: existing.branch,
       revisions: selectCommitRevisions(engine, existing.seq),
+      replayed: true,
     };
+  }
+
+  // A sessionless delegated chain has NO session instance (scopes.md
+  // §5: a sessionless actor's session-scoped write is an ERROR —
+  // neither falling back to another identity nor minting a session is
+  // permitted). Without this refusal the writeOperation fallback
+  // below would key such a write from the DELEGATING envelope's
+  // session — `session:<actingPrincipal>:<sink session>`, a chimera
+  // instance no party ever acted as. Refused at admission, loudly.
+  // Placed AFTER the replay return (the stage-B ordering rule): the
+  // check is payload-pure, so a first attempt refuses identically, and
+  // a replay of a commit the store already admitted returns its stored
+  // result rather than being re-adjudicated.
+  if (
+    delegated !== undefined &&
+    (delegated.actingSession === undefined || delegated.actingSession === "")
+  ) {
+    for (const operation of commit.operations) {
+      if (operation.op === "sqlite") {
+        // The same rule for folded SQLite writes: a session-scoped
+        // cell-db resolves its on-disk file from a session identity a
+        // sessionless actor does not have — admitting it would key the
+        // file from the delegating ENVELOPE's session, the same
+        // chimera instance the entity-write refusal below prevents.
+        if (operation.db.scope === "session") {
+          throw new ProtocolError(
+            "delegated admission rejected: a sessionless delegated " +
+              "batch (no actingSession) carries a session-scoped " +
+              "SQLite write — a sessionless actor has no session " +
+              "instance (scopes.md §5, protocol.md §2's delegated row)",
+          );
+        }
+        continue;
+      }
+      if (normalizeScope(operation.scope) === "session") {
+        throw new ProtocolError(
+          "delegated admission rejected: a sessionless delegated " +
+            "batch (no actingSession) carries a session-scoped write " +
+            "— a sessionless actor has no session instance " +
+            "(scopes.md §5, protocol.md §2's delegated row)",
+        );
+      }
+    }
   }
 
   validateCommitPreconditions(engine, sessionKey, branch, commit, {
