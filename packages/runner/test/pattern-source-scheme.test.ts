@@ -100,7 +100,7 @@ describe("normalizePatternSource", () => {
 
   it("drops a query or fragment rather than minting an unusable ref", () => {
     // The patterns route serves a file by path, so neither selects anything;
-    // keeping either would spell a ref the resolver rejects, leaving the piece
+    // keeping either would name a ref the resolver rejects, leaving the piece
     // with provenance nothing would follow again.
     expect(normalizePatternSource("/api/patterns/custom/my-app.tsx?v=2", HOST))
       .toBe("system:custom/my-app.tsx");
@@ -123,7 +123,7 @@ describe("normalizePatternSource", () => {
   });
 
   it("refuses a legacy locator that does not address a file on the route", () => {
-    // Climbing, an empty path, and a doubled separator each spell a ref that
+    // Climbing, an empty path, and a doubled separator each denote a ref that
     // cannot resolve, so the locator is left as authored instead.
     for (
       const source of [

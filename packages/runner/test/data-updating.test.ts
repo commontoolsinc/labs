@@ -1766,11 +1766,11 @@ describe("data-updating", () => {
       expect(long.reads).toBeLessThan(50);
     });
 
-    it("stores a value answering `toCell` as the link it names", () => {
+    it("stores a value carrying `toCell` as the link it names", () => {
       // What the walk stops at, the diff replaces with a link -- which is
       // what makes an unchanged element of a read-back list cost nothing to
       // write, and is the property the walk stopping must not disturb. Both
-      // kinds of value answer `toCell` and both land the same way: the live
+      // kinds of value carry `toCell` and both land the same way: the live
       // view a schemaless read hands out, and the frozen result a read
       // through a schema annotates.
       const source = runtime.getCell<{ inner: { deep: number } }>(

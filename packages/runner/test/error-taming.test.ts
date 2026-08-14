@@ -92,7 +92,7 @@ describe("Error.isError under SES lockdown", () => {
     it("recognizes an error handed in from the host", () => {
       // The reason to restore the genuine intrinsic rather than polyfill with
       // `instanceof`: the compartment's `Error` is not the host's, so only the
-      // internal-slot test answers this correctly.
+      // internal-slot test is correct here.
       const check = evaluateFunctionSourceInSES(
         `function (value) { return Error.isError(value); }`,
         { lockdown: true },

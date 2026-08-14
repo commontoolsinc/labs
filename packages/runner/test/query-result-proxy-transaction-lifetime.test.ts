@@ -8,7 +8,7 @@
 //
 // A transaction marked for lazy materialization turns the same call into a view
 // over the state that one transaction sees, fixed at creation. Reading after
-// the transaction finishes throws instead of quietly answering from committed
+// the transaction finishes throws instead of quietly reading from committed
 // state, which is what a materialized read wants: the value it describes is the
 // value that was there when it was taken.
 
@@ -149,7 +149,7 @@ describe("query-result-proxy transaction lifetime", () => {
       await readTx.commit();
 
       // The transaction it was made against is gone, and the handle still
-      // answers — from current committed state, not from a refusal.
+      // reads — from current committed state, not from a refusal.
       expect(handle.outer.middle.leaf).toBe(1);
 
       const update = runtime.edit();

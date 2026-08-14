@@ -355,8 +355,8 @@ describe("CT-1240: query result proxy enumeration", () => {
     }
   });
 
-  // `in` IS the `has` trap's own operator, so inherited names SHOULD answer
-  // true there. Pinned so a future cleanup does not "fix" both traps alike.
+  // `in` IS the `has` trap's own operator, so inherited names SHOULD be true
+  // there. Pinned so a future cleanup does not "fix" both traps alike.
   it("the `in` operator still sees inherited names", () => {
     const cell = runtime.getCell<{ a: number }>(
       space,

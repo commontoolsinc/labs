@@ -119,7 +119,7 @@ describe("CFC wildcard policy value conditions on fabric-primitive types", () =>
   });
 
   it("stays conservative on a type name outside the vocabulary", () => {
-    // The matcher's unknown-type fallthrough answers "applies" so a policy
+    // The matcher's unknown-type fallthrough returns "applies" so a policy
     // with a type this build does not know cannot be dodged.
     const unknownCondition = {
       type: "SomeFutureType",
