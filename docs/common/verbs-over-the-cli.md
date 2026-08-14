@@ -513,9 +513,11 @@ holding one piece can render two different `id`s, and a marker and
 created inside a handler and pushed into a collection is held through a link
 that redirects to it and the two stop at different points along that redirect.
 
-Both read back the same contents. So feed an address into the next command
-rather than comparing it to another — two ids differing is not evidence of two
-pieces.
+So feed an address into the next command rather than comparing it to another:
+two ids differing is not evidence of two pieces. Comparing contents answers a
+different question — distinct pieces can hold identical contents, and one
+piece's contents change under it. **Whether two addresses name the same
+piece is not a question the CLI answers today.**
 
 The marker sits beside a projection when both are wanted, and the answer
 carries both:

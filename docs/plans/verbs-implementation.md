@@ -53,7 +53,7 @@ without reconstructing it.
 | 2. an unrecognized projection key is refused | not started; design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
 | 5. `cf wish` and `cf exec` take the read options | not started |
-| 11. a caller may name a reference | **decided** — the two routes are aliases, so a statement rather than a fix; documentation in #5754, then #5632 closes. Whether a rendered address should declare itself indirect is deferred in #5760 and gates nothing |
+| 11. a caller may name a reference | not started; sequenced, gated on one measurement |
 
 Item 9 is split because its two halves have different fates: the marks landed,
 the emission is parked.
@@ -462,7 +462,7 @@ re-runs as data arrives, and interim states are rarely acted on. A marker
 offering resolution over it would ship nondeterminism under a name promising
 determinism, so none is planned and the vocabulary has stopped moving.
 
-Two things follow, and both are recorded in [#5760] rather than resolved here:
+Two things follow, and both are recorded in #5760 rather than resolved here:
 whether a rendered address should declare itself indirect, deferred as not
 needed yet; and that a **non-reactive reader** is where eventual consistency
 stops paying, since `cf` exits before convergence on purpose rather than hold a
@@ -646,7 +646,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | **fixed** by #5740 |
 | #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | **fixed** by #5757 |
 | #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 — **working as designed**; closes once #5754 lands the documentation |
-| #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | step 11, if it proves to be the same root |
+| #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | unscheduled. It rode ordering step 11 while that step was a question about identity; the answer there was that the two routes are aliases by design, which says nothing about a scheme the id itself drops. Independent, and still open |
 | #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
 | #5560 | an address a call returns cannot be passed back as a verb argument | item 11 |
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |

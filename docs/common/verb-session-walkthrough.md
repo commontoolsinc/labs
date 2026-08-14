@@ -343,10 +343,12 @@ dictionary of RFC 6901 pointers naming the document behind each result path, so
 the address is one `jq` hop further away but reachable.
 
 It differs from a marker in one way that matters: it **resolves**. A marker
-renders the link as stored; `--show-links` follows the chain and names the
-document at the end of it. For getting an address to compose with, the two are
-interchangeable and an in-band marker is the shorter road. For asking which
-document a path really lands in, only the resolving one answers.
+renders the link as stored; `--show-links` follows the chain as far as the
+links this replica has already materialized, and names the document it reaches.
+That is not a terminal answer — a hop whose target is not local kicks off a
+fetch nobody awaits, and a one-shot command exits before it lands, so the same
+path can resolve further on a later read. For getting an address to compose
+with, the two are interchangeable and an in-band marker is the shorter road.
 
 **An address is not an identifier to compare.** Addresses are many-to-one over
 cells, and a holder of one cannot tell a canonical id from an alias. Two
@@ -358,8 +360,10 @@ redirect. Each address reads back the same contents, which is what an address
 is for: something to read next, not a claim about canonical identity.
 
 So compose with an address; do not compare one. Two ids differing does not mean
-two pieces, and equality of contents is the question a caller actually wants
-answered.
+two pieces — and comparing contents does not rescue the question, since two
+distinct pieces can hold identical contents and one piece's contents change
+under it. **Asking whether two addresses name the same piece is not something
+the CLI supports today.**
 
 Neither route needs a verb to declare its result. A `$link` marker on a link
 position renders the address and suppresses the fetch without consulting a
