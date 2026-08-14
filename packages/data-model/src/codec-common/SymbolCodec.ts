@@ -34,7 +34,9 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
+export class SymbolCodec<
+  Encoded extends (string extends Encoded ? unknown : never),
+> extends BaseTerminalCodec<Encoded> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.Symbol, Symbol as unknown as Constructor);
@@ -48,10 +50,11 @@ export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
   /**
    * @inheritDoc
    *
-   * The cast is what a caller's choice of `Encoded` cannot be asked to prove.
-   * A registry key is a `string`, and every format registering this codec has
-   * a `string` arm, but TypeScript has no way to require "`Encoded` is a union
-   * containing `string`", so the assignment is stated here rather than checked.
+   * The cast is unavoidable but not unguarded. TypeScript will not prove a
+   * `string` assignable to a bare type parameter inside a body, whatever the
+   * parameter is constrained to; what the constraint on the class does instead
+   * is make the cast safe by construction, since no caller can instantiate
+   * this at an `Encoded` that a registry key would not fit.
    */
   encode(value: symbol): Encoded {
     // `canEncode()` already verified the symbol has a registry key.
