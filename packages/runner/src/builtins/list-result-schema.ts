@@ -1,5 +1,8 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "../builder/types.ts";
+import type { Cell } from "../cell.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { recordGeneratedWritePolicy } from "../cfc/generated-write-policy.ts";
 
 /**
  * Result-container schema for the list builtins (map/filter/flatMap): an
@@ -27,4 +30,12 @@ export const listResultSchema = (itemSchema?: JSONSchema): JSONSchema => {
     items: itemSchemaWithoutDefs,
     ...($defs !== undefined && { $defs }),
   });
+};
+
+export const recordListResultWritePolicy = (
+  tx: IExtendedStorageTransaction,
+  result: Cell<unknown>,
+  itemSchema?: JSONSchema,
+): JSONSchema => {
+  return recordGeneratedWritePolicy(tx, result, listResultSchema(itemSchema));
 };

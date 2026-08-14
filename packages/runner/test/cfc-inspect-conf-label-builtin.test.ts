@@ -104,7 +104,7 @@ const storedConfidentialityOf = (
       entry.label.confidentiality ?? []
     );
   } finally {
-    rtx.commit();
+    rtx.abort();
   }
 };
 
@@ -156,7 +156,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       // metadata observation, and marks it CFC-relevant — an unprepared
       // commit would (correctly) reject under enforce-explicit.
       runtime.prepareTxForCommit(tx);
-      tx.commit();
+      expect((await tx.commit()).ok).toBeDefined();
 
       const value = await waitForStatus(
         runtime,
@@ -239,7 +239,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
         resultCell,
       );
       runtime.prepareTxForCommit(tx);
-      tx.commit();
+      expect((await tx.commit()).ok).toBeDefined();
 
       const value = await waitForStatus(
         runtime,
@@ -283,7 +283,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       // metadata observation, and marks it CFC-relevant — an unprepared
       // commit would (correctly) reject under enforce-explicit.
       runtime.prepareTxForCommit(tx);
-      tx.commit();
+      expect((await tx.commit()).ok).toBeDefined();
 
       const value = await waitForStatus(runtime, result);
       await runtime.idle();
@@ -317,7 +317,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       // metadata observation, and marks it CFC-relevant — an unprepared
       // commit would (correctly) reject under enforce-explicit.
       runtime.prepareTxForCommit(tx);
-      tx.commit();
+      expect((await tx.commit()).ok).toBeDefined();
 
       const value = await waitForStatus(runtime, result);
       await runtime.idle();
@@ -338,7 +338,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       );
       const result = runtime.run(tx, testPattern, {}, resultCell);
       runtime.prepareTxForCommit(tx);
-      tx.commit();
+      expect((await tx.commit()).ok).toBeDefined();
 
       const value = await waitForStatus(runtime, result);
       await runtime.idle();
@@ -363,7 +363,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       // metadata observation, and marks it CFC-relevant — an unprepared
       // commit would (correctly) reject under enforce-explicit.
       runtime.prepareTxForCommit(tx);
-      tx.commit();
+      expect((await tx.commit()).ok).toBeDefined();
 
       const value = await waitForStatus(runtime, result);
       await runtime.idle();

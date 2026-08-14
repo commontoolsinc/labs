@@ -65,6 +65,7 @@ import {
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
 import { externalIngestStamp } from "./external-ingest.ts";
+import { getLlmDerivedWrites } from "./runtime-integrity.ts";
 import {
   createTxCfcGrantResolver,
   flushCfcGrantConsumptionClaims,
@@ -102,6 +103,7 @@ import { createTrustResolver } from "./trust.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  type CfcAddress,
   cfcEnforcementStrictness,
   type CfcMetadata,
   type IFCLabel,
@@ -487,13 +489,12 @@ const metadataAppliesToPath = (
   // applies on this path"; do NOT filter on `hasLabelValues` here, or
   // claim-only entries get silently bypassed.
   //
-  // Derived/structure (flow-label) entries are the exception: they record
-  // taint, not authored policy. A plain value write replacing a
-  // flow-labeled path is an ordinary overwrite (the flow components are
-  // replaced/cleared by the flow stage), so it must not demand a schema
-  // write-policy input.
+  // Per-value runtime entries are the exception: they record properties of the
+  // stored value, not authored policy. A plain value write replacing one is an
+  // ordinary overwrite, so it must not demand a schema write-policy input.
   return metadata.labelMap.entries.some((entry) =>
     entry.origin !== "derived" && entry.origin !== "structure" &&
+    entry.origin !== "runtime-integrity" &&
     (isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path))
   );
 };
@@ -511,6 +512,20 @@ const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
     schema.ifc.uiContract !== undefined ||
     schema.ifc.exactCopyOf !== undefined ||
     schema.ifc.projection !== undefined;
+};
+
+const hasFuturePolicyContract = (schema: JSONSchema): boolean => {
+  if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) return false;
+  const ifc = schema.ifc;
+  return hasPersistedPolicyClaim(schema) ||
+    Object.hasOwn(ifc, "maxConfidentiality") ||
+    [
+      ifc.confidentiality,
+      ifc.integrity,
+      ifc.addIntegrity,
+      ifc.requiredIntegrity,
+    ].some((value) => Array.isArray(value) && value.length > 0) ||
+    ifc.ownerPrincipal !== undefined;
 };
 
 const claimPathToLogicalPath = (
@@ -848,7 +863,30 @@ const generatedOutputPathsByTarget = (
   for (const input of inputs) {
     if (
       input.kind !== "schema" || input.schema === undefined ||
-      input.schemaRole !== "output"
+      input.schemaRole === undefined
+    ) {
+      continue;
+    }
+    const key = targetKey(input.target);
+    const path = canonicalizeLogicalPath(input.target.path);
+    const existing = result.get(key) ?? [];
+    if (!existing.some((candidate) => arraysEqual(candidate, path))) {
+      result.set(key, [...existing, path]);
+    }
+  }
+  return result;
+};
+
+// Runtime setup records a distinct role for the cells it constructs. These
+// paths identify that temporary creation form without trusting the authored
+// schema shape or treating ordinary generated outputs as setup writes.
+const generatedSetupInitializationPathsByTarget = (
+  inputs: readonly WritePolicyInput[],
+): ReadonlyMap<string, readonly (readonly string[])[]> => {
+  const result = new Map<string, readonly (readonly string[])[]>();
+  for (const input of inputs) {
+    if (
+      input.kind !== "schema" || input.schemaRole !== "setup-output"
     ) {
       continue;
     }
@@ -5187,6 +5225,8 @@ export const prepareBoundaryCommit = (
   const generatedOutputPaths = generatedOutputPathsByTarget(
     state.writePolicyInputs,
   );
+  const generatedSetupInitializationPaths =
+    generatedSetupInitializationPathsByTarget(state.writePolicyInputs);
   const candidates = candidateSchemasByTarget(
     state.writePolicyInputs,
     identityForInput,
@@ -5197,6 +5237,14 @@ export const prepareBoundaryCommit = (
     identityForInput,
   );
   const linkWrites = linkWritesByTarget(state.writePolicyInputs);
+  const llmDerivedWrites = getLlmDerivedWrites(tx);
+  const llmDerivedWritesByTarget = new Map<string, CfcAddress[]>();
+  for (const target of llmDerivedWrites) {
+    const key = targetKey(target);
+    const entries = llmDerivedWritesByTarget.get(key) ?? [];
+    entries.push(target);
+    llmDerivedWritesByTarget.set(key, entries);
+  }
   // S16 flow labels: the per-tx conservative join. In `persist` mode every
   // value write target gets a `derived` component carrying it; in `observe`
   // mode it only feeds diagnostics. Derivation never rejects.
@@ -5208,7 +5256,8 @@ export const prepareBoundaryCommit = (
   // below can tell a same-space join from one that consumed foreign labels.
   // `off` pays nothing — no space collection, no eligibility tracking.
   const labelProtectionMode = state.labelMetadataProtectionMode;
-  const flowTargets = flowMode === "off" ? undefined : valueWriteTargets(tx);
+  const writeTargets = valueWriteTargets(tx);
+  const flowTargets = flowMode === "off" ? undefined : writeTargets;
   const flowJoin = flowMode === "off"
     ? { confidentiality: [], integrity: [] }
     : deriveFlowJoin(
@@ -5240,6 +5289,7 @@ export const prepareBoundaryCommit = (
         `${flowTargets.size} written doc(s)`,
     );
   }
+  const runtimeIntegrityOverwriteTargets = new Set<string>();
   for (const [key, target] of valueWriteTargets(tx)) {
     if (candidates.has(key)) {
       continue;
@@ -5254,7 +5304,19 @@ export const prepareBoundaryCommit = (
     if (existing === undefined) {
       continue;
     }
-    if (!metadataAppliesToAnyPath(existing, target.paths)) {
+    const overwritesRuntimeIntegrity = existing.labelMap.entries.some((entry) =>
+      entry.origin === "runtime-integrity" &&
+      target.paths.some((path) =>
+        isPrefix(entry.path, path) || isPrefix(path, entry.path)
+      )
+    );
+    if (overwritesRuntimeIntegrity) {
+      runtimeIntegrityOverwriteTargets.add(key);
+    }
+    if (
+      !overwritesRuntimeIntegrity &&
+      !metadataAppliesToAnyPath(existing, target.paths)
+    ) {
       continue;
     }
     const linkWriteInputs = linkWrites.get(key) ?? [];
@@ -5272,7 +5334,12 @@ export const prepareBoundaryCommit = (
       `missing schema write-policy input for ${target.id}`,
     );
   }
-  const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
+  const targetKeys = new Set([
+    ...candidates.keys(),
+    ...linkWrites.keys(),
+    ...llmDerivedWritesByTarget.keys(),
+    ...runtimeIntegrityOverwriteTargets,
+  ]);
   // A vouched ingest writes its provenance mark even when the payload write
   // carries no schema candidate and flow labels are off, so the ingest target
   // must enter the persist loop on its own. The anchor is the cell the helper
@@ -5434,16 +5501,21 @@ export const prepareBoundaryCommit = (
     }
 
     const linkWriteInputs = linkWrites.get(key) ?? [];
+    const generatedVerificationSchema = generatedSetupInitializationPaths.has(
+        key,
+      )
+      ? mergedSchema
+      : schema;
     const verificationSchema = storedSchema !== undefined &&
         linkWriteInputs.length > 0
       ? undefinedCandidate
         ? storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
         : mergeCfcSchemaEnvelopes(
-          schema,
+          generatedVerificationSchema,
           storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
           { generatedOutputPaths: generatedOutputPaths.get(key) },
         )
-      : schema;
+      : generatedVerificationSchema;
 
     const requirementFailure = verifyInputRequirements(
       tx,
@@ -5546,6 +5618,7 @@ export const prepareBoundaryCommit = (
     );
     const flowTarget = flowPersist ? flowTargets?.get(key) : undefined;
     const flowWrittenPaths = flowTarget?.paths ?? [];
+    const valueWrittenPaths = writeTargets.get(key)?.paths ?? [];
     const flowWrittenValues = flowTarget?.valuesByPath;
     // Pre-transaction snapshots (and slot presence at each recorded path)
     // per written path, for the §8.12.8 re-mint-on-recreation probe below.
@@ -5698,6 +5771,7 @@ export const prepareBoundaryCommit = (
     );
     let flowCleared = false;
     let remintCleared = false;
+    let runtimeIntegrityCleared = false;
     // Stage B: stored label-metadata templates this persist drops (they are
     // re-derived from the FINAL payload entry set below). Tracked so a
     // TEMPLATE-ONLY stale envelope — a mixed-version writer cleared the
@@ -5849,9 +5923,15 @@ export const prepareBoundaryCommit = (
           continue;
         }
       }
+      const isPerValueEntry = entry.origin === "derived" ||
+        entry.origin === "link" || entry.origin === "structure" ||
+        entry.origin === "runtime-integrity";
+      const perValueEntryWasReplaced = currentLinkWritePaths.has(key) ||
+        valueWrittenPaths.some((written) => isPrefix(written, entryPath));
       if (
-        persistedLabelEntryKeys.has(key) || remintedDeclaredPaths.has(key) ||
-        currentLinkWritePaths.has(key)
+        (persistedLabelEntryKeys.has(key) || remintedDeclaredPaths.has(key) ||
+          currentLinkWritePaths.has(key)) &&
+        (!isPerValueEntry || perValueEntryWasReplaced)
       ) {
         if (
           remintedDeclaredPaths.has(key) &&
@@ -5905,6 +5985,13 @@ export const prepareBoundaryCommit = (
         }) && entryPath[entryPath.length - 1] === "*"
         ? entryPath.slice(0, -1)
         : entryPath;
+      if (
+        entry.origin === "runtime-integrity" &&
+        valueWrittenPaths.some((written) => isPrefix(written, clearProbePath))
+      ) {
+        runtimeIntegrityCleared = true;
+        continue;
+      }
       if (
         flowPersist &&
         (entry.origin === "derived" || entry.origin === "link" ||
@@ -6077,6 +6164,14 @@ export const prepareBoundaryCommit = (
       }
     }
 
+    for (const stamped of llmDerivedWritesByTarget.get(key) ?? []) {
+      persistedLabelEntries.push({
+        path: canonicalizeLogicalPath(stamped.path),
+        label: { integrity: [cfcAtom.llmDerived()] },
+        origin: "runtime-integrity",
+      });
+    }
+
     if (flowPersist && (flowHasLabels || clearedExistence.length > 0)) {
       // Attach the per-tx join at each written path. Within one tx every
       // write carries the same join, so deeper written paths are redundant
@@ -6243,17 +6338,15 @@ export const prepareBoundaryCommit = (
           continue;
         }
         if (flowConfidentiality.length > 0) {
-          // Absent declared entries resolve to the EMPTY ceiling ("public
-          // store"), never the undefined "no ceiling" — a tainted write to
-          // an undeclared store is the canonical misfit, and fitting it
-          // by default would hollow the rule out. Clause membership is the
-          // shared subsumption predicate of the egress/observation gates,
-          // so writer-fit cannot drift from what a ceiling admits — and the
-          // ungrantable read-failed marker stays outside every declared
-          // policy (a poisoned measurement never proves fit).
+          // A generated output has the fixed confidentiality ceiling of its
+          // destination space. This does not derive authority from the flow it
+          // is checking. Other absent declarations remain public stores.
+          const generatedOutputCoversPath = generatedOutputPaths.get(key)
+            ?.some((outputPath) => isPrefix(outputPath, path)) === true;
           const declaredCeiling =
             labelForEntriesAtPath(declaredPolicyEntries, path)
-              ?.confidentiality ?? [];
+              ?.confidentiality ??
+              (generatedOutputCoversPath ? [cfcAtom.space(target.space)] : []);
           const offending = atomsOutsideCeiling(
             flowConfidentiality,
             declaredCeiling as readonly CfcConfClause[],
@@ -6556,7 +6649,10 @@ export const prepareBoundaryCommit = (
 
     if (
       coalescedLabelEntries.length === 0 && !flowCleared && !remintCleared &&
-      !droppedLabelMetadataTemplates
+      !runtimeIntegrityCleared && !droppedLabelMetadataTemplates &&
+      !mergedSchemaEntries.some((entry) =>
+        hasFuturePolicyContract(entry.schema)
+      )
     ) {
       continue;
     }

@@ -3534,6 +3534,12 @@ async function startRequest(
     tx: IExtendedStorageTransaction,
     messages: Schema<typeof LLMMessageSchema>[],
   ) => {
+    if (runtime.cfcEnforcementMode !== "disabled") {
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "llmDialog",
+      });
+    }
     const startIndex = (messagesCell.withTx(tx).get() as
       | readonly CfcConfClause[]
       | undefined)?.length ?? 0;
@@ -3566,14 +3572,6 @@ async function startRequest(
     if (runtime.cfcEnforcementMode === "disabled") {
       return;
     }
-    // Attribute the writes to the builtin: `LlmDerived` is a runtime-minted
-    // evidence family, so the persist-time gate (`gateRuntimeMintedIntegrity`,
-    // audit S4) admits it only from builtin authors — the same gating that
-    // stops pattern code from forging the stamp.
-    tx.setCfcImplementationIdentity({
-      kind: "builtin",
-      builtinId: "llmDialog",
-    });
     // Record the stamping schema for each pushed message's own entity doc
     // (every message is appended as a link to a document of its own, so each
     // one is separately addressable). The messages link carries its own schema, which wins over
@@ -3594,14 +3592,19 @@ async function startRequest(
         );
         continue;
       }
-      recordRelevantSchemaWritePolicyInput(tx, {
-        ...link,
-        id,
-        space: link.space ?? base.space ?? space,
-        scope: resolveLinkScope(link.scope, base.scope),
-        path: [],
-        schema: LLM_DERIVED_MESSAGE_SCHEMA,
-      }, LLM_DERIVED_MESSAGE_SCHEMA);
+      recordRelevantSchemaWritePolicyInput(
+        tx,
+        {
+          ...link,
+          id,
+          space: link.space ?? base.space ?? space,
+          scope: resolveLinkScope(link.scope, base.scope),
+          path: [],
+          schema: LLM_DERIVED_MESSAGE_SCHEMA,
+        },
+        LLM_DERIVED_MESSAGE_SCHEMA,
+        "output",
+      );
     }
   };
 

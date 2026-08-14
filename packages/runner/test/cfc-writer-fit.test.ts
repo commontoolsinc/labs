@@ -4,12 +4,13 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { cfcAtom } from "@commonfabric/api/cfc";
 
 const signer = await Identity.fromPassphrase("runner-cfc-writer-fit");
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: string[]; integrity?: unknown[] };
+  label: { confidentiality?: unknown[]; integrity?: unknown[] };
   origin?: string;
 };
 
@@ -82,6 +83,36 @@ const seedSecretSource = async (runtime: Runtime, name: string) => {
   expect((await seed.commit()).ok).toBeDefined();
 };
 
+const seedSpaceSource = async (
+  runtime: Runtime,
+  name: string,
+  space: string,
+) => {
+  const seed = runtime.edit();
+  const sourceCell = runtime.getCell(signer.did(), name);
+  const sourceId = parseLink(sourceCell.getAsLink()).id!;
+  seed.writeOrThrow({
+    space: signer.did(),
+    scope: "space",
+    id: sourceId,
+    path: [],
+  }, {
+    value: { secret: "space data" },
+    cfc: {
+      version: 1,
+      schemaHash: "seed-schema",
+      labelMap: {
+        version: 1,
+        entries: [{
+          path: ["secret"],
+          label: { confidentiality: [cfcAtom.space(space)] },
+        }],
+      },
+    },
+  });
+  expect((await seed.commit()).ok).toBeDefined();
+};
+
 // H4 writer-fit (SC-18b, spec §8.12.4): a write whose derived flow label does
 // not fit the target's DECLARED store policy. Under `enforce-explicit` the
 // derived component is a measurement, not a write ceiling — the write
@@ -90,6 +121,43 @@ const seedSecretSource = async (runtime: Runtime, name: string) => {
 // delta of docs/specs/cfc-enforcement-matrix.md §4), leaving the §8.12.5
 // outs: upgrade the store label in the same tx, or write to a fitting store.
 describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
+  it("does not admit another space through an explicit space ceiling", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      await seedSpaceSource(
+        runtime,
+        "writer-fit-foreign-space-source",
+        "did:key:z6Mkforeignspace",
+      );
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(
+        signer.did(),
+        "writer-fit-foreign-space-source",
+        undefined,
+        tx,
+      );
+      const raw = source.getRaw() as { secret?: string };
+      runtime.getCell(
+        signer.did(),
+        "writer-fit-foreign-space-derived",
+        {
+          ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+        },
+        tx,
+      ).set({ copied: raw.secret });
+      tx.prepareCfc();
+      expect((await tx.commit()).error?.message).toContain(
+        "writer-fit confidentiality misfit",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects a confidentiality misfit under enforce-strict with the SC-18c reason", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
@@ -129,6 +197,44 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
 
       // Fail-closed: the rejected transaction persisted nothing.
       expect(storedDocument(storageManager, derivedId)).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not use a generated output's flow label as its own ceiling", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      await seedSecretSource(runtime, "writer-fit-generated-source");
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(
+        signer.did(),
+        "writer-fit-generated-source",
+        undefined,
+        tx,
+      );
+      const secret = (source.getRaw() as { secret: string }).secret;
+      const generated = runtime.getCell(
+        signer.did(),
+        "writer-fit-generated-target",
+        undefined,
+        tx,
+      );
+      generated.set({ copied: secret });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: generated.getAsNormalizedFullLink(),
+        schema: {},
+        schemaRole: "output",
+      });
+
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "writer-fit confidentiality misfit",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

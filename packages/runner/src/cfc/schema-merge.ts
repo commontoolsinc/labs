@@ -1,3 +1,4 @@
+import type { JSONValue } from "@commonfabric/api";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -12,6 +13,7 @@ import { forEachSubschema } from "../schema-walk.ts";
 import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
+import { resolveCfcSchemaRefsOrThrow } from "./schema-refs.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 
 const IFC_KEYS = [
@@ -66,6 +68,40 @@ const mergeArraySet = (
     }
   }
   return result;
+};
+
+/** Adds confidentiality clauses to a schema's result root. */
+export const addRootConfidentiality = (
+  resultSchema: JSONSchema | undefined,
+  additions: readonly JSONValue[],
+): JSONSchema => {
+  const unresolvedSchema = resultSchema === false
+    ? { not: {} }
+    : isObjectOrArray(resultSchema)
+    ? resultSchema as JSONSchemaObj
+    : {};
+  const schema = typeof unresolvedSchema.$ref === "string"
+    ? asSchemaObject(
+      resolveCfcSchemaRefsOrThrow(unresolvedSchema, unresolvedSchema),
+      "",
+    )
+    : unresolvedSchema;
+  const ifc = isObjectOrArray(schema.ifc) ? schema.ifc : {};
+  const confidentiality = Array.isArray(ifc.confidentiality)
+    ? ifc.confidentiality
+    : [];
+  return {
+    ...schema,
+    ifc: {
+      ...ifc,
+      confidentiality: [
+        ...confidentiality,
+        ...additions.filter((addition) =>
+          !confidentiality.some((existing) => deepEqual(existing, addition))
+        ),
+      ],
+    },
+  };
 };
 
 type WriterIdentityClaim = {
@@ -375,7 +411,10 @@ const generatedOutputCovers = (
 ): boolean =>
   options.generatedOutputPaths?.some((outputPath) =>
     outputPath.length <= path.length &&
-    outputPath.every((segment, index) => segment === path[index])
+    outputPath.every((segment, index) =>
+      segment === path[index] ||
+      (path[index] === "*" && /^(0|[1-9]\d*)$/.test(segment))
+    )
   ) ?? false;
 
 const mergeRequired = (
@@ -454,12 +493,17 @@ const mergeSchemaNode = (
     : Array.isArray(right.type)
     ? [...right.type]
     : [right.type];
-  if (
-    leftTypes !== undefined &&
-    rightTypes !== undefined &&
+  const leftIsUnknown = leftTypes?.includes("unknown") === true;
+  const rightIsUnknown = rightTypes?.includes("unknown") === true;
+  const typesChanged = leftTypes !== undefined && rightTypes !== undefined &&
     (leftTypes.length !== rightTypes.length ||
       !arraySubsetOf(leftTypes, rightTypes) ||
-      !arraySubsetOf(rightTypes, leftTypes))
+      !arraySubsetOf(rightTypes, leftTypes));
+  const permissiveUnknownChange = typesChanged &&
+    (leftIsUnknown || rightIsUnknown);
+  if (
+    typesChanged &&
+    !permissiveUnknownChange
   ) {
     throw new Error(
       `type changed incompatibly at ${path || "/"}: ${
@@ -581,6 +625,7 @@ const mergeSchemaNode = (
   return {
     ...left,
     ...right,
+    ...(permissiveUnknownChange && rightIsUnknown ? { type: left.type } : {}),
     ...(Object.keys(mergedProperties).length > 0
       ? { properties: mergedProperties }
       : {}),

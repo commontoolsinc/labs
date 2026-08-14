@@ -27,7 +27,10 @@ import {
 } from "./list-element-rollback.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
-import { listResultSchema } from "./list-result-schema.ts";
+import {
+  listResultSchema,
+  recordListResultWritePolicy,
+} from "./list-result-schema.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import {
   createResumeRepublisher,
@@ -395,9 +398,11 @@ export function flatMap(
     // either holds for the still-loading container or sees the durable value, so
     // priorSlots is never undefined here.
     if (priorSlots === undefined) {
+      recordListResultWritePolicy(tx, resultWithLog);
       probeScoped(() => resultWithLog.set([]));
     }
     if (list === undefined) {
+      recordListResultWritePolicy(tx, resultWithLog);
       probeScoped(() => resultWithLog.set([]));
       releaseRemovedElements(runtime, elementRuns, new Set());
       return;
@@ -544,6 +549,7 @@ export function flatMap(
       awaitPendingThenRepublish(pendingCells);
       return;
     }
+    recordListResultWritePolicy(tx, resultWithLog);
     probeScoped(() => resultWithLog.set(newArrayValue));
   };
 

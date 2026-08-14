@@ -376,6 +376,75 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/type changed incompatibly/);
   });
 
+  it("keeps concrete types beside permissive unknown schemas", () => {
+    const existing = {
+      type: "array",
+      items: { type: "string" },
+    } as const;
+    const wrapper = {
+      type: "array",
+      items: { type: "unknown", asCell: ["cell"] },
+    } as const;
+    const merged = mergeCfcSchemaEnvelopes(existing, wrapper, {
+      generatedOutputPaths: [[]],
+    }) as JSONSchemaObj;
+    expect(merged.items).toMatchObject({
+      type: "string",
+      asCell: ["cell"],
+    });
+    expect(
+      mergeCfcSchemaEnvelopes(existing, wrapper),
+    ).toEqual(merged);
+    expect(
+      mergeCfcSchemaEnvelopes(existing, {
+        type: "array",
+        items: { type: "unknown" },
+      }),
+    ).toMatchObject({ items: { type: "string" } });
+    expect(
+      mergeCfcSchemaEnvelopes({ type: "unknown" }, { type: "object" }),
+    ).toMatchObject({ type: "object" });
+    expect(
+      mergeCfcSchemaEnvelopes(
+        { type: "string" },
+        { type: ["unknown", "number"] },
+      ),
+    ).toMatchObject({ type: "string" });
+    expect(
+      mergeCfcSchemaEnvelopes(
+        { type: ["unknown", "string"] },
+        { type: "object" },
+      ),
+    ).toMatchObject({ type: "object" });
+  });
+  it("matches concrete generated array items to wildcard schema paths", () => {
+    const existing = {
+      type: "array",
+      items: { type: "object", properties: {} },
+    } as const;
+    const generated = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { value: { type: "string" } },
+        required: ["value"],
+      },
+    } as const;
+
+    expect(
+      mergeCfcSchemaEnvelopes(existing, generated, {
+        generatedOutputPaths: [["0"]],
+      }),
+    ).toMatchObject({
+      type: "array",
+      items: { required: ["value"] },
+    });
+    expect(() =>
+      mergeCfcSchemaEnvelopes(existing, generated, {
+        generatedOutputPaths: [["item"]],
+      })
+    ).toThrow(/required field value needs a default/);
+  });
   it("merges item schemas and object defaults", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "array",

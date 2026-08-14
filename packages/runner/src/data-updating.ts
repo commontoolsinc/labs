@@ -28,6 +28,7 @@ import {
   cloneCfcLabelView,
   getCarriedCfcLabelView,
 } from "./cfc/label-view-state.ts";
+import { recordGeneratedWritePolicyForLink } from "./cfc/generated-write-policy.ts";
 import {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
@@ -395,6 +396,14 @@ export function diffAndUpdate(
   options?: DiffAndUpdateOptions,
   anchorIds?: () => string | number,
 ): boolean {
+  if (options?.schemaRole === "output") {
+    recordGeneratedWritePolicyForLink(
+      tx,
+      link,
+      link.schema ?? {},
+      "output",
+    );
+  }
   const readOptions: DiffAndUpdateOptions = {
     ...options,
     meta: {
@@ -507,12 +516,20 @@ function anchorValueAsEntity(
   // Carry the child schema on every visit so CFC can merge the candidate
   // envelope — including generated-output provenance — against an existing
   // long-lived document.
-  recordRelevantSchemaWritePolicyInput(
-    tx,
-    newEntryLink,
-    newEntryLink.schema,
-    options?.schemaRole,
-  );
+  if (options?.schemaRole === "output") {
+    recordGeneratedWritePolicyForLink(
+      tx,
+      newEntryLink,
+      newEntryLink.schema ?? {},
+      "output",
+    );
+  } else {
+    recordRelevantSchemaWritePolicyInput(
+      tx,
+      newEntryLink,
+      newEntryLink.schema,
+    );
+  }
 
   return [
     // If it wasn't already, set the current value to be a doc link to this doc

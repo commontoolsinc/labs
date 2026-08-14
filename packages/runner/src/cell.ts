@@ -93,6 +93,8 @@ import {
   storedCfcMetadataAppliesToPath,
 } from "./cfc/metadata.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
+import { addRootConfidentiality } from "./cfc/schema-merge.ts";
+import { spaceRootConfidentiality } from "./cfc/space-root-policy.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { createRef } from "./create-ref.ts";
@@ -1550,6 +1552,25 @@ export class CellImpl<T extends FabricValue>
         this.link,
         "writeRedirect",
       );
+      if (!areLinksSame(this.link, writeLink)) {
+        const destinationSchema = writeLink.schema ??
+          resolvedToValueLink.schema ?? this.schema;
+        const destinationRootConfidentiality = spaceRootConfidentiality(
+          this.tx.getCfcState().enforcementMode,
+          this.tx.getCfcState().flowLabelsMode,
+          writeLink.space,
+        );
+        recordRelevantSchemaWritePolicyInput(
+          this.tx,
+          writeLink,
+          destinationRootConfidentiality === undefined
+            ? destinationSchema
+            : addRootConfidentiality(
+              destinationSchema,
+              destinationRootConfidentiality,
+            ),
+        );
+      }
 
       // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       // The anchor id source makes sure each object in an array gets its own

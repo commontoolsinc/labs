@@ -223,6 +223,7 @@ export type LabelEntryOrigin =
   | "link"
   | "derived"
   | "structure"
+  | "runtime-integrity"
   | "external-ingest"
   | "label-metadata";
 
@@ -406,12 +407,13 @@ export type WritePolicyInput =
     readonly schema?: JSONSchema;
     /**
      * Present only when this schema describes a generated output of the
-     * running module. Such outputs may introduce required fields without
+     * running module. `setup-output` additionally identifies a cell created by
+     * runtime setup. Such outputs may introduce required fields without
      * defaults because the module materializes them. Absence is deliberately
      * strict: inputs and ordinary document writes must preserve values already
      * at rest.
      */
-    readonly schemaRole?: "output";
+    readonly schemaRole?: "output" | "setup-output";
   }
   | {
     readonly kind: "structural-provenance";

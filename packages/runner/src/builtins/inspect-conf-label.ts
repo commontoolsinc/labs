@@ -9,6 +9,8 @@ import {
   inspectStoredConfLabel,
 } from "../cfc/label-introspection.ts";
 import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { recordGeneratedWritePolicy } from "../cfc/generated-write-policy.ts";
+import { diffAndUpdate } from "../data-updating.ts";
 
 // Inv-12 Stage 2 (spec §4.6.4.1; docs/specs/cfc-label-metadata-confidentiality
 // .md §3): `inspectConfLabel` — the ONLY pattern-facing surface for
@@ -79,7 +81,9 @@ export function inspectConfLabel(
       tx,
     );
     const result = scopedCell(runtime, tx, baseResult, resultScope);
-    sendResult(tx, result);
+    const schema = recordGeneratedWritePolicy(tx, result, { type: "object" });
+    const resultWithSchema = result.asSchema(schema);
+    sendResult(tx, resultWithSchema);
 
     const inputs = inputsWithTx.asSchema(INPUT_SCHEMA).get() as {
       target?: unknown;
@@ -110,6 +114,13 @@ export function inspectConfLabel(
     // contract). A JSON round-trip here would corrupt or throw on any
     // non-JSON-safe Fabric value a stored atom might carry, breaking the
     // stored-form-verbatim promise (codex/cubic P2 on the Stage 2 PR).
-    result.withTx(tx).set(outcome);
+    diffAndUpdate(
+      runtime,
+      tx,
+      resultWithSchema.getAsNormalizedFullLink(),
+      outcome,
+      cause,
+      { schemaRole: "output" },
+    );
   };
 }

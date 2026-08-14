@@ -27,7 +27,10 @@ import {
 } from "./list-element-rollback.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
-import { listResultSchema } from "./list-result-schema.ts";
+import {
+  listResultSchema,
+  recordListResultWritePolicy,
+} from "./list-result-schema.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import {
   exposedResultCell,
@@ -335,7 +338,14 @@ export function map(
         !active ? Promise.resolve() : runtime.editWithRetry((seedTx) => {
           if (!active) return;
           const container = result!.withTx(seedTx);
-          if (container.getRaw() === undefined) container.set([]);
+          if (container.getRaw() === undefined) {
+            recordListResultWritePolicy(
+              seedTx,
+              container,
+              opPattern.resultSchema,
+            );
+            container.set([]);
+          }
         }).then(({ error }) => {
           if (error) {
             logger.warn(
@@ -378,13 +388,19 @@ export function map(
     // either holds for the still-loading container or sees the durable value, so
     // priorSlots is never undefined here.
     if (priorSlots === undefined) {
-      probeScoped(() => resultWithLog.set([]));
+      probeScoped(() => {
+        recordListResultWritePolicy(tx, resultWithLog, opPattern.resultSchema);
+        resultWithLog.set([]);
+      });
     }
     // If the list is undefined it means the input isn't available yet.
     // Correspondingly, the result should be []. TODO: Maybe it's important to
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
-      probeScoped(() => resultWithLog.set([]));
+      probeScoped(() => {
+        recordListResultWritePolicy(tx, resultWithLog, opPattern.resultSchema);
+        resultWithLog.set([]);
+      });
       releaseRemovedElements(runtime, elementRuns, new Set());
       return;
     }
@@ -469,7 +485,10 @@ export function map(
         newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
       }
     }
-    probeScoped(() => resultWithLog.set(newArrayValue));
+    probeScoped(() => {
+      recordListResultWritePolicy(tx, resultWithLog, opPattern.resultSchema);
+      resultWithLog.set(newArrayValue);
+    });
   };
 
   // Child-starting coordinator: never rehydrates clean on resume — the

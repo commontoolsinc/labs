@@ -1,4 +1,5 @@
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   fabricFromNativeValue,
   FabricInstance,
@@ -51,6 +52,12 @@ import {
 } from "./cancel.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import {
+  recordGeneratedWritePolicy,
+  recordGeneratedWritePolicyForLink,
+} from "./cfc/generated-write-policy.ts";
+import { addRootConfidentiality } from "./cfc/schema-merge.ts";
+import { spaceRootConfidentiality } from "./cfc/space-root-policy.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
 import { refuseFabricInstance } from "./fabric-special-object.ts";
@@ -323,9 +330,7 @@ const recordOutputSchemaPolicyInputs = (
   resultSchema: JSONSchema | undefined,
   schemaPath: readonly string[] = [],
 ): void => {
-  if (resultSchema === undefined) {
-    return;
-  }
+  const effectiveResultSchema = resultSchema ?? {};
 
   if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
     const bindingBase = resultCell.getAsNormalizedFullLink();
@@ -346,24 +351,18 @@ const recordOutputSchemaPolicyInputs = (
           "writeRedirect",
         ),
     );
-    const schema = schemaPath.length === 0
-      ? resultSchema
-      : ContextualFlowControl.getSchemaAtPath(resultSchema, [...schemaPath]);
-    if (schema === undefined) {
-      return;
-    }
+    const selectedSchema = schemaPath.length === 0
+      ? effectiveResultSchema
+      : ContextualFlowControl.getSchemaAtPath(effectiveResultSchema, [
+        ...schemaPath,
+      ]) ?? {};
     for (const targetLink of [bindingLink, link]) {
-      tx.recordCfcWritePolicyInput({
-        kind: "schema",
-        target: {
-          space: targetLink.space,
-          id: targetLink.id,
-          scope: targetLink.scope,
-          path: [...targetLink.path],
-        },
-        schema,
-        schemaRole: "output",
-      });
+      recordGeneratedWritePolicy(
+        tx,
+        runtime.getCellFromLink(targetLink),
+        selectedSchema,
+        isWriteRedirectLink(outputBinding) ? "setup-output" : "output",
+      );
     }
     return;
   }
@@ -375,7 +374,7 @@ const recordOutputSchemaPolicyInputs = (
         runtime,
         resultCell,
         child,
-        resultSchema,
+        effectiveResultSchema,
         [...schemaPath, String(index)],
       )
     );
@@ -412,7 +411,7 @@ const recordOutputSchemaPolicyInputs = (
         runtime,
         resultCell,
         child,
-        resultSchema,
+        effectiveResultSchema,
         [...schemaPath, key],
       );
     }
@@ -463,7 +462,7 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
           "writeRedirect",
         ),
     );
-    const schema = bindingLink.schema ?? link.schema;
+    const schema = bindingLink.schema ?? link.schema ?? {};
     recordSchemaPolicyInputForLink(tx, bindingLink, schema, "output");
     recordSchemaPolicyInputForLink(tx, link, schema, "output");
     return;
@@ -549,10 +548,19 @@ const recordRawBuiltinResultSchemaPolicyInput = (
   if (!isCell(result)) {
     return;
   }
+  const link = result.getAsNormalizedFullLink();
+  const state = tx.getCfcState();
+  const rootConfidentiality = spaceRootConfidentiality(
+    state.enforcementMode,
+    state.flowLabelsMode,
+    link.space,
+  );
   recordSchemaPolicyInputForLink(
     tx,
-    result.getAsNormalizedFullLink(),
-    result.schema,
+    link,
+    rootConfidentiality === undefined
+      ? result.schema
+      : addRootConfidentiality(result.schema, rootConfidentiality),
     "output",
   );
 };
@@ -688,6 +696,16 @@ const recordSetupProjectionPolicyInputs = (
         path: [...source.path],
       }],
     });
+    if (isObjectOrArray(schema) && isObjectOrArray(schema.ifc)) {
+      // The projected cell owns the field's policy. Record only that policy
+      // here because the cell's generated value schema supplies its shape.
+      recordGeneratedWritePolicyForLink(
+        tx,
+        source,
+        { ifc: schema.ifc },
+        "output",
+      );
+    }
     return;
   }
 
@@ -2406,6 +2424,16 @@ export class Runner {
     } catch {
       return false;
     }
+  }
+
+  private cfcSpaceRootConfidentiality(
+    resultCell: Cell<unknown>,
+  ): readonly CfcAtom[] | undefined {
+    return spaceRootConfidentiality(
+      this.runtime.cfcEnforcementMode,
+      this.runtime.cfcFlowLabels,
+      resultCell.space,
+    );
   }
 
   /** Convert a module to pattern format */
@@ -5421,15 +5449,31 @@ export class Runner {
             result !== undefined
             ? result
             : {};
-        const receipt = receiptCell.withTx(tx);
-        receipt.set(receiptValue);
+        let receipt = receiptCell.withTx(tx);
         // The receipt says what it holds, the way any other cell does. The
         // shape is only knowable here: the cell is minted at the top of the
         // dispatch, before the handler runs. Both writes ride this one
         // transaction, which the create-only mark below gates, so the schema
         // and the value it describes commit together or not at all.
         const shape = receiptShapeSchema(receiptValue);
-        if (shape !== undefined) receipt.setMetaRaw("schema", shape);
+        const rootConfidentiality = this.cfcSpaceRootConfidentiality(
+          receiptCell,
+        );
+        const effectiveSchema = rootConfidentiality === undefined
+          ? shape
+          : addRootConfidentiality(shape ?? {}, rootConfidentiality);
+        if (effectiveSchema !== undefined) {
+          const policySchema = recordGeneratedWritePolicy(
+            tx,
+            receipt.asSchema(effectiveSchema),
+            effectiveSchema,
+          );
+          receipt = receipt.asSchema(policySchema);
+        }
+        receipt.set(receiptValue);
+        if (effectiveSchema !== undefined) {
+          receipt.setMetaRaw("schema", effectiveSchema);
+        }
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;
@@ -7207,7 +7251,6 @@ export class Runner {
         ),
       },
     );
-
     if (sendToBindings) {
       sendValueToBinding(
         tx,

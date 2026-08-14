@@ -13,12 +13,14 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import { stampLlmDerivedWrites } from "../src/cfc/runtime-integrity.ts";
 import { parseLink } from "../src/link-utils.ts";
 import type { Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { waitForLlmSettled } from "./support/llm-result.ts";
 import { LLM_DERIVED_RESULT_STAMP_SCHEMA } from "../src/builtins/llm-schemas.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-test-options.ts";
 
 // Epic D1b (docs/history/plans/cfc-future-work-implementation.md): the `llm`,
 // `generateText`, and `generateObject` builtins stamp their MODEL-OUTPUT
@@ -82,9 +84,7 @@ function childDocIntegrity(
 }
 
 describe("CFC LlmDerived stamping — result-field stamp mechanism", () => {
-  // The builtins write model output through LLM_DERIVED_RESULT_STAMP_SCHEMA.
-  // Prove the gate keys the stamp on the write's authoring identity at the
-  // result field-path: a builtin write stamps, a pattern write is stripped.
+  // Prove the schema gate strips pattern-authored copies of the runtime atom.
   it("stamps a builtin write to the result field; strips a pattern write", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
@@ -149,6 +149,71 @@ describe("CFC LlmDerived stamping — result-field stamp mechanism", () => {
         LLM_DERIVED_ATOM,
       );
       forgeReadTx.commit();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("clears a runtime LlmDerived stamp on an ordinary overwrite", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const modelTx = runtime.edit();
+      const result = runtime.getCell(
+        space,
+        "llm-derived-runtime-channel",
+        undefined,
+        modelTx,
+      );
+      const output = result.key("result");
+      output.set("model bytes");
+      const link = output.getAsNormalizedFullLink();
+      stampLlmDerivedWrites(modelTx, [{
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+        path: link.path,
+      }]);
+      expect((await modelTx.commit()).ok).toBeDefined();
+
+      const stampedReadTx = runtime.edit();
+      const stamped = runtime.getCell(
+        space,
+        "llm-derived-runtime-channel",
+        undefined,
+        stampedReadTx,
+      );
+      expect(integrityAtomsAt(stamped.key("result"))).toContainEqual(
+        LLM_DERIVED_ATOM,
+      );
+      stampedReadTx.commit();
+
+      const overwriteTx = runtime.edit();
+      runtime.getCell(
+        space,
+        "llm-derived-runtime-channel",
+        undefined,
+        overwriteTx,
+      ).key("result").set("ordinary bytes");
+      expect((await overwriteTx.commit()).ok).toBeDefined();
+
+      const overwrittenReadTx = runtime.edit();
+      const overwritten = runtime.getCell(
+        space,
+        "llm-derived-runtime-channel",
+        undefined,
+        overwrittenReadTx,
+      );
+      expect(integrityAtomsAt(overwritten.key("result"))).not.toContainEqual(
+        LLM_DERIVED_ATOM,
+      );
+      overwrittenReadTx.commit();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -612,8 +677,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
   });
 
   it("does not stamp the `generateObject` result when CFC is disabled", async () => {
-    // Exercises setStampedObjectResult's disabled branch (writes through the
-    // bare resultSchema, minting no CFC metadata).
+    // The disabled branch writes through the bare result schema and records no
+    // runtime provenance locations.
     const disabledStorage = StorageManager.emulate({ as: signer });
     const disabledRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
