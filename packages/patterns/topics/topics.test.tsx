@@ -132,7 +132,10 @@ interface LegacyUnsignedTopicOutput {
   unmention: Stream<UnmentionEvent, UnmentionResult>;
 }
 
-const LegacyUnsignedTopic = pattern<Record<PropertyKey, never>, LegacyUnsignedTopicOutput>(() => {
+const LegacyUnsignedTopic = pattern<
+  Record<PropertyKey, never>,
+  LegacyUnsignedTopicOutput
+>(() => {
   const addComment = action<{ body: string }, AddCommentResult>((event) => ({
     comment: { authorName: "", body: event.body, sentAt: 0 },
   }));

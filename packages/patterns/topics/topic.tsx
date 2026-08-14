@@ -1,6 +1,7 @@
 import {
   action,
   cellFromUrl,
+  type ComparableCell,
   computed,
   Default,
   entityRefToString,
@@ -11,7 +12,6 @@ import {
   pattern,
   type PerSession,
   type PerUser,
-  type ReadonlyCell,
   SELF,
   Stream,
   UI,
@@ -218,13 +218,21 @@ export type TopicMentionRefMap = Record<string, TopicMentionRef>;
  * What the board's pivot reads from one topic: what it points at, and nothing
  * else. This is the entire cost of deriving the whole graph.
  *
- * The mentions are `unknown` because they are only ever compared. A wider
- * declaration would resolve the piece behind each one, turning a scan of the
- * board's shape into a read of its contents — `object` most of all, which
- * retrieves everything.
+ * The mentions are CELLS, and the annotation is what makes the answer settle.
+ * Declared `unknown` each entry still arrives as a link — the proxy keeps the
+ * back-pointer, and `equals` compares it correctly every time — but nothing
+ * tells the runtime that the entry is a reference worth tracking, so whether
+ * the document behind it has loaded when this runs is a matter of timing. The
+ * pivot then computes a different graph on different passes and never
+ * converges: the row for a topic that IS mentioned comes back empty, and the
+ * idempotency recheck reports differing writes for `mentionedBy`.
+ *
+ * `ComparableCell` is that missing annotation. It does not change what an entry
+ * is, only what the runtime knows to do about it, which is the whole difference
+ * between a graph that settles and one that depends on load order.
  */
 export interface TopicMentionSource {
-  mentions: unknown[] | Default<[]>;
+  mentions: ComparableCell<unknown>[] | Default<[]>;
 }
 
 export interface TopicCrossrefRow {
