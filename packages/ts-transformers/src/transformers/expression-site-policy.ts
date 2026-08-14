@@ -770,9 +770,21 @@ function isDeferredJsxArrayMethodExpression(
     }
   }
 
+  // The registry is what lets this stage agree with the closure stage about
+  // a local it rewrote an array method over (`const view =
+  // rows.get().filter(...)` — site-lifted, so structurally invisible to the
+  // provenance walk). Without it the rewritten `*WithPattern` call reads as
+  // plain, misses the deferral, and gets wrapped in a second, incoherent
+  // lift. The typeRegistry keeps the walk's type rooting working on the
+  // synthetic nodes that rewrite produced.
   const arrayMethodCallSite = classifyArrayMethodCallSite(
     current,
     context.checker,
+    {
+      typeRegistry: context.state.typeRegistry,
+      syntheticReactiveCollectionRegistry: context.state
+        .syntheticReactiveCollectionRegistry,
+    },
   );
   return !!arrayMethodCallSite &&
     arrayMethodCallSite.ownership === "reactive";

@@ -242,6 +242,17 @@ Remaining fallback behavior is intentionally narrow:
   classify as builders in type-only environments
 - shadowed local helpers and object methods with Common Fabric-like names are not
   classified
+- a property call spelled `mapWithPattern` / `filterWithPattern` /
+  `flatMapWithPattern` whose method resolves to **no symbol** classifies as
+  the array-method family by spelling alone. The transformer emits these
+  calls against receivers whose static type is still the plain array type
+  (a site-lifted collection local, for example), so the method never
+  resolves and the spelling is the only remaining evidence of the family —
+  this is what keeps post-closure stages from wrapping an already-rewritten
+  call in a second lift. A `*WithPattern` method that **does** resolve is an
+  author's own declaration and keeps its author's semantics; authored
+  spellings (`.map` et al.) that fail symbol resolution still require a
+  reactive receiver to classify
 
 Builder-placement validation uses `detectDirectBuilderCall()`, so calls to
 functions returned by builders are not reclassified as direct `lift()` or
@@ -864,6 +875,12 @@ Key rewrite rules:
 - `a || b`: lowers to `unless(condition, fallback)` only in pattern context
 - ternary `cond ? x : y`:
   - becomes `ifElse(cond, x, y)` with branch/predicate processing
+- array-method family calls are never wrapped as a unit: the analysis marks
+  them `skip-call-rewrite`, so only the receiver chain before the method is
+  processed. Via §5's spelling fallback this equally covers an
+  already-rewritten symbol-less `*WithPattern` call encountered inside a
+  processed branch — it stays in place rather than acquiring a lift around
+  the rewritten call
 - non-compute contexts:
   - complex reactive expressions are wrapped via `computed(() => expr)` (later
     lowered to the lift-applied form)
@@ -974,6 +991,15 @@ Transform eligibility:
 
 - decision is context/receiver-policy driven:
   - pattern context + reactive receiver origin -> transform
+  - pattern context + receiver identifier bound, directly in a `pattern` /
+    `render` builder callback body, to an initializer the shared
+    expression-site policy classifies as a lowerable `variable-initializer`
+    site (`const view = rows.get().filter(...)`, which §6.5's autowrap turns
+    into a lift) -> transform, and the receiver symbol is registered in
+    `syntheticReactiveCollectionRegistry` so post-closure consumers of the
+    provenance walk agree with the decision. A local inside a JSX IIFE or any
+    other callback is not admitted here — it belongs to that callback's own
+    lowering
   - compute context + `celllike_requires_rewrite` receiver kind -> transform
   - compute context + `opaque_autounwrapped` receiver kind -> do not transform
   - compute context + local alias in the same callback whose initializer
@@ -981,6 +1007,11 @@ Transform eligibility:
     `wish`, already-rewritten collection calls, or other reactive cell-like
     receivers) -> transform
 - plain array `.map()` is not transformed
+- an inline cell-read receiver (`rows.get().filter(...)` used directly as a
+  `.map` receiver, or standing alone) is NOT transformed by this strategy —
+  the read itself is the thing being lowered, and the expression-site
+  machinery owns it (§6.5); inside standalone hardened functions the eager
+  `<cell>.get().filter(...)` spelling stays untouched plain JavaScript
 - transformed callbacks are marked in `mapCallbackRegistry` and become
   pattern-callback contexts for downstream classification
 - synthetic compute-owned array-method nodes assert that stale pattern ownership
