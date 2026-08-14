@@ -276,9 +276,7 @@ const crossrefTable = lift(
         // these name the same document" whether each side arrived as a cell or
         // as the raw link a read left behind. A method call on the value would
         // depend on which of those it happens to be.
-        other?.get().mentions.some((mention) =>
-          equals(mention as object, topic)
-        )
+        other?.get().mentions.some((mention) => equals(mention, topic))
       );
       // Addressed by the topic it describes, so a row keeps its identity
       // wherever it sits and however the board is reordered. That is what lets
