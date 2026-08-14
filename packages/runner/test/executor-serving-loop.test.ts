@@ -94,13 +94,14 @@ const bobSigner = await Identity.fromPassphrase("serving loop bob");
 
 const waitUntil = async (
   predicate: () => boolean,
-  label: string,
+  label: string | (() => string),
   timeoutMs = 10_000,
 ): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
+      const rendered = typeof label === "function" ? label() : label;
+      throw new Error(`timed out waiting for ${rendered}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -2354,12 +2355,12 @@ describe("stage F serving loop", () => {
     const tx = clientRuntime.edit();
     clientArg.withTx(tx).set({ n: 41 });
     expect((await tx.commit()).error).toBeUndefined();
-    const authoredSeq = Engine.serverSeq(engine);
-    await waitUntil(
-      () => readWatermarkSeq(engine) >= authoredSeq,
-      "the wave to derive past the authored input",
-      20_000,
-    );
+    // No seq-target staging wait here: a serverSeq read after the
+    // commit RACES the loop's own wave commit (when the wave lands
+    // first, the read includes the wave's own seq, which W never
+    // covers on a then-quiet space — self-echoes advance no
+    // coverage). The acting-annotation wait below IS the gate this
+    // test exists for; it resolves exactly when the wave commits.
 
     // THE SUPPLY'S OBSERVABLE (red-first: pre-P2-F the demanded
     // derivation ran under the wave fallback and its writes carried NO
