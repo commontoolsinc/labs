@@ -61,7 +61,10 @@ import type {
   Unit,
 } from "../storage/interface.ts";
 import type { CommitError } from "../storage/interface.ts";
-import { ensurePieceRunning } from "../ensure-piece-running.ts";
+import {
+  type EnsurePieceVerdict,
+  ensurePieceRunningVerdict,
+} from "../ensure-piece-running.ts";
 import {
   stampWaveRunContext,
   WaveAccumulator,
@@ -75,6 +78,7 @@ import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
 import {
   resolveScopeKey,
+  type ScopeKey,
   type ScopeKeyIdentity,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
 } from "@commonfabric/memory/v2";
@@ -180,14 +184,42 @@ export class SpaceServer implements TransactionSealDestination {
    * it returned false (typically the creation race: the demand cycle
    * ran before the piece's `patternIdentity` meta applied to the
    * serving replica) or threw. Re-attempted once per demand cycle
-   * until the load lands: cycles are input-driven, and the missing
-   * meta arrives as an input (the instantiation commit), which fires
-   * the cycle that retries — bounded, no timers. Without this set a
-   * root attempted once before its meta existed stayed in
-   * `#demandedRoots` forever and the piece never started server-side
-   * (waves committed watermark-only while `waitForSettled` claimed
-   * the derivation current). */
+   * until the load lands OR the root TERMINALIZES (below): cycles are
+   * input-driven, and the missing meta arrives as an input (the
+   * instantiation commit), which fires the cycle that retries —
+   * bounded, no timers. Without this set a root attempted once before
+   * its meta existed stayed in `#demandedRoots` forever and the piece
+   * never started server-side (waves committed watermark-only while
+   * `waitForSettled` claimed the derivation current). */
   readonly #pendingStructureLoads = new Set<string>();
+  /** The TERMINAL not-loadable roots (stage P2-F, the OW19 demand-cycle
+   * design — RULED direction 2026-08-07): a demanded root whose doc is
+   * confirmed SYNCED from the durable store and still carries no
+   * pattern meta stops retrying — no per-cycle churn — keyed by demand
+   * key, valued with the load's observed doc ids. A commit touching an
+   * observed doc RE-ARMS the root (back to `#pendingStructureLoads`),
+   * which is what distinguishes not-yet (a creation race whose
+   * instantiation commit arrives later) from never (a plain value doc
+   * demanded as if it owned a piece). The ruled id-class exclusion
+   * (computed:/cid:/watermark) already keeps the structurally-futile
+   * classes out of piece demand entirely; this covers the remaining
+   * `of:` ids, which id classes cannot split. */
+  readonly #terminalStructureLoads = new Map<string, ReadonlySet<string>>();
+  /** The single-flighted demand-structure load pass (stage P2-F): the
+   * wave cycle races it against the flush deadline; a pass outliving
+   * its wave keeps running and later cycles join it. */
+  #structureLoadPass: Promise<void> | undefined;
+  /** Re-armed roots whose retry waits for the CURRENT cycle's settle
+   * (frame application) before re-entering `#pendingStructureLoads` —
+   * retrying inside the re-arming cycle reads the replica's stale
+   * pre-commit state and re-terminalizes the root. Promoted at the
+   * settle boundary; the promotion latches a wake so a then-quiet
+   * space retries promptly instead of sitting out the idle window. */
+  readonly #rearmedAwaitingSettle = new Set<string>();
+  /** Level-converted wake for the promotion above (the same latch
+   * shape as the shadow-flip wake): set when re-armed roots became
+   * retryable mid-cycle, consumed by the next #waitForInput. */
+  #pendingStructureRetryWake = false;
   /** Live readers per demanded root — DEMAND ITSELF (serving-loop.md
    * §1: "a subscription to a value recomputes that value and its
    * upstream"): the sink is what pulls the demanded value through the
@@ -195,11 +227,18 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #demandSinks = new Map<string, () => void>();
   /** The demanded IDENTITY per scoped demand key (server-execution v2
    * Phase 2, M1's demand carriage — scopes.md §5: the demand supplies
-   * the run identity). The per-instance run SUPPLY (the scheduler
-   * running a scoped action once per demanded instance, stamping each
-   * run from this registry through #stampRun's widened seam) is the
-   * owed scheduler-instance-dimension follow-up. */
+   * the run identity). Stage P2-F consumes it as the per-(action ×
+   * instance) run SUPPLY: the scheduler resolves an action's piece root
+   * through `#runInstancesFor` and runs once per demanded instance,
+   * each run stamped from this registry through #stampRun's seam. */
   readonly #demandedIdentities = new Map<string, ScopeKeyIdentity>();
+  /** Demand key → the piece root doc id its structure load RESOLVED to
+   * (stage P2-F): a demanded root may be an argument/derived doc whose
+   * owning piece `ensurePieceRunning` discovers by following the result
+   * chain; the run supply must find the demand's identity from that
+   * PIECE's actions too, not only when the demand names the piece root
+   * itself. Entries retire with their demand key. */
+  readonly #pieceRootByDemandKey = new Map<string, string>();
   /** The stage-G effect channel (serving-loop.md §4–§5). */
   #outbox: SpaceOutbox | undefined;
   /** A drain left undelivered rows behind (transport-class failure):
@@ -341,6 +380,21 @@ export class SpaceServer implements TransactionSealDestination {
     runtime.effectMemoObserver = () => {
       this.#options.stats.memo.hits += 1;
     };
+    // Stage P2-F (the F1 fold-in, RULED 2026-08-13): a piece-start
+    // setup/instantiation commit that fails on this serving runtime —
+    // refused at the seal, withdrawn by the wave, rejected — is a
+    // demanded-structure load that failed ASYNCHRONOUSLY (the start
+    // path is fire-and-forget by design). Count it where the demand
+    // cycle's synchronous failures already count, so the swallowed-
+    // refusal class is a health-stats fact, never a log grep.
+    runtime.pieceStartCommitFailureObserver = ({ actionId, error }) => {
+      this.#options.stats.structureLoadFailures += 1;
+      logger.warn("piece-start-commit-failed", () => [
+        `piece-start commit ${actionId} failed on the serving runtime; ` +
+        "counted structureLoadFailures (stage P2-F, F1)",
+        error,
+      ]);
+    };
     // The shadow-flip WAKE (Phase 2's settle input barrier): a clamped
     // wave's floor lifts when the replica's parked promotion flips the
     // shadowed foreign value visible — a dirtiness with NO admitted
@@ -415,9 +469,15 @@ export class SpaceServer implements TransactionSealDestination {
 
     // The seal destination + the §3d run stamper (stage F names the
     // sanctioned internal stamp kinds when installing the destination:
-    // "bookkeeping", used by the watermark write below).
+    // "bookkeeping", used by the watermark write below) + the
+    // per-(action × instance) run-supply resolver (stage P2-F): the
+    // scheduler consults it at the reactive-action choke point and runs
+    // a demanded action once per instance, stamped from the demand
+    // registry through the seam above.
     runtime.installSealDestination(this, {
       runStamper: (tx, info) => this.#stampRun(tx, info),
+      runInstanceResolver: (pieceRootId) =>
+        this.#runInstancesFor(pieceRootId),
     });
 
     // Stage B's renew cadence, finally driven (serving-loop.md §2).
@@ -573,9 +633,27 @@ export class SpaceServer implements TransactionSealDestination {
    * identity resolves its scoped reads, result cells, seal, basis rows,
    * and outbox carriage against THAT instance; a run without one keeps
    * the wave-level identity (the cardinality-1 fallback). The SUPPLY
-   * side — the scheduler running a scoped action once per demanded
-   * instance — is the owed scheduler-instance-dimension follow-up. */
+   * side landed with stage P2-F: the scheduler consults
+   * `#runInstancesFor` (installed beside this stamper) and runs a
+   * demanded action once per instance, filling these fields per run.
+   *
+   * ATTRIBUTION rides the same stamp (protocol.md §1, stage P2-F): a
+   * demanded identity with a principal is the run's ACTING (user,
+   * session) pair — the demand supplied the identity the run acts as
+   * (scopes.md §5), so its seal annotations and its emitted events
+   * (LT6) carry it. Never for `bookkeeping`: the loop's own writes are
+   * service-identity writes that carry addressing and NO acting
+   * principal (protocol.md §1's "The SpaceServer's own writes"). */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
+    const principal = info.scopeKeyIdentity?.principal;
+    const acting = info.kind !== "bookkeeping" && principal !== undefined
+      ? {
+        user: principal,
+        ...(info.scopeKeyIdentity?.sessionId !== undefined
+          ? { session: String(info.scopeKeyIdentity.sessionId) }
+          : {}),
+      }
+      : undefined;
     stampWaveRunContext(tx, {
       actionId: info.actionId,
       kind: info.kind,
@@ -586,7 +664,32 @@ export class SpaceServer implements TransactionSealDestination {
       ...(info.actionScopeKey !== undefined
         ? { actionScopeKey: info.actionScopeKey }
         : {}),
+      ...(acting !== undefined ? { acting } : {}),
     });
+  }
+
+  /** The per-(action × instance) run supply's resolver (stage P2-F),
+   * installed beside the stamper: the demanded instances of a piece
+   * root, from the demand registry — entries whose demand key names the
+   * root directly plus entries whose structure load RESOLVED to it
+   * (`#pieceRootByDemandKey`), deduped per instance key. Space-scope
+   * demands carry no identity and contribute nothing (the wave-level
+   * fallback run). */
+  #runInstancesFor(
+    pieceRootId: string,
+  ): Array<{ scopeKeyIdentity: ScopeKeyIdentity; actionScopeKey: ScopeKey }> {
+    const instances = new Map<string, ScopeKeyIdentity>();
+    for (const [key, identity] of this.#demandedIdentities) {
+      const matches = key.endsWith(`\0${pieceRootId}`) ||
+        this.#pieceRootByDemandKey.get(key) === pieceRootId;
+      if (!matches) continue;
+      const instanceKey = key.slice(0, key.indexOf("\0"));
+      if (!instances.has(instanceKey)) instances.set(instanceKey, identity);
+    }
+    return [...instances.entries()].map(([actionScopeKey, scopeKeyIdentity]) => ({
+      scopeKeyIdentity,
+      actionScopeKey: actionScopeKey as ScopeKey,
+    }));
   }
 
   /**
@@ -897,6 +1000,13 @@ export class SpaceServer implements TransactionSealDestination {
 
   async #waitForInput(maxMs: number): Promise<void> {
     if (this.#feed.length > 0) return;
+    if (this.#pendingStructureRetryWake) {
+      // Consume the settle-gated retry latch (stage P2-F): re-armed
+      // roots became retryable mid-cycle; run a cycle now so the
+      // demand-load pass re-attempts them against the settled replica.
+      this.#pendingStructureRetryWake = false;
+      return;
+    }
     if (this.#pendingShadowFlipWake) {
       // A flip fired while no waiter was installed (r3739416418):
       // consume the latch and run a cycle now — the floor has lifted
@@ -931,6 +1041,32 @@ export class SpaceServer implements TransactionSealDestination {
       this.#coverageHead = record.seq;
       if (record.class === "authored") {
         this.#options.stats.authoredSeen += 1;
+      }
+      // The commit-triggered RE-ARM (stage P2-F, the OW19 design's
+      // second half): a commit touching one of a terminal root's
+      // observed docs returns that root to the pending set — the next
+      // cycle retries its load. This is what makes the terminal state
+      // safe for the creation race: a not-yet-created piece's
+      // instantiation commit writes the demanded doc, re-arms it here,
+      // and the retry then finds the meta (not-yet vs never).
+      if (this.#terminalStructureLoads.size > 0 && record.writes.length > 0) {
+        for (const [key, observed] of this.#terminalStructureLoads) {
+          if (!record.writes.some((write) => observed.has(write.id))) continue;
+          this.#terminalStructureLoads.delete(key);
+          // SETTLE-GATED (not straight to pending): the retry must run
+          // against a replica that has APPLIED the re-arming commit's
+          // frames, which only this cycle's settle guarantees. A retry
+          // in the same load pass reads the stale pre-commit state,
+          // re-confirms "no meta", and re-terminalizes a root whose
+          // meta just landed — the not-yet case would break exactly
+          // where the re-arm exists to keep it sound.
+          this.#rearmedAwaitingSettle.add(key);
+          this.#options.stats.structureLoadRearmed += 1;
+          logger.info?.("structure-load-rearmed", () => [
+            `terminal demanded root re-armed by commit seq ${record.seq}; ` +
+            "retry follows this cycle's settle",
+          ]);
+        }
       }
     }
     this.#feed = [];
@@ -999,13 +1135,23 @@ export class SpaceServer implements TransactionSealDestination {
       this.#demandSinks.delete(key);
       this.#demandedRoots.delete(key);
       this.#demandedIdentities.delete(key);
+      this.#pieceRootByDemandKey.delete(key);
     }
-    // A pending load whose demand retired stops retrying (pruned
-    // directly against the demanded keys, not via the sink loop above:
-    // a root whose SINK creation failed has no sink entry to retire
-    // through).
+    // A pending or terminal load whose demand retired stops being
+    // tracked (pruned directly against the demanded keys, not via the
+    // sink loop above: a root whose SINK creation failed has no sink
+    // entry to retire through).
     for (const key of this.#pendingStructureLoads) {
       if (!currentKeys.has(key)) this.#pendingStructureLoads.delete(key);
+    }
+    for (const key of this.#terminalStructureLoads.keys()) {
+      if (!currentKeys.has(key)) {
+        this.#terminalStructureLoads.delete(key);
+        this.#pieceRootByDemandKey.delete(key);
+      }
+    }
+    for (const key of this.#rearmedAwaitingSettle) {
+      if (!currentKeys.has(key)) this.#rearmedAwaitingSettle.delete(key);
     }
     for (const root of roots) {
       const key = keyOf(root);
@@ -1027,7 +1173,12 @@ export class SpaceServer implements TransactionSealDestination {
           });
         }
       }
-      // Id-class exclusion (RULED 2026-08-07): well-known never-a-piece
+      // A root parked TERMINAL stays parked until a commit touching one
+      // of its observed docs re-arms it (the #drainFeed re-arm) — no
+      // per-cycle ensure churn (stage P2-F, the OW19 design).
+      if (this.#terminalStructureLoads.has(key)) {
+        if (!firstDemand) continue;
+      } // Id-class exclusion (RULED 2026-08-07): well-known never-a-piece
       // ids register NO piece demand — no `ensurePieceRunning` attempt,
       // no retry, no `structureLoadDeferred` increment (the counter
       // stays meaningful for genuinely not-yet-loadable pieces).
@@ -1036,14 +1187,12 @@ export class SpaceServer implements TransactionSealDestination {
       // settledness subscription every waitForSettled/overlay client
       // holds — none can ever carry `patternIdentity` meta. The demand
       // SINK below still registers where applicable: value-granular
-      // pull is not piece demand. The COMPLETE terminal-state design —
-      // terminal-on-loaded-doc-without-pattern-meta with
-      // commit-triggered re-arm — is the named owed follow-up
-      // (verification-coverage.md's owed register): id classes cannot
-      // distinguish a not-yet-created piece from a never-a-piece doc
-      // for the remaining `of:` ids, so the general fix needs the
-      // meta-observing re-arm, not a bigger blocklist.
-      if (neverAPieceRootId(root.id)) {
+      // pull is not piece demand. The remaining `of:` ids — which id
+      // classes cannot split into not-yet-created pieces vs
+      // never-a-piece value docs — are covered by the TERMINAL state
+      // below (stage P2-F): confirmed-synced-no-meta parks the root,
+      // and the commit-triggered re-arm keeps the creation race sound.
+      else if (neverAPieceRootId(root.id)) {
         this.#pendingStructureLoads.delete(key);
         if (!firstDemand) continue;
       } else {
@@ -1053,24 +1202,62 @@ export class SpaceServer implements TransactionSealDestination {
           // collapse-to-false it was unreachable and every real
           // load/start error masqueraded as a creation-race deferral,
           // silently retried each input-driven cycle (r3739139521).
-          const started = await ensurePieceRunning(runtime, {
-            space: this.#options.space,
-            id: root.id as never,
-            scope: root.scope ?? "space",
-            path: [],
-          }, { propagateErrors: true });
-          if (started) {
+          const verdict = await this.#attemptStructureLoad(runtime, root);
+          if (verdict.started) {
             this.#pendingStructureLoads.delete(key);
+            if (verdict.rootId !== undefined && verdict.rootId !== root.id) {
+              // The demand named an argument/derived doc; remember the
+              // OWNING piece root so the per-(action × instance) run
+              // supply finds this demand's identity from that piece's
+              // actions (stage P2-F).
+              this.#pieceRootByDemandKey.set(key, verdict.rootId);
+            }
+          } else if (verdict.reason === "no-pattern-meta") {
+            // The OW19 terminal class — but only ON CONFIRMED durable
+            // state: an un-synced doc reads identically, so sync the
+            // observed docs from the store and re-ask once. Still
+            // no meta ⇒ the durable state genuinely lacks it ⇒ TERMINAL
+            // (no more per-cycle churn); a creation commit later
+            // touches the doc and re-arms (not-yet vs never).
+            const confirmed = await this.#confirmNoPatternMeta(
+              runtime,
+              root,
+              verdict,
+            );
+            if (confirmed.started) {
+              this.#pendingStructureLoads.delete(key);
+              if (
+                confirmed.rootId !== undefined && confirmed.rootId !== root.id
+              ) {
+                this.#pieceRootByDemandKey.set(key, confirmed.rootId);
+              }
+            } else if (confirmed.reason === "no-pattern-meta") {
+              this.#pendingStructureLoads.delete(key);
+              this.#terminalStructureLoads.set(
+                key,
+                new Set(confirmed.observedDocIds),
+              );
+              this.#options.stats.structureLoadTerminal += 1;
+              logger.info?.("structure-load-terminal", () => [
+                `demanded root ${root.id} confirmed synced with no ` +
+                "pattern meta; parked terminal until a commit touches " +
+                "it (stage P2-F, OW19)",
+              ]);
+            } else {
+              this.#pendingStructureLoads.add(key);
+              this.#options.stats.structureLoadDeferred += 1;
+            }
           } else {
-            // A false return is a load that cannot land YET — most
-            // often the creation race, where this cycle ran before the
-            // piece's `patternIdentity` meta applied to the serving
-            // replica. Counted per attempt (§7 structureLoadDeferred)
-            // and left pending: the next input-driven cycle retries.
+            // Not loadable YET for a non-terminal reason (a chain
+            // cycle mid-write, an unloadable pattern awaiting its
+            // source docs). Counted per attempt (§7
+            // structureLoadDeferred) and left pending: the next
+            // input-driven cycle retries.
             this.#pendingStructureLoads.add(key);
             this.#options.stats.structureLoadDeferred += 1;
             logger.debug?.("structure-load-deferred", () => [
-              `demanded root ${root.id} not loadable yet; ` +
+              `demanded root ${root.id} not loadable yet ` +
+              `(${verdict.reason ?? "unclassified"}); ` +
               "retrying next demand cycle",
             ]);
           }
@@ -1118,6 +1305,75 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
+  /** One structure-load attempt for a demanded root (stage P2-F): the
+   * demanded INSTANCE is tried first (a scoped result doc may carry
+   * its own per-instance pattern pointer), and a scoped no-meta miss
+   * falls back to the SPACE instance — piece structure is shared (one
+   * graph; instances are data slots, scopes.md §2), so a scoped demand
+   * on a shared-structure piece must load through the broad slot
+   * rather than churn forever on its meta-less instance doc. */
+  async #attemptStructureLoad(
+    runtime: Runtime,
+    root: { id: string; scope?: string },
+  ): Promise<EnsurePieceVerdict> {
+    const scope = root.scope ?? "space";
+    const verdict = await ensurePieceRunningVerdict(runtime, {
+      space: this.#options.space,
+      id: root.id as never,
+      scope: scope as never,
+      path: [],
+    }, { propagateErrors: true });
+    if (
+      verdict.started || scope === "space" ||
+      verdict.reason !== "no-pattern-meta"
+    ) {
+      return verdict;
+    }
+    const spaceVerdict = await ensurePieceRunningVerdict(runtime, {
+      space: this.#options.space,
+      id: root.id as never,
+      scope: "space",
+      path: [],
+    }, { propagateErrors: true });
+    // Merge observed docs: the re-arm must watch both instances' reads.
+    for (const id of verdict.observedDocIds) {
+      if (!spaceVerdict.observedDocIds.includes(id)) {
+        spaceVerdict.observedDocIds.push(id);
+      }
+    }
+    return spaceVerdict;
+  }
+
+  /** The terminal decision's sync-and-re-ask half (stage P2-F): a
+   * no-meta verdict on an UN-synced doc is not evidence about durable
+   * state, so pull every observed doc from the store (loopback,
+   * co-hosted — cheap) and ask once more. Only a verdict that survives
+   * this confirmation parks the root terminal. */
+  async #confirmNoPatternMeta(
+    runtime: Runtime,
+    root: { id: string; scope?: string },
+    verdict: EnsurePieceVerdict,
+  ): Promise<EnsurePieceVerdict> {
+    const scopes = new Set<string>(["space", root.scope ?? "space"]);
+    for (const id of verdict.observedDocIds) {
+      for (const scope of scopes) {
+        try {
+          await runtime.getCellFromLink({
+            space: this.#options.space,
+            id: id as never,
+            scope: scope as never,
+            path: [],
+          }).sync();
+        } catch {
+          // A failed pull leaves the verdict unconfirmed; the caller's
+          // deferred arm retries next cycle.
+          return { ...verdict, reason: "chain-cycle" };
+        }
+      }
+    }
+    return await this.#attemptStructureLoad(runtime, root);
+  }
+
   /**
    * One wave (serving-loop.md §3): drain input, let the scheduler run
    * the affected graph to quiescence — or to the consequence-flush
@@ -1129,7 +1385,6 @@ export class SpaceServer implements TransactionSealDestination {
     const runtime = this.#runtime;
     if (runtime === undefined || !this.#active) return;
     const { batchHead } = this.#drainFeed();
-    await this.#loadDemandedStructure();
 
     // Settle to quiescence under the flush deadline: idle() is the wave
     // boundary; synced() lets the loopback session's frames land so the
@@ -1146,6 +1401,27 @@ export class SpaceServer implements TransactionSealDestination {
         Math.max(0, deadline - Date.now()),
       );
     });
+    // The demanded-structure load pass runs UNDER the wave's flush
+    // deadline (stage P2-F, the OW19 design's throughput half): before
+    // this it ran ahead of the settle race with no bound, so one slow
+    // ensure (an unresponsive pattern load, a wedged doc pull)
+    // throttled input consumption for every user of the space.
+    // Single-flighted: a pass that outlives its wave's deadline keeps
+    // running — the next cycle joins it instead of starting a rival
+    // pass over the same roots — and its completion wakes the loop so
+    // freshly loaded structure settles in a fresh cycle rather than
+    // waiting out the idle window.
+    const loadPass = this.#structureLoadPass ??= this.#loadDemandedStructure()
+      .catch((error) => {
+        logger.warn("structure-load-pass-failed", () => [
+          "demand-structure load pass failed",
+          error,
+        ]);
+      })
+      .finally(() => {
+        this.#structureLoadPass = undefined;
+        this.#feedArrived?.resolve();
+      });
     let exhausted = false;
     try {
       while (true) {
@@ -1156,6 +1432,7 @@ export class SpaceServer implements TransactionSealDestination {
         // cascade). The deadline must be able to fire MID-await.
         const step = await Promise.race([
           (async () => {
+            await loadPass;
             await runtime.idle();
             // Couple the settle to FRAME DELIVERY (W-soundness): the
             // feed learns of a commit synchronously at admission, but
@@ -1197,6 +1474,21 @@ export class SpaceServer implements TransactionSealDestination {
       }
     } finally {
       if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+    }
+
+    // Promote settle-gated re-armed roots (stage P2-F): a TRUE settle
+    // proved every frame ≤ batchHead applied — the re-arming commit's
+    // included — so the retry now reads the post-commit state. An
+    // exhausted flush proves nothing and keeps them gated. The latch
+    // wakes the next input wait so a then-quiet space retries promptly
+    // (the shadow-flip wake's shape).
+    if (!exhausted && this.#rearmedAwaitingSettle.size > 0) {
+      for (const key of this.#rearmedAwaitingSettle) {
+        this.#pendingStructureLoads.add(key);
+      }
+      this.#rearmedAwaitingSettle.clear();
+      this.#pendingStructureRetryWake = true;
+      this.#feedArrived?.resolve();
     }
 
     const wave = this.#currentWave;
@@ -1502,7 +1794,11 @@ export class SpaceServer implements TransactionSealDestination {
     this.#demandSinks.clear();
     this.#demandedRoots.clear();
     this.#demandedIdentities.clear();
+    this.#pieceRootByDemandKey.clear();
     this.#pendingStructureLoads.clear();
+    this.#terminalStructureLoads.clear();
+    this.#rearmedAwaitingSettle.clear();
+    this.#pendingStructureRetryWake = false;
     const wave = this.#currentWave;
     this.#currentWave = undefined;
     await this.#sealChain;
@@ -1519,6 +1815,7 @@ export class SpaceServer implements TransactionSealDestination {
       if (this.#runtime !== undefined) {
         this.#runtime.asyncWorkObserver = undefined;
         this.#runtime.effectMemoObserver = undefined;
+        this.#runtime.pieceStartCommitFailureObserver = undefined;
         // The shadow-flip wake dies with the tenure (a late flip on a
         // disposing replica must not poke a parked loop's stale wait).
         this.#runtime.storageManager.open(this.#options.space).replica

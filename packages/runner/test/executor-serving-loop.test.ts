@@ -526,12 +526,15 @@ describe("stage F serving loop", () => {
       15_000,
     );
 
-    // §7: the not-loadable-yet attempts were COUNTED, not silent — at
-    // least the pre-instantiation one — and none of them THREW (false
-    // returns are deferrals, not failures; the two counters stay
-    // distinct).
+    // §7: the not-loadable-yet attempt was COUNTED, not silent — since
+    // stage P2-F as the TERMINAL class (confirmed-synced-no-meta parks
+    // the root instead of re-deferring every cycle), the instantiation
+    // commit RE-ARMED it (the not-yet half of OW19's not-yet-vs-never),
+    // and none of the attempts THREW (classifications and failures stay
+    // distinct counters).
     const stats = host.stats();
-    expect(stats.structureLoadDeferred).toBeGreaterThanOrEqual(1);
+    expect(stats.structureLoadTerminal).toBeGreaterThanOrEqual(1);
+    expect(stats.structureLoadRearmed).toBeGreaterThanOrEqual(1);
     expect(stats.structureLoadFailures).toBe(0);
   });
 
@@ -2255,5 +2258,152 @@ describe("stage F serving loop", () => {
       await bobRuntime.dispose();
       await bobManager.close();
     }
+  });
+
+  it("supplies the demanded (user, session) identity to the piece's derivation runs END TO END: the demand registry stamps the runs, and the derived commit's annotations + basis rows carry the demanding actor (stage P2-F; protocol.md §1, LT6's acting half)", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+
+    // A real pattern served at activation (the first test's shape): the
+    // demanded root is its RESULT doc.
+    onServingRuntime = async (runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            "  ({ n }) => ({ total: computed(() => n + 1) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const argument = runtime.getCell<{ n: number }>(
+        space,
+        "p2f-supply-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ total: number }>(
+        space,
+        "p2f-supply-result",
+        compiled.resultSchema,
+      );
+      for (let attempt = 0;; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, compiled, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    // Alice's demand, BOTH halves: the ordinary space subscription (the
+    // value pull) and the USER-scoped subscription — the demand row
+    // that carries her (user, session) identity into the registry
+    // (scopes.md §5: the DEMAND supplies the run identity).
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "p2f-supply-result",
+      undefined,
+    );
+    await clientResult.sync();
+    const rootDocId = clientResult.getAsNormalizedFullLink().id;
+    const scopedResult = clientRuntime.getCellFromLink<{ total: number }>({
+      ...clientResult.getAsNormalizedFullLink(),
+      scope: "user",
+    });
+    await scopedResult.sync();
+
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    // The demand registry carries alice's identity for the piece root
+    // (the landed M1 carriage; the run SUPPLY consumes it below).
+    await waitUntil(
+      () =>
+        (host!.spaceServer(space)?.demandedIdentitiesOf(rootDocId) ?? [])
+          .some((identity) => identity.principal === aliceSigner.did()),
+      "the demand registry to carry alice's identity",
+      15_000,
+    );
+    const demanded = host!.spaceServer(space)!.demandedIdentitiesOf(
+      rootDocId,
+    ).find((identity) => identity.principal === aliceSigner.did())!;
+    const expectedInstanceKey = resolveScopeKey("user", demanded as never);
+
+    // The authored input: wakes the loop; the piece's derivation run
+    // serves alice's demand.
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "p2f-supply-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const tx = clientRuntime.edit();
+    clientArg.withTx(tx).set({ n: 41 });
+    expect((await tx.commit()).error).toBeUndefined();
+    const authoredSeq = Engine.serverSeq(engine);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authoredSeq,
+      "the wave to derive past the authored input",
+      20_000,
+    );
+
+    // THE SUPPLY'S OBSERVABLE (red-first: pre-P2-F the demanded
+    // derivation ran under the wave fallback and its writes carried NO
+    // acting annotation — userless): the derived commits' per-write
+    // annotations carry the DEMANDING session's actor (protocol.md §1
+    // ATTRIBUTION at the run granularity).
+    const actingRows = () => {
+      const rows = engine.database.prepare(
+        `SELECT annotations FROM "commit" WHERE class = 'derived' AND
+         annotations IS NOT NULL`,
+      ).all() as Array<{ annotations: string }>;
+      return rows.flatMap((row) =>
+        decodeMemoryBoundary(row.annotations) as unknown as Array<{
+          actingUser?: string;
+          actingSession?: string;
+        }>
+      ).filter((annotation) => annotation.actingUser !== undefined);
+    };
+    await waitUntil(
+      () => actingRows().some((a) => a.actingUser === aliceSigner.did()),
+      "a derived write annotated with alice as the acting user",
+      20_000,
+    );
+    const aliceAnnotations = actingRows().filter((a) =>
+      a.actingUser === aliceSigner.did()
+    );
+    // The SESSION rides with the user (the session-bearing pair LT6
+    // hands to emitted events).
+    expect(
+      aliceAnnotations.some((a) =>
+        a.actingSession === String(demanded.sessionId)
+      ),
+    ).toBe(true);
+
+    // Basis rows key per (action, INSTANCE): the demanded run's rows
+    // land under alice's instance key (serving-loop.md §3b's
+    // action_scope_key), never only the wave identity's.
+    const basisKeys = new Set(
+      (engine.database.prepare(
+        `SELECT DISTINCT action_scope_key FROM scheduler_basis`,
+      ).all() as Array<{ action_scope_key: string }>).map((row) =>
+        row.action_scope_key
+      ),
+    );
+    expect(basisKeys.has(expectedInstanceKey)).toBe(true);
   });
 });

@@ -39,6 +39,7 @@ function followResultCellChain(
   runtime: Runtime,
   rootCell: Cell<any>,
   tx: IExtendedStorageTransaction,
+  observedDocIds: string[],
 ): Cell<any> | undefined {
   let currentCell = rootCell;
   const visited = new Set<string>();
@@ -53,6 +54,8 @@ function followResultCellChain(
       return undefined;
     }
     visited.add(key);
+    const currentId = currentCell.getAsNormalizedFullLink().id;
+    if (!observedDocIds.includes(currentId)) observedDocIds.push(currentId);
 
     const resultLink = getMetaLink(currentCell, "result");
     if (resultLink === undefined) return currentCell;
@@ -66,6 +69,147 @@ function followResultCellChain(
 
     currentCell = runtime.getCellFromLink(resultLink, undefined, tx);
     depth++;
+  }
+}
+
+/**
+ * A classified `ensurePieceRunning` outcome (server-execution v2 stage
+ * P2-F): the serving loop's demand cycle needs to tell a doc that is
+ * LOADED but carries no pattern meta (the OW19 terminal class —
+ * terminal-on-loaded-doc-without-pattern-meta, re-armed by a commit
+ * touching an observed doc) from the other not-startable shapes, and
+ * needs the resolved OWNING root so the per-(action × instance) run
+ * supply can map a demanded argument/derived doc to its piece's actions.
+ */
+export type EnsurePieceVerdict = {
+  /** The owning piece is (now) running. */
+  started: boolean;
+  /** Why a `started: false` verdict could not start the piece. */
+  reason?:
+    /** Result-metadata cycle, or traversal depth exceeded. */
+    | "chain-cycle"
+    /** The chain's owning doc carries no `patternIdentity` meta — as
+     * OBSERVED LOCALLY: an un-synced doc reads the same way, so a
+     * terminal decision must confirm durable state first (the caller
+     * syncs and re-asks). */
+    | "no-pattern-meta"
+    /** Meta present but `loadPatternByIdentity` found nothing. */
+    | "pattern-unloadable";
+  /** The owning result doc's id (the chain terminus) where the chain
+   * resolved — present for `started`, `no-pattern-meta`, and
+   * `pattern-unloadable`. */
+  rootId?: string;
+  /** Every doc id the traversal read (the demanded root plus chain
+   * links): the demand cycle's commit-triggered re-arm watches these. */
+  observedDocIds: string[];
+};
+
+/**
+ * Classified variant of {@link ensurePieceRunning} — same traversal and
+ * start, richer outcome. `propagateErrors` RETHROWS instead of
+ * collapsing every exception into a verdict (review thread
+ * r3739139521): the serving loop's demand cycle must distinguish a
+ * deferral from an actual load/start FAILURE; default stays
+ * best-effort for the event-recovery caller.
+ */
+export async function ensurePieceRunningVerdict(
+  runtime: Runtime,
+  cellLink: NormalizedFullLink,
+  options?: { propagateErrors?: boolean },
+): Promise<EnsurePieceVerdict> {
+  const observedDocIds: string[] = [];
+  try {
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+
+    try {
+      // Get the cell at the event link location
+      const rootCell: Cell<any> = runtime.getCellFromLink(
+        // We'll find the piece information at the root of what could be the
+        // owning result cell already, hence remove the path:
+        { ...cellLink, path: [] },
+        undefined,
+        tx,
+      );
+
+      // If this is an internal/argument/derived cell, find the result cell that
+      // owns the chain.
+      const resultCell = followResultCellChain(
+        runtime,
+        rootCell,
+        tx,
+        observedDocIds,
+      );
+      if (resultCell === undefined) {
+        return { started: false, reason: "chain-cycle", observedDocIds };
+      }
+      const rootId = resultCell.getAsNormalizedFullLink().id;
+
+      // If rootCell is a result cell, it will carry a `{ identity, symbol }`
+      // pattern pointer.
+      const identityRef = readPatternIdentity(resultCell);
+      if (!identityRef) {
+        logger.debug("ensure-piece", () => [
+          `No pattern identity found in result metadata`,
+        ]);
+        return {
+          started: false,
+          reason: "no-pattern-meta",
+          rootId,
+          observedDocIds,
+        };
+      }
+
+      // Commit the read transaction before starting the piece
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      // Load the pattern by its content identity.
+      const pattern = await runtime.patternManager.loadPatternByIdentity(
+        identityRef.identity,
+        identityRef.symbol,
+        cellLink.space,
+      );
+
+      if (!pattern) {
+        logger.debug("ensure-piece", () => [
+          `Failed to load pattern: ${identityRef.identity}#${identityRef.symbol}`,
+        ]);
+        return {
+          started: false,
+          reason: "pattern-unloadable",
+          rootId,
+          observedDocIds,
+        };
+      }
+
+      logger.debug("ensure-piece", () => [
+        `Starting piece with pattern ${identityRef.identity} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
+      ]);
+
+      // Start the existing piece - this registers event handlers without
+      // re-running setup and potentially allocating different metadata cells.
+      await runtime.start(resultCell);
+
+      logger.debug("ensure-piece", () => [
+        `Piece started successfully`,
+      ]);
+
+      return { started: true, rootId, observedDocIds };
+    } catch (error) {
+      // Make sure to commit/rollback the transaction on error
+      try {
+        runtime.prepareTxForCommit(tx);
+        await tx.commit();
+      } catch {
+        // Ignore commit errors on cleanup
+      }
+      throw error;
+    }
+  } catch (error) {
+    if (options?.propagateErrors === true) throw error;
+    logger.error("ensure-piece", "Error ensuring piece is running:", error);
+    return { started: false, observedDocIds };
   }
 }
 
@@ -106,79 +250,5 @@ export async function ensurePieceRunning(
   cellLink: NormalizedFullLink,
   options?: { propagateErrors?: boolean },
 ): Promise<boolean> {
-  try {
-    const tx = runtime.edit();
-    tx.tx.immediate = true;
-
-    try {
-      // Get the cell at the event link location
-      const rootCell: Cell<any> = runtime.getCellFromLink(
-        // We'll find the piece information at the root of what could be the
-        // owning result cell already, hence remove the path:
-        { ...cellLink, path: [] },
-        undefined,
-        tx,
-      );
-
-      // If this is an internal/argument/derived cell, find the result cell that
-      // owns the chain.
-      const resultCell = followResultCellChain(runtime, rootCell, tx);
-      if (resultCell === undefined) return false;
-
-      // If rootCell is a result cell, it will carry a `{ identity, symbol }`
-      // pattern pointer.
-      const identityRef = readPatternIdentity(resultCell);
-      if (!identityRef) {
-        logger.debug("ensure-piece", () => [
-          `No pattern identity found in result metadata`,
-        ]);
-        return false;
-      }
-
-      // Commit the read transaction before starting the piece
-      runtime.prepareTxForCommit(tx);
-      await tx.commit();
-
-      // Load the pattern by its content identity.
-      const pattern = await runtime.patternManager.loadPatternByIdentity(
-        identityRef.identity,
-        identityRef.symbol,
-        cellLink.space,
-      );
-
-      if (!pattern) {
-        logger.debug("ensure-piece", () => [
-          `Failed to load pattern: ${identityRef.identity}#${identityRef.symbol}`,
-        ]);
-        return false;
-      }
-
-      logger.debug("ensure-piece", () => [
-        `Starting piece with pattern ${identityRef.identity} for result cell ${resultCell.getAsNormalizedFullLink().id}`,
-      ]);
-
-      // Start the existing piece - this registers event handlers without
-      // re-running setup and potentially allocating different metadata cells.
-      await runtime.start(resultCell);
-
-      logger.debug("ensure-piece", () => [
-        `Piece started successfully`,
-      ]);
-
-      return true;
-    } catch (error) {
-      // Make sure to commit/rollback the transaction on error
-      try {
-        runtime.prepareTxForCommit(tx);
-        await tx.commit();
-      } catch {
-        // Ignore commit errors on cleanup
-      }
-      throw error;
-    }
-  } catch (error) {
-    if (options?.propagateErrors === true) throw error;
-    logger.error("ensure-piece", "Error ensuring piece is running:", error);
-    return false;
-  }
+  return (await ensurePieceRunningVerdict(runtime, cellLink, options)).started;
 }

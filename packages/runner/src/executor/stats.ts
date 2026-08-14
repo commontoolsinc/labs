@@ -54,6 +54,21 @@ export type ServingLoopStats = {
    * loadable (e.g. a plain value doc demanded as if it owned a
    * piece). */
   structureLoadDeferred: number;
+  /** Demanded roots that reached the TERMINAL not-loadable state
+   * (server-execution v2 stage P2-F, the OW19 demand-cycle design): the
+   * root's doc is confirmed synced from the durable store and carries
+   * no pattern meta, so the demand cycle STOPS retrying it — no more
+   * per-cycle churn — until a commit touching one of the load's
+   * observed docs re-arms it (the not-yet vs never distinction).
+   * Counted per terminalization, so a root that re-arms and
+   * terminalizes again counts again. */
+  structureLoadTerminal: number;
+  /** Terminal roots RE-ARMED by a commit touching one of their observed
+   * docs (the OW19 re-arm half): the root returns to the pending set
+   * and the next cycle retries its load — this is what keeps the
+   * terminal state safe for the creation race (a not-yet-created
+   * piece's instantiation commit re-arms and then loads). */
+  structureLoadRearmed: number;
   /** Waves whose W advance was CLAMPED below the input batch head
    * because inbound foreign novelty was still shadowed by a parked own
    * write (the settle input barrier, Phase 2 revisit (a):
@@ -93,6 +108,8 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   derivedCommits: 0,
   structureLoadFailures: 0,
   structureLoadDeferred: 0,
+  structureLoadTerminal: 0,
+  structureLoadRearmed: 0,
   watermarkClamped: 0,
   unstampedSealRefusals: 0,
   watermarkLag: 0,

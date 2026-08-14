@@ -368,6 +368,20 @@ export type ServerRunInfo = {
   actionScopeKey?: ScopeKey;
 };
 
+/**
+ * One demanded instance of a scoped run (server-execution v2 stage
+ * P2-F, the per-(action × instance) run SUPPLY): the demand registry's
+ * identity plus the resolved instance key the run serves. The scheduler
+ * consults {@link Runtime.serverRunInstancesFor} at its reactive-action
+ * choke point and runs the action once per instance — instances live in
+ * keys/basis/stamps, never as extra dependency-graph nodes (the
+ * spec-model's C11b).
+ */
+export type ServerRunInstance = {
+  scopeKeyIdentity: ScopeKeyIdentity;
+  actionScopeKey: ScopeKey;
+};
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -755,6 +769,12 @@ export class Runtime {
   // attaches the wave run context before the tx seals.
   #serverRunStamper:
     | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
+    | undefined;
+  // The per-(action × instance) run-supply resolver (installed WITH the
+  // destination, stage P2-F): piece root doc id → the demanded
+  // instances the SpaceServer's registry holds for it.
+  #serverRunInstanceResolver:
+    | ((pieceRootId: string) => readonly ServerRunInstance[])
     | undefined;
   // The client speculation overlay (server-execution v2 Phase 2,
   // speculation.md): the DEFAULT seal destination of every runtime under
@@ -1348,6 +1368,22 @@ export class Runtime {
     | undefined;
 
   /**
+   * Server-execution v2 stage P2-F (the F1 fold-in, RULED 2026-08-13):
+   * a PIECE-START setup/instantiation commit that fails — refused at
+   * the wave seal, withdrawn, or rejected — surfaces here. The start
+   * path is deliberately fire-and-forget (start() resolves before its
+   * commit settles), so without this seam the refusal Result was
+   * SWALLOWED and the piece silently ran against stale setup. The
+   * SpaceServer installs the observer at activation and counts the
+   * failure into §7's `structureLoadFailures` (a demanded-structure
+   * load that failed, asynchronously); the runner's loud error log
+   * rides the same reporting call in every arm.
+   */
+  pieceStartCommitFailureObserver:
+    | ((failure: { actionId: string; error: unknown }) => void)
+    | undefined;
+
+  /**
    * Register an in-flight async builtin operation so `settled()` waits for it
    * instead of racing the post-commit flush. The scheduler registers an
    * effect-bearing commit's promise here (a race-free barrier — the flush runs
@@ -1781,6 +1817,17 @@ export class Runtime {
         tx: IExtendedStorageTransaction,
         info: ServerRunInfo,
       ) => void;
+      /** The per-(action × instance) run SUPPLY (server-execution v2
+       * stage P2-F): resolves a piece root doc id to the demanded
+       * instances the SpaceServer's demand registry holds for it. The
+       * scheduler consults this at its reactive-action choke point and
+       * runs the action once per instance, stamping each run with that
+       * instance's identity (scopes.md §5: the DEMAND supplies the run
+       * identity). Absent (or returning nothing) the run keeps the
+       * wave-level fallback — the Phase-1 cardinality-1 posture. */
+      runInstanceResolver?: (
+        pieceRootId: string,
+      ) => readonly ServerRunInstance[];
     } = {},
   ): void {
     if (this.experimental.serverExecution !== true) {
@@ -1798,6 +1845,7 @@ export class Runtime {
     }
     this.#transactionSealDestination = destination;
     this.#serverRunStamper = options.runStamper;
+    this.#serverRunInstanceResolver = options.runInstanceResolver;
   }
 
   /** Whether a seal destination is installed — the ON-arm SERVING
@@ -1812,6 +1860,22 @@ export class Runtime {
   clearSealDestination(): void {
     this.#transactionSealDestination = undefined;
     this.#serverRunStamper = undefined;
+    this.#serverRunInstanceResolver = undefined;
+  }
+
+  /**
+   * The demanded instances a scheduler action's piece root currently has
+   * (the per-(action × instance) run SUPPLY, stage P2-F). Undefined
+   * everywhere except a serving runtime whose SpaceServer installed a
+   * resolver — the OFF arm and client speculation pay one undefined
+   * check. The scheduler runs the action once per returned instance
+   * (instances live in keys/basis/stamps, never as extra graph nodes —
+   * C11b); an empty return keeps the single wave-identity run.
+   */
+  serverRunInstancesFor(
+    pieceRootId: string,
+  ): readonly ServerRunInstance[] | undefined {
+    return this.#serverRunInstanceResolver?.(pieceRootId);
   }
 
   /**

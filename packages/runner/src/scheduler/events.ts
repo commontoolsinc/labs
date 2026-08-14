@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import { ensurePieceRunning } from "../ensure-piece-running.ts";
+import { waveRunContextOf } from "../executor/wave.ts";
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
@@ -1006,10 +1007,30 @@ export async function dispatchQueuedEvent(state: {
   // handlers), while the requeue paths' anonymous wrappers split rows
   // per event; scheduler_basis requires "durable ... restart-stable"
   // (serving-loop.md §3b).
+  //
+  // Stage P2-F — the LT6 inheritance rule (events.md §2, RULED
+  // 2026-08-03: "an event emitted by ANY run carries that run's acting
+  // identity — events run as the session they originated from"): a
+  // server-side event whose ORIGIN transaction ran under a stamped
+  // per-run identity hands that identity to the handler run, so a
+  // cascade rooted in a demanded (user, session) derivation preserves
+  // the acting pair hop by hop instead of blanking to the userless
+  // service fallback. Off the serving posture `waveRunContextOf` finds
+  // no stamp and this is inert; Phase 3's wire events will carry the
+  // server-stamped `firedAt` through their own carriage instead.
+  const originContext = queuedEvent.originTx !== undefined
+    ? waveRunContextOf(queuedEvent.originTx)
+    : undefined;
   state.runtime.stampServerRun(tx, {
     actionId: handlerId,
     kind: "event-handler",
     eventId: queuedEvent.id,
+    ...(originContext?.scopeKeyIdentity !== undefined
+      ? { scopeKeyIdentity: originContext.scopeKeyIdentity }
+      : {}),
+    ...(originContext?.actionScopeKey !== undefined
+      ? { actionScopeKey: originContext.actionScopeKey }
+      : {}),
   });
   if (queuedEvent.originTx !== undefined) {
     const originLocalSeq = state.getOriginLocalSeq(

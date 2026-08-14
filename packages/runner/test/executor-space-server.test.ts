@@ -540,4 +540,197 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(flushed).toBe(0);
     expect(Engine.serverSeq(engine)).toBe(seqBefore);
   });
+
+  // ---- stage P2-F: the demand-cycle terminal state (OW19) ----
+
+  /** A facade whose watch registry names exactly the given demanded
+   * roots — the unit-level stand-in for client sessions' watches (the
+   * production feed is pinned in the serving-loop E2E). */
+  const demandFacade = (
+    roots: Array<{
+      id: string;
+      scope?: string;
+      identity?: { principal?: string; sessionId?: string };
+    }>,
+  ): typeof server =>
+    new Proxy(server, {
+      get(target, prop, receiver) {
+        if (prop === "watchedRootsForSpace") {
+          return () => roots;
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof server;
+
+  it("terminalizes a confirmed no-meta demanded root and STOPS the per-cycle churn (OW19's terminal half)", async () => {
+    // A doc that EXISTS durably with a plain value and NO pattern meta
+    // — the never-a-piece `of:` class (registry/home/argument docs)
+    // that id classes cannot exclude.
+    await server.writeDocument(space, "of:p2f-terminal-root", { plain: 1 });
+
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({
+      stats,
+      serverFacade: demandFacade([{ id: "of:p2f-terminal-root" }]),
+    });
+    expect(await created.activate()).toBe(true);
+
+    // The root terminalizes: attempted, confirmed synced-no-meta,
+    // parked — counted once.
+    await waitUntil(
+      () => stats.structureLoadTerminal === 1,
+      "the demanded root to terminalize",
+    );
+
+    // THE CHURN STOPS (the starvation fork's fix): further cycles —
+    // driven by unrelated commits — re-attempt NOTHING for the parked
+    // root. Pre-P2-F every input-driven cycle re-ran the ensure
+    // (structureLoadDeferred grew per cycle, unbounded).
+    const deferredAtTerminal = stats.structureLoadDeferred;
+    const terminalAtTerminal = stats.structureLoadTerminal;
+    for (let i = 0; i < 4; i++) {
+      const applied = await server.writeDocument(
+        space,
+        `of:p2f-unrelated-${i}`,
+        { n: i },
+      );
+      created.enqueueCommit({
+        space,
+        seq: applied.seq,
+        class: "system",
+        sessionId: "session:p2f-unrelated",
+        writes: [{ id: `of:p2f-unrelated-${i}`, scopeKey: "space" }],
+      });
+      await waitUntil(
+        () => created.watermark >= applied.seq,
+        `unrelated cycle ${i} to settle`,
+      );
+    }
+    expect(stats.structureLoadDeferred).toBe(deferredAtTerminal);
+    expect(stats.structureLoadTerminal).toBe(terminalAtTerminal);
+    expect(stats.structureLoadRearmed).toBe(0);
+    expect(stats.structureLoadFailures).toBe(0);
+  });
+
+  it("re-arms a terminal root on a commit touching it and LOADS a piece created after the terminal decision (OW19's not-yet half)", async () => {
+    const stats = emptyServingLoopStats();
+    const rootName = "p2f-created-later";
+    const created = newSpaceServer({ stats });
+    expect(await created.activate()).toBe(true);
+    const runtime = servingRuntime!;
+
+    // The demanded root's id BEFORE anything exists at it — the
+    // creation race's first half: demand precedes the piece.
+    const rootCell = runtime.getCell<{ total?: number }>(
+      space,
+      rootName,
+      undefined,
+    );
+    const rootId = rootCell.getAsNormalizedFullLink().id;
+
+    // Point the demand facade at it (swapped in via the server's
+    // observer seam: the SpaceServer reads watchedRootsForSpace on
+    // every demand pass, so overriding the method on the shared server
+    // object works mid-flight).
+    const originalWatched = server.watchedRootsForSpace.bind(server);
+    (server as { watchedRootsForSpace: unknown }).watchedRootsForSpace =
+      () => [{ id: rootId }];
+    try {
+      // Fire a demand pass; the absent root confirms no-meta and
+      // terminalizes (not-yet and never are indistinguishable HERE —
+      // the re-arm below is what distinguishes them). Poll-fired: the
+      // wake resolves the loop's input wait, which is re-armed between
+      // cycles (the clamp test's idiom).
+      await waitUntil(
+        () => {
+          created.noteDemandChanged();
+          return stats.structureLoadTerminal === 1;
+        },
+        "the not-yet-created root to terminalize",
+      );
+
+      // NOW create the piece at that root through a CLIENT runtime —
+      // the scheduler tell's creation shape (an outside-scheduler
+      // authored act; protocol.md §1): its commit is a fresh authored
+      // admission whose notice the admission hook would deliver — this
+      // direct-drive harness hand-feeds the same notice with the
+      // commit's REAL seq.
+      const creatorManager = EmulatedStorageManager.connectTo(server, {
+        as: spaceSigner,
+      });
+      const creator = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: creatorManager,
+      });
+      try {
+        const compiled = await creator.patternManager.compilePattern({
+          main: "/main.tsx",
+          files: [{
+            name: "/main.tsx",
+            contents: [
+              "import { computed, pattern } from 'commonfabric';",
+              "export default pattern<{ n: number }, { total: number }>(",
+              "  ({ n }) => ({ total: computed(() => n + 7) }),",
+              ");",
+            ].join("\n"),
+          }],
+        }, { space });
+        const argument = creator.getCell<{ n: number }>(
+          space,
+          "p2f-created-later-arg",
+          undefined,
+        );
+        const creatorRoot = creator.getCell<{ total?: number }>(
+          space,
+          rootName,
+          undefined,
+        );
+        await argument.sync();
+        await creatorRoot.sync();
+        const argTx = creator.edit();
+        argument.withTx(argTx).set({ n: 1 });
+        creator.run(argTx, compiled, argument, creatorRoot);
+        expect((await argTx.commit()).error).toBeUndefined();
+        await creator.idle();
+        await creator.storageManager.synced();
+      } finally {
+        await creator.dispose();
+        await creatorManager.close();
+      }
+      const creationSeq = Engine.serverSeq(engine);
+      created.enqueueCommit({
+        space,
+        seq: creationSeq,
+        class: "authored",
+        sessionId: "session:p2f-creator",
+        writes: [{ id: rootId, scopeKey: "space" }],
+      });
+
+      await waitUntil(
+        () => stats.structureLoadRearmed === 1,
+        "the terminal root to re-arm on the creation commit",
+      );
+      // The settle-gated retry LOADS the piece: no re-terminalization,
+      // and the piece's derivation serves — the derived total lands in
+      // the engine under a derived-class commit.
+      await waitUntil(
+        () => {
+          const row = engine.database.prepare(
+            `SELECT c.class AS class FROM revision r
+             JOIN "commit" c ON c.seq = r.commit_seq
+             WHERE r.id LIKE 'computed:%' ORDER BY r.seq DESC LIMIT 1`,
+          ).get() as { class: string } | undefined;
+          return row?.class === "derived";
+        },
+        "the re-armed piece to derive server-side",
+        15_000,
+      );
+      expect(stats.structureLoadTerminal).toBe(1);
+      expect(stats.structureLoadFailures).toBe(0);
+    } finally {
+      (server as { watchedRootsForSpace: unknown }).watchedRootsForSpace =
+        originalWatched;
+    }
+  });
 });

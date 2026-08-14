@@ -27,6 +27,12 @@ export interface SchedulerObservationIdentity {
   branch?: string;
   pieceId: string;
   processGeneration?: number;
+  /** The piece root's RAW doc id (no scope-key prefix — `pieceId` above
+   * is instance-keyed for shaper buckets). The per-(action × instance)
+   * run supply (server-execution v2 stage P2-F) resolves an action's
+   * demanded instances through this id at the reactive-action choke
+   * point. */
+  pieceRootId?: string;
 }
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
