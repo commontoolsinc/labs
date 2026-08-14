@@ -181,7 +181,7 @@ function adaptSandboxResult(
   const existing = adapted.get(value);
   if (existing !== undefined) return existing;
 
-  // This boundary answers in canonical shapes: a fresh `Array` for anything
+  // This boundary returns canonical shapes: a fresh `Array` for anything
   // array-shaped, and an `Object.prototype`-rooted record for anything else.
   // A prototype is not part of what a value says as data, and a fabric value
   // has exactly one shape for a record, so a pattern that builds a result with

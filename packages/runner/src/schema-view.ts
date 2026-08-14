@@ -117,7 +117,7 @@ const EXCLUDED_MISSING: JSONSchema = Object.freeze({
  * document behind it, and reading first would resolve the link and fetch the
  * document the `false` was there to avoid.
  *
- * This is its own marker because `schemaAtPath` also answers `false` for a
+ * This is its own marker because `schemaAtPath` also returns `false` for a
  * shape it cannot read a child out of — an `allOf`, or an object schema that
  * omits `type` — where the schema has turned nothing down and the subschema is
  * still reachable below.
@@ -135,7 +135,7 @@ const isExcluded = (schema: JSONSchema): boolean =>
 /**
  * The type name a schema's `type` keyword would use for this value.
  *
- * A `FabricPrimitive` answers with its own concrete name (`FabricBytes` and the
+ * A `FabricPrimitive` returns its own concrete name (`FabricBytes` and the
  * rest), which is what a schema selecting one declares; `schemaTypeMatchesValueType`
  * still lets an `object` schema accept it through its subtype rule.
  */
@@ -212,7 +212,7 @@ const branchWithOuter = (
  *
  * An optional handle — `Cell<T> | undefined` — generates as a union whose one
  * branch carries the marker and whose other is the absent case. `hasAsCell`
- * answers for a union only when EVERY branch declares one, so that shape reads
+ * holds for a union only when EVERY branch declares one, so that shape reads
  * as "not a cell" and the reader gets a plain value where the pattern declared
  * a handle. An eager read survives it by evaluating every branch and picking
  * the cell among the results (`mergeMatches`); collapsing to the branch is the
@@ -387,8 +387,8 @@ const declaredDefault = (schema: JSONSchema): FabricValue | undefined => {
  * Only one the schema declares at its own top level, which is the rule an eager
  * read applies: a default sitting inside a branch of a union is reached by
  * evaluating that branch against a value, and an absent value gets no branch
- * evaluated. Reading one out anyway would answer where an eager read leaves the
- * value absent.
+ * evaluated. Reading one out anyway would return a value where an eager read
+ * leaves it absent.
  */
 const defaultForAbsentValue = (
   schema: JSONSchema | undefined,
@@ -490,7 +490,7 @@ export function materializeSchemaView(
   }
 
   // An opaque leaf still owes the schema's `required` keys. A `FabricPrimitive`
-  // answers them through class accessors — `FabricBytes.length` satisfies
+  // supplies them through class accessors — `FabricBytes.length` satisfies
   // `required: ["length"]` — so the check is prototype-chain membership with
   // the brand exemption, which is what an eager read applies before letting one
   // through.
@@ -626,7 +626,7 @@ const readChildAt = (
  *
  * An eager read leaves such a property out of the object it filters, and
  * `undefined` is a value a property can legitimately hold, so the two cannot
- * share a return. A view answers `undefined` to a plain property access either
+ * share a return. A view returns `undefined` for a plain property access either
  * way — that is what reading an absent property gives — and uses this to keep
  * enumeration and `in` agreeing with an eager read about which keys exist.
  */

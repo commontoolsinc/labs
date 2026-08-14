@@ -1061,11 +1061,11 @@ function deriveDereferenceLabelView(
  * The value a resolved link points at, including the one address that is
  * computed rather than stored.
  *
- * A string's `length` is not a path the store holds. Traversal answers it from
+ * A string's `length` is not a path the store holds. Traversal reads it off
  * the string it sits on (`getAtPath` in `traverse.ts`), so a link ending there
  * — `subject.key("label", "length")` where `label` is a string — resolves to
  * an address the store cannot serve, and a bare read of it yields `undefined`.
- * Answering it from the string applies traversal's rule where a link is
+ * Reading it off the string applies traversal's rule where a link is
  * followed rather than where a value is walked, so both routes agree on what
  * `<string>/length` is worth. An array's `length` needs none of this; the store
  * reads that segment itself.
@@ -1128,7 +1128,7 @@ export function validateAndTransform(
   //
   // A transaction marked for lazy materialization is kept whatever its state:
   // a view reads the state ITS transaction saw, and swapping a finished one for
-  // a fresh read would answer from newer state where the view's contract is to
+  // a fresh read would read newer state where the view's contract is to
   // refuse. The refusal comes from the marked transaction's own guard below.
   if (tx?.isLazyMaterialize() !== true) tx = runtime.readTx(tx);
 

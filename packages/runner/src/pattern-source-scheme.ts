@@ -91,8 +91,8 @@ function staysInPatternsRoute(pathname: string): boolean {
 }
 
 /**
- * The `system:` ref a compiled module name spells, or `undefined` when the name
- * says nothing about a route.
+ * The `system:` ref a compiled module name denotes, or `undefined` when the
+ * name says nothing about a route.
  *
  * A module's name is a URL pathname only for a program the worker compiled over
  * HTTP, where `HttpProgramResolver` names every module by its pathname. A
@@ -125,7 +125,7 @@ export function systemPatternSourceForModuleName(
  * A query or fragment on a legacy locator is dropped: it selects nothing on the
  * patterns route, which serves a file by path, and revalidation is the
  * `?identity` ETag's job. Keeping it would leave the piece with a locator no
- * ref can spell, and therefore one nothing would ever follow again.
+ * ref can name, and therefore one nothing would ever follow again.
  *
  * The result either resolves as a ref or is the input unchanged; nothing here
  * can mint a ref the resolver rejects.
@@ -154,7 +154,7 @@ function legacyPatternsRoutePath(
   // Both spellings are read as URLs so they get one set of checks: a rooted
   // path against a syntactic base, an absolute locator against the space's own
   // host. Reading only the rooted form as a string let `..`, a query, and a
-  // fragment through, each of which spells a ref that cannot resolve.
+  // fragment through, each of which denotes a ref that cannot resolve.
   let url: URL;
   if (source.startsWith("/")) {
     url = new URL(source, RESOLUTION_BASE);
