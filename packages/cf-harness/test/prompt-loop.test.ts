@@ -554,6 +554,13 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
       model: "gpt-5.4",
       modelProvider: "openai-codex",
       credentialOwnerKey: "loom:user-1",
+      credentialOwner: {
+        type: "cf-harness.credential-owner-ref",
+        version: 1,
+        ownerKey: "loom:user-1",
+      },
+      modelAuthSource: "cf-harness-local-store",
+      harnessHomeIdentity: "sha256:opaque-home",
       cfcEnforcementMode: "disabled",
     }),
   });
@@ -568,6 +575,22 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
   assertEquals(
     result.runState.subagentRuns?.[0]?.manifest.modelProvider,
     "openai-codex",
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.modelAuthSource,
+    "cf-harness-local-store",
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.credentialOwner,
+    {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+    },
+  );
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.harnessHomeIdentity,
+    "sha256:opaque-home",
   );
   const serialized = JSON.stringify(result.runState.subagentRuns);
   assertEquals(serialized.includes("initial-refresh-secret"), false);
@@ -1331,6 +1354,51 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to gateway requests", asyn
 
   assertEquals(result.finalAssistantText, "Hi.");
   assertEquals(seenSignal, controller.signal);
+});
+
+Deno.test("CfHarnessPromptLoop preserves custom abort reasons for local gateway runs", async () => {
+  const reason = new Error("custom cancellation reason");
+  const controller = new AbortController();
+  controller.abort(reason);
+  const modelClient: HarnessModelClient = {
+    providerId: "openai-compatible-gateway",
+    complete: () => Promise.reject(reason),
+  };
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-local-gateway-custom-abort",
+      model: "gpt-5.4",
+      modelProvider: "openai-compatible-gateway",
+      modelAuthSource: "none",
+      credentialOwner,
+      harnessHomeIdentity: "sha256:opaque-home",
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        modelProvider: "openai-compatible-gateway",
+        modelAuthSource: "none",
+        credentialOwner,
+        harnessHomeIdentity: "sha256:opaque-home",
+      },
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  let caught: unknown;
+  try {
+    await loop.runPrompt({ prompt: "Say hi.", signal: controller.signal });
+  } catch (error) {
+    caught = error;
+  }
+  assert(caught === reason, "custom abort reason must be rethrown unchanged");
 });
 
 Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loops", async () => {

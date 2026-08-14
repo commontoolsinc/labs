@@ -166,6 +166,10 @@ What is not done yet:
   - what caused a gateway request, reported on the request
 - [src/interactive-chat-stdio.ts](src/interactive-chat-stdio.ts)
   - NDJSON stdio transport for the interactive chat protocol
+- [src/loom-local-host.ts](src/loom-local-host.ts)
+  - strict, fixed-owner host factory for local single-user Loom
+- [src/loom-local-host-main.ts](src/loom-local-host-main.ts)
+  - one batch/interactive executable boundary for Loom-owned runs
 - [src/sqlite-session-store.ts](src/sqlite-session-store.ts)
   - SQLite-backed interactive chat session, turn, and event persistence
 - [src/artifacts.ts](src/artifacts.ts)
@@ -313,8 +317,45 @@ silently substituted.
 
 ### Loom subscription binding
 
-Loom support uses the same `openai-codex` protocol and model client, but never
-the local filesystem credential store. A trusted Loom host must:
+Local single-user Loom uses the exported `createLoomLocalCfHarnessHost()`
+factory and the package entrypoint in `src/loom-local-host-main.ts`. The host
+requires an explicit, absolute, normalized `CF_HARNESS_HOME`; strictly resolves
+the persisted provider from that home's `config.json`; and fixes the credential
+owner to `local`. It uses that same home's `auth.json` only through cf-harness's
+credential-store and resolver APIs. It never reads or imports the ordinary Codex
+CLI login.
+
+```bash
+CF_HARNESS_HOME=/canonical/private/home \
+  deno run --no-lock -A src/loom-local-host-main.ts batch -- \
+  --workspace ../.. --prompt "Summarize this workspace."
+
+CF_HARNESS_HOME=/canonical/private/home \
+  deno run --no-lock -A src/loom-local-host-main.ts interactive -- \
+  --chat-session-db /private/runtime/chat.sqlite
+```
+
+The entrypoint serves both execution shapes. It rejects missing or invalid
+provider configuration instead of applying the historical gateway default. Codex
+preflight reads bounded connection health without refreshing; an expired
+credential refreshes only in the serialized resolver immediately before model
+traffic. Disconnected and reconnect-required Codex configurations return
+`provider-auth-required` without contacting Codex or the gateway. Resumed runs
+must match the recorded provider, model, fixed owner, auth source, and an opaque
+digest of the canonical home. The path itself is never written to provider
+binding metadata. Runs and durable chat sessions created before this complete
+binding existed are deliberately not resumable through the local adapter; it
+fails closed instead of guessing which credential home or billing route created
+them.
+
+Batch startup failures are one `cf-harness.host-failure` JSON object on stderr.
+Interactive startup failures remain on the NDJSON chat protocol so hosts that do
+not consume stderr still receive the stable provider error code. Run state,
+manifests, reports, child manifests, and structured batch results record only
+provider, the non-secret auth-source label, and the fixed owner reference.
+
+Hosted or multi-user Loom must not reuse this single-user adapter. A trusted
+multi-user host must instead:
 
 - require the initiating user to connect ChatGPT/Codex explicitly;
 - put `modelProvider: "openai-codex"` and a `cf-harness.credential-owner-ref` in
@@ -333,7 +374,7 @@ interactive service processes, inject the owner-bound client through
 `credentialOwner`. The service constructor rejects Codex without this fixed
 process owner. Do not accept an owner or token through the NDJSON request.
 
-This package provides the Loom integration seam; the Loom host still must
+The multi-user library seam remains available, but its host still must
 authenticate the initiating principal, enforce workspace policy, and prove
 cross-user isolation before product rollout.
 

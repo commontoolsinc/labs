@@ -43,12 +43,15 @@ import {
   type PromptSlotRole,
 } from "./contracts/prompt-slot.ts";
 import {
+  bindLoomLocalRunManifest,
   HARNESS_CREDENTIAL_OWNER_REF_TYPE,
   type HarnessCredentialOwnerRef,
   harnessCredentialOwnersEqual,
   type HarnessRunManifest,
+  type LoomLocalHostBinding,
   parseLoomRunManifestJson,
 } from "./contracts/run-manifest.ts";
+import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
   getHarnessSubagentProfileConfig,
@@ -290,7 +293,7 @@ export interface CfHarnessCliCapabilities {
     persistentProviderConfig: true;
     structuredAuthControl: true;
     credentialHealth: true;
-    loomLocalOwnerBinding: false;
+    loomLocalOwnerBinding: true;
     runPattern: true;
   };
 }
@@ -299,6 +302,33 @@ export interface CfHarnessCliIO {
   stdout(text: string): void;
   stderr(text: string): void;
 }
+
+export interface CfHarnessHostFailure {
+  type: "cf-harness.host-failure";
+  version: 1;
+  ok: false;
+  error: {
+    code: HarnessControlErrorCode;
+    message: string;
+  };
+}
+
+export const createCfHarnessHostFailure = (
+  error: unknown,
+): CfHarnessHostFailure => {
+  const controlError = error instanceof HarnessControlError
+    ? error
+    : new HarnessControlError(
+      "internal-error",
+      "The local cf-harness host operation failed",
+    );
+  return {
+    type: "cf-harness.host-failure",
+    version: 1,
+    ok: false,
+    error: { code: controlError.code, message: controlError.message },
+  };
+};
 
 export type CfHarnessCliSignal = "SIGINT" | "SIGTERM";
 
@@ -309,6 +339,10 @@ export type CfHarnessCliSignalHandler = (
 export interface RunCfHarnessCliDependencies {
   cwd?: string;
   env?: Record<string, string | undefined>;
+  /** Trusted, fixed binding supplied only by the dedicated local Loom host. */
+  loomLocalHostBinding?: LoomLocalHostBinding;
+  fetchFn?: HarnessFetch;
+  structuredHostFailures?: boolean;
   /**
    * What caused this run, reported on every gateway request it makes.
    * Resolved from the process when absent.
@@ -595,7 +629,7 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     persistentProviderConfig: true,
     structuredAuthControl: true,
     credentialHealth: true,
-    loomLocalOwnerBinding: false,
+    loomLocalOwnerBinding: true,
     runPattern: true,
   },
 });
@@ -1742,11 +1776,13 @@ const createSelectedModelClient = async (options: {
       store,
       ownerKey: credentialOwnerKey,
       credentialOwner: options.credentialOwner,
+      fetchFn: options.deps.fetchFn,
     });
   }
   return new OpenAICodexResponsesClient({
     credentialResolver: resolver!,
     credentialOwner: options.credentialOwner,
+    fetchFn: options.deps.fetchFn,
   });
 };
 
@@ -2022,6 +2058,9 @@ export interface CfHarnessBatchResult {
   run_id: string;
   status: string;
   model: string;
+  model_provider?: HarnessModelProviderId;
+  model_auth_source?: string;
+  credential_owner?: HarnessCredentialOwnerRef;
   usage?: HarnessModelUsage;
   artifact_root?: string;
   transcript_path?: string;
@@ -2109,6 +2148,15 @@ export const createCfHarnessBatchResult = (
   run_id: result.runState.runId,
   status: result.runState.status,
   model: result.model,
+  ...(result.runState.modelProvider !== undefined
+    ? { model_provider: result.runState.modelProvider }
+    : {}),
+  ...(result.runState.modelAuthSource !== undefined
+    ? { model_auth_source: result.runState.modelAuthSource }
+    : {}),
+  ...(result.runState.credentialOwner !== undefined
+    ? { credential_owner: structuredClone(result.runState.credentialOwner) }
+    : {}),
   ...((result.totalUsage ?? result.usage) !== undefined
     ? { usage: result.totalUsage ?? result.usage }
     : {}),
@@ -2351,6 +2399,21 @@ const parseCfHarnessCliControlArgs = (
       h: "help",
     },
   });
+};
+
+export type CfHarnessCliInformationalControl =
+  | "help"
+  | "describe-capabilities";
+
+/** Classifies global controls that do not inspect provider or auth state. */
+export const cfHarnessCliInformationalControl = (
+  argv: readonly string[],
+): CfHarnessCliInformationalControl | undefined => {
+  if (cfHarnessCliCommandName(argv) !== "prompt") return undefined;
+  const args = parseCfHarnessCliControlArgs(argv);
+  if (args.help) return "help";
+  if (args["describe-capabilities"]) return "describe-capabilities";
+  return undefined;
 };
 
 const defaultOpenUrl = async (url: string): Promise<void> => {
@@ -2742,12 +2805,12 @@ export const runCfHarnessCli = async (
     if (modelsResult !== undefined) return modelsResult;
     const whoamiResult = runCfHarnessWhoamiCommand(argv, deps, io);
     if (whoamiResult !== undefined) return whoamiResult;
-    const controlArgs = parseCfHarnessCliControlArgs(argv);
-    if (controlArgs.help) {
+    const informationalControl = cfHarnessCliInformationalControl(argv);
+    if (informationalControl === "help") {
       io.stdout(formatCfHarnessCliUsage());
       return 0;
     }
-    if (controlArgs["describe-capabilities"]) {
+    if (informationalControl === "describe-capabilities") {
       io.stdout(
         `${JSON.stringify(createCfHarnessCliCapabilities(), null, 2)}\n`,
       );
@@ -2765,10 +2828,24 @@ export const runCfHarnessCli = async (
     const readTextFile = deps.readTextFile ?? Deno.readTextFile;
     const startedAt = Date.now();
     let result: HarnessPromptLoopResult;
-    const runManifest = await readRunManifest(
+    let runManifest = await readRunManifest(
       parsed.runManifestPath,
       readTextFile,
     );
+    if (deps.loomLocalHostBinding !== undefined) {
+      try {
+        runManifest = bindLoomLocalRunManifest(
+          runManifest,
+          deps.loomLocalHostBinding,
+          parsed.model,
+        );
+      } catch (error) {
+        throw new HarnessControlError(
+          "provider-mismatch",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
     const promptSlotBinding = runManifest?.promptSlot ??
       createCliPromptSlotBinding({
         kernelName: "cf-harness",
@@ -2854,6 +2931,16 @@ export const runCfHarnessCli = async (
         );
       }
       const recordedRunManifest = artifacts.runState.runManifest;
+      if (
+        runManifest?.model !== undefined &&
+        artifacts.runState.model !== undefined &&
+        runManifest.model !== artifacts.runState.model
+      ) {
+        throw new HarnessControlError(
+          "provider-mismatch",
+          `resume model mismatch: run uses ${artifacts.runState.model}, requested manifest uses ${runManifest.model}`,
+        );
+      }
       const credentialOwner = recordedRunManifest?.credentialOwner ??
         localCredentialOwner(artifacts.runState.credentialOwnerKey ?? "local");
       if (
@@ -2972,6 +3059,7 @@ export const runCfHarnessCli = async (
           ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
           : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
+        ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
         ...(parsed.reasoningEffort !== undefined
           ? { reasoningEffort: parsed.reasoningEffort }
           : {}),
@@ -3115,6 +3203,7 @@ export const runCfHarnessCli = async (
           ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
           : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
+        ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
         ...(parsed.reasoningEffort !== undefined
           ? { reasoningEffort: parsed.reasoningEffort }
           : {}),
@@ -3190,7 +3279,20 @@ export const runCfHarnessCli = async (
     }
     return 0;
   } catch (error) {
-    io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    const hostError = deps.structuredHostFailures &&
+        !(error instanceof HarnessControlError)
+      ? new HarnessControlError(
+        activeEngine === undefined ? "invalid-request" : "internal-error",
+        activeEngine === undefined
+          ? "The cf-harness request is invalid"
+          : "The local cf-harness host operation failed",
+      )
+      : error;
+    io.stderr(
+      deps.structuredHostFailures
+        ? `${JSON.stringify(createCfHarnessHostFailure(hostError))}\n`
+        : `${error instanceof Error ? error.message : String(error)}\n`,
+    );
     return 1;
   } finally {
     signalCleanup?.();

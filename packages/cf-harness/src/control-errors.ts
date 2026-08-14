@@ -5,12 +5,10 @@ export type HarnessControlErrorCode =
   | "provider-auth-required"
   | "provider-mismatch"
   | "provider-unavailable"
+  | "internal-error"
   | "operation-canceled";
 
-/**
- * A machine-classifiable provider failure whose message and cause graph are
- * safe to persist in run metadata or return from a control command.
- */
+/** A machine-classifiable, bounded failure safe to return at host boundaries. */
 export class HarnessControlError extends Error {
   constructor(
     readonly code: HarnessControlErrorCode,

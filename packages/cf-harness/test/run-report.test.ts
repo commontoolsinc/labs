@@ -54,6 +54,36 @@ Deno.test("run reports do not invent API-key auth for legacy run state", () => {
   assertEquals(report.modelAuthSource, undefined);
 });
 
+Deno.test("run reports preserve the non-secret local Loom host binding", () => {
+  const report = createHarnessRunReport({
+    runState: {
+      runId: "loom-local",
+      status: "completed",
+      updatedAt: "2026-08-13T00:00:00.000Z",
+      cfcEnforcementMode: "disabled",
+      modelProvider: "openai-codex",
+      modelAuthSource: "cf-harness-local-store",
+      credentialOwner: {
+        type: "cf-harness.credential-owner-ref",
+        version: 1,
+        ownerKey: "local",
+      },
+      harnessHomeIdentity: "sha256:opaque-home",
+      policyEvents: [],
+      policyDecisions: [],
+      toolOutputs: [],
+    },
+    model: "gpt-5.6-terra",
+    modelTurns: 1,
+    toolActivity: [],
+  });
+
+  assertEquals(report.modelProvider, "openai-codex");
+  assertEquals(report.modelAuthSource, "cf-harness-local-store");
+  assertEquals(report.credentialOwner?.ownerKey, "local");
+  assertEquals(report.harnessHomeIdentity, "sha256:opaque-home");
+});
+
 Deno.test("run reports preserve aggregate and per-turn model usage", () => {
   const usage = {
     inputTokens: 300,

@@ -1139,8 +1139,14 @@ Deno.test("CfHarnessEngine keeps a resumed run's recorded provider authoritative
     cfcEnforcementMode: "disabled",
     currentDir: "/workspace",
     modelProvider: "openai-codex",
-    modelAuthSource: "owner-bound-oauth",
+    modelAuthSource: "cf-harness-local-store",
     credentialOwnerKey: "loom:user-1",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+    },
+    harnessHomeIdentity: "sha256:home-one",
     policyEvents: [],
     toolOutputs: [],
     failureRecords: [],
@@ -1152,6 +1158,9 @@ Deno.test("CfHarnessEngine keeps a resumed run's recorded provider authoritative
   });
   assertEquals(resumed.config.modelProvider, "openai-codex");
   assertEquals(resumed.config.credentialOwnerKey, "loom:user-1");
+  assertEquals(resumed.config.modelAuthSource, "cf-harness-local-store");
+  assertEquals(resumed.config.credentialOwner, runState.credentialOwner);
+  assertEquals(resumed.config.harnessHomeIdentity, "sha256:home-one");
 
   assertThrows(
     () =>
@@ -1173,6 +1182,40 @@ Deno.test("CfHarnessEngine keeps a resumed run's recorded provider authoritative
       }),
     Error,
     "credential owner does not match",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+        credentialOwner: {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "loom:user-2",
+        },
+      }),
+    Error,
+    "credential owner does not match",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+        harnessHomeIdentity: "sha256:home-two",
+      }),
+    Error,
+    "harness home does not match",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+        modelAuthSource: "owner-bound-oauth",
+      }),
+    Error,
+    "auth source does not match",
   );
 });
 

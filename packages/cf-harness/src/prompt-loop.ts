@@ -113,6 +113,7 @@ import type {
   HarnessModelUsage,
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
+import { HarnessControlError } from "./control-errors.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -2109,29 +2110,47 @@ export class CfHarnessPromptLoop {
     try {
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;
-        const response = await this.modelClient.complete({
-          model,
-          transcript,
-          tools: BUILTIN_TOOLS.filter((tool) =>
-            this.#allowedToolIds.has(tool.descriptor.toolId)
-          ).map((tool) => tool.descriptor),
-          nativeModelToolIds: this.#nativeModelToolIds,
-          runId: this.engine.getRunState().runId,
-          ...(this.#cacheAffinityKey !== undefined
-            ? { cacheAffinityKey: this.#cacheAffinityKey }
-            : {}),
-          ...(this.#promptCacheMode !== undefined
-            ? { promptCacheMode: this.#promptCacheMode }
-            : {}),
-          ...(this.#reasoningEffort !== undefined
-            ? { reasoningEffort: this.#reasoningEffort }
-            : {}),
-          ...(this.#compactThreshold !== undefined
-            ? { compactThreshold: this.#compactThreshold }
-            : {}),
-          signal: options.signal,
-          onAttempt: recordModelAttempt,
-        });
+        let response;
+        try {
+          response = await this.modelClient.complete({
+            model,
+            transcript,
+            tools: BUILTIN_TOOLS.filter((tool) =>
+              this.#allowedToolIds.has(tool.descriptor.toolId)
+            ).map((tool) => tool.descriptor),
+            nativeModelToolIds: this.#nativeModelToolIds,
+            runId: this.engine.getRunState().runId,
+            ...(this.#cacheAffinityKey !== undefined
+              ? { cacheAffinityKey: this.#cacheAffinityKey }
+              : {}),
+            ...(this.#promptCacheMode !== undefined
+              ? { promptCacheMode: this.#promptCacheMode }
+              : {}),
+            ...(this.#reasoningEffort !== undefined
+              ? { reasoningEffort: this.#reasoningEffort }
+              : {}),
+            ...(this.#compactThreshold !== undefined
+              ? { compactThreshold: this.#compactThreshold }
+              : {}),
+            signal: options.signal,
+            onAttempt: recordModelAttempt,
+          });
+        } catch (error) {
+          const localGateway = this.engine.config.modelProvider ===
+              "openai-compatible-gateway" &&
+            this.engine.config.runManifest?.harnessHomeIdentity !== undefined;
+          if (
+            localGateway && !(error instanceof HarnessControlError) &&
+            options.signal?.aborted !== true &&
+            !(error instanceof DOMException && error.name === "AbortError")
+          ) {
+            throw new HarnessControlError(
+              "provider-unavailable",
+              "The configured cf-harness gateway request failed",
+            );
+          }
+          throw error;
+        }
         if (response.usage !== undefined) {
           modelUsage.push({
             modelTurn: modelTurns,
@@ -3016,6 +3035,15 @@ export class CfHarnessPromptLoop {
       depth: 1,
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
       modelProvider,
+      ...(parentRunState.modelAuthSource !== undefined
+        ? { modelAuthSource: parentRunState.modelAuthSource }
+        : {}),
+      ...(parentRunState.credentialOwner !== undefined
+        ? { credentialOwner: structuredClone(parentRunState.credentialOwner) }
+        : {}),
+      ...(parentRunState.harnessHomeIdentity !== undefined
+        ? { harnessHomeIdentity: parentRunState.harnessHomeIdentity }
+        : {}),
       model: childModel.model,
       modelSource: childModel.source,
       allowedToolIds: [...profileConfig.allowedToolIds],

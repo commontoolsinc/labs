@@ -212,6 +212,41 @@ Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex
   );
 });
 
+Deno.test("resolveHarnessConfig requires exact explicit and manifest credential owners", () => {
+  const runManifest = {
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref" as const,
+      version: 1 as const,
+      ownerKey: "local",
+      tenantKey: "tenant-a",
+    },
+  };
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        credentialOwner: {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "local",
+          tenantKey: "tenant-b",
+        },
+        runManifest,
+      }),
+    Error,
+    "does not match run manifest",
+  );
+  assertEquals(
+    resolveHarnessConfig({
+      credentialOwner: runManifest.credentialOwner,
+      runManifest,
+    }).credentialOwner,
+    runManifest.credentialOwner,
+  );
+});
+
 Deno.test("resolveHarnessConfig accepts an explicit mode override string", () => {
   const config = resolveHarnessConfig({
     inheritedCfcEnforcementMode: "disabled",
