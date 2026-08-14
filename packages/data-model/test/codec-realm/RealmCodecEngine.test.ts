@@ -178,27 +178,31 @@ describe("RealmCodecEngine", () => {
         .toThrow(/not a form this format emits/);
     });
 
-    it("refuses a single-entry `Map` whose key is not a string", () => {
-      // A tag is a string, and a key off the wire is not taken on the type's
-      // word. Cloning carries a `Map` keyed by anything, so both of these
-      // arrive intact and neither can name a wire type.
+    it("refuses a single-entry `Map` whose key is not a tag", () => {
+      // Cloning carries a `Map` keyed by anything at all, so this format can
+      // find a non-string in tag position where JSON never can. The engine
+      // hands the key over as it found it, and the shared tag check judges
+      // it, so what is refused here is refused the same way under any format.
       expect(() => fabricFromRealmValue(new Map([[42, "x"]]) as never))
-        .toThrow(/not a form this format emits/);
+        .toThrow(/malformed tag/);
       expect(() => fabricFromRealmValue(new Map([[Symbol("s"), "x"]]) as never))
-        .toThrow(/not a form this format emits/);
+        .toThrow(/malformed tag/);
+      expect(() => fabricFromRealmValue(new Map([["hole", "x"]]) as never))
+        .toThrow(/malformed tag/);
     });
 
-    it("returns a non-string key's refusal as a `ProblematicValue` when lenient", () => {
+    it("keeps the offending key in a lenient refusal", () => {
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
         new Map([[42, "x"]]) as never,
         EMPTY_RECONSTRUCTION_CONTEXT,
-      );
+      ) as ProblematicValue;
 
       expect(decoded).toBeInstanceOf(ProblematicValue);
-      expect((decoded as ProblematicValue).error).toMatch(
-        /not a form this format emits/,
-      );
+      expect(decoded.error).toMatch(/malformed tag/);
+      // The key itself, rendered: a report of a bad tag that did not say
+      // which tag would be most of the way to useless.
+      expect(decoded.wireTypeTag).toBe("42");
     });
 
     it("raises a codec's rejection as a `ProblematicStateError`", () => {

@@ -340,21 +340,22 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * if `data` is not a tagged value. The `state` is extracted directly from
    * `data`.
    *
-   * The key's type is checked rather than taken on the declaration's word.
+   * The key is handed over as it was found, of whatever type.
    * {@link RealmTaggedValue} says a tag is a `string`, but that describes what
-   * this format _emits_, and decoding is exactly where data that came from
-   * somewhere else arrives. A `Map` keyed by anything else is a form this
-   * format never produces, and is refused as one alongside a multi-entry
-   * `Map`, rather than being let through to name a wire type it cannot name.
+   * this format _emits_, and decoding is where data that came from somewhere
+   * else arrives -- structured cloning carries a `Map` keyed by anything at
+   * all. Whether what is here is a tag belongs to `decodeTagged()`, which
+   * asks it the same way for every format and settles the answer against
+   * `lenient`.
    */
   static #unwrapTag(
     data: RealmCodecValue,
-  ): { tag: string; state: RealmCodecValue } | null {
+  ): { tag: any; state: RealmCodecValue } | null {
     if (!((data instanceof Map) && (data.size === 1))) {
       return null;
     }
 
     const [tag, state] = data.entries().next().value!;
-    return (typeof tag === "string") ? { tag, state } : null;
+    return { tag, state };
   }
 }
