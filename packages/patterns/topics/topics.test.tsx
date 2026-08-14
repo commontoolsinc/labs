@@ -14,6 +14,7 @@ import {
   assert,
   Default,
   NAME,
+  Stream,
   TESTS,
   UI,
   Writable,
@@ -43,6 +44,8 @@ import Topic, {
   type TopicComment,
   type TopicLink,
   type TopicLinkKind,
+  type TopicMentionRefMap,
+  type TopicSummary,
   type UnmentionEvent,
   type UnmentionResult,
   whenLabel,
@@ -94,7 +97,42 @@ const propValue = (value: any): unknown =>
 // runtime: a declared result adds nothing to the generated schema (C3
 // withdrawn — results flow schema-free through receipts), so the stored
 // schema a legacy piece is validated against is unchanged.
-const LegacyUnsignedTopic = pattern(() => {
+/**
+ * What a topic pattern deployed before the current paths existed publishes.
+ *
+ * Declared explicitly rather than inferred, because the shim returns undefined
+ * for the paths it predates and an inferred `unknown` there would make the
+ * output schema carry `{ type: "unknown" }` — which a consumer reads back as
+ * undefined for reasons that have nothing to do with this test. Spelling the
+ * shape out says the real thing: these paths are absent from a legacy sibling,
+ * and `TopicPiece` — where they now carry a default and no `| undefined` — has
+ * to survive being handed one.
+ */
+interface LegacyUnsignedTopicOutput {
+  [NAME]: string | undefined;
+  title: string;
+  body: string;
+  comments: TopicComment[];
+  links: TopicLink[];
+  createdAt: number;
+  createdBy: TopicAuthor | undefined;
+  createdByName: string;
+  mentions: unknown[] | undefined;
+  references: TopicMentionRefMap | undefined;
+  referencedBy: TopicSummary[] | undefined;
+  commentCount: number | undefined;
+  lastActivityAt: number | undefined;
+  addComment: Stream<{ body: string }, AddCommentResult>;
+  addLink: Stream<
+    { kind: TopicLinkKind; url: string; label: string },
+    AddLinkResult
+  >;
+  setBody: Stream<{ body: string }, SetBodyResult>;
+  mention: Stream<MentionEvent, MentionResult>;
+  unmention: Stream<UnmentionEvent, UnmentionResult>;
+}
+
+const LegacyUnsignedTopic = pattern<Record<PropertyKey, never>, LegacyUnsignedTopicOutput>(() => {
   const addComment = action<{ body: string }, AddCommentResult>((event) => ({
     comment: { authorName: "", body: event.body, sentAt: 0 },
   }));
@@ -124,6 +162,11 @@ const LegacyUnsignedTopic = pattern(() => {
     createdByName: "Legacy Person",
     // Absent for the same reason `createdBy` is: this sibling predates these
     // paths, and the current projection has to accept that.
+    //
+    // These two now declare a default and no `| undefined` on `TopicPiece`,
+    // which is exactly what this sibling is here to exercise: a retained
+    // mixed-version link materializes a missing path as a present undefined,
+    // and current list validation has to survive it.
     mentions: undefined,
     references: undefined,
     referencedBy: undefined,
