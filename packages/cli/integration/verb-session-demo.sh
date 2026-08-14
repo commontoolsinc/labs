@@ -46,7 +46,7 @@ fi
 # The connection lives in the environment cf documents, so it stays off every
 # command line. The space cannot: cf has no environment variable for it, so
 # `-s` is on each command, exactly as a reader would have to type it.
-export CF_API_URL="${API_URL:-http://localhost:8000}"
+export CF_API_URL="${CF_API_URL:-${API_URL:-http://localhost:8000}}"
 if [ -z "${CF_IDENTITY:-}" ]; then
   CF_IDENTITY=$(mktemp)
   cf id new >"$CF_IDENTITY" 2>/dev/null
@@ -55,6 +55,10 @@ export CF_IDENTITY
 SPACE="${SPACE:-$(mktemp -u demoXXXXXXXX)}"
 
 B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; Y=$'\033[33m'; N=$'\033[0m'
+R=$'\033[31m'
+# An act that is not marked BROKEN claims the command works. Counted so a
+# transcript that hid one cannot exit 0 and read as a clean session.
+UNEXPECTED=0
 act() { printf '\n%s━━ %s %s\n' "$B" "$1" "$N"; }
 say() { printf '%s   %s%s\n' "$D" "$1" "$N"; }
 
@@ -77,8 +81,20 @@ shown() {
 # person at a prompt rather than to a transcript.
 run() {
   printf '\n%s   $ %s%s\n' "$C" "$(shown "$@")" "$N"
-  OUT=$("$@" 2>/dev/null)
+  # stderr is kept, not dropped. An act that is not marked BROKEN is a claim
+  # that the command works, so a failure here is the demo being wrong about
+  # the surface — the thing this script exists to stop — and it has to be as
+  # visible as the transcript it would otherwise sit inside quietly.
+  OUT=$("$@" 2>/tmp/verb-session-run-err.$$)
+  local rc=$?
   printf '%s\n' "$OUT" | sed 's/^/     /'
+  if [ "$rc" != "0" ]; then
+    printf '%s     UNEXPECTED FAILURE (exit %s) — this act is not marked BROKEN%s\n' \
+      "$R" "$rc" "$N"
+    sed 's/^/       /' /tmp/verb-session-run-err.$$
+    UNEXPECTED=$((UNEXPECTED + 1))
+  fi
+  rm -f /tmp/verb-session-run-err.$$
 }
 
 # Same, for a command that fails today: stderr is kept, because the error is
@@ -187,3 +203,11 @@ say "Acts 9 and 10 are the graph half, and they are sequenced as verbs plan"
 say "item 11. Act 6 is a defect: #5633, with a fix in review as #5764."
 say "verb-session-gaps.sh asserts all three, and fails the day any one of them"
 say "changes — so this demo cannot quietly go stale."
+
+if [ "$UNEXPECTED" != "0" ]; then
+  printf '\n%s━━ %d act(s) failed that this demo says work%s\n' \
+    "$R" "$UNEXPECTED" "$N"
+  say "Every act above that is not marked BROKEN is a claim about the surface."
+  say "One of them did not hold, so this transcript does not describe cf."
+  exit 1
+fi
