@@ -71,9 +71,13 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   apiUrl: { treat: "per-site" },
   storageManager: { treat: "per-site" },
   experimental: { treat: "per-site" },
-  // Same value as the Runtime constructor default today; pinned so a changed
-  // constructor default cannot silently relax first-party environments.
-  cfcEnforcementMode: { treat: "core-pinned", value: "enforce-explicit" },
+  cfcEnforcementMode: { treat: "core-pinned", value: "enforce-strict" },
+  cfcFlowLabels: { treat: "core-pinned", value: "persist" },
+  cfcWriteFloor: { treat: "core-pinned", value: "enforce" },
+  cfcTriggerReadGating: { treat: "core-pinned", value: true },
+  cfcPolicyEvaluation: { treat: "core-pinned", value: "enforce" },
+  cfcLabelMetadataProtection: { treat: "core-pinned", value: "enforce" },
+  cfcDeclaredMonotonicity: { treat: "core-pinned", value: "enforce" },
   // Deployment-facing runtimes point patterns at the deployment itself;
   // local presets keep the builder-env default (localhost fall-through).
   patternEnvironment: {
@@ -90,12 +94,6 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   pieceCreatedCallback: { treat: "absent" },
   debug: { treat: "absent" },
   telemetry: { treat: "absent" },
-  cfcFlowLabels: { treat: "absent" },
-  cfcWriteFloor: { treat: "absent" },
-  cfcTriggerReadGating: { treat: "absent" },
-  cfcPolicyEvaluation: { treat: "absent" },
-  cfcLabelMetadataProtection: { treat: "absent" },
-  cfcDeclaredMonotonicity: { treat: "absent" },
   cfcPolicyRecords: { treat: "absent" },
   cfcPrefixProvenanceStats: { treat: "absent" },
   cfcTrustConfig: { treat: "absent" },
@@ -359,7 +357,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
       storageManager: emulated,
     }));
     try {
-      expect(runtime.cfcEnforcementMode).toBe("enforce-explicit");
+      expect(runtime.cfcEnforcementMode).toBe("enforce-strict");
     } finally {
       await runtime.dispose();
       await emulated.close();

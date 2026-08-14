@@ -3001,8 +3001,13 @@ describe("browserWorkerParamsFromInitializationData", () => {
         >[2],
       ),
     );
-    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
-    expect(options.cfcFlowLabels).toBeUndefined();
+    expect(options.cfcEnforcementMode).toBe("enforce-strict");
+    expect(options.cfcFlowLabels).toBe("persist");
+    expect(options.cfcWriteFloor).toBe("enforce");
+    expect(options.cfcTriggerReadGating).toBe(true);
+    expect(options.cfcPolicyEvaluation).toBe("enforce");
+    expect(options.cfcLabelMetadataProtection).toBe("enforce");
+    expect(options.cfcDeclaredMonotonicity).toBe("enforce");
   });
 
   it("threads the host-decided space-host map through to the runtime options", () => {

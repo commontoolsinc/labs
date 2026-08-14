@@ -198,7 +198,7 @@ Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex
     gatewayBaseUrl: DEFAULT_GATEWAY_BASE_URL,
     gatewayAuthMode: "bearer",
     skillScriptExecutionTarget: "sandbox",
-    cfcEnforcementMode: "enforce-explicit",
+    cfcEnforcementMode: "enforce-strict",
     cfcEnforcementModeSource: "default",
   });
   assertThrows(

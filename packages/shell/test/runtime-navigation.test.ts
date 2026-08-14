@@ -215,7 +215,7 @@ describe("RuntimeInternals navigation", () => {
     }
   });
 
-  it("creates worker runtime options with explicit CFC enforcement and principal trust", async () => {
+  it("uses strict CFC enforcement and carries principal trust", async () => {
     const { createRuntimeClientOptions } = await import(
       "../src/lib/runtime.ts"
     );
@@ -234,7 +234,7 @@ describe("RuntimeInternals navigation", () => {
       apiUrl: new URL("http://shell.test/"),
     });
 
-    expect(options.cfcEnforcementMode).toBe("enforce-explicit");
+    expect(options.cfcEnforcementMode).toBe("enforce-strict");
     expect(options.trustSnapshot).toEqual({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

@@ -37,7 +37,13 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   assertEquals(options.experimental?.modernCellRep, true);
   // Unset flags stay unset (tri-state fidelity), not coerced.
   assertEquals(options.experimental?.persistentSchedulerState, undefined);
-  assertEquals(options.cfcEnforcementMode, "enforce-explicit");
+  assertEquals(options.cfcEnforcementMode, "enforce-strict");
+  assertEquals(options.cfcFlowLabels, "persist");
+  assertEquals(options.cfcWriteFloor, "enforce");
+  assertEquals(options.cfcTriggerReadGating, true);
+  assertEquals(options.cfcPolicyEvaluation, "enforce");
+  assertEquals(options.cfcLabelMetadataProtection, "enforce");
+  assertEquals(options.cfcDeclaredMonotonicity, "enforce");
 });
 
 // The runtime→OTel bridge attach rides Runtime construction (CT plan: the

@@ -120,9 +120,9 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
     type: "cf-harness.capability-snapshot",
     at: "2026-04-22T23:00:00.000Z",
     cfc: {
-      enforcementMode: "enforce-explicit",
-      absenceBehavior: "permissive-if-absent",
-      substrateStatus: "not-attested",
+      enforcementMode: "enforce-strict",
+      absenceBehavior: "fail-closed-if-absent",
+      substrateStatus: "missing",
       runManifest: { present: false },
       sandbox: {
         kind: "docker-runsc-cfc",
@@ -208,9 +208,9 @@ Deno.test("collectHarnessCapabilitySnapshot reports configured Fabric mounts", a
       sandboxPath: "/fabric",
       readOnly: false,
       writeGovernance: {
-        policy: "host-writable-non-strict",
+        policy: "host-writable-cfc-strict-unattested",
         statusProbe: "missing",
-        delegatedToCfc: false,
+        delegatedToCfc: true,
       },
     },
     hostBinds: [],
