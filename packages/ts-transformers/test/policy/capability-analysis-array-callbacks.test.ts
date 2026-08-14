@@ -55,6 +55,35 @@ export default { backlinksOf };
   return schema;
 }
 
+/**
+ * As {@link liftInputSchema}, for a body that reaches a second array through a
+ * nested call — `indexes` here is read only from inside the arguments of a
+ * call on the operand's spine, one level deeper again than the callback cases
+ * above.
+ */
+async function liftInputSchemaWithIndexes(
+  body: string,
+): Promise<Record<string, unknown>> {
+  const output = await transformSource(
+    `import { equals, lift } from "commonfabric";
+
+const backlinksOf = lift((
+  { table, indexes, self }: {
+    table: { topic: unknown; mentionedBy: unknown }[];
+    indexes: { topic: unknown }[];
+    self: unknown;
+  },
+): unknown => ${body});
+
+export default { backlinksOf };
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const schema = callSchemas(parseModule(output), "lift")[0];
+  if (!schema) throw new Error("No emitted `lift(cb, input, result)` schema");
+  return schema;
+}
+
 describe("capability-analysis-array-callbacks", () => {
   describe("a property read only inside an array-method callback", () => {
     it("reaches the input schema from a `find` callback behind a `??`", async () => {
@@ -87,6 +116,29 @@ describe("capability-analysis-array-callbacks", () => {
       );
 
       expect(elementProperties(schema)).toEqual({ topic: { type: "unknown" } });
+    });
+  });
+
+  describe("a callback nested in the arguments of a call on the spine", () => {
+    it("reaches the input schema along with the array it iterates", async () => {
+      const schema = await liftInputSchemaWithIndexes(
+        `table.at(indexes.findIndex((row) => equals(self, row.topic)))?.mentionedBy ?? []`,
+      );
+      const properties = schema.properties as Record<
+        string,
+        { items?: { properties?: unknown } }
+      >;
+
+      // Ref resolution walks the spine as far as `at`, so both the callback
+      // and the `indexes.findIndex(...)` argument holding it are skipped —
+      // `indexes` reaches the schema only if the operand is walked.
+      expect(properties.indexes?.items?.properties).toEqual({
+        topic: { type: "unknown" },
+      });
+      expect(properties.self).toEqual({
+        type: "unknown",
+        asCell: ["comparable"],
+      });
     });
   });
 

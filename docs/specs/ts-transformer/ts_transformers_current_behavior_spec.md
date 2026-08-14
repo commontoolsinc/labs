@@ -1214,12 +1214,17 @@ adjustments:
 - reads inside an inline array-method callback count as reads of the enclosing
   builder's parameter: the element parameter is bound to the receiver's item
   path, so `table.find((row) => equals(self, row.topic))` records
-  `table[].topic` and, through the capture, `self`. This holds wherever the
-  call sits in the body, the left operand of a `??` / `||` fallback included —
-  resolving that operand to a single read stands in for walking it, so an
-  operand whose member/call spine passes through a call is walked as well
-  (`memberSpineContainsCall` in `policy/capability-analysis.ts`;
-  `test/policy/capability-analysis-array-callbacks.test.ts`)
+  `table[].topic` and, through the capture, `self`. The left operand of a `??`
+  / `||` fallback resolves to a single source ref, which reaches a root through
+  a member/call spine and consumes nothing else; an operand whose spine passes
+  through a call is therefore walked as well, covering that call's callback and
+  arguments and any call nested in them (`memberSpineContainsCall` in
+  `policy/capability-analysis.ts`;
+  `test/policy/capability-analysis-array-callbacks.test.ts`). An operand whose
+  ref resolves dynamically instead — a computed element-access key, as in
+  `table[indexes.findIndex(...)]?.mentionedBy ?? []` — marks the root wildcard,
+  which disables shrinking for the whole parameter: its declared shape is
+  emitted intact, without the capability wrappers a walked operand would derive
 - node-driven shrinking can still shrink the inner type of cell-like wrappers
   when `.get()` contributes an empty path but coexists with more specific
   non-empty paths
