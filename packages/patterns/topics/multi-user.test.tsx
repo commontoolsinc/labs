@@ -15,7 +15,7 @@
  * arrays do not resolve before a local write (see lunch-poll and scrabble
  * multi-user tests).
  */
-import { action, computed, multiUserTest, pattern, TESTS } from "commonfabric";
+import { action, assert, multiUserTest, pattern, TESTS } from "commonfabric";
 import Topics, { type TopicsOutput } from "./main.tsx";
 
 interface Setup {
@@ -39,14 +39,14 @@ export const gideon = pattern<{ setup: Setup }>(({ setup }) => {
     }
   });
 
-  const assert_topic_created = computed(() =>
+  const assert_topic_created = assert(() =>
     (board.topics ?? []).length === 1 &&
     board.topics?.[0]?.title === "First topic" &&
     board.topics?.[0]?.createdBy?.kind === "agent" &&
     board.topics?.[0]?.createdBy?.name === "Sol"
   );
 
-  const assert_own_comment = computed(() =>
+  const assert_own_comment = assert(() =>
     board.topics?.[0]?.comments?.[0]?.author?.kind === "agent" &&
     board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
     board.topics?.[0]?.comments?.[0]?.body === "opening the thread" &&
@@ -56,10 +56,10 @@ export const gideon = pattern<{ setup: Setup }>(({ setup }) => {
   // Fable commented on my topic and started a second topic. Use literal paths
   // here, as required for cross-runtime reads above; aggregate length and
   // commentCount reads can remain stale until this runtime performs a write.
-  const assert_sees_fable_comment = computed(() =>
+  const assert_sees_fable_comment = assert(() =>
     board.topics?.[0]?.comments?.[1]?.author?.name === "Fable"
   );
-  const assert_fable_topic_authorship = computed(() =>
+  const assert_fable_topic_authorship = assert(() =>
     board.topics?.[1]?.createdBy?.name === "Fable"
   );
 
@@ -91,7 +91,7 @@ export const fable = pattern<{ setup: Setup }>(({ setup }) => {
   });
 
   // Sol's topic + comment propagated from the other runtime.
-  const assert_sees_sol_setup = computed(() =>
+  const assert_sees_sol_setup = assert(() =>
     (board.topics ?? []).length === 1 &&
     board.topics?.[0]?.title === "First topic" &&
     board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
@@ -99,14 +99,14 @@ export const fable = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   // Both comments landed (mergeable append, no clobber), in thread order.
-  const assert_both_comments = computed(() =>
+  const assert_both_comments = assert(() =>
     board.topics?.[0]?.commentCount === 2 &&
     board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
     board.topics?.[0]?.comments?.[1]?.author?.name === "Fable" &&
     board.topics?.[0]?.comments?.[1]?.body === "seconding this"
   );
 
-  const assert_second_topic = computed(() =>
+  const assert_second_topic = assert(() =>
     (board.topics ?? []).length === 2 &&
     board.topics?.[1]?.title === "Second topic" &&
     board.topics?.[1]?.createdBy?.name === "Fable"
