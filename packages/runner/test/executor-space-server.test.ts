@@ -26,6 +26,7 @@ import {
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
 import { liveExecutionLeaseHolder } from "@commonfabric/memory/v2/execution-lease";
+import { streamEntriesDocId } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -60,9 +61,12 @@ const waitUntil = async (
   }
 };
 
+const pendingRowStream = { id: "of:space-server-stream", path: [] as string[] };
+const pendingRowSidecar = streamEntriesDocId(pendingRowStream);
 const pendingRow = (eventId: string) => ({
   targetSpace,
-  targetStream: "of:stream-events:space-server",
+  targetStream: pendingRowSidecar,
+  targetStreamLink: pendingRowStream,
   eventId,
   payload: { via: "recovery seam" },
   actingPrincipal: "user:alice",
@@ -219,7 +223,7 @@ describe("stage G SpaceServer recovery seams", () => {
     );
     const targetEngine = await server.engineForSpace(targetSpace);
     const doc = Engine.read(targetEngine, {
-      id: "of:stream-events:space-server",
+      id: pendingRowSidecar,
     });
     const entries = (doc?.value as { entries?: Array<Record<string, unknown>> })
       ?.entries ?? [];
@@ -269,7 +273,7 @@ describe("stage G SpaceServer recovery seams", () => {
     );
     const targetEngine = await server.engineForSpace(targetSpace);
     const doc = Engine.read(targetEngine, {
-      id: "of:stream-events:space-server",
+      id: pendingRowSidecar,
     });
     const entries = (doc?.value as { entries?: Array<unknown> })?.entries ?? [];
     expect(entries.length).toBe(1);

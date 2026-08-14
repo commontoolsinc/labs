@@ -50,6 +50,7 @@ import {
   type SqliteRegisterDiskSourceRequest,
   type SqliteRegisterDiskSourceResult,
   type SqliteResultColumn,
+  streamEntriesDocId,
   type StreamEventEntry,
   type StreamEventsDocValue,
   type StreamLinkRef,
@@ -1910,8 +1911,31 @@ export class Server {
     if (duplicate) {
       return { deduped: true };
     }
-    const stream: StreamLinkRef = entry.targetStreamLink ??
-      { id: entry.targetStream, path: [] };
+    // The delivered entry's self-describing link MUST derive the target
+    // sidecar (events.md §1 — one derivation; the engine's admission
+    // re-checks the same binding). A row with NO link (stage-G era) is
+    // REFUSED, not patched with a fabricated path-less link: the
+    // fabricated link hashes to a DIFFERENT sidecar id, so the target's
+    // drain would route the event to a stream nothing fired at —
+    // deferred until dropped, handler never run. The deterministic
+    // refusal takes the LT4 arm at the source: failure notice (warn log
+    // for unsourced legacy rows), row retired.
+    const stream: StreamLinkRef | undefined = entry.targetStreamLink;
+    if (stream === undefined) {
+      throw new Engine.ProtocolError(
+        `delegated append ${entry.eventId} carries no target stream ` +
+          "link — a legacy (stage-G era) outbox row cannot name the " +
+          "stream its entry stands for; refused, never fabricated " +
+          "(events.md §1)",
+      );
+    }
+    if (streamEntriesDocId(stream) !== entry.targetStream) {
+      throw new Engine.ProtocolError(
+        `delegated append ${entry.eventId} carries a stream link that ` +
+          `does not derive its target sidecar "${entry.targetStream}" ` +
+          "(events.md §1's one derivation)",
+      );
+    }
     const streamEntry: StreamEventEntry = {
       eventId: entry.eventId,
       stream,

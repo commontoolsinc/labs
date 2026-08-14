@@ -38,6 +38,7 @@ import {
   insertExecutionOutboxRows,
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
+import { streamEntriesDocId } from "@commonfabric/memory/v2";
 import { table } from "@commonfabric/memory/sqlite/schema";
 import { runQuery } from "@commonfabric/memory/sqlite/exec";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -469,9 +470,12 @@ describe("stage G outbox + sqlite discharge", () => {
     const tx1 = runtime.edit();
     stampWaveRunContext(tx1, { actionId: "derive-x", kind: "derivation" });
     x.withTx(tx1).set({ value: 1 });
+    const deliverStream = { id: "of:deliver-stream", path: [] as string[] };
+    const deliverSidecar = streamEntriesDocId(deliverStream);
     wave.enqueueOutboundAppend(tx1, {
       targetSpace,
-      targetStream: "of:stream-events:deliver",
+      targetStream: deliverSidecar,
+      targetStreamLink: deliverStream,
       eventId: "evt-d1",
       payload: { n: 7 },
       actingPrincipal: "user:alice",
@@ -493,7 +497,7 @@ describe("stage G outbox + sqlite discharge", () => {
     // closed) — and the delivery commit's envelope session is the
     // service holder (LT5), class authored.
     const targetEngine = await server.engineForSpace(targetSpace);
-    const doc = Engine.read(targetEngine, { id: "of:stream-events:deliver" });
+    const doc = Engine.read(targetEngine, { id: deliverSidecar });
     const entries =
       (doc?.value as { entries?: Array<Record<string, unknown>> })?.entries ??
         [];
@@ -534,7 +538,8 @@ describe("stage G outbox + sqlite discharge", () => {
     x.withTx(tx2).set({ value: 2 });
     wave2.enqueueOutboundAppend(tx2, {
       targetSpace,
-      targetStream: "of:stream-events:deliver",
+      targetStream: deliverSidecar,
+      targetStreamLink: deliverStream,
       eventId: "evt-d1",
       payload: { n: 7 },
       actingPrincipal: "user:alice",
@@ -552,7 +557,7 @@ describe("stage G outbox + sqlite discharge", () => {
     // to.
     const { outbox: recovered, stats: recoveredStats } = newOutbox();
     await recovered.deliverPendingAppends();
-    const after = Engine.read(targetEngine, { id: "of:stream-events:deliver" });
+    const after = Engine.read(targetEngine, { id: deliverSidecar });
     const afterEntries =
       (after?.value as { entries?: Array<unknown> })?.entries ?? [];
     expect(afterEntries.length).toBe(1);
@@ -571,12 +576,15 @@ describe("stage G outbox + sqlite discharge", () => {
   it("stops the drain at a transport failure: the failed row AND its successors stay, preserving per-stream FIFO; the re-drain delivers in order (round-2 thread 7)", async () => {
     // Three rows to ONE target stream, inserted directly (the crashed-
     // before-delivery shape the drain recovers).
+    const fifoStream = { id: "of:fifo-stream-link", path: [] as string[] };
+    const fifoSidecar = streamEntriesDocId(fifoStream);
     insertExecutionOutboxRows(engine, {
       branch: "",
       createdSeq: 1,
       rows: [1, 2, 3].map((n) => ({
         targetSpace,
-        targetStream: "of:stream-events:fifo",
+        targetStream: fifoSidecar,
+        targetStreamLink: fifoStream,
         eventId: `evt-fifo-${n}`,
         payload: { n },
         actingPrincipal: "user:alice",
@@ -616,7 +624,7 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
       .toBe(3);
     const targetEngine = await server.engineForSpace(targetSpace);
-    const empty = Engine.read(targetEngine, { id: "of:stream-events:fifo" });
+    const empty = Engine.read(targetEngine, { id: fifoSidecar });
     expect(
       ((empty?.value as { entries?: Array<unknown> })?.entries ?? []).length,
     ).toBe(0);
@@ -626,7 +634,7 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(second.remaining).toBe(0);
     expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
       .toBe(0);
-    const after = Engine.read(targetEngine, { id: "of:stream-events:fifo" });
+    const after = Engine.read(targetEngine, { id: fifoSidecar });
     const entries =
       (after?.value as { entries?: Array<{ eventId?: string }> })?.entries ??
         [];
@@ -831,14 +839,47 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(Engine.read(targetEngine, { id: "of:lt4-stream" })).toBeNull();
   });
 
-  it("OW15: a DECLARED userless row delivers — the target stamps firedAt = { session: 'server' } with NO user; undeclared userless stays refused (the floor negatives)", async () => {
+  it("refuses a LINK-LESS legacy row deterministically — the delivery never fabricates a stream link for it (events.md §1's one derivation; T18)", async () => {
+    // A stage-G-era row: a real sidecar id but NO targetStreamLink. A
+    // fabricated path-less link would hash to a DIFFERENT sidecar, so
+    // the target's drain would route the event to a stream nothing
+    // fired at. Refused (LT4 arm), retired, nothing written.
+    const legacyStream = { id: "of:legacy-stream", path: [] as string[] };
+    const legacySidecar = streamEntriesDocId(legacyStream);
     insertExecutionOutboxRows(engine, {
       branch: "",
       createdSeq: 1,
       rows: [{
         targetSpace,
-        targetStream: "of:stream-events:ow15",
-        targetStreamLink: { id: "of:ow15-stream", path: ["events"] },
+        targetStream: legacySidecar,
+        eventId: "evt-legacy",
+        payload: {},
+        actingPrincipal: "user:alice",
+        actingSession: "sess-1",
+        capabilityRef: "cap-legacy",
+      }],
+    });
+    const { outbox, stats } = newOutbox();
+    await outbox.deliverPendingAppends();
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(0);
+    expect(stats.outbox.failed).toBe(1);
+    const targetEngine = await server.engineForSpace(targetSpace);
+    expect(Engine.read(targetEngine, { id: legacySidecar })).toBeNull();
+  });
+
+  it("OW15: a DECLARED userless row delivers — the target stamps firedAt = { session: 'server' } with NO user; undeclared userless stays refused (the floor negatives)", async () => {
+    const ow15Stream = { id: "of:ow15-stream", path: ["events"] };
+    const ow15Sidecar = streamEntriesDocId(ow15Stream);
+    const ow15UndeclaredStream = { id: "of:ow15-undeclared", path: [] as string[] };
+    const ow15UndeclaredSidecar = streamEntriesDocId(ow15UndeclaredStream);
+    insertExecutionOutboxRows(engine, {
+      branch: "",
+      createdSeq: 1,
+      rows: [{
+        targetSpace,
+        targetStream: ow15Sidecar,
+        targetStreamLink: ow15Stream,
         eventId: "evt-ow15",
         payload: { n: 1 },
         sessionlessSpaceScope: true,
@@ -846,8 +887,11 @@ describe("stage G outbox + sqlite discharge", () => {
       }, {
         // The floor negative at delivery: userless WITHOUT the
         // declaration is refused deterministically (LT4 retires it).
+        // The link is VALID so the refusal pinned here stays the
+        // FLOOR's, not the link binding's.
         targetSpace,
-        targetStream: "of:stream-events:ow15-undeclared",
+        targetStream: ow15UndeclaredSidecar,
+        targetStreamLink: ow15UndeclaredStream,
         eventId: "evt-ow15-undeclared",
         payload: { n: 2 },
         capabilityRef: "cap-ow15",
@@ -856,7 +900,7 @@ describe("stage G outbox + sqlite discharge", () => {
     const { outbox, stats } = newOutbox();
     await outbox.deliverPendingAppends();
     const targetEngine = await server.engineForSpace(targetSpace);
-    const doc = Engine.read(targetEngine, { id: "of:stream-events:ow15" });
+    const doc = Engine.read(targetEngine, { id: ow15Sidecar });
     const entries =
       (doc?.value as { entries?: Array<Record<string, unknown>> })?.entries ??
         [];
@@ -874,7 +918,7 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(commitRow.acting_session).toBeNull();
     // The undeclared row was refused (LT4) and retired.
     expect(
-      Engine.read(targetEngine, { id: "of:stream-events:ow15-undeclared" }),
+      Engine.read(targetEngine, { id: ow15UndeclaredSidecar }),
     ).toBeNull();
     expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
       .toBe(0);
@@ -887,7 +931,10 @@ describe("stage G outbox + sqlite discharge", () => {
     // Derived commits — the setup AND the outbox's notice write — need
     // the live lease (protocol.md §2's one equality check).
     const lease = liveLease();
-    const sourceSidecar = "of:stream-events:ow14-source";
+    const sourceStream = { id: "of:ow14-stream", path: ["s"] };
+    const sourceSidecar = streamEntriesDocId(sourceStream);
+    const ow14TargetStream = { id: "of:ow14-target", path: [] as string[] };
+    const ow14TargetSidecar = streamEntriesDocId(ow14TargetStream);
     const holder2 = holder;
     Engine.applyCommit(engine, {
       sessionId: holder2,
@@ -904,7 +951,7 @@ describe("stage G outbox + sqlite discharge", () => {
             value: {
               entries: [{
                 eventId: "evt-source",
-                stream: { id: "of:ow14-stream", path: ["s"] },
+                stream: sourceStream,
                 firedAt: { user: "user:alice", session: "sess-1" },
                 consequenced: true,
               }],
@@ -921,7 +968,8 @@ describe("stage G outbox + sqlite discharge", () => {
       createdSeq: 2,
       rows: [{
         targetSpace,
-        targetStream: "of:stream-events:ow14-target",
+        targetStream: ow14TargetSidecar,
+        targetStreamLink: ow14TargetStream,
         eventId: "evt-refused",
         payload: {},
         capabilityRef: "cap-ow14",
@@ -953,7 +1001,8 @@ describe("stage G outbox + sqlite discharge", () => {
       createdSeq: 3,
       rows: [{
         targetSpace,
-        targetStream: "of:stream-events:ow14-target",
+        targetStream: ow14TargetSidecar,
+        targetStreamLink: ow14TargetStream,
         eventId: "evt-refused",
         payload: {},
         capabilityRef: "cap-ow14",
@@ -969,12 +1018,15 @@ describe("stage G outbox + sqlite discharge", () => {
   });
 
   it("keeps the row on a transport-class delivery failure (admit-before-delete): the next drain delivers exactly one entry", async () => {
+    const transportStream = { id: "of:transport-stream", path: [] as string[] };
+    const transportSidecar = streamEntriesDocId(transportStream);
     insertExecutionOutboxRows(engine, {
       branch: "",
       createdSeq: 1,
       rows: [{
         targetSpace,
-        targetStream: "of:stream-events:transport",
+        targetStream: transportSidecar,
+        targetStreamLink: transportStream,
         eventId: "evt-tr1",
         payload: { n: 3 },
         actingPrincipal: "user:alice",
@@ -1016,7 +1068,7 @@ describe("stage G outbox + sqlite discharge", () => {
     const { outbox } = newOutbox();
     await outbox.deliverPendingAppends();
     const targetEngine = await server.engineForSpace(targetSpace);
-    const doc = Engine.read(targetEngine, { id: "of:stream-events:transport" });
+    const doc = Engine.read(targetEngine, { id: transportSidecar });
     const entries = (doc?.value as { entries?: Array<unknown> })?.entries ?? [];
     expect(entries.length).toBe(1);
     expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)

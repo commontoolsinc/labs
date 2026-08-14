@@ -51,9 +51,11 @@ import {
   type SessionId,
   type SqliteOperation,
   STREAM_ENTRIES_DOC_PREFIX,
+  streamEntriesDocId,
   type StreamEventEntry,
   type StreamEventFiredAt,
   type StreamEventsDocValue,
+  type StreamLinkRef,
   tableDeclaresRowLabel,
 } from "../v2.ts";
 
@@ -2126,6 +2128,23 @@ const validateEventAppends = (
             "entries are self-describing (events.md §1)",
         );
       }
+      // The link must DERIVE the sidecar being written (events.md §1:
+      // the sidecar id is the hash every party derives from the stream
+      // link with no coordination). Without this binding, an append
+      // into a FRESH sidecar id can name ANOTHER stream in its
+      // self-describing link: the drain executes the named stream's
+      // handler while the eventId only ever met the fresh doc's empty
+      // dedupe horizon — a per-stream exactly-once bypass (verdict
+      // blocker, 2026-08-12). Derived REWRITES of already-stamped
+      // entries never reach here (their admission happened at append).
+      if (streamEntriesDocId(entry.stream as StreamLinkRef) !== operation.id) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} carries a stream link that ` +
+            `does not derive the sidecar doc being written ` +
+            `("${operation.id}") — the self-describing link and the ` +
+            "sidecar id are one derivation (events.md §1)",
+        );
+      }
 
       // The firedAt stamp, per admitting class (protocol.md §2).
       let firedAt: StreamEventFiredAt;
@@ -3163,6 +3182,16 @@ const maintainStreamEventWatermarks = (
       touched.set(`${revision.id}\0${revision.scopeKey}`, revision);
     }
   }
+  // Synthetic ops slot BEYOND the commit's own highest revision opIndex
+  // — NOT `revisions.length` (verdict blocker, 2026-08-12): sqlite ops
+  // consume operation indices without pushing revisions, so for
+  // `[sqlite, sidecar]` the length re-uses the sidecar revision's own
+  // index and the (seq, op_index) primary key collides, rolling back
+  // the whole wave. Max+1 is collision-free: entity revisions occupy
+  // exactly their operation indices, and sqlite slots write no
+  // revision rows.
+  let nextSyntheticOpIndex =
+    revisions.reduce((max, r) => Math.max(max, r.opIndex), -1) + 1;
   for (const revision of touched.values()) {
     const state = readStateForScopeKey(engine, {
       id: revision.id,
@@ -3215,14 +3244,14 @@ const maintainStreamEventWatermarks = (
       continue;
     }
     // A synthetic op BEYOND the commit's own operations (op_index is
-    // unique per (seq, opIndex), and revisions.length grows with each
-    // frontier write, so slots never collide). The returned revision
-    // JOINS the commit's revision list: snapshot materialization, head
-    // maintenance, and subscriber push all ride it.
+    // unique per (seq, opIndex); see nextSyntheticOpIndex above). The
+    // returned revision JOINS the commit's revision list: snapshot
+    // materialization, head maintenance, and subscriber push all ride
+    // it.
     revisions.push(writeOperation(engine, {
       branch,
       seq,
-      opIndex: revisions.length,
+      opIndex: nextSyntheticOpIndex++,
       operation: {
         op: "patch",
         id: revision.id as never,

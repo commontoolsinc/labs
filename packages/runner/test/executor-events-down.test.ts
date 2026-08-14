@@ -35,6 +35,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   decodeMemoryBoundary,
+  streamEntriesDocId,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -658,10 +659,11 @@ describe("Phase 3 events-down (serving side)", () => {
     // An entry whose stream points at a doc that IS no piece and never
     // will be: the drain defers (cold-view creation race) for the
     // bounded window, then hardens into the drop notice.
+    const neverAPieceStream = { id: "of:no-such-piece", path: ["stream"] };
     const delivered = await server.commitDelegatedAppend({
       targetSpace: space,
-      targetStream: "of:stream-events:never-a-piece",
-      targetStreamLink: { id: "of:no-such-piece", path: ["stream"] },
+      targetStream: streamEntriesDocId(neverAPieceStream),
+      targetStreamLink: neverAPieceStream,
       eventId: "evt-unrunnable",
       payload: {},
       actingPrincipal: aliceSigner.did(),
@@ -674,7 +676,7 @@ describe("Phase 3 events-down (serving side)", () => {
     await waitUntil(
       () => {
         const value = Engine.read(engine, {
-          id: "of:stream-events:never-a-piece",
+          id: streamEntriesDocId(neverAPieceStream),
         })?.value as StreamEventsDocValue | undefined;
         const entry = value?.entries?.[0];
         return entry?.status === "dropped" &&
@@ -685,7 +687,7 @@ describe("Phase 3 events-down (serving side)", () => {
       30_000,
     );
     const entry = (Engine.read(engine, {
-      id: "of:stream-events:never-a-piece",
+      id: streamEntriesDocId(neverAPieceStream),
     })?.value as StreamEventsDocValue).entries![0];
     expect(entry.reason).toContain("no runnable handler");
     // The space can PARK again: the drop cleared the undelivered-events
