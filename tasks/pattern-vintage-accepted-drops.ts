@@ -47,29 +47,38 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
   {
     pattern: "topics/main.tsx",
     paths: [
-      // The board's published graph, whole.
+      // `crossrefs` is listed WHOLE, and that is the honest shape of what
+      // happened: the old graph row carried an fid, a title, summary counts and
+      // two edge sets, and the pivot row that replaced it carries a topic and
+      // who mentions it. Nothing of the old row survives to be compared field
+      // by field.
       "crossrefs",
-      // The edge sets the old index rows carried beside their summaries.
+      // The old index rows carried the same two edge sets beside their
+      // summaries. The summaries themselves are untouched.
       "index[].refsOut",
       "index[].referencedBy",
-      // Each child's own row, reachable through both lists of children.
+      // The retired per-topic edge row, seen through each of the board's two
+      // lists of children.
       "topics[].crossrefs",
       "mentionable[].crossrefs",
     ],
     reason:
-      "Cross-reference links removed from Topics — see the matching entry in " +
-      "tasks/pattern-compat-accepted-breaks.ts. Board rows keep their fid, " +
-      "reference and summary scalars; only the edges go.",
+      "Topics' reference graph was rebuilt on cell identity — see the matching " +
+      "entry in tasks/pattern-compat-accepted-breaks.ts. A topic publishes " +
+      "`referencedBy` instead of deriving its own edge row, so the old row is " +
+      "gone from every child the board lists.",
   },
   {
     pattern: "topics/topic.tsx",
-    // The topic's own row, whole: the two edge sets and the durable link
-    // snapshots all sat under it.
+    // The topic's own edge row, whole. A topic no longer derives one: inbound
+    // references are read out of the board's pivot and published as
+    // `referencedBy`, so nothing reads this path.
     paths: ["crossrefs"],
     reason:
-      "Cross-reference links removed from Topics — see the matching entry in " +
-      "tasks/pattern-compat-accepted-breaks.ts. A topic no longer derives an " +
-      "edge row, so nothing reads these paths.",
+      "Topics' reference graph was rebuilt on cell identity — see the matching " +
+      "entry in tasks/pattern-compat-accepted-breaks.ts. The board's own " +
+      "`crossrefs` came back as a pivot and strands nothing, so only a topic's " +
+      "retired per-topic row is listed here.",
   },
 ];
 

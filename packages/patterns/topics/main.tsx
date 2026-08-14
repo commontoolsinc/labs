@@ -2,6 +2,7 @@ import {
   action,
   Default,
   entityRefToString,
+  equals,
   handler,
   lift,
   NAME,
@@ -24,6 +25,8 @@ import Topic, {
   topicAuthorFromPerson,
   topicAuthorLabel,
   topicCellLink,
+  type TopicCrossrefRow,
+  type TopicMentionSource,
   type TopicPiece,
   TOPICS_THEME,
   type TopicSummary,
@@ -41,9 +44,12 @@ export type {
   SetBodyResult,
   TopicAuthor,
   TopicComment,
+  TopicCrossrefRow,
   TopicInput,
   TopicLink,
   TopicLinkKind,
+  TopicMentionRef,
+  TopicMentionRefMap,
   TopicOutput,
   TopicPiece,
   TopicSummary,
@@ -211,6 +217,72 @@ const boardRows = lift(
   },
 );
 
+/**
+ * The board's mention pivot: one row per topic, naming the topics that mention
+ * it.
+ *
+ * The whole reference graph is derived HERE, once, and every topic reads its
+ * own row out of the result. The alternative — each topic deriving its own
+ * inbound edges — is the same join done N times over the same corpus.
+ *
+ * The declared parameter is the entire cost of that: one list of references per
+ * topic, `unknown` because they are compared by identity and never read
+ * through. So the pivot over a whole board expands no topic's title, prose,
+ * thread, verbs, or rendered UI. It reads the shape of the graph and nothing
+ * else.
+ *
+ * Matching is a linear scan of `.equals` rather than a lookup keyed by id, and
+ * that is the point rather than a concession: a cell reference is the identity,
+ * so there is no id to key by and none has to be minted, kept in step, or
+ * migrated when a piece moves. At board scale the scan is O(topics × mentions)
+ * comparisons of already-resolved links, which is nothing.
+ *
+ * Each row is addressed by the topic it describes — `Writable.for(topic)` — so
+ * a row keeps its identity wherever it sits in the array and however the board
+ * is reordered. That is what lets every topic's lookup lift re-run freely on
+ * any board change and still write nothing: an unchanged row recomputes to the
+ * same links at the same address.
+ */
+const crossrefTable = lift(
+  (
+    { identities, sources }: {
+      identities: Writable<(object | undefined)[] | Default<[]>>;
+      sources: Writable<TopicMentionSource[] | Default<[]>>;
+    },
+  ): TopicCrossrefRow[] => {
+    // The SAME array, declared twice, because the pivot asks two questions of
+    // it and each has its own minimal answer: which piece is this, and what
+    // does it point at. A topic IS its cell, so `identities[i]` is the identity
+    // of topic `i` — no id is minted, and no position is mistaken for one.
+    const topics = identities.get();
+    const mentionsPerTopic = sources.get();
+    return topics.map((topic, index) => {
+      // A linear scan, deliberately. A cell reference is the identity, so there
+      // is no id to key a map by — and nothing to mint, keep in step, or
+      // migrate when a piece moves. At board scale this is a few hundred
+      // comparisons of already-resolved links.
+      const mentionedBy = topics.filter((_other, from) =>
+        // A topic mentioning itself is not an edge, the rule a self-link has
+        // always had here.
+        from !== index &&
+        // `equals` resolves BOTH sides before comparing, so it answers "do
+        // these name the same document" whether each side arrived as a cell or
+        // as the raw link a read left behind. A method call on the value would
+        // depend on which of those it happens to be.
+        (mentionsPerTopic[from]?.mentions ?? []).some((mention) =>
+          equals(mention, topic)
+        )
+      );
+      // Addressed by the topic it describes, so a row keeps its identity
+      // wherever it sits and however the board is reordered. That is what lets
+      // every topic's lookup re-run freely on any board change and still write
+      // nothing: an unchanged row recomputes to the same links at the same
+      // address.
+      return Writable.for<TopicCrossrefRow>(topic).set({ topic, mentionedBy });
+    }) as unknown[] as TopicCrossrefRow[];
+  },
+);
+
 /** Exactly what one board card renders. Its `topic` is a two-field projection
  * of the row's reference — the body snippet and the legacy author name — so a
  * card can never expand a topic beyond those. Private to the board; nothing
@@ -264,6 +336,11 @@ export interface TopicsOutput {
   topics: TopicPiece[];
   mentionable: TopicPiece[] | Default<[]>;
   topicCount: number;
+  /** The board's mention pivot, one row per topic: the topic, and the topics
+   * that mention it. Published so a topic composed outside `addTopic` can be
+   * wired to the same table the board's own children read — the graph is
+   * derived once, here, and never per topic. */
+  crossrefs: TopicCrossrefRow[] | Default<[]>;
   /** The full-board survey surface: one bounded row per topic, carrying its
    * canonical address, its reference, and the scalars a survey reads. Rows
    * carry their own `fid`, so consumers never correlate by position — an index
@@ -291,6 +368,7 @@ export { topicCellLink } from "./topic.tsx";
 export const submitProfileTopic = handler<void, {
   topics: Writable<TopicPiece[] | Default<[]>>;
   mentionable: Writable<TopicPiece[] | Default<[]>>;
+  boardCrossrefs: Writable<TopicCrossrefRow[] | Default<[]>>;
   newTitle: Writable<string>;
   myName: Writable<string | Default<"">>;
   profileName: string;
@@ -298,6 +376,7 @@ export const submitProfileTopic = handler<void, {
 }>((_, {
   topics,
   mentionable,
+  boardCrossrefs,
   newTitle,
   myName,
   profileName,
@@ -313,8 +392,10 @@ export const submitProfileTopic = handler<void, {
     createdByName: topicAuthorLabel(author),
     myName,
     // Same wiring `addTopic` gives its children: the board's own list is the
-    // mention universe the new topic's editor autocompletes over.
+    // mention universe the new topic's editor autocompletes over, and the
+    // board's pivot is where it reads its inbound references.
     mentionable,
+    boardCrossrefs,
   });
   topics.push(piece);
   newTitle.set("");
@@ -330,6 +411,8 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const topicCount = topics.get().length;
   const rows = boardRows(topics);
   const cards = cardsByActivity(rows);
+  // Derived once for the whole board; every topic reads its own row out of it.
+  const crossrefs = crossrefTable({ identities: topics, sources: topics });
   const hasNoTopics = rows.length === 0;
 
   // Browser authorship comes from the current viewer's canonical Profile.
@@ -372,6 +455,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       // The board's own list, so the editor has a mention universe (backfilled
       // as a one-time link-bind on pieces created before this input existed).
       mentionable: topics,
+      // The board's mention pivot. A topic reads its inbound references out of
+      // the row the board already built for it rather than rebuilding the join.
+      boardCrossrefs: crossrefs,
     });
     // Mergeable append: concurrent creates from different users all land.
     topics.push(piece);
@@ -386,6 +472,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const submitTopic = submitProfileTopic({
     topics,
     mentionable: topics,
+    boardCrossrefs: crossrefs,
     newTitle,
     myName,
     profileName,
@@ -479,6 +566,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     topics,
     mentionable: topics,
     topicCount,
+    crossrefs,
     index: rows,
     newTitle,
     addTopic,

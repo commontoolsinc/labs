@@ -65,16 +65,24 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260807T155936Z-wBGKcf6ruadhes3g",
       "20260807T190842Z-SD0Ii3eK0ZnJnIhs",
       "20260810T212206Z-cIIz70jbLbbPc-F3",
+      "20260812T003521Z-Jy37T5qk4KSHkgQe",
     ],
-    // `argument.topics[]` is the same removal seen from the board's list: each
-    // stored topic carried a `crossrefs` default, and dropping it moves the
-    // defaults below a constraint the proof cannot show is stable.
-    paths: ["argument.topics[]", "result.crossrefs"],
+    // `argument.topics[]` is every change to `TopicPiece` seen from the board's
+    // list: each stored topic's defaults moved, which the proof cannot show is
+    // stable under insertion. The `crossrefs[]` fields are the old graph row's,
+    // which the pivot row replaces wholesale.
+    paths: [
+      "argument.topics[]",
+      "result.crossrefs",
+      "result.crossrefs[].fid",
+      "result.crossrefs[].commentCount",
+    ],
     reason:
-      "Cross-reference links removed from Topics. The board's `crossrefs` " +
-      "result and the `crossrefs` default on each topic in `topics` go with " +
-      "the feature; `index` remains the full-board survey surface and now " +
-      "carries each row's canonical fid.",
+      "Topics' reference graph was removed and then rebuilt on cell identity. " +
+      "The board still publishes `crossrefs`, but as a `{ topic, mentionedBy }` " +
+      "pivot rather than the old summary-bearing graph row, so the old row's " +
+      "fields go. `index` is the full-board survey surface and carries each " +
+      "row's canonical fid.",
   },
   {
     // The same removal seen from a topic: its own `crossrefs` row, and the
@@ -88,11 +96,19 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260807T190842Z-XNG2XTMFFTjcmnX0",
       "20260808T001558Z-H7ntBZnGU80t30LL",
       "20260810T212206Z-FQasUmU3p-SDapLo",
+      "20260812T003521Z-XWPlA9Dl3OHXlHEH",
     ],
-    paths: ["argument.boardCrossrefs", "result.crossrefs"],
+    paths: [
+      "argument.boardCrossrefs",
+      "argument.boardCrossrefs[].referencedBy",
+      "argument.mentionable[]",
+      "result.crossrefs",
+    ],
     reason:
-      "Cross-reference links removed from Topics. A topic no longer derives " +
-      "its own edge row, so the `crossrefs` result and the `boardCrossrefs` " +
-      "input that fed it are both gone.",
+      "Topics' reference graph was removed and then rebuilt on cell identity. " +
+      "A topic no longer derives an edge row and no longer publishes " +
+      "`crossrefs`; it publishes `referencedBy`, read out of the board's pivot, " +
+      "whose row shape the `boardCrossrefs` input changed to match. " +
+      "`mentionable[]` moves because `TopicPiece` gained the reference fields.",
   },
 ];
