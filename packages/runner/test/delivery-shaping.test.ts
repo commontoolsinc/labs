@@ -571,6 +571,137 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
+  // W4 exclusion: a caller-supplied durable id names an invocation whose
+  // receipt address derives from it, so it must never be last-wins-merged.
+  // At the cap it is refused loudly before dispatch — callback settled
+  // errored, nothing executed — rather than silently folded into another
+  // event's identity.
+  it("refuses a caller-id send at the backlog cap instead of collapsing it", async () => {
+    const runtime = makeRuntime();
+    try {
+      const { tx, linkRef, received } = streamWithHandler(runtime, "w4/refuse");
+      await tx.commit();
+      for (let i = 1; i <= MAX_EVENT_BACKLOG_PER_STREAM; i++) {
+        runtime.scheduler.queueEvent(linkRef, { n: i });
+      }
+      const outcomes: string[] = [];
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "caller-payload" },
+        true,
+        (t: IExtendedStorageTransaction) => {
+          const status = t.status();
+          if (status.status === "error") {
+            // The drop settles the callback with an aborted transaction whose
+            // error carries the refusal as its `reason`.
+            const error = status.error as {
+              message?: unknown;
+              reason?: unknown;
+            };
+            const reason = error.reason as { message?: unknown } | undefined;
+            outcomes.push(String(reason?.message ?? error.message));
+          } else {
+            outcomes.push(status.status);
+          }
+        },
+        false,
+        { eventId: "inv-refused" },
+      );
+      // The refusal settles the callback before dispatch, with the reason.
+      expect(outcomes.length).toBe(1);
+      expect(outcomes[0]).toContain("backlog");
+      await runtime.idle();
+      // Nothing of the refused send was delivered, and no queued payload was
+      // rewritten by it: the cap-many minted events arrive as sent.
+      expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
+      expect(received).not.toContainEqual({ marker: "caller-payload" });
+      expect(received[received.length - 1]).toEqual({
+        n: MAX_EVENT_BACKLOG_PER_STREAM,
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  // Same pair, same stream: the same invocation. At the cap a retry rides the
+  // already-pending entry — first payload wins, matching the create-only
+  // receipt arbitration it would get after dispatch — and both senders settle
+  // on the one outcome.
+  it("coalesces a same-id send at the cap onto its pending invocation", async () => {
+    const runtime = makeRuntime();
+    try {
+      const { tx, linkRef, received } = streamWithHandler(
+        runtime,
+        "w4/coalesce",
+      );
+      await tx.commit();
+      for (let i = 1; i < MAX_EVENT_BACKLOG_PER_STREAM; i++) {
+        runtime.scheduler.queueEvent(linkRef, { n: i });
+      }
+      let settledOriginal = 0;
+      let settledRetry = 0;
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "original" },
+        true,
+        () => settledOriginal++,
+        false,
+        { eventId: "inv-coalesced" },
+      );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "retry" },
+        true,
+        () => settledRetry++,
+        false,
+        { eventId: "inv-coalesced" },
+      );
+      await runtime.idle();
+      // One delivery, carrying the FIRST payload; both callbacks settled on it.
+      expect(received).toContainEqual({ marker: "original" });
+      expect(received).not.toContainEqual({ marker: "retry" });
+      expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
+      expect(settledOriginal).toBe(1);
+      expect(settledRetry).toBe(1);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  // The other direction of the exclusion: a minted flood collapsing at the cap
+  // must never select a caller-id entry as its survivor, which would rewrite
+  // the payload that entry's receipt is about to witness.
+  it("never rewrites a queued caller-id entry when a minted flood collapses", async () => {
+    const runtime = makeRuntime();
+    try {
+      const { tx, linkRef, received } = streamWithHandler(runtime, "w4/keep");
+      await tx.commit();
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "keep" },
+        true,
+        undefined,
+        false,
+        { eventId: "inv-kept" },
+      );
+      const total = MAX_EVENT_BACKLOG_PER_STREAM + 3;
+      for (let i = 1; i <= total; i++) {
+        runtime.scheduler.queueEvent(linkRef, { n: i });
+      }
+      await runtime.idle();
+      // The caller-id payload arrives exactly as sent, once; the overflow
+      // collapsed into the newest MINTED entry instead.
+      expect(
+        received.filter((e) => (e as { marker?: string }).marker === "keep")
+          .length,
+      ).toBe(1);
+      expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
+      expect(received[received.length - 1]).toEqual({ n: total });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   // The collapse is last-wins for the event TIME as well as the payload: a
   // dispatched handler must read the instant of the event it actually runs, not
   // the first event that happened to occupy the collapsed slot. These events are

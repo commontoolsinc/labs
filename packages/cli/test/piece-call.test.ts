@@ -927,6 +927,41 @@ describe("executePieceCallable", () => {
     ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
   });
 
+  it("surfaces a pre-dispatch drop's reason from the aborted transaction", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      abortedWithReason: "Event backlog for this stream is full " +
+        "(256 pending), so this send was refused before dispatch",
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        ["--message", "milk"],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+        },
+      ),
+    ).rejects.toThrow(
+      /Handler "recordMessage" failed: Event backlog for this stream is full/,
+    );
+  });
+
   it("threads the invocation id to send and settles with receipt readback, without awaiting graph quiescence", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -1224,6 +1259,13 @@ function createPieceCallableHarness(options: {
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   handlerFailureMessage?: string;
+  /** Commit settles as an aborted transaction whose error wraps the drop
+   * reason (`StorageTransactionAborted.reason`) — the shape a pre-dispatch
+   * drop hands the commit callback (a send refused at the event-backlog
+   * cap, a piece that failed to load). Unlike `handlerFailureMessage`,
+   * nothing reaches the runtime error log: the reason on the transaction is
+   * the whole signal. */
+  abortedWithReason?: string;
   callableScope?: "space" | "user" | "session";
   /** Value the handling's receipt cell reads back ({} = value-less verb). */
   receiptValue?: unknown;
@@ -1314,7 +1356,15 @@ function createPieceCallableHarness(options: {
             if (options.neverCommit) return;
             onCommit?.({
               status: () =>
-                options.handlerFailureMessage
+                options.abortedWithReason
+                  ? {
+                    status: "error",
+                    error: Object.assign(
+                      new Error("Transaction was aborted"),
+                      { reason: new Error(options.abortedWithReason) },
+                    ),
+                  }
+                  : options.handlerFailureMessage
                   ? {
                     status: "error",
                     error: new Error(options.handlerFailureMessage),

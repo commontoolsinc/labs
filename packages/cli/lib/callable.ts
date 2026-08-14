@@ -235,6 +235,16 @@ export function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
 }
 
 function errorMessage(error: unknown): string {
+  if (
+    typeof error === "object" && error !== null && "reason" in error &&
+    (error as { reason?: unknown }).reason != null
+  ) {
+    // A StorageTransactionAborted carries the abort's cause as `reason`, and
+    // its own message is the generic "Transaction was aborted". Prefer the
+    // cause: for a pre-dispatch drop — a send refused at the backlog cap, a
+    // piece that failed to load — the reason is the whole signal.
+    return errorMessage((error as { reason: unknown }).reason);
+  }
   if (error instanceof Error) {
     return error.message;
   }
