@@ -34,7 +34,11 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { containsExternalSchemaRef } from "./schema-decompose.ts";
+import {
+  collectExternalSchemaRefHashes,
+  containsExternalSchemaRef,
+} from "./schema-decompose.ts";
+import { registerSchemaDocument } from "./schema-registry.ts";
 import {
   DEFAULT_SELECTOR,
   internPathSelector,
@@ -81,7 +85,7 @@ import {
 import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { type CellLinkRefPayload, SigilLink } from "./sigil-types.ts";
+import { type CellLinkRefPayload, SigilLink, type URI } from "./sigil-types.ts";
 import {
   recordTraverseInvocation,
   wrapTxForTraverseCapture,
@@ -1103,6 +1107,13 @@ export type TraversalContext = {
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
   ) => void;
+  /**
+   * Schema-document tracker keys this traversal has already attempted to
+   * load, so one traversal reads each referenced document at most once. A
+   * failed attempt is not retried within the traversal; the next traversal
+   * (triggered by the arrival) retries.
+   */
+  schemaDocsLoaded: Set<string>;
 };
 
 export function createTraversalContext(
@@ -1114,6 +1125,7 @@ export function createTraversalContext(
     link: NormalizedFullLink,
     sourceSpace: MemorySpace,
   ) => void,
+  schemaDocsLoaded: Set<string> = new Set<string>(),
 ): TraversalContext {
   return {
     tracker,
@@ -1121,6 +1133,7 @@ export function createTraversalContext(
     includeMeta,
     metaDocsVisited,
     onMissingLinkTarget,
+    schemaDocsLoaded,
   };
 }
 
@@ -2044,6 +2057,11 @@ function followPointer(
     // The link.path doesn't include the initial "value", so prepend it
     path: ["value", ...link.path as string[]],
   };
+  // A link schema carrying external refs needs its schema documents loaded
+  // before the narrowing below consults it.
+  if (link.schema !== undefined) {
+    loadExternalSchemaDocs(tx, doc.address, link.schema, context);
+  }
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
     // A broader-scoped read context cannot follow a link into a narrower scope
@@ -2328,6 +2346,66 @@ function loadMetaLinkedDocFromLink(
   return { address, value: result.ok.value, selector: REJECTING_SELECTOR };
 }
 
+/**
+ * Loads the schema-document closure behind every external ref in `schema`
+ * into the traversal: each document is read (a scheduling-visible read, so
+ * an absent document's arrival re-triggers the reader), added to the schema
+ * tracker (which is what carries it into query results and watch sets), and
+ * registered in the schema-document registry after hash verification — a
+ * forged document is neither registered nor recursed into. Registered
+ * documents' own external refs are followed; the DAG property bounds the
+ * walk, and `context.schemaDocsLoaded` bounds it per traversal.
+ *
+ * Documents are read in the referrer's space at the referrer's scope, the
+ * same defaulting the CFC `cid:` metadata links get from `parseLink`.
+ */
+function loadExternalSchemaDocs(
+  tx: IExtendedStorageTransaction,
+  referrer: IMemorySpaceAddress,
+  schema: JSONSchema | undefined,
+  context: TraversalContext,
+): void {
+  if (!containsExternalSchemaRef(schema)) return;
+  const pending = [...collectExternalSchemaRefHashes(schema)];
+  while (pending.length > 0) {
+    const hash = pending.pop()!;
+    const address = {
+      space: referrer.space,
+      id: `cid:${hash}` as URI,
+      scope: referrer.scope,
+      path: [],
+    };
+    const key = getTrackerKey(address);
+    if (context.schemaDocsLoaded.has(key)) continue;
+    context.schemaDocsLoaded.add(key);
+    // A plain read: loads the document AND records the dependency, so an
+    // absent document's later arrival re-triggers the reader.
+    const result = tx.read(address);
+    if (result.error !== undefined) continue;
+    context.schemaTracker.add(key, REJECTING_SELECTOR);
+    const doc = result.ok.value;
+    if (!isObjectOrArray(doc) || !("value" in doc)) continue;
+    const schemaValue = (doc as { value?: FabricValue }).value;
+    try {
+      const interned = registerSchemaDocument(
+        hash,
+        schemaValue as JSONSchema,
+      );
+      for (const dep of collectExternalSchemaRefHashes(interned)) {
+        pending.push(dep);
+      }
+    } catch (error) {
+      // Fail closed: the document stays unregistered, so refs to it stay
+      // unresolvable, and nothing below it is followed.
+      logger.warn("traverse", () => [
+        "Rejected schema document (content does not match its id):",
+        address.id,
+        error,
+      ]);
+    }
+  }
+}
+
 function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
   if (isObjectOrArray(obj) && "schemaHash" in obj) {
     const schemaHash = obj["schemaHash"];
@@ -2366,6 +2444,7 @@ function traverseMetaLinkedDoc(
     context.includeMeta,
     context.metaDocsVisited,
     context.onMissingLinkTarget,
+    context.schemaDocsLoaded,
   );
   const traverser = new SchemaObjectTraverser(
     tx,
@@ -3034,6 +3113,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (!this.sharedSchemaMemo) {
       this.schemaMemo.clear();
     }
+    // A selector schema carrying external refs needs its schema documents
+    // loaded before traversal resolves against them.
+    loadExternalSchemaDocs(
+      this.tx,
+      doc.address,
+      this.selector.schema,
+      this.context,
+    );
     // Reset MapSet deepEqual counters
     this.schemaTracker.deepEqualCalls = 0;
     this.schemaTracker.deepEqualMs = 0;

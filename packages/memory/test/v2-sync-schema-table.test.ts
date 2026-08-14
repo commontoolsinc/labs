@@ -1318,3 +1318,108 @@ Deno.test("encodeMemoryBoundary embeds reserved prefixes verbatim", () => {
   assert(!withoutRefs.includes("schema-ref@2:"));
   assert(!withoutRefs.includes("schema-cas@1:"));
 });
+
+Deno.test("sync schema table leaves schema-document references inline", () => {
+  // A reference-only schema position — `{ "$ref": "cid:…" }` pointing at a
+  // content-addressed schema document — is already smaller than a table
+  // ref, so compression leaves it in place. A sibling inline schema in the
+  // same frame still compresses.
+  const documentRef: JSONSchema = {
+    $ref: "cid:fid1:0123456789abcdefghijklmnopqrstuvwxyzABCDEF#/$defs/Node",
+  };
+  const inlineSchema: JSONSchema = {
+    type: "object",
+    properties: { title: { type: "string" } },
+  };
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:document-ref-source",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          byRef: {
+            "/": {
+              [LINK_V1_TAG]: {
+                id: "of:ref-target",
+                path: [],
+                schema: documentRef,
+              },
+            },
+          },
+          inline: {
+            "/": {
+              [LINK_V1_TAG]: {
+                id: "of:inline-target",
+                path: [],
+                schema: inlineSchema,
+              },
+            },
+          },
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  const compressed = compressSessionSyncSchemas(sync) as SchemaTableSessionSync;
+  const inlineHash = internSchema(inlineSchema, true).taggedHashString;
+  assertExists(compressed.schemaTable);
+  assertEquals(Object.keys(compressed.schemaTable), [inlineHash]);
+
+  const value = compressed.upserts[0].doc?.value as Record<string, unknown>;
+  const refEnvelope = (value.byRef as Record<string, unknown>)["/"] as Record<
+    string,
+    unknown
+  >;
+  assertEquals(
+    (refEnvelope[LINK_V1_TAG] as Record<string, unknown>).schema,
+    documentRef,
+  );
+
+  assertEquals(expandSessionSyncSchemas(compressed), sync);
+});
+
+Deno.test("stored-document validation ignores schema-document references", () => {
+  // The engine's stored-document gate refuses reserved TRANSPORT prefixes in
+  // schema positions; an object-valued `cid:` reference is the STORAGE form
+  // and passes. This pins the boundary between the two.
+  const linkWithDocumentRef = {
+    value: {
+      x: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:target",
+            path: [],
+            schema: { $ref: "cid:fid1:someDocumentHash" },
+          },
+        },
+      },
+    },
+  };
+  assertEquals(findSyncSchemaRef(linkWithDocumentRef), undefined);
+  assertEquals(containsSyncSchemaRefString(linkWithDocumentRef), false);
+
+  const linkWithTransportRef = {
+    value: {
+      x: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:target",
+            path: [],
+            schema: "schema-cas@1:fid1:someDocumentHash",
+          },
+        },
+      },
+    },
+  };
+  assertEquals(
+    findSyncSchemaRef(linkWithTransportRef),
+    "schema-cas@1:fid1:someDocumentHash",
+  );
+  assertEquals(containsSyncSchemaRefString(linkWithTransportRef), true);
+});

@@ -28,8 +28,23 @@ type RewriteState = {
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   isPlainObject(value);
 
+/**
+ * A reference-only schema position: `{ "$ref": "cid:…" }` and nothing else,
+ * pointing at a content-addressed schema document
+ * (`docs/specs/content-addressed-schemas.md`). Already smaller than a table
+ * ref, so compressing it would grow the frame; the schema body travels once
+ * as the referenced document itself.
+ */
+const isSchemaDocumentRefOnly = (value: unknown): boolean => {
+  if (!isPlainRecord(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === 1 && keys[0] === "$ref" &&
+    typeof value.$ref === "string" && value.$ref.startsWith("cid:");
+};
+
 const isCompressibleSchema = (value: unknown): value is JSONSchema =>
-  value === true || value === false || isPlainRecord(value);
+  (value === true || value === false || isPlainRecord(value)) &&
+  !isSchemaDocumentRefOnly(value);
 
 const schemaRefFor = (
   schema: JSONSchema,

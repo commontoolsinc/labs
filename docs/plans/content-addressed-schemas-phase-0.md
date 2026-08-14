@@ -74,30 +74,30 @@ the canonical document forms every later stage must accept.
 
 ### Stage 3 — traversal and the memory walkers
 
-- [ ] Link and selector schema positions holding an external reference
-      contribute a synthesized link to the root schema document, extending
-      the `cfcMetaToSigilLink` / `loadMetaLinkedDocs` seam in
-      `packages/runner/src/traverse.ts`.
-- [ ] A schema document's own external refs contribute synthesized links to
-      their targets — relaxing the deliberate no-recurse rule for `cid:`
-      documents, for schema-document targets only. The scan for external
-      refs in a schema document is a plain walk of its value; the DAG
-      property plus the existing per-(identity, schema) cycle detection
-      bounds the traversal.
-- [ ] The three schema-position walkers
-      (`mapLinkSchemas`, `findSyncSchemaRef`, `containsSyncSchemaRefString`
-      in `packages/memory/v2/schema-table-links.ts` and
-      `sync-schema-table.ts`) learn reference-only schema positions in one
-      change: transport compression skips them (they are already small),
-      and the walker-agreement test in
-      `packages/memory/test/v2-sync-schema-table.test.ts` extends to pin
-      all three.
-- [ ] Confirm the engine's reserved-prefix gate
-      (`rejectStoredSyncSchemaRef`, `packages/memory/v2/engine.ts`) does
-      not misfire on stored `cid:` refs: `schema-ref@2:` and
-      `schema-cas@1:` stay storage-illegal, `cid:` refs inside a stored
-      link schema are storage-legal. A test states this boundary
-      explicitly.
+- [x] Link and selector schema positions holding external references load
+      the referenced documents into the traversal:
+      `loadExternalSchemaDocs` in `packages/runner/src/traverse.ts`
+      (hooked in `followPointer` for link schemas and at the schema
+      traverser's entry for selector schemas) reads each document — a
+      dependency-recording read, so an absent document's arrival
+      re-triggers the reader — adds it to the schema tracker (which is
+      what carries it into query results and watch sets), and registers it
+      after hash verification. A forged document is tracked but neither
+      registered nor recursed into.
+- [x] A schema document's own external refs are followed by the same
+      loader after registration — the one place `cid:` documents recurse.
+      The DAG property plus the per-traversal loaded set bounds the walk;
+      the meta-doc no-recurse rule in `loadMetaLinkedDocs` is untouched.
+- [x] The walkers needed no structural change — a reference-only schema is
+      an object in an ordinary schema position, which all three already
+      pass through — but transport compression now skips reference-only
+      positions (`isSchemaDocumentRefOnly` in
+      `packages/memory/v2/sync-schema-table.ts`): a reference is already
+      smaller than a table ref. Pinned in
+      `packages/memory/test/v2-sync-schema-table.test.ts`.
+- [x] The engine's reserved-prefix gate boundary is pinned by test:
+      `schema-ref@2:` and `schema-cas@1:` strings in a schema position stay
+      storage-illegal, an object-valued `cid:` reference is storage-legal.
 
 ### Stage 4 — sync registration and cold-miss recovery
 

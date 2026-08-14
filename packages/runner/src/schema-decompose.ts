@@ -34,6 +34,7 @@ import {
   isSubschema,
   mapSubschemas,
   type SchemaWalkOptions,
+  walkSchema,
 } from "./schema-walk.ts";
 import { decodeJsonPointer, encodeJsonPointer } from "./link-types.ts";
 
@@ -150,6 +151,38 @@ export function containsExternalSchemaRef(
     { includeDefs: true, includeUnused: true },
   );
   if (isDeepFrozen(schema)) externalRefPresenceCache.set(schema, result);
+  return result;
+}
+
+const EMPTY_HASHES: ReadonlySet<string> = new Set();
+const externalRefHashCache = new WeakMap<JSONSchemaObj, ReadonlySet<string>>();
+
+/**
+ * The tagged hashes of every schema document `schema` references — its own
+ * `$ref`, any subschema's (the never-emitted keywords included), and inside
+ * `$defs` bodies. Memoized for frozen inputs.
+ */
+export function collectExternalSchemaRefHashes(
+  schema: JSONSchema | undefined,
+): ReadonlySet<string> {
+  if (!isObjectOrArray(schema)) return EMPTY_HASHES;
+  const cached = externalRefHashCache.get(schema);
+  if (cached !== undefined) return cached;
+  const hashes = new Set<string>();
+  walkSchema(
+    schema,
+    (node) => {
+      if (
+        isObjectOrArray(node.schema) && typeof node.schema.$ref === "string"
+      ) {
+        const parsed = parseExternalSchemaRef(node.schema.$ref);
+        if (parsed !== undefined) hashes.add(parsed.taggedHash);
+      }
+    },
+    { includeDefs: true, includeUnused: true },
+  );
+  const result: ReadonlySet<string> = hashes.size === 0 ? EMPTY_HASHES : hashes;
+  if (isDeepFrozen(schema)) externalRefHashCache.set(schema, result);
   return result;
 }
 
