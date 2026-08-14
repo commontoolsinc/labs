@@ -365,8 +365,15 @@ describe("CFC concept-level integrity floors (D5)", () => {
           "concept-sink",
           {
             type: "object",
+            ifc: { confidentiality: ["s"] },
             properties: {
-              out: { type: "string", ifc: { requiredIntegrity: [required] } },
+              out: {
+                type: "string",
+                ifc: {
+                  requiredIntegrity: [required],
+                  addIntegrity: [sources[0][0]],
+                },
+              },
             },
             required: ["out"],
           } as JSONSchema,

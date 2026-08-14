@@ -179,6 +179,7 @@ describe("Cell commit callbacks", () => {
     cell.set(42, (committedTx) => {
       statuses.push(committedTx.status().status);
     });
+    tx.invalidateCfc("callback-test-commit-rejection");
 
     const result = await tx.commit();
     expect(result.error).toBeDefined();

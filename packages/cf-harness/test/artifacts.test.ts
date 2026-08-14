@@ -423,6 +423,7 @@ Deno.test({
           ]),
           runId: "run-loop-persisted",
           model: "gpt-5.4",
+          cfcEnforcementMode: "observe",
           now: (() => {
             const timestamps = [
               "2026-04-15T21:10:00.000Z",
@@ -531,9 +532,9 @@ Deno.test({
         "2026-04-15T21:10:03.000Z",
       );
       assertEquals(persistedPolicySnapshot.cfc, {
-        enforcementMode: "enforce-explicit",
-        enforcementModeSource: "default",
-        absenceBehavior: "permissive-if-absent",
+        enforcementMode: "observe",
+        enforcementModeSource: "explicit-config",
+        absenceBehavior: "observe-only",
         substrateStatus: "not-attested",
       });
       assertEquals(persistedPolicySnapshot.runManifest, { present: false });
@@ -591,9 +592,9 @@ Deno.test({
         toolCallId: "call-1",
         toolId: "read_file",
         effectClass: "read",
-        cfcEnforcementMode: "enforce-explicit",
+        cfcEnforcementMode: "observe",
         decision: "allowed",
-        reasonCodes: ["cfc_enforce_explicit_read"],
+        reasonCodes: ["cfc_observe_read"],
         toolInputSummary: {
           type: "cf-harness.tool-input-summary",
           toolId: "read_file",
@@ -651,7 +652,7 @@ Deno.test({
         toolCallId: "call-1",
         toolId: "read_file",
         effectClass: "read",
-        cfcEnforcementMode: "enforce-explicit",
+        cfcEnforcementMode: "observe",
         policyDecision: "allowed",
         executionStatus: "completed",
         toolInputSummary: {

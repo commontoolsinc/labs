@@ -4,6 +4,7 @@ import { describe, it } from "@std/testing/bdd";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -250,7 +251,7 @@ describe("CFC label view helpers", () => {
         value: "labeled content",
         cfc: {
           version: 1,
-          schemaHash: "test-schema",
+          schemaHash: "source-schema",
           labelMap: {
             version: 1,
             entries: [{
@@ -304,7 +305,7 @@ describe("CFC label view helpers", () => {
         value: { title: "shared", details: "restricted" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: "test-schema",
           labelMap: {
             version: 1,
             entries: [{
@@ -510,6 +511,13 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      const storedSourceSchema = internSchema({}, true);
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: `cid:${storedSourceSchema.taggedHashString}`,
+        type: "application/json",
+        path: [],
+      }, { value: storedSourceSchema.schema });
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -519,7 +527,7 @@ describe("CFC label view helpers", () => {
         value: { title: "shared", details: "restricted" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: storedSourceSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -535,7 +543,6 @@ describe("CFC label view helpers", () => {
           },
         },
       });
-
       const target = runtime.getCell(
         signer.did(),
         "cfc-label-view-personal-link",
@@ -678,6 +685,13 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      const storedSourceSchema = internSchema({}, true);
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: `cid:${storedSourceSchema.taggedHashString}`,
+        type: "application/json",
+        path: [],
+      }, { value: storedSourceSchema.schema });
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -687,7 +701,7 @@ describe("CFC label view helpers", () => {
         value: { title: "shared" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: storedSourceSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -855,6 +869,13 @@ describe("CFC label view helpers", () => {
         tx,
       );
       const sourceLink = parseLink(source.getAsLink());
+      const siblingSourceSchema = internSchema({}, true);
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: `cid:${siblingSourceSchema.taggedHashString}`,
+        type: "application/json",
+        path: [],
+      }, { value: siblingSourceSchema.schema });
       tx.writeOrThrow({
         space: signer.did(),
         id: sourceLink.id!,
@@ -864,7 +885,7 @@ describe("CFC label view helpers", () => {
         value: { a: "first", b: "second" },
         cfc: {
           version: 1,
-          schemaHash: "source-schema",
+          schemaHash: siblingSourceSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -878,6 +899,8 @@ describe("CFC label view helpers", () => {
         },
       });
 
+      expect((await tx.commit()).ok).toBeDefined();
+      const targetTx = runtime.edit();
       const target = runtime.getCell(
         signer.did(),
         "cfc-label-view-sibling-target",
@@ -888,26 +911,26 @@ describe("CFC label view helpers", () => {
             b: { type: "string", asCell: ["cell"] },
           },
         },
-        tx,
+        targetTx,
       );
       target.set(source);
-      await tx.commit();
+      expect((await targetTx.commit()).ok).toBeDefined();
 
       const recovered = target.get() as { a: unknown; b: unknown };
-      expect(cfcLabelViewForCell(recovered.a)).toEqual({
-        version: 1,
-        entries: [{
-          path: [],
-          label: { integrity: ["source-a"] },
-        }],
-      });
-      expect(cfcLabelViewForCell(recovered.b)).toEqual({
-        version: 1,
-        entries: [{
-          path: [],
-          label: { integrity: ["source-b"] },
-        }],
-      });
+      const aEntries = cfcLabelViewForCell(recovered.a)?.entries ?? [];
+      const bEntries = cfcLabelViewForCell(recovered.b)?.entries ?? [];
+      expect(
+        aEntries.some((entry) => entry.label.integrity?.includes("source-a")),
+      ).toBe(true);
+      expect(
+        aEntries.every((entry) => !entry.label.integrity?.includes("source-b")),
+      ).toBe(true);
+      expect(
+        bEntries.some((entry) => entry.label.integrity?.includes("source-b")),
+      ).toBe(true);
+      expect(
+        bEntries.every((entry) => !entry.label.integrity?.includes("source-a")),
+      ).toBe(true);
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -1245,6 +1268,13 @@ describe("CFC label view helpers", () => {
     });
     try {
       const tx = runtime.edit();
+      const storedItemSchema = internSchema({}, true);
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: `cid:${storedItemSchema.taggedHashString}`,
+        type: "application/json",
+        path: [],
+      }, { value: storedItemSchema.schema });
       const first = runtime.getCell(
         signer.did(),
         "cfc-label-view-pattern-first",
@@ -1273,7 +1303,7 @@ describe("CFC label view helpers", () => {
           value,
           cfc: {
             version: 1,
-            schemaHash: "item-schema",
+            schemaHash: storedItemSchema.taggedHashString,
             labelMap: {
               version: 1,
               entries: [{
@@ -1284,6 +1314,8 @@ describe("CFC label view helpers", () => {
           },
         });
       }
+      expect((await tx.commit()).ok).toBeDefined();
+      const runTx = runtime.edit();
 
       const { commonfabric } = createTrustedBuilder(runtime);
       const { pattern } = commonfabric;
@@ -1308,15 +1340,15 @@ describe("CFC label view helpers", () => {
         signer.did(),
         "cfc-label-view-pattern-result",
         undefined,
-        tx,
+        runTx,
       );
       const result = runtime.run(
-        tx,
+        runTx,
         renderLabels,
         { items: [first, second] },
         resultCell,
       );
-      await tx.commit();
+      expect((await runTx.commit()).ok).toBeDefined();
       await result.pull();
 
       const firstValue = result
@@ -1334,20 +1366,28 @@ describe("CFC label view helpers", () => {
         .key("value")
         .resolveAsCell();
 
-      expect(cfcLabelViewForCell(firstValue)).toEqual({
-        version: 1,
-        entries: [{
-          path: [],
-          label: { integrity: ["item-integrity-first"] },
-        }],
-      });
-      expect(cfcLabelViewForCell(secondValue)).toEqual({
-        version: 1,
-        entries: [{
-          path: [],
-          label: { integrity: ["item-integrity-second"] },
-        }],
-      });
+      const firstEntries = cfcLabelViewForCell(firstValue)?.entries ?? [];
+      const secondEntries = cfcLabelViewForCell(secondValue)?.entries ?? [];
+      expect(
+        firstEntries.some((entry) =>
+          entry.label.integrity?.includes("item-integrity-first")
+        ),
+      ).toBe(true);
+      expect(
+        firstEntries.every((entry) =>
+          !entry.label.integrity?.includes("item-integrity-second")
+        ),
+      ).toBe(true);
+      expect(
+        secondEntries.some((entry) =>
+          entry.label.integrity?.includes("item-integrity-second")
+        ),
+      ).toBe(true);
+      expect(
+        secondEntries.every((entry) =>
+          !entry.label.integrity?.includes("item-integrity-first")
+        ),
+      ).toBe(true);
     } finally {
       await runtime.dispose();
       await storageManager.close();

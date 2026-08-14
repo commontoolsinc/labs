@@ -64,10 +64,8 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
-      ...(mode !== undefined ? { cfcLabelMetadataProtection: mode } : {}),
-      ...(extra.cfcFlowLabels !== undefined
-        ? { cfcFlowLabels: extra.cfcFlowLabels }
-        : {}),
+      cfcLabelMetadataProtection: mode ?? "off",
+      cfcFlowLabels: extra.cfcFlowLabels ?? "off",
     });
     return { storageManager, runtime };
   };

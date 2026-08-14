@@ -83,16 +83,14 @@ describe("CFC labelMap component origins", () => {
       cfcEnforcementMode: "enforce-explicit",
     });
     try {
-      const guarded = internSchema(
-        {
-          type: "object",
-          properties: {
-            secret: { type: "string", ifc: { confidentiality: ["secret"] } },
-          },
-          required: ["secret"],
-        } satisfies JSONSchema,
-        true,
-      );
+      const guardedSchema = {
+        type: "object",
+        properties: {
+          secret: { type: "string", ifc: { confidentiality: ["secret"] } },
+        },
+        required: ["secret"],
+      } satisfies JSONSchema;
+      const guarded = internSchema(guardedSchema, true);
 
       const seed = runtime.edit();
       const seedCell = runtime.getCell(
@@ -118,10 +116,26 @@ describe("CFC labelMap component origins", () => {
         guarded.schema,
         tx,
       );
-      cell.set({ secret: "v2" });
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      tx.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: persistedId,
+        path: ["value"],
+      }, { secret: "v2" });
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          space: signer.did(),
+          scope: "space",
+          id: persistedId,
+          path: [],
+        },
+        schemaHash: guarded.taggedHashString,
+        schema: guardedSchema,
+      });
       tx.prepareCfc();
 
-      const persistedId = parseLink(cell.getAsLink()).id!;
       const cfcWrites = [...(tx.getWriteDetails?.(signer.did()) ?? [])]
         .filter((write) =>
           write.address.id === persistedId && write.address.path[0] === "cfc"

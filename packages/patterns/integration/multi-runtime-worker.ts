@@ -211,13 +211,23 @@ const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<unknown>
 > = {
-  async init({ rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs }) {
+  async init({
+    rawIdentity,
+    spaceName,
+    apiUrl,
+    diagnostics,
+    wsDelayMs,
+    cfcOptions,
+  }) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
     if (typeof wsDelayMs === "number") installWsDelay(wsDelayMs);
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
       identity,
       spaceName: spaceName as string,
+      cfcOptions: cfcOptions as Parameters<
+        typeof initializePiecesController
+      >[0]["cfcOptions"],
     });
     if (diagnostics === true) {
       const scheduler = controller().runtime.scheduler;

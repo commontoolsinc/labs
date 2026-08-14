@@ -14,6 +14,7 @@ import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-options.ts";
 
 // `cf piece setsrc <main>` replaces the source of a LIVE piece. Until now the
 // only way to learn whether a source could be applied was to attempt it, and
@@ -234,8 +235,12 @@ describe("setsrc compatibility preflight", () => {
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
+      // This suite exercises the operator's legacy incompatible-schema
+      // override with writer-fit in its diagnostic-only mode.
+      cfcEnforcementMode: "enforce-explicit",
     });
     spaceName = `pattern-compat-check-${crypto.randomUUID()}`;
     pieces = new PiecesController(

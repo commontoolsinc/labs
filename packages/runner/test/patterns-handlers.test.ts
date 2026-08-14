@@ -34,6 +34,7 @@ describe("Pattern Runner - Handlers", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
 
     tx = runtime.edit();

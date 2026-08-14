@@ -1,12 +1,16 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import { CFC_OBSERVE_FLOW_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-creation-anchor");
 const space = signer.did();
+const storedSeedSchema = internSchema({}, true);
 
 type StoredEntry = {
   path: string[];
@@ -51,13 +55,20 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     seed.writeOrThrow({
       space,
       scope: "space",
+      id: `cid:${storedSeedSchema.taggedHashString}`,
+      type: "application/json",
+      path: [],
+    }, { value: storedSeedSchema.schema });
+    seed.writeOrThrow({
+      space,
+      scope: "space",
       id,
       path: [],
     }, {
       value,
       cfc: {
         version: 1,
-        schemaHash: "seed-schema",
+        schemaHash: storedSeedSchema.taggedHashString,
         labelMap: {
           version: 1,
           entries: [{ path: [], label: { confidentiality: [atom] } }],
@@ -80,6 +91,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
   const createList = async (): Promise<string> => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "observe",
@@ -158,6 +170,9 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     const outDerived = entriesOf(out.getAsNormalizedFullLink().id).find((e) =>
       e.origin === "derived" && e.observes === "value"
     );
-    expect(outDerived?.label.confidentiality).toEqual(["alice-secret"]);
+    expect(outDerived?.label.confidentiality).toEqual([
+      "alice-secret",
+      { type: CFC_ATOM_TYPE.Space, id: space },
+    ]);
   });
 });

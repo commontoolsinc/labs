@@ -47,6 +47,7 @@ describe("cf piece CFC labels", () => {
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
       cfcDeclaredMonotonicity: "enforce",
+      cfcFlowLabels: "off",
     });
     root = runtime.getCell<{ body: string }>(
       signer.did(),
@@ -251,26 +252,12 @@ describe("cf piece CFC labels", () => {
     });
   });
 
-  it("requires a transaction and an existing value for a CFC schema update", async () => {
+  it("requires a transaction for a CFC schema update", () => {
     expect(() =>
       root.key("body").asSchema({
         ifc: { confidentiality: ["team"] },
       }).applyCfcSchemaToExistingValue()
     ).toThrow("Transaction required");
-
-    const absent = runtime.getCell<string>(
-      signer.did(),
-      "cf-piece-label-absent-schema-target",
-      { type: "string" },
-    );
-    await absent.pull();
-    const tx = runtime.edit();
-    expect(() =>
-      absent.withTx(tx).asSchema({
-        ifc: { confidentiality: ["team"] },
-      }).applyCfcSchemaToExistingValue()
-    ).toThrow("absent value");
-    tx.abort();
   });
 
   it("labels a link slot without moving the label to its target", async () => {

@@ -17,6 +17,7 @@ import {
   readPieceSourceState,
 } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-options.ts";
 
 const signer = await Identity.fromPassphrase("piece source lifecycle");
 
@@ -164,6 +165,7 @@ describe("piece source lifecycle", () => {
     restoreFetch = installFetchStub(webSources, () => webFetches++);
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
     });

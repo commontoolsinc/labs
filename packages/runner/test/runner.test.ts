@@ -84,6 +84,7 @@ describe("runPattern", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
   });
 
@@ -1100,6 +1101,7 @@ describe("runPattern", () => {
     const localRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: sm,
+      cfcEnforcementMode: "disabled",
     });
 
     const pattern: Pattern = {
@@ -1249,6 +1251,7 @@ describe("storage subscription", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
   });
 
@@ -1299,6 +1302,7 @@ describe("setup/start", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
   });
 
@@ -2277,6 +2281,7 @@ describe("runner utils", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
     tx = runtime.edit();
   });

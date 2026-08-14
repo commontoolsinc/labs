@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { Cell } from "../src/cell.ts";
 import { getMetaLink } from "../src/link-utils.ts";
-import { Runtime as RuntimeClass } from "../src/runtime.ts";
+import { LegacyRuntime as RuntimeClass } from "./support/legacy-runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type { Runtime } from "../src/runtime.ts";

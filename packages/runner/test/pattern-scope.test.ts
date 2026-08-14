@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { createSession, Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import {
   getMetaLink,
   parseLink,

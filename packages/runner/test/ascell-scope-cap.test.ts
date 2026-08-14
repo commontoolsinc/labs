@@ -23,7 +23,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import type { JSONSchema, SchemaScope } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 

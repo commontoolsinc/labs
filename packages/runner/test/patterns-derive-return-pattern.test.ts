@@ -35,6 +35,8 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
     });
 
     tx = runtime.edit();

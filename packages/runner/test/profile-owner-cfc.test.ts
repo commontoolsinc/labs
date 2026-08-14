@@ -75,6 +75,7 @@ const createRuntime = () => {
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
+    cfcEnforcementMode: "enforce-explicit",
   });
   return { runtime, storageManager };
 };

@@ -1423,6 +1423,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         id: "of:cfc-outbox-reject",
         path: [],
       }, { ok: false });
+      rejected.prepareCfc();
+      rejected.recordCfcWritePolicyInput({
+        kind: "custom",
+        name: "invalidate-outbox-test",
+        value: true,
+      });
 
       const rejectedResult = await rejected.commit();
       expect(rejectedResult.error).toBeDefined();
@@ -2258,10 +2264,12 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtimeA = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManagerA,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const runtimeB = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManagerB,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const schema = {
       type: "object",
@@ -2375,7 +2383,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("persists CFC metadata for stored link writes without link schema", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
     try {
       const seed = runtime.edit();
       seed.setCfcEnforcementMode("enforce-explicit");
@@ -2454,7 +2465,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("persists link metadata when the source label is new in the same transaction", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
     try {
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
@@ -2592,7 +2606,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("persists CFC metadata for stored write-redirect links", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
     try {
       const seed = runtime.edit();
       seed.setCfcEnforcementMode("enforce-explicit");
@@ -2803,7 +2820,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     // the link label derives from the target's schema at the target path —
     // here the location's own confidentiality — instead of failing closed
     // (CT-1698: profile element writes).
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
     try {
       const seed = runtime.edit();
       seed.setCfcEnforcementMode("enforce-explicit");
@@ -2874,7 +2894,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     // from the SOURCE's own schema: the target-schema child-doc fallback
     // (previous test) could only produce ["personal-space"] here, so
     // ["card-space"] proves the setup-schema hatch supplied the label.
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
     try {
       const seed = runtime.edit();
       seed.setCfcEnforcementMode("enforce-explicit");
@@ -3378,7 +3401,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("preserves prior stored link-field labels across unrelated metadata rewrites", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
     try {
       const sourceSeed = runtime.edit();
       sourceSeed.setCfcEnforcementMode("enforce-explicit");
@@ -4060,7 +4086,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("keeps derived read labels out of persisted label metadata", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
     try {
       const seed = runtime.edit();
       seed.writeOrThrow({
@@ -4448,6 +4477,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const firstTx = runtime1.edit();
@@ -4478,6 +4508,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const runtime2 = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
+        cfcEnforcementMode: "enforce-explicit",
       });
       try {
         const secondTx = runtime2.edit();
@@ -4540,6 +4571,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager1,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const cellSchema = {
       type: "object",
@@ -4574,6 +4606,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime2 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager2,
+      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const secondSchema = {
@@ -4622,6 +4655,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime1 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager1,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const cellSchema = {
       type: "object",
@@ -4662,6 +4696,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     const runtime2 = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: storageManager2,
+      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const secondSchema = {
@@ -5449,7 +5484,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
   });
 
   it("persists only concrete evidence and addIntegrity in output metadata", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime(
+      "enforce-explicit",
+      "persist",
+    );
     try {
       const seed = runtime.edit();
       const sourceId = parseLink(

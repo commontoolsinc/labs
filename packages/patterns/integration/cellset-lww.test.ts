@@ -58,6 +58,15 @@ describe("cellset last-write-wins for scalar $value (own-write race)", () => {
     harness = await MultiRuntimeHarness.create({
       programPath: PROGRAM_PATH,
       rootPath: ROOT_PATH,
+      cfcOptions: {
+        cfcEnforcementMode: "observe",
+        cfcFlowLabels: "off",
+        cfcWriteFloor: "off",
+        cfcTriggerReadGating: false,
+        cfcPolicyEvaluation: "off",
+        cfcLabelMetadataProtection: "off",
+        cfcDeclaredMonotonicity: "off",
+      },
       sessions: [
         { label: "alice", identity: aliceId },
         // Same user as alice, separate session ≈ second browser tab.

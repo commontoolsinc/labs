@@ -50,6 +50,7 @@ describe("llmDialog", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
     tx = runtime.edit();
 
@@ -544,6 +545,7 @@ describe("llmDialog", () => {
     >(
       {
         type: "object",
+        ifc: { confidentiality: ["secret"] },
         properties: {
           recipient: { type: "string" },
           subject: { type: "string" },
@@ -557,7 +559,12 @@ describe("llmDialog", () => {
         properties: {
           emails: {
             type: "array",
-            items: { type: "object", additionalProperties: true },
+            items: {
+              type: "object",
+              additionalProperties: true,
+              ifc: { confidentiality: ["secret"] },
+            },
+            ifc: { confidentiality: ["secret"] },
             asCell: ["cell"],
           },
         },
@@ -573,7 +580,12 @@ describe("llmDialog", () => {
       properties: {
         emails: {
           type: "array",
-          items: { type: "object", additionalProperties: true },
+          items: {
+            type: "object",
+            additionalProperties: true,
+            ifc: { confidentiality: ["secret"] },
+          },
+          ifc: { confidentiality: ["secret"] },
         },
         summary: { type: "string", asCell: ["cell"] },
         tools: true,
@@ -685,6 +697,7 @@ describe("llmDialog", () => {
     >(
       {
         type: "object",
+        ifc: { confidentiality: ["secret"] },
         properties: {
           recipient: { type: "string" },
           subject: { type: "string" },
@@ -698,7 +711,12 @@ describe("llmDialog", () => {
         properties: {
           emails: {
             type: "array",
-            items: { type: "object", additionalProperties: true },
+            items: {
+              type: "object",
+              additionalProperties: true,
+              ifc: { confidentiality: ["secret"] },
+            },
+            ifc: { confidentiality: ["secret"] },
             asCell: ["cell"],
           },
         },
@@ -714,7 +732,12 @@ describe("llmDialog", () => {
       properties: {
         emails: {
           type: "array",
-          items: { type: "object", additionalProperties: true },
+          items: {
+            type: "object",
+            additionalProperties: true,
+            ifc: { confidentiality: ["secret"] },
+          },
+          ifc: { confidentiality: ["secret"] },
         },
         summary: { type: "string", asCell: ["cell"] },
         tools: true,
@@ -2012,6 +2035,7 @@ describe("llmDialog", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: ceilingStorageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
       // Deployment ceiling: the llmDialog sink may carry no confidentiality.
       cfcSinkMaxConfidentiality: { llmDialog: [] },
     });

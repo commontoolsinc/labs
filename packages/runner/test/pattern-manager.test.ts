@@ -15,6 +15,7 @@ import {
   COMPILED_INTEGRITY_ATOM,
   sourceDocKey,
 } from "../src/compilation-cache/cell-cache.ts";
+import { CFC_OBSERVE_FLOW_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -73,6 +74,7 @@ describe("PatternManager program persistence", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      ...CFC_OBSERVE_FLOW_OPTIONS,
     });
     tx = runtime.edit();
   });

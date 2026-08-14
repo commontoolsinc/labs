@@ -28,6 +28,7 @@ describe("cf wish headless read (resolveWish)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
   });
 

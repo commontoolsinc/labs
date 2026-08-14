@@ -72,6 +72,7 @@ describe("read options, four ways", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
     tmpDir = await Deno.makeTempDir({ prefix: "cf-four-ways-" });
   });

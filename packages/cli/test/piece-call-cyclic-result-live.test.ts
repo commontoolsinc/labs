@@ -159,6 +159,7 @@ async function withTracker<T>(
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
+    cfcEnforcementMode: "disabled",
   });
   const space = signer.did();
 

@@ -354,6 +354,7 @@ describe("late space host hints", () => {
       const runtime = new Runtime({
         apiUrl: new URL("https://default-toolshed.test"),
         storageManager: reader,
+        cfcEnforcementMode: "disabled",
       });
       try {
         expect(
@@ -1925,6 +1926,7 @@ describe("late space host hints", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://default-toolshed.test"),
       storageManager: reader,
+      cfcEnforcementMode: "disabled",
     });
 
     try {

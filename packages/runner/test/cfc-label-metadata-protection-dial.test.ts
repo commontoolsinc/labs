@@ -11,7 +11,7 @@ const signer = await Identity.fromPassphrase(
 );
 
 // Inv-12 Stage 1 (SC-25): the `cfcLabelMetadataProtection` dial —
-// `off | observe | enforce`, default `off` — following the established dial
+// `off | observe | enforce` — following the established dial
 // plumbing (cfcWriteFloor / cfcPolicyEvaluation): RuntimeOptions → per-tx
 // threading at edit() → CfcTxState, with the anti-downgrade pin (once
 // `enforce`, weakening throws) and prepared-state invalidation on a real
@@ -23,11 +23,11 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
-      ...(mode !== undefined ? { cfcLabelMetadataProtection: mode } : {}),
+      cfcLabelMetadataProtection: mode ?? "off",
     });
   };
 
-  it("defaults to off and threads the option onto each transaction", () => {
+  it("threads an explicit off mode onto each transaction", () => {
     const offRuntime = makeRuntime();
     const offTx = offRuntime.edit();
     expect(offTx.getCfcState().labelMetadataProtectionMode).toBe("off");

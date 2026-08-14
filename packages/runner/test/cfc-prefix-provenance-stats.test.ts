@@ -50,6 +50,7 @@ const makeRuntime = (options: {
     apiUrl: new URL("https://example.com"),
     storageManager: options.storageManager,
     cfcEnforcementMode: "enforce-explicit",
+    cfcWriteFloor: "off",
     ...(options.cfcPrefixProvenanceStats !== undefined
       ? { cfcPrefixProvenanceStats: options.cfcPrefixProvenanceStats }
       : {}),

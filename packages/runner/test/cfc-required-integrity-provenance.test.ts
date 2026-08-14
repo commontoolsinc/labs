@@ -65,7 +65,13 @@ const seedLabeledDoc = async (
 const SINK_SCHEMA = {
   type: "object",
   properties: {
-    out: { type: "string", ifc: { requiredIntegrity: [ADMIN_ATOM] } },
+    out: {
+      type: "string",
+      ifc: {
+        requiredIntegrity: [ADMIN_ATOM],
+        addIntegrity: [ADMIN_ATOM],
+      },
+    },
   },
   required: ["out"],
 } as const satisfies JSONSchema;

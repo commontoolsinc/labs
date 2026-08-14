@@ -28,6 +28,7 @@ describe("cf wish read options", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
   });
 

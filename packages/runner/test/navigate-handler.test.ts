@@ -365,9 +365,10 @@ Deno.test(
       );
 
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
       rejectedTx.markCfcRelevant("navigateTo retry regression");
       builtin.action(rejectedTx);
+      rejectedTx.prepareCfc();
+      rejectedTx.invalidateCfc("navigateTo retry regression");
       const rejectedResult = await rejectedTx.commit();
       assert(rejectedResult.error !== undefined);
       await runtime.settled();

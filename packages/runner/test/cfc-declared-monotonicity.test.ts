@@ -27,7 +27,7 @@ const signer = await Identity.fromPassphrase("runner-cfc-declared-mono");
 // unenforced prose. This suite first PINS current behavior (the
 // characterization block — the off/observe byte-compat contract), then
 // specifies the gate behind `cfcDeclaredMonotonicity: off | observe |
-// enforce` (default off).
+// enforce`.
 
 const CLAUSE_A = "clause-a";
 const CLAUSE_B = "clause-b";
@@ -127,12 +127,8 @@ const makeRuntime = (opts: {
     apiUrl: new URL("https://example.com"),
     storageManager: opts.storageManager,
     cfcEnforcementMode: opts.cfcEnforcementMode ?? "enforce-explicit",
-    ...(opts.cfcFlowLabels !== undefined
-      ? { cfcFlowLabels: opts.cfcFlowLabels }
-      : {}),
-    ...(opts.cfcDeclaredMonotonicity !== undefined
-      ? { cfcDeclaredMonotonicity: opts.cfcDeclaredMonotonicity }
-      : {}),
+    cfcFlowLabels: opts.cfcFlowLabels ?? "off",
+    cfcDeclaredMonotonicity: opts.cfcDeclaredMonotonicity ?? "off",
   });
 
 const persistedEntriesFor = (
@@ -412,7 +408,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
 
     it("with flow labels off, the Wave-2 grow-only ratchet folds the stronger stored entry back in", async () => {
-      // The dual pin: under the default cfcFlowLabels:"off" the legacy
+      // The dual pin: under the explicit cfcFlowLabels:"off" test posture the legacy
       // ratchet merges prior confidentiality into the fresh entry, so the
       // confidentiality half of §8.12.1 cannot regress on this path — which
       // is why the gate's confidentiality tests run under flow persist.

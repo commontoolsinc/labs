@@ -9,7 +9,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Cell, isCell } from "../src/cell.ts";
 import { SigilLink } from "../src/sigil-types.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import { toURI } from "../src/uri-utils.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";

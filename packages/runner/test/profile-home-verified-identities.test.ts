@@ -9,6 +9,7 @@ import { cfcLabelViewForCell } from "../src/cfc/mod.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase(
   "profile-home-verified-identities",
@@ -62,8 +63,11 @@ describe("profile-home verified external identities", () => {
 
   it("collects and revokes the original integrity-bearing assertion cell", async () => {
     const runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager: manager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     try {
       const tx = runtime.edit();
@@ -143,8 +147,11 @@ describe("profile-home verified external identities", () => {
 
   it("rejects an unlabeled assertion before the publish handler runs", async () => {
     const runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager: manager,
+      cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
     try {
       const setupTx = runtime.edit();

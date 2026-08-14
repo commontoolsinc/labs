@@ -129,6 +129,7 @@ describe("CFC additive-required default preserves old documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const space = alice.did();
     const ROOT = "legacy-home-root";
@@ -174,8 +175,7 @@ describe("CFC additive-required default preserves old documents", () => {
         expect(res.ok).toBeDefined();
       }
 
-      // 2. Materialize the real home pattern over the SAME root cell
-      //    (enforce-explicit is the runtime default).
+      // 2. Materialize the real home pattern over the SAME root cell.
       const homePattern = await compileHomePattern(runtime, space);
       const resultCell = runtime.getCell(space, ROOT);
       const home = await runtime.runSynced(resultCell, homePattern, {});
@@ -208,6 +208,7 @@ describe("CFC additive-required default preserves old documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const space = alice.did();
     const ROOT = "legacy-home-root-reject";

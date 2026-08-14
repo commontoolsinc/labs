@@ -14,6 +14,7 @@ import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
 } from "../src/cfc/policy.ts";
+import { commitCfcFieldValue } from "../src/cfc/label-representation.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -110,8 +111,8 @@ const seedLabeledDoc = async (
 
 const isLinkReference = (atom: unknown): atom is {
   type: string;
-  source: { space: string; id: string; path: string[] };
-  target: { space: string; id: string; path: string[] };
+  source: { digestOf: string };
+  target: { digestOf: string };
 } =>
   typeof atom === "object" && atom !== null &&
   (atom as { type?: unknown }).type ===
@@ -214,8 +215,8 @@ describe("CFC cross-space integrity", () => {
   // -------------------------------------------------------------------------
   // Scenario 1 proper (reference / no-copy): space B holds a LINK to the
   // labeled value in space A. Traversing the link yields the source integrity
-  // PRESERVED plus a runtime-minted `LinkReference` endorsement that records
-  // BOTH spaces (§3.7.2: integrity = target ∪ link-endorsement), and the
+  // PRESERVED plus a runtime-minted `LinkReference` endorsement that commits
+  // to both endpoints (§3.7.2: integrity = target ∪ link-endorsement), and the
   // source confidentiality carried across the boundary (§3.7.1). This is the
   // mechanism that genuinely crosses spaces today.
   // -------------------------------------------------------------------------
@@ -261,8 +262,16 @@ describe("CFC cross-space integrity", () => {
       // …plus the endorsement recording the A→B edge.
       const linkRef = (entry.label.integrity ?? []).find(isLinkReference);
       expect(linkRef).toBeDefined();
-      expect(linkRef!.source.space).toBe(spaceA);
-      expect(linkRef!.target.space).toBe(spaceB);
+      expect(linkRef!.source).toEqual(commitCfcFieldValue({
+        space: spaceA,
+        id: src.getAsNormalizedFullLink().id,
+        path: [],
+      }));
+      expect(linkRef!.target).toEqual(commitCfcFieldValue({
+        space: spaceB,
+        id: parseLink(sink.getAsLink()).id!,
+        path: ["ref"],
+      }));
       // Source confidentiality carried across the space boundary.
       expect(entry.label.confidentiality).toContain("space-a-secret");
     } finally {
@@ -405,9 +414,8 @@ describe("CFC cross-space integrity", () => {
         parseLink(copy.getAsLink()).id!,
       );
       // The copied bytes equal the source, but the source's declared integrity
-      // did not ride along — materializing severed the provenance. (Under the
-      // default cfcFlowLabels:"off"; a flow-persisting deployment would stamp a
-      // separate `derived` taint component, never the source's declared label.)
+      // did not ride along — materializing severed the declared provenance.
+      // Flow propagation never copies the source's declared component.
       expect((doc?.value as { reading?: string })?.reading).toBe(
         "37.77,-122.41",
       );

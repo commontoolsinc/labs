@@ -6,6 +6,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type FactoryInput } from "../src/builder/types.ts";
+import { deriveFlowJoin } from "../src/cfc/prepare.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-pointwise");
 const space = signer.did();
@@ -187,7 +188,9 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       const ptx = runtime!.edit();
       const value = (result.key("mapped") as any).key(index).withTx(ptx)
         .get() as { doubled: number };
-      const out = runtime!.getCell(space, cause, undefined, ptx);
+      const out = runtime!.getCell(space, cause, {
+        ifc: { confidentiality: deriveFlowJoin(ptx).confidentiality },
+      }, ptx);
       out.set({ copied: value.doubled });
       ptx.prepareCfc();
       expect((await ptx.commit()).ok).toBeDefined();
@@ -277,7 +280,9 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     const ptx = runtime.edit();
     const keptLength = ((result.key("kept") as any).withTx(ptx)
       .get() as Array<unknown>).length;
-    const out = runtime.getCell(space, "memb-probe", undefined, ptx);
+    const out = runtime.getCell(space, "memb-probe", {
+      ifc: { confidentiality: deriveFlowJoin(ptx).confidentiality },
+    }, ptx);
     out.set({ count: keptLength });
     ptx.prepareCfc();
     expect((await ptx.commit()).ok).toBeDefined();
@@ -363,7 +368,9 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       .asSchema({ type: "array", items: { asCell: ["cell"] } })
       .withTx(ptx)
       .get() as unknown[];
-    const out = runtime.getCell(space, "shape-probe", undefined, ptx);
+    const out = runtime.getCell(space, "shape-probe", {
+      ifc: { confidentiality: deriveFlowJoin(ptx).confidentiality },
+    }, ptx);
     out.set({ count: keptCells.length });
     ptx.prepareCfc();
     expect((await ptx.commit()).ok).toBeDefined();
@@ -446,7 +453,9 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       .withTx(ptx)
       .get() as unknown[];
     expect(keptCells.length).toBe(0);
-    const out = runtime.getCell(space, "empty-probe", undefined, ptx);
+    const out = runtime.getCell(space, "empty-probe", {
+      ifc: { confidentiality: deriveFlowJoin(ptx).confidentiality },
+    }, ptx);
     out.set({ count: keptCells.length });
     ptx.prepareCfc();
     expect((await ptx.commit()).ok).toBeDefined();

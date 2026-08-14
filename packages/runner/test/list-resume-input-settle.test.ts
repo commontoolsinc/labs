@@ -9,7 +9,7 @@ import {
   type SessionFactory,
   StorageManager,
 } from "../src/storage/v2.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,

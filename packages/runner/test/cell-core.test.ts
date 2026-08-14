@@ -16,7 +16,7 @@ import {
   isPrimitiveCellLink,
   parseLink,
 } from "../src/link-utils.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import {
   type IExtendedStorageTransaction,
   type IMemorySpaceAddress,

@@ -968,6 +968,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
         // create-only mark, exactly the shape flushCfcGrantConsumptionClaims
         // stages — against a replica that has not observed any receipt.
         const remoteTx = new ExtendedStorageTransaction(remote.edit());
+        remoteTx.setCfcEnforcementMode("disabled");
         remoteTx.writeOrThrow({
           space: signer.did(),
           id: receiptId,

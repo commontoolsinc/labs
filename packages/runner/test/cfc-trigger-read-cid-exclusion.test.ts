@@ -167,7 +167,7 @@ describe("CFC trigger reads: cid: exclusion", () => {
       const out = runtime.getCell(
         signer.did(),
         "cfc-trigger-cid-out",
-        undefined,
+        { ifc: { confidentiality: ["secret"] } },
         tx,
       );
       out.set({ flag: 1 });

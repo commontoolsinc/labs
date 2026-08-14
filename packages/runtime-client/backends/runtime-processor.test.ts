@@ -19,6 +19,7 @@ import {
   entityIdFrom,
   Runtime,
   type RuntimeFetch,
+  type RuntimeOptions,
   runtimePresets,
   RuntimeTelemetry,
 } from "@commonfabric/runner";
@@ -81,7 +82,9 @@ class SharedV2StorageManager extends V2Storage.StorageManager {
   }
 }
 
-const createRuntime = () => {
+const createRuntime = (
+  options: Pick<RuntimeOptions, "cfcFlowLabels"> = {},
+) => {
   const server = new MemoryV2Server.Server({
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
@@ -99,6 +102,7 @@ const createRuntime = () => {
   const runtime = new Runtime({
     apiUrl: new URL("http://localhost/"),
     storageManager,
+    ...options,
   });
   return { runtime, storageManager };
 };
@@ -2376,7 +2380,9 @@ describe("RuntimeProcessor CFC label IPC", () => {
   });
 
   it("ignores schema-bearing anyOf refs when reading nested stored labels", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime({
+      cfcFlowLabels: "observe",
+    });
     try {
       const pieceSchema = {
         $ref: "#/$defs/TrustedMessage",
@@ -2446,7 +2452,6 @@ describe("RuntimeProcessor CFC label IPC", () => {
         rootSchema,
       );
       const tx = runtime.edit() as any;
-      tx.setCfcEnforcementMode("enforce-explicit");
       (root.withTx(tx) as any).set({
         messages: [{ piece: { id: "alice", body: "hello" } }],
       });
@@ -2498,7 +2503,9 @@ describe("RuntimeProcessor CFC label IPC", () => {
   });
 
   it("reads nested stored labels after push when child refs rely on parent defs", async () => {
-    const { runtime, storageManager } = createRuntime();
+    const { runtime, storageManager } = createRuntime({
+      cfcFlowLabels: "observe",
+    });
     try {
       const rootSchema = {
         type: "object",
@@ -2591,13 +2598,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
       );
 
       const seed = runtime.edit();
-      seed.setCfcEnforcementMode("enforce-explicit");
       root.withTx(seed).set({ messages: [] });
       seed.prepareCfc();
       expect((await seed.commit()).ok).toBeDefined();
 
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       root.withTx(tx).key("messages").push({
         piece: {
           id: "alice-message",

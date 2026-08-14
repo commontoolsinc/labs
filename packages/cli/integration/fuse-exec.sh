@@ -698,7 +698,7 @@ fi
 rm -f "$MEMORY_PROXY_READY"
 MEMORY_PROXY_READY=""
 
-MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --background --dangerously-allow-incompatible-schema)
+MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --background --cfc-mode=observe --dangerously-allow-incompatible-schema)
 echo "$MOUNT_OUTPUT"
 
 MOUNT_PID="${MOUNT_OUTPUT#*PID }"

@@ -78,10 +78,12 @@ describe("schema-gated link expansion at coverage", () => {
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageA,
+      cfcEnforcementMode: "disabled",
     });
     rtB = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageB,
+      cfcEnforcementMode: "disabled",
     });
   });
 

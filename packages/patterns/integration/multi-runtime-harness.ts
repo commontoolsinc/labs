@@ -23,7 +23,10 @@
 import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { setPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
-import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import {
+  experimentalOptionsFromEnv,
+  type RuntimeOptions,
+} from "@commonfabric/runner";
 import type {
   RuntimeDiagnosticsSnapshot,
   TrustedUiDescriptor,
@@ -78,6 +81,17 @@ export interface MultiRuntimeHarnessOptions {
   input?: Record<string, unknown>;
   /** Enable scheduler graph/stats/action diagnostics for this harness run. */
   diagnostics?: boolean;
+  /** Explicit CFC posture for tests whose subject is not CFC behavior. */
+  cfcOptions?: Pick<
+    RuntimeOptions,
+    | "cfcEnforcementMode"
+    | "cfcFlowLabels"
+    | "cfcWriteFloor"
+    | "cfcTriggerReadGating"
+    | "cfcPolicyEvaluation"
+    | "cfcLabelMetadataProtection"
+    | "cfcDeclaredMonotonicity"
+  >;
   sessions: (string | MultiRuntimeSessionSpec)[];
   spaceName?: string;
   /**
@@ -360,6 +374,9 @@ export class MultiRuntimeHarness {
           spaceName,
           apiUrl,
           diagnostics: options.diagnostics === true,
+          ...(options.cfcOptions !== undefined
+            ? { cfcOptions: options.cfcOptions }
+            : {}),
           ...(normalized.wsDelayMs !== undefined
             ? { wsDelayMs: normalized.wsDelayMs }
             : {}),
@@ -380,6 +397,9 @@ export class MultiRuntimeHarness {
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,
+        ...(options.cfcOptions !== undefined
+          ? { cfcOptions: options.cfcOptions }
+          : {}),
       });
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,

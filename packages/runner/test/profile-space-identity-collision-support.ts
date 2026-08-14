@@ -4,7 +4,7 @@ import { fromFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 
 // CT-1650: two DIFFERENT users who create a profile with the SAME display name

@@ -12,7 +12,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";

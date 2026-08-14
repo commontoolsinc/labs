@@ -169,10 +169,14 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
           "coherence-sink",
           {
             type: "object",
+            ifc: { confidentiality: ["s"] },
             properties: {
               out: {
                 type: "string",
-                ifc: { requiredIntegrity: [required] },
+                ifc: {
+                  requiredIntegrity: [required],
+                  addIntegrity: [required],
+                },
               },
             },
             required: ["out"],
@@ -232,10 +236,14 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
 
     const sinkSchema = {
       type: "object",
+      ifc: { confidentiality: ["s"] },
       properties: {
         out: {
           type: "string",
-          ifc: { requiredIntegrity: [{ type: REVIEWED }] },
+          ifc: {
+            requiredIntegrity: [{ type: REVIEWED }],
+            addIntegrity: [reviewedBy("r1")],
+          },
         },
       },
       required: ["out"],

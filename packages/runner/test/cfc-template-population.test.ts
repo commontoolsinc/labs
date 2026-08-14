@@ -20,6 +20,7 @@ import {
   linkResolutionProbe,
   machineryRead,
 } from "../src/storage/reactivity-log.ts";
+import { CFC_OBSERVE_FLOW_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-template-population");
 const foreignSigner = await Identity.fromPassphrase(
@@ -66,8 +67,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
+      ...CFC_OBSERVE_FLOW_OPTIONS,
     });
     return runtime;
   };
@@ -553,8 +553,7 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
+      ...CFC_OBSERVE_FLOW_OPTIONS,
     });
     return runtime;
   };
@@ -770,8 +769,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
+      ...CFC_OBSERVE_FLOW_OPTIONS,
     });
     return runtime;
   };
@@ -1041,8 +1039,7 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
+      ...CFC_OBSERVE_FLOW_OPTIONS,
     });
     return runtime;
   };
@@ -1162,8 +1159,7 @@ describe("CFC template population (Stage A): cross-space label protection", () =
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       cfcLabelMetadataProtection: "enforce",
     });
     try {

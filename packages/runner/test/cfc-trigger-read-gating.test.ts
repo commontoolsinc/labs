@@ -14,7 +14,7 @@ const signer = await Identity.fromPassphrase("runner-cfc-trigger-read-gating");
 
 // Epic H5 (§8.9.2 / SC-3): the addresses whose invalidating writes SCHEDULED a
 // reactive rerun (trigger reads) join the enforcement consumed set behind the
-// `cfcTriggerReadGating` flag (default off). Without it, a handler scheduled by
+// `cfcTriggerReadGating` flag. Without it, a handler scheduled by
 // a secret's write can egress to a ceiling'd sink — or write a
 // requiredIntegrity-floored target — without ever re-reading that secret, and
 // pass. The tests drive each gate with the flag OFF (passes today) and ON
@@ -48,10 +48,9 @@ const makeRuntime = (opts: {
     apiUrl: new URL("https://example.com"),
     storageManager: opts.storageManager,
     cfcEnforcementMode: "enforce-explicit",
+    cfcFlowLabels: "off",
     cfcSinkMaxConfidentiality: opts.cfcSinkMaxConfidentiality,
-    ...(opts.cfcTriggerReadGating !== undefined
-      ? { cfcTriggerReadGating: opts.cfcTriggerReadGating }
-      : {}),
+    cfcTriggerReadGating: opts.cfcTriggerReadGating ?? false,
   });
 
 // Seed a confidential cell and return the id whose /secret carries [medical].
@@ -122,7 +121,7 @@ const scheduledEgress = (
 };
 
 describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
-  it("flag OFF (default): a scheduled egress that never re-reads the secret passes", async () => {
+  it("flag OFF: a scheduled egress that never re-reads the secret passes", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,

@@ -30,6 +30,7 @@ describe("Pattern Runner - Miscellaneous", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
 
     tx = runtime.edit();

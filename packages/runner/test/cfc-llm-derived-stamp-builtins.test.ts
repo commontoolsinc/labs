@@ -88,6 +88,7 @@ describe("CFC LlmDerived stamping — result-field stamp mechanism", () => {
   it("stamps a builtin write to the result field; strips a pattern write", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -231,6 +232,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     clearMockResponses();
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -632,6 +634,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
   it("does not stamp the `llm` result when CFC enforcement is disabled", async () => {
     const disabledStorage = StorageManager.emulate({ as: signer });
     const disabledRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
       cfcEnforcementMode: "disabled",
@@ -681,6 +684,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     // runtime provenance locations.
     const disabledStorage = StorageManager.emulate({ as: signer });
     const disabledRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
       cfcEnforcementMode: "disabled",

@@ -6,7 +6,7 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 

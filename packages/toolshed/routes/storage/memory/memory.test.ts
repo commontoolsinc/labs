@@ -165,6 +165,7 @@ serialTest(
     const runtime = new Runtime({
       apiUrl: base,
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
 
     try {
@@ -217,6 +218,7 @@ serialTest(
       runtime = new Runtime({
         apiUrl: base,
         storageManager,
+        cfcEnforcementMode: "disabled",
       });
       const tx = runtime.edit();
       const cell = runtime.getCell(

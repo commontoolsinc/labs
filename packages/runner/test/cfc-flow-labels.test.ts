@@ -1,12 +1,25 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import type { Action } from "../src/scheduler.ts";
+import { CFC_OBSERVE_FLOW_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-labels");
+const storedSeedSchema = internSchema({}, true);
+
+const writeStoredSeedSchema = (tx: ReturnType<Runtime["edit"]>): void => {
+  tx.writeOrThrow({
+    space: signer.did(),
+    scope: "space",
+    id: `cid:${storedSeedSchema.taggedHashString}`,
+    type: "application/json",
+    path: [],
+  }, { value: storedSeedSchema.schema });
+};
 
 type StoredEntry = {
   path: string[];
@@ -34,6 +47,7 @@ describe("CFC flow labels (default transition)", () => {
   it("persists derived flow labels on laundered value copies and gates downstream egress", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -42,6 +56,7 @@ describe("CFC flow labels (default transition)", () => {
     try {
       // Doc A: labeled secret.
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -61,7 +76,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -151,6 +166,7 @@ describe("CFC flow labels (default transition)", () => {
   it("does not exempt user value fields named like runtime surfaces", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -160,6 +176,7 @@ describe("CFC flow labels (default transition)", () => {
       // Doc A: labeled secret. Doc B: pre-existing plain doc with a user
       // field named `source`.
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -176,7 +193,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -270,6 +287,7 @@ describe("CFC flow labels (default transition)", () => {
   it("untainted overwrite replaces the value channel and grows the existence channel", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -277,6 +295,7 @@ describe("CFC flow labels (default transition)", () => {
     });
     try {
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -293,7 +312,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -347,6 +366,16 @@ describe("CFC flow labels (default transition)", () => {
         id: targetId,
         path: ["value"],
       }, { note: "fresh public text" });
+      clean.recordCfcWritePolicyInput({
+        kind: "schema",
+        target: {
+          space: signer.did(),
+          scope: "space",
+          id: targetId,
+          path: [],
+        },
+        schema: {},
+      });
       clean.prepareCfc();
       expect((await clean.commit()).ok).toBeDefined();
 
@@ -376,6 +405,7 @@ describe("CFC flow labels (default transition)", () => {
     // no write to the target's ["cfc"] path.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -383,6 +413,7 @@ describe("CFC flow labels (default transition)", () => {
     });
     try {
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -399,7 +430,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{ path: ["secret"], label: { confidentiality: ["x"] } }],
@@ -470,6 +501,7 @@ describe("CFC flow labels (default transition)", () => {
   it("SC-11: skips the envelope write for a canonically-equal but byte-different stored form", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -482,6 +514,7 @@ describe("CFC flow labels (default transition)", () => {
         }).getDocument(id);
 
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -498,7 +531,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -642,6 +675,7 @@ describe("CFC flow labels (default transition)", () => {
   it("observe mode derives the join as a diagnostic and persists nothing", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -649,6 +683,7 @@ describe("CFC flow labels (default transition)", () => {
     });
     try {
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -665,7 +700,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -732,6 +767,7 @@ describe("CFC flow labels (default transition)", () => {
   it("joins trigger-read labels into the derived component", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -739,6 +775,7 @@ describe("CFC flow labels (default transition)", () => {
     });
     try {
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -755,7 +792,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "s3cr3t" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -804,6 +841,7 @@ describe("CFC flow labels (default transition)", () => {
   it("taints rerun writes with the triggering change's labels", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "observe",
@@ -811,6 +849,7 @@ describe("CFC flow labels (default transition)", () => {
     });
     try {
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -827,7 +866,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "v1" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{
@@ -906,6 +945,7 @@ describe("CFC flow labels (default transition)", () => {
     );
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "observe",
@@ -913,6 +953,7 @@ describe("CFC flow labels (default transition)", () => {
     });
     try {
       const seed = runtime.edit();
+      writeStoredSeedSchema(seed);
       const sourceId = parseLink(
         runtime.getCell(
           signer.did(),
@@ -929,7 +970,7 @@ describe("CFC flow labels (default transition)", () => {
         value: { secret: "v1" },
         cfc: {
           version: 1,
-          schemaHash: "seed-schema",
+          schemaHash: storedSeedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{

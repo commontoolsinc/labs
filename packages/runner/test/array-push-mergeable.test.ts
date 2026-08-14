@@ -5,7 +5,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Cell } from "../src/cell.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import {
   getDirectTransactionMergeableOpAddresses,

@@ -12,6 +12,7 @@ import {
   HOME_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-options.ts";
 
 // The route that ref expands to — what the toolshed serves, and what the
 // worker names the module by when it compiles the pattern over HTTP.
@@ -144,6 +145,7 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
     stub.setSource(ROOT_V1);
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
       // One flag covers every tracked system root, home included.

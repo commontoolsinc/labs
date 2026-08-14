@@ -40,6 +40,7 @@ describe("wish built-in", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
 
     tx = runtime.edit();
@@ -1011,6 +1012,7 @@ describe("wish built-in", () => {
       runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
+        cfcEnforcementMode: "disabled",
       });
       tx = runtime.edit();
 
@@ -2477,6 +2479,7 @@ describe("wish built-in", () => {
       runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
+        cfcEnforcementMode: "disabled",
       });
       tx = runtime.edit();
 
@@ -4436,6 +4439,7 @@ describe("interval #now wish", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
 
     tx = runtime.edit();

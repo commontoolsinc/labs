@@ -42,6 +42,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
   const runtime = new Runtime({
     storageManager,
     apiUrl: new URL("http://localhost"),
+    cfcEnforcementMode: "disabled",
+    cfcFlowLabels: "off",
   });
   const healthRecordAtom = {
     type: "https://commonfabric.org/cfc/atom/Resource",

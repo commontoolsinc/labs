@@ -25,6 +25,8 @@ describe("PiecesController.getPieceCell", () => {
     };
     const runtime = {
       userIdentityDID: "did:key:home",
+      cfcEnforcementMode: "disabled",
+      cfcFlowLabels: "off",
       getSpaceCell: () => ({
         sync: () => Promise.resolve(),
       }),

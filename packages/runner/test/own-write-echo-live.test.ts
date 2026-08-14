@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // Own-write echo (CT-1965), end to end over a LIVE in-process server: a

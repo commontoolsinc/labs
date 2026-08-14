@@ -25,6 +25,7 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "../src/ops/clone-data-snapshot.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-options.ts";
 import {
   classifyOrigin,
   PieceOriginError,
@@ -745,6 +746,7 @@ describe("reading a piece's source state", () => {
     });
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
     });

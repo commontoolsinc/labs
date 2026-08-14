@@ -151,6 +151,16 @@ const DOUBLED_RESULT_SCHEMA = {
   required: ["doubled"],
 } as const;
 
+const LEGACY_CFC_OPTIONS = {
+  cfcEnforcementMode: "observe",
+  cfcFlowLabels: "off",
+  cfcWriteFloor: "off",
+  cfcTriggerReadGating: false,
+  cfcPolicyEvaluation: "off",
+  cfcLabelMetadataProtection: "off",
+  cfcDeclaredMonotonicity: "off",
+} as const;
+
 /**
  * A minimal default-pattern program exposing the piece registry, so the
  * space has a REAL registry rather than the detached always-empty fallback.
@@ -220,6 +230,7 @@ describe("run-pattern", () => {
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
     });

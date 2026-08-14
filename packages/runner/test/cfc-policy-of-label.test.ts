@@ -21,6 +21,7 @@ import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
 const space = signer.did();
@@ -35,6 +36,7 @@ describe("PolicyOf label-time binding", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -359,6 +361,7 @@ describe("PolicyOf label-time binding", () => {
     expect((await installTx.commit()).ok).toBeDefined();
 
     const coldRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -438,6 +441,7 @@ describe("PolicyOf label-time binding", () => {
     }
 
     const coldRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -525,6 +529,7 @@ describe("PolicyOf label-time binding", () => {
     expect((await copyTx.commit()).ok).toBeDefined();
 
     const coldRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -638,6 +643,7 @@ describe("PolicyOf label-time binding", () => {
     expect((await seed.commit()).ok).toBeDefined();
 
     const sinkRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -693,6 +699,7 @@ describe("PolicyOf label-time binding", () => {
     }
 
     const sinkRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",

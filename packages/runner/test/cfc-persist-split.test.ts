@@ -8,6 +8,9 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import { deriveFlowJoin } from "../src/cfc/prepare.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-persist-split");
 const space = signer.did();
@@ -95,19 +98,67 @@ describe("CFC observation classes (C2 persist split)", () => {
     path: ["value", ...path],
   });
 
+  const flowSinkSchema = (
+    tx: ReturnType<Runtime["edit"]>,
+    confidentiality: readonly CfcConfClause[] = deriveFlowJoin(tx)
+      .confidentiality,
+  ) =>
+    ({
+      ifc: { confidentiality },
+    }) as JSONSchema;
+
+  const recordFlowSinkPolicy = (
+    tx: ReturnType<Runtime["edit"]>,
+    id: string,
+    confidentiality: readonly CfcConfClause[] = deriveFlowJoin(tx)
+      .confidentiality,
+  ) => {
+    const schema = internSchema(flowSinkSchema(tx, confidentiality), true);
+    tx.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: { space, scope: "space", id, path: [] },
+      schemaHash: schema.taggedHashString,
+      schema: schema.schema,
+    });
+    tx.writeOrThrow(
+      {
+        space,
+        scope: "space",
+        id: `cid:${schema.taggedHashString}` as `${string}:${string}`,
+        path: [],
+      },
+      { value: schema.schema },
+    );
+  };
+
   // Copies a labeled value into a fresh output doc and returns the output's
   // stored entries.
   const launder = async (
     rt: Runtime,
     sourceId: string,
     outCause: string,
+    confidentiality?: readonly CfcConfClause[],
   ): Promise<{ id: string; entries: StoredEntry[] }> => {
     const tx = rt.edit();
     tx.readOrThrow(readAddress(sourceId, []));
-    const out = rt.getCell(space, outCause, undefined, tx);
+    const sinkConfidentiality = confidentiality ??
+      deriveFlowJoin(tx).confidentiality;
+    const out = rt.getCell(
+      space,
+      outCause,
+      flowSinkSchema(tx, sinkConfidentiality),
+      tx,
+    );
+    recordFlowSinkPolicy(
+      tx,
+      out.getAsNormalizedFullLink().id,
+      sinkConfidentiality,
+    );
     out.set({ copied: true });
     tx.prepareCfc();
-    expect((await tx.commit()).ok).toBeDefined();
+    const result = await tx.commit();
+    expect(result.ok, (result.error as Error | undefined)?.message)
+      .toBeDefined();
     const id = out.getAsNormalizedFullLink().id;
     return { id, entries: entriesOf(id) };
   };
@@ -131,6 +182,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     tx.readOrThrow(readAddress(sourceId, []));
     const out = rt.getCell(space, "ps-out", undefined, tx);
     const outId = out.getAsNormalizedFullLink().id;
+    recordFlowSinkPolicy(tx, outId);
     tx.writeOrThrow(
       { space, scope: "space", id: outId, path: ["value"] },
       { copied: true },
@@ -214,8 +266,16 @@ describe("CFC observation classes (C2 persist split)", () => {
     // skipped (canonically identical), not re-split or duplicated.
     const tx = rt.edit();
     tx.readOrThrow(readAddress(sourceId, []));
-    const out = rt.getCell(space, "ps-idem-out", undefined, tx);
-    out.set({ copied: true });
+    recordFlowSinkPolicy(tx, first.id);
+    tx.writeOrThrow(
+      {
+        space,
+        scope: "space",
+        id: first.id as `${string}:${string}`,
+        path: ["value"],
+      },
+      { copied: true },
+    );
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
@@ -266,6 +326,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     tx.readOrThrow(readAddress(first.id, []), { nonRecursive: true });
     const out = rt.getCell(space, "ps-shape-out", undefined, tx);
     const outId = out.getAsNormalizedFullLink().id;
+    recordFlowSinkPolicy(tx, outId);
     tx.writeOrThrow(
       { space, scope: "space", id: outId, path: ["value"] },
       { counted: true },
@@ -298,7 +359,13 @@ describe("CFC observation classes (C2 persist split)", () => {
     const publicId = await seedDoc(rt, "ps-ow-public", { n: 2 }, [
       { path: [], label: { confidentiality: ["public-ish"] } },
     ]);
-    const first = await launder(rt, secretId, "ps-ow-out");
+    const overwriteCeiling = ["old-secret", "public-ish"];
+    const first = await launder(
+      rt,
+      secretId,
+      "ps-ow-out",
+      overwriteCeiling,
+    );
     expect(
       first.entries.find((e) => e.observes === "value")?.label.confidentiality,
     ).toEqual(["old-secret"]);
@@ -308,6 +375,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     // leaf-diffing would not exercise replace-on-overwrite.
     const tx = rt.edit();
     tx.readOrThrow(readAddress(publicId, []));
+    recordFlowSinkPolicy(tx, first.id, overwriteCeiling);
     tx.writeOrThrow(
       {
         space,
@@ -345,6 +413,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     tx.readOrThrow(readAddress(sourceId, []));
     const out = rt.getCell(space, "ps-compat-out", undefined, tx);
     const outId = out.getAsNormalizedFullLink().id;
+    recordFlowSinkPolicy(tx, outId);
     tx.writeOrThrow(
       { space, scope: "space", id: outId, path: ["value"] },
       { copied: true },
@@ -376,6 +445,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     tx.read(readAddress(first.id, []), { meta: linkResolutionProbe });
     const out = rt.getCell(space, "ps-probe-out", undefined, tx);
     const outId = out.getAsNormalizedFullLink().id;
+    recordFlowSinkPolicy(tx, outId);
     tx.writeOrThrow(
       { space, scope: "space", id: outId, path: ["value"] },
       { probed: true },

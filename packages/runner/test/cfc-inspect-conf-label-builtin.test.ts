@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import type { URI } from "@commonfabric/memory/interface";
@@ -17,6 +18,7 @@ import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { CFC_OBSERVE_FLOW_OPTIONS } from "./cfc-test-options.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -37,6 +39,8 @@ const caveatAtom = {
   source: SOURCE_A,
 };
 
+const storedSeedSchema = internSchema({}, true);
+
 const seedLabeledDoc = async (
   runtime: Runtime,
   cause: string,
@@ -50,11 +54,18 @@ const seedLabeledDoc = async (
       { type: "object", properties: { body: { type: "string" } } },
     ).getAsLink(),
   ).id!;
+  seed.writeOrThrow({
+    space,
+    scope: "space",
+    id: `cid:${storedSeedSchema.taggedHashString}`,
+    type: "application/json",
+    path: [],
+  }, { value: storedSeedSchema.schema });
   seed.writeOrThrow({ space, scope: "space", id: id as URI, path: [] }, {
     value: { body: "payload" },
     cfc: {
       version: 1,
-      schemaHash: "seed-schema",
+      schemaHash: storedSeedSchema.taggedHashString,
       labelMap: {
         version: 1,
         entries: [{
@@ -117,6 +128,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
   const boot = (cfcFlowLabels: "off" | "persist") => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
@@ -194,13 +206,20 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
         runtime.getCell(space, "inspect-query-type", { type: "string" })
           .getAsLink(),
       ).id!;
+      seed.writeOrThrow({
+        space,
+        scope: "space",
+        id: `cid:${storedSeedSchema.taggedHashString}`,
+        type: "application/json",
+        path: [],
+      }, { value: storedSeedSchema.schema });
       seed.writeOrThrow(
         { space, scope: "space", id: queryTypeId as URI, path: [] },
         {
           value: CFC_ATOM_TYPE.Caveat,
           cfc: {
             version: 1,
-            schemaHash: "seed-schema",
+            schemaHash: storedSeedSchema.taggedHashString,
             labelMap: {
               version: 1,
               entries: [{

@@ -1566,6 +1566,7 @@ Deno.test("CfHarnessPromptLoop attaches images loaded by view_image on the next 
       workspaceHostPath: workspace,
       runId: "run-view-image",
       model: "gpt-5.4",
+      cfcEnforcementMode: "observe",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});

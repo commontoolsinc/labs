@@ -8,7 +8,7 @@ import {
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";

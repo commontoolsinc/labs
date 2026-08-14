@@ -33,6 +33,7 @@ import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
 import { getMetaLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-test-options.ts";
 import { waitForLlmSettled } from "./support/llm-result.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
@@ -69,8 +70,11 @@ describe("generateObject with tools", () => {
     clearMockResponses(); // Clear mocks from previous tests
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
     });
     tx = runtime.edit();
 
@@ -1703,6 +1707,7 @@ describe("generateObject with tools", () => {
     clearMockResponses();
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",

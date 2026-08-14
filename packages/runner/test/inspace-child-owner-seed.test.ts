@@ -128,10 +128,12 @@ describe("inSpace child owner-protected seed value (profile name)", () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: managerA,
+      cfcEnforcementMode: "enforce-explicit",
     });
     const rt2 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: managerB,
+      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // Session 1: run the parent in space A; the handler creates the child

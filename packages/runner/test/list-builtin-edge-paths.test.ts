@@ -15,7 +15,7 @@ import {
 } from "../src/storage/v2.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {

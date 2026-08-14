@@ -81,12 +81,8 @@ const makeRuntime = (options: {
     apiUrl: new URL("https://example.com"),
     storageManager: options.storageManager,
     cfcEnforcementMode: "enforce-explicit",
-    ...(options.cfcTriggerReadGating !== undefined
-      ? { cfcTriggerReadGating: options.cfcTriggerReadGating }
-      : {}),
-    ...(options.cfcWriteFloor !== undefined
-      ? { cfcWriteFloor: options.cfcWriteFloor }
-      : {}),
+    cfcTriggerReadGating: options.cfcTriggerReadGating ?? false,
+    cfcWriteFloor: options.cfcWriteFloor ?? "off",
   });
 
 // Seed a doc's stored CFC metadata directly via an ungated path-[]

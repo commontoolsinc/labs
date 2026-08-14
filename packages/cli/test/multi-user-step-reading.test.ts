@@ -36,7 +36,7 @@ describe(
         // so reporting its keys would name nothing the author wrote.
         const { results } = await runTests(
           resolve(FIXTURES, "invalid-step.test.tsx"),
-          { root: FIXTURES },
+          { root: FIXTURES, cfcEnforcementMode: "disabled" },
         );
         expect(results[0].error ?? "").toContain("notAValidStep");
       });

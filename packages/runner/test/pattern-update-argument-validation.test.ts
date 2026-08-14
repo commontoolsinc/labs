@@ -10,7 +10,7 @@ import {
   isStoredArgumentSchemaRefusal,
   STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "../src/index.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 

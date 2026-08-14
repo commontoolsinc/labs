@@ -32,6 +32,7 @@ import type {
   IStorageNotification,
 } from "../src/storage/interface.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -56,6 +57,7 @@ function createSchedulerTestRuntime(
   const storageManager = options.storageManager ??
     StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
+    ...LEGACY_CFC_OPTIONS,
     apiUrl: apiUrl instanceof URL ? apiUrl : new URL(apiUrl),
     storageManager,
     ...(options.experimental ? { experimental: options.experimental } : {}),

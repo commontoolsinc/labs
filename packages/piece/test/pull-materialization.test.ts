@@ -54,6 +54,7 @@ import {
 } from "../src/ops/piece-controller.ts";
 import { readPieceSourceState } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-options.ts";
 
 const signer = await Identity.fromPassphrase("piece pull materialization");
 
@@ -919,6 +920,7 @@ describe("piece pull materialization", () => {
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });
@@ -5820,6 +5822,7 @@ describe("piece pull materialization", () => {
       spaceName: pieces.getSpaceName()!,
     });
     const freshRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });
@@ -7190,6 +7193,7 @@ describe("piece pull materialization", () => {
       spaceName: pieces.getSpaceName()!,
     });
     const remoteRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });
@@ -7402,6 +7406,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       as: signer,
     });
     writerRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager: writerStorage,
     });
@@ -7445,6 +7450,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       as: signer,
     });
     const readerRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager: readerStorage,
     });
@@ -7519,6 +7525,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       as: signer,
     });
     const readerRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager: readerStorage,
     });
@@ -7657,6 +7664,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
       as: signer,
     });
     const readerRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager: readerStorage,
     });

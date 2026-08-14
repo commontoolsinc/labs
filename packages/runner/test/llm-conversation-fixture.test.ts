@@ -26,7 +26,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createBuilder } from "../src/builder/factory.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { waitForLlmMessages, waitForLlmSettled } from "./support/llm-result.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";

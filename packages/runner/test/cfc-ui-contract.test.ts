@@ -361,6 +361,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -426,6 +427,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const sourceStream = runtime.getCell(
@@ -1274,6 +1276,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -1341,6 +1344,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -1406,6 +1410,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -1487,6 +1492,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-1",
         actingPrincipal: signer.did(),
@@ -1698,6 +1704,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-1",
         actingPrincipal: signer.did(),
@@ -1917,6 +1924,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -1983,6 +1991,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -2061,6 +2070,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -2161,6 +2171,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -2238,6 +2249,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(
@@ -2313,6 +2325,7 @@ describe("CFC trusted UI event enforcement", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
     });
 
     const stream = runtime.getCell(

@@ -48,6 +48,7 @@ describe("PiecesController.ensureDefaultPattern", () => {
       // Use a fake URL since we won't actually fetch patterns in unit tests
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
+      cfcEnforcementMode: "disabled",
     });
 
     const session = await createSession({

@@ -57,6 +57,7 @@ import {
   TILE_UI,
   UI,
 } from "@commonfabric/runner";
+import { LEGACY_CFC_OPTIONS } from "./cfc-options.ts";
 import type { RuntimeProgram } from "@commonfabric/runner";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { Database } from "@db/sqlite";
@@ -318,6 +319,7 @@ export async function openFileBackedRuntime(
   const runtime = new Runtime({
     apiUrl: new URL("http://toolshed.test"),
     storageManager,
+    ...LEGACY_CFC_OPTIONS,
   });
 
   return {

@@ -5,6 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-projection");
 
@@ -20,6 +21,7 @@ describe("CFC projection claims", () => {
       as: signer,
     });
     const runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL(import.meta.url),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",

@@ -9,7 +9,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import { type Cell } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

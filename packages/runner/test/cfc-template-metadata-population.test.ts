@@ -25,6 +25,7 @@ import type { IFCLabel } from "../src/cfc/mod.ts";
 import type { CfcMetadata, LabelMapEntry } from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { CFC_OBSERVE_FLOW_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-template-metadata-population",
@@ -107,8 +108,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
+      ...CFC_OBSERVE_FLOW_OPTIONS,
     });
     return runtime;
   };
@@ -439,8 +439,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       cfcLabelMetadataProtection: "enforce",
     });
     const rt = runtime;
@@ -650,16 +649,22 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect((await seed.commit()).ok).toBeDefined();
     expect(entriesOf(seededId).length).toBe(2);
 
-    // A clean (unlabeled) value write: no payload entries survive the
-    // re-derivation, so no templates re-derive either — the heal writes the
-    // empty label map instead of keeping the stale bytes.
+    // A clean value write retains only the ambient space policy. No templates
+    // re-derive, so the heal removes the stale bytes.
     const tx = rt.edit();
     const cell = rt.getCell(space, "mp-heal", undefined, tx);
     cell.set({ fresh: true } as never);
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
-    expect(entriesOf(seededId)).toEqual([]);
+    expect(entriesOf(seededId)).toEqual([{
+      path: [],
+      label: {
+        confidentiality: [{ type: CFC_ATOM_TYPE.Space, id: space }],
+        integrity: undefined,
+      },
+      origin: "declared",
+    }]);
   });
 
   // The recorded labelMetadata observations reference the CONCRETE metadata
@@ -689,10 +694,10 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     // one field consultation and one whole-atom projection, at concrete
     // clause indices across the concatenated per-entry clause lists.
     expect(paths).toEqual([
-      "cfc/labels/value/confidentiality/clauses/0/alternatives/0",
-      "cfc/labels/value/confidentiality/clauses/0/alternatives/0/source",
       "cfc/labels/value/confidentiality/clauses/1/alternatives/0",
       "cfc/labels/value/confidentiality/clauses/1/alternatives/0/source",
+      "cfc/labels/value/confidentiality/clauses/2/alternatives/0",
+      "cfc/labels/value/confidentiality/clauses/2/alternatives/0/source",
     ]);
     await inspect.commit();
   });
@@ -829,8 +834,7 @@ describe("CFC template metadata population (Stage B): evaluator resolution", () 
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
+      ...CFC_OBSERVE_FLOW_OPTIONS,
     });
     try {
       const tx = runtime.edit();

@@ -1,17 +1,19 @@
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
+import { deriveFlowJoin } from "../src/cfc/prepare.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { linkResolutionProbe } from "../src/storage/reactivity-log.ts";
+import { CFC_OBSERVE_FLOW_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-observation-classes");
 const space = signer.did();
@@ -47,6 +49,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
   const makeRuntime = () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "observe",
@@ -96,6 +99,30 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     path: ["value", ...path],
   });
 
+  const recordFlowSinkPolicy = (
+    tx: ReturnType<Runtime["edit"]>,
+    id: string,
+    path: string[] = [],
+  ) => {
+    const schema = internSchema(
+      {
+        ifc: {
+          confidentiality: [
+            cfcAtom.space(space),
+            ...deriveFlowJoin(tx).confidentiality,
+          ],
+        },
+      } as JSONSchema,
+      true,
+    );
+    tx.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: { space, scope: "space", id, path },
+      schemaHash: schema.taggedHashString,
+      schema: schema.schema,
+    });
+  };
+
   // The doc every test seeds: a legacy covering entry at the root, a
   // covering derived entry on a field, and a link-origin pointer label on a
   // slot (implicitly `observes:"followRef"` per the C0 §3 carve-out).
@@ -125,7 +152,9 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
   ): Promise<string[] | undefined> => {
     const tx = rt.edit();
     observe(tx);
-    const out = rt.getCell(space, outCause, undefined, tx);
+    const out = rt.getCell(space, outCause, {
+      ifc: { confidentiality: deriveFlowJoin(tx).confidentiality },
+    }, tx);
     out.set({ copied: true });
     if (!options?.autoRelevance) {
       tx.prepareCfc();
@@ -297,6 +326,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     // output doc's prior value and rightly empty the meet on its own).
     const out = rt.getCell(space, "occ-meet-out", undefined, tx);
     const outId = out.getAsNormalizedFullLink().id;
+    recordFlowSinkPolicy(tx, outId);
     tx.writeOrThrow(
       { space, scope: "space", id: outId, path: ["value"] },
       { copied: true },
@@ -401,6 +431,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     tx.readOrThrow(readAddress(taintId, []));
     const cell = rt.getCell(space, "occ-carry-forward", undefined, tx);
     cell.key("other").set(2);
+    recordFlowSinkPolicy(tx, id, ["other"]);
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 

@@ -1,11 +1,13 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { labelResultSchema } from "../src/builtins/sqlite-builtins.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { CFC_OBSERVE_FLOW_OPTIONS } from "./cfc-test-options.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-declared-observes");
 const space = signer.did();
@@ -38,6 +40,7 @@ describe("CFC declared observation classes (C5)", () => {
   const makeRuntime = () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...CFC_OBSERVE_FLOW_OPTIONS,
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "observe",
@@ -150,7 +153,26 @@ describe("CFC declared observation classes (C5)", () => {
     expect((await countTx.commit()).ok).toBeDefined();
     expect(
       entriesOf(countOutId).filter((e) => e.origin === "derived"),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        path: [],
+        label: {
+          confidentiality: [{ type: CFC_ATOM_TYPE.Space, id: space }],
+          integrity: undefined,
+        },
+        origin: "derived",
+        observes: "shape",
+      },
+      {
+        path: [],
+        label: {
+          confidentiality: [{ type: CFC_ATOM_TYPE.Space, id: space }],
+          integrity: undefined,
+        },
+        origin: "derived",
+        observes: "value",
+      },
+    ]);
 
     // A value read still consumes it.
     const valueTx = rt.edit();
@@ -161,12 +183,14 @@ describe("CFC declared observation classes (C5)", () => {
       type: "application/json",
       path: ["value", "rows"],
     });
-    const valueOut = rt.getCell(space, "dobs-value-out", undefined, valueTx);
-    const valueOutId = valueOut.getAsNormalizedFullLink().id;
-    valueTx.writeOrThrow(
-      { space, scope: "space", id: uri(valueOutId), path: ["value"] },
-      { copied: true },
+    const valueOut = rt.getCell(
+      space,
+      "dobs-value-out",
+      { ifc: { confidentiality: ["content-secret"] } },
+      valueTx,
     );
+    const valueOutId = valueOut.getAsNormalizedFullLink().id;
+    valueOut.set({ copied: true });
     valueTx.prepareCfc();
     expect((await valueTx.commit()).ok).toBeDefined();
     expect(
@@ -203,7 +227,10 @@ describe("CFC declared observation classes (C5)", () => {
     const guarded = internSchema(
       {
         type: "object",
-        ifc: { confidentiality: ["declared-members"], observes: "shape" },
+        ifc: {
+          confidentiality: ["declared-members", "secret"],
+          observes: "shape",
+        },
       } as JSONSchema,
       true,
     );
@@ -279,12 +306,14 @@ describe("CFC declared observation classes (C5)", () => {
       type: "application/json",
       path: ["value", "rows"],
     }, { nonRecursive: true });
-    const out = rt.getCell(space, "dobs-invalid-out", undefined, countTx);
-    const outId = out.getAsNormalizedFullLink().id;
-    countTx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
-      { count: 1 },
+    const out = rt.getCell(
+      space,
+      "dobs-invalid-out",
+      { ifc: { confidentiality: ["content-secret"] } },
+      countTx,
     );
+    const outId = out.getAsNormalizedFullLink().id;
+    out.set({ count: 1 });
     countTx.prepareCfc();
     expect((await countTx.commit()).ok).toBeDefined();
     expect(

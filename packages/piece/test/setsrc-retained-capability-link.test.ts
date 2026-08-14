@@ -43,6 +43,7 @@ import { Database } from "@db/sqlite";
 
 import { PieceController } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { LEGACY_CFC_OPTIONS } from "./cfc-options.ts";
 
 const signer = await Identity.fromPassphrase("setsrc-e2e-sqlite");
 
@@ -117,6 +118,7 @@ describe("setsrc over a retained injected sqlite capability link", () => {
     seedDiskDb(diskPath);
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });
@@ -278,6 +280,7 @@ describe("setsrc over a retained injected sqlite capability link", () => {
       spaceName: pieces.getSpaceName()!,
     });
     const freshRuntime = new Runtime({
+      ...LEGACY_CFC_OPTIONS,
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });

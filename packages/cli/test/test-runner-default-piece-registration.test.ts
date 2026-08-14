@@ -15,7 +15,7 @@ describe(
     it("registers valid addPiece events and ignores events without a piece", async () => {
       const { passed, failed } = await runTests(
         resolve(FIXTURES, "registration.test.tsx"),
-        { root: FIXTURES },
+        { root: FIXTURES, cfcEnforcementMode: "disabled" },
       );
 
       expect(passed).toBe(3);

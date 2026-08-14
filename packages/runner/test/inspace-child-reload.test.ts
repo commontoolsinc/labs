@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
+import { LegacyRuntime as Runtime } from "./support/legacy-runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 const signer = await Identity.fromPassphrase("inspace-child-reload");

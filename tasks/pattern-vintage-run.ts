@@ -1035,6 +1035,7 @@ export async function captureVintage(
     const seen = new Map<string, VintageManifestEntry>();
     const result = await runTestPattern(testPath, {
       root: roots.repoRoot,
+      cfcEnforcementMode: "disabled",
       storageHost: {
         identity: roots.signer,
         storageManager: vintage.storageManager as never,

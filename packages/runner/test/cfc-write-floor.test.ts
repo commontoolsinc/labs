@@ -16,7 +16,7 @@ const signer = await Identity.fromPassphrase("runner-cfc-write-floor");
 // read-side gate (verifyInputRequirements) quantifies over consumed reads; the
 // floor tests the WRITTEN VALUE's integrity — schema `addIntegrity` mints,
 // carried link-view integrity, the flow hereditary meet — against the declared
-// floor. Dial `cfcWriteFloor: off | observe | enforce`, default off.
+// floor. Dial `cfcWriteFloor: off | observe | enforce`.
 const ADMIN_ATOM = "admin-approved";
 const LLM_DERIVED_ATOM = {
   type: "https://commonfabric.org/cfc/atom/LlmDerived",
@@ -55,12 +55,8 @@ const makeRuntime = (opts: {
     apiUrl: new URL("https://example.com"),
     storageManager: opts.storageManager,
     cfcEnforcementMode: "enforce-explicit",
-    ...(opts.cfcWriteFloor !== undefined
-      ? { cfcWriteFloor: opts.cfcWriteFloor }
-      : {}),
-    ...(opts.cfcFlowLabels !== undefined
-      ? { cfcFlowLabels: opts.cfcFlowLabels }
-      : {}),
+    cfcWriteFloor: opts.cfcWriteFloor ?? "off",
+    cfcFlowLabels: opts.cfcFlowLabels ?? "off",
   });
 
 // Seed a doc's stored CFC metadata directly via an ungated path-[] full-document
@@ -146,7 +142,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  it("dial off (the default): the same write commits — byte-compat", async () => {
+  it("dial off: the same write commits — byte-compat", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({ storageManager });
     try {

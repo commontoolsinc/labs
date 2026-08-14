@@ -176,7 +176,12 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
       const b = runtime.getCell(space, "flow-wl-b", undefined, tx);
       const rawA = a.getRaw() as { n: number };
       const rawB = b.getRaw() as { n: number };
-      const out = runtime.getCell(space, "flow-wl-out", undefined, tx);
+      const out = runtime.getCell(
+        space,
+        "flow-wl-out",
+        { ifc: { confidentiality: ["plain"] } },
+        tx,
+      );
       out.set({ sum: rawA.n + rawB.n });
       tx.prepareCfc();
       expect((await tx.commit()).ok).toBeDefined();
