@@ -6,6 +6,7 @@ import {
   cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
 } from "../src/cfc/label-view.ts";
+import { cfcLabelViewFromSchema } from "../src/cfc/schema-label-view.ts";
 import {
   redactSigilCfcLabelViewsForDisplay,
   stripSigilCfcLabelViews,
@@ -57,6 +58,84 @@ describe("CFC label view helpers", () => {
           label: { integrity: ["summarized-by-trusted-pattern"] },
         },
       ],
+    });
+  });
+
+  it("collects declared labels from schema paths and local references", () => {
+    expect(cfcLabelViewFromSchema({
+      type: "object",
+      ifc: {
+        confidentiality: ["workspace"],
+        maxConfidentiality: ["workspace"],
+      },
+      properties: {
+        items: {
+          type: "array",
+          items: { $ref: "#/$defs/Reviewed" },
+        },
+      },
+      $defs: {
+        Reviewed: {
+          type: "string",
+          ifc: { integrity: ["reviewed"], observes: "value" },
+        },
+      },
+    })).toEqual({
+      version: 1,
+      entries: [
+        {
+          path: [],
+          label: { confidentiality: ["workspace"] },
+        },
+        {
+          path: ["items", "*"],
+          label: { integrity: ["reviewed"] },
+          observes: "value",
+        },
+      ],
+    });
+  });
+
+  it("ignores a root value that is not a schema", () => {
+    expect(cfcLabelViewFromSchema(null as never)).toBeUndefined();
+  });
+
+  it("keeps declarations beside an unresolved schema reference", () => {
+    expect(cfcLabelViewFromSchema({
+      $ref: "#/$defs/Missing",
+      ifc: { confidentiality: ["workspace"] },
+    })).toEqual({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["workspace"] },
+      }],
+    });
+  });
+
+  it("ignores an IFC block that is not an object", () => {
+    expect(cfcLabelViewFromSchema({ ifc: null } as never)).toBeUndefined();
+  });
+
+  it("ignores IFC label fields that are not arrays", () => {
+    expect(cfcLabelViewFromSchema({
+      ifc: { confidentiality: 7, integrity: { trusted: true } },
+    } as never)).toBeUndefined();
+    expect(cfcLabelViewFromSchema({
+      ifc: { integrity: "trusted" },
+    } as never)).toBeUndefined();
+  });
+
+  it("ignores a properties value that is not an object", () => {
+    expect(cfcLabelViewFromSchema({
+      ifc: { confidentiality: ["workspace"] },
+      properties: null,
+    } as never)).toEqual({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["workspace"] },
+      }],
     });
   });
 
