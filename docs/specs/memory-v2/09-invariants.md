@@ -41,8 +41,8 @@ Checkers referenced below:
 - the **TLA+ model**: `docs/specs/memory-v2/tla/PendingStacks.tla`, which
   model-checks INV-1/INV-3/INV-4/INV-5 over all small interleavings for each
   dependency-recording and staleness-basis variant, and — in its
-  delayed-verdict-delivery mode (`PendingStacks_Channel.cfg`) — INV-6 over
-  the decided-but-not-yet-delivered window.
+  delayed-verdict-delivery mode (the `PendingStacks_Channel*.cfg` configs) —
+  INV-6 over the decided-but-not-yet-processed window.
 
 ## The invariants
 
@@ -163,11 +163,11 @@ parked — is reachable in the TLA+ model's `fullstack` recording mode:
 rejection removes the doomed layers from the pending stack, an accepted
 layer stays pending until `Integrate`, and a later `Build` records only the
 survivors — a sparse set relative to session history. The delayed-delivery
-mode (`PendingStacks_Channel.cfg`) additionally certifies the window where
-a rejection is decided but not yet delivered: a commit built there still
-names the dead layer and is refused by the dead-dependency admission rule,
-while a commit built after the delivered drop records the sparse survivor
-set and is admitted.
+mode (the `PendingStacks_Channel*.cfg` configs) additionally certifies the
+window where a rejection is decided but not yet processed: a commit built
+there still names the dead layer and is refused by the dead-dependency
+admission rule, while a commit built after the processed drop records the
+sparse survivor set and is admitted.
 
 Layer: client dependency recording (`packages/runner/src/storage/v2.ts`
 pending-stack bookkeeping); server resolution (`resolvePendingReads`).
@@ -250,9 +250,10 @@ commit whose local doom is still possible, and MUST NOT locally drop a
 commit whose acceptance is still possible without confirming its fate.
 
 Checked by: the TLA+ model's delayed-delivery mode
-(`PendingStacks_Channel.cfg`, invariant `AcceptedVersusDropped`), which
-splits the server's decision from the client's knowledge, runs the
-rejection drop-and-cascade at delivery, and checks that a locally
+(the `PendingStacks_Channel*.cfg` configs, invariant
+`AcceptedVersusDropped`), which splits the server's decision from the
+client's processing, runs the rejection drop-and-cascade at the
+processing point, and checks that a locally
 cascade-dropped commit is never durably accepted — the guarantee rests on
 FIFO admission plus the dead-dependency rule, and the model checks that
 composition rather than assuming it. The CT-1927 parking window is in

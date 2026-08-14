@@ -67,9 +67,9 @@
 (*                   and the scan runs from that confirmed basis with the  *)
 (*                   reader's own session excluded.                        *)
 (*                                                                         *)
-(*   DeliveryMode - when the client learns a verdict (see above):          *)
+(*   DeliveryMode - when the client PROCESSES a verdict (see above):        *)
 (*       "atomic"    verdict and mirrored client effects in one action.    *)
-(*       "channel"   verdicts delivered later, in order, by Deliver.       *)
+(*       "channel"   verdicts processed later, in order, by Deliver.       *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets
 
@@ -89,16 +89,24 @@ ASSUME MaxTotal \in Nat \ {0}
 VARIABLES
   log,        \* accepted commit log; seq n is log[n]
   pend,       \* per session: the pending stack (layers the client's view
-              \* still sits on: undecided, decided-but-undelivered, and
+              \* still sits on: undecided, decided-but-unprocessed, and
               \* accepted-not-yet-integrated commits, in localSeq order)
   res,        \* per session, per localSeq: SERVER verdict [st, seq]
               \* st \in {"none", "acc", "rej"}; seq is 0 unless st = "acc"
-  known,      \* per session, per localSeq: CLIENT-known fate
-              \* ("none" | "acc" | "rej"); trails res in channel mode,
-              \* mirrors it in atomic mode.  A cascade victim's "rej" is
-              \* fabricated locally, possibly before its server verdict.
+  known,      \* per session, per localSeq: the fate the client has
+              \* PROCESSED ("none" | "acc" | "rej"); trails res in channel
+              \* mode, mirrors it in atomic mode.  Processing is asymmetric
+              \* by fate: for an accept it is mere receipt (promotion still
+              \* parks until Integrate), while for a rejection it is
+              \* APPLICATION - the drop and cascade - which the
+              \* implementation defers to the covering frame even though
+              \* the verdict itself is known at the transact response
+              \* (fate callbacks fire there).  That receipt-to-application
+              \* gap is the collapsed window argued in the header.  A
+              \* cascade victim's "rej" is fabricated locally, possibly
+              \* before its server verdict.
   localrej,   \* per session: localSeqs the client rejected locally (cascade
-              \* victims of a delivered rejection) - the INV-6 witness set
+              \* victims of a processed rejection) - the INV-6 witness set
   nextLocal,  \* per session: next localSeq to assign
   csn,        \* per session: confirmed seq (integrated log prefix length)
   built       \* total commits built (bound: MaxTotal)
@@ -255,12 +263,12 @@ Process(s) ==
 (* is already set, which is the model's suppressed-late-verdict.           *)
 (***************************************************************************)
 
-Undelivered(s) == {l \in LSeqs : res[s][l].st # "none" /\ known[s][l] = "none"}
+Unprocessed(s) == {l \in LSeqs : res[s][l].st # "none" /\ known[s][l] = "none"}
 
 Deliver(s) ==
   /\ DeliveryMode = "channel"
-  /\ Undelivered(s) # {}
-  /\ LET l == Min(Undelivered(s))
+  /\ Unprocessed(s) # {}
+  /\ LET l == Min(Unprocessed(s))
      IN IF res[s][l].st = "acc"
         THEN /\ known' = [known EXCEPT ![s][l] = "acc"]
              /\ UNCHANGED <<pend, localrej>>
