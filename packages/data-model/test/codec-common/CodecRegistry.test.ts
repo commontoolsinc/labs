@@ -53,7 +53,7 @@ class TestCodec extends BaseNonterminalCodec {
   readonly #accept: FabricValue | undefined;
 
   constructor(
-    recognizedTypeTag: string,
+    recognizedTypeTag: string | undefined,
     uniqueHandledClass: Constructor | undefined,
     accept?: FabricValue,
   ) {
@@ -215,14 +215,35 @@ describe("CodecRegistry", () => {
 
     it("throws given a codec whose recognized tag is empty", () => {
       // Spec §9 makes a bare `/` key an encoding error whatever follows it,
-      // and the decoder reports it as one by finding no codec for the empty
-      // tag. A codec registered under it would intercept that payload.
+      // and the decoder reports it as one. A codec registered under it could
+      // encode a value that this same system would then refuse to read back.
       const codec = new TestCodec("", FabricRegExp);
       const registry = new CodecRegistry(TEST_FORMAT);
 
       expect(() => registry.register(codec)).toThrow(
-        "Cannot register a codec under the empty tag",
+        /Cannot register a codec under/,
       );
+    });
+
+    it("throws given a codec whose recognized tag has no version", () => {
+      // The register-time counterpart of the decoder's check: `hole` is a
+      // meta-tag rather than a type, so a decoder refuses it, and a codec
+      // indexed under it would emit exactly what the decoder refuses.
+      const codec = new TestCodec("hole", FabricRegExp);
+      const registry = new CodecRegistry(TEST_FORMAT);
+
+      expect(() => registry.register(codec)).toThrow(
+        /not a codec type tag/,
+      );
+    });
+
+    it("registers a codec whose recognized tag is `undefined`", () => {
+      // Not a tag, and not an error: it marks a codec whose tag is read from
+      // each value rather than fixed.
+      const codec = new TestCodec(undefined, FabricRegExp);
+      const registry = new CodecRegistry(TEST_FORMAT);
+
+      expect(() => registry.register(codec)).not.toThrow();
     });
 
     it("throws given an empty-tagged codec registered by primitive", () => {
@@ -230,7 +251,7 @@ describe("CodecRegistry", () => {
       const registry = new CodecRegistry(TEST_FORMAT);
 
       expect(() => registry.registerPrimitive("bigint", codec)).toThrow(
-        "Cannot register a codec under the empty tag",
+        /Cannot register a codec under/,
       );
     });
 

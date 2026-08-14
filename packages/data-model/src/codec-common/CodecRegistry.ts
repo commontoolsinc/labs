@@ -12,6 +12,9 @@
  * frozen registry means extending it into a new one.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
+import type { Constructor } from "@commonfabric/utils/types";
+
 import type { FabricValue } from "@/interface.ts";
 import {
   CODEC,
@@ -20,7 +23,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import type { Constructor } from "@commonfabric/utils/types";
+import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 
 /**
  * Sentinel returned by {@link CodecRegistry#codecFromValue} for a
@@ -371,19 +374,23 @@ export class CodecRegistry<Encoded> {
   //
 
   /**
-   * Guards against registering a codec under the empty tag. A bare `"/"` key
-   * on the wire is an encoding error whatever follows it, per Section 9 of the
-   * formal spec, and a decoder reports it as such -- but only by finding no
-   * codec for the empty tag. A codec registered under one would intercept the
-   * very payload that rule exists to reject.
+   * Guards against registering a codec under a tag that is not one. A decoder
+   * refuses a tag that is not syntactically a tag, per Section 9 of the formal
+   * spec, so a codec indexed under such a string could emit a value this same
+   * system would then refuse to read back. Checking here is what keeps the two
+   * sides of a round trip from disagreeing, and does it once per codec rather
+   * than once per value.
    *
-   * @throws If `tag` is the empty string.
+   * `undefined` is allowed and is not a tag: it marks a codec whose tag is
+   * per-instance, read from the value by `tagForValue()` rather than fixed.
+   *
+   * @throws If `tag` is a string that is not a codec type tag.
    */
   static #assertTagRegistrable(tag: string | undefined): void {
-    if (tag === "") {
+    if ((tag !== undefined) && !isCodecTypeTag(tag)) {
       throw new Error(
-        "Cannot register a codec under the empty tag: a bare `/` key is an " +
-          "encoding error, not a type.",
+        `Cannot register a codec under ${backtickQuote(tag)}: not a codec ` +
+          "type tag, so nothing encoded under it could be decoded.",
       );
     }
   }
