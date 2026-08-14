@@ -87,6 +87,12 @@ describe("stage G outbox + sqlite discharge", () => {
         sessionId: "outbox-test-session",
       },
       replicaFor: (s) => storageManager.open(s).replica,
+      // The Phase-5 posture, explicitly: the FP1 fold tests exercise
+      // foreign-only-seal survivors (§2b machinery, dark until Phase
+      // 5). The serving loop's real accumulators run the DEFAULT
+      // ("refuse", RULED 2026-08-14 (c)) — pinned in
+      // executor-serving-loop.test.ts and executor-wave.test.ts.
+      foreignWrites: "accept",
       ...(options.lease !== undefined ? { lease: options.lease } : {}),
     });
 
