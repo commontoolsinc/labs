@@ -2494,6 +2494,17 @@ export async function deriveSelectedValue(
         `Could not apply piece get transform: ${committed.error}`,
       );
     }
+    // This wait is GLOBAL: idle() drains the whole reactive graph and
+    // synced() the whole storage manager, not just this transform. On a
+    // plain `piece get` that is benign — nothing else runs in the CLI's
+    // runtime — but a shaped `piece call` readback arrives here right after
+    // its handler ran, so the selection waits on whatever derived
+    // recomputation that handler triggered elsewhere, a coupling the plain
+    // call's transaction-local acknowledgement deliberately avoids.
+    // Documented as a known cost of shaping at the call (decided
+    // 2026-08-14; packages/cli/README.md names the shape-the-collect
+    // alternative); scoping this wait to the transform's own computation is
+    // the named follow-up.
     await outputCell.pull();
     await runtime.idle();
     await runtime.storageManager.synced();

@@ -135,9 +135,15 @@ export interface CallableExecutionDeps {
    *
    * It shapes a result that exists rather than deciding what is fetched: the
    * readback has already materialized the whole receipt by the time this
-   * applies, and a receipt declares no schema for a selector to narrow
-   * against. A verb that returns nothing keeps returning nothing — there is
-   * no value for a selection to be about. */
+   * applies. (A plain result's receipt does carry a descriptive schema of
+   * what it holds — a reactive result's carries none — but either way the
+   * fetch has happened first.) The shared step also awaits the runtime's
+   * global idle plus storage sync, so a shaped call result can wait on
+   * derived recomputation the plain call's transaction-local acknowledgement
+   * does not — a documented cost of shaping at the call
+   * (`deriveSelectedValue`, cell-selection.ts). A verb that returns nothing
+   * keeps returning nothing — there is no value for a selection to be
+   * about. */
   selection?: CellSelection;
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
   deriveSelectedValue?: typeof deriveSelectedValue;
