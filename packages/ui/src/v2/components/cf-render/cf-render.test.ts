@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { defer } from "@commonfabric/utils/defer";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
+import { providePieceBoundary } from "../../../../../html/src/main/space-context.ts";
 import {
   CFRender,
   hasVariantValue,
@@ -1034,6 +1035,7 @@ describe("CFRender piece context menu", () => {
   function contextMenuEvent(
     deepestTarget?: EventTarget,
     modifiers: { shiftKey?: boolean } = {},
+    ancestors: EventTarget[] = [],
   ): MouseEvent & { defaultPrevented: boolean; propagationStopped: boolean } {
     const event = {
       clientX: 120,
@@ -1041,7 +1043,7 @@ describe("CFRender piece context menu", () => {
       shiftKey: modifiers.shiftKey ?? false,
       defaultPrevented: false,
       propagationStopped: false,
-      composedPath: () => (deepestTarget ? [deepestTarget] : []),
+      composedPath: () => (deepestTarget ? [deepestTarget, ...ancestors] : []),
       preventDefault() {
         event.defaultPrevented = true;
       },
@@ -1207,6 +1209,90 @@ describe("CFRender piece context menu", () => {
 
     const detail = rightClick(element, contextMenuEvent());
     expect(detail?.pieceId).toBe("of:fid1:tile-piece");
+    expect(detail?.variant).toBe("full");
+  });
+
+  it("reports the innermost nested pattern in the click path", () => {
+    const element = new CFRender();
+    element.variant = "tile";
+    element.cell = createMockCellHandle({ name: "outer" }, {
+      id: "of:fid1:outer-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const inner = createMockCellHandle({ name: "inner" }, {
+      id: "of:fid1:inner-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const innerRoot = new EventTarget() as unknown as Element;
+    providePieceBoundary(innerRoot, inner);
+
+    const detail = rightClick(
+      element,
+      contextMenuEvent(innerRoot, {}, [element]),
+    );
+
+    expect(detail?.pieceId).toBe("of:fid1:inner-piece");
+    expect(detail?.variant).toBe("full");
+  });
+
+  it("does not inherit a piece boundary outside this renderer", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "inner" }, {
+      id: "of:fid1:inner-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const outer = createMockCellHandle({ name: "outer" }, {
+      id: "of:fid1:outer-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const outerRoot = new EventTarget() as unknown as Element;
+    providePieceBoundary(outerRoot, outer);
+    const innerTarget = {
+      dispatchEvent: (event: Event) => outerRoot.dispatchEvent(event),
+    } as EventTarget;
+
+    const detail = rightClick(
+      element,
+      contextMenuEvent(innerTarget, {}, [element, outerRoot]),
+    );
+
+    expect(detail?.pieceId).toBe("of:fid1:inner-piece");
+    expect(detail?.variant).toBe("full");
+  });
+
+  it("skips a nested provider that is not a whole piece", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "renderer" }, {
+      id: "of:fid1:renderer-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const outer = createMockCellHandle({ name: "outer" }, {
+      id: "of:fid1:outer-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const field = createMockCellHandle({ name: "field" }, {
+      id: "of:fid1:field-piece" as never,
+      space: "did:key:zSpace" as never,
+      path: ["value"],
+    }) as CellHandle;
+    const outerRoot = new EventTarget() as unknown as Element;
+    const fieldRoot = new EventTarget() as unknown as Element;
+    providePieceBoundary(outerRoot, outer);
+    providePieceBoundary(fieldRoot, field);
+    const deepestTarget = {
+      dispatchEvent(event: Event) {
+        fieldRoot.dispatchEvent(event);
+        if (!event.cancelBubble) outerRoot.dispatchEvent(event);
+        return !event.defaultPrevented;
+      },
+    } as EventTarget;
+
+    const detail = rightClick(
+      element,
+      contextMenuEvent(deepestTarget, {}, [fieldRoot, outerRoot, element]),
+    );
+
+    expect(detail?.pieceId).toBe("of:fid1:outer-piece");
     expect(detail?.variant).toBe("full");
   });
 });

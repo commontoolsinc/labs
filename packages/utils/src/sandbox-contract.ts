@@ -1,8 +1,10 @@
-// The contract between the pattern toolchain and the sandbox compartment a
-// pattern runs in: the globals a compartment withholds, the builder and
-// data-helper names that are trusted, the identifiers reserved within a
-// factory's scope, and the source text of the helpers that carry the
-// value-side parts of the contract.
+/**
+ * The contract between the pattern toolchain and the sandbox compartment a
+ * pattern runs in: the globals a compartment withholds, the builder and
+ * data-helper names that are trusted, the identifiers reserved within a
+ * factory's scope, and the source text of the helpers that carry the
+ * value-side parts of the contract.
+ */
 
 /**
  * Names that a factory's scope shadows, so that authored code reaching for one

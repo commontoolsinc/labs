@@ -52,7 +52,6 @@ import {
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME, CFC_BROWSER_PROFILE_COUNT } = env;
-const PROPAGATION_TIMEOUT = 60_000;
 const SAVE_PROFILE_ACTION = "TrustedGroupChatSaveProfile";
 const PROFILE_COUNT = Math.max(2, CFC_BROWSER_PROFILE_COUNT);
 
@@ -205,7 +204,6 @@ describe(
               SAVE_PROFILE_ACTION,
               "#trusted-profile-status",
               userNames[0],
-              { timeout: PROPAGATION_TIMEOUT },
             ),
         );
         await Promise.all(
@@ -251,7 +249,6 @@ describe(
                 SAVE_PROFILE_ACTION,
                 "#trusted-profile-status",
                 userNames[index],
-                { timeout: PROPAGATION_TIMEOUT },
               ),
           );
         }

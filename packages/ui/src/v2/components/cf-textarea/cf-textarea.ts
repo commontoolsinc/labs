@@ -53,7 +53,6 @@ export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
  * <!-- Debounced input - waits 500ms after user stops typing -->
  * <cf-textarea timingStrategy="debounce" timingDelay="500" placeholder="Search..."></cf-textarea>
  */
-
 export class CFTextarea extends BaseElement {
   static formAssociated = true;
 

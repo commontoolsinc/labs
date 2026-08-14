@@ -29,7 +29,7 @@
  *
  * Run: deno task cf test packages/patterns/battleship/pass-and-play/main.test.tsx --verbose
  */
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import Battleship, { type SquareState } from "./main.tsx";
 
 export default pattern(() => {
@@ -152,7 +152,7 @@ export default pattern(() => {
   // Test Sequence - array of { assertion } or { action } objects
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Test 1: Initial state ===
       { assertion: assert_initial_phase_playing },
       { assertion: assert_initial_turn_player1 },

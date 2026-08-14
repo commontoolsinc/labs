@@ -5,15 +5,15 @@ import type {
 } from "@commonfabric/api";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import {
-  CODEC,
-  type FabricCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
-} from "@/codec-common/interface.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
+} from "@/codec-interface/interface.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
@@ -134,8 +134,8 @@ export class FabricRegExp extends BaseFabricPrimitive
   // Static members
   //
 
-  static #codec = Object.freeze(
-    new (class RegExpCodec extends BaseFabricCodec {
+  static #jsonCodec = Object.freeze(
+    new (class RegExpCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
@@ -186,8 +186,8 @@ export class FabricRegExp extends BaseFabricPrimitive
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
-    return this.#codec;
+  static get [JSON_CODEC](): NonterminalCodec {
+    return this.#jsonCodec;
   }
 }
 

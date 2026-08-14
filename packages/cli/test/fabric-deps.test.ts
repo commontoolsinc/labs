@@ -7,7 +7,7 @@ import { slugIdForSpace } from "../../runner/src/slugs.ts";
 import { InMemoryProgram } from "@commonfabric/js-compiler";
 import { pinProgramFabricImports } from "../lib/fabric-deps.ts";
 import { collectLocalProgram } from "../lib/dev.ts";
-import { cf } from "./utils.ts";
+import { cf, stripAnsi } from "./utils.ts";
 
 const signer = await Identity.fromPassphrase("cli fabric deps test");
 const space = signer.did();
@@ -162,6 +162,6 @@ describe("cli fabric deps", () => {
     const { code, stdout } = await cf("deps update --help");
 
     expect(code).toBe(0);
-    expect(stdout.join("\n")).toContain("--check");
+    expect(stripAnsi(stdout.join("\n"))).toContain("--check");
   });
 });

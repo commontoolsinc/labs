@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * These tests focus on the core functionality used by our piece reference detection
@@ -92,14 +92,15 @@ describe("Reference detection core functionality", () => {
 
       // Check for alias
       if (
-        isRecord(value) && isRecord(value.$alias) && isRecord(value.$alias.cell)
+        isObjectOrArray(value) && isObjectOrArray(value.$alias) &&
+        isObjectOrArray(value.$alias.cell)
       ) {
         // FIXME: types
         foundReferences.push(value.$alias.cell.id as string);
       }
 
       // Recursively search through object properties
-      if (isObject(value)) {
+      if (isObjectNotArray(value)) {
         for (const key in value) {
           recursiveSearch((value as Record<string, unknown>)[key]);
         }
@@ -166,8 +167,8 @@ describe("Reference detection core functionality", () => {
       if (!value) return;
 
       // Check if value might be a cell link
-      const isCellLink = isRecord(value) &&
-        isRecord(value.cell) &&
+      const isCellLink = isObjectOrArray(value) &&
+        isObjectOrArray(value.cell) &&
         "path" in value;
       if (isCellLink) {
         foundReferences.push({
@@ -179,7 +180,8 @@ describe("Reference detection core functionality", () => {
 
       // Check for alias
       if (
-        isRecord(value) && isRecord(value.$alias) && isRecord(value.$alias.cell)
+        isObjectOrArray(value) && isObjectOrArray(value.$alias) &&
+        isObjectOrArray(value.$alias.cell)
       ) {
         foundReferences.push({
           type: "alias",
@@ -189,7 +191,7 @@ describe("Reference detection core functionality", () => {
       }
 
       // Recursively search
-      if (isObject(value)) {
+      if (isObjectNotArray(value)) {
         for (const key in value) {
           detectReferences((value as Record<string, unknown>)[key]);
         }

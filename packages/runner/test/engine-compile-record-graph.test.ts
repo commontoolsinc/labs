@@ -48,6 +48,31 @@ describe("Engine.compileToRecordGraph()", () => {
     expect(joinedBodies(result.graph).length).toBeGreaterThan(0);
   });
 
+  it("compiles an empty attached source root", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      sourceRoots: ["/main.test.ts"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: "export default 42;",
+        },
+        {
+          name: "/main.test.ts",
+          contents: "",
+        },
+      ],
+    };
+
+    const result = await engine.compileToRecordGraph(program);
+
+    expect(
+      [...result.graph.specifierByPath.keys()].some((path) =>
+        path.endsWith("/main.test.ts")
+      ),
+    ).toBe(true);
+  });
+
   it("compiles a multi-file program", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",

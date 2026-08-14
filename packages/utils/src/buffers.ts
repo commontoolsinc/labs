@@ -39,13 +39,23 @@ export function isDetached(source: ArrayBufferLike | ArrayBufferView): boolean {
  * since it cannot tell which of the two happened. Passing an already-detached
  * `bytes` throws, as reading it would.
  *
+ * The result's buffer is **exact-sized**: the result starts at offset zero and
+ * runs to the end of it, so the buffer holds these bytes and nothing else.
+ * That is stronger than sole ownership and is separately load-bearing. A
+ * caller reaching past the view to the buffer -- to hash it, or to hand it to
+ * `postMessage()` as a transferable -- gets exactly the byte sequence the view
+ * describes, with no offset to apply and no tail belonging to something else.
+ * Both paths give it: the copy allocates a buffer of the needed size, and the
+ * take-over path is entered only for a `bytes` that already covered its whole
+ * buffer.
+ *
  * @param bytes - The source bytes.
  * @param transfer - Whether the caller cedes `bytes`.
  */
 export function toOwnedUint8Array(
   bytes: Uint8Array,
   transfer: boolean,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const buffer = bytes.buffer;
 
   if (

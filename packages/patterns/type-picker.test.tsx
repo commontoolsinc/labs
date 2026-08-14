@@ -1,4 +1,4 @@
-import { action, assert, pattern, UI, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import TypePickerModule from "./type-picker.tsx";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 import { findElementByText, propsOf } from "./test/vnode-helpers.ts";
@@ -56,7 +56,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_undismissed },
       { action: action_dismiss },
       { assertion: assert_dismissed_follows_the_cell },

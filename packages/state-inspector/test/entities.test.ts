@@ -1,11 +1,13 @@
-// Hermetic test for the unified entity model + encoded commit decoding. Seeds a
-// modern piece (patternIdentity → module, argument, internal manifest), an
-// owned cell, a stream, and a free cell, then checks classification + lineage.
-// Side-effect free.
+/**
+ * Hermetic test for the unified entity model + encoded commit decoding. Seeds a
+ * modern piece (patternIdentity → module, argument, internal manifest), an
+ * owned cell, a stream, and a free cell, then checks classification + lineage.
+ * Side-effect free.
+ */
 
 import { assert, assertEquals } from "@std/assert";
 import { Database } from "@db/sqlite";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 
 import { openSpace } from "../db.ts";
 import { listCommits } from "../queries.ts";
@@ -48,7 +50,7 @@ function seed(path: string) {
   const session = "session:did:key:zSpaceAAAA:11111111-2222-3333";
 
   // Commit 1: original stored codec-encoded with 2 ops and 1 confirmed read.
-  const original = jsonFromValue({
+  const original = jsonFromFabricValue({
     localSeq: 1,
     operations: [{ op: "set" }, { op: "patch" }],
     reads: { confirmed: [{ id: "x" }], pending: [] },

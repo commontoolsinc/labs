@@ -1,9 +1,12 @@
-// recent main runs: every run in the window (newest first, including in-progress
-// ones), across both the labs and loom repos interleaved chronologically, each
-// row linking to the PR that landed the commit and tagged with its repo.
-// Full-width. The tile's aggregate status is bad if the latest completed run
-// failed, concerning if a failure sits within the recent window but the tip
-// recovered, else good.
+/**
+ * Lists every run on main in the window, newest first and including the ones
+ * still in progress, with the labs and loom repositories interleaved
+ * chronologically. Each row is tagged with its repository and links to the
+ * pull request that landed the commit. The tile is full-width. Its aggregate
+ * status is bad when the latest completed run failed, a warning when a failure
+ * sits within the recent window but the tip has recovered, and good otherwise.
+ */
+
 import {
   runSource,
   type Run,

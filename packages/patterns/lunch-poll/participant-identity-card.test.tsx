@@ -4,6 +4,7 @@ import {
   Default,
   equals,
   pattern,
+  TESTS,
   UI,
   Writable,
 } from "commonfabric";
@@ -241,7 +242,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial },
       { assertion: assert_guest_setup_renders },
       { assertion: assert_profile_first_renders },

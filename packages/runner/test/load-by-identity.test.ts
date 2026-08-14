@@ -161,6 +161,96 @@ describe("load by module identity (warm + version-bump recovery)", () => {
     });
   });
 
+  it("cold-loads an exact attached source-root package", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      sourceRoots: ["/tests/main.test.tsx"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "export default pattern(() => ({ value: 1 }));",
+          ].join("\n"),
+        },
+        {
+          name: "/tests/main.test.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            'import { expected } from "./support.ts";',
+            'import type { Expected } from "./types.d.ts";',
+            "const typed: Expected = expected;",
+            "export default pattern(() => ({ expected: typed }));",
+          ].join("\n"),
+        },
+        {
+          name: "/tests/support.ts",
+          contents: "export const expected = 1;",
+        },
+        {
+          name: "/tests/types.d.ts",
+          contents: "export type Expected = number;",
+        },
+      ],
+    };
+    const compiled = await engine.compileToRecordGraph(program);
+    writeSourceDocs(
+      runtime,
+      space,
+      compiled.modules,
+      compiled.entryIdentity,
+      tx,
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    tx = runtime.edit();
+    await runtime.storageManager.synced();
+
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    try {
+      const loaded = await coldRuntime.patternManager.loadPatternByIdentity(
+        compiled.entryIdentity,
+        "default",
+        space,
+      );
+      expect(typeof loaded).toBe("function");
+      const recovered = await coldRuntime.patternManager
+        .getPatternSourceProgramByIdentity(compiled.entryIdentity, space);
+      expect(recovered?.sourceRoots).toEqual(["/tests/main.test.tsx"]);
+      expect(recovered?.files.map((file) => file.name)).toContain(
+        "/tests/support.ts",
+      );
+      expect(recovered?.files.map((file) => file.name)).toContain(
+        "/tests/types.d.ts",
+      );
+      await coldRuntime.patternManager.flushCompileCacheWrites();
+      await coldRuntime.storageManager.synced();
+
+      const warmRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      try {
+        const warm = await warmRuntime.patternManager.loadPatternByIdentity(
+          compiled.entryIdentity,
+          "default",
+          space,
+        );
+        expect(typeof warm).toBe("function");
+        const warmSource = await warmRuntime.patternManager
+          .getPatternSourceProgramByIdentity(compiled.entryIdentity, space);
+        expect(warmSource?.sourceRoots).toEqual(["/tests/main.test.tsx"]);
+      } finally {
+        await warmRuntime.dispose({ closeStorage: false });
+      }
+    } finally {
+      await coldRuntime.dispose({ closeStorage: false });
+    }
+  });
+
   it("trusts integrity-gated cached bodies and skips body re-verification", async () => {
     // Spec (module-loading.md, threat model): a warm hit loaded from the
     // integrity-gated compiled set trusts the CFC label, so `trustedBodies`

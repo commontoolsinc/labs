@@ -5,6 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { CommitError } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -74,6 +75,55 @@ describe("interval #now wish", () => {
     expect(updated! % 1000).toBe(0);
 
     runtime.runner.stop(resultCell);
+  });
+
+  it("reports a failed #now interval tick", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/1" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "failed interval now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const failure = {
+      name: "StorageTransactionAborted" as const,
+      message: "interval tick failed",
+      reason: "interval tick failed",
+    } satisfies CommitError;
+    const reported: unknown[][] = [];
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const originalConsoleError = console.error;
+    runtime.editWithRetry =
+      (() =>
+        Promise.resolve({ error: failure })) as typeof runtime.editWithRetry;
+    console.error = (...args: unknown[]) => {
+      if (args[0] === "[wish] #now interval tick failed:") {
+        reported.push(args);
+      } else {
+        originalConsoleError(...args);
+      }
+    };
+
+    try {
+      await clock.tick(1000);
+      expect(reported).toEqual([[
+        "[wish] #now interval tick failed:",
+        failure,
+      ]]);
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+      console.error = originalConsoleError;
+      runtime.runner.stop(resultCell);
+    }
   });
 
   it("#now interval keeps ticking when other dependencies change", async () => {

@@ -89,20 +89,27 @@ Waits split into two groups with different primitives.
   flip with no DOM mutation (for example a runtime global being set). The
   predicate is serialized and runs in the page, so it closes over nothing from
   the test module — inline any collection it needs, and pass values in through
-  `args`.
+  `args`. A predicate that returns a truthy value instead of `true` hands that
+  value back to the caller in the same binding notification, so it must be a
+  `PageConditionValue`: a plain JSON value. Maps, functions, class instances,
+  cycles, and other lossy JSON inputs are rejected at the boundary instead of
+  being changed silently.
 - `awaitViewSettled(page)` resolves once the worker has settled reactively, the
   resulting vdom batch has crossed to the main thread and been applied, and Lit
   has finished its update cycle. This is the "is the control interactive yet"
   signal.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` compose the two
-  primitives above for common waits and interactions. `clickCfButton` and
-  `clickCfButtonsConcurrently` settle and mark the exact rendered targets before
-  clicking them. `clickCfButton` takes the first match and reaches through a
-  host's shadow root for its inner `[data-cf-button]`.
-  `clickNthCfButton` takes the `index`-th match of a selector that already
-  resolves to the buttons themselves. It does not yet have the same settlement
-  guarantee.
+  primitives above for common waits and interactions. Each of them settles and
+  marks the exact rendered target before acting on it; what differs between them
+  is only how they recognize that target. `clickCfButton` takes the first match
+  and reaches through a host's shadow root for its inner `[data-cf-button]`, and
+  `clickCfButtonsConcurrently` does the same for a group. `clickNthCfButton`
+  takes the `index`-th match of a selector that already resolves to the buttons
+  themselves. `clickTrustedAction` takes the first enabled match of a
+  `data-ui-action` value. The note-button helpers take a button by its text or
+  its title. `submitViaEnter` focuses a field and presses Enter rather than
+  clicking, and settles around resolving that field the same way.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -129,13 +136,15 @@ When several controls are clicked as a group, prove that every target is stable
 before marking any of them. Mark the targets inside the successful predicate so
 the click addresses the elements that passed the settle check.
 
-`clickCfButton` and `clickCfButtonsConcurrently` work this way.
-`clickTrustedAction` and `settleAndClickNoteButton` in
-`packages/patterns/integration/note-button-helpers.ts` use `clickMarked` for
-the final geometry check and replacement handling. Their earlier readiness
-checks differ from `clickCfButton`'s settle-and-mark predicate.
-`submitViaEnter` is a keyboard interaction and settles before resolving its
-input.
+Every marked click runs the same step to get there, `settleAndMarkTargets`, so
+`clickCfButton`, `clickCfButtonsConcurrently`, `clickNthCfButton`,
+`clickTrustedAction` and the note-button helpers in
+`packages/patterns/integration/note-button-helpers.ts` all mark under these
+rules. A helper supplies only a finder: which elements qualify, answered from
+the page. Resolving them either side of the settle, requiring the same elements
+both times, and marking them is the shared step's work. `submitViaEnter`
+focuses a field and presses Enter rather than clicking, and goes through the
+same step to resolve that field.
 
 Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
 it is deliberately not `probe.isVisible`, which additionally requires the
@@ -171,10 +180,23 @@ between. The hold is frame-driven and drops its baseline whenever the box
 disappears. A control hidden partway through is picked up once it returns rather
 than clicked mid-shift. The stuck-condition net bounds a box that never settles.
 
+The point that measurement answers is the middle of the part of the control's
+box that lies inside the page, which for a control the page has room for is the
+middle of the whole box. A control reaching past the edge of the page — a
+surface positioned towards that edge in a narrow viewport, a control wider than
+the space it is drawn in — can have the middle of its whole box outside the
+page. The browser accepts a trusted click dispatched outside the page, delivers
+it to nothing, and reports no error for having done so, so a click aimed there
+leaves the caller told that a control was pressed which never was. A control
+with no part of it inside the page has no point to aim at, and `clickMarked`
+reports it, naming the control's box and the size of the page. What the page
+shows of a control is a wider question than this one: an ancestor's overflow can
+clip it, and anything painted over it can cover it. Neither moves this point.
+
 The page can move again after that first measurement. An interaction observer
 also runs before the trusted click and can give the page time to change. Just
 before dispatch, `clickMarked` resolves the marked control in one page turn and
-reads its current center. If the control has moved or disappeared, the helper
+reads its current point. If the control has moved or disappeared, the helper
 settles it again and applies the caller's tagging predicate to any replacement.
 It takes one final current measurement after that settle, then dispatches the
 single trusted click at that point.
@@ -187,6 +209,65 @@ click on" means. A helper that tags a control by name also passes its tagging
 predicate to `clickMarked`. A control the page rebuilt is therefore tagged
 again on whatever took its place, under that helper's own readiness rules,
 rather than reported as gone.
+
+The dispatch that follows still crosses the protocol, and the page keeps running
+while it does. A surface that relays out in that crossing carries the control
+off the point the click is already aimed at, and the click lands on whatever
+moved into the space. So the same page turn that measures the point also arms an
+interceptor: it watches the window, in the capture phase, for the pointer and
+mouse events of that one click. The first of them to arrive decides what happens
+to the rest. If the mark is on its composed path, every event of the interaction
+goes through to the page. If it is not, every event is stopped at the window.
+One decision for the whole interaction is what makes the control take the press
+and the release together or take neither.
+
+Whether the click was delivered is decided separately, at the click event,
+because that is the event a control acts on. The press and the release cross the
+protocol one at a time, so the page can carry the control away between them, and
+the browser then raises the click on the nearest ancestor the two have in common
+rather than on the control. A click that does not carry the mark is stopped like
+any other miss. So is a control that declines the interaction outright: a
+disabled one takes the press and raises no click at all.
+
+What the interceptor stops is the press, the release and the click — the events
+a control acts on. The pointer moves to the point before it presses, and the
+hover events that produces reach the page like any other. It also leaves the
+page's own clicks alone: a label forwarding to its control, or a component
+clicking itself from a key handler, raises an untrusted event, which the
+interceptor passes through and does not read a verdict from.
+
+A miss did not activate the control, so `clickMarked` aims again at wherever the
+control now stands and dispatches again. What bounds that is progress: the aim
+has to answer a pixel no dispatch has lost yet. A control that has not moved
+answers the same pixel, and a page that shuffles a control between a few
+positions comes back to one of them, so both stop at the second aim that repeats
+itself. The report then names every pixel tried and what the click reached at
+each, which says whether the control was covered, was declining the click, or
+was being carried around the page.
+
+This is the one place in the interaction helpers where a failed operation is
+retried. It is not the kind of retry the rule above forbids, because a click the
+interceptor stopped is not a failed attempt that might have worked — it provably
+did nothing to the page — and because it cannot repeat itself: a second dispatch
+only happens at a pixel that has never been dispatched at.
+
+Those steps look like one another and are not. Each answers a different question
+about the control, and dropping any of them leaves a click that quietly does
+nothing:
+
+- Is it wired up? The settle either side of the mark answers this, and nothing
+  later can. A click that reaches a control whose handler has not been bound is
+  delivered and discarded, so every other check passes and the test waits on an
+  effect that will not come.
+- Is it the control the settle ran for? Resolving before and after the settle
+  and requiring the same elements answers this. A surface that rebuilt its
+  control mid-settle otherwise hands the mark to an element that never settled.
+- Is there a point to aim at? The single page turn that holds for a stable box
+  and measures it answers this. A control with no box makes the measurement come
+  back empty and the click throw before any of it reaches the page.
+- Did the click land on it? The interceptor answers this, and only this. It is
+  what turns a click carried off its target into a re-aim rather than a silent
+  success.
 
 That error message covers more than a missing layout box: the underlying
 `DOM.getBoxModel` reports a node the browser's DOM agent no longer knows about
@@ -400,6 +481,13 @@ resolve on their own. `t.settle` resolves once every zero-delay timer and
 microtask has run to a fixpoint, so it covers both the mock-cell and
 runtime-cell trees these tests mix, and needs no runtime argument.
 
+A `setImmediate` counts as one of those zero-delay timers. The harness replaces
+it too, and registers what it schedules exactly as it registers a
+`setTimeout(fn, 0)`, so a turn taken through `setImmediate` fires in the same
+batch and is counted by the same census. Without that it would run beside the
+harness rather than under it, ahead of every turn the harness was holding, and
+neither `settle()` nor `tick(ms)` could hold it back.
+
 `t.settle` is an ordering guarantee rather than a deadline, so it cannot lose a
 race under load. It also holds for a test asserting that an op is *absent*: once
 it returns, every op the change was going to produce has been delivered, so no
@@ -520,11 +608,19 @@ the earliest pending `src/`-armed timer regardless of its nominal delay, so a
 only ever worked by accident. Manual mode has no timer to fire, on any clock.
 
 Single-manager `StorageManager.emulate()` harnesses need none of this: their
-private server flushes on a zero-delay timer, so awaited round trips deliver
+private server flushes on a zero-delay turn, so awaited round trips deliver
 their own fan-out and there is no second session to keep stale. The loopback
-transport itself delivers each server frame on its own zero-delay timer turn,
-so `clock.settle()` drains in-flight deliveries without letting any coalescing
+transport itself delivers each server frame on its own turn, so
+`clock.settle()` drains in-flight deliveries without letting any coalescing
 window elapse.
+
+Both take that turn through `armTurn` in `packages/memory/v2/turn.ts`, which
+claims it twice over: a zero-delay timer, which is what `settle()` counts, and
+a `setImmediate`, which is the same turn for a fraction of the cost. Whichever
+arrives first runs the handler and cancels the other. So an outstanding turn
+is always an armed zero-delay timer that `settle()` can see, while the waiting
+itself costs microseconds rather than the two milliseconds Deno takes to wake
+its event loop for a timer.
 
 ## The background-piece-service suite: the same clock for a polling loop
 

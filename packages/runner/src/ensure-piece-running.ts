@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { Cell } from "./cell.ts";
 import { getMetaLink, type NormalizedFullLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
@@ -15,7 +15,7 @@ function readPatternIdentity(
 ): { identity: string; symbol: string } | undefined {
   const raw = cell.getMetaRaw("patternIdentity");
   if (
-    isRecord(raw) && typeof raw.identity === "string" &&
+    isObjectOrArray(raw) && typeof raw.identity === "string" &&
     typeof raw.symbol === "string"
   ) {
     return { identity: raw.identity, symbol: raw.symbol };

@@ -1,20 +1,21 @@
 #!/usr/bin/env -S deno run --allow-read --allow-run=git
-//
-// Fails when a tracked file contains an unresolved merge-conflict marker.
-//
-// A conflict resolved by hand can leave its markers behind, and nothing else
-// here notices. `deno fmt` does not treat them as an error in Markdown, and
-// `deno.jsonc` excludes `docs/` from `deno fmt` entirely, so a document under
-// `docs/` has no other mechanical gate at all. In source they usually break the
-// type check, but only because they usually happen to be syntactically invalid
-// -- that is luck, not a guarantee.
-//
-// The case this exists for is the one no per-commit diff shows: an EVIL MERGE,
-// where the resolution introduces content present in the merge result and in
-// neither parent. `git log -S` finds nothing, because no commit added the line;
-// the merge did. Reviewing every commit of a branch can miss it entirely.
-//
-// Usage: deno run --allow-read --allow-run=git ./tasks/check-conflict-markers.ts
+/**
+ * Fails when a tracked file contains an unresolved merge-conflict marker.
+ *
+ * A conflict resolved by hand can leave its markers behind, and nothing else
+ * here notices. `deno fmt` does not treat them as an error in Markdown, and
+ * `deno.jsonc` excludes `docs/` from `deno fmt` entirely, so a document under
+ * `docs/` has no other mechanical gate at all. In source they usually break the
+ * type check, but only because they usually happen to be syntactically invalid
+ * -- that is luck, not a guarantee.
+ *
+ * The case this exists for is the one no per-commit diff shows: an EVIL MERGE,
+ * where the resolution introduces content present in the merge result and in
+ * neither parent. `git log -S` finds nothing, because no commit added the line;
+ * the merge did. Reviewing every commit of a branch can miss it entirely.
+ *
+ * Usage: deno run --allow-read --allow-run=git ./tasks/check-conflict-markers.ts
+ */
 
 import { dirname, fromFileUrl } from "@std/path";
 

@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/google-calendar-importer.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import { hasText } from "../../test/vnode-helpers.ts";
 import GoogleCalendarImporter, {
   type Auth,
@@ -51,7 +51,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_data_empty },
       { assertion: assert_direct_auth_exposes_fetch_control },
     ],

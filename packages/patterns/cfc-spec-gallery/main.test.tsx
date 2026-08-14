@@ -1,4 +1,4 @@
-import { assert, handler, pattern, Stream } from "commonfabric";
+import { assert, handler, pattern, Stream, TESTS } from "commonfabric";
 import Gallery from "./main.tsx";
 
 const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
@@ -91,7 +91,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_count },
       { action: action_change_forward_recipient },
       { action: action_prepare_forward },

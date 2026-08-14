@@ -34,6 +34,7 @@ import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
 import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import { pattern } from "../src/builder/pattern.ts";
+import { sourceRootSpecifier } from "../src/sandbox/module-record-compiler.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
@@ -232,6 +233,59 @@ describe("cell-cache: verifySourceDocs (Merkle self-verification)", () => {
     const v = verifySourceDocs(entryIdentity, docs);
     expect(v.ok).toBe(false);
     expect(v.missing).toContain(identityOf(PROGRAM, "/util.ts"));
+  });
+
+  it("rejects removing a source-package root edge", () => {
+    const files = [
+      { name: "/main.tsx", contents: "export default 1;" },
+      { name: "/main.test.tsx", contents: "export default 2;" },
+    ];
+    const rootSpecifier = sourceRootSpecifier("/main.test.tsx");
+    const identities = computeModuleHashes(
+      { main: "/main.tsx", files },
+      {
+        additionalInternalDeps: new Map([
+          [
+            "/main.tsx",
+            [{ specifier: rootSpecifier, target: "/main.test.tsx" }],
+          ],
+        ]),
+      },
+    );
+    const entryIdentity = identities.get("/main.tsx")!;
+    const testIdentity = identities.get("/main.test.tsx")!;
+    const docs = buildSourceDocs(
+      [
+        {
+          identity: entryIdentity,
+          filename: "/main.tsx",
+          source: files[0].contents,
+          js: "",
+          imports: [{
+            specifier: rootSpecifier,
+            targetIdentity: testIdentity,
+          }],
+        },
+        {
+          identity: testIdentity,
+          filename: "/main.test.tsx",
+          source: files[1].contents,
+          js: "",
+          imports: [],
+        },
+      ],
+      entryIdentity,
+    );
+    expect(verifySourceDocs(entryIdentity, docs).ok).toBe(true);
+
+    const tampered = new Map(docs);
+    tampered.set(entryIdentity, {
+      ...docs.get(entryIdentity)!,
+      imports: [],
+    });
+    const verification = verifySourceDocs(entryIdentity, tampered);
+    expect(verification.ok).toBe(false);
+    expect(verification.mismatches).toContain(entryIdentity);
   });
 
   it("is entry-point independent (util identity is stable across entries)", () => {

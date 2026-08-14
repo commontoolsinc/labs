@@ -14,7 +14,7 @@ let originalFetch: typeof globalThis.fetch;
 describe("CT-1334: fetchJson + computed inside sub-pattern (transformed)", () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async (
+    globalThis.fetch = (
       input: string | URL | Request,
       _init?: RequestInit,
     ) => {
@@ -26,19 +26,20 @@ describe("CT-1334: fetchJson + computed inside sub-pattern (transformed)", () =>
 
       // Only mock our test endpoint
       if (url.includes("localhost:59999/api/contacts")) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        return new Response(
-          JSON.stringify({
-            connections: [
-              { name: "Alice" },
-              { name: "Bob" },
-              { name: "Carol" },
-            ],
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              connections: [
+                { name: "Alice" },
+                { name: "Bob" },
+                { name: "Carol" },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
         );
       }
 

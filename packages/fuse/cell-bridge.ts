@@ -33,7 +33,7 @@ import {
   type FsValue,
   isSigilLink,
   isVNode,
-  safeStringify,
+  stringifyEntryValue,
 } from "./tree-builder.ts";
 import {
   decodeFuseComponent,
@@ -3637,7 +3637,7 @@ export class CellBridge {
           const vnodeIno = this.tree.addFile(
             parentIno,
             fileName,
-            safeStringify(val),
+            stringifyEntryValue(this.tree, parentIno, fileName, val),
             "object",
           );
           const contentLabel = annotator?.subtreeLabel(val, [key]);

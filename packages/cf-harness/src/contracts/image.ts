@@ -12,4 +12,14 @@ export interface HarnessImageAttachment {
   mediaType: HarnessImageMediaType;
   bytes: number;
   digest: string;
+  /**
+   * Content-addressed copy of the image taken when the attachment was
+   * created. When present, materialization reads this snapshot instead of
+   * `hostPath`, so the working file may be regenerated mid-run (e.g. an
+   * agent iterating on a rendered image it already viewed) without
+   * invalidating the attachment. Absent on run-start `--image` inputs,
+   * which stay integrity-locked to their source file, and on attachments
+   * persisted by older versions.
+   */
+  snapshotPath?: string;
 }

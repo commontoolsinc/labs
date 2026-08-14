@@ -24,7 +24,6 @@
 
 import {
   COMPILE_CACHE_FAMILIES,
-  type CompileCacheState,
   type CompileCacheStates,
   githubGet,
   REPO,
@@ -150,22 +149,6 @@ export async function classifyRunAgainstPredecessor(
 }
 
 /**
- * Expand a run-level fingerprint verdict to per-family states: a fingerprint
- * rotation colds every family at once (the shared key prefix), and a
- * fingerprint-stable run restored (at least) via restore-keys everywhere.
- * Used to retro-classify runs whose artifacts predate the recorded stamp.
- */
-export function uniformCacheStates(
-  state: CompileCacheState,
-): CompileCacheStates {
-  const states: CompileCacheStates = {};
-  for (const family of COMPILE_CACHE_FAMILIES) {
-    states[family] = state;
-  }
-  return states;
-}
-
-/**
  * The current run's fallback fingerprint verdict, used only to fill families
  * that have no recorded cache state. A PR run reads its own changed-file list;
  * a main-push run compares its head against the latest prior baseline run.
@@ -229,35 +212,4 @@ export function fillMissingFamiliesFromFingerprint(
     );
   }
   return filled;
-}
-
-/**
- * Retro-classify an unstamped baseline run — one whose artifacts carry no
- * recorded stamp — from the compile fingerprint against its predecessor, and
- * record the result in `cacheStatesByRunId` keyed by run id. A "cold"/"warm"
- * verdict applies to every family at once (the shared key prefix); "unknown"
- * (no predecessor, or an unreadable compare) records nothing, leaving the run
- * to gate on its kept samples like any run whose cache state cannot be
- * determined. A cold retro-classification is logged for the CI transcript.
- * `fetchChanged` is injected so the classification is testable offline.
- */
-export async function recordUnstampedBaselineRunState(
-  cacheStatesByRunId: Map<number, CompileCacheStates>,
-  run: { id: number; head_sha: string },
-  predecessorSha: string | undefined,
-  label: string,
-  fetchChanged?: (baseSha: string, headSha: string) => Promise<string[]>,
-): Promise<void> {
-  const inferred = await classifyRunAgainstPredecessor(
-    run.head_sha,
-    predecessorSha,
-    fetchChanged,
-  );
-  if (inferred === "unknown") return;
-  cacheStatesByRunId.set(run.id, uniformCacheStates(inferred));
-  if (inferred === "cold") {
-    console.log(
-      `  Baseline run ${run.id} (${label}) retro-classified cold: compile fingerprint changed vs predecessor.`,
-    );
-  }
 }

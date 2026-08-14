@@ -19,6 +19,10 @@ describe("CFCodeEditor", () => {
     expect(element.timingDelay).toBe(500);
     expect(element.autofocus).toBe(false);
     expect(element.cursorPosition).toBe("start");
+    // No reference map, so mentions are minted as wiki-links.
+    expect(element.references).toBe(null);
+    // No extra hosts; a pasted page URL is judged against this document's own.
+    expect(element.fabricHosts).toEqual([]);
   });
 
   it("should have MimeType constants", () => {
@@ -132,5 +136,207 @@ describe("CFCodeEditor backlink disposal handling", () => {
       spy.restore();
     }
     expect(spy.calls.length).toBe(0);
+  });
+});
+
+describe("CFCodeEditor reference-map housekeeping", () => {
+  // The map lives beside the document and has to stay in step with it. Both
+  // behaviors below are about NOT losing something: a key another editor
+  // minted, and a deletion still sitting in the debounce. Exercised against a
+  // minimal `this`, so no CodeMirror or DOM is constructed.
+
+  const KEY = "a3f9zz";
+  const OTHER = "b7k2m1";
+
+  function editorThis(doc: string, map: Record<string, unknown>) {
+    const deleted: string[] = [];
+    let flushed = 0;
+    return {
+      deleted,
+      flushes: () => flushed,
+      self: {
+        _editorView: { state: { doc: { toString: () => doc } } },
+        references: {
+          get: () => map,
+          key: (k: string) => ({
+            set: (v: unknown) => {
+              if (v === undefined) deleted.push(k);
+            },
+          }),
+        },
+        _refKeysAtLoad: new Set<string>(),
+        _cellController: { flush: () => flushed++ },
+        _refMap() {
+          return map;
+        },
+      } as Record<string, unknown>,
+    };
+  }
+
+  function call(name: string, self: unknown, ...args: unknown[]): unknown {
+    const fn = (CFCodeEditor.prototype as unknown as Record<
+      string,
+      (this: unknown, ...a: unknown[]) => unknown
+    >)[name];
+    return fn.call(self, ...args);
+  }
+
+  describe("_takenRefKeys()", () => {
+    it("returns the map's keys and the document's together", () => {
+      // A key pasted into the text is spoken for even before the map has it,
+      // and minting over it would point two mentions at one entry.
+      const { self } = editorThis(`[A][${OTHER}]`, { [KEY]: {} });
+      expect(call("_takenRefKeys", self)).toEqual(new Set([KEY, OTHER]));
+    });
+  });
+
+  describe("_collectUnreferencedRefEntries()", () => {
+    it("removes an entry whose token has left the document", () => {
+      const t = editorThis("no tokens left", { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.deleted).toEqual([KEY]);
+    });
+
+    it("keeps a key it never saw at load", () => {
+      // Another editor added it while this one was open; this editor has no
+      // reason to believe it was ever in its document.
+      const t = editorThis("no tokens left", { [KEY]: {} });
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.deleted).toEqual([]);
+    });
+
+    it("keeps every entry while the token is still there", () => {
+      const t = editorThis(`[A][${KEY}]`, { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.deleted).toEqual([]);
+    });
+
+    it("collects nothing against a document that has not loaded", () => {
+      // An empty document names nothing, which is not the same as a document
+      // that names nothing — reading it as the latter empties the map.
+      const t = editorThis("", { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.deleted).toEqual([]);
+    });
+
+    it("flushes the pending document write before removing anything", () => {
+      // The deletion that made the entry collectable is still in the
+      // debounce; losing it after the entry is gone leaves a token with no
+      // destination in the durable document.
+      const t = editorThis("no tokens left", { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.flushes()).toBe(1);
+    });
+
+    it("does not flush when there is nothing to collect", () => {
+      const t = editorThis(`[A][${KEY}]`, { [KEY]: {} });
+      (t.self._refKeysAtLoad as Set<string>).add(KEY);
+      call("_collectUnreferencedRefEntries", t.self);
+      expect(t.flushes()).toBe(0);
+    });
+  });
+});
+
+describe("CFCodeEditor pasted-mention decision", () => {
+  // `_handleUrlPaste` decides whether a pasted URL becomes a mention, and it
+  // prevents the browser's own paste when it does. Anything it declines has to
+  // fall through UNPREVENTED, or the clipboard content goes nowhere — the
+  // failure this pins. Exercised against a minimal `this`, so no CodeMirror or
+  // DOM is constructed.
+
+  const HASH = "V2tROHl4KsExx5M0fYnkQaOryFwjVUkqXIlcdMWz7SQ";
+  const SPACE = "did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh";
+
+  // Built on the prototype so `_refMode` — a getter — and `_fabricHosts()`
+  // resolve; the insertion itself needs a runtime, so an own property shadows
+  // it. The decision under test needs neither.
+  function pasteThis(): Record<string, unknown> {
+    const own = (value: unknown) => ({ value, writable: true });
+    // Defined rather than assigned: assigning would run Lit's reactive
+    // property setters, which need instance state this object does not have.
+    // Own data properties also shadow those accessors for the rest of the test.
+    return Object.create(CFCodeEditor.prototype, {
+      // Its presence is what selects reference mode.
+      references: own({ get: () => ({}) }),
+      pattern: own({ space: () => "did:key:mock" }),
+      fabricHosts: own(["fabric.example"]),
+      _editorView: own(undefined),
+      _insertPastedMention: own(() => {}),
+    });
+  }
+
+  function paste(
+    fakeThis: Record<string, unknown>,
+    text: string,
+  ): { handled: boolean; prevented: boolean } {
+    let prevented = false;
+    const event = {
+      clipboardData: { getData: () => text },
+      preventDefault: () => (prevented = true),
+    };
+    const handled = (fakeThis as unknown as {
+      _handleUrlPaste(event: unknown, view: unknown): boolean;
+    })._handleUrlPaste(event, undefined);
+    return { handled, prevented };
+  }
+
+  it("takes over a paste of a URL naming a piece", () => {
+    const result = paste(pasteThis(), `/of:fid1:${HASH}`);
+    expect(result.handled).toBe(true);
+    expect(result.prevented).toBe(true);
+  });
+
+  it("takes over a paste of a page URL on a configured host", () => {
+    const result = paste(
+      pasteThis(),
+      `https://fabric.example/${SPACE}/of:fid1:${HASH}`,
+    );
+    expect(result.handled).toBe(true);
+  });
+
+  it("leaves an ordinary web page to the browser, unprevented", () => {
+    const result = paste(pasteThis(), "https://example.com/blog/post");
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+
+  it("leaves a slug URL to the browser, unprevented", () => {
+    // A slug addresses a redirect document, which needs a read before it can
+    // name a piece. Preventing the paste and then declining swallowed it.
+    // The space is a DID on purpose: a named space is refused one check
+    // earlier, so this would not reach the branch under test.
+    const result = paste(
+      pasteThis(),
+      `https://fabric.example/${SPACE}/my-note`,
+    );
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+
+  it("leaves a URL naming its space by name to the browser, unprevented", () => {
+    const result = paste(
+      pasteThis(),
+      `https://fabric.example/work/of:fid1:${HASH}`,
+    );
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+
+  it("leaves pasted prose alone", () => {
+    const result = paste(pasteThis(), "some words and a space");
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
+  });
+
+  it("leaves every paste alone without a reference map", () => {
+    const fakeThis = pasteThis();
+    fakeThis.references = null;
+    const result = paste(fakeThis, `/of:fid1:${HASH}`);
+    expect(result.handled).toBe(false);
+    expect(result.prevented).toBe(false);
   });
 });

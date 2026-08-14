@@ -1,3 +1,14 @@
+/**
+ * `PathKeyMap` keyed by path rather than by a single value, so the cases that
+ * matter are the ones where paths relate to each other: a nested path under a
+ * set one, overwriting at the same path, and invalidating a chain.
+ *
+ * The distinction between a present-but-`undefined` value and an absent key is
+ * pinned deliberately. A map that collapses the two cannot be used to cache
+ * anything whose legitimate value is `undefined`, which is most of what a
+ * reactive read returns.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { PathKeyMap } from "../src/path-key-map.ts";

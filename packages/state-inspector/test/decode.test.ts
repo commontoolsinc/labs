@@ -10,7 +10,7 @@ import {
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
@@ -20,6 +20,7 @@ import {
   annotate,
   collectLinks,
   decodedLinkOf,
+  stringifyInspectorJson,
   summarize,
   summarizeLink,
 } from "../decode.ts";
@@ -43,7 +44,9 @@ Deno.test("decode: a modern encoded link round-trips to a recognized link", () =
   setModernCellRepConfig(true);
   let encoded: string;
   try {
-    encoded = jsonFromValue({ value: { ref: new FabricLink({ id: "of:x" }) } });
+    encoded = jsonFromFabricValue({
+      value: { ref: new FabricLink({ id: "of:x" }) },
+    });
   } finally {
     resetModernCellRepConfig();
   }
@@ -82,6 +85,39 @@ Deno.test("decode: BigInt is JSON-safe after annotate", () => {
   // the whole thing must JSON.stringify without throwing (the HTML/CLI export path)
   const json = JSON.stringify(annotated);
   assert(json.includes('"$bigint"'), "bigint lowered to a tagged record");
+});
+
+Deno.test("decode: inspector JSON matches ordinary pretty output", () => {
+  const annotated = annotate({
+    text: "value",
+    list: [1, true, null],
+    nested: { leaf: "complete" },
+  });
+  assertEquals(
+    stringifyInspectorJson(annotated),
+    JSON.stringify(annotated, null, 2),
+  );
+});
+
+Deno.test("decode: full-depth output survives deeply nested values", () => {
+  const depth = 20_000;
+  let value: unknown = { leaf: "complete" };
+  for (let index = 0; index < depth; index++) value = { child: value };
+
+  const serialized = stringifyInspectorJson({
+    value: annotate(value, Number.POSITIVE_INFINITY),
+  });
+  let nested = (JSON.parse(serialized) as { value: unknown }).value;
+  for (let index = 0; index < depth; index++) {
+    nested = (nested as { child: unknown }).child;
+  }
+  assertEquals(nested, { leaf: "complete" });
+});
+
+Deno.test("decode: full-depth annotation marks cycles", () => {
+  const value: Record<string, unknown> = {};
+  value.self = value;
+  assertEquals(annotate(value, Number.POSITIVE_INFINITY), { self: "…" });
 });
 
 Deno.test("decode: annotate lowers a `FabricPrimitive` to its debug string", () => {
@@ -139,5 +175,47 @@ Deno.test("decode: a present `undefined` is not silently dropped on export", () 
   assert(
     "a" in JSON.parse(JSON.stringify(annotated)),
     "the undefined field survives JSON round-trip",
+  );
+});
+
+Deno.test("decode: sparse arrays keep holes without scanning their length", () => {
+  const sparse: unknown[] = [];
+  sparse.length = 1_000_000_000;
+  sparse[5] = undefined;
+  Object.defineProperty(sparse, "__proto__", {
+    value: "own property",
+    enumerable: true,
+  });
+
+  const annotated = annotate(sparse) as {
+    $sparseArray: {
+      length: number;
+      entries: Record<string, unknown>;
+      properties: Record<string, unknown>;
+    };
+  };
+  assertEquals(annotated, {
+    $sparseArray: {
+      length: 1_000_000_000,
+      entries: { "5": { $undefined: true } },
+      properties: JSON.parse('{"__proto__":"own property"}'),
+    },
+  });
+  assert(Object.hasOwn(annotated.$sparseArray.properties, "__proto__"));
+  const ordinary = annotate(
+    JSON.parse('{"ordinary":true,"__proto__":"own property"}'),
+  ) as Record<string, unknown>;
+  assertEquals(Object.getPrototypeOf(ordinary), Object.prototype);
+  assert(Object.hasOwn(ordinary, "__proto__"));
+});
+
+Deno.test("decode: summaries escape terminal control characters", () => {
+  assertEquals(
+    summarize("\u001b[2Jforged\nline"),
+    '"\\u001b[2Jforged\\nline"',
+  );
+  assertEquals(
+    summarize(JSON.parse('{"line\\nforged":1,"bidi‮forged":2}')),
+    '{"line\\nforged", "bidi\\u202eforged"}',
   );
 });

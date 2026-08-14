@@ -1,6 +1,6 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
@@ -48,13 +48,31 @@ const proxyCacheByTx = new WeakMap<
   IExtendedStorageTransaction,
   ProxyCache
 >();
-// Default key if no tx is provided
-const defaultTx = {} as IExtendedStorageTransaction;
+// The index a read with no transaction of its own is cached under, one per
+// runtime. Two runtimes in a single process — every test that makes its own,
+// and any host running more than one — can name the same space and entity, so a
+// single process-wide index would hand one runtime's reader a proxy closed over
+// the other's runtime, reading through the wrong storage. Held weakly, so an
+// index and its cache go when the runtime does.
+const defaultTxByRuntime = new WeakMap<
+  Runtime,
+  IExtendedStorageTransaction
+>();
+
+const defaultTxFor = (runtime: Runtime): IExtendedStorageTransaction => {
+  let index = defaultTxByRuntime.get(runtime);
+  if (index === undefined) {
+    index = {} as IExtendedStorageTransaction;
+    defaultTxByRuntime.set(runtime, index);
+  }
+  return index;
+};
 
 const getProxyCache = (
   tx: IExtendedStorageTransaction | undefined,
+  runtime: Runtime,
 ): ProxyCache => {
-  const cacheIndex = tx ?? defaultTx;
+  const cacheIndex = tx ?? defaultTxFor(runtime);
   let txCache = proxyCacheByTx.get(cacheIndex);
   if (!txCache) {
     txCache = {
@@ -78,6 +96,10 @@ const proxyCacheKey = (
     link.path,
     cfcLabelView ?? null,
   ]);
+
+/** Whether a transaction can still answer a read. */
+const isReadable = (tx: IExtendedStorageTransaction): boolean =>
+  tx.status().status === "ready";
 
 const childLabelView = (
   cfcLabelView: CfcLabelView | undefined,
@@ -156,6 +178,64 @@ export function createQueryResultProxy<T>(
   writable: boolean = false,
   cfcLabelView?: CfcLabelView,
 ): T {
+  // The transaction decides which of the two this is. Marked for lazy
+  // materialization, the proxy is a view: it keeps this transaction, so the
+  // value it describes stays the value that was there when it was taken, and
+  // reading after the transaction finishes throws.
+  //
+  // Unmarked — every caller today — it is a standing handle on a cell that
+  // resolves the transaction afresh on every access, so a holder keeps reading
+  // current state after the transaction it was made against has finished. Long-
+  // lived consumers depend on that: a tool call dispatched by the LLM builtin,
+  // a SQLite result flushed after commit, and a piece started on demand all
+  // read handles their originating run no longer owns.
+  //
+  // An unmarked caller who supplies no transaction gets a genuinely fresh one
+  // per access rather than whatever `readTx()` would hand back, so the handle
+  // cannot be pinned to an ambient transaction that has since gone stale.
+  const pinned = tx?.isLazyMaterialize() === true;
+  return createViewProxy(
+    runtime,
+    pinned ? tx : tx === undefined ? runtime.edit() : runtime.readTx(tx),
+    tx,
+    link,
+    depth,
+    writable,
+    cfcLabelView,
+    pinned,
+  );
+}
+
+/**
+ * The shared proxy body.
+ *
+ * Reads go through `readTx()`: the transaction fixed at creation when
+ * `pinned`, and one resolved per access otherwise. Writes and cell minting go
+ * through `tx` — the transaction the caller actually supplied, which is
+ * `undefined` when they supplied none and is what the write traps test to
+ * refuse a mutation. The proxy cache is keyed on `viewTx`, the transaction the
+ * proxies in it actually read through, so a cached proxy is never handed to a
+ * caller reading through a different one.
+ */
+function createViewProxy<T>(
+  runtime: Runtime,
+  viewTx: IExtendedStorageTransaction,
+  tx: IExtendedStorageTransaction | undefined,
+  link: NormalizedFullLink,
+  depth: number,
+  writable: boolean,
+  cfcLabelView: CfcLabelView | undefined,
+  pinned: boolean,
+): T {
+  // The transaction a trap reads through, and the one a child view is built
+  // over. A pinned view keeps the transaction it was created with for both; an
+  // unpinned one resolves afresh, so it tracks current state once its original
+  // has finished. A child of an unpinned tx-less view inherits that view's own
+  // transaction rather than minting one per child.
+  const readTx = (): IExtendedStorageTransaction =>
+    pinned ? viewTx : runtime.readTx(tx);
+  const childViewTx = (): IExtendedStorageTransaction =>
+    pinned ? viewTx : runtime.readTx(tx ?? viewTx);
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
     throw new Error(
@@ -164,25 +244,23 @@ export function createQueryResultProxy<T>(
   }
 
   // Resolve path and follow links to actual value.
-  const readTx = tx === undefined ? runtime.edit() : runtime.readTx(tx);
-  const proxyTx = tx ?? readTx;
-  const traceStart = readTx.getCfcState().dereferenceTraces.length;
-  link = resolveLink(runtime, readTx, link);
+  const traceStart = viewTx.getCfcState().dereferenceTraces.length;
+  link = resolveLink(runtime, viewTx, link);
   cfcLabelView = mergeCfcLabelViews([
     cloneCfcLabelView(cfcLabelView),
     cfcLabelViewForDereferenceTraces(
-      readTx,
-      readTx.getCfcState().dereferenceTraces.slice(traceStart),
+      viewTx,
+      viewTx.getCfcState().dereferenceTraces.slice(traceStart),
     ),
   ]);
-  const value = readTx.readValueOrThrow(link, SHAPE_READ) as any;
+  const value = viewTx.readValueOrThrow(link, SHAPE_READ) as any;
 
   // The SHAPE_READ above only tracks the container's shape, but the stream
   // check depends on a specific field's VALUE. Register an explicit read of
   // `$stream` when present, so a value flipping into/out of a stream marker
   // re-triggers consumers. [review: ubik2]
-  if (isRecord(value) && "$stream" in value) {
-    readTx.readValueOrThrow({ ...link, path: [...link.path, "$stream"] });
+  if (isObjectOrArray(value) && "$stream" in value) {
+    viewTx.readValueOrThrow({ ...link, path: [...link.path, "$stream"] });
   }
 
   // If the value is a stream marker ({ $stream: true }), return a Cell with
@@ -199,7 +277,7 @@ export function createQueryResultProxy<T>(
   // directly, exactly as for JS primitives above; wrapping one in a live proxy
   // serves no purpose and would leak that proxy into any consumer that
   // deep-clones or freezes the surrounding value (e.g. schema interning).
-  if (!isRecord(value) || value instanceof FabricPrimitive) {
+  if (!isObjectOrArray(value) || value instanceof FabricPrimitive) {
     // The SHAPE_READ above tracks only the container's shape, but a
     // FabricPrimitive is an atomic VALUE the consumer materializes here (handed
     // back directly, like a JS primitive), not a container whose shape it
@@ -207,7 +285,7 @@ export function createQueryResultProxy<T>(
     // primitive (e.g. a FabricBytes updated to different bytes) re-triggers
     // consumers — a nonRecursive read is compared shape-only and would miss it.
     if (value instanceof FabricPrimitive) {
-      readTx.readValueOrThrow(link);
+      viewTx.readValueOrThrow(link);
     }
     return value;
   }
@@ -258,8 +336,19 @@ export function createQueryResultProxy<T>(
     ? (Array.isArray(value) ? new Array(value.length) : {})
     : value;
 
-  // Get the appropriate cache index by log
-  const txCache = getProxyCache(tx);
+  // Index by the CALLER's transaction, not by the one reads resolve through.
+  // A standing handle is created without a transaction and resolves a fresh one
+  // per access, so indexing by the resolved transaction gives every read its own
+  // cache and hands back a different object each time — and a consumer that
+  // holds one and later meets it again (FUSE matching a callable against its own
+  // entry, a value whose element points back at the array containing it) sees
+  // two things where there is one. Tx-less reads share the default index, which
+  // is what makes them the same object.
+  //
+  // A pinned view has the marked transaction as its caller tx, so it still gets
+  // one cache per transaction — which is right, because it describes the instant
+  // that transaction saw.
+  const txCache = getProxyCache(tx, runtime);
   const cacheKey = proxyCacheKey(link, writable, cfcLabelView);
 
   // Check if we already have a proxy for this target in the cache.
@@ -271,9 +360,14 @@ export function createQueryResultProxy<T>(
 
   const proxy = new Proxy(proxyTarget as object, {
     get: (target, prop, receiver) => {
+      // Promise adoption probes `then` on every value it receives, so a view
+      // that refuses the probe cannot cross a promise boundary at all — and a
+      // lift's result crosses one by construction. A finished view answers it
+      // with `undefined`, which is what a live one answers for a value with no
+      // `then`; every other property still refuses.
+      if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
       if (Array.isArray(value) && prop === "length") {
-        const readTx = runtime.readTx(tx);
-        const current = readTx.readValueOrThrow(link) as typeof value;
+        const current = readTx().readValueOrThrow(link) as typeof value;
         return Array.isArray(current) ? current.length : 0;
       }
 
@@ -293,16 +387,16 @@ export function createQueryResultProxy<T>(
             let index = 0;
             return {
               next() {
-                const readTx = runtime.readTx(tx);
-                const length = readTx.readValueOrThrow({
+                const length = readTx().readValueOrThrow({
                   ...link,
                   path: [...link.path, "length"],
                 }) as number;
                 if (index < length) {
                   const result = {
-                    value: createQueryResultProxy(
+                    value: createViewProxy(
                       runtime,
-                      proxyTx,
+                      childViewTx(),
+                      tx,
                       {
                         ...link,
                         path: [...link.path, String(index)],
@@ -310,6 +404,7 @@ export function createQueryResultProxy<T>(
                       depth + 1,
                       writable,
                       childLabelView(cfcLabelView, String(index)),
+                      pinned,
                     ),
                     done: false,
                   };
@@ -321,9 +416,7 @@ export function createQueryResultProxy<T>(
             };
           };
         }
-
-        const readTx = runtime.readTx(tx);
-        const current = readTx.readValueOrThrow(link) as typeof value;
+        const current = readTx().readValueOrThrow(link) as typeof value;
 
         const returnValue = Reflect.get(current, prop, current);
         if (typeof returnValue === "function") return returnValue.bind(current);
@@ -343,8 +436,7 @@ export function createQueryResultProxy<T>(
             // This will also mark each element read in the log. Almost all
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
-            const readTx = runtime.readTx(tx);
-            const length = readTx.readValueOrThrow({
+            const length = readTx().readValueOrThrow({
               ...link,
               path: [...link.path, "length"],
             }) as number;
@@ -355,19 +447,21 @@ export function createQueryResultProxy<T>(
               );
             }
 
-            const current = readTx.readValueOrThrow(link) as typeof value;
+            const current = readTx().readValueOrThrow(link) as typeof value;
             const copy = new Array(length);
             for (let i = 0; i < length; i++) {
               if (!(i in current)) {
                 continue;
               }
-              copy[i] = createQueryResultProxy(
+              copy[i] = createViewProxy(
                 runtime,
-                proxyTx,
+                childViewTx(),
+                tx,
                 { ...link, path: [...link.path, String(i)] },
                 depth + 1,
                 writable,
                 childLabelView(cfcLabelView, String(i)),
+                pinned,
               );
             }
 
@@ -398,14 +492,13 @@ export function createQueryResultProxy<T>(
             // `push("b")` then `sort()` sorts the stale pre-push array and drops
             // "b" from the local result. WriteOnly and ReadWrite both read fresh;
             // ReadWrite also unwraps against this array below.
-            const readTx = runtime.readTx(tx);
             // For `push`, this base-array read is the op's own incidental read:
             // mark it `mergeableOpRead` so the commit drops it from conflict
             // detection and the tail append merges, matching `Cell.push`. The
             // handler's own explicit `.get()` of the list stays in the conflict
             // set. Other mutators (fill, unshift, sort, splice, ...) are not
             // mergeable tail appends and keep their read.
-            const currentValue = readTx.readValueOrThrow(
+            const currentValue = readTx().readValueOrThrow(
               link,
               prop === "push" ? { meta: mergeableOpRead } : undefined,
             ) as any[];
@@ -416,11 +509,13 @@ export function createQueryResultProxy<T>(
               copy = base.map((_, index) =>
                 createProxyForArrayValue(
                   runtime,
-                  proxyTx,
+                  childViewTx(),
+                  tx,
                   index,
                   { ...link, path: [...link.path, String(index)] },
                   writable,
                   childLabelView(cfcLabelView, String(index)),
+                  pinned,
                 )
               );
             }
@@ -509,12 +604,15 @@ export function createQueryResultProxy<T>(
 
               diffAndUpdate(runtime, tx, resultLink, result, cause);
 
-              result = createQueryResultProxy(
+              result = createViewProxy(
                 runtime,
-                proxyTx,
+                childViewTx(),
+                tx,
                 resultLink,
                 0,
                 writable,
+                undefined,
+                pinned,
               );
             }
 
@@ -542,13 +640,15 @@ export function createQueryResultProxy<T>(
         return Reflect.get(value, prop);
       }
 
-      return createQueryResultProxy(
+      return createViewProxy(
         runtime,
-        proxyTx,
+        childViewTx(),
+        tx,
         { ...link, path: [...link.path, prop] },
         depth + 1,
         writable,
         childLabelView(cfcLabelView, String(prop)),
+        pinned,
       );
     },
     set: (_, prop, value) => {
@@ -587,9 +687,8 @@ export function createQueryResultProxy<T>(
       return true;
     },
     ownKeys: () => {
-      const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link, SHAPE_READ);
-      const keys = isRecord(current) || Array.isArray(current)
+      const current = readTx().readValueOrThrow(link, SHAPE_READ);
+      const keys = isObjectOrArray(current) || Array.isArray(current)
         ? Reflect.ownKeys(current)
         : Reflect.ownKeys(value);
       if (Array.isArray(proxyTarget)) {
@@ -625,16 +724,15 @@ export function createQueryResultProxy<T>(
         // enumeration-derived mergeable write conflicts and retries instead of
         // merging on a stale key set. It is marked `ignoreReadForScheduling` so it
         // adds only the conflict dependency; reactivity stays on the SHAPE_READ.
-        readTx.readValueOrThrow(link, { meta: ignoreReadForScheduling });
+        readTx().readValueOrThrow(link, { meta: ignoreReadForScheduling });
       }
       return keys;
     },
     getOwnPropertyDescriptor: (target, prop) => {
       if (Array.isArray(target) && prop === "length") {
-        const readTx = runtime.readTx(tx);
         // Read the array fully (not SHAPE_READ) so the length descriptor tracks
         // element add/remove, matching the `length` get trap above. [review: ubik2]
-        const current = readTx.readValueOrThrow(link);
+        const current = readTx().readValueOrThrow(link);
         return {
           configurable: false,
           enumerable: false,
@@ -653,8 +751,10 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return Object.getOwnPropertyDescriptor(value, prop);
       }
-      const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link, SHAPE_READ) as typeof value;
+      const current = readTx().readValueOrThrow(
+        link,
+        SHAPE_READ,
+      ) as typeof value;
       // `Object.hasOwn`, not `in`: this trap answers about OWN properties, and
       // `in` walks the prototype chain. Because the underlying value is an
       // ordinary `Object.prototype`-rooted record, `in` reported every member of
@@ -671,20 +771,22 @@ export function createQueryResultProxy<T>(
       // (loom CT-1949). The `has` trap below keeps `in` -- there it is correct,
       // being the `in` operator's own trap.
       if (
-        (isRecord(current) || Array.isArray(current)) &&
+        (isObjectOrArray(current) || Array.isArray(current)) &&
         Object.hasOwn(current, prop)
       ) {
         return {
           configurable: true,
           enumerable: true,
           writable: writable,
-          value: createQueryResultProxy(
+          value: createViewProxy(
             runtime,
-            proxyTx,
+            childViewTx(),
+            tx,
             { ...link, path: [...link.path, prop as string] },
             depth + 1,
             writable,
             childLabelView(cfcLabelView, String(prop)),
+            pinned,
           ),
         };
       }
@@ -694,9 +796,8 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         return prop in value;
       }
-      const readTx = runtime.readTx(tx);
-      const current = readTx.readValueOrThrow(link, SHAPE_READ);
-      if (isRecord(current) || Array.isArray(current)) {
+      const current = readTx().readValueOrThrow(link, SHAPE_READ);
+      if (isObjectOrArray(current) || Array.isArray(current)) {
         // Probing whether a numeric index is present (`n in arr`) observes the
         // array's key set: for a dense array the answer is `n < length`, but a
         // sparse array has holes, so the answer depends on whether index `n` is
@@ -705,7 +806,7 @@ export function createQueryResultProxy<T>(
         // conflict-only, like ownKeys above) so an `n in arr`-derived mergeable
         // write conflicts and retries instead of merging on a stale key set.
         if (Array.isArray(current) && /^\d+$/.test(prop)) {
-          readTx.readValueOrThrow(link, { meta: ignoreReadForScheduling });
+          readTx().readValueOrThrow(link, { meta: ignoreReadForScheduling });
         }
         return prop in current;
       }
@@ -758,26 +859,39 @@ const originalIndex = Symbol("original index");
 
 const createProxyForArrayValue = (
   runtime: Runtime,
+  viewTx: IExtendedStorageTransaction,
   tx: IExtendedStorageTransaction | undefined,
   source: number,
   link: NormalizedFullLink,
   writable: boolean = false,
   cfcLabelView?: CfcLabelView,
+  pinned: boolean = false,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createQueryResultProxy(
+      return createViewProxy(
         runtime,
+        viewTx,
         tx,
         link,
         0,
         writable,
         cfcLabelView,
+        pinned,
       );
     },
     toString: function () {
       return String(
-        createQueryResultProxy(runtime, tx, link, 0, writable, cfcLabelView),
+        createViewProxy(
+          runtime,
+          viewTx,
+          tx,
+          link,
+          0,
+          writable,
+          cfcLabelView,
+          pinned,
+        ),
       );
     },
     [originalIndex]: source,
@@ -787,7 +901,7 @@ const createProxyForArrayValue = (
 };
 
 function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
-  return isRecord(value) && originalIndex in value;
+  return isObjectOrArray(value) && originalIndex in value;
 }
 
 /**
@@ -809,7 +923,7 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
  * @returns {boolean}
  */
 export function isCellResult(value: any): value is CellResult<any> {
-  return isRecord(value) &&
+  return isObjectOrArray(value) &&
     typeof (value as Partial<BackToCellInternals>)[toCell] === "function";
 }
 

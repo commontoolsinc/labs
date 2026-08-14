@@ -47,6 +47,8 @@ export interface SpaceEntityView {
   lastWriteAt: string | null;
   /** Annotated value at the requested path (links/streams normalized). */
   value?: unknown;
+  /** Whether the requested path exists within a present entity. */
+  pathExists?: boolean;
   /** Canonical key used for clustering equal values. */
   valueKey?: string;
   /** Set if reconstruction/decode threw for this space (entity still counts as present). */
@@ -59,16 +61,21 @@ export type ConvergenceVerdict =
   | "partial"
   | "absent";
 
+/** A verdict that also represents values which could not be reconstructed. */
+export type ExactConvergenceVerdict = ConvergenceVerdict | "unknown";
+
 export interface ValueCluster {
   valueKey: string;
   value: unknown;
   labels: string[];
+  /** Whether this cluster represents values found at the requested path. */
+  pathExists?: boolean;
 }
 
 export type ConvergenceRelationship =
   | "cross-space-linked" // a space links to this entity@another-space → real replica drift
   | "no-cross-space-link" // shared id, no cross-space link → likely independent instances
-  | "n/a"; // converged/absent — relationship not meaningful
+  | "n/a"; // converged, absent, or unknown — relationship not meaningful
 
 export interface ConvergenceResult {
   id: string;
@@ -81,6 +88,12 @@ export interface ConvergenceResult {
   caveat: string;
   /** Set when a link index is supplied — distinguishes drift from instances. */
   relationship?: ConvergenceRelationship;
+}
+
+/** A convergence result that distinguishes unavailable values. */
+export interface ExactConvergenceResult
+  extends Omit<ConvergenceResult, "verdict"> {
+  verdict: ExactConvergenceVerdict;
 }
 
 export interface CrossSpaceEdge {
@@ -117,6 +130,10 @@ const CAVEAT =
 function canonical(v: unknown): string {
   return v === undefined ? "undefined" : hashStringOf(v);
 }
+
+const MISSING_PATH_KEY = "«missing-path»";
+const MISSING_PATH_VALUE = Object.freeze({ $missing: true } as const);
+const DECODE_ERROR_KEY = "«decode-error»";
 
 interface MetaRow {
   headSeq: number | null;
@@ -175,12 +192,12 @@ export interface ConvergenceOptions {
   path?: string[];
 }
 
-/** Compare one entity's value across the given spaces and classify. */
-export function convergence(
+/** Compare one entity and report unavailable values as an exact verdict. */
+export function convergenceExact(
   spaces: SpaceRef[],
   opts: ConvergenceOptions,
   index?: CrossSpaceLinkIndex,
-): ConvergenceResult {
+): ExactConvergenceResult {
   const scope = opts.scope ?? "space";
   const branch = opts.branch ?? "";
   const path = opts.path ?? [];
@@ -190,9 +207,7 @@ export function convergence(
     view.label = label;
     if (view.present) {
       // Decode can throw (e.g. an encoded payload referencing a live cell).
-      // Keep the entity counted as present but isolate the failure, so that one
-      // bad row doesn't abort a whole scan; errored spaces cluster together by
-      // a distinct key.
+      // Keep the entity counted as present and expose the unavailable view.
       try {
         const res = getValueAt(space, { id: opts.id, scope, branch }, path);
         if (!res.exists) {
@@ -204,38 +219,47 @@ export function convergence(
           // Cluster on the RAW value (depth-complete, fabric-aware). Annotate is
           // for DISPLAY only — hashing it would falsely converge values that
           // differ below the annotate depth cap or only by BigInt vs its tag.
-          view.value = annotate(res.value);
-          view.valueKey = canonical(res.value);
+          view.pathExists = res.pathExists;
+          view.value = res.pathExists
+            ? annotate(res.value)
+            : MISSING_PATH_VALUE;
+          view.valueKey = res.pathExists
+            ? canonical(res.value)
+            : MISSING_PATH_KEY;
         }
       } catch (e) {
         view.error = (e as Error).message;
-        view.valueKey = "«decode-error»";
       }
     }
     return view;
   });
 
   const present = views.filter((v) => v.present);
+  const available = present.filter((view) => view.error === undefined);
   const clusterMap = new Map<string, ValueCluster>();
-  for (const v of present) {
+  for (const v of available) {
     const key = v.valueKey!;
     const c = clusterMap.get(key);
     if (c) c.labels.push(v.label);
-    else {clusterMap.set(key, {
+    else {
+      clusterMap.set(key, {
         valueKey: key,
         value: v.value,
         labels: [v.label],
-      });}
+        pathExists: v.pathExists,
+      });
+    }
   }
   const clusters = [...clusterMap.values()];
 
-  let verdict: ConvergenceVerdict;
-  if (present.length === 0) verdict = "absent";
+  let verdict: ExactConvergenceVerdict;
+  if (present.some((view) => view.error !== undefined)) verdict = "unknown";
+  else if (present.length === 0) verdict = "absent";
   else if (clusters.length > 1) verdict = "diverged";
   else if (present.length < views.length) verdict = "partial";
   else verdict = "converged";
 
-  const result: ConvergenceResult = {
+  const result: ExactConvergenceResult = {
     id: opts.id,
     scope,
     branch,
@@ -244,6 +268,49 @@ export function convergence(
     views,
     clusters,
     caveat: CAVEAT,
+  };
+  if (index) result.relationship = classifyRelationship(result, index);
+  return result;
+}
+
+/** Compare one entity using the published convergence verdicts. */
+export function convergence(
+  spaces: SpaceRef[],
+  opts: ConvergenceOptions,
+  index?: CrossSpaceLinkIndex,
+): ConvergenceResult {
+  const exact = convergenceExact(spaces, opts);
+  const views = exact.views.map((view) =>
+    view.error === undefined ? view : { ...view, valueKey: DECODE_ERROR_KEY }
+  );
+  const present = views.filter((view) => view.present);
+  const clusterMap = new Map<string, ValueCluster>();
+  for (const view of present) {
+    const valueKey = view.valueKey!;
+    const cluster = clusterMap.get(valueKey);
+    if (cluster) {
+      cluster.labels.push(view.label);
+    } else {
+      clusterMap.set(valueKey, {
+        valueKey,
+        value: view.error === undefined ? view.value : undefined,
+        labels: [view.label],
+        pathExists: view.error === undefined ? view.pathExists : undefined,
+      });
+    }
+  }
+  const clusters = [...clusterMap.values()];
+  let verdict: ConvergenceVerdict;
+  if (present.length === 0) verdict = "absent";
+  else if (clusters.length > 1) verdict = "diverged";
+  else if (present.length < views.length) verdict = "partial";
+  else verdict = "converged";
+
+  const result: ConvergenceResult = {
+    ...exact,
+    verdict,
+    views,
+    clusters,
   };
   if (index) result.relationship = classifyRelationship(result, index);
   return result;
@@ -300,10 +367,13 @@ export function buildCrossSpaceLinkIndex(
 
 /** Label a divergence as real replica drift vs. likely independent instances. */
 export function classifyRelationship(
-  result: ConvergenceResult,
+  result: ConvergenceResult | ExactConvergenceResult,
   index: CrossSpaceLinkIndex,
 ): ConvergenceRelationship {
-  if (result.verdict === "converged" || result.verdict === "absent") {
+  if (
+    result.verdict === "converged" || result.verdict === "absent" ||
+    result.verdict === "unknown"
+  ) {
     return "n/a";
   }
   // A cross-space link to (space, id) makes the relationship a replica link
@@ -318,7 +388,7 @@ export function classifyRelationship(
 export interface ScanOptions {
   scope?: string;
   branch?: string;
-  /** Max diverged/partial findings to return. */
+  /** Max diverged, partial, or unknown findings to return. */
   limit?: number;
   /** Max shared entities to reconstruct (cost guard). */
   examineCap?: number;
@@ -340,11 +410,18 @@ export interface ScanResult {
   findings: ConvergenceResult[];
 }
 
-/** Find entities present in >=2 spaces and report those that diverge. */
-export function convergenceScan(
+/** A scan result that distinguishes unavailable values from known findings. */
+export interface ExactScanResult extends Omit<ScanResult, "findings"> {
+  /** Findings whose values could not all be reconstructed. */
+  unknownFindings: number;
+  findings: ExactConvergenceResult[];
+}
+
+/** Find shared entities with values that differ, are missing, or are unavailable. */
+export function convergenceScanExact(
   spaces: SpaceRef[],
   opts: ScanOptions = {},
-): ScanResult {
+): ExactScanResult {
   const scope = opts.scope ?? "space";
   const branch = opts.branch ?? "";
   const limit = opts.limit ?? 50;
@@ -368,6 +445,65 @@ export function convergenceScan(
     id
   );
 
+  const findings: ExactConvergenceResult[] = [];
+  let examined = 0;
+  for (const id of shared) {
+    if (examined >= examineCap) break;
+    examined++;
+    const result = convergenceExact(spaces, { id, scope, branch }, index);
+    if (
+      result.verdict === "diverged" || result.verdict === "partial" ||
+      result.verdict === "unknown"
+    ) {
+      findings.push(result);
+      if (findings.length >= limit) break;
+    }
+  }
+
+  const linkedFindings =
+    findings.filter((f) => f.relationship === "cross-space-linked").length;
+  const unlinkedFindings =
+    findings.filter((f) => f.relationship === "no-cross-space-link").length;
+  const unknownFindings =
+    findings.filter((f) => f.verdict === "unknown").length;
+  return {
+    sharedEntities: shared.length,
+    examined,
+    examineCapped: examined >= examineCap && shared.length > examineCap,
+    crossSpaceLinkEdges: index?.edges.length ?? 0,
+    linkedFindings,
+    unlinkedFindings,
+    unknownFindings,
+    findings,
+  };
+}
+
+/** Find shared entities using the published convergence verdicts. */
+export function convergenceScan(
+  spaces: SpaceRef[],
+  opts: ScanOptions = {},
+): ScanResult {
+  const scope = opts.scope ?? "space";
+  const branch = opts.branch ?? "";
+  const limit = opts.limit ?? 50;
+  const examineCap = opts.examineCap ?? 1000;
+
+  const index = opts.linkIndex === false
+    ? undefined
+    : buildCrossSpaceLinkIndex(spaces, { scope, branch });
+  const counts = new Map<string, number>();
+  for (const { space } of spaces) {
+    const ids = space.db
+      .prepare(
+        `SELECT DISTINCT id FROM revision WHERE branch = ? AND scope_key = ?`,
+      )
+      .all<{ id: string }>(branch, scope);
+    for (const { id } of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const shared = [...counts.entries()].filter(([, count]) => count >= 2).map(
+    ([id]) => id,
+  );
+
   const findings: ConvergenceResult[] = [];
   let examined = 0;
   for (const id of shared) {
@@ -381,14 +517,18 @@ export function convergenceScan(
   }
 
   const linkedFindings =
-    findings.filter((f) => f.relationship === "cross-space-linked").length;
+    findings.filter((finding) => finding.relationship === "cross-space-linked")
+      .length;
+  const unlinkedFindings =
+    findings.filter((finding) => finding.relationship === "no-cross-space-link")
+      .length;
   return {
     sharedEntities: shared.length,
     examined,
     examineCapped: examined >= examineCap && shared.length > examineCap,
     crossSpaceLinkEdges: index?.edges.length ?? 0,
     linkedFindings,
-    unlinkedFindings: findings.length - linkedFindings,
+    unlinkedFindings,
     findings,
   };
 }

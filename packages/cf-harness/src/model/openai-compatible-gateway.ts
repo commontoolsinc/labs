@@ -168,16 +168,6 @@ export const usesResponsesApi = (
 ): boolean => nativeModelToolIds.length === 0 && model.startsWith("gpt-");
 
 /**
- * `gpt-*` models reason by default, and Chat Completions rejects function
- * tools whenever reasoning is active. Provider-native tools force a turn onto
- * Chat Completions, so combining them with an OpenAI model would route
- * straight into that 400 with cf-harness's function tools attached.
- *
- * Nothing produces this combination today — the only native-tool profile is
- * `web_search`, which overrides the model to Gemini — so this fails loudly
- * rather than letting a future profile discover it as a provider error.
- */
-/**
  * Rejects a compaction threshold on a turn that cannot honour it.
  *
  * `context_management` is only sent on the Responses path, so a chat-routed
@@ -199,6 +189,16 @@ export const assertCompactThresholdSupported = (
   }
 };
 
+/**
+ * `gpt-*` models reason by default, and Chat Completions rejects function
+ * tools whenever reasoning is active. Provider-native tools force a turn onto
+ * Chat Completions, so combining them with an OpenAI model would route
+ * straight into that 400 with cf-harness's function tools attached.
+ *
+ * Nothing produces this combination today — the only native-tool profile is
+ * `web_search`, which overrides the model to Gemini — so this fails loudly
+ * rather than letting a future profile discover it as a provider error.
+ */
 const assertSupportedToolCombination = (
   model: string,
   nativeModelToolIds: readonly LLMNativeModelToolId[],

@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export type DID = `did:${string}:${string}`;
 export type DIDKey = `did:key:${string}`;
@@ -128,7 +128,7 @@ export type KeyPairRaw = CryptoKeyPair | InsecureCryptoKeyPair;
 export function isCryptoKeyPair(input: unknown): input is CryptoKeyPair {
   return !!(
     globalThis.CryptoKey &&
-    isRecord(input) &&
+    isObjectOrArray(input) &&
     input.privateKey instanceof globalThis.CryptoKey &&
     input.publicKey instanceof globalThis.CryptoKey
   );
@@ -138,7 +138,7 @@ export function isInsecureCryptoKeyPair(
   input: unknown,
 ): input is InsecureCryptoKeyPair {
   return !!(
-    isRecord(input) &&
+    isObjectOrArray(input) &&
     input.privateKey instanceof Uint8Array &&
     input.publicKey instanceof Uint8Array
   );
