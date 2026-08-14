@@ -2232,6 +2232,55 @@ describe("piece pull materialization", () => {
     );
   });
 
+  it("a nested result write cannot extend an array past its parent maxItems — ancestor container cardinality survives the narrowed guard (r3739139515)", async () => {
+    // The narrowed path-only contract validates the LEAF; pre-fix a
+    // write to items[3] of a maxItems:3 array passed leaf validation
+    // and persisted a 4-element array the schema forbids. The
+    // cardinality re-check binds ONLY minItems/maxItems on ancestors
+    // of the written path — never the unrelated-sibling validation the
+    // ruling removed.
+    const resultSchema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: { type: "number" },
+          maxItems: 3,
+        },
+        name: { type: "string" },
+      },
+      // `name` REQUIRED but server-derived-late (absent locally): its
+      // absence must NOT block the container check's error, nor a
+      // legal in-bounds write — the ruling's narrowing stands.
+      required: ["items", "name"],
+    } as const;
+    const piece = await pieces.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema,
+        result: { items: [1, 2] },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(pieces, piece);
+    // In-bounds nested writes stay legal (index 2 fills to maxItems),
+    // even with the required sibling still absent.
+    await controller.result.set(9, ["items", "2"]);
+    expect((piece.getRaw() as { items?: number[] }).items).toEqual(
+      [1, 2, 9],
+    );
+    // Out-of-bounds extension: refused by the CONTAINER stage.
+    await expect(controller.result.set(4, ["items", "3"])).rejects.toThrow(
+      /updated value does not match its container at \["items"\]/,
+    );
+    expect((piece.getRaw() as { items?: number[] }).items).toEqual(
+      [1, 2, 9],
+    );
+  });
+
   it("an invalid UNRELATED sibling does not invalidate a valid path write (the narrowed #4717 guard — RULED 2026-08-07)", async () => {
     // RECONCILED with the set-validation ruling: the pre-ruling test
     // pinned the WHOLE-RESULT validation deliberately (an invalid raw
@@ -2316,9 +2365,13 @@ describe("piece pull materialization", () => {
     // undefined behind the alias is still NOT hidden, surfaced by the
     // WRITE-DESTINATION validation instead ("updated result does not
     // match its write destination"), which materializes through the
-    // alias and catches b on the same write.
+    // alias and catches b on the same write. The regex pins EXACTLY
+    // that stage (review thread r3739139525): the previous
+    // (schema|write destination) cross-product also accepted the
+    // whole-result schema message, so a regression back to the
+    // over-reaching validation this ruling removed would have passed.
     await expect(controller.result.set(3, ["a"])).rejects.toThrow(
-      /updated (result|value) does not match its (schema|write destination)/,
+      /updated (result|value) does not match its write destination/,
     );
     expect(argument.getRaw()).toEqual({ a: 1, b: undefined });
   });

@@ -92,11 +92,19 @@ function followResultCellChain(
  *
  * @param runtime - The runtime instance
  * @param cellLink - The location that received an event or should be current
+ * @param options - `propagateErrors` RETHROWS instead of collapsing every
+ *   exception into `false` (review thread r3739139521): the serving loop's
+ *   demand cycle must distinguish a creation-race DEFERRAL (`false` — retry
+ *   next cycle) from an actual load/start FAILURE (throw — counted
+ *   `structureLoadFailures`); with the collapse, its failure arm was
+ *   unreachable and real errors retried silently every input-driven cycle.
+ *   Default stays best-effort for the event-recovery caller.
  * @returns Promise<boolean> - true if a piece was started, false otherwise
  */
 export async function ensurePieceRunning(
   runtime: Runtime,
   cellLink: NormalizedFullLink,
+  options?: { propagateErrors?: boolean },
 ): Promise<boolean> {
   try {
     const tx = runtime.edit();
@@ -169,6 +177,7 @@ export async function ensurePieceRunning(
       throw error;
     }
   } catch (error) {
+    if (options?.propagateErrors === true) throw error;
     logger.error("ensure-piece", "Error ensuring piece is running:", error);
     return false;
   }

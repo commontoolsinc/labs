@@ -120,11 +120,15 @@ describe("Phase 2 speculation overlay", () => {
     clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
-    // The ambient flag is ON (the host pinned it), so this runtime is a
-    // flag-ON CLIENT: no servingPosture, speculation overlay by default.
+    // EXPLICITLY flag-ON (review thread r3739139533): relying on the
+    // host having pinned the ambient flag made the test order-dependent
+    // — under an unset ambient env this runtime would run the OFF path
+    // and assert authored-class commits for the wrong reason. No
+    // servingPosture: a flag-ON CLIENT, speculation overlay by default.
     clientRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: clientManager,
+      experimental: { serverExecution: true },
     });
   };
 

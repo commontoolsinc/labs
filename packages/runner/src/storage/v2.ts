@@ -2937,10 +2937,16 @@ class SpaceReplica implements ISpaceReplica {
    * apply pending, notify — with the store half deferred to `verdict`. The
    * wave accumulator resolves the verdict at its commit step: `committed`
    * promotes the pending writes at the wave commit's seq, `withdrawn`
-   * rolls them back through the same rejection path a refused push takes.
-   * The pending overlay this leaves behind is the wave's layered view —
-   * later action runs read the sealed writes through the ordinary read
-   * path until the verdict settles them.
+   * rolls them back through the same rejection path a refused push takes —
+   * EXCEPT the `superseded` variant (speculation.md §4's retirement),
+   * which routes through `finalizeSupersededSpeculation`: a
+   * SUCCESS-shaped drop that skips the rejection machinery, does not
+   * cascade-reject dependants (an authored commit that read the echo is
+   * decided by the store's CAS — and since the leg-C export refusal, a
+   * dependent basis naming the echo never exports at all), and settles
+   * ok. The pending overlay this leaves behind is the wave's layered
+   * view — later action runs read the sealed writes through the
+   * ordinary read path until the verdict settles them.
    */
   sealNative(
     transaction: NativeStorageCommit,
@@ -5024,7 +5030,15 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private dropPending(localSeq: number): void {
-    for (const record of this.#docs.values()) {
+    // A drop can LIFT the shadow floor without a promotion (review
+    // thread r3739416417): a rejected/rolled-back own write emptying a
+    // shadowed doc's pending set makes the foreign value visible and
+    // prunes the floor lazily — but only confirmPending fired the
+    // serving loop's wake, so a quiet clamped space stayed asleep
+    // until the input-wait timeout. Fire the same flag-gated wake when
+    // the drop empties a shadowed doc's pending set.
+    let shadowLifted = false;
+    for (const [key, record] of this.#docs.entries()) {
       const firstPendingIndex = record.pending.findIndex((entry) =>
         entry.localSeq === localSeq
       );
@@ -5035,6 +5049,21 @@ class SpaceReplica implements ISpaceReplica {
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      if (
+        record.pending.length === 0 && this.#shadowedForeignSeqs.has(key)
+      ) {
+        shadowLifted = true;
+      }
+    }
+    if (shadowLifted && getServerExecutionConfig()) {
+      try {
+        this.shadowFlipObserver?.();
+      } catch (error) {
+        logger.error("shadow-flip-observer-error", () => [
+          "shadowFlipObserver threw during a pending drop",
+          error,
+        ]);
+      }
     }
   }
 

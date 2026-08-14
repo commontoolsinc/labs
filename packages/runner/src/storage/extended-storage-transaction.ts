@@ -412,13 +412,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   /**
    * Authoritative writes for effect-COMPLETION transactions (F2, the
    * completion-visibility wedge; serving-loop.md §4): gated on a
-   * configured seal destination, i.e. the serving posture — that is
-   * where the replica's optimistic view layers sealed wave overlays a
-   * later wave-commit can supersede-drop, making the ordinary no-op
-   * elision destructive (a completion that diffs its `inputHash` write
-   * against a doomed overlay durably lands `result present + inputHash
-   * stale`; the next run's memo guard then wipes the served value). On
-   * every client and in the OFF arm this is a no-op, so
+   * configured seal destination. Since Phase 2 that is NOT synonymous
+   * with the serving posture — the speculation overlay is every
+   * flag-ON client's default destination too (see the inline note
+   * below) — but the gate still holds where it matters: the serving
+   * runtime is where the replica's optimistic view layers sealed wave
+   * overlays a later wave-commit can supersede-drop, making the
+   * ordinary no-op elision destructive (a completion that diffs its
+   * `inputHash` write against a doomed overlay durably lands `result
+   * present + inputHash stale`; the next run's memo guard then wipes
+   * the served value), and no client-side path reaches
+   * `markEffectCompletion` under the flag (egress is dropped at the
+   * overlay). In the OFF arm this is a no-op, so
    * `markEffectCompletion` keeps its documented byte-identical
    * behavior there — the accepted client-side corner (a completion
    * eliding against an in-flight optimistic overlay that later

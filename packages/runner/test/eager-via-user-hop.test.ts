@@ -225,6 +225,7 @@ Deno.test("flag ON: a pattern run whose output scope is DISCOVERED session-narro
     {
       const tx = runtime.edit();
       runtime.run(tx, compiled, argument, result);
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
     }
     const cancel = result.sink(() => {});

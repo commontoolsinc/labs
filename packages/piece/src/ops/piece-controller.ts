@@ -2794,6 +2794,75 @@ class PiecePropIo implements PieceCellIo {
                 );
               }
             }
+            // Ancestor container CARDINALITY (review thread
+            // r3739139515): the path-only contract validates the
+            // written leaf, so a nested write could still persist an
+            // array violating an ancestor's minItems/maxItems (a write
+            // to index N extends the array past maxItems unseen).
+            // Re-validate each array ancestor that carries cardinality
+            // keywords against its POST-WRITE value, with content
+            // keywords stripped: cardinality only — never the
+            // unrelated-sibling validation the 2026-08-07 ruling
+            // removed. Reading the touched container's own current
+            // value is the write's own placement basis, not the
+            // server-derived-late sibling race the ruling closed.
+            for (let depth = writePath.length - 1; depth >= 0; depth--) {
+              const ancestorPath = writePath.slice(0, depth);
+              let ancestorContracts:
+                | ReturnType<typeof linkPathContracts>
+                | undefined;
+              try {
+                ancestorContracts = linkPathContracts(
+                  [{ schema, root: schema }],
+                  ancestorPath,
+                );
+              } catch {
+                // Undecomposable (correlated anyOf): the whole-result
+                // fallback branch below owns those paths.
+                continue;
+              }
+              for (const contract of ancestorContracts) {
+                const ancestorSchema = contract.schema;
+                if (
+                  typeof ancestorSchema !== "object" ||
+                  ancestorSchema === null ||
+                  (!("maxItems" in ancestorSchema) &&
+                    !("minItems" in ancestorSchema))
+                ) {
+                  continue;
+                }
+                const cardinality: Record<string, unknown> = {
+                  type: "array",
+                };
+                if ("maxItems" in ancestorSchema) {
+                  cardinality.maxItems = ancestorSchema.maxItems;
+                }
+                if ("minItems" in ancestorSchema) {
+                  cardinality.minItems = ancestorSchema.minItems;
+                }
+                const postWrite = replaceMaterializedValueAtPath(
+                  getValueAtPath(
+                    targetCell.asSchema(undefined).withTx(tx).get(),
+                    ancestorPath,
+                  ),
+                  writePath.slice(depth),
+                  materializedValue,
+                );
+                const issue = validateSchemaValue(
+                  cardinality as JSONSchema,
+                  postWrite,
+                  cardinality as JSONSchema,
+                  { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+                );
+                if (issue !== undefined) {
+                  throw new Error(
+                    `updated value does not match its container at ${
+                      JSON.stringify(ancestorPath)
+                    }: ${issue}`,
+                  );
+                }
+              }
+            }
           } else {
             const validationRoot = replaceMaterializedValueAtPath(
               // See omitMissingProjectionAliases: missing optional

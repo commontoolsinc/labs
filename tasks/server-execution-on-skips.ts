@@ -55,13 +55,15 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * fine" (L14), and never a shipped state. Entries name their unskipping
  * phase — never silent filtering anywhere else.
  *
- * Stage-G re-justification (2026-08-06, per the phase-completing pass):
- * the ONE entry below was re-examined and STANDS on its original
- * Phase-2 reason — a two-browser CAS-storm bring-up failure of the
- * two-deriver interim, unrelated to effect serving. Stage G landed the
- * effect channel and added NO skips: the effectful builtins served in
- * the ON arm are exercised by the runner suite's serving-loop tests,
- * and the ON-arm integration suites run unfiltered but for this entry.
+ * History: stage G (2026-08-06) re-justified the two-browsers CFC-gate
+ * entry this file had held since stage F and added no skips of its own;
+ * Phase 2 then RETIRED that entry — the client derivation-commit path
+ * is removed by construction, dissolving the two-deriver CAS storm the
+ * entry named as its unskipping condition (that gate now runs, and
+ * passes, ON). The ONE entry below is Phase 2's own: the
+ * sx2-serving-loop reproducer of the demand-cycle starvation fork, at
+ * `phase-2-followup` — it lifts with the owed terminal-state follow-up
+ * (verification-coverage.md §3's demand-cycle row; the P2-F build).
  */
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,

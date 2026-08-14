@@ -157,6 +157,10 @@ export class SpaceServer implements TransactionSealDestination {
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
   #feedArrived: PromiseWithResolvers<void> | undefined;
+  // A shadow flip that fired while no input waiter was installed
+  // (r3739416418): consumed by the next #waitForInput so the wake is
+  // never dropped between cycles.
+  #pendingShadowFlipWake = false;
   #inputHead = 0;
   /** Highest NON-self-echo seq drained — the watermark's advance
    * target. The loop's own derived commits return on the feed above W
@@ -345,9 +349,15 @@ export class SpaceServer implements TransactionSealDestination {
     // wait and a then-quiet space would sit out the idle window with W
     // still clamped. The replica's flip path resolves the wait
     // directly; the woken cycle derives over the foreign value and W
-    // catches up.
-    runtime.storageManager.open(space).replica.shadowFlipObserver = () =>
+    // catches up. The wake also LATCHES (review thread r3739416418):
+    // edge-triggered alone it was dropped whenever the flip fired while
+    // no waiter was installed (mid-cycle), and the next #waitForInput
+    // then slept the full idle window anyway; the latch converts the
+    // edge to a level the next wait consumes.
+    runtime.storageManager.open(space).replica.shadowFlipObserver = () => {
+      this.#pendingShadowFlipWake = true;
       this.#feedArrived?.resolve();
+    };
 
     // W = read watermark doc (0 if absent).
     this.#watermark = readWatermarkSeq(engine);
@@ -887,6 +897,13 @@ export class SpaceServer implements TransactionSealDestination {
 
   async #waitForInput(maxMs: number): Promise<void> {
     if (this.#feed.length > 0) return;
+    if (this.#pendingShadowFlipWake) {
+      // A flip fired while no waiter was installed (r3739416418):
+      // consume the latch and run a cycle now — the floor has lifted
+      // and the catch-up wave must not wait out the idle window.
+      this.#pendingShadowFlipWake = false;
+      return;
+    }
     this.#feedArrived = Promise.withResolvers<void>();
     const timer = setTimeout(() => this.#feedArrived?.resolve(), maxMs);
     try {
@@ -1031,12 +1048,17 @@ export class SpaceServer implements TransactionSealDestination {
         if (!firstDemand) continue;
       } else {
         try {
+          // propagateErrors: the catch below is the loop's FAILURE arm
+          // (§7 structureLoadFailures); with the helper's default
+          // collapse-to-false it was unreachable and every real
+          // load/start error masqueraded as a creation-race deferral,
+          // silently retried each input-driven cycle (r3739139521).
           const started = await ensurePieceRunning(runtime, {
             space: this.#options.space,
             id: root.id as never,
             scope: root.scope ?? "space",
             path: [],
-          });
+          }, { propagateErrors: true });
           if (started) {
             this.#pendingStructureLoads.delete(key);
           } else {

@@ -98,16 +98,19 @@ speculative one in the same render path — the simplest thing, and
 exactly how conflicts render today (RULED 2026-08-02). No flicker
 suppression beyond what rebasing gives.
 
-Stated honestly (RULED 2026-08-07; owed from the wedge round): the
-overlay retires on watermark coverage of its BASIS, not on value
-ARRIVAL — "the store wins" carries no by-construction guarantee that
-the store HOLDS what won at withdrawal time (W covers DEMANDED
-derivations; nothing about an entry's own output riding the covering
-wave is implied). What makes retirement safe is the serving loop's
-first-round reliability machinery — the demanded-structure loads with
-their counted, retried deferrals (serving-loop.md §1/§3's demand
-cycle and its ensure-retry) — which makes the demanded derivation
-exist and land.
+Stated honestly (RULED 2026-08-07; owed from the wedge round), and
+scoped to step 3's INPUT-origin entries — step 2's intent-origin
+entries retire on their event appearing in `consequenceOf`, which IS
+the authoritative consequence arriving: an input-origin entry retires
+on watermark coverage of its BASIS, not on value ARRIVAL — "the store
+wins" carries no by-construction guarantee that the store HOLDS what
+won at withdrawal time (W covers DEMANDED derivations; nothing about
+an entry's own output riding the covering wave is implied). What makes
+retirement safe is the serving loop's first-round reliability
+machinery — the demanded-structure loads with their counted, retried
+deferrals (serving-loop.md §7's `structureLoadDeferred` /
+`structureLoadFailures` counters over §1/§3's per-cycle load pass) —
+which makes the demanded derivation exist and land.
 
 ## 5. Offline
 

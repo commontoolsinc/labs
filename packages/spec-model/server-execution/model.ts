@@ -1199,6 +1199,12 @@ export function applyFanout(s0: FanoutState, step: FanoutStep): FanoutState {
       // instance value. Sibling instances materialize on THEIR OWN
       // demand. The broad slot stops being a value instance the same
       // moment for every reader — the clean-product shape.
+      // A step naming a principal OUTSIDE the configured set is
+      // REJECTED (no-op; review thread r3739139513): it would mint an
+      // instance outside the clean product the invariants quantify
+      // over, so the violation checker could never see it — the menu
+      // must not be able to smuggle states past the properties.
+      if (!s.principals.includes(step.by)) return s;
       if (s.narrowed) return s;
       s.narrowed = true;
       delete s.instances[SPACE_KEY];
@@ -1211,6 +1217,8 @@ export function applyFanout(s0: FanoutState, step: FanoutStep): FanoutState {
       return s;
     }
     case "fanDemand": {
+      // Same out-of-set rejection as fanNarrow (r3739139513).
+      if (!s.principals.includes(step.user)) return s;
       const key = s.narrowed ? userKey(step.user) : SPACE_KEY;
       if (!s.demanded.includes(key)) {
         s.demanded.push(key);

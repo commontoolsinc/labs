@@ -968,6 +968,22 @@ Deno.test("C11a: instance sets are CLEAN PRODUCTS over principals — never ragg
   }
 });
 
+Deno.test("C11d: a step naming a principal outside the configured set is REJECTED — the menu cannot smuggle instances past the clean-product invariant (r3739139513)", () => {
+  const s0 = makeFanout([U1]);
+  // Pre-fix, fanNarrow/fanDemand minted the foreign user's instance:
+  // the clean-product check quantifies over `principals`, so the
+  // out-of-set state passed the violations assertion unseen.
+  assertEquals(applyFanout(s0, { kind: "fanNarrow", by: U2 }), s0);
+  assertEquals(applyFanout(s0, { kind: "fanDemand", user: U2 }), s0);
+  // And after a legitimate narrowing, a foreign demand still cannot
+  // mint an out-of-set instance key.
+  const narrowed = applyFanout(s0, { kind: "fanNarrow", by: U1 });
+  assertEquals(
+    applyFanout(narrowed, { kind: "fanDemand", user: U2 }),
+    narrowed,
+  );
+});
+
 Deno.test("C11b: the fan-out unit is the RUN — `action × instance`, one principal's writes per run, never merged (serving-loop §3c)", () => {
   const all = exploreFanout(makeFanout([U1, U2]), 7);
   for (const s of all) {

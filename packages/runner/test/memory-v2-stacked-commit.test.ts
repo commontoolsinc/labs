@@ -2335,6 +2335,11 @@ Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own w
 });
 
 Deno.test("memory v2 stacked commits: the shadow flip stays silent with the flag OFF (byte-identical OFF arm), while the floor still reports and clears", async () => {
+  // EXPLICIT OFF (review thread r3739139549): relying on the default
+  // being false (and the preceding ON test's finally) would silently
+  // flip this into an ON-arm test the day the rollout defaults the
+  // flag on — while still claiming to validate OFF.
+  setServerExecutionConfig(false);
   const harness = await markerHarness();
   const wake = installShadowFlipObserver(harness);
   try {
@@ -2378,6 +2383,7 @@ Deno.test("memory v2 stacked commits: the shadow flip stays silent with the flag
     assertEquals(wake.fires, 0);
   } finally {
     await harness.close();
+    resetServerExecutionConfig();
   }
 });
 
@@ -2655,6 +2661,74 @@ Deno.test("memory v2 stacked commits: the own-echo verdict repair lifts EXACTLY 
     expectVisible(harness, { A: valueFor("foreign") });
   } finally {
     await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a REJECTED own write that was shadowing foreign novelty fires the shadow-flip wake at its drop (r3739416417 — flag ON; the floor lifts without a promotion)", async () => {
+  setServerExecutionConfig(true);
+  const harness = await markerHarness();
+  const wake = installShadowFlipObserver(harness);
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // A foreign winner lands server-side (seq 2); the doomed own write
+    // reads the stale basis and is REJECTED.
+    harness.model.injectRemote({
+      label: "winner",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("winner") }],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+    });
+    const doomed = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("mine"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(2),
+      "doomed commit to reach the wire",
+    );
+
+    // The winner's fan-out arrives UNDER the still-pending own write:
+    // shadowed foreign novelty, floor = winnerSeq. (No ack exists for
+    // the doomed write, so the own-echo exemption does not apply.)
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: winnerSeq, value: valueFor("winner") }],
+      caughtUpLocalSeq: doomed.localSeq,
+    });
+    const result = await doomed.promise;
+    assertExists(result.error);
+
+    // The drop emptied the shadowed doc's pending set: the foreign
+    // value is visible, the floor lifts — and the WAKE fired (pre-fix
+    // only confirmPending fired it; a rejection-driven lift left the
+    // clamped serving loop asleep until the input-wait timeout).
+    expectVisible(harness, { A: valueFor("winner") });
+    assertEquals(shadowFloorOf(harness), undefined);
+    assertEquals(
+      wake.fires >= 1,
+      true,
+      "the rejection-driven shadow lift must fire the serving loop's wake",
+    );
+  } finally {
+    await harness.close();
+    resetServerExecutionConfig();
   }
 });
 

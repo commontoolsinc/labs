@@ -509,7 +509,14 @@ population):
 Delta 2026-08-07 — Phase 2 lands (flag ON: the server derives, the
 client does not; this PR):
 
-- speculation §1/§2/§4/§6's impl-gate rows: → COVERED. The overlay is
+- speculation §1/§2/§4/§6's impl-gated rules: the implementation they
+  gated on LANDED, with the pins cited below. Stated precisely
+  (r3739139527 — the earlier "impl-gate rows → COVERED" overstated
+  against the §1 map, whose speculation row still counts them
+  impl-gate): this delta records the landing evidence; the map's
+  COLUMN moves (impl-gate → instrument-covered where the cited pins
+  bind the rule text) belong to the next full mapping pass, which §4's
+  standing rule already schedules. The overlay is
   the runtime's DEFAULT seal destination under the flag for every
   non-serving runtime (`packages/runner/src/speculation/
   overlay-destination.ts`): stamped derivation-kind runs redirect into
