@@ -24,11 +24,16 @@ import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  *
- * TODO(danfuzz): Settle what the far side is promised. `Symbol.for()`
- * reconstructs the identical symbol only where the two sides share a global
- * symbol registry, and a decode landing in a realm with a registry of its own
- * produces a distinct symbol with the same key. JSON never faces this, its
- * decode happening wherever it happens with no claim about identity.
+ * **What crosses is internedness**, and that is the whole of the promise: a
+ * decoded symbol is interned under the key the encoded one was interned
+ * under, which is as interned as a symbol on the far side can be.
+ *
+ * Whether it is the *same* symbol is not a question this format answers, and
+ * not because the answer is unfavorable. Comparing two symbols means holding
+ * both in one realm, and a realm boundary is what makes that not generally
+ * arrangeable; whether `Symbol.for()` on the two sides reaches one registry
+ * is a fact about how those realms are related rather than about this format.
+ * A promise resting on it would be a promise about someone else's topology.
  */
 export class SymbolCodec extends BaseTerminalCodec<RealmCodecValue> {
   /** Constructs an instance. */

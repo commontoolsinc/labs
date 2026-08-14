@@ -129,6 +129,24 @@ describe("RealmCodecEngine", () => {
       );
     });
 
+    it("encodes an interned symbol to its registry key", () => {
+      // Cloning refuses every symbol, so this is the one JavaScript primitive
+      // the format has to spell out at all.
+      const payload = realmFromFabricValue(Symbol.for("k") as FabricValue);
+
+      expect((payload as RealmTaggedValue).get("Symbol@1")).toBe("k");
+    });
+
+    it("refuses a unique symbol rather than interning one", () => {
+      // A unique symbol has no key to carry, so there is nothing to encode
+      // that would decode back to it. Coercing one to a registry symbol would
+      // hand the far side a different symbol wearing its description.
+      expect(() => realmFromFabricValue(Symbol("d") as FabricValue))
+        .toThrow(/no applicable codec/);
+      expect(() => realmFromFabricValue(Symbol() as FabricValue))
+        .toThrow(/no applicable codec/);
+    });
+
     it("does not hand out the bytes an encoded `FabricBytes` holds", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
       const state = new Uint8Array(
@@ -379,7 +397,10 @@ describe("RealmCodecEngine", () => {
       expect(report.facts?.negZeroIsNegative).toBe(true);
       expect(report.facts?.nothingPresent).toBe(true);
       // A symbol is the one primitive cloning refuses outright, so this one
-      // crossed through `SymbolCodec` and was re-interned on the far side.
+      // crossed through `SymbolCodec`. Internedness under the same key is the
+      // whole of what the format promises, and so the whole of what is
+      // checked: identity across a realm boundary is not a question it
+      // answers, there being no realm in which both symbols exist to compare.
       expect(report.facts?.symbolIsInterned).toBe(true);
     });
 
