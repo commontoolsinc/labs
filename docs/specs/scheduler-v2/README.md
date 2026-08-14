@@ -713,17 +713,20 @@ Implemented behavior:
   their handler's piece must load asynchronously. The event and any
   handler-result pieces are recorded under the sending transaction's
   speculation lineage.
-- The per-(stream, handler) in-queue backlog is capped
-  (`MAX_EVENT_BACKLOG_PER_STREAM`). At the cap, a minted-id send collapses
-  last-wins into the last pending same-origin entry, so a pattern cannot
-  observe an unbounded post-block event count. Events carrying a
+- The per-(stream, handler) backlog cap (`MAX_EVENT_BACKLOG_PER_STREAM`) is a
+  collapse policy, not a hard ceiling. At the cap, a minted-id send collapses
+  last-wins into the last pending same-origin entry, so a same-origin flood
+  cannot grow an unbounded post-block event count. Events carrying a
   **caller-supplied durable id** are excluded from that merge in both
   directions, because the receipt address derives from the id: at the cap
   such a send coalesces onto an already-queued entry with the same delivery
   id (the same invocation — first payload wins, matching the receipt
   arbitration), and is otherwise refused before dispatch, settling its
   commit callback errored with nothing executed and no receipt created, so
-  the same pair is safe to send again.
+  the same pair is safe to send again. A minted-id send with no safe
+  survivor — the pending entries carry other origins, or durable ids — still
+  enqueues past the cap; whether such an event should instead be refused is
+  an open scheduler-policy question, not something this section decides.
 - A failed origin cancels every undispatched descendant through one terminal
   drop path, settles its internal commit callback exactly once, and stops
   locally started descendant pieces. Same-space descendants additionally carry
