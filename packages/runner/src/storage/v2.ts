@@ -88,6 +88,7 @@ import {
   type EventAppendOutcome,
   EventAppendQueue,
   type EventAppendQueueStore,
+  memoryEventAppendQueueStore,
   type QueuedEventAppend,
 } from "./event-append-queue.ts";
 import * as SubscriptionManager from "./subscription.ts";
@@ -827,7 +828,14 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? {};
     this.#sessionFactory = sessionFactory;
-    this.#eventAppendQueueStore = options.eventAppendQueueStore;
+    // ONE store per manager even in the in-memory default (verdict
+    // blocker, 2026-08-12 / LT9): the store must outlive any single
+    // SpaceReplica, or a provisional-replica replacement hands the new
+    // queue a FRESH private store and the old queue's undischarged user
+    // intents vanish in-process. A host that persists sessions supplies
+    // a durable adapter through the same seam (see Options).
+    this.#eventAppendQueueStore = options.eventAppendQueueStore ??
+      memoryEventAppendQueueStore();
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
     }
@@ -2216,6 +2224,13 @@ class SpaceReplica implements ISpaceReplica {
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
     this.#eventAppendQueueStore = options.eventAppendQueueStore;
+    // Eager queue init (LT9; verdict blocker, 2026-08-12): a persisted
+    // backlog — a dead predecessor's intents in the manager-shared
+    // store, or a durable adapter's reload survivors — must discharge
+    // WITHOUT waiting for a fresh fire. The constructor's load kicks
+    // the drain iff rows exist; an empty load is inert (no session is
+    // established until something discharges).
+    this.#ensureEventAppendQueue();
   }
 
   did(): MemorySpace {

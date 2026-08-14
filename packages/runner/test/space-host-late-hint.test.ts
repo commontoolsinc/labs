@@ -408,6 +408,100 @@ describe("late space host hints", () => {
     }
   });
 
+  it("a provisional-replica replacement preserves queued event intents — the manager-shared store survives the swap (LT9; verdict blocker, 2026-08-12)", async () => {
+    // Pre-fix every EventAppendQueue minted its own private in-memory
+    // store, so the replacement's fresh queue lost the old queue's
+    // undischarged user intents in-process. The manager now owns ONE
+    // store; the replacement replica's eager queue init loads the
+    // backlog and discharges it with no fresh fire.
+    setServerExecutionConfig(true);
+    const signer = await Identity.fromPassphrase("late-hint-queue-preserve");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-queue-preserve-target",
+    )).did();
+    const workingServer = makeServer("late-hint-queue-preserve-hinted");
+    // The FIRST session open fails (the provisional route is dark), so
+    // the queued intent stays undischarged and the route stays
+    // UNMARKED — replacement is still approvable.
+    let sessionAttempts = 0;
+    const factory: SessionFactory = {
+      create: (space, signerArg, mountOptions, signal) => {
+        sessionAttempts += 1;
+        if (sessionAttempts === 1) {
+          return Promise.reject(new Error("provisional host down"));
+        }
+        return new LoopbackSessionFactory(() => workingServer).create(
+          space,
+          signerArg,
+          mountOptions,
+          signal,
+        );
+      },
+    };
+    const manager = TestStorageManager.create(signer, factory);
+    try {
+      const provider = manager.open(targetSpace);
+      const replica = provider.replica as unknown as {
+        enqueueEventAppend(append: {
+          sidecarId: string;
+          stream: { id: string; path: readonly string[] };
+          eventId: string;
+          payload?: unknown;
+        }): Promise<{ delivered: boolean }>;
+        pendingEventAppends(): readonly unknown[];
+      };
+      const stream = { id: "of:preserved-stream", path: [] as string[] };
+      const sidecarId = streamEntriesDocId(stream);
+      const outcome = replica.enqueueEventAppend({
+        sidecarId,
+        stream,
+        eventId: "evt-preserved",
+        payload: { n: 7 },
+      });
+      // The intent is queued (first discharge attempt failing).
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(replica.pendingEventAppends().length).toBe(1);
+      // The late hint replaces the provisional replica (no append ever
+      // ISSUED on the dark route, so the route-write guard permits it).
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(true);
+      await provider.replaceProvisionalReplica();
+      // The REPLACEMENT queue discharges the preserved intent with no
+      // fresh fire; the working host's engine holds the entry.
+      const delivered = await outcome;
+      expect(delivered).toEqual({ delivered: false, refused: "event queue closed" });
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        const doc = await workingServer.readDocument(
+          targetSpace,
+          sidecarId as never,
+        );
+        const entries =
+          ((doc?.value ?? {}) as { entries?: Array<{ eventId?: string }> })
+            .entries ?? [];
+        if (entries.some((entry) => entry.eventId === "evt-preserved")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const doc = await workingServer.readDocument(
+        targetSpace,
+        sidecarId as never,
+      );
+      const entries =
+        ((doc?.value ?? {}) as { entries?: Array<{ eventId?: string }> })
+          .entries ?? [];
+      expect(entries.some((entry) => entry.eventId === "evt-preserved"))
+        .toBe(true);
+    } finally {
+      resetServerExecutionConfig();
+      await manager.close();
+      await workingServer.close();
+    }
+  });
+
   it("rejects a provisional transaction when the hint arrives during commit", async () => {
     const signer = await Identity.fromPassphrase(
       "late-hint-committing-transaction",
