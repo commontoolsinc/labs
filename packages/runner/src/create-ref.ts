@@ -137,7 +137,7 @@ export function createRef(
     // A _nullish_ form leaves the value in place, which is what the `??` is
     // for -- a value carrying no form at all needs no fallback, since that
     // answer is the value already. `CellImpl` is the one implementation that
-    // answers nullish, doing so for a cell whose link is not built yet, and the
+    // returns nullish, doing so for a cell whose link is not built yet, and the
     // branches below need that cell rather than the `null`: one of them builds
     // the link.
     obj = encodableFormOf(obj) ?? obj;
@@ -186,7 +186,7 @@ export function createRef(
       );
     } else if (typeof obj === "function") return obj.toString();
     // A primitive reaches here only as an encodable FORM, the reassignment above
-    // having replaced the value it came from -- a primitive INPUT is answered at
+    // having replaced the value it came from -- a primitive INPUT is handled at
     // the top of the walk. A form is its own preimage, and stringifying one
     // would make the form `7` and the form `"7"` name a single document.
     else return obj;

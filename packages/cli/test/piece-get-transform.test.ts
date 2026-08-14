@@ -1950,7 +1950,7 @@ describe("cf piece get transforms", () => {
     );
   });
 
-  it("answers an unset declared array with no addresses rather than a refusal", async () => {
+  it("returns no addresses for an unset declared array rather than refusing", async () => {
     // An unset declared array is the empty array under the runner's map
     // semantics, and the unmarked spelling already answers `[]`. A marked one
     // must agree: refusing here would tell a caller its piece is malformed
@@ -3222,7 +3222,7 @@ describe("cf piece get transforms", () => {
       return { value, cell: outputCell!.getAsNormalizedFullLink().id };
     }
 
-    it("answers the repeat from the cell the first read set up", async () => {
+    it("returns the repeat from the cell the first read set up", async () => {
       const source = await seededSource(runtime, "repeat-identical-source", [
         { id: 1, title: "First" },
         { id: 2, title: "Second" },
@@ -3239,7 +3239,7 @@ describe("cf piece get transforms", () => {
       expect(second.cell).toBe(first.cell);
     });
 
-    it("answers the repeat with a source change made between the reads", async () => {
+    it("returns the repeat with a source change made between the reads", async () => {
       const source = await seededSource(runtime, "repeat-restated-source", [
         { id: 1, title: "First" },
       ]);
@@ -3262,7 +3262,7 @@ describe("cf piece get transforms", () => {
       expect(second.cell).toBe(first.cell);
     });
 
-    it("answers each differing selection from its own cell", async () => {
+    it("returns each differing selection from its own cell", async () => {
       const source = await seededSource(runtime, "repeat-distinct-source", [
         { id: 1, title: "First" },
         { id: 2, title: "Second" },
@@ -3300,7 +3300,7 @@ describe("cf piece get transforms", () => {
       expect(repeat.cell).toBe(ids.cell);
     });
 
-    it("answers a repeat whose source changed root kind between the reads", async () => {
+    it("returns a repeat whose source changed root kind between the reads", async () => {
       // A source whose schema names no root kind has its array-ness read off
       // the value, and the projection's shape follows it. So the two reads
       // below ask the same thing of two different shapes, and answering the
@@ -3327,7 +3327,7 @@ describe("cf piece get transforms", () => {
         .toEqual({ id: 9 });
     });
 
-    it("answers a second runtime's identical read over the same session", async () => {
+    it("returns a second runtime's identical read over the same session", async () => {
       const source = await seededSource(runtime, "repeat-two-hosts-source", [
         { id: 1, title: "First" },
       ]);

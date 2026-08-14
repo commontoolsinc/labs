@@ -591,8 +591,8 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
       if (converted === undefined) {
         // Nothing under here rebound, so hand back the original.
         // `noteDerivedCopy()` is skipped deliberately: it no-ops when copy and
-        // original are the same value, and `resolveOriginal()` already answers
-        // with the original.
+        // original are the same value, and `resolveOriginal()` already returns
+        // the original.
         return binding;
       }
       // Carry the derivation link (trust + content-addressed entry ref) onto

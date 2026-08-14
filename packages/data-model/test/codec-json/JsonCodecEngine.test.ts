@@ -1320,7 +1320,7 @@ describe("JsonCodecEngine", () => {
           expect(Object.getPrototypeOf(nested)).toBe(Object.prototype);
 
           // The payload reached nobody: not the decoded records, and not the
-          // shared prototype every object in the process answers through.
+          // shared prototype every object in the process inherits from.
           expect(
             (Object.prototype as Record<string, unknown>).hostile,
           ).toBe(undefined);

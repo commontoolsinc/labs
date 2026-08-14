@@ -108,7 +108,7 @@ carrier: explicit source provenance travels with it. For an unstamped non-root
 piece, its verified source-doc closure supplies the authored entry path — but
 only a path under the patterns route is admitted, since a module's name equals
 its route only for a program compiled over HTTP. The runtime persists the
-`system:` ref that path spells, and only after the matching `?identity` route
+`system:` ref that path denotes, and only after the matching `?identity` route
 succeeds.
 
 ## The implemented specialized model

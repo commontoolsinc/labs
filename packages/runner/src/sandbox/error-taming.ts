@@ -21,7 +21,7 @@
  * We restore the genuine intrinsic rather than polyfill it. Captured at module
  * evaluation (before any lockdown), it is a pure predicate over the
  * `[[ErrorData]]` internal slot: no powers to withhold, no realm affinity, and
- * it answers correctly for the tamed constructors' instances because those are
+ * it is correct for the tamed constructors' instances because those are
  * still constructed from the original `Error`.
  *
  * Two consequences to be aware of:

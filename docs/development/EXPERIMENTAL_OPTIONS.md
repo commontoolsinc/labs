@@ -668,6 +668,15 @@ the per-epic implementation notes).
   on FIFO arrival) would otherwise have had to re-discover the hazard. It had
   also never shown a measured win: neutral on lunch-poll (safe but no win,
   because the staleness is only knowable on the server, not locally).
+- **What feeds it changed.** The stale floors `preempt` reads are recorded from
+  server conflict verdicts, so they only cover commits that were actually sent.
+  A commit refused before the wire for naming an already-rejected optimistic
+  layer records none. That removes a population of floors that used to exist: a
+  "pending dependency not resolved" verdict says nothing about the versions of
+  the identifiers the commit read or wrote, so the floor it recorded was
+  spurious and pre-empted commits on evidence it did not have. Anyone
+  re-measuring `preempt` is measuring against a smaller and more accurate set of
+  floors than the numbers below were taken on.
 - **Current default and planned end state.** `off` by default. `preempt` was
   measured net-negative on the lunch-poll workload (it pre-empted commits that
   would have succeeded). The code comment warns not to enable it without

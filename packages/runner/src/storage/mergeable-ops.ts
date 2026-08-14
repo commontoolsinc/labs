@@ -411,7 +411,7 @@ export const foldMergeableIntent = (
  * payload is `array.slice(tailStart)`, so it holds whatever those elements
  * contain, however deep. An `increment` sends a number and a `remove-by-value`
  * sends the element it removes, neither of which contains another intent's
- * target, so both answer `false`.
+ * target, so both return `false`.
  *
  * This is what makes two intents on one document mutually exclusive. An intent
  * inside another op's payload has ALREADY had its change applied by that op — the

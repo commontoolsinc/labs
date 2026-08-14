@@ -34,8 +34,8 @@ import {
  * containing a `var` own key in any other arrangement (extra keys, non-string
  * value, empty string) matches nothing — never silently degrading to literal
  * matching, in either direction (a pattern cannot literally match atom data
- * that happens to spell `{var: …}`, and a malformed placeholder cannot match
- * anything at all).
+ * that happens to look like `{var: …}`, and a malformed placeholder cannot
+ * match anything at all).
  *
  * Bindings are unification-style: the same variable name recurring anywhere
  * across one match (or across patterns in a conjunction) must bind

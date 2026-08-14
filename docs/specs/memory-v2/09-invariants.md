@@ -204,17 +204,24 @@ argument and the `SkipLayers` refinement that would bring it in scope.
 ### INV-4 — Cascade totality
 
 > If a pending commit is rejected, every commit whose recorded dependency set
-> names it is also rejected (server side), and every queued or in-flight
-> commit naming it is dropped before its verdict arrives (client mirror).
-> Combined with INV-3(a), no commit built on a rejected layer's optimistic
-> value is ever durably accepted.
+> names it is also rejected (server side), and no commit naming it is left
+> standing on the client: one already queued or in flight is dropped before
+> its verdict arrives, and one minted after the rejection is refused before
+> it is sent. Combined with INV-3(a), no commit built on a rejected layer's
+> optimistic value is ever durably accepted.
+
+The client mirror has to cover both halves because a rejected layer outlives
+its verdict: the drop waits for the conflict's read repair, and the layer is
+visible to dependency recording for that whole window. Covering only the
+drop leaves every commit minted during the repair to be sent and refused by
+the server, one round trip each.
 
 Note the division of labor: the cascade mechanism is only as good as the
 dependency sets it walks (INV-3). A complete cascade over incomplete
 dependencies still admits phantoms.
 
 Layer: server (`resolvePendingReads` rejection path); client drop cascade
-(`packages/runner/src/storage/v2.ts`).
+and pre-send refusal (`packages/runner/src/storage/v2.ts`).
 
 Soundness direction: MAY drop commits that name a rejected layer they did
 not semantically depend on (over-coupling, a wasted retry); MUST NOT leave a

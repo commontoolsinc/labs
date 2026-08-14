@@ -63,7 +63,7 @@ describe("flattenBuilderArtifacts()", () => {
   });
 
   it("leaves a value it did not copy out of the side table", () => {
-    // Nothing was replaced, so the value is answered by identity and is its
+    // Nothing was replaced, so the value is returned by identity and is its
     // own original -- not a derivation of anything.
     const value = { a: 1, b: { c: [1, 2, 3] } };
     expect(flattenBuilderArtifacts(value)).toBe(value);

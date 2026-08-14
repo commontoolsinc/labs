@@ -82,7 +82,7 @@ describe("noteDerivedCopy trust carry", () => {
   });
 
   it("records nothing for a value derived from itself", () => {
-    // A walk answers an unchanged subtree by identity, so a caller can reach
+    // A walk returns an unchanged subtree by identity, so a caller can reach
     // here with one object for both sides. Recording that would make the
     // value its own ancestor.
     const value = brandTrustedPattern(patternShape());

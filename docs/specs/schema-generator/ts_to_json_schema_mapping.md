@@ -180,7 +180,7 @@ Whether a type gets a name is decided by `getNamedTypeKey`
 sets — not the short name list in the README. A type is *excluded* when any of
 these holds:
 
-- the type **node** spells a wrapper: `Default`, `Cell`, `Writable`,
+- the type **node** names a wrapper: `Default`, `Cell`, `Writable`,
   `ReadonlyCell`, `WriteonlyCell`, `ComparableCell`, `OpaqueCell`, `Stream`,
   `SqliteDb` (name sets `CELL_LIKE_WRAPPER_NAMES` / `OPAQUE_WRAPPER_NAMES`;
   `Reactive` is *not* excluded on the node axis);

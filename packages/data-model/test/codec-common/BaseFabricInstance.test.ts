@@ -1,6 +1,6 @@
 /**
- * The clone template methods, and exactly when one may answer with the
- * instance it was given rather than a new one.
+ * The clone template methods, and exactly when one may return the instance it
+ * was given rather than a new one.
  *
  * Identity comes back only where it is indistinguishable from a fresh copy,
  * which is a narrower condition than it first looks. A shallow clone may

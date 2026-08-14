@@ -362,9 +362,9 @@ function createViewProxy<T>(
     get: (target, prop, receiver) => {
       // Promise adoption probes `then` on every value it receives, so a view
       // that refuses the probe cannot cross a promise boundary at all — and a
-      // lift's result crosses one by construction. A finished view answers it
-      // with `undefined`, which is what a live one answers for a value with no
-      // `then`; every other property still refuses.
+      // lift's result crosses one by construction. A finished view returns
+      // `undefined` for it, which is what a live one returns for a value
+      // with no `then`; every other property still refuses.
       if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
       if (Array.isArray(value) && prop === "length") {
         const current = readTx().readValueOrThrow(link) as typeof value;
@@ -755,7 +755,7 @@ function createViewProxy<T>(
         link,
         SHAPE_READ,
       ) as typeof value;
-      // `Object.hasOwn`, not `in`: this trap answers about OWN properties, and
+      // `Object.hasOwn`, not `in`: this trap reports on OWN properties, and
       // `in` walks the prototype chain. Because the underlying value is an
       // ordinary `Object.prototype`-rooted record, `in` reported every member of
       // `Object.prototype` -- `toString`, `valueOf`, `constructor`, `__proto__`
