@@ -12,6 +12,7 @@ import {
   pattern,
   type PerSession,
   type PerUser,
+  type ReadonlyCell,
   SELF,
   Stream,
   UI,
@@ -99,19 +100,6 @@ export interface AddLinkResult {
   link: TopicLink;
 }
 
-export interface MentionResult {
-  /** The key this mention was recorded under, local to this topic. A caller
-   * needs it to retract exactly this mention rather than every one pointing at
-   * the same piece. */
-  key: string;
-}
-
-export interface UnmentionResult {
-  /** The keys that were removed — plural, because the same piece may have been
-   * referenced from more than one place in the prose. */
-  keys: string[];
-}
-
 export interface SetBodyResult {
   /** The body as persisted — verbatim, so a caller can confirm that
    * whitespace-sensitive Markdown survived the round trip. */
@@ -177,10 +165,23 @@ export interface TopicInput {
    * under a different default than its input carries cannot be materialized. */
   // deno-lint-ignore ban-types
   references?: Writable<TopicMentionRefMap | Default<{}>>;
+  /** Pieces this topic references outside its prose — what `mention` records.
+   *
+   * Its own list rather than an entry in `references`, because that map belongs
+   * to the body editor: the editor mints its keys, rewrites its labels, and
+   * collects entries whose token has left the document. A verb writing there
+   * would be writing into somebody else's bookkeeping. Here there is nothing to
+   * key by, because there is nothing to point back at from the prose — a
+   * reference outside a sentence is just a link in a list. */
+  mentioned?: Writable<unknown[] | Default<[]>>;
   /** The board's mention pivot, one row per topic. A topic reads its own row
    * out of it and nothing else; see `backlinksOf`. Absent, a topic simply shows
-   * no inbound references. */
-  boardCrossrefs?: Writable<TopicCrossrefRow[] | Default<[]>>;
+   * no inbound references.
+   *
+   * Readable, not writable: the pivot is the board's derivation, and a topic
+   * has no business writing into it. Declaring the narrower cell says so where
+   * a reader can see it, rather than leaving it to convention. */
+  boardCrossrefs?: ReadonlyCell<TopicCrossrefRow[] | Default<[]>>;
 }
 
 /**
@@ -300,9 +301,11 @@ export interface TopicPiece extends TopicSummary {
    * materializes against. */
   mentions: unknown[] | Default<[]>;
   /** Where this topic's `[Label][key]` mentions point. Durable content, like
-   * `links` — the editor writes it, and it is what `mentions` is derived from. */
+   * `links`. Written by the body editor; this pattern only ever reads it. */
   // deno-lint-ignore ban-types
-  references: TopicMentionRefMap | Default<{}>;
+  references: TopicMentionRefMap | Default<{}> | undefined;
+  /** Pieces referenced outside the prose, recorded by `mention`. */
+  mentioned: unknown[] | Default<[]> | undefined;
   /** The topics that mention this one, read out of the board's pivot.
    *
    * Declared through `TopicSummary` rather than `TopicPiece`, and that is
@@ -325,8 +328,8 @@ export interface TopicPiece extends TopicSummary {
    * neither, and a required property it cannot produce refuses its update
    * outright. The older verbs predate every deployed generation, so they can
    * stay required; these cannot. */
-  mention?: Stream<MentionEvent, MentionResult>;
-  unmention?: Stream<UnmentionEvent, UnmentionResult>;
+  mention?: Stream<MentionEvent>;
+  unmention?: Stream<UnmentionEvent>;
 }
 
 /** The complete result available when a Topic is instantiated directly. */
@@ -452,29 +455,6 @@ export const topicAuthorLabel = (
  * text), since stored data may predate the write guard. */
 export const isSafeLinkUrl = (url: string): boolean =>
   /^https?:\/\//i.test((url ?? "").trim());
-
-/**
- * The map key a destination gets, derived from the destination itself.
- *
- * Eight characters over `[0-9a-z]`, which is inside the `{6,10}` shape
- * `cf-code-editor` parses, taken from the destination's own fid payload —
- * base64url folded to lower case with the two non-base36 characters dropped.
- *
- * Derived rather than allocated, and that is what makes it safe under
- * concurrency. Counting to the lowest free key is reproducible within one
- * retried transaction but not across writers: two agents mentioning different
- * pieces at the same moment both see the same free key, both take it, and one
- * write lands on top of the other. Keyed by the destination, two writers
- * referencing DIFFERENT pieces cannot collide, and two referencing the SAME
- * piece write the same key with the same value, which merges instead of
- * clobbering — and says the true thing, that one topic mentioning another twice
- * is one edge.
- *
- * The payload is 43 characters of hash, so eight base36 characters of it carry
- * far more separation than a board will ever need.
- */
-export const mentionKeyFor = (fidPayloadOfDestination: string): string =>
-  fidPayloadOfDestination.toLowerCase().replace(/[^0-9a-z]/g, "").slice(0, 8);
 
 /** The payload of a `fid1:…` tagged hash string; "" for anything else. The
  * length floor is what distinguishes a real address (43 chars of base64url
@@ -623,8 +603,10 @@ export const submitProfileLink = handler<void, {
  */
 const backlinksOf = lift((
   { table, self }: {
-    table: { topic: unknown; mentionedBy: unknown[] }[] | Default<[]>;
-    self: unknown;
+    table:
+      | { topic: ComparableCell<unknown>; mentionedBy: unknown[] }[]
+      | Default<[]>;
+    self: ComparableCell<unknown>;
   },
 ): TopicSummary[] =>
   // `filter` + `flatMap` rather than `find`, so a topic with no row on the
@@ -632,7 +614,7 @@ const backlinksOf = lift((
   // expression instead of from a `?? []` bolted onto a miss. At most one row
   // matches: rows are keyed by the topic they describe.
   table
-    .filter((row) => equals(self as object, row.topic as object))
+    .filter((row) => equals(self, row.topic))
     .flatMap((row) => row.mentionedBy) as TopicSummary[]
 );
 
@@ -649,14 +631,19 @@ const backlinksOf = lift((
  * link stays an ordinary web link.
  */
 const mentionsOf = lift((
-  { references, linkTargets }: {
+  { references, mentioned, linkTargets }: {
     // deno-lint-ignore ban-types
     references: Record<string, { destination: unknown }> | Default<{}>;
+    mentioned: unknown[] | Default<[]>;
     linkTargets: { cell?: unknown; pending?: boolean }[] | Default<[]>;
   },
 ): unknown[] =>
   [
+    // Three places a reference can come from, and only the last two are this
+    // pattern's to write: the body editor's map, the `mention` verb's list,
+    // and a link whose URL named a piece.
     ...Object.values(references).map((ref) => ref?.destination),
+    ...mentioned,
     ...linkTargets.map((resolution) => resolution?.cell),
   ].filter((destination) => destination !== undefined && destination !== null)
 );
@@ -709,6 +696,7 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedAt,
       mentionable,
       references,
+      mentioned,
       boardCrossrefs,
       [SELF]: self,
     },
@@ -818,54 +806,31 @@ export default pattern<TopicInput, TopicOutput>(
      * only collects keys it saw when the document loaded or minted itself, so a
      * key that arrived from elsewhere is kept.
      */
-    const mention = action<MentionEvent, MentionResult>(({ topic }) => {
+    const mention = action<MentionEvent>(({ topic }) => {
       if (!topic) rejectMutation("mention", "topic must be a reference");
-      // deno-lint-ignore no-explicit-any
-      const entity = (topic as any).resolveAsCell?.()?.entityId;
-      const payload = entity ? fidPayload(entityRefToString(entity)) : "";
-      // A destination with no resolved identity yet cannot be compared against
-      // anything, so it could never become an edge. Rejecting says so, rather
-      // than storing a reference that silently means nothing.
-      if (!payload) {
-        rejectMutation("mention", "topic has no resolved identity yet");
-      }
-      const key = mentionKeyFor(payload);
-      // Written ONE KEY AT A TIME, never by setting a rebuilt copy of the map.
-      // Two reasons, and both matter. A blind write of a snapshot takes any
-      // entry that arrived between the read and the write down with it. And
-      // rebuilding the object flattens every destination it carries over: a
-      // cell survives being stored, but a read of one resolves to a plain
-      // object, so the rewritten map holds inlined copies — and a copy is equal
-      // to nothing, so those references stop being edges.
-      references.key(key).set({ destination: topic, modifiedTitle: false });
-      return { key };
+      // A mergeable append, like every other list this pattern writes:
+      // concurrent mentions from different people all land. Nothing is minted
+      // and nothing is deduplicated — two entries naming one piece are one edge
+      // to the board's pivot, which asks whether ANY mention names a topic.
+      mentioned.push(topic);
     });
 
     /**
-     * Stop referencing a piece — every mention of it, since the same piece may
-     * be referenced from more than one place.
+     * Stop referencing a piece — every entry naming it, since a caller means
+     * "not that one" rather than "not that one particular append".
      *
-     * Matched by `equals`, which resolves both sides to what they point at, so
-     * a caller passing the piece finds the entry whichever way that entry's
-     * link was written.
+     * Each slot is cleared where it sits. Rebuilding the list and setting it
+     * back would carry every survivor through a read, and a read of a
+     * reference resolves it to a plain object — flattening the links that make
+     * the remaining mentions edges at all.
      */
-    const unmention = action<UnmentionEvent, UnmentionResult>(({ topic }) => {
+    const unmention = action<UnmentionEvent>(({ topic }) => {
       if (!topic) rejectMutation("unmention", "topic must be a reference");
-      const current = (references.get() ?? {}) as TopicMentionRefMap;
-      // Compared through the cell at each destination, not through the value
-      // the map read gave back. A link read out of a field nested in an object
-      // resolves to a plain object, which leaves `equals` nothing to follow;
-      // addressing the field keeps the link intact.
-      const keys = Object.keys(current).filter((key) =>
-        equals(topic as object, references.key(key).key("destination"))
-      );
-      // Removed ONE KEY AT A TIME, for the same reason `mention` writes that
-      // way. Rebuilding the map from `references.get()` and setting it back
-      // would carry every surviving entry through a read — flattening its
-      // destination into a plain object and quietly retracting those mentions
-      // too, which is the opposite of what a caller asked for.
-      for (const key of keys) references.key(key).set(undefined);
-      return { keys };
+      const count = mentioned.get().length;
+      for (let at = 0; at < count; at++) {
+        const slot = mentioned.key(at);
+        if (equals(topic, slot)) slot.set(undefined);
+      }
     });
 
     // --- UI-side actions (close over session drafts) ---
@@ -1213,7 +1178,7 @@ export default pattern<TopicInput, TopicOutput>(
     // Outbound: what this topic points at. Only this half depends on the
     // topic's own content, which is what keeps the board's join reading one
     // small list per topic.
-    const mentions = mentionsOf({ references, linkTargets });
+    const mentions = mentionsOf({ references, mentioned, linkTargets });
 
     return {
       [NAME]: topicName,
@@ -1230,6 +1195,7 @@ export default pattern<TopicInput, TopicOutput>(
       commentCount,
       lastActivityAt,
       references,
+      mentioned,
       mentions,
       referencedBy,
       addComment,

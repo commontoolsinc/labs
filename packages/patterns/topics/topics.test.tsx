@@ -32,8 +32,6 @@ import Topic, {
   fidPayload,
   isSafeLinkUrl,
   type MentionEvent,
-  mentionKeyFor,
-  type MentionResult,
   saveProfileBody,
   type SetBodyResult,
   snippet,
@@ -47,7 +45,6 @@ import Topic, {
   type TopicMentionRefMap,
   type TopicSummary,
   type UnmentionEvent,
-  type UnmentionResult,
   whenLabel,
 } from "./topic.tsx";
 
@@ -128,8 +125,8 @@ interface LegacyUnsignedTopicOutput {
     AddLinkResult
   >;
   setBody: Stream<{ body: string }, SetBodyResult>;
-  mention: Stream<MentionEvent, MentionResult>;
-  unmention: Stream<UnmentionEvent, UnmentionResult>;
+  mention: Stream<MentionEvent>;
+  unmention: Stream<UnmentionEvent>;
 }
 
 const LegacyUnsignedTopic = pattern<
@@ -148,10 +145,8 @@ const LegacyUnsignedTopic = pattern<
   const setBody = action<{ body: string }, SetBodyResult>((event) => ({
     body: event.body,
   }));
-  const mention = action<MentionEvent, MentionResult>(() => ({ key: "" }));
-  const unmention = action<UnmentionEvent, UnmentionResult>(() => ({
-    keys: [],
-  }));
+  const mention = action<MentionEvent>(() => {});
+  const unmention = action<UnmentionEvent>(() => {});
   return {
     [NAME]: undefined,
     title: "Legacy unsigned sibling",
@@ -172,6 +167,7 @@ const LegacyUnsignedTopic = pattern<
     // and current list validation has to survive it.
     mentions: undefined,
     references: undefined,
+    mentioned: undefined,
     referencedBy: undefined,
     commentCount: undefined,
     lastActivityAt: undefined,
@@ -735,21 +731,6 @@ export default pattern(() => {
     (directTopic.referencedBy ?? []).length === 0
   );
 
-  // The key a destination gets, derived from the destination rather than
-  // allocated: the same piece always yields the same key — so two writers
-  // referencing it merge instead of clobbering — and the result stays inside
-  // the `[0-9a-z]{6,10}` shape the editor parses.
-  const P = "A".repeat(43);
-  const assert_mention_keys = assert(() =>
-    mentionKeyFor(P) === "aaaaaaaa" &&
-    mentionKeyFor(P) === mentionKeyFor(P) &&
-    mentionKeyFor("B".repeat(43)) !== mentionKeyFor(P) &&
-    // base64url carries two characters base36 does not; they drop out rather
-    // than producing a key the editor's parser would refuse.
-    /^[0-9a-z]{8}$/.test(mentionKeyFor("-_aB3-_9zQ_-xY")) &&
-    mentionKeyFor("") === ""
-  );
-
   // The case that makes per-key writes matter: two mentions, one retracted.
   // Rebuilding the map from a read would carry the survivor through a resolve
   // and flatten its destination, silently retracting it too.
@@ -863,7 +844,6 @@ export default pattern(() => {
       { action: action_source_retracts_mention },
       { assertion: assert_reference_retracted },
       { assertion: assert_boardless_topic_has_no_backlinks },
-      { assertion: assert_mention_keys },
       { action: action_source_mentions_both },
       { assertion: assert_two_mentions },
       { action: action_retract_one_of_two },
