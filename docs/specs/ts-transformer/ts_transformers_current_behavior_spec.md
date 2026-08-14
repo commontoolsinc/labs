@@ -1525,7 +1525,10 @@ first then module scope) to an applied handler factory that:
    doing its job, not wrapping a UI.
 
 Every hop that does not match leaves the property unmarked — the mark fails
-open. The companion mark `deprecated: true` is produced in the schema
+open. Property names are read statically throughout — identifier and
+string-literal spellings alike, in the inference and the schema mutation both
+— and a computed name is never inferred. The companion mark
+`deprecated: true` is produced in the schema
 generator itself (`@deprecated` JSDoc on a stream-valued property,
 `packages/schema-generator/src/doc-utils.ts`), and both keys are classified
 annotation-class in the piece compat checker so they add and remove freely
