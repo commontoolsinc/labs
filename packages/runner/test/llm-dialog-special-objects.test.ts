@@ -1,9 +1,11 @@
-// The two walks in `llm-dialog.ts` that carry a `FabricValue` give the two
-// special-object kinds opposite treatment, and neither is the object branch. A
-// `FabricPrimitive` is a leaf and stands whole, where a walk that rebuilt it
-// from its entries would hand the model a bare `{}`. A `FabricInstance` is a
-// container reached by its codec contents, which neither walk can do, so each
-// refuses rather than flattening one.
+/**
+ * The two walks in `llm-dialog.ts` that carry a `FabricValue` give the two
+ * special-object kinds opposite treatment, and neither is the object branch. A
+ * `FabricPrimitive` is a leaf and stands whole, where a walk that rebuilt it
+ * from its entries would hand the model a bare `{}`. A `FabricInstance` is a
+ * container reached by its codec contents, which neither walk can do, so each
+ * refuses rather than flattening one.
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

@@ -1,6 +1,25 @@
 import { isDeno } from "@commonfabric/utils/env";
 import { ProgramResolver, Source } from "./interface.ts";
-import { dirname, join, normalize } from "@std/path/posix";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  relative,
+  SEPARATOR,
+} from "@std/path";
+
+function isOutsideRoot(relativePath: string): boolean {
+  return relativePath === ".." || relativePath.startsWith(`..${SEPARATOR}`) ||
+    isAbsolute(relativePath);
+}
+
+function groundedSourceName(relativePath: string): string {
+  const portablePath = SEPARATOR === "/"
+    ? relativePath
+    : relativePath.replaceAll(SEPARATOR, "/");
+  return `/${portablePath}`;
+}
 
 export class InMemoryProgram implements ProgramResolver {
   private modules: Record<string, string>;
@@ -12,7 +31,7 @@ export class InMemoryProgram implements ProgramResolver {
 
   main(): Promise<Source> {
     const main = this.modules[this._main];
-    if (!main) {
+    if (main === undefined) {
       throw new Error(`${this._main} not in modules.`);
     }
     return Promise.resolve({ name: this._main, contents: main });
@@ -20,7 +39,7 @@ export class InMemoryProgram implements ProgramResolver {
 
   resolveSource(identifier: string): Promise<Source | undefined> {
     const contents = this.modules[identifier];
-    if (!contents) return Promise.resolve(undefined);
+    if (contents === undefined) return Promise.resolve(undefined);
     return Promise.resolve({ contents, name: identifier });
   }
 }
@@ -29,17 +48,27 @@ export class InMemoryProgram implements ProgramResolver {
 // Deno-only.
 export class FileSystemProgramResolver implements ProgramResolver {
   private fsRoot: string;
+  private realFsRoot: string;
   private _main: Source;
   constructor(mainPath: string, rootPath?: string) {
-    this.fsRoot = rootPath ? normalize(rootPath) : dirname(mainPath);
-    if (rootPath && !mainPath.startsWith(this.fsRoot)) {
+    this.fsRoot = normalize(rootPath ?? dirname(mainPath));
+    const normalizedMainPath = normalize(mainPath);
+    const relativeMainPath = relative(this.fsRoot, normalizedMainPath);
+    if (rootPath && isOutsideRoot(relativeMainPath)) {
+      throw new Error(
+        `Main file "${mainPath}" must be within root directory "${this.fsRoot}".`,
+      );
+    }
+    this.realFsRoot = this.#realPath(this.fsRoot);
+    const realMainPath = this.#realPath(normalizedMainPath);
+    if (isOutsideRoot(relative(this.realFsRoot, realMainPath))) {
       throw new Error(
         `Main file "${mainPath}" must be within root directory "${this.fsRoot}".`,
       );
     }
     this._main = {
-      name: mainPath.substring(this.fsRoot.length),
-      contents: this.#readFile(mainPath),
+      name: groundedSourceName(relativeMainPath),
+      contents: this.#readFile(realMainPath),
     };
   }
 
@@ -52,18 +81,35 @@ export class FileSystemProgramResolver implements ProgramResolver {
       return Promise.resolve(undefined);
     }
     const absPath = normalize(
-      join(this.fsRoot, specifier.substring(1, specifier.length)),
+      join(
+        this.fsRoot,
+        specifier.substring(1, specifier.length).replaceAll("/", SEPARATOR),
+      ),
     );
-    // Ensure the resolved path stays within fsRoot
-    if (!absPath.startsWith(this.fsRoot + "/") && absPath !== this.fsRoot) {
+    if (isOutsideRoot(relative(this.fsRoot, absPath))) {
+      throw new Error(
+        `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+      );
+    }
+    const realPath = this.#realPath(absPath);
+    if (isOutsideRoot(relative(this.realFsRoot, realPath))) {
       throw new Error(
         `Import "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
       );
     }
     return Promise.resolve({
       name: specifier,
-      contents: this.#readFile(absPath),
+      contents: this.#readFile(realPath),
     });
+  }
+
+  #realPath(path: string): string {
+    if (!isDeno()) {
+      throw new Error(
+        "FileSystemProgramResolver is not supported in this environment.",
+      );
+    }
+    return Deno.realPathSync(path);
   }
 
   #readFile(path: string): string {

@@ -14,6 +14,7 @@ export {
   classifyArrayMethodResultSinkCall,
   classifyArrayMethodResultSinkReceiverChainCall,
   classifyWildcardTraversalCall,
+  declaredVerbResultTypeNode,
   detectCallKind,
   detectDirectBuilderCall,
   detectNewExpressionKind,
@@ -33,6 +34,7 @@ export {
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,
   isWildcardTraversalCall,
+  type VerbBuilderName,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {

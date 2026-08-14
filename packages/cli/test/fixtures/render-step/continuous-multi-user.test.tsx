@@ -1,8 +1,10 @@
 import {
   action,
+  assert,
   computed,
   multiUserTest,
   pattern,
+  TESTS,
   UI,
   Writable,
 } from "commonfabric";
@@ -20,11 +22,11 @@ const alice = pattern(() => {
       )}
     </div>
   );
-  const isLate = computed(() => phase.get() === "late");
+  const isLate = assert(() => phase.get() === "late");
 
   return {
     [UI]: view,
-    tests: [
+    [TESTS]: [
       { action: advance },
       { assertion: isLate },
     ],

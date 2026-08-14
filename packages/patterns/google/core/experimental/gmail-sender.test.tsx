@@ -5,7 +5,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/gmail-sender.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import {
   findElementByText,
   propsOf,
@@ -66,7 +66,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_result_initially_empty },
       { assertion: assert_review_button_disabled_without_auth },
       { action: action_open_confirmation },

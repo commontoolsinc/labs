@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export class AssertionError<A, E> extends Error {
   actual: A | undefined;
@@ -45,7 +45,7 @@ export const matchObject = (
   expected: unknown,
   message = "",
 ) => {
-  if (!isRecord(actual) || !isRecord(expected)) {
+  if (!isObjectOrArray(actual) || !isObjectOrArray(expected)) {
     throw new AssertionError({
       message: message || "Both arguments must be objects",
       actual,
@@ -63,7 +63,7 @@ export const matchObject = (
         });
       }
 
-      if (isRecord(expected[key]) && isRecord(actual[key])) {
+      if (isObjectOrArray(expected[key]) && isObjectOrArray(actual[key])) {
         // Recursively check nested objects
         matchObject(actual[key], expected[key], message);
       } else if (actual[key] !== expected[key]) {

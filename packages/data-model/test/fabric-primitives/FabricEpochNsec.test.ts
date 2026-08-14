@@ -1,13 +1,26 @@
+/**
+ * A nanosecond timestamp as a fabric primitive: always frozen, wrapping a
+ * `bigint`, and encoded to a flat base64 string.
+ *
+ * Holding a `bigint` rather than a number is the reason the class exists, so
+ * the cases reach for magnitudes past where a double stops being exact -- a
+ * far-future timestamp as well as pre-epoch ones -- rather than staying near
+ * zero, where any representation would look correct.
+ *
+ * Malformed state decodes to a `ProblematicValue` rather than throwing, and
+ * conversion leaves an instance alone even when asked for something mutable.
+ */
+
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("FabricEpochNsec", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
@@ -55,8 +68,8 @@ describe("FabricEpochNsec", () => {
   });
 
   describe("static members", () => {
-    describe("[CODEC]", () => {
-      const codec = FabricEpochNsec[CODEC];
+    describe("`[JSON_CODEC]`", () => {
+      const codec = FabricEpochNsec[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochNsec;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 

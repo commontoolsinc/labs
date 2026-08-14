@@ -1,8 +1,10 @@
-// Shared interfaces for the tile registry.
-//
-// To add a tile: create a file in tiles/ that exports a `Tile`, then add it to
-// the array in registry.ts (the single registration point). To remove one:
-// delete its line from registry.ts. Nothing else needs to change.
+/**
+ * Declares the contract a tile and the dashboard core hold each other to: the
+ * statuses a tile may report, the render-ready view its `collect()` returns,
+ * the shared context it is handed to gather that view, and the drill-down
+ * routes it may claim. A file under tiles/ becomes a tile by exporting a
+ * `Tile`.
+ */
 
 export type Status = "good" | "warn" | "bad" | "unknown";
 

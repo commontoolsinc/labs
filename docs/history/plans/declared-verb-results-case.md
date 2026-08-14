@@ -1,7 +1,36 @@
+---
+status: historical
+created: 2026-08-10
+archived: 2026-08-10
+reason: "Argument for carrying a verb's declared result on `module.resultSchema` in the interim; decided yes, conditionally, on 2026-08-10."
+---
+
 # What a declared verb result buys
 
+## Outcome
+
+**Decided yes, with a condition, on 2026-08-10** — Bernhard Seefeld, on #5501,
+in reply to the one-page form of this argument:
+
+> If it's easy to add `.resultSchema` now, let's go for it, it's where it'll
+> eventually land. Just wary of that creating more things to chase down, so if
+> that happens, revisit.
+
+Two things travel with that. The timing framing this document argues from is
+confirmed rather than merely accepted — the durable form is where it lands
+eventually, and the question was only whether to wire it before then. And the
+approval is **conditional on the work staying cheap**: if carrying the field
+starts generating follow-on work, the decision is open again rather than
+settled. That condition is a live constraint and belongs with the sequencing,
+not in this record.
+
+The rest of this document is the argument as it stood when the decision was
+made, frozen.
+
+---
+
 The case for the one decision
-[the verbs plan](verbs-implementation.md) says everything else waits behind:
+[the verbs plan](../../plans/verbs-implementation.md) says everything else waits behind:
 **does a verb's declared result reach the runtime now, or only when the
 Fabric-types stream supplies a durable one?**
 
@@ -16,15 +45,15 @@ it will cost to replace, and it costs little to replace precisely because of
 the property that makes it safe.
 
 It is an argument, not a plan — the sequencing lives in the verbs plan, and the
-model lives in [the pattern verb contract](pattern-verb-contract.md) and
-[shaped reads and verb results](shaped-reads-and-verb-results.md).
+model lives in [the pattern verb contract](../../plans/pattern-verb-contract.md) and
+[shaped reads and verb results](../../plans/shaped-reads-and-verb-results.md).
 
 The argument is told as a walkthrough of a session that does not run yet: a
 work-item tracker driven entirely through `cf`, shown twice. Once as it reads
 today, once as it reads with declared results. Nothing separates the two
 except one field.
 
-[A verb session, end to end](../common/verb-session-walkthrough.md) walks that
+[A verb session, end to end](../../common/verb-session-walkthrough.md) walks that
 session in full, marking each step for whether it works today, is built and
 merging, or is blocked. This document takes the one step the decision turns on.
 
@@ -318,7 +347,7 @@ what the paragraph above shows a module field does not trip. So the thing that
 answers the withdrawal is also the thing that makes the swap cheap: there is
 no permanence to unwind.
 
-[Shaped reads](shaped-reads-and-verb-results.md) already records the shape of
+[Shaped reads](../../plans/shaped-reads-and-verb-results.md) already records the shape of
 that swap for the receipt half — when declared result schemas arrive, "the same
 slot takes a better-sourced value — a change to one argument, not a migration."
 The command-surface half is the same story: `callableCommandSpec` reads the
@@ -431,5 +460,5 @@ one.
 
 Declared results make an **output** self-describing. This is about what an
 **input** accepts, and it stays open whichever way the timing question is
-settled. [A verb session, end to end](../common/verb-session-walkthrough.md)
+settled. [A verb session, end to end](../../common/verb-session-walkthrough.md)
 works the case through.

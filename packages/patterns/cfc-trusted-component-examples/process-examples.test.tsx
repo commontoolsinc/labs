@@ -1,4 +1,4 @@
-import { assert, handler, pattern } from "commonfabric";
+import { assert, handler, pattern, TESTS } from "commonfabric";
 import {
   BatchPhotoUploadJobExample,
   CalendarAvailabilityPolicyExample,
@@ -66,7 +66,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: runSong({ suite: song }) },
       { assertion: assert_song_id_only },
       { action: runPolicy({ suite: policy }) },

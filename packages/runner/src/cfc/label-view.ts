@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import {
   isPrimitiveCellLink,
@@ -124,7 +124,7 @@ export const cfcLabelViewForCellWithStatus = (
   cell: unknown,
 ): CfcLabelViewStatus => {
   if (
-    !isRecord(cell) ||
+    !isObjectOrArray(cell) ||
     typeof cell.getAsNormalizedFullLink !== "function"
   ) {
     return { view: getCarriedCfcLabelView(cell), readFailed: false };

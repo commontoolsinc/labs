@@ -53,9 +53,14 @@ ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
+# One session for the whole walkthrough, the way an agent run carries one: an
+# invocation id names an outcome within the session it was chosen in, so the
+# replay in step 7 has to be made from the session its original call was.
+export CF_INVOCATION_SESSION=$($CF invocation-session new)
+
 # A plain-JSON result rides the plainResultReceipts option, on by default.
 # Set it explicitly anyway so the walkthrough asserts the same thing whatever a
-# host's environment carries; step 7 sets it false to show the difference
+# host's environment carries; step 8 sets it false to show the difference
 # against a result carrying a piece, which survives either way.
 export EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true
 
@@ -74,6 +79,35 @@ VERBS=$($CF piece verbs --piece "$BOARD" $ARGS --json 2>/dev/null)
 echo "$VERBS" | jq -r '.verbs[]? | "    " + .name' 2>/dev/null | head -10
 echo "$VERBS" | jq -e '[.verbs[]?.name] | index("createNote")' >/dev/null 2>&1 &&
   ok "createNote is listed" || bad "createNote missing from the verb listing"
+# A declared result rides the listing, so a caller learns the shape of what it
+# will get back WITHOUT calling — the half of verb discovery that makes a call
+# something you can prepare for rather than discover by trying.
+check "note" "$(echo "$VERBS" | jq -r '.verbs[] |
+  select(.name == "createNote") | .outputSchema.properties | keys | join(",")' \
+  2>/dev/null)" "createNote advertises the result it declared"
+check "label,revision" "$(echo "$VERBS" | jq -r '.verbs[] |
+  select(.name == "setLabel") | .outputSchema.properties | keys | join(",")' \
+  2>/dev/null)" "setLabel advertises every field of its declared result"
+# The value-less shape says so by carrying no result at all, rather than an
+# empty one a caller would have to interpret.
+check "false" "$(echo "$VERBS" | jq -r '.verbs[] |
+  select(.name == "touch") | has("outputSchema")' 2>/dev/null)" \
+  "a value-less verb advertises no result"
+
+# The same declaration reaches the page a caller reads before calling ONE verb,
+# where the listing answers for the whole piece. It names where the value
+# arrives — the Invocation JSON's result — because that is what a handler's
+# caller collects rather than stdout.
+HELP=$($CF piece call --piece "$BOARD" $ARGS createNote --help 2>/dev/null)
+check "1" "$(printf '%s\n' "$HELP" | grep -c '^Output:')" \
+  "createNote's help page carries an Output section"
+check "1" "$(printf '%s\n' "$HELP" | grep -c '^    note ')" \
+  "createNote's help page enumerates the result field it declared"
+# And a value-less verb's page carries no Output section at all, the same
+# distinction the listing draws.
+VOID_HELP=$($CF piece call --piece "$BOARD" $ARGS touch --help 2>/dev/null)
+check "0" "$(printf '%s\n' "$VOID_HELP" | grep -c '^Output:')" \
+  "a value-less verb's help page carries no Output section"
 
 step "3. A create hands back the piece it created"
 R=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation create-1 \
@@ -139,8 +173,23 @@ B=$($CF piece call --quiet --piece "$FIRST" $ARGS --invocation append-read \
 check "written at create
 appended through the read" "$(echo "$B" | jq -r '.result.body // empty')" \
   "the address a read returned is one a caller can call"
+# A field list spells the same marker with a trailing @, so one read asks for
+# an address at one position and projects at another. The list is element-wise
+# across an array, so the marked collection answers with one address per note.
+# noteCount is computed, so --step brings it up to date the way step 7 does.
+AT=$($CF piece get --quiet --piece "$BOARD" $ARGS --step \
+  --select 'notes@,noteCount' 2>/dev/null)
+check "true" "$(echo "$AT" | jq -c \
+  '(.notes | length > 0) and ([.notes[] | has("$link")] | all)')" \
+  "a trailing @ on an array returns an address per element"
+check "true" "$(echo "$AT" | jq -c '.noteCount >= 1')" \
+  "and a sibling path projects beside it in the one result"
+# The bare suffix names the position the read is already at.
+ROOT=$($CF piece get --quiet --piece "$BOARD" $ARGS --select '@' 2>/dev/null)
+check "true" "$(echo "$ROOT" | jq -c 'has("$link")')" \
+  "a bare @ returns the read source's own address"
 
-step "7. A replayed invocation id returns the ORIGINAL result"
+step "7. A replayed invocation id returns the ORIGINAL result — in its session"
 # Captured rather than hard-coded: the property is that the replay changes
 # nothing, which stays true however many notes earlier steps created.
 BEFORE=$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)
@@ -152,6 +201,22 @@ check "true" "$(echo "$D" | jq -r '.deduplicated // false')" \
   "the call reports itself deduplicated"
 check "$BEFORE" "$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
   "the replay created no note (count unchanged at $BEFORE)"
+
+# The same word, from another caller. `create-1` is this session's name for
+# its first create, and nothing stops a second agent picking it: that agent is
+# calling for itself, and must get its own call rather than a report that
+# someone else's had settled.
+OTHER=$(CF_INVOCATION_SESSION=$($CF invocation-session new) $CF piece call \
+  --quiet --piece "$BOARD" \
+  $ARGS --invocation create-1 \
+  createNote '{"title":"Another agent"}' 2>/dev/null)
+check "Another agent" "$(echo "$OTHER" | jq -r '.result.note["$NAME"] // empty')" \
+  "the same id in ANOTHER session executes and returns its own result"
+check "false" "$(echo "$OTHER" | jq -r '.deduplicated // false')" \
+  "and does not report itself deduplicated"
+check "$((BEFORE + 1))" \
+  "$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
+  "and created its note, so the write really happened"
 
 step "8. A piece result survives the option being off; a plain record does not"
 P=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF piece call --quiet \
@@ -201,6 +266,22 @@ echo "$OUT" | jq -e '.status' >/dev/null 2>&1 &&
 grep -qE "[0-9]+ *ms" "$ERR" && ok "per-phase timings on stderr" ||
   bad "no timings on stderr"
 sed 's/^/    /' "$ERR" | grep timing | head -5
+
+step "13. An invocation id without a session is refused"
+# The id is the replay handle, and a session minted for this one request
+# would put that id on a different outcome next time — so the call cannot be
+# honored as it was asked, and the refusal says how to ask again.
+NO_SESSION=$(env -u CF_INVOCATION_SESSION $CF piece call --quiet \
+  --piece "$BOARD" $ARGS \
+  --invocation lonely-1 createNote '{"title":"No session"}' 2>&1)
+rc=$?
+check "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "the call exits nonzero"
+echo "$NO_SESSION" | grep -q -- "CF_INVOCATION_SESSION" &&
+  ok "the refusal names CF_INVOCATION_SESSION" ||
+  bad "the refusal does not name CF_INVOCATION_SESSION"
+echo "$NO_SESSION" | grep -q "invocation-session new" &&
+  ok "and the command that mints one" ||
+  bad "the refusal does not say how to mint a session"
 
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed — %ds wall clock\n' "$PASS" "$FAIL" "$ELAPSED"

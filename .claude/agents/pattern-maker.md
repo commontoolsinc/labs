@@ -47,6 +47,10 @@ or changed behavior:
 - User-visible flows that the PR changes
 - Regressions fixed by the PR
 
+Run every authored pattern test with `deno task cf test`. Keep the test entry
+paths with the implementation handoff so the deployment phase can attach every
+entry with repeatable `--test` flags.
+
 ## Updating Existing Code
 
 - Read existing code first
@@ -58,4 +62,5 @@ or changed behavior:
 - Pattern runs without errors
 - Core behavior works (verified by running it)
 - New code and behavior has automated test coverage
+- Every test entry passes and is identified for deployment
 - Ready for user to try

@@ -1,3 +1,15 @@
+/**
+ * The tokenizer boundaries behind `#hashtag` extraction, which is program
+ * output rather than a convenience: `schema-generator`'s doc-comment handling
+ * and the runner's wish builtin both read what this function returns, so a
+ * hashtag written as an aside in a doc comment becomes data downstream.
+ *
+ * Each case fixes a decision the name does not carry -- a token takes in an
+ * underscore but ends at a hyphen, letters outside Latin and their diacritics
+ * count, and results come back lowercased and deduplicated in
+ * first-appearance order.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

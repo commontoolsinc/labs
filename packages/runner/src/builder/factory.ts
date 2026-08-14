@@ -18,6 +18,7 @@ import {
   NAME,
   schema as schemaIdentity,
   SELF,
+  TESTS,
   TILE_UI,
   TYPE,
   UI,
@@ -36,6 +37,7 @@ import {
   lift,
 } from "./module.ts";
 import {
+  cellFromUrl,
   compileAndRun,
   fetchBinary,
   fetchJson,
@@ -207,6 +209,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     generateObject,
     generateText,
     fetchBinary,
+    cellFromUrl,
     fetchText,
     fetchJson,
     fetchJsonUnchecked,
@@ -278,6 +281,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     TILE_UI,
     CHIP_UI,
     FS,
+    TESTS,
 
     // Schema utilities
     schema: runtimeSchema,

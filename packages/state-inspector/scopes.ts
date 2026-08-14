@@ -26,7 +26,11 @@ import type { SpaceDb } from "./db.ts";
 import { resolveScopeKey } from "@commonfabric/memory/v2/engine";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { annotate, summarize } from "./decode.ts";
-import { type EntityDocument, reconstructDocument } from "./reconstruct.ts";
+import {
+  type EntityDocument,
+  reconstructDocument,
+  selectAtPath,
+} from "./reconstruct.ts";
 
 export type ScopeKind = "space" | "user" | "session" | "other";
 
@@ -104,11 +108,19 @@ export function listScopes(
  * sessionId: `[session:X:sid, user:X, space]`; without: `[user:X, space]`.
  * Encoding goes through the engine's `resolveScopeKey`, so the keys are exactly
  * what the runtime writes (no hand-rolled %-encoding to drift).
+ *
+ * @throws {Error} When `identity` or a provided `sessionId` is empty.
  */
 export function resolveScopeChain(
   identity: string,
   sessionId?: string,
 ): string[] {
+  if (identity.length === 0) {
+    throw new Error("`identity` must not be empty.");
+  }
+  if (sessionId !== undefined && sessionId.length === 0) {
+    throw new Error("`sessionId` must not be empty.");
+  }
   const chain: string[] = [];
   if (sessionId) {
     chain.push(
@@ -130,6 +142,12 @@ export interface IdentityValue {
   overrides?: boolean;
   /** Honest reminder this is an approximation, not the runtime read path. */
   approximation: true;
+}
+
+/** An identity view that distinguishes a missing selected path. */
+export interface SelectedIdentityValue extends IdentityValue {
+  /** Whether the requested path exists within the resolved document. */
+  pathExists: boolean;
 }
 
 /**
@@ -161,6 +179,8 @@ function scopeHasEntity(
  * alone, know which declared scope a real read would target, nor follow the
  * base-scope link the runtime uses. Use {@link scopeOverlay} for the ground
  * truth. The `approximation` flag is here so callers can't forget that.
+ *
+ * @throws {Error} When selectors conflict or identity/session values are empty.
  */
 export function valueAsIdentity(
   space: SpaceDb,
@@ -170,8 +190,17 @@ export function valueAsIdentity(
     sessionId?: string;
     branch?: string;
     atSeq?: number;
+    /** Exact path segments within the resolved value. */
+    path?: string[];
+    /** Return the resolved document instead of selecting within its value. */
+    doc?: boolean;
+    /** Maximum depth retained in annotated output. Defaults to eight. */
+    annotationDepth?: number;
   },
-): IdentityValue {
+): SelectedIdentityValue {
+  if (opts.doc && opts.path !== undefined) {
+    throw new Error("`doc` and `path` cannot be used together.");
+  }
   const branch = opts.branch ?? "";
   const chain = resolveScopeChain(opts.identity, opts.sessionId);
   for (let i = 0; i < chain.length; i++) {
@@ -191,16 +220,26 @@ export function valueAsIdentity(
     const overrides = chain
       .slice(i + 1)
       .some((s) => scopeHasEntity(space, opts.id, s, branch, opts.atSeq));
+    const selected = doc === undefined
+      ? { found: false, value: undefined }
+      : opts.doc
+      ? { found: true, value: doc }
+      : Object.hasOwn(doc, "value")
+      ? selectAtPath(doc.value, opts.path ?? [])
+      : { found: false, value: undefined };
     return {
       exists: doc !== undefined,
       resolvedScope: scope,
       resolvedKind: parseScope(scope).kind,
-      value: doc === undefined ? undefined : annotate(doc.value),
+      pathExists: selected.found,
+      value: doc === undefined
+        ? undefined
+        : annotate(selected.value, opts.annotationDepth),
       overrides,
       approximation: true,
     };
   }
-  return { exists: false, approximation: true };
+  return { exists: false, pathExists: false, approximation: true };
 }
 
 export interface Participant {

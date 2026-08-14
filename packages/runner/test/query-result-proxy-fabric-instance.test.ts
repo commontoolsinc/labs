@@ -1,3 +1,16 @@
+/**
+ * A `FabricInstance` holds all of its state in private fields and exposes it
+ * through accessors on its prototype. Reading one through the query-result
+ * proxy has to evaluate the accessor against the instance itself: a private
+ * field is unreachable from the proxy, which does not declare it, so an
+ * accessor run with the proxy as receiver throws outright rather than
+ * returning a wrong answer.
+ *
+ * `FabricError` stands in for the whole tree here because it is the instance a
+ * cell write actually produces -- `Cell.set()` of a native `Error` wraps one --
+ * and it is the state-heaviest of the concrete classes.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -8,16 +21,6 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test proxy fabric instance");
 const space = signer.did();
 
-// A `FabricInstance` holds all of its state in private fields and exposes it
-// through accessors on its prototype. Reading one through the query-result
-// proxy has to evaluate the accessor against the instance itself: a private
-// field is unreachable from the proxy, which does not declare it, so an
-// accessor run with the proxy as receiver throws outright rather than
-// returning a wrong answer.
-//
-// `FabricError` stands in for the whole tree here because it is the instance a
-// cell write actually produces -- `Cell.set()` of a native `Error` wraps one --
-// and it is the state-heaviest of the concrete classes.
 describe("query-result proxy: FabricInstance accessors read through to the instance", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

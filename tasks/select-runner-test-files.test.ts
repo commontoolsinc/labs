@@ -6,7 +6,7 @@ import {
 import { parseShard } from "./shard-utils.ts";
 import { RUNNER_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
-const TOTAL_SHARDS = 5;
+const TOTAL_SHARDS = 8;
 
 Deno.test("parseShard parses shard notation", () => {
   assertEquals(parseShard("2/5"), { index: 2, total: 5 });

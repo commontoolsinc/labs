@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
@@ -149,7 +149,7 @@ export function withAliasBindings(
   // A `FabricPrimitive` is an atomic value whose state lives in private fields
   // (zero enumerable own-props), so the `for...in` copy below would flatten it
   // to `{}`. It leaves whole, and it leaves FIRST: it is also a record, so an
-  // `isRecord()` test would otherwise claim it.
+  // `isObjectOrArray()` test would otherwise claim it.
   if (value instanceof FabricPrimitive) return value;
 
   // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
@@ -178,7 +178,9 @@ export function withAliasBindings(
   // null-prototype object -- each producing a plain object that satisfies
   // `isFabricValue()` while meaning something else. Nothing downstream can
   // catch it, because what it produces is genuinely valid.
-  if (isRecord(value) && !isPattern(value) && !isInertPlainObject(value)) {
+  if (
+    isObjectOrArray(value) && !isPattern(value) && !isInertPlainObject(value)
+  ) {
     value = shallowFabricFromNativeValue(value);
     // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
     // an `Error` a `FabricError`.
@@ -187,7 +189,7 @@ export function withAliasBindings(
   }
 
   // If this is an object or a pattern, process each key recursively.
-  if (isRecord(value) || isPattern(value)) {
+  if (isObjectOrArray(value) || isPattern(value)) {
     // Guard against circular object references (e.g. schema objects with
     // shared identity between $defs and sibling properties).
     if (!seen) seen = new WeakMap();

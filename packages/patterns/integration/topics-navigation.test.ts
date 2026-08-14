@@ -1,17 +1,15 @@
 import { Identity } from "@commonfabric/identity";
-import { env, type Page, waitForCondition } from "@commonfabric/integration";
+import { env } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { assertEquals } from "@std/assert";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import { waitForRuntimeIdle, waitForText } from "./cfc-browser-helpers.ts";
 import {
-  CLICK_TARGET_ATTR,
-  clickMarked,
-  settleView,
-  waitForRuntimeIdle,
-  waitForText,
-} from "./cfc-browser-helpers.ts";
+  clickCellLink,
+  waitForPieceView,
+} from "./topics-navigation-helpers.ts";
 import {
   initializePiecesController,
   PieceController,
@@ -94,7 +92,7 @@ describe("Topics durable navigation", () => {
     // in persisted VDOM without a registered handler.
     const openedPieceId = await clickCellLink(page, "Open");
     const openedFid = openedPieceId.replace(/^of:/, "");
-    await waitForTopicView(page, openedPieceId);
+    await waitForPieceView(page, SPACE_NAME, openedPieceId);
 
     const otherTitle = openedFid === targetFid ? SOURCE_TITLE : TARGET_TITLE;
     const otherFid = openedFid === targetFid ? sourceFid : targetFid;
@@ -102,7 +100,7 @@ describe("Topics durable navigation", () => {
 
     const crossrefPieceId = await clickCellLink(page, otherTitle);
     assertEquals(crossrefPieceId, `of:${otherFid}`);
-    await waitForTopicView(page, crossrefPieceId);
+    await waitForPieceView(page, SPACE_NAME, crossrefPieceId);
 
     const droppedEvents = await page.evaluate(() =>
       ((globalThis as typeof globalThis & {
@@ -124,92 +122,5 @@ async function topicAt(
   return new PieceController(
     board.pieces(),
     result.key("topics").key(index).resolveAsCell(),
-  );
-}
-
-/**
- * Wait for a resolved cf-cell-link, mark its native button, then issue one
- * trusted browser click. Returning the link's fid lets the test assert the
- * shell selected exactly the destination represented by the rendered data.
- *
- * Settle the view before marking, the same ordering `clickCfButton` uses. A
- * cold-loaded detail page keeps reflowing as content above the crossref links
- * settles (the topic body's markdown fills in, the links form and Connections
- * card render), so the link's layout box moves for a few frames after it first
- * becomes rendered and resolvable. A trusted click resolves the button's box
- * and then dispatches the mouse events; if the box moved in between, the click
- * lands on the shifted-away layout instead of the button, no navigation fires,
- * and the following `waitForTopicView` waits out its full safety net. Settling
- * first drains the pipeline that carries a change from the worker through an
- * applied vdom batch to a finished Lit update, so the target is stationary when
- * it is clicked.
- */
-async function clickCellLink(page: Page, label: string): Promise<string> {
-  await settleView(page);
-  const token = `topics-cell-link-${crypto.randomUUID()}`;
-  await waitForCondition(
-    page,
-    (
-      probe,
-      targetLabel: string,
-      targetToken: string,
-      clickTargetAttribute: string,
-    ) => {
-      for (const element of probe.collect("cf-cell-link")) {
-        const link = element as HTMLElement & {
-          label?: string;
-          link?: string;
-          _resolvedCell?: unknown;
-        };
-        if (
-          link.label !== targetLabel || !link.link || !link._resolvedCell
-        ) {
-          continue;
-        }
-        const chip = link.shadowRoot?.querySelector("cf-chip");
-        const button = chip?.shadowRoot?.querySelector("button");
-        if (!button || !probe.isRendered(button)) continue;
-        link.setAttribute("data-topics-link-target", targetToken);
-        probe.addToken(button, clickTargetAttribute, targetToken);
-        return true;
-      }
-      return false;
-    },
-    { args: [label, token, CLICK_TARGET_ATTR] },
-  );
-
-  const target = await page.evaluate((targetToken: string) => {
-    const stack: (Document | ShadowRoot)[] = [document];
-    while (stack.length > 0) {
-      const root = stack.pop()!;
-      const found = root.querySelector(
-        `[data-topics-link-target="${targetToken}"]`,
-      ) as (HTMLElement & { link?: string }) | null;
-      if (found?.link) return found.link;
-      for (const element of root.querySelectorAll("*")) {
-        if (element.shadowRoot) stack.push(element.shadowRoot);
-      }
-    }
-    return undefined;
-  }, { args: [token] });
-  if (!target?.startsWith("/of:")) {
-    throw new Error(`Topics link "${label}" had invalid target: ${target}`);
-  }
-
-  await clickMarked(page, token);
-  return target.slice(1);
-}
-
-async function waitForTopicView(page: Page, pieceId: string): Promise<void> {
-  await waitForCondition(
-    page,
-    (_probe, expectedSpaceName: string, expectedPieceId: string) => {
-      const state = globalThis.app?.serialize() as
-        | { view?: { spaceName?: string; pieceId?: string } }
-        | undefined;
-      return state?.view?.spaceName === expectedSpaceName &&
-        state.view.pieceId === expectedPieceId;
-    },
-    { args: [SPACE_NAME, pieceId] },
   );
 }

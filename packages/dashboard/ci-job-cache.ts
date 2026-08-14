@@ -1,11 +1,13 @@
-// An index of completed CI runs, persisted across dashboard restarts. Timings
-// are stable for one workflow attempt and are retained for the widest history
-// window the dashboard can display.
-//
-// The index holds each run's per-job durations, which is what the CI duration
-// history charts. The far larger per-step detail the Gantt views draw lives one
-// file per attempt in ci-gantt-detail.ts, so the index stays small enough to
-// keep in memory for the whole retention window.
+/**
+ * Indexes the completed CI runs, and keeps that index across dashboard
+ * restarts. Timings are stable for one workflow attempt and are retained for
+ * the widest history window the dashboard can display.
+ *
+ * The index holds each run's per-job durations, which is what the CI duration
+ * history charts. The far larger per-step detail the Gantt views draw lives
+ * one file per attempt in ci-gantt-detail.ts, so the index stays small enough
+ * to keep in memory for the whole retention window.
+ */
 
 import { basename, dirname, join } from "@std/path";
 import { dashboardCacheFile } from "./history-files.ts";

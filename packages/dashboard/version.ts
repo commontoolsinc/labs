@@ -1,3 +1,10 @@
+/**
+ * Says which version of the dashboard is being served, so a page left open
+ * notices that the code behind it has changed and reloads onto the new one. A
+ * deployment names its commit in DASHBOARD_GIT_COMMIT, and anything else
+ * reports the moment the process started.
+ */
+
 type Environment = (name: string) => string | undefined;
 type Clock = () => Date;
 
