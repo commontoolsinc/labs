@@ -3,6 +3,7 @@ import { type Cell, compileAndSavePattern } from "@commonfabric/runner";
 import { validateAgainstSchema } from "@commonfabric/runner/cfc";
 import {
   createLLMFriendlyLink,
+  FRAMEWORK_RESULT_KEYS,
   matchLLMFriendlyLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
@@ -180,59 +181,6 @@ const asSerializableValue = (value: unknown): unknown => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-/**
- * Keys the runtime puts on every pattern result: the display name and the
- * rendering variants. Their names are fixed by the framework, not by anything
- * the pattern computed.
- */
-const FRAMEWORK_RESULT_KEYS: readonly string[] = [
-  "$TYPE",
-  "$NAME",
-  "$UI",
-  "$TILE_UI",
-  "$CHIP_UI",
-  "$FS",
-  "$TESTS",
-];
-
-/**
- * Drops the framework's own keys from a result before it is measured against a
- * caller's `resultSchema`.
- *
- * The sanitizer seals a whole object the moment it carries a key the schema
- * does not model — a key it cannot model is a key whose NAME may itself be
- * data, so the object goes over as one opaque link. A pattern result always
- * carries `$NAME` and `$UI`, so a schema describing only what the pattern
- * computes would seal every result, taking the inert numbers with it. These
- * keys are named by the framework and dropped rather than shown, so removing
- * them discloses nothing; a schema that asks for one by name keeps it.
- */
-const withoutFrameworkResultKeys = (
-  value: unknown,
-  schema: JSONSchema,
-): unknown => {
-  if (!isRecord(value)) {
-    return value;
-  }
-  const declared = typeof schema === "object" && schema !== null &&
-      isRecord((schema as Record<string, unknown>).properties)
-    ? (schema as { properties: Record<string, unknown> }).properties
-    : {};
-  const dropped = FRAMEWORK_RESULT_KEYS.filter((key) =>
-    key in value && !(key in declared)
-  );
-  if (dropped.length === 0) {
-    return value;
-  }
-  const kept: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value)) {
-    if (!dropped.includes(key)) {
-      defineOwnEntry(kept, key, child);
-    }
-  }
-  return kept;
-};
 
 /**
  * Awaits `work` unless `signal` aborts first. Resolution (not rejection)
@@ -441,13 +389,18 @@ export const runPatternTool: HarnessToolDefinition<
     let valueError: string | undefined;
     if (parsedResultSchema !== undefined) {
       try {
+        // The raw result is what gets measured: the framework's own result
+        // keys are named to the sanitizer as RESERVED rather than projected
+        // out first. Projecting first would change the question the schema
+        // answers — a value a branch refuses because of what it carries under
+        // `$NAME` would reach that branch with the offending key already
+        // gone — and would miss a `$NAME` the caller declared through a
+        // `$ref` or a combinator rather than at the top level.
         const sanitized = validateAndSanitizeStructuredResult({
           schema: parsedResultSchema.schema,
-          value: withoutFrameworkResultKeys(
-            rawValue,
-            parsedResultSchema.schema,
-          ),
+          value: rawValue,
           opaqueHandleId: outputId,
+          reservedKeys: FRAMEWORK_RESULT_KEYS,
         });
         value = sanitized.value;
         linkedStringCount = sanitized.linkedStringCount;

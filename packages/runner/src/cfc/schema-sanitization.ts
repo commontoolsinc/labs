@@ -1206,6 +1206,17 @@ interface SchemaValidationOptions {
     fullSchema: JSONSchema,
   ) => boolean;
   optionalUndefinedIsAbsent?: boolean;
+  /**
+   * Property names an object may carry without the schema modelling them —
+   * the reserved keys of whatever produced the value, whose NAMES are fixed by
+   * a framework rather than chosen by the value's author.
+   *
+   * They are excused from the additional-property rules ONLY. A name in this
+   * set that the schema DOES model is measured against what the schema says
+   * about it, exactly as it would be otherwise: excusing a key from the
+   * unmodeled-key policy is not a licence to skip its constraints.
+   */
+  reservedAdditionalProperties?: ReadonlySet<string>;
 }
 
 export interface SchemaValueValidationOptions {
@@ -1246,6 +1257,8 @@ export interface SchemaValueValidationOptions {
    */
   optionalUndefinedIsAbsent?: boolean;
 }
+
+const EMPTY_RESERVED: ReadonlySet<string> = new Set<string>();
 
 const SANITIZATION_VALIDATION: SchemaValidationOptions = {
   strictConstraints: false,
@@ -1578,6 +1591,33 @@ export const validateAgainstSchema = (
     createSchemaValidationContext(),
   )?.message;
 
+/**
+ * `validateAgainstSchema()` with a set of reserved property names excused from
+ * the unmodeled-key rules, which is the question the structured-result
+ * sanitizer asks of every value it measures.
+ *
+ * A reserved name is one whose SPELLING belongs to the framework that produced
+ * the value rather than to whoever described it — a pattern result always
+ * carries `$NAME` and `$UI`, whatever the caller's schema says. Excusing them
+ * from the unmodeled-key rules is what keeps a schema describing only the
+ * computed fields from failing on the framework's own. It excuses nothing
+ * else: a reserved name the schema DOES model is measured against what the
+ * schema says about it.
+ */
+export const validateAgainstSchemaForSanitization = (
+  schema: JSONSchema,
+  value: unknown,
+  fullSchema: JSONSchema = schema,
+  reservedAdditionalProperties: ReadonlySet<string> = EMPTY_RESERVED,
+): string | undefined =>
+  validateAgainstSchemaInternal(
+    schema,
+    value,
+    fullSchema,
+    { ...SANITIZATION_VALIDATION, reservedAdditionalProperties },
+    createSchemaValidationContext(),
+  )?.message;
+
 const validateAgainstSchemaInternal = (
   schema: JSONSchema,
   value: unknown,
@@ -1790,6 +1830,9 @@ const validateAgainstSchemaInternal = (
           if (failure !== undefined) return atValidationPath(key, failure);
         }
       }
+      // Reserved names are excused from the unmodeled-key rules below; a
+      // reserved name the schema models was already measured against it above.
+      const reserved = options.reservedAdditionalProperties ?? EMPTY_RESERVED;
       const explicitlyClosed = schema.additionalProperties === false;
       const closesAdditionalProperties = options
           .implicitAdditionalPropertiesOpen
@@ -1812,7 +1855,8 @@ const validateAgainstSchemaInternal = (
           )
           : [];
         const extra = Object.keys(value).find((key) =>
-          !known.has(key) && !patterns.some((pattern) => pattern.test(key))
+          !known.has(key) && !reserved.has(key) &&
+          !patterns.some((pattern) => pattern.test(key))
         );
         if (extra !== undefined) {
           return mismatch(`additional property ${extra}`);
@@ -1826,7 +1870,8 @@ const validateAgainstSchemaInternal = (
           : [];
         for (const key of Object.keys(value)) {
           if (
-            !known.has(key) && !patterns.some((pattern) => pattern.test(key))
+            !known.has(key) && !reserved.has(key) &&
+            !patterns.some((pattern) => pattern.test(key))
           ) {
             const failure = validateAgainstSchemaInternal(
               schema.additionalProperties,

@@ -197,6 +197,53 @@ describe("run-pattern", () => {
       expect(output.linkedStringCount).toBe(0);
     });
 
+    it("refuses a result the schema rejects for what it carries under a framework key", async () => {
+      // The raw result is what the schema measures. A branch that asks what
+      // `$NAME` holds gets the answer the pattern gave, so a result that does
+      // not match is refused — projecting the framework keys out before
+      // validating would hand the branch the rest of the result and accept it.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: {
+          oneOf: [{
+            type: "object",
+            properties: {
+              doubled: { type: "number" },
+              $NAME: { type: "string", const: "Approved" },
+            },
+            required: ["doubled", "$NAME"],
+          }],
+        },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toBeUndefined();
+      expect(output.valueError).toBeDefined();
+    });
+
+    it("keeps a framework key the schema declares through a composed branch", async () => {
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: NAMED_DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: {
+          oneOf: [{
+            type: "object",
+            properties: {
+              doubled: { type: "number" },
+              $NAME: { type: "string", const: "Doubler" },
+            },
+            required: ["doubled", "$NAME"],
+          }],
+        },
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.value).toEqual({ doubled: 42, $NAME: "Doubler" });
+    });
+
     it("passes a whole-string LLM-friendly link input as a live cell reference", async () => {
       const space = pieces.getSpace();
       const seed = runtime.getCell<number>(space, "run-pattern-seed", {

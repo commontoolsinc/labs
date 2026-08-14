@@ -195,6 +195,7 @@ export {
   type Cell as BuilderCell,
   CHIP_UI,
   type FactoryInput,
+  FRAMEWORK_RESULT_KEYS,
   type Frame,
   FS,
   type FsProjection,

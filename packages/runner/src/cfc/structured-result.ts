@@ -5,7 +5,7 @@ import {
   cfcObjectSchemaIsClosed,
   isPrimitiveJsonValue,
   resolveSchemaForValidation,
-  validateAgainstSchema,
+  validateAgainstSchemaForSanitization,
 } from "./schema-sanitization.ts";
 
 export interface SchemaOpaqueLinkSanitizationResult {
@@ -13,13 +13,40 @@ export interface SchemaOpaqueLinkSanitizationResult {
   linkedStringCount: number;
 }
 
+const NO_RESERVED_KEYS: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Property names excused from the unmodeled-key rules everywhere in one
+ * sanitization: the reserved keys of whatever produced the value, whose
+ * spellings are fixed by a framework rather than chosen by the value's author.
+ * A reserved key the schema models is measured normally; a reserved key it
+ * does not model neither fails validation nor seals the object — it is simply
+ * dropped from the sanitized value, because a key the schema never asked for
+ * carries nothing the caller can read.
+ */
+export interface StructuredResultReservedKeys {
+  reservedKeys?: readonly string[];
+}
+
+const reservedKeySet = (
+  options: StructuredResultReservedKeys,
+): ReadonlySet<string> =>
+  options.reservedKeys === undefined || options.reservedKeys.length === 0
+    ? NO_RESERVED_KEYS
+    : new Set(options.reservedKeys);
+
 export const validateStructuredResultValue = (
   options: {
     schema: JSONSchema;
     value: unknown;
-  },
+  } & StructuredResultReservedKeys,
 ): void => {
-  const failure = validateAgainstSchema(options.schema, options.value);
+  const failure = validateAgainstSchemaForSanitization(
+    options.schema,
+    options.value,
+    options.schema,
+    reservedKeySet(options),
+  );
   if (failure !== undefined) {
     throw new Error(failure);
   }
@@ -29,6 +56,7 @@ const schemaAllowsRawString = (
   schema: JSONSchema,
   value: string,
   fullSchema: JSONSchema,
+  reserved: ReadonlySet<string>,
 ): boolean => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
   if (!isObjectOrArray(resolved)) {
@@ -45,17 +73,22 @@ const schemaAllowsRawString = (
   }
   if (Array.isArray(resolved.allOf)) {
     return resolved.allOf.some((branch) =>
-      schemaAllowsRawString(branch, value, fullSchema)
+      schemaAllowsRawString(branch, value, fullSchema, reserved)
     );
   }
-  const oneOf = matchingBranch(resolved.oneOf, value, fullSchema);
+  const oneOf = matchingBranch(resolved.oneOf, value, fullSchema, reserved);
   if (oneOf !== undefined) {
-    return schemaAllowsRawString(oneOf, value, fullSchema);
+    return schemaAllowsRawString(oneOf, value, fullSchema, reserved);
   }
   if (Array.isArray(resolved.anyOf)) {
     return resolved.anyOf.some((branch) =>
-      validateAgainstSchema(branch, value, fullSchema) === undefined &&
-      schemaAllowsRawString(branch, value, fullSchema)
+      validateAgainstSchemaForSanitization(
+          branch,
+          value,
+          fullSchema,
+          reserved,
+        ) === undefined &&
+      schemaAllowsRawString(branch, value, fullSchema, reserved)
     );
   }
   return false;
@@ -75,6 +108,7 @@ const matchingBranches = (
   branches: unknown,
   value: unknown,
   fullSchema: JSONSchema,
+  reserved: ReadonlySet<string>,
 ): JSONSchema[] => {
   if (!Array.isArray(branches)) {
     return [];
@@ -82,7 +116,12 @@ const matchingBranches = (
   return branches
     .filter((branch): branch is JSONSchema =>
       (typeof branch === "boolean" || isObjectOrArray(branch)) &&
-      validateAgainstSchema(branch, value, fullSchema) === undefined
+      validateAgainstSchemaForSanitization(
+          branch,
+          value,
+          fullSchema,
+          reserved,
+        ) === undefined
     )
     .map((branch) => resolveSchemaForValidation(branch, fullSchema));
 };
@@ -91,12 +130,20 @@ const schemaAcceptsOpaqueLinkObject = (
   schema: JSONSchema,
   value: { "@link": string },
   fullSchema: JSONSchema,
+  reserved: ReadonlySet<string>,
 ): boolean => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
   if (!isObjectOrArray(resolved)) {
     return false;
   }
-  if (validateAgainstSchema(resolved, value, fullSchema) !== undefined) {
+  if (
+    validateAgainstSchemaForSanitization(
+      resolved,
+      value,
+      fullSchema,
+      reserved,
+    ) !== undefined
+  ) {
     return false;
   }
   if (schemaDirectlyDeclaresOpaqueLinkObject(resolved)) {
@@ -104,18 +151,23 @@ const schemaAcceptsOpaqueLinkObject = (
   }
   if (Array.isArray(resolved.allOf)) {
     return resolved.allOf.some((branch) =>
-      schemaAcceptsOpaqueLinkObject(branch, value, fullSchema)
+      schemaAcceptsOpaqueLinkObject(branch, value, fullSchema, reserved)
     );
   }
-  const oneOfBranches = matchingBranches(resolved.oneOf, value, fullSchema);
+  const oneOfBranches = matchingBranches(
+    resolved.oneOf,
+    value,
+    fullSchema,
+    reserved,
+  );
   if (oneOfBranches.length > 0) {
     return oneOfBranches.some((branch) =>
-      schemaAcceptsOpaqueLinkObject(branch, value, fullSchema)
+      schemaAcceptsOpaqueLinkObject(branch, value, fullSchema, reserved)
     );
   }
-  return matchingBranches(resolved.anyOf, value, fullSchema).some((branch) =>
-    schemaAcceptsOpaqueLinkObject(branch, value, fullSchema)
-  );
+  return matchingBranches(resolved.anyOf, value, fullSchema, reserved).some((
+    branch,
+  ) => schemaAcceptsOpaqueLinkObject(branch, value, fullSchema, reserved));
 };
 
 const valueIsOpaqueLinkObject = (
@@ -129,13 +181,19 @@ const matchingBranch = (
   branches: unknown,
   value: unknown,
   fullSchema: JSONSchema,
+  reserved: ReadonlySet<string>,
 ): JSONSchema | undefined => {
   if (!Array.isArray(branches)) {
     return undefined;
   }
   const branch = branches.find((branch): branch is JSONSchema =>
     (typeof branch === "boolean" || isObjectOrArray(branch)) &&
-    validateAgainstSchema(branch, value, fullSchema) === undefined
+    validateAgainstSchemaForSanitization(
+        branch,
+        value,
+        fullSchema,
+        reserved,
+      ) === undefined
   );
   return branch === undefined
     ? undefined
@@ -173,6 +231,7 @@ const schemaForValue = (
   schema: JSONSchema,
   value: unknown,
   fullSchema: JSONSchema,
+  reserved: ReadonlySet<string>,
 ): JSONSchema => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
   if (!isObjectOrArray(resolved)) {
@@ -180,12 +239,12 @@ const schemaForValue = (
   }
   let base: JSONSchema = resolved;
   const branches: JSONSchema[] = [];
-  const oneOf = matchingBranch(resolved.oneOf, value, fullSchema);
+  const oneOf = matchingBranch(resolved.oneOf, value, fullSchema, reserved);
   if (oneOf !== undefined) {
     base = schemaWithoutBranchKeyword(base as Record<string, unknown>, "oneOf");
     branches.push(oneOf);
   }
-  const anyOf = matchingBranch(resolved.anyOf, value, fullSchema);
+  const anyOf = matchingBranch(resolved.anyOf, value, fullSchema, reserved);
   if (anyOf !== undefined) {
     base = schemaWithoutBranchKeyword(base as Record<string, unknown>, "anyOf");
     branches.push(anyOf);
@@ -303,10 +362,11 @@ const sanitizeValueWithOpaqueLinks = (
   fullSchema: JSONSchema,
   opaqueHandleId: string,
   path: readonly (string | number)[],
+  reserved: ReadonlySet<string>,
 ): SchemaOpaqueLinkSanitizationResult => {
-  const effectiveSchema = schemaForValue(schema, value, fullSchema);
+  const effectiveSchema = schemaForValue(schema, value, fullSchema, reserved);
   if (typeof value === "string") {
-    if (schemaAllowsRawString(effectiveSchema, value, fullSchema)) {
+    if (schemaAllowsRawString(effectiveSchema, value, fullSchema, reserved)) {
       return { value, linkedStringCount: 0 };
     }
     return {
@@ -323,6 +383,7 @@ const sanitizeValueWithOpaqueLinks = (
         fullSchema,
         opaqueHandleId,
         [...path, index],
+        reserved,
       );
       linkedStringCount += sanitized.linkedStringCount;
       return sanitized.value;
@@ -332,29 +393,38 @@ const sanitizeValueWithOpaqueLinks = (
   if (isObjectOrArray(value)) {
     if (
       valueIsOpaqueLinkObject(value) &&
-      schemaAcceptsOpaqueLinkObject(schema, value, fullSchema)
+      schemaAcceptsOpaqueLinkObject(schema, value, fullSchema, reserved)
     ) {
       return { value, linkedStringCount: 0 };
     }
+    // The unmodeled-key policy: one key the schema does not model seals the
+    // whole object, because a key it cannot model is a key whose NAME may
+    // itself be data. A RESERVED unmodeled key is the exception — its
+    // spelling is the framework's, not the value author's — and it is dropped
+    // rather than shown, so nothing about it reaches the reader either way.
     const knownKeys = knownPropertyNames(effectiveSchema, fullSchema);
-    if (Object.keys(value).some((key) => !knownKeys.has(key))) {
+    const unmodeled = Object.keys(value).filter((key) => !knownKeys.has(key));
+    if (unmodeled.some((key) => !reserved.has(key))) {
       return {
         value: cfcOpaqueLinkForPath(opaqueHandleId, path),
         linkedStringCount: 0,
       };
     }
+    const dropped = new Set(unmodeled);
     let linkedStringCount = 0;
-    const entries = Object.entries(value).map(([key, child]) => {
-      const sanitized = sanitizeValueWithOpaqueLinks(
-        child,
-        childSchemaForKey(effectiveSchema, key, fullSchema),
-        fullSchema,
-        opaqueHandleId,
-        [...path, key],
-      );
-      linkedStringCount += sanitized.linkedStringCount;
-      return [key, sanitized.value] as const;
-    });
+    const entries = Object.entries(value).filter(([key]) => !dropped.has(key))
+      .map(([key, child]) => {
+        const sanitized = sanitizeValueWithOpaqueLinks(
+          child,
+          childSchemaForKey(effectiveSchema, key, fullSchema),
+          fullSchema,
+          opaqueHandleId,
+          [...path, key],
+          reserved,
+        );
+        linkedStringCount += sanitized.linkedStringCount;
+        return [key, sanitized.value] as const;
+      });
     return { value: Object.fromEntries(entries), linkedStringCount };
   }
   return { value, linkedStringCount: 0 };
@@ -365,8 +435,12 @@ export const validateAndSanitizeSchemaValueWithOpaqueLinks = (
     schema: JSONSchema;
     value: unknown;
     opaqueHandleId: string;
-  },
+  } & StructuredResultReservedKeys,
 ): SchemaOpaqueLinkSanitizationResult => {
+  // The value validated is the value as it arrived. Projecting reserved keys
+  // out first would change what the schema is measuring: a value a `oneOf`
+  // branch refuses BECAUSE of what it carries under a reserved name would be
+  // handed to that branch with the offending key already gone, and accepted.
   validateStructuredResultValue(options);
   return sanitizeValueWithOpaqueLinks(
     options.value,
@@ -374,6 +448,7 @@ export const validateAndSanitizeSchemaValueWithOpaqueLinks = (
     options.schema,
     options.opaqueHandleId,
     [],
+    reservedKeySet(options),
   );
 };
 

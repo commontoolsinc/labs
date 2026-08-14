@@ -1754,4 +1754,84 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       linkedStringCount: 0,
     });
   });
+
+  it("drops a reserved key the schema does not model instead of sealing", () => {
+    const schema = {
+      type: "object",
+      properties: { total: { type: "number" } },
+      required: ["total"],
+    } as const satisfies JSONSchema;
+
+    // Reserved names are excused from the unmodeled-key policy, so the
+    // computed number survives instead of the whole object going over as one
+    // opaque link — and the reserved keys are dropped rather than shown.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { total: 42, $NAME: "Doubler", $UI: { tag: "div" } },
+      opaqueHandleId: "run-1",
+      reservedKeys: ["$NAME", "$UI"],
+    })).toEqual({ value: { total: 42 }, linkedStringCount: 0 });
+
+    // A name NOT on the reserved list is refused by the same closed-object
+    // rule the reserved names are excused from.
+    expect(() =>
+      validateAndSanitizeSchemaValueWithOpaqueLinks({
+        schema,
+        value: { total: 42, leaked: "secret" },
+        opaqueHandleId: "run-1",
+        reservedKeys: ["$NAME", "$UI"],
+      })
+    ).toThrow("additional property leaked");
+
+    // Where the schema is open enough to admit it, an unreserved key still
+    // seals the object: a key the schema cannot model is a key whose spelling
+    // may itself be data.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: { ...schema, additionalProperties: true },
+      value: { total: 42, leaked: "secret", $NAME: "Doubler" },
+      opaqueHandleId: "run-1",
+      reservedKeys: ["$NAME", "$UI"],
+    })).toEqual({
+      value: { "@link": "opaque:run-1" },
+      linkedStringCount: 0,
+    });
+  });
+
+  it("measures a reserved key the schema does model, and measures it raw", () => {
+    const schema = {
+      oneOf: [{
+        type: "object",
+        properties: {
+          count: { type: "number" },
+          $NAME: { type: "string", const: "allowed" },
+        },
+        required: ["count", "$NAME"],
+      }],
+    } as const satisfies JSONSchema;
+
+    // The value is measured as it arrived: the branch asks what `$NAME`
+    // holds, and a value that does not answer is refused. Projecting the
+    // reserved key out before validating would hand the branch `{count: 42}`
+    // and have it accepted.
+    expect(() =>
+      validateAndSanitizeSchemaValueWithOpaqueLinks({
+        schema,
+        value: { count: 42, $NAME: "wrong" },
+        opaqueHandleId: "run-1",
+        reservedKeys: ["$NAME"],
+      })
+    ).toThrow();
+
+    // A reserved key a composed schema declares is still available: it is
+    // modeled, so it is kept and sanitized rather than dropped.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { count: 42, $NAME: "allowed" },
+      opaqueHandleId: "run-1",
+      reservedKeys: ["$NAME"],
+    })).toEqual({
+      value: { count: 42, $NAME: "allowed" },
+      linkedStringCount: 0,
+    });
+  });
 });
