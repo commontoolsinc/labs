@@ -69,7 +69,7 @@ describe("CFC authoring surface trust-sensitive claims", () => {
       const observeResult = await observeTx.commit();
       expect(observeResult.ok).toBeDefined();
       expect(observeTx.getCfcState().diagnostics).toContain(
-        "writeAuthorizedBy requires a trusted verified binding identity at /value",
+        "unsupported trust-sensitive claim writeAuthorizedBy at /value",
       );
 
       const enforceTx = runtime.edit();
@@ -90,8 +90,75 @@ describe("CFC authoring surface trust-sensitive claims", () => {
 
       const enforceResult = await enforceTx.commit();
       expect(enforceResult.error?.message).toContain(
-        "writeAuthorizedBy requires a trusted verified binding identity at /value",
+        "unsupported trust-sensitive claim writeAuthorizedBy at /value",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not grant setup authority to an authored lift output", async () => {
+    const { runtime, storageManager } = (() => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-explicit",
+        trustSnapshotProvider: () => ({
+          id: "authored-lift-owner-output",
+          actingPrincipal: signer.did(),
+        }),
+      });
+      return { runtime, storageManager };
+    })();
+
+    try {
+      const program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: `/// <cts-enable />
+            import {
+              Cfc,
+              CurrentPrincipal,
+              lift,
+              pattern,
+              RepresentsCurrentUser,
+            } from "commonfabric";
+
+            type OwnerOutput<T> = RepresentsCurrentUser<
+              Cfc<
+                T,
+                {
+                  ownerPrincipal: CurrentPrincipal;
+                  writeAuthorizedBy: readonly [];
+                }
+              >
+            >;
+
+            const claimOwner = lift<string, OwnerOutput<string>>(
+              (value) => value,
+            );
+
+            export default pattern<{ value: string }, { value: OwnerOutput<string> }>(
+              ({ value }) => ({ value: claimOwner(value) }),
+            );
+          `,
+        }],
+      };
+      const { main } = await runtime.harness.compileAndEvaluateModules(program);
+      const resultCell = runtime.getCell<{ value: string }>(
+        signer.did(),
+        "cfc-authored-lift-owner-output",
+      );
+
+      const result = await runtime.runSynced(
+        resultCell,
+        main?.default,
+        { value: "Ada" },
+      );
+      await expect(result.pull()).resolves.toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();

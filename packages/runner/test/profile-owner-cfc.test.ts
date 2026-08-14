@@ -510,6 +510,51 @@ describe("profile owner CFC policy", () => {
     }
   });
 
+  it("does not treat an authored generated output as runtime setup", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcTrustSnapshot({
+        id: "profile-authored-generated-output",
+        actingPrincipal: alice.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "system.not-the-profile-writer",
+      });
+      const cell = runtime.getCell(
+        alice.did(),
+        "profile-authored-generated-output",
+        undefined,
+        tx,
+      );
+      cell.set("Ada");
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "schema",
+        target,
+        schemaRole: "output",
+        schema: {
+          asCell: ["cell"],
+          ifc: {
+            ownerPrincipal: alice.did(),
+            addIntegrity: [ownerAtom(alice.did())],
+            writeAuthorizedBy: [PROFILE_WRITER],
+          },
+        },
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "writeAuthorizedBy failed",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("marks the home profiles list as integrity-protected data", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -754,15 +799,7 @@ describe("profile owner CFC policy", () => {
     }
   });
 
-  it("allows initializing owner-protected fields marked as a pattern setup projection", async () => {
-    // When the runtime instantiates a pattern whose result declares
-    // owner-protected fields, it records a `runtime.setup.result-projection`
-    // marker whose `sources` point at the cells holding those fields. A creating
-    // context that is not the per-field edit handler may then initialize them:
-    // `writeAuthorizedBy` is a modification gate, not a creation gate (CFC spec
-    // §8.15.4 / §8.15.10). This exercises that exemption directly: an identity
-    // that does NOT satisfy `writeAuthorizedBy` is allowed solely because the
-    // owner-protected fields are recorded as this pattern's setup projection.
+  it("allows a trusted setup projection to name a different future writer", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();

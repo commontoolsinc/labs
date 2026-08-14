@@ -335,6 +335,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             ifc: {
               writeAuthorizedBy: {
                 __ctWriterIdentityOf: {
+                  moduleIdentity: "module-hash-setup",
                   file: "/main.tsx",
                   path: ["commitTrustedSaveTitle"],
                 },
@@ -423,6 +424,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             ifc: {
               writeAuthorizedBy: {
                 __ctWriterIdentityOf: {
+                  moduleIdentity: "module-hash-setup",
                   file: "/main.tsx",
                   path: ["commitTrustedSaveTitle"],
                 },
@@ -510,6 +512,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             ifc: {
               writeAuthorizedBy: {
                 __ctWriterIdentityOf: {
+                  moduleIdentity: "module-hash-setup",
                   file: "/main.tsx",
                   path: ["commitTrustedSaveTitle"],
                 },
@@ -565,6 +568,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             ifc: {
               writeAuthorizedBy: {
                 __ctWriterIdentityOf: {
+                  moduleIdentity: "module-hash-setup",
                   file: "/main.tsx",
                   path: ["commitTrustedSaveTitle"],
                 },
@@ -6277,7 +6281,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       tx.prepareCfc();
       const result = await tx.commit();
-      expect(result.error?.message).toContain("writeAuthorizedBy failed");
+      expect(result.error?.message).toContain(
+        "unsupported trust-sensitive claim writeAuthorizedBy",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

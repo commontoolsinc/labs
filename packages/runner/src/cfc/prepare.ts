@@ -551,13 +551,23 @@ const claimPathToLogicalPath = (
   return undefined;
 };
 
+type WriteAuthorizedByFailure = {
+  kind:
+    | "invalid-claim"
+    | "missing-trust-snapshot"
+    | "missing-builtin-identity"
+    | "missing-verified-identity"
+    | "writer-mismatch";
+  message: string;
+};
+
 const writeAuthorizedByReason = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   path: readonly string[],
   targetSpace: MemorySpace,
   targetIdentity?: ImplementationIdentity,
-): string | undefined => {
+): WriteAuthorizedByFailure | undefined => {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) {
     return undefined;
   }
@@ -566,9 +576,32 @@ const writeAuthorizedByReason = (
     return undefined;
   }
 
+  const builtinClaim = Array.isArray(claim) && claim.length > 0 &&
+    claim.every((entry) => typeof entry === "string" && entry.length > 0);
+  const bindingIdentity = parseWriteAuthorizedByBindingIdentity(claim);
+  const verifiedClaim = bindingIdentity !== undefined &&
+    typeof bindingIdentity.moduleIdentity === "string" &&
+    bindingIdentity.moduleIdentity.length > 0 &&
+    bindingIdentity.file.length > 0 &&
+    bindingIdentity.path.length > 0 &&
+    bindingIdentity.path.every((entry) => entry.length > 0);
+  if (!builtinClaim && !verifiedClaim) {
+    return {
+      kind: "invalid-claim",
+      message: `unsupported trust-sensitive claim writeAuthorizedBy at /${
+        path.join("/")
+      }`,
+    };
+  }
+
   const trustSnapshot = tx.getCfcState().trustSnapshot;
   if (!trustSnapshot?.id || !trustSnapshot?.actingPrincipal) {
-    return `writeAuthorizedBy requires a trust snapshot at /${path.join("/")}`;
+    return {
+      kind: "missing-trust-snapshot",
+      message: `writeAuthorizedBy requires a trust snapshot at /${
+        path.join("/")
+      }`,
+    };
   }
 
   // Verify against the identity that authored this target's writes. A write
@@ -576,30 +609,40 @@ const writeAuthorizedByReason = (
   // fails closed below; it must not borrow the transaction's current identity
   // (audit S13).
   const identity = targetIdentity;
-  if (
-    Array.isArray(claim) && claim.every((entry) => typeof entry === "string")
-  ) {
+  if (builtinClaim) {
     if (!identity || identity.kind !== "builtin") {
-      return `writeAuthorizedBy requires a trusted builtin identity at /${
-        path.join("/")
-      }`;
+      return {
+        kind: "missing-builtin-identity",
+        message: `writeAuthorizedBy requires a trusted builtin identity at /${
+          path.join("/")
+        }`,
+      };
     }
     if (!claim.includes(identity.builtinId)) {
-      return `writeAuthorizedBy failed at /${path.join("/")}`;
+      return {
+        kind: "writer-mismatch",
+        message: `writeAuthorizedBy failed at /${path.join("/")}`,
+      };
     }
     return undefined;
   }
 
-  const bindingIdentity = parseWriteAuthorizedByBindingIdentity(claim);
-  if (!bindingIdentity) {
-    return `unsupported trust-sensitive claim writeAuthorizedBy at /${
-      path.join("/")
-    }`;
+  if (bindingIdentity === undefined) {
+    return {
+      kind: "invalid-claim",
+      message: `unsupported trust-sensitive claim writeAuthorizedBy at /${
+        path.join("/")
+      }`,
+    };
   }
   if (!identity || identity.kind !== "verified" || !identity.bindingPath) {
-    return `writeAuthorizedBy requires a trusted verified binding identity at /${
-      path.join("/")
-    }`;
+    return {
+      kind: "missing-verified-identity",
+      message:
+        `writeAuthorizedBy requires a trusted verified binding identity at /${
+          path.join("/")
+        }`,
+    };
   }
   // Identity arm (fail closed): the claim's content-addressed moduleIdentity
   // must match the live identity's. The legacy bundleId-only arm (stored
@@ -624,7 +667,10 @@ const writeAuthorizedByReason = (
     !identityArmMatches ||
     !arraysEqual(identity.bindingPath, bindingIdentity.path)
   ) {
-    return `writeAuthorizedBy failed at /${path.join("/")}`;
+    return {
+      kind: "writer-mismatch",
+      message: `writeAuthorizedBy failed at /${path.join("/")}`,
+    };
   }
   return undefined;
 };
@@ -3577,6 +3623,7 @@ const verifyInputRequirements = (
   // the per-path last-overlapping-write bounds each entry's input checks
   // quantify under.
   prefixBounds: WritePrefixBounds,
+  generatedSetupInitializationPaths: readonly (readonly string[])[],
   // Stage-0 precision counters (docs/specs/cfc-value-level-provenance.md §6),
   // accumulated across the boundary pass. undefined — the default, whenever
   // no onPrefixProvenance hook is installed — skips all measurement.
@@ -3705,6 +3752,25 @@ const verifyInputRequirements = (
     if (disallowedClause !== undefined) {
       return disallowedClause;
     }
+    // The constructor output is trusted only for the write that creates its
+    // backing document. Later writes use the projected writer policy.
+    const generatedOutputInitialization = generatedSetupInitializationPaths
+      .some(
+        (outputPath) => concretePathHasPrefix(entry.path, outputPath),
+      ) &&
+      [...(tx.getWriteDetails?.(target.space) ?? [])].some((detail) =>
+        detail.address.id === target.id &&
+        normalizeCellScope(detail.address.scope) === target.scope &&
+        detail.address.path.length <= 1 &&
+        detail.previousValue === undefined
+      );
+    const trustedSetupProjection = setupProjectionSourceMatchesValue(
+      tx,
+      target,
+      entry.path,
+    ) || writeIsPatternSetupInitialization(tx, target, entry.path);
+    const runtimeMaterialization = generatedOutputInitialization ||
+      writeIsSeedMaterialization(tx, target);
     const currentPrincipalFailure = currentPrincipalIntegrityReason(
       tx,
       entry.schema,
@@ -3720,14 +3786,16 @@ const verifyInputRequirements = (
       target.space,
       identityForPath(entry.path),
     );
-    const setupProjection = setupProjectionSourceMatchesValue(
-      tx,
-      target,
-      entry.path,
-    ) || writeIsPatternSetupInitialization(tx, target, entry.path) ||
-      writeIsSeedMaterialization(tx, target);
-    if (writeAuthorizedByFailure !== undefined && !setupProjection) {
-      return writeAuthorizedByFailure;
+    const setupWithoutWriterIdentity = (trustedSetupProjection &&
+      (writeAuthorizedByFailure?.kind === "missing-builtin-identity" ||
+        writeAuthorizedByFailure?.kind === "missing-verified-identity" ||
+        writeAuthorizedByFailure?.kind === "writer-mismatch")) ||
+      (runtimeMaterialization &&
+        writeAuthorizedByFailure?.kind === "missing-verified-identity");
+    if (
+      writeAuthorizedByFailure !== undefined && !setupWithoutWriterIdentity
+    ) {
+      return writeAuthorizedByFailure.message;
     }
     const requiredIntegrity = ifc?.requiredIntegrity ?? [];
     const maxConfidentiality = ifc?.maxConfidentiality;
@@ -5712,6 +5780,7 @@ export const prepareBoundaryCommit = (
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
       prefixBounds,
+      generatedSetupInitializationPaths.get(key) ?? [],
       prefixProvenance,
     );
     // A verification failure records a reason (which rejects the whole commit
