@@ -587,7 +587,7 @@ export default pattern<Record<PropertyKey, never>, GalleryOutput>(() => {
                   {LabelDisclosureCard({
                     title: "Prompt Influence Disclosure",
                     subtitle:
-                      "The influenced content is rendered with its label and disclosure text instead of a click acknowledgment.",
+                      "The influenced content is rendered with its label and disclosure text instead of a click acknowledgement.",
                     value: promptInfluenceDisclosureRender,
                     displayValue: promptInfluenceDisclosureText,
                     valueId: "prompt-influence-disclosure",

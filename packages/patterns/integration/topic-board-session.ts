@@ -105,7 +105,7 @@ export class BoardSession {
     return pieceId;
   }
 
-  /** Follow the crossref labeled `title` to the sibling it names. */
+  /** Follow the crossref labelled `title` to the sibling it names. */
   async followCrossref(title: string): Promise<void> {
     const pieceId = await clickCellLink(this.#page, title);
     await waitForPieceView(this.#page, this.#target.fixture.spaceName, pieceId);

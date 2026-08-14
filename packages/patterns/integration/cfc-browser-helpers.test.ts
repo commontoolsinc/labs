@@ -2082,7 +2082,7 @@ describe("CFC browser helpers", () => {
         ["before", "after"],
         "the observer should bracket the click",
       );
-      // The control sits at 40,40 and is 120x40, so its center is 100,60.
+      // The control sits at 40,40 and is 120x40, so its centre is 100,60.
       assertEquals({ x: observed[0].x, y: observed[0].y }, { x: 100, y: 60 });
       assertEquals({ x: observed[1].x, y: observed[1].y }, { x: 100, y: 60 });
     } finally {
