@@ -626,19 +626,10 @@ const backlinksOf = lift((
     table: { topic: unknown; mentionedBy: unknown }[] | Default<[]>;
     self: unknown;
   },
-): TopicSummary[] => {
-  // Written as a loop rather than `table.find(...)` because the schema the
-  // transformer generates from this parameter only carries the properties read
-  // in the OUTER expression: with the comparison inside a `.find()` callback,
-  // both `self` and each row's `topic` were dropped from the generated schema
-  // and arrived undefined, so `equals` could never match.
-  for (const row of table) {
-    if (equals(self as object, row.topic as object)) {
-      return (row.mentionedBy ?? []) as TopicSummary[];
-    }
-  }
-  return [];
-});
+): TopicSummary[] =>
+  (table.find((row) => equals(self as object, row.topic as object))
+    ?.mentionedBy ?? []) as TopicSummary[]
+);
 
 /**
  * Every piece this topic points at, from both places a reference can come from:
