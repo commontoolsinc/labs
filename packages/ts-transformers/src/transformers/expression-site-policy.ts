@@ -1394,10 +1394,18 @@ export function findInlineCallbackCarrierSite(
 
   while (current) {
     if (ts.isFunctionLike(current)) {
-      const parent: ts.Node | undefined = current.parent;
+      // Parentheses around the callback are transparent, here as everywhere
+      // in the site rules: `toSorted(((a, b) => ...))` carries like
+      // `toSorted((a, b) => ...)`.
+      let argument: ts.Node = current;
+      let parent: ts.Node | undefined = current.parent;
+      while (parent && ts.isParenthesizedExpression(parent)) {
+        argument = parent;
+        parent = parent.parent;
+      }
       if (
         !parent || !ts.isCallExpression(parent) ||
-        !ts.isExpression(current) || !parent.arguments.includes(current)
+        !ts.isExpression(argument) || !parent.arguments.includes(argument)
       ) {
         return undefined;
       }

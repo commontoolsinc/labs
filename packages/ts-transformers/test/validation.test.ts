@@ -3340,6 +3340,41 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows optional access inside a parenthesized inline comparator",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row {
+        sentAt: number;
+      }
+
+      export default pattern<{ rows: Writable<Row[]> }>(({ rows }) => {
+        const sorted = rows.get().toSorted(((a, b) =>
+          (a?.sentAt ?? 0) - (b?.sentAt ?? 0)
+        ));
+        return { sorted };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      // The parenthesized spelling still draws the (pre-existing)
+      // function-creation rejection — parentheses hide the callback from
+      // that validation's inline-argument allowance, a separate gap. This
+      // step pins the carrier decision alone: optionality is carried
+      // through the parentheses, so no optional-chaining error joins it.
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "parentheses around the callback do not change the carrier decision",
+      );
+    },
+  );
+
+  await t.step(
     "still errors on optional access inside a lowered array-method callback",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
