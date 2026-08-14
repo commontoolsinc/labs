@@ -541,6 +541,63 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(Engine.serverSeq(engine)).toBe(seqBefore);
   });
 
+  // ---- stage P2-F: late-notice accounting (the sx2 unskip flake) ----
+
+  it("counts an authored notice that arrives AFTER a higher-seq echo (the two-producer notice race): late records still count and re-arm, and coverage stays in-order", async () => {
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({ stats });
+    expect(await created.activate()).toBe(true);
+
+    // Two REAL commits, enqueued out of order — the loop's own
+    // post-commit notice (seq S+1) landing before the transact
+    // path's async admission notice (seq S), exactly the in-process
+    // race the unskipped sx2 gate exposed (authoredSeen undercounted
+    // while W stayed honest).
+    const first = await server.writeDocument(space, "of:p2f-late-a", {
+      n: 1,
+    });
+    const second = await server.writeDocument(space, "of:p2f-late-b", {
+      n: 2,
+    });
+    const authoredBefore = stats.authoredSeen;
+    created.enqueueCommit({
+      space,
+      seq: second.seq,
+      class: "authored",
+      sessionId: "session:p2f-late",
+      writes: [{ id: "of:p2f-late-b", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => created.watermark >= second.seq,
+      "the in-order record to drain and settle",
+    );
+    // The LATE notice: seq below the drained head. Pre-fix it was
+    // silently skipped (never counted); post-fix it counts exactly
+    // once — a replayed duplicate stays skipped.
+    created.enqueueCommit({
+      space,
+      seq: first.seq,
+      class: "authored",
+      sessionId: "session:p2f-late",
+      writes: [{ id: "of:p2f-late-a", scopeKey: "space" }],
+    });
+    await waitUntil(
+      () => stats.authoredSeen === authoredBefore + 2,
+      "the late authored notice to be counted",
+    );
+    created.enqueueCommit({
+      space,
+      seq: first.seq,
+      class: "authored",
+      sessionId: "session:p2f-late",
+      writes: [{ id: "of:p2f-late-a", scopeKey: "space" }],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(stats.authoredSeen).toBe(authoredBefore + 2);
+    // Coverage math stayed in-order: W never regressed.
+    expect(created.watermark).toBeGreaterThanOrEqual(second.seq);
+  });
+
   // ---- stage P2-F: the demand-cycle terminal state (OW19) ----
 
   /** A facade whose watch registry names exactly the given demanded

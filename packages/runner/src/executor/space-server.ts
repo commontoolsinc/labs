@@ -220,6 +220,15 @@ export class SpaceServer implements TransactionSealDestination {
    * shape as the shadow-flip wake): set when re-armed roots became
    * retryable mid-cycle, consumed by the next #waitForInput. */
   #pendingStructureRetryWake = false;
+  /** The activation scan's head: records at or below it are covered
+   * by the basis re-mark and never drained (activation filters the
+   * queued feed the same way). Late-arrival accounting keys off it. */
+  #activationScanHead = 0;
+  /** Exact-once guard for LATE records (seq ≤ inputHead at drain —
+   * the two-producer notice race documented in #drainFeed): recently
+   * drained seqs, insertion-ordered, pruned at a bound that far
+   * exceeds any realistic in-process reorder window. */
+  readonly #drainedLateWindow = new Set<number>();
   /** Live readers per demanded root — DEMAND ITSELF (serving-loop.md
    * §1: "a subscription to a value recomputes that value and its
    * upstream"): the sink is what pulls the demanded value through the
@@ -443,6 +452,7 @@ export class SpaceServer implements TransactionSealDestination {
     ]);
     // Subscribe from the scan head: drop queued records the scan covers.
     this.#feed = this.#feed.filter((record) => record.seq > scanHead);
+    this.#activationScanHead = Math.max(scanHead, this.#watermark);
     this.#inputHead = Math.max(this.#inputHead, scanHead, this.#watermark);
     this.#coverageHead = Math.max(this.#coverageHead, scanHead);
 
@@ -1033,12 +1043,37 @@ export class SpaceServer implements TransactionSealDestination {
    * doc changes, and storage notifications mark the graph dirty. */
   #drainFeed(): { batchHead: number } {
     for (const record of this.#feed) {
-      if (record.seq <= this.#inputHead) continue;
-      this.#inputHead = record.seq;
+      // LATE records (stage P2-F, the sx2 unskip's flake diagnosis):
+      // the feed has two in-process producers — the admission hook's
+      // notify (async, after the transact's engine apply) and the
+      // loop's own post-commit noteExecutorCommit (sync after the
+      // sink's engine apply) — so a wave echo at seq S+1 can enqueue
+      // BEFORE an in-flight authored commit's notice at seq S. The
+      // old `seq <= inputHead ⇒ skip` guard silently dropped such a
+      // record from ACCOUNTING (authoredSeen undercounted; a terminal
+      // root's re-arm missed), though never from SERVING — the
+      // authored commit's dirtiness rides the session frames, which
+      // the settle's input barrier orders by seq regardless of notice
+      // order, so W stayed honest. Late records therefore still COUNT
+      // and RE-ARM (deduped exactly — each seq is delivered once per
+      // producer; the bounded set below absorbs any replay overlap),
+      // while the head/coverage math stays in-order only.
+      const late = record.seq <= this.#inputHead;
+      if (late) {
+        if (record.seq <= this.#activationScanHead) continue;
+        if (this.#drainedLateWindow.has(record.seq)) continue;
+      }
+      this.#drainedLateWindow.add(record.seq);
+      while (this.#drainedLateWindow.size > 1024) {
+        const oldest = this.#drainedLateWindow.values().next().value;
+        if (oldest === undefined) break;
+        this.#drainedLateWindow.delete(oldest);
+      }
+      if (!late) this.#inputHead = record.seq;
       const selfEcho = record.class === "derived" &&
         record.holder === this.#holder;
       if (selfEcho) continue;
-      this.#coverageHead = record.seq;
+      if (!late) this.#coverageHead = record.seq;
       if (record.class === "authored") {
         this.#options.stats.authoredSeen += 1;
       }

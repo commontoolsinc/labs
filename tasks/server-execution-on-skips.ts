@@ -57,43 +57,23 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  *
  * History: stage G (2026-08-06) re-justified the two-browsers CFC-gate
  * entry this file had held since stage F and added no skips of its own;
- * Phase 2 then RETIRED that entry — the client derivation-commit path
- * is removed by construction, dissolving the two-deriver CAS storm the
- * entry named as its unskipping condition (that gate now runs, and
- * passes, ON). The ONE entry below is Phase 2's own: the
- * sx2-serving-loop reproducer of the demand-cycle starvation fork, at
- * `phase-2-followup` — it lifts with the owed terminal-state follow-up
- * (verification-coverage.md §3's demand-cycle row; the P2-F build).
+ * Phase 2 RETIRED that entry — the client derivation-commit path is
+ * removed by construction, dissolving the two-deriver CAS storm the
+ * entry named as its unskipping condition — and ADDED the
+ * sx2-serving-loop reproducer of the demand-cycle starvation fork at
+ * `phase-2-followup`. Stage P2-F (2026-08-13) RETIRED that entry too:
+ * the demand-cycle terminal state with commit-triggered re-arm closed
+ * the fork (never-loadable roots park instead of churning per cycle;
+ * the load pass runs under the flush deadline), so the surface runs —
+ * carrying the in-CI amplification-ratio gate and the pattern-updater
+ * CHECK-half witness (verification-coverage.md's closed OW19 row).
+ * Every list is EMPTY: the ON arm runs the full suites.
  */
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
   ServerExecutionOnSkip[]
 > = {
-  // Phase 2 retired the entry this file held since stage F (the
-  // two-browsers CFC gate): the client derivation-commit path is
-  // removed by construction, the two-deriver interim's CAS storm with
-  // it — the exact unskipping condition the entry named. That gate now
-  // runs (and passes) ON.
-  patterns: [
-    {
-      file: "integration/sx2-serving-loop.test.ts",
-      phase: "phase-2-followup",
-      reason: "reproducer of the ESCALATED demand-cycle starvation " +
-        "fork: the SpaceServer's cycle runs #loadDemandedStructure " +
-        "BEFORE the settle race with no deadline, and never-loadable " +
-        "demanded roots are re-attempted every cycle since the " +
-        "ensure-retry fix, throttling input consumption. The RULED " +
-        "id-class exclusion (2026-08-07: computed:/cid:/watermark " +
-        "roots register no piece demand) REDUCED it — post-exclusion " +
-        "the loop consumes input again — but of:-class roots without " +
-        "pattern meta (registry/home/argument docs) still churn per " +
-        "cycle pending the owed terminal-state design " +
-        "(verification-coverage.md §3's demand-cycle row), and under " +
-        "load the gate's settle window sees too few cycles. The " +
-        "sx2-speculation gate runs unskipped; this entry lifts with " +
-        "the terminal-state follow-up.",
-    },
-  ],
+  patterns: [],
   runner: [],
   "runtime-client": [],
   shell: [],
