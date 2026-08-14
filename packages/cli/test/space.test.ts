@@ -15,8 +15,8 @@ import { cf, stripAnsi } from "./utils.ts";
 /**
  * `CliResult` streams are line arrays; join before substring assertions.
  *
- * The escapes go too: the CLI colours help and error output whenever the
- * environment asks for colour, so an assertion on raw text passes or fails by
+ * The escapes go too: the CLI colors help and error output whenever the
+ * environment asks for color, so an assertion on raw text passes or fails by
  * where the developer ran it.
  */
 const text = (lines: string[]): string => stripAnsi(lines.join("\n"));
@@ -394,7 +394,7 @@ describe("cf space", () => {
 
   it("refuses to pull a whole-space snapshot over plaintext http", async () => {
     // A snapshot is the entire contents of a space — the same confidentiality
-    // judgement that keeps the dump endpoint off in production. Loopback is
+    // judgment that keeps the dump endpoint off in production. Loopback is
     // exempt (it never leaves the machine) and the tests above rely on that.
     await withFixture(async ({ clone }) => {
       const result = await cf(

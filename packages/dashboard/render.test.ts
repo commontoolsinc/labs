@@ -29,7 +29,7 @@ Deno.test("renderTile: status drives the tile class, the dot color and the headl
     good: "green",
     warn: "amber",
     bad: "red",
-    unknown: "grey",
+    unknown: "gray",
   };
   for (const [status, dot] of Object.entries(dots) as [Status, string][]) {
     const html = renderTile(view({ status, value: "passing" }));
@@ -515,7 +515,7 @@ Deno.test("shell: the turned texture layer still covers a tile far wider than it
   assertStringIncludes(layer[0], "aspect-ratio:1");
   assertStringIncludes(layer[0], "top:50%;left:50%");
   assertStringIncludes(layer[0], "translate(-50%,-50%)");
-  // Turning a square about its centre sweeps its corners inward, so the layer
+  // Turning a square about its center sweeps its corners inward, so the layer
   // covers the tile only while half its side still reaches the tile's corner.
   // That reach is the tile's half-diagonal. The layer is measured off the
   // tile's width alone, so the shape that strains it is a tall narrow tile:

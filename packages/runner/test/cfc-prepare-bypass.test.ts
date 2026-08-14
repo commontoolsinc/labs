@@ -17,7 +17,7 @@ const signer = await Identity.fromPassphrase("runner-cfc-prepare-bypass-tests");
 // policy-violating transaction cleanly.
 //
 // The fix removes the input parameter entirely so verification always runs.
-// This test pins the behavioural contract: a relevant, policy-violating
+// This test pins the behavioral contract: a relevant, policy-violating
 // transaction can never reach a committed state through prepareCfc.
 describe("CFC prepareCfc verification bypass", () => {
   it("rejects a writeAuthorizedBy violation even when prepareCfc is driven directly", async () => {

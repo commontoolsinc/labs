@@ -308,7 +308,7 @@ Deno.test("a dry run predicts a failing real run", async () => {
 
 Deno.test("warns when an explicit --dir is not on PATH", async () => {
   // Auto-detection only picks directories on PATH. An explicit --dir is
-  // honoured, but installing somewhere unreachable is the exact silent failure
+  // honored, but installing somewhere unreachable is the exact silent failure
   // this whole area exists to prevent, so it is said out loud.
   await withTempDir(async (dir) => {
     const checkout = join(dir, "labs");

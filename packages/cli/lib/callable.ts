@@ -108,8 +108,8 @@ export interface CallableExecutionDeps {
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
   /** `--no-wait`: await this handling's transaction-local commit
-   * acknowledgement, then return WITHOUT the receipt readback (sync + read).
-   * The commit acknowledgement cannot be skipped: the handler executes in
+   * acknowledgment, then return WITHOUT the receipt readback (sync + read).
+   * The commit acknowledgment cannot be skipped: the handler executes in
    * THIS process's runtime, so exiting before the commit is acknowledged
    * would abandon the invocation un-executed — nothing durable would have
    * happened — not leave it settling elsewhere. What CAN be skipped is
@@ -139,7 +139,7 @@ export interface CallableExecutionDeps {
    * what it holds — a reactive result's carries none — but either way the
    * fetch has happened first.) The shared step also awaits the runtime's
    * global idle plus storage sync, so a shaped call result can wait on
-   * derived recomputation the plain call's transaction-local acknowledgement
+   * derived recomputation the plain call's transaction-local acknowledgment
    * does not — a documented cost of shaping at the call
    * (`deriveSelectedValue`, cell-selection.ts). A verb that returns nothing
    * keeps returning nothing — there is no value for a selection to be

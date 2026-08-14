@@ -1349,7 +1349,7 @@ Deno.test("benchmark: a stalled sample does not move the trend", async () => {
 });
 
 Deno.test("benchmark: a run still in flight is not sampled", async () => {
-  // A conclusion of null is not a colour, it is an absence: the run has not
+  // A conclusion of null is not a color, it is an absence: the run has not
   // finished and has no artifact to read. Only completed runs are sampled.
   const id = 11_700;
   const inFlight = {
@@ -1709,7 +1709,7 @@ Deno.test("benchmark: a run under way is a badge, not a verdict", async () => {
   await withApi({ pages: { 1: [inFlight, ...newestFirst] }, artifacts, zips }, async () => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertStringIncludes(v.aside ?? "", "running");
-    assertEquals(v.status, "good"); // the runs that finished still set the colour
+    assertEquals(v.status, "good"); // the runs that finished still set the color
   });
   await withApi({ pages: { 1: newestFirst }, artifacts, zips }, async () => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
@@ -2646,7 +2646,7 @@ Deno.test("benchmark: CPU-less cached runs are fetched again", async () => {
   }
 });
 
-Deno.test("/bench: grouped by source file, each benchmark coloured by its own trend", async () => {
+Deno.test("/bench: grouped by source file, each benchmark colored by its own trend", async () => {
   const html = await page("?stat=p99&sort=file");
   assertEquals(
     [...html.matchAll(/<h2>([^<]*)<\/h2>/g)].map((m) => m[1]),
@@ -2915,7 +2915,7 @@ Deno.test("/bench: the measurement selector changes what is plotted", async () =
     await page("?stat=mean"),
     "<title>Benchmarks — mean</title>",
   );
-  // The mean column was once labelled p50, so a link saved under that name still
+  // The mean column was once labeled p50, so a link saved under that name still
   // opens it rather than falling back to the default.
   assertEquals(
     rows(await page("?stat=p50")).find((r) => r.name === "hot/steep")?.value,

@@ -107,7 +107,7 @@ interface Snapshot {
 }
 
 // A role's swatch color: decimal Discord color -> "#rrggbb"; the 0 sentinel
-// (Discord's "no color") maps to the neutral grey used elsewhere in the shell.
+// (Discord's "no color") maps to the neutral gray used elsewhere in the shell.
 function roleColor(color: number): string {
   if (!Number.isInteger(color) || color <= 0) return VISITOR_COLOR;
   return "#" + (color & 0xffffff).toString(16).padStart(6, "0");

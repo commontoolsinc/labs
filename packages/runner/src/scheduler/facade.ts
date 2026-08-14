@@ -1210,7 +1210,7 @@ export class Scheduler {
   // Client-facing quiescence: reactive quiescence AND durability of in-flight
   // commits. Commits are issued fire-and-forget (event handlers, direct cell
   // writes over IPC, reactive recomputation write-backs), so plain idle()
-  // reports quiescence while a commit is still travelling to the server; a
+  // reports quiescence while a commit is still traveling to the server; a
   // client that reads idle as a safe point to navigate or reload would then
   // drop that write when the page and its worker are torn down. The pending
   // set is sourced from the storage manager — the single chokepoint every

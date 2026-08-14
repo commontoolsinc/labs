@@ -1143,7 +1143,7 @@ describe("renderPieceCallHelp", () => {
     // caller has no way to reach — and it is the last line of the page.
     expect(help).not.toContain("write JSON to this file");
     expect(help).not.toContain("Alternatively");
-    // The neighbouring note is about this command's own spelling, and stays.
+    // The neighboring note is about this command's own spelling, and stays.
     expect(help).toContain(
       "Invoke alone will call the handler without any inputs.",
     );
