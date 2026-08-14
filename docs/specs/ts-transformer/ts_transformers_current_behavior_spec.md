@@ -755,9 +755,15 @@ report these through the same collector (deduplicated via §2.2's
   (a true pipeline bug) and for the culprit-already-compute disagreement
   shape.
 - **Warning** `contract:foreign-output-embedding`
-  (`foreign-output-embedding.ts`, invoked from the pattern branch of
-  `schema-injection.ts`) — a pattern's argument or result contract embeds
-  a type that is the Output-position type argument of a DIFFERENT
+  (`src/lints/foreign-output-embedding.ts`) — the first **contract lint**:
+  a read-only, program-scoped analysis whose subject is a design rule
+  rather than compiler correctness. Lints live behind
+  `src/lints/mod.ts` — pure detection returning findings, severity mapped
+  in the registry's policy table (advisory by default), one
+  `runContractLints` hook called from the pattern branch of
+  `schema-injection.ts` after contract resolution, and never any effect on
+  emission. This one fires when a pattern's argument or result contract
+  embeds a type that is the Output-position type argument of a DIFFERENT
   `pattern<I, O>` call somewhere in the program (Output symbols are indexed
   program-wide, WeakMap-cached per `ts.Program`). The pattern's own
   output-position symbol is exempt (self-reference is the documented

@@ -53,7 +53,7 @@ import {
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
-import { checkForeignOutputEmbedding } from "./foreign-output-embedding.ts";
+import { runContractLints } from "../lints/mod.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -3023,11 +3023,11 @@ function handlePatternSchemaInjection(
     typeRegistry.set(resultSchemaCall, resultType);
   }
 
-  // Walk the ORIGINAL argument node and type: capability shrinking may have
-  // replaced `inputTypeNode` with a synthetic literal (and nulled
-  // `inputType`), and the embedding question is about the contract the
+  // The contract lints get the ORIGINAL argument node and type: capability
+  // shrinking may have replaced `inputTypeNode` with a synthetic literal
+  // (and nulled `inputType`), and a lint's subject is the contract the
   // author declared.
-  checkForeignOutputEmbedding({
+  runContractLints({
     context,
     callNode: node,
     inputType: originalInputType,

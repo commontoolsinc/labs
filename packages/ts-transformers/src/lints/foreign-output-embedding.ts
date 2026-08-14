@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { detectCallKind, getTypeFromTypeNodeWithFallback } from "../ast/mod.ts";
-import type { TransformationContext } from "../core/mod.ts";
+import type { ContractLintFinding, ContractLintInput } from "./mod.ts";
 
 /**
  * Foreign-output embedding check (prototype for the verb-evolution brief,
@@ -25,8 +25,9 @@ import type { TransformationContext } from "../core/mod.ts";
  * is the documented shape), and a provider can opt a type out with a
  * `@sharedContract` JSDoc tag when the type itself is the intended protocol.
  *
- * Severity is "warning" while this is a prototype: it surfaces the coupling
- * without failing anyone's build.
+ * Severity belongs to the registry's policy map (`lints/mod.ts`), advisory
+ * while this is a prototype: the coupling is surfaced without failing
+ * anyone's build.
  *
  * Scope: the check reasons over declared TYPE symbols. The schema-argument
  * form (`pattern(fn, inputSchemaLiteral)`) is outside it — a hand-authored
@@ -217,27 +218,19 @@ function referenceNodeForSymbol(
   return found;
 }
 
-export interface ForeignOutputEmbeddingCheckInput {
-  readonly context: TransformationContext;
-  readonly callNode: ts.CallExpression;
-  readonly inputType: ts.Type | undefined;
-  readonly inputTypeNode: ts.TypeNode;
-  readonly resultType: ts.Type | undefined;
-  readonly resultTypeNode: ts.TypeNode;
-}
-
 /**
- * Report a warning for every foreign pattern Output type embedded in this
- * pattern call's argument or result contract.
+ * One finding for every foreign pattern Output type embedded in this
+ * pattern call's argument or result contract. Pure detection: severity is
+ * the registry's business (`lints/mod.ts`).
  */
-export function checkForeignOutputEmbedding(
-  input: ForeignOutputEmbeddingCheckInput,
-): void {
+export function foreignOutputEmbeddingLint(
+  input: ContractLintInput,
+): ContractLintFinding[] {
   const { context, callNode } = input;
   const { checker, program } = context;
 
   const index = outputSymbolIndex(program, checker);
-  if (index.size === 0) return;
+  if (index.size === 0) return [];
 
   // Only the OUTPUT-position type argument is exempt: a pattern's own
   // output referencing itself is the documented self-reference shape. A
@@ -264,6 +257,7 @@ export function checkForeignOutputEmbedding(
     { role: "result", type: input.resultType, typeNode: input.resultTypeNode },
   ];
 
+  const findings: ContractLintFinding[] = [];
   for (const side of sides) {
     const type = side.type ??
       getTypeFromTypeNodeWithFallback(side.typeNode, checker);
@@ -278,8 +272,7 @@ export function checkForeignOutputEmbedding(
     for (const hit of hits) {
       const anchor =
         referenceNodeForSymbol(side.typeNode, hit.symbol, checker) ?? callNode;
-      context.reportDiagnosticOnce({
-        severity: "warning",
+      findings.push({
         type: FOREIGN_OUTPUT_EMBEDDING_DIAGNOSTIC,
         node: anchor,
         message: `Pattern ${side.role} embeds ${hit.info.typeName}, the ` +
@@ -292,4 +285,5 @@ export function checkForeignOutputEmbedding(
       });
     }
   }
+  return findings;
 }
