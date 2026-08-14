@@ -11,6 +11,7 @@ interface PingResult {
 interface Verbs {
   ping: Stream<Ping, PingResult>;
   pingNamed: Stream<Ping, PingResult>;
+  pingDeclared: Stream<Ping, PingResult>;
   poke: Stream<Ping>;
 }
 
@@ -56,6 +57,27 @@ const pingNamed = handler<Ping, { count: number }, PingResult>(
   echoNamed,
 );
 
+// A callback referenced as a function DECLARATION: no expression resolver can
+// return it, so recognition asks callback-ness instead — without this, the
+// prepend path ran and the trailing-options lowering spread-replaced the
+// reference with the result options, handing the runtime a schema where its
+// callback belonged.
+function echoDeclared(event: Ping, _state: { count: number }): PingResult {
+  return { echoed: event.word };
+}
+const pingDeclared = handler<Ping, { count: number }, PingResult>(
+  {
+    type: "object",
+    properties: { word: { type: "string" } },
+    required: ["word"],
+  },
+  {
+    type: "object",
+    properties: { count: { type: "number", asCell: ["cell"] } },
+  },
+  echoDeclared,
+);
+
 // The same form without a declared result: passed through untouched — no
 // generated schemas, no options object.
 const poke = handler<Ping, { count: number }>(
@@ -76,6 +98,7 @@ export default pattern<Record<string, never>, Verbs>(() => {
   return {
     ping: ping({ count }),
     pingNamed: pingNamed({ count }),
+    pingDeclared: pingDeclared({ count }),
     poke: poke({ count }),
   };
 });

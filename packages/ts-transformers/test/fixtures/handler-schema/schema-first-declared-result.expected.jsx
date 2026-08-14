@@ -20,6 +20,7 @@ interface PingResult {
 interface Verbs {
     ping: Stream<Ping, PingResult>;
     pingNamed: Stream<Ping, PingResult>;
+    pingDeclared: Stream<Ping, PingResult>;
     poke: Stream<Ping>;
 }
 // The schema-first authored form: the author supplies the event and state
@@ -72,6 +73,33 @@ const pingNamed = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
+// A callback referenced as a function DECLARATION: no expression resolver can
+// return it, so recognition asks callback-ness instead — without this, the
+// prepend path ran and the trailing-options lowering spread-replaced the
+// reference with the result options, handing the runtime a schema where its
+// callback belonged.
+function echoDeclared(event: Ping, _state: {
+    count: number;
+}): PingResult {
+    return { echoed: event.word };
+}
+__cfHardenFn(echoDeclared);
+const pingDeclared = handler({
+    type: "object",
+    properties: { word: { type: "string" } },
+    required: ["word"],
+}, {
+    type: "object",
+    properties: { count: { type: "number", asCell: ["cell"] } },
+}, echoDeclared, { resultSchema: {
+        type: "object",
+        properties: {
+            echoed: {
+                type: "string"
+            }
+        },
+        required: ["echoed"]
+    } as const satisfies __cfHelpers.JSONSchema });
 // The same form without a declared result: passed through untouched — no
 // generated schemas, no options object.
 const poke = handler({
@@ -89,6 +117,7 @@ export default pattern(() => {
     return {
         ping: ping({ count }).for({ stream: ["__patternResult", "ping"] }, true),
         pingNamed: pingNamed({ count }).for({ stream: ["__patternResult", "pingNamed"] }, true),
+        pingDeclared: pingDeclared({ count }).for({ stream: ["__patternResult", "pingDeclared"] }, true),
         poke: poke({ count }).for({ stream: ["__patternResult", "poke"] }, true)
     };
 }, {
@@ -106,12 +135,16 @@ export default pattern(() => {
             $ref: "#/$defs/Ping",
             asCell: ["stream"]
         },
+        pingDeclared: {
+            $ref: "#/$defs/Ping",
+            asCell: ["stream"]
+        },
         poke: {
             $ref: "#/$defs/Ping",
             asCell: ["stream"]
         }
     },
-    required: ["ping", "pingNamed", "poke"],
+    required: ["ping", "pingNamed", "pingDeclared", "poke"],
     $defs: {
         Ping: {
             type: "object",
@@ -139,5 +172,6 @@ __cfHardenFn(h);
 __cfReg({
     ping,
     pingNamed,
+    pingDeclared,
     poke
 });

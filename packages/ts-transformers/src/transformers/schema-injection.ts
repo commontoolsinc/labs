@@ -2524,6 +2524,27 @@ function resolveLiftAppliedInputAndCallback(
   return { input, callback };
 }
 
+/**
+ * Whether `expression` names a callback: a function-like expression under the
+ * identifier-aware resolution, or a reference to a function DECLARATION —
+ * which no expression resolver can return, but which is just as much a
+ * callback for recognizing the schema-first `handler` form and for keeping
+ * the trailing-options check from spread-replacing it with the injected
+ * result options.
+ */
+function isCallbackReference(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!expression) return false;
+  if (resolveCallbackFunctionExpression(expression, checker)) return true;
+  const unwrapped = unwrapExpression(expression);
+  if (!ts.isIdentifier(unwrapped)) return false;
+  const symbol = checker.getSymbolAtLocation(unwrapped);
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  return declaration !== undefined && ts.isFunctionDeclaration(declaration);
+}
+
 function resolveFunctionLikeExpression(
   expression: ts.Expression | undefined,
   checker: ts.TypeChecker,
@@ -3088,7 +3109,7 @@ function withDeclaredResultSchema(
     ? node.arguments[node.arguments.length - 1]
     : undefined;
   const authoredOptions = authoredTail !== undefined &&
-      !resolveCallbackFunctionExpression(authoredTail, checker)
+      !isCallbackReference(authoredTail, checker)
     ? authoredTail
     : undefined;
 
@@ -3249,9 +3270,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           // load, but the emission must not garble the call on the way there.
           if (
             node.arguments.length >= 3 &&
-            !resolveCallbackFunctionExpression(node.arguments[0], checker) &&
-            !resolveCallbackFunctionExpression(node.arguments[1], checker) &&
-            resolveCallbackFunctionExpression(node.arguments[2], checker)
+            !isCallbackReference(node.arguments[0], checker) &&
+            !isCallbackReference(node.arguments[1], checker) &&
+            isCallbackReference(node.arguments[2], checker)
           ) {
             const updated = preserveSourceMapRange(
               factory.createCallExpression(
