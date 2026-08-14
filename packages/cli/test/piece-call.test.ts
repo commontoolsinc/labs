@@ -4437,6 +4437,55 @@ describe("reportVerbInputErrorOrRethrow", () => {
   });
 });
 
+describe("the pre-dispatch gate on the forced-stream path", () => {
+  // A handler resolved through the forced-stream fallback dispatches on a
+  // cast cell whose schema is only { asCell: ["stream"] } — a shape every
+  // payload satisfies. The resolution carries the piece's published payload
+  // schema as `inputSchema`, and the gate judges against THAT, so a
+  // malformed payload is refused before the invocation id is spent instead
+  // of dispatching a handling that runs with no event.
+  const forcedStreamResolution = (sends: unknown[]) =>
+    ({
+      callableCell: createMockCell({ $stream: true }, { asCell: ["stream"] }, {
+        send: (value, onCommit) => {
+          sends.push(value);
+          onCommit?.({ status: () => ({ status: "done" }) });
+        },
+      }),
+      callableKind: "handler",
+      cellKey: "addNote",
+      pieces: { runtime: {} },
+      space: "did:key:test-home",
+      inputSchema: {
+        type: "object",
+        properties: { title: { type: "string" } },
+        required: ["title"],
+      },
+    }) as unknown as CallableResolution;
+
+  it("refuses a payload the published schema rejects, before dispatch", async () => {
+    const sends: unknown[] = [];
+    const resolved = forcedStreamResolution(sends);
+
+    await expect(
+      executeResolvedCallable(resolved, { titel: "typo" }),
+    ).rejects.toThrow(VerbInputValidationError);
+    expect(sends).toEqual([]);
+  });
+
+  it("dispatches a payload the published schema accepts", async () => {
+    const sends: unknown[] = [];
+    const resolved = forcedStreamResolution(sends);
+
+    const executed = await executeResolvedCallable(resolved, {
+      title: "Ship it",
+    });
+
+    expect(sends).toEqual([{ title: "Ship it" }]);
+    expect(executed).toEqual({});
+  });
+});
+
 describe("runtimeErrorLog", () => {
   // Pinned directly rather than left to incidental coverage: which execution
   // paths hand this a non-object runtime varies by run and sharding, and the

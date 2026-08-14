@@ -1634,9 +1634,12 @@ async function tryResolvePieceHandler(
     callableKind: "handler",
     cellKey: callableName,
     // The link-derived cell still carries whatever payload schema the piece
-    // does publish, which the forced stream cast does not; keep using it for
-    // the command spec so `--help` and input validation are unaffected.
+    // does publish, which the forced stream cast does not: the command spec
+    // reads it for `--help`, and `inputSchema` hands it to the pre-dispatch
+    // gate — the cast's own schema admits any payload, so gating on it would
+    // dispatch a malformed payload and spend the invocation id.
     commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
+    inputSchema: linkDerivedCell.schema,
     pieces,
     space,
   };

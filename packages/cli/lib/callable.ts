@@ -55,6 +55,16 @@ export interface CallableResolution {
    * to consult — which says this resolution cannot describe a result rather
    * than promising there is none. */
   declaredResult?: () => Promise<JSONSchema | undefined>;
+  /** The verb's published event schema, when the resolution knows a richer
+   * one than the dispatch cell carries.
+   *
+   * The forced-stream fallback dispatches through a cast cell whose schema is
+   * only `{asCell: ["stream"]}` — a shape every payload satisfies — while the
+   * link-derived cell still carries whatever payload schema the piece
+   * publishes. The pre-dispatch gate validates against this when present, so
+   * a malformed payload on that path is refused before the invocation id is
+   * spent, exactly as on the ordinary paths. */
+  inputSchema?: JSONSchema;
 }
 
 /** The phases a handler invocation passes through, reported on early exit so
@@ -844,11 +854,13 @@ export async function executeResolvedCallable(
     // Before anything is dispatched, and so before the invocation id can be
     // spent on a handling that would run with no event. An absent payload
     // is normalized to `{}` against an object schema (D5), so what goes out
-    // is what the gate judged.
+    // is what the gate judged. A resolution carrying a richer published
+    // schema than its dispatch cell (the forced-stream fallback) is judged
+    // against that one.
     const dispatchInput = assertVerbInputSatisfiesSchema(
       resolved.cellKey,
       input,
-      resolved.callableCell.schema,
+      resolved.inputSchema ?? resolved.callableCell.schema,
     );
     const runtimeErrors = runtimeErrorLog(resolved.pieces.runtime);
     const errorCountBefore = runtimeErrors.length;
