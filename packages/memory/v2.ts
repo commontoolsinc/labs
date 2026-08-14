@@ -190,11 +190,17 @@ export type PendingRead = {
    * document its subscriptions never covered.
    *
    * When present, the staleness scan covers the FULL interval
-   * `(basisSeq, head]`, excluding only the session's own TRUE PREDECESSOR
-   * commits — those with a localSeq below the reader's, the accepted layers
-   * its materialized view included. An own write with a higher localSeq
-   * accepted first (out-of-order submission) conflicts like a foreign
-   * write, so soundness does not depend on wire-order discipline. This is
+   * `(basisSeq, head]`, excluding only the own-session layers this read's
+   * `localSeq` array NAMES — the accepted layers whose inclusion in the
+   * reader's materialized view the array attests. Any own write the array
+   * does not name conflicts like a foreign write: a higher localSeq
+   * accepted first (out-of-order submission), or an omitted layer whose
+   * write is durably integrated — so the server verifies that `basisSeq`
+   * plus the named layers fully account for the document's durable history
+   * at the read path, rather than trusting client discipline. (What it
+   * cannot verify is the phantom direction: an omitted REJECTED
+   * contributor left nothing durable to compare against — that stays in
+   * the fabricated-read trust class.) This is
    * the CT-1910 repair
    * (`PendingStacks_Repaired.cfg` certifies it); when absent (a legacy
    * client), staleness is based at the HIGHEST dependency's resolution seq,

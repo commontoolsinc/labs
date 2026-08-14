@@ -81,9 +81,10 @@ not: a pending read without `basisSeq` is scanned from the highest
 dependency's resolution seq, so overlapping foreign writes landing between
 the reader's confirmed basis and that seq are not scanned. A read declaring
 `basisSeq` is scanned over the full interval from that basis, excluding
-only the session's TRUE PREDECESSOR commits — those with a localSeq below
-the reader's, the accepted layers its view included; an own write admitted
-out of submission order conflicts like a foreign one
+only the own-session layers its dependency array NAMES — the accepted
+layers whose inclusion in the reader's view the array attests; an own
+write the array does not name conflicts like a foreign one, whether
+admitted out of submission order or omitted while durably integrated
 (03-commit-model.md §3.6.3) — the shape current clients always emit. The TLA+ config
 `PendingStacks_Current.cfg` reproduces the legacy-shape violation (kept as a
 regression witness, alongside the legacy-shape engine test in
@@ -124,7 +125,7 @@ generator test asserting the runner's array-op discipline
 > set that (a) includes every pending layer whose acceptance or rejection can
 > change the observed value, and (b) includes the top-of-stack layer of the
 > reader's materialized view. For a read declaring its true confirmed basis
-> (`basisSeq`), the staleness scan runs from that basis with predecessor-only
+> (`basisSeq`), the staleness scan runs from that basis with declared-set
 > own-session exclusion; for a legacy read, the top-of-stack layer's
 > resolution is the staleness basis. Narrowing may drop only non-top layers
 > that provably cannot influence the observed value: a layer whose write
@@ -154,10 +155,14 @@ history (`03-commit-model.md` §3.5): a layer the overlay removed before the
 view was built — a rejection verdict honored, the view rebuilt without it —
 is not a contributor under clause (a), so its absence is a sound narrowing
 and the recorded array may be non-contiguous in the session's `localSeq`
-space. The server cannot check completeness (it does not know the client's
-view); it imposes per-element resolution on what is named and nothing on
-what is not, so the soundness burden for an omission sits entirely with the
-client, in the same trust class as a fabricated read. The interleaving this
+space. The server verifies the durable half of the completeness claim: the
+declared-set exclusion (§3.6.3) makes an omitted own layer's durable
+overlapping write conflict like a foreign one, so an accepted omission is
+one whose omitted layers contributed nothing durable — which a processed
+rejection never does. Only the never-durable half stays on the client's
+honor: an omitted REJECTED contributor's optimistic value never crossed the
+wire, so that omission is unverifiable and sits in the same trust class as
+a fabricated read. The interleaving this
 permits — rejections honored eagerly while an accept's promotion is still
 parked — is reachable in the TLA+ model's `fullstack` recording mode:
 rejection removes the doomed layers from the pending stack, an accepted
@@ -178,13 +183,23 @@ rejection is no longer a contributor); MUST NOT omit a layer of the view
 that overlaps the read path, and MUST NOT omit the view's top-of-stack
 layer. A legacy read MUST NOT base its staleness scan below
 the top of stack; a `basisSeq` read scans from its declared basis and MUST
-exclude only true predecessor own-session commits (localSeq below the
-reader's — an own write accepted out of submission order conflicts like a
-foreign write).
+exclude only the own-session layers its array names — an own write it does
+not name conflicts like a foreign write, whether accepted out of
+submission order or omitted while durably integrated. The declared-set
+exclusion is what lets the server VERIFY the completeness claim against
+durable history instead of trusting it; the phantom direction (an omitted
+rejected contributor) remains unverifiable, as recorded in §3.5.
 
 Checked by: the TLA+ model (both recording modes, under atomic and
-delayed-delivery configs); stacked-commit unit
-tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`).
+delayed-delivery configs) for recording completeness and sparse-omission
+reachability — its `Build` always names the view's full layer set, so the
+declared-set scan's VALIDATION half (a buggy omission of a durably
+integrated layer) is outside its reach and is checked instead by the
+engine unit tests (`packages/memory/test/v2-sparse-pending-dependencies.test.ts`),
+the differential harness's sparse mutation, and stacked-commit unit
+tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`); see the
+TLA README's "Canonical dependency arrays" note for the coincidence
+argument and the `SkipLayers` refinement that would bring it in scope.
 
 ### INV-4 — Cascade totality
 

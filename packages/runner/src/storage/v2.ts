@@ -357,7 +357,8 @@ type PendingCommitRead = {
    * space — the same value the confirmed branch emits as `seq`, which the
    * pre-CT-1910 pending shape discarded. A server that understands it scans
    * staleness over the FULL interval (basisSeq, head], excluding only the
-   * session's own predecessor commits (localSeq below the reader's),
+   * own-session layers the read's dependency array names — for this
+   * runner, which names its full surviving stack, exactly its own view —
    * repairing the pending-read basis over-advance; older servers ignore the
    * field and keep the max-dependency basis. See
    * {@link PendingRead.basisSeq} (memory/v2.ts).
@@ -3969,7 +3970,9 @@ class SpaceReplica implements ISpaceReplica {
       // the doc's top-of-stack below this commit) so a dropped deeper layer
       // still dooms this commit (server: pending-dependency resolution;
       // client: cascade). Servers that honor `basisSeq` scan staleness from
-      // it with predecessor-only own-session exclusion (CT-1910); legacy
+      // it, excluding only the own-session layers the array names
+      // (CT-1910) — naming the full stack is thus also what keeps the
+      // scan from conflicting with this commit's own view. Legacy
       // servers base staleness at the highest element only — a lower-layer
       // basis WITHOUT that exclusion would false-conflict with the
       // session's own later stacked writes (CT-1872 1c).
