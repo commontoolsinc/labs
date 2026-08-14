@@ -538,13 +538,12 @@ work is the natural place for this to ride, and that work —
 started. So call-count-driven retirement is not near-term at any price: its
 carrier waits on a review rather than on a queue position.
 
-Counting also sees past the
-blast-radius horizon: a call executes against the provider's piece, in the
-provider's space, so invocation records catch the cross-space and
-third-party callers no static enumeration can reach. The two signals are
-complementary and both partial — enumeration sees recorded demands within
-its horizon, dormant holders included; counting sees live callers beyond
-it, and misses anyone who has not called lately.
+Counting also sees past the blast-radius horizon: a call executes against the
+provider's piece, in the provider's space, so invocation records catch the
+cross-space and third-party callers no static enumeration can reach. The two
+signals are complementary and both partial — enumeration sees recorded
+demands within its horizon, dormant holders included; counting sees live
+callers beyond it, and misses anyone who has not called lately.
 
 ## The longer arc
 
