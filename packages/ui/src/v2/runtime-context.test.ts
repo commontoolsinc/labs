@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { Context } from "@lit/context";
 import type { RuntimeClient } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
 import { runtimeContext, spaceContext } from "./runtime-context.ts";
@@ -30,11 +31,11 @@ describe("host embedding contract: runtime/space contexts", () => {
     // published value types drift (e.g. RuntimeClient -> some shell-internal
     // type), this stops compiling and the seam test fails at type-check time.
     const _runtime: typeof runtimeContext extends
-      import("@lit/context").Context<unknown, RuntimeClient | undefined> ? true
+      Context<unknown, RuntimeClient | undefined> ? true
       : never = true;
-    const _space: typeof spaceContext extends
-      import("@lit/context").Context<unknown, DID | undefined> ? true : never =
-        true;
+    const _space: typeof spaceContext extends Context<unknown, DID | undefined>
+      ? true
+      : never = true;
     expect(_runtime).toBe(true);
     expect(_space).toBe(true);
   });

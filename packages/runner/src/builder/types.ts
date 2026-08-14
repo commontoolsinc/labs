@@ -65,6 +65,27 @@ import type {
 } from "@commonfabric/api";
 import { toSchema } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
+import type {
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
+import type {
+  FabricBytes,
+  FabricEpochDays,
+  FabricEpochNsec,
+  FabricHash,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
+import type {
+  FabricInstance,
+  FabricPrimitive,
+  FabricSpecialObject,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
+import type {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { ImplementationIdentity } from "../cfc/types.ts";
@@ -473,35 +494,23 @@ export interface BuilderFunctionsAndConstants {
   UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
   // Fabric value classes, in the order they are declared in api/index.ts.
-  FabricSpecialObject:
-    typeof import("@commonfabric/data-model/fabric-value").FabricSpecialObject;
-  FabricInstance:
-    typeof import("@commonfabric/data-model/fabric-value").FabricInstance;
-  FabricPrimitive:
-    typeof import("@commonfabric/data-model/fabric-value").FabricPrimitive;
-  FabricEpochNsec:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochNsec;
-  FabricEpochDays:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
-  FabricHash:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
-  FabricLink:
-    typeof import("@commonfabric/data-model/fabric-instances").FabricLink;
-  FabricBytes:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
-  FabricRegExp:
-    typeof import("@commonfabric/data-model/fabric-primitives").FabricRegExp;
-  FabricError:
-    typeof import("@commonfabric/data-model/fabric-instances").FabricError;
+  FabricSpecialObject: typeof FabricSpecialObject;
+  FabricInstance: typeof FabricInstance;
+  FabricPrimitive: typeof FabricPrimitive;
+  FabricEpochNsec: typeof FabricEpochNsec;
+  FabricEpochDays: typeof FabricEpochDays;
+  FabricHash: typeof FabricHash;
+  FabricLink: typeof FabricLink;
+  FabricBytes: typeof FabricBytes;
+  FabricRegExp: typeof FabricRegExp;
+  FabricError: typeof FabricError;
 
   // Debug stringifiers
-  toCompactDebugString:
-    typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
-  toIndentedDebugString:
-    typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
+  toCompactDebugString: typeof toCompactDebugString;
+  toIndentedDebugString: typeof toIndentedDebugString;
 
   // Value comparison
-  valueEqual: typeof import("@commonfabric/data-model/fabric-value").valueEqual;
+  valueEqual: typeof valueEqual;
 }
 
 // Runtime interface needed by createCell

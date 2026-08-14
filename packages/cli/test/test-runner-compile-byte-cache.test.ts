@@ -8,6 +8,7 @@ import {
   writeCompileByteCacheForTesting,
 } from "@commonfabric/test-support/compile-byte-cache";
 import { runMultiUserTestPattern } from "../lib/multi-user-test-runner.ts";
+import type * as compileByteCacheModule from "../lib/compile-byte-cache.ts";
 import { runTests } from "../lib/test-runner.ts";
 import { cf, checkStderr, withEnv } from "./utils.ts";
 
@@ -50,7 +51,7 @@ async function readCoverageText(coverageDir: string): Promise<string> {
 }
 
 async function importFreshCompileByteCacheModule(): Promise<
-  typeof import("../lib/compile-byte-cache.ts")
+  typeof compileByteCacheModule
 > {
   const url = new URL(COMPILE_BYTE_CACHE_MODULE);
   url.searchParams.set("testRun", crypto.randomUUID());

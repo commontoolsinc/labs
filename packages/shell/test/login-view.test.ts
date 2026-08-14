@@ -4,12 +4,9 @@ import {
   AUTH_METHOD_PASSKEY,
   AUTH_METHOD_PASSPHRASE,
 } from "../src/lib/credentials.ts";
+import type { XLoginView } from "../src/views/LoginView.ts";
 
-type LoginView =
-  & InstanceType<
-    typeof import("../src/views/LoginView.ts").XLoginView
-  >
-  & Record<string, unknown>;
+type LoginView = InstanceType<typeof XLoginView> & Record<string, unknown>;
 
 type TemplateResultLike = {
   strings?: readonly string[];
