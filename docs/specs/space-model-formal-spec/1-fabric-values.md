@@ -1390,6 +1390,15 @@ expanded, or a shared subtree quietly copied in two, is a value that decodes
 to a different graph than the one encoded, with nothing at either end saying
 so.
 
+**Conversion answers separately from serialization, and refuses a cycle.**
+`fabricFromNativeValue()` builds a fabric value out of native data, and will not
+build one containing a cycle; it preserves shared references, so the converted
+form for a given original is reused and structural sharing survives. That is a
+third answer under the same rule, not an exception to it: membership admits a
+cycle -- `isFabricValue()` handles one and returns `true` -- while this entry
+point declines to construct one. A value holding a cycle therefore reaches the
+model by being built directly rather than converted.
+
 Note that preserving shared references means preserving _structure_: the same
 encoded subtree appears at each position it appeared at. Whether the decoded
 objects are `===` to each other is a further promise, which an engine states

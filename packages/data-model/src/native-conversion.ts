@@ -438,7 +438,7 @@ function fabricFromNativeValueInternal(
     const cached = converted.get(original);
     if (cached === PROCESSING) {
       throw new Error(
-        "Not representable as a `FabricValue`: circular reference",
+        "Conversion refuses a circular reference",
       );
     }
     return cached;
