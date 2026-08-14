@@ -40,7 +40,12 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
  * repeated `toString()` calls are O(1).
  */
 export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
-  readonly #hash: Uint8Array;
+  /**
+   * Private byte storage. Guaranteed to be backed by an exact-sized and
+   * unshared `ArrayBuffer`, which is what lets the realm codec hand out a
+   * transferable copy covering exactly these bytes.
+   */
+  readonly #hash: Uint8Array<ArrayBuffer>;
   readonly #tag: string;
   readonly #justHashString: string;
   readonly #fullStringForm: string;
@@ -172,9 +177,16 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
         super(CODEC_TYPE_TAGS.Hash, FabricHash);
       }
 
-      /** @inheritDoc */
+      /**
+       * @inheritDoc
+       *
+       * The buffer covers exactly these bytes and is nobody else's: a
+       * transfer hands over the whole of one, so a state covering more than
+       * the value would cede bytes that are not part of it, and one shared
+       * with this instance would leave a transferred value hollow.
+       */
       encode(value: FabricHash): RealmCodecValue {
-        return { tag: value.tag, hash: value.bytes };
+        return { tag: value.tag, hash: value.#hash.buffer.slice(0) };
       }
 
       /**
@@ -199,16 +211,19 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
           );
         }
 
-        const { tag, hash } = state as { tag: unknown; hash: unknown };
-        if ((typeof tag !== "string") || !(hash instanceof Uint8Array)) {
+        const { tag, hash } = state as { tag: any; hash: any };
+        if ((typeof tag !== "string") || !(hash instanceof ArrayBuffer)) {
           return new ProblematicValue(
             typeTag,
             state,
-            `expected string \`tag\` and \`Uint8Array\` \`hash\``,
+            `expected string \`tag\` and \`ArrayBuffer\` \`hash\``,
           );
         }
 
-        return new FabricHash(hash, tag);
+        // Taken over rather than copied, as `FabricBytes` does: the buffer
+        // arrived either by being cloned, making it this realm's own, or by
+        // being transferred, which detached the sender's.
+        return new FabricHash(new Uint8Array(hash), tag, true);
       }
     })(),
   );
@@ -226,14 +241,10 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
    * `FabricValue`, so a state holding one has no nonterminal reading. The
    * record being a plain object decides nothing either way.
    *
-   * TODO(danfuzz): A nonterminal state of `{ tag, hash: FabricBytes }` is
-   * available too, reaching the bytes through whichever codec this format
-   * binds for `FabricBytes` instead of naming `Uint8Array` here, and so
-   * keeping the representation of bytes in one place per format rather than
-   * two. It
-   * is a different encoding rather than the same one reached differently: the
-   * bytes would arrive under their own tag nested inside this one, a level
-   * deeper than the state below puts them.
+   * The state is terminal, and its `hash` is a bare `ArrayBuffer` for the
+   * reason `FabricBytes` encodes to one: that is the form `postMessage()` can
+   * *transfer*, so a caller assembling a transfer list finds a transferable
+   * object here rather than a view it would have to reach through.
    */
   static get [REALM_CODEC](): TerminalCodec<RealmCodecValue> {
     return this.#realmCodec;

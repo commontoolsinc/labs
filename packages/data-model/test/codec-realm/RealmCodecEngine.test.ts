@@ -119,6 +119,37 @@ describe("RealmCodecEngine", () => {
       expect(state.byteLength).toBe(3);
     });
 
+    it("encodes a `FabricHash` to a tag and a transferable `ArrayBuffer`", () => {
+      const payload = realmFromFabricValue(
+        new FabricHash(new Uint8Array([1, 2, 3]), "fid1"),
+      );
+      const state = (payload as RealmTaggedValue).get("Hash@1") as {
+        tag: string;
+        hash: ArrayBuffer;
+      };
+
+      // Both byte-carrying classes reach `postMessage()`'s transferable form,
+      // so a transfer list can be assembled from either without reaching
+      // through a view.
+      expect(state.tag).toBe("fid1");
+      expect(state.hash).toBeInstanceOf(ArrayBuffer);
+      expect([...new Uint8Array(state.hash)]).toEqual([1, 2, 3]);
+      // Covering exactly the bytes: a transfer hands over the whole buffer.
+      expect(state.hash.byteLength).toBe(3);
+    });
+
+    it("does not hand out the bytes an encoded `FabricHash` holds", () => {
+      const hash = new FabricHash(new Uint8Array([1, 2, 3]), "fid1");
+      const state = (realmFromFabricValue(hash) as RealmTaggedValue)
+        .get("Hash@1") as { hash: ArrayBuffer };
+
+      new Uint8Array(state.hash)[0] = 99;
+      // Read through `bytes`, not `toString()`: the string forms are computed
+      // once in the constructor, so they cannot witness a mutation of the
+      // bytes and a test resting on them passes however this codec behaves.
+      expect([...hash.bytes]).toEqual([1, 2, 3]);
+    });
+
     it("encodes a `FabricEpochNsec` to a `bigint`", () => {
       const payload = realmFromFabricValue(
         new FabricEpochNsec(1234567890123456789n),
