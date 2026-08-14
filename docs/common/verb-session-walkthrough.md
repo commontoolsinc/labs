@@ -30,6 +30,43 @@ Section headers inside the help output below are the literal strings
 `renderPieceCallHelp` emits (`packages/cli/lib/exec-schema.ts`). Their contents
 are illustrative.
 
+## Why this pattern
+
+A fixture exists to be driven, and this one is shaped so that driving it is hard
+in the particular ways the verb surface has to be good at.
+
+**A tree with cross-links.** An item is filed under one item and can be waited
+on by any other, so the same item is reachable by two different paths. That is
+where an address stops being a convenience: handing a caller the item's contents
+twice says nothing about whether they are looking at one item or two, and only
+an address answers it.
+
+**State a caller cannot set.** `title` is the only field supplied at creation.
+`status`, `notes`, `children` and `blockedOn` belong to the pattern and change
+only when a verb is called, which is what makes the verb surface the whole
+interface rather than a convenience laid over a writable document.
+
+**Five verbs, one per shape.** They are not five features. Each exists because
+a caller asks a different question about what comes back, and the tracker holds
+one of each so that no shape goes undemonstrated:
+
+| Verb | The shape it exercises | Where |
+| --- | --- | --- |
+| `addItem`, `addChild` | returns a piece — an address the next command takes as its target, and a value that can be reached from inside itself | acts 4 and 8 |
+| `recordNote` | returns what only the pattern could compute: the clock is a handler capability, so the stamp cannot come from the caller | act 7 |
+| `finish` | returns a derived fact — `openBelow` takes a walk of the whole subtree, which a caller would pay N reads for | act 8 |
+| `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
+| `blockOn` | takes an address as an **argument** rather than as the receiver | act 10, **[blocked]** |
+
+Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
+drives the session and prints each command before running it — the transcript is
+what that script is for. Beside it,
+`packages/cli/integration/verb-session-gaps.sh` asserts the same surface as
+pass/fail, and several of its steps assert that something does *not* work yet,
+failing loudly the day it does. A verb added to the fixture wants a row above, an
+act in the demo, and a step in the harness; a shape demonstrated in none of the
+three is a claim this document is making alone.
+
 ## What you are driving
 
 Two patterns. A **board** holds root items; an **item** holds its own subtree,

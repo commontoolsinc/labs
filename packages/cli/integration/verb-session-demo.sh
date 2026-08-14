@@ -6,6 +6,10 @@
 # the transcript is the artifact. Its companion `verb-session-gaps.sh` asserts
 # the same surface as pass/fail and is what keeps this one honest.
 #
+# docs/common/verb-session-walkthrough.md is the prose half: why the fixture
+# declares the verbs it does, and which shape of the surface each act is here
+# to show. An act added here without a row there is an act nobody can place.
+#
 # Every command in the transcript is one array of words, printed and then run.
 # There is no second, prettier spelling of it anywhere in this file: `run` and
 # `broken` display `"$@"` and execute `"$@"`, so a line that reads well and a
@@ -199,7 +203,14 @@ KID=$(cf piece get -s "$SPACE" --piece "$EPIC" children --select @ 2>/dev/null |
 run cf piece call -s "$SPACE" --piece "$KID" --select item.title addChild -- --title "Rotate signing key"
 run cf piece call -s "$SPACE" --piece "$EPIC" finish -- --body "shipping behind a flag"
 
-act "9 · Relate two items — PENDING"
+act "9 · A verb that declares no result"
+say "archive is Stream<void>: there is nothing for it to hand back, and the"
+say "invocation says so by settling with no result at all."
+run cf piece call -s "$SPACE" --piece "$KID" archive
+say "What it changed is a read away, on the one field the caller never sets."
+run cf piece get -s "$SPACE" --piece "$KID" status
+
+act "10 · Relate two items — PENDING"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
 pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address>" \
   "an address cannot yet be a verb argument (verbs plan item 11)" \
@@ -212,11 +223,11 @@ pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address
   }
 }'
 
-act "10 · One item, two paths, one address — PENDING"
+act "11 · One item, two paths, one address — PENDING"
 say "This is what addresses are for: the same item under a parent AND as a blocker,"
 say "and a caller can tell it is one item rather than two copies."
 pending "cf piece get -s $SPACE --piece board items --select title,children@,blockedOn@" \
-  "needs the edge from act 9" \
+  "needs the edge from act 10" \
   'the same of:fid1:… appears under one item'"'"'s children and another'"'"'s blockedOn'
 
 printf '\n%s━━ %s %s\n' "$B" "What just happened" "$N"
@@ -227,7 +238,7 @@ say "One name was typed: 'board'. Everything under it was addressed by the id a"
 say "call handed back — which is the composition the verb surface exists for,"
 say "and the reason those lines are as long as they are."
 say ""
-say "Acts 9 and 10 are the graph half, and they are sequenced as verbs plan"
+say "Acts 10 and 11 are the graph half, and they are sequenced as verbs plan"
 say "item 11. Act 6 is a defect: #5633, with a fix in review as #5764."
 say "verb-session-gaps.sh asserts all three, and fails the day any one of them"
 say "changes — so this demo cannot quietly go stale."
