@@ -1,4 +1,5 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
@@ -313,6 +314,85 @@ Deno.test("Foreign-output embedding check", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       assertEquals(embeddingWarnings(diagnostics).length, 0);
+    },
+  );
+
+  // A chain of single-property interfaces: L1.next -> L2.next -> … -> leaf.
+  // From the argument root, the leaf sits at depth `links + 1`.
+  const chainTo = (links: number, leaf: string): string[] => {
+    const lines: string[] = [];
+    for (let i = 1; i <= links; i++) {
+      lines.push(
+        `interface L${i} {`,
+        `  next: ${i === links ? leaf : `L${i + 1}`};`,
+        `}`,
+        "",
+      );
+    }
+    return lines;
+  };
+
+  const boardAround = (chain: string[]): string =>
+    [
+      'import { pattern } from "commonfabric";',
+      "",
+      "export interface NoteOutput {",
+      "  title: string;",
+      "}",
+      "",
+      "interface NoteInput {",
+      "  title?: string;",
+      "}",
+      "",
+      "export const Note = pattern<NoteInput, NoteOutput>(({ title }) => ({",
+      "  title,",
+      "}));",
+      "",
+      ...chain,
+      "interface BoardInput {",
+      "  deep: L1;",
+      "}",
+      "",
+      "interface BoardOutput {",
+      "  noteCount: number;",
+      "}",
+      "",
+      "export default pattern<BoardInput, BoardOutput>(() => ({",
+      "  noteCount: 0,",
+      "}));",
+    ].join("\n");
+
+  await t.step(
+    "still finds a foreign Output deep inside the cap",
+    async () => {
+      // Six links put NoteOutput at depth 7 — under the cap of 8.
+      const { diagnostics } = await validateSource(
+        boardAround(chainTo(6, "NoteOutput")),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(embeddingWarnings(diagnostics).length, 1);
+    },
+  );
+
+  await t.step(
+    "records a debug note when the depth cap truncates the walk",
+    async () => {
+      const capCount = () =>
+        getLoggerCountsBreakdown()["contract-lints"]?.["walk-depth-cap"]
+          ?.debug ?? 0;
+      const before = capCount();
+
+      // Nine links put NoteOutput at depth 10 — past the cap, so no
+      // warning fires; the truncation must be recorded, not silent.
+      const { diagnostics } = await validateSource(
+        boardAround(chainTo(9, "NoteOutput")),
+        { types: COMMONFABRIC_TYPES },
+      );
+      assertEquals(embeddingWarnings(diagnostics).length, 0);
+      assert(
+        capCount() > before,
+        "expected the walk-depth-cap debug note to be recorded",
+      );
     },
   );
 });

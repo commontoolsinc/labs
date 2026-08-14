@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getLogger } from "@commonfabric/utils/logger";
 import { detectCallKind, getTypeFromTypeNodeWithFallback } from "../ast/mod.ts";
 import type { ContractLintFinding, ContractLintInput } from "./mod.ts";
 
@@ -42,7 +43,16 @@ export const FOREIGN_OUTPUT_EMBEDDING_DIAGNOSTIC =
 
 const SHARED_CONTRACT_TAG = "sharedContract";
 
+// Depth cap for the type walk in `collectEmbeddingHits`. The visited set
+// already breaks cycles; this bounds non-cyclic explosion through deeply
+// instantiated generics. A realistic contract costs one to two depth per
+// structural level, so 8 covers what the fleet writes — and when it trips
+// anyway, the disabled-by-default logger below records a debug note, so
+// the truncation is observable (in counts, and in output when the logger
+// is enabled) rather than silent.
 const WALK_DEPTH_LIMIT = 8;
+
+const lintLogger = getLogger("contract-lints", { enabled: false });
 
 interface IndexedOutput {
   readonly typeName: string;
@@ -150,12 +160,17 @@ function collectEmbeddingHits(
   location: ts.Node,
   index: OutputSymbolIndex,
   ownSymbols: ReadonlySet<ts.Symbol>,
-): EmbeddingHit[] {
+): { hits: EmbeddingHit[]; capTripped: boolean } {
   const hits = new Map<ts.Symbol, EmbeddingHit>();
   const visited = new Set<ts.Type>();
+  let capTripped = false;
 
   const visit = (type: ts.Type, depth: number): void => {
-    if (depth > WALK_DEPTH_LIMIT || visited.has(type)) return;
+    if (depth > WALK_DEPTH_LIMIT) {
+      capTripped = true;
+      return;
+    }
+    if (visited.has(type)) return;
     visited.add(type);
 
     const symbol = namedSymbolForType(type);
@@ -197,7 +212,7 @@ function collectEmbeddingHits(
   };
 
   visit(root, 0);
-  return [...hits.values()];
+  return { hits: [...hits.values()], capTripped };
 }
 
 /** Best-effort syntactic anchor: the reference node that names the symbol. */
@@ -262,14 +277,26 @@ export function foreignOutputEmbeddingLint(
     const type = side.type ??
       getTypeFromTypeNodeWithFallback(side.typeNode, checker);
 
-    const hits = collectEmbeddingHits(
+    const walk = collectEmbeddingHits(
       type,
       checker,
       callNode,
       index,
       ownSymbols,
     );
-    for (const hit of hits) {
+    if (walk.capTripped) {
+      // The note composes from context.sourceFile, never from the call
+      // node: earlier pipeline stages can hand this lint a synthetic node
+      // with no source file attached.
+      lintLogger.debug(
+        "walk-depth-cap",
+        `type walk stopped at depth ${WALK_DEPTH_LIMIT} in the ` +
+          `${side.role} contract of a pattern call in ` +
+          `${context.sourceFile.fileName}; deeper structure was not ` +
+          "scanned for foreign outputs",
+      );
+    }
+    for (const hit of walk.hits) {
       const anchor =
         referenceNodeForSymbol(side.typeNode, hit.symbol, checker) ?? callNode;
       findings.push({
