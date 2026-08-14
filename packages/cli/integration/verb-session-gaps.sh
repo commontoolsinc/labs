@@ -137,30 +137,17 @@ ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
 check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link") and (.title|length>0)] | all')" \
   "a marker beside a projection returns the address AND the fields"
 KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"].id')
-# GAP: the very same read, run a second time. A (source cell, schema) pair
-# serves exactly once — the second read reports success and returns null for
-# every projected field, while the addresses survive (#5633; the fix is in
-# review as #5764, so this is the assertion that will announce it landing).
-# The check above is what makes this comparison mean anything: were the first
-# read already empty, the two would agree and this would misreport the gap as
-# closed. Matched against that SPECIFIC shape rather than against "differs at
-# all": a server hiccup or a renamed field also differs, and a probe that reads
-# any difference as "gap still open" is a probe that cannot fail.
+# The very same read, run a second time. A (source cell, schema) pair is
+# reusable: it answers with what it answered before, which is what a caller
+# reaching for one projection twice depends on. Asserted by equality against
+# the first read rather than against a shape, because the property is that
+# nothing about the answer moved. The check above is what gives it force —
+# were the first read already empty, two empty reads would agree and this
+# would pass saying nothing.
 AGAIN=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
-SECOND_READ="a second read of one (source, schema) pair returning what the first did"
-ADDR_IDS=$(echo "$ADDR" | jq -c '[.[]? | .["$link"].id]' 2>/dev/null)
-AGAIN_IDS=$(echo "$AGAIN" | jq -c '[.[]? | .["$link"].id]' 2>/dev/null)
-AGAIN_DROPPED=$(echo "$AGAIN" |
-  jq -c '[.[]? | .title] | length > 0 and all(. == null)' 2>/dev/null)
-if [ "$ADDR" = "$AGAIN" ]; then
-  gap 0 "$SECOND_READ"
-elif [ "$AGAIN_IDS" = "$ADDR_IDS" ] && [ "$AGAIN_DROPPED" = "true" ]; then
-  gap 1 "$SECOND_READ (it keeps the addresses and drops every field)"
-else
-  bad "the second read differed in a way that is not the known drop: $AGAIN"
-fi
+check "$ADDR" "$AGAIN" "the same read, run again, answers the same"
 
 step "6. Two routes hand back an address, and either one addresses the piece"
 # MEASURED, and not what you would guess: the address a call hands back

@@ -18,16 +18,14 @@
 #
 # Two acts are marked PENDING. They print the command and the result they will
 # produce, without running it, because the capability is sequenced and not yet
-# built (docs/plans/references-as-arguments.md). One is
-# marked BROKEN: it runs, it fails, and its error is printed as it arrives.
-# Both are deliberately visible — a demo that quietly omits what does not work
-# teaches a surface that does not exist.
+# built (docs/plans/references-as-arguments.md). They are deliberately visible —
+# a demo that quietly omits what does not work teaches a surface that does not
+# exist.
 #
-# One constraint on anyone editing this file: while #5633 is open — its fix is
-# in review as #5764 — no two reads may share a (source cell, schema) pair; the
-# second one silently drops every projected field. Act 6 is that failure, on
-# purpose. Every other read here uses a pair no other read uses, which is the
-# only reason they pass.
+# No act is marked BROKEN today. `broken` stays for the next one that is: it
+# checks that the defect an act claims still answers to its own signature, so
+# an act cannot go on asserting a defect that has been fixed. Deriving that
+# again from scratch is how it acquires the same hole twice.
 #
 #   API_URL=http://localhost:8000 packages/cli/integration/verb-session-demo.sh
 set -uo pipefail
@@ -183,13 +181,11 @@ act "5 · Read addresses instead of contents"
 say "An unshaped read follows every link. A bare @ stops at the address."
 run cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
 
-act "6 · Ask the same question twice — BROKEN"
+act "6 · Ask the same question twice"
 say "The first thing anyone watching says is 'show me that again'."
-broken "a second read of one (source, schema) pair drops every projected field (#5633, fixed by #5764 in review)" \
-  '[.[]? | .title] | length > 0 and all(. == null)' \
-  cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
-say "The addresses survive; the titles do not. The read reports success while"
-say "returning less than it did a moment ago, which is the part worth knowing."
+run cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
+say "The same answer. A projection is a question you may ask twice, which is"
+say "what makes any of the reads above safe to put in a script."
 
 act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
@@ -239,9 +235,8 @@ say "call handed back — which is the composition the verb surface exists for,"
 say "and the reason those lines are as long as they are."
 say ""
 say "Acts 10 and 11 are the graph half, sequenced as references-as-arguments."
-say "Act 6 is a defect: #5633, with a fix in review as #5764."
-say "verb-session-gaps.sh asserts all three, and fails the day any one of them"
-say "changes — so this demo cannot quietly go stale."
+say "verb-session-gaps.sh asserts both, and fails the day either one starts"
+say "working — so this demo cannot quietly go stale."
 
 if [ "$UNEXPECTED" != "0" ]; then
   printf '\n%s━━ %d act(s) failed that this demo says work%s\n' \
