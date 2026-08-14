@@ -332,7 +332,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // and returning one of these -- are the codec author's choice and say
       // nothing about what a caller wants. `lenient` is what says that, so
       // this instance settles both into the same answer: a strict decode
-      // fails, whichever way the codec spelled it.
+      // fails, whichever way the codec reported it.
       //
       // `ProblematicValue`'s own codec is exempt, because for that one a
       // `ProblematicValue` is the successful product rather than a refusal.

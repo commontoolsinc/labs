@@ -109,8 +109,8 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   /**
    * @inheritDoc
    *
-   * A run of holes is spelled as a `/hole` count, JSON having no way to write
-   * an absent index.
+   * A run of holes is represented as a `/hole` count, JSON having no way
+   * to write an absent index.
    */
   protected override encodeArray(
     value: readonly FabricValue[],

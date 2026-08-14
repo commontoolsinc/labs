@@ -1822,7 +1822,7 @@ export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
  * kind serves. A terminal codec serves that format alone, a nonterminal one
  * serves every format, and both are "for" this one.
  *
- * Spelling the union out is unavoidable. `FabricCodec` is invariant in
+ * Writing the union out is unavoidable. `FabricCodec` is invariant in
  * `Encoded` -- the parameter sits in both an argument and a return position
  * -- so a `NonterminalCodec` is assignable to no format's instantiation, and
  * the two arms have to be named separately.

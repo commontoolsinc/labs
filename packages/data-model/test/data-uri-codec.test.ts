@@ -80,7 +80,7 @@ describe("data-uri-codec", () => {
 
     // The payload is base64url of the UTF-8 form of the encoded text. The id
     // is that payload, so however the bytes are arrived at, the answer has to
-    // be the one this spells out. The cases cover text that is entirely
+    // be the one stated here. The cases cover text that is entirely
     // ASCII, text that is not, and text too long to take any short cut.
     it("mints a payload that is base64url of the encoded text", () => {
       const textEncoder = new TextEncoder();
