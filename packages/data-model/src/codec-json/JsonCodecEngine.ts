@@ -161,6 +161,8 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     const result: Record<string, JsonCodecValue> = {};
     let anySlashKey = false;
     for (const key of utf8SortedKeysOf(value)) {
+      JsonCodecEngine.assertEncodableKey(key);
+
       if (key.startsWith("/")) {
         anySlashKey = true;
       }
@@ -215,11 +217,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           // Same reservation as the plain-object arm below: the assignment
           // cannot rebuild these names.
           if (isUnsafeObjectKey(key)) {
-            return this.reportMalformed(
-              key,
-              inner,
-              `object contains a key this runtime reserves: "${key}"`,
-            );
+            return this.reportReservedKey(key, inner);
           }
           result[key] = this.decodeValue(val, context);
         }
@@ -342,11 +340,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       // implementation, whose write path refuses it, so report it rather than
       // decoding something the bytes do not say.
       if (isUnsafeObjectKey(key)) {
-        return this.reportMalformed(
-          key,
-          data,
-          `object contains a key this runtime reserves: "${key}"`,
-        );
+        return this.reportReservedKey(key, data);
       }
       result[key] = this.decodeValue(val, context);
     }
