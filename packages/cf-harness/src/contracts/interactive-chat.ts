@@ -2,6 +2,7 @@ import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessBrowserAccessLease } from "./browser-access.ts";
 import type { HarnessImageAttachment } from "./image.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
+import type { LoomLocalHostBinding } from "./run-manifest.ts";
 import {
   type BuiltinToolId,
   DEFAULT_PARENT_TOOL_IDS,
@@ -245,6 +246,10 @@ export interface HarnessChatError {
     | "session_closed"
     | "browser_access_required"
     | "policy_denied"
+    | "provider-configuration-required"
+    | "provider-auth-required"
+    | "provider-mismatch"
+    | "provider-unavailable"
     | "internal_error";
   message: string;
   retryable?: boolean;
@@ -294,6 +299,7 @@ export interface HarnessChatSessionStatus {
   workspace?: HarnessChatWorkspace;
   context?: HarnessChatContext;
   model?: string;
+  loomLocalHostBinding?: LoomLocalHostBinding;
   harnessRunId?: string;
   artifactRoot?: string;
   capabilities: HarnessChatCapabilities;
@@ -449,6 +455,7 @@ export interface CreateHarnessChatSessionStatusOptions {
   workspace?: HarnessChatWorkspace;
   context?: HarnessChatContext;
   model?: string;
+  loomLocalHostBinding?: LoomLocalHostBinding;
   harnessRunId?: string;
   artifactRoot?: string;
   capabilities?: Partial<HarnessChatCapabilities>;
@@ -473,6 +480,9 @@ export const createHarnessChatSessionStatus = (
       : {}),
     ...(options.context !== undefined ? { context: options.context } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
+    ...(options.loomLocalHostBinding !== undefined
+      ? { loomLocalHostBinding: structuredClone(options.loomLocalHostBinding) }
+      : {}),
     ...(options.harnessRunId !== undefined
       ? { harnessRunId: options.harnessRunId }
       : {}),

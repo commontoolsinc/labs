@@ -89,6 +89,8 @@ Environment:
   ${CHAT_MAX_IN_MEMORY_EVENTS_ENV}       Default in-memory event retention cap
 `;
 
+export const harnessInteractiveChatStdioUsageText = (): string => usageText;
+
 const nonEmptyOptionValue = (
   name: string,
   value: string | undefined,
@@ -575,7 +577,9 @@ export const runHarnessInteractiveChatStdioCli = async (
 ): Promise<void> => {
   const options = parseHarnessInteractiveChatStdioCliOptions(args);
   if (options.help) {
-    await Deno.stderr.write(new TextEncoder().encode(usageText));
+    await Deno.stderr.write(
+      new TextEncoder().encode(harnessInteractiveChatStdioUsageText()),
+    );
     return;
   }
   await runHarnessInteractiveChatStdio(options);

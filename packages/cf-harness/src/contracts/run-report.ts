@@ -21,6 +21,7 @@ import type {
   HarnessModelAuthSource,
   HarnessModelProviderId,
 } from "../config.ts";
+import type { HarnessCredentialOwnerRef } from "./run-manifest.ts";
 
 export type HarnessToolPolicyDecision = "allowed" | "warned" | "denied";
 export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
@@ -106,6 +107,8 @@ export interface HarnessRunReport {
   cacheAffinity?: "run" | "custom";
   modelProvider?: HarnessModelProviderId;
   modelAuthSource?: HarnessModelAuthSource;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  harnessHomeIdentity?: string;
   modelTurns: number;
   /** Usage from model turns executed directly by this run. */
   usage?: HarnessModelUsage;
@@ -163,6 +166,8 @@ export interface CreateHarnessRunReportOptions {
     toolOutputs: ToolResultRef[];
     modelProvider?: HarnessModelProviderId;
     modelAuthSource?: HarnessModelAuthSource;
+    credentialOwner?: HarnessCredentialOwnerRef;
+    harnessHomeIdentity?: string;
     subagentRuns?: HarnessSubagentRunRef[];
   };
   model: string;
@@ -309,6 +314,12 @@ export const createHarnessRunReport = (
       ? { modelAuthSource: options.runState.modelAuthSource }
       : options.runState.modelProvider === "openai-codex"
       ? { modelAuthSource: "owner-bound-oauth" as const }
+      : {}),
+    ...(options.runState.credentialOwner !== undefined
+      ? { credentialOwner: structuredClone(options.runState.credentialOwner) }
+      : {}),
+    ...(options.runState.harnessHomeIdentity !== undefined
+      ? { harnessHomeIdentity: options.runState.harnessHomeIdentity }
       : {}),
     modelTurns: options.modelTurns,
     ...(options.usage !== undefined ? { usage: options.usage } : {}),

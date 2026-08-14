@@ -10,6 +10,7 @@ import {
   buildCfHarnessBaseSystemPrompt,
   buildCfHarnessBatchSystemPrompt,
   buildCfHarnessOperatorSystemPrompt,
+  cfHarnessCliInformationalControl,
   type CfHarnessCliIO,
   type CfHarnessCliSignalHandler,
   createCfHarnessBatchResult,
@@ -1700,6 +1701,36 @@ Deno.test("runCfHarnessCli prints usage for help", async () => {
   assertEquals(stderr, []);
 });
 
+Deno.test("cfHarnessCliInformationalControl mirrors global control parsing", () => {
+  assertEquals(cfHarnessCliInformationalControl(["--help"]), "help");
+  assertEquals(cfHarnessCliInformationalControl(["-h"]), "help");
+  assertEquals(
+    cfHarnessCliInformationalControl(["--describe-capabilities"]),
+    "describe-capabilities",
+  );
+  assertEquals(
+    cfHarnessCliInformationalControl([
+      "--describe-capabilities",
+      "--help",
+    ]),
+    "help",
+  );
+  assertEquals(cfHarnessCliInformationalControl(["--", "--help"]), "help");
+  assertEquals(
+    cfHarnessCliInformationalControl([
+      "--output-mode",
+      "batch",
+      "--",
+      "--help",
+    ]),
+    undefined,
+  );
+  assertEquals(
+    cfHarnessCliInformationalControl(["config", "inspect", "--help"]),
+    undefined,
+  );
+});
+
 Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   const { io, stdout, stderr } = createIoBuffers();
   const exitCode = await runCfHarnessCli(["--describe-capabilities"], { io });
@@ -1736,7 +1767,7 @@ Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
   assertEquals(capabilities.features.persistentProviderConfig, true);
   assertEquals(capabilities.features.structuredAuthControl, true);
   assertEquals(capabilities.features.credentialHealth, true);
-  assertEquals(capabilities.features.loomLocalOwnerBinding, false);
+  assertEquals(capabilities.features.loomLocalOwnerBinding, true);
 });
 
 Deno.test("installCfHarnessSignalHandlers terminalizes the active run before exiting", async () => {
@@ -5400,4 +5431,55 @@ Deno.test("parseCfHarnessCliArgs validates --compact-threshold", async () => {
       "--compact-threshold requires a non-negative integer token count",
     );
   }
+});
+
+Deno.test("local Loom binding conflicts become structured provider mismatches before execution", async () => {
+  const buffers = createIoBuffers();
+  let promptLoopsCreated = 0;
+  let providerRequests = 0;
+  const exitCode = await runCfHarnessCli(
+    ["--run-manifest", "/tmp/loom-run-manifest.json", "hello"],
+    {
+      cwd: "/tmp/project",
+      env: {},
+      io: buffers.io,
+      structuredHostFailures: true,
+      loomLocalHostBinding: {
+        source: "loom",
+        modelProvider: "openai-codex",
+        modelAuthSource: "cf-harness-local-store",
+        credentialOwner: {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "local",
+        },
+        harnessHomeIdentity: "sha256:local-home",
+      },
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          type: "cf-harness.loom-run-manifest",
+          version: 1,
+          source: "loom",
+          modelProvider: "openai-compatible-gateway",
+        })),
+      createPromptLoop: () => {
+        promptLoopsCreated += 1;
+        throw new Error("must not construct a prompt loop");
+      },
+      fetchFn: () => {
+        providerRequests += 1;
+        return Promise.reject(new Error("must not request a provider"));
+      },
+    },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(promptLoopsCreated, 0);
+  assertEquals(providerRequests, 0);
+  assertEquals(buffers.stdout, []);
+  assertEquals(buffers.stderr.length, 1);
+  const failure = JSON.parse(buffers.stderr[0]);
+  assertEquals(failure.type, "cf-harness.host-failure");
+  assertEquals(failure.error.code, "provider-mismatch");
+  assertStringIncludes(failure.error.message, "provider");
 });
