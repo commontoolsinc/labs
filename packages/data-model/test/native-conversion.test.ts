@@ -786,7 +786,7 @@ describe("native-conversion", () => {
       });
 
       it("throws for an array carrying `toJSON()`", () => {
-        // An array is answered by the array rule whatever it carries, and that
+        // An array is handled by the array rule whatever it carries, and that
         // rule rejects the named own property `toJSON` is.
         const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
         arr.toJSON = () => "custom array";
@@ -1656,7 +1656,7 @@ describe("native-conversion", () => {
 
       it("throws even for an already-frozen subclass instance", () => {
         // The case the deep-frozen identity short-circuit would otherwise wave
-        // through unconverted, prototype and all: iteration answers content
+        // through unconverted, prototype and all: iteration yields content
         // that the indices never show, and freezing the instance does nothing
         // about the prototype that does it.
         class Smuggler extends Array {

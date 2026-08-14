@@ -86,7 +86,7 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    * `BaseFabricInstance.isInstance()`.
    *
    * Like its counterpart, this uses "death before confusion" on the mismatch:
-   * it throws rather than quietly answering `false`, so a broken subclass is
+   * it throws rather than quietly returning `false`, so a broken subclass is
    * surfaced at the point of use. The throw is intentional despite the
    * predicate-style name.
    *
