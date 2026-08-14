@@ -134,7 +134,7 @@ describe("CFC atom patterns", () => {
     it("fails closed on malformed var-bearing records, both directions", () => {
       // A record with a `var` key that is not the exact placeholder shape is
       // a malformed pattern: it matches nothing — including atom data that
-      // literally spells the same record.
+      // is literally the same record.
       const malformed = { var: "$x", type: "t" };
       expect(matchAtomPattern(malformed, { var: "$x", type: "t" })).toBeNull();
       expect(matchAtomPattern(malformed, roleAliceX)).toBeNull();
