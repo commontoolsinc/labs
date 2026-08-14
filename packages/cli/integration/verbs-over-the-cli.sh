@@ -302,7 +302,7 @@ check "committed" "$(echo "$NW" | jq -r '.status')" \
   "--no-wait returns at committed"
 RECEIPT_ID=$(echo "$NW" | jq -r '.receipt // empty')
 check "/of:" "${RECEIPT_ID:0:4}" \
-  "the envelope names the receipt as one reference string, scheme included"
+  "the envelope names the receipt, scheme included"
 if [ -n "$RECEIPT_ID" ]; then
   COLLECTED=$($CF piece get --quiet --piece "$RECEIPT_ID" $ARGS 2>/dev/null)
   check "Detached label" "$(echo "$COLLECTED" | jq -r '.label // empty')" \
