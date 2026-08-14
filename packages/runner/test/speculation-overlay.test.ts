@@ -420,6 +420,106 @@ describe("Phase 2 speculation overlay", () => {
     cancelDemand();
   });
 
+  it("the send settle callback NEVER reports the speculative echo as durable success: a refused append surfaces an error status; an undischarged append holds the callback (verdict blocker, 2026-08-12)", async () => {
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
+    const HANDLER_PATTERN = [
+      "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+      "const bump = handler<unknown, { value: Writable<number> }>(",
+      "  (_ev, { value }) => { value.set((value.get() ?? 0) + 1); },",
+      ");",
+      "export default pattern<",
+      "  { value: Writable<number> },",
+      "  { value: number; bump: Stream<unknown> }",
+      ">(({ value }) => ({ value, bump: bump({ value }) }));",
+    ].join("\n");
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: HANDLER_PATTERN }],
+    }, { space });
+    const argument = clientRuntime.getCell<{ value: number }>(
+      space,
+      "ack-arg",
+      undefined,
+    );
+    const result = clientRuntime.getCell<{ value: number; bump: unknown }>(
+      space,
+      "ack-result",
+      compiled.resultSchema,
+    );
+    await argument.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      argument.withTx(seed).set({ value: 0 });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    const replica = clientRuntime.storageManager.open(space).replica as {
+      enqueueEventAppend?: (append: unknown) => Promise<unknown>;
+    };
+    const realEnqueue = replica.enqueueEventAppend!.bind(replica);
+    try {
+      // Arm 1 — REFUSED at admission: the callback's tx reads ERROR.
+      replica.enqueueEventAppend = () =>
+        Promise.resolve({ delivered: false, refused: "admission said no" });
+      let refusedStatus:
+        | { status: string; error?: { message?: string } }
+        | undefined;
+      (result.key("bump") as unknown as {
+        send(
+          value: unknown,
+          onCommit?: (
+            tx: {
+              status(): { status: string; error?: { message?: string } };
+            },
+          ) => void,
+        ): unknown;
+      }).send({}, (ackTx) => {
+        refusedStatus = ackTx.status();
+      });
+      await clientRuntime.idle();
+      await waitUntil(
+        () => refusedStatus !== undefined,
+        "the refused ack to settle",
+      );
+      expect(refusedStatus!.status).toBe("error");
+      expect(refusedStatus!.error?.message).toContain("admission said no");
+
+      // Arm 2 — UNDISCHARGED (offline): the callback must HOLD — no
+      // false durable success from the local echo. (The echo itself
+      // ran: handler dispatch is local either way.)
+      replica.enqueueEventAppend = () => new Promise(() => {});
+      let heldFired = false;
+      (result.key("bump") as unknown as {
+        send(value: unknown, onCommit?: (tx: unknown) => void): unknown;
+      }).send({}, () => {
+        heldFired = true;
+      });
+      await clientRuntime.idle();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await clientRuntime.idle();
+      expect(heldFired).toBe(false);
+    } finally {
+      replica.enqueueEventAppend = realEnqueue;
+      cancelDemand();
+    }
+  });
+
   it("a speculative run's egress effects are dropped; navigateTo still enacts (the egress rule, README §1/§3.5; speculation.md §2)", async () => {
     // Destination-level pin: no server needed — the allowlist decision
     // is the unit under test.

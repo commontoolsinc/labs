@@ -270,9 +270,20 @@ describe("Phase 3 events-down (serving side)", () => {
 
     host = newHost();
     const before = Engine.serverSeq(engine);
-    result.key("bump").send({});
+    // The durable-ack coupling (verdict blocker, 2026-08-12): the send's
+    // settle callback fires from the append + authoritative consequence
+    // outcome — captured here, asserted after the consequence lands.
+    let ackStatus: string | undefined;
+    (result.key("bump") as unknown as {
+      send(value: unknown, onCommit?: (tx: { status(): { status: string } }) => void): unknown;
+    }).send({}, (ackTx) => {
+      ackStatus = ackTx.status().status;
+    });
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
+    // The speculative echo alone is NOT the acknowledgment: nothing has
+    // consequenced yet.
+    expect(ackStatus).toBeUndefined();
 
     // The serving side processes the event: the sidecar entry is
     // marked consequenced and the per-stream watermark advances to its
@@ -340,6 +351,13 @@ describe("Phase 3 events-down (serving side)", () => {
     const stats = host!.stats();
     expect(stats.events.appended).toBeGreaterThanOrEqual(1);
     expect(stats.events.processed).toBeGreaterThanOrEqual(1);
+    // The durable ack settled — from the DELIVERED append and the
+    // consequenced handling, not the local echo — and reads non-error.
+    await waitUntil(
+      () => ackStatus !== undefined,
+      "the durable-ack settle callback",
+    );
+    expect(ackStatus).not.toBe("error");
     cancelDemand();
   });
 

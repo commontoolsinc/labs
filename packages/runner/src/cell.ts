@@ -330,6 +330,36 @@ const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
  * is ignored and the closed-world gate judges the key like any other
  * undeclared field.
  */
+/** An error-status VIEW of a transaction (the durable-ack coupling;
+ * verdict blocker, 2026-08-12): everything passes through except
+ * `status()`, which reports the append/consequence failure — so a
+ * caller that reads the settle callback's tx as the durable
+ * acknowledgment (the CLI verb dispatch's verb-contract Settlement
+ * read) sees the authoritative failure instead of the speculative
+ * echo's local state. */
+const errorStatusTxView = (
+  tx: IExtendedStorageTransaction,
+  message: string,
+): IExtendedStorageTransaction => {
+  const status = () => {
+    const real = tx.status();
+    return {
+      ...real,
+      status: "error" as const,
+      error: Object.assign(new Error(message), {
+        name: "EventDeliveryError",
+      }),
+    };
+  };
+  return new Proxy(tx, {
+    get(target, prop, receiver) {
+      if (prop === "status") return status;
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as IExtendedStorageTransaction;
+};
+
 export function markRuntimeInjectedEventKeys(
   keys: readonly string[],
 ): readonly string[] {
@@ -1553,6 +1583,49 @@ export class CellImpl<T extends FabricValue>
           this.runtime.storageManager.trackPendingCommit(
             outcome as Promise<unknown>,
           );
+          // The durable-ack coupling (verdict blocker, 2026-08-12): the
+          // caller's settle callback must NEVER settle from the
+          // speculative local run — under events-down the local
+          // handling is the diverted ECHO and its tx commits nothing
+          // durable, yet unchanged callers (the CLI verb dispatch, the
+          // webhook forwarder) read the callback's tx as the durable
+          // acknowledgment. The callback now settles from the APPEND
+          // outcome + the intent's authoritative CONSEQUENCE: refusal,
+          // a server-side handler error, or the dropped-event notice
+          // present an error-status view of the tx; only a delivered
+          // append whose handling consequenced (or a bare teardown,
+          // reported as such) passes the tx through untouched.
+          if (onCommit !== undefined) {
+            const callerOnCommit = onCommit;
+            onCommit = (echoTx: IExtendedStorageTransaction) => {
+              void outcome.then(async (delivery) => {
+                if (!delivery.delivered) {
+                  callerOnCommit(errorStatusTxView(
+                    echoTx,
+                    `event append refused: ${delivery.refused}`,
+                  ));
+                  return;
+                }
+                const consequence = overlay === undefined
+                  ? { kind: "consequenced" as const }
+                  : await overlay.waitForIntentConsequence(space, eventId);
+                if (
+                  consequence.kind === "errored" ||
+                  consequence.kind === "dropped" ||
+                  consequence.kind === "refused"
+                ) {
+                  callerOnCommit(errorStatusTxView(
+                    echoTx,
+                    `event handling ${consequence.kind}: ${
+                      consequence.reason ?? consequence.kind
+                    }`,
+                  ));
+                  return;
+                }
+                callerOnCommit(echoTx);
+              });
+            };
+          }
         }
       }
 
@@ -1829,11 +1902,14 @@ export class CellImpl<T extends FabricValue>
       // above an op's array poisons it.
       this.tx.poisonMergeableOp?.(writeLink);
 
-      // Register commit callback if provided.
-      if (onCommit) {
+      // Register commit callback if provided. (Bound to a local: the
+      // stream branch above reassigns `onCommit` for the durable-ack
+      // coupling, which widens the parameter's narrowing.)
+      const settleCallback = onCommit;
+      if (settleCallback) {
         this.tx.addCommitCallback((committedTx) => {
           try {
-            onCommit(committedTx);
+            settleCallback(committedTx);
           } catch (error) {
             console.error("Error in cell onCommit callback:", error);
           }

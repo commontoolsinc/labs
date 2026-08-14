@@ -116,6 +116,18 @@ export type EventIntentOutcome = {
   reason: string;
 };
 
+/** A fired intent's terminal consequence, as awaited by the send
+ * path's durable-ack coupling (verdict blocker, 2026-08-12):
+ * `consequenced` is the SUCCESS arm (the authoritative server handling
+ * committed — signaled by the consequence mark, or by watermark-sweep
+ * coverage, the same two signals that retire the echo); the other
+ * three mirror EventIntentOutcome. `unsettled` reports a teardown
+ * before any signal (runtime dispose). */
+export type IntentConsequence = {
+  kind: "consequenced" | "errored" | "dropped" | "refused" | "unsettled";
+  reason?: string;
+};
+
 type OverlayEntry = {
   space: MemorySpace;
   localSeq: number;
@@ -187,6 +199,18 @@ export class SpeculationOverlayDestination
   readonly #intentOutcomeSubscribers = new Set<
     (outcome: EventIntentOutcome) => void
   >();
+  /** Per-intent consequence waiters (verdict blocker, 2026-08-12): the
+   * send path's durable-ack coupling awaits an intent's TERMINAL
+   * consequence — consequenced (server handling committed), errored,
+   * dropped, or refused — so a caller's commit callback can no longer
+   * report the speculative local run as durable success. Memoized
+   * until consumed: the consequence may land before the waiter
+   * registers. */
+  readonly #intentConsequenceWaiters = new Map<
+    string,
+    Array<(outcome: IntentConsequence) => void>
+  >();
+  readonly #intentConsequenceMemo = new Map<string, IntentConsequence>();
   #closed = false;
 
   constructor(runtime: Runtime) {
@@ -513,6 +537,10 @@ export class SpeculationOverlayDestination
     if (this.#closed) return;
     this.#untrackIntent(space, sidecarId, eventId);
     this.retireIntent(space, eventId);
+    this.#settleIntentConsequence(space, eventId, {
+      kind: "refused",
+      reason: outcome.reason,
+    });
     this.#notifyIntentOutcome({
       space,
       eventId,
@@ -528,6 +556,47 @@ export class SpeculationOverlayDestination
   ): () => void {
     this.#intentOutcomeSubscribers.add(subscriber);
     return () => this.#intentOutcomeSubscribers.delete(subscriber);
+  }
+
+  /** Await a fired intent's terminal consequence (see
+   * IntentConsequence). Resolves immediately when the consequence
+   * already landed; on overlay close, pending waiters settle
+   * `unsettled`. */
+  waitForIntentConsequence(
+    space: MemorySpace,
+    eventId: string,
+  ): Promise<IntentConsequence> {
+    const key = `${space}\0${eventId}`;
+    const memo = this.#intentConsequenceMemo.get(key);
+    if (memo !== undefined) {
+      this.#intentConsequenceMemo.delete(key);
+      return Promise.resolve(memo);
+    }
+    if (this.#closed) return Promise.resolve({ kind: "unsettled" });
+    return new Promise((resolve) => {
+      const waiters = this.#intentConsequenceWaiters.get(key) ?? [];
+      waiters.push(resolve);
+      this.#intentConsequenceWaiters.set(key, waiters);
+    });
+  }
+
+  #settleIntentConsequence(
+    space: MemorySpace,
+    eventId: string,
+    outcome: IntentConsequence,
+  ): void {
+    const key = `${space}\0${eventId}`;
+    const waiters = this.#intentConsequenceWaiters.get(key);
+    if (waiters !== undefined && waiters.length > 0) {
+      this.#intentConsequenceWaiters.delete(key);
+      for (const resolve of waiters) resolve(outcome);
+      return;
+    }
+    // Nobody waiting yet: memoize the FIRST terminal signal (bounded by
+    // in-flight fires; consumed by the next waiter).
+    if (!this.#intentConsequenceMemo.has(key)) {
+      this.#intentConsequenceMemo.set(key, outcome);
+    }
   }
 
   #notifyIntentOutcome(outcome: EventIntentOutcome): void {
@@ -561,6 +630,10 @@ export class SpeculationOverlayDestination
         // UI is signaled.
         this.#untrackIntent(space, sidecarId, entry.eventId);
         this.retireIntent(space, entry.eventId);
+        this.#settleIntentConsequence(space, entry.eventId, {
+          kind: "dropped",
+          reason: entry.reason ?? "dropped",
+        });
         this.#notifyIntentOutcome({
           space,
           eventId: entry.eventId,
@@ -570,6 +643,13 @@ export class SpeculationOverlayDestination
       } else if (entry.consequenced === true) {
         this.#untrackIntent(space, sidecarId, entry.eventId);
         this.retireIntent(space, entry.eventId);
+        this.#settleIntentConsequence(
+          space,
+          entry.eventId,
+          entry.error !== undefined
+            ? { kind: "errored", reason: entry.error }
+            : { kind: "consequenced" },
+        );
         if (entry.error !== undefined) {
           // The handler threw server-side: the error IS the consequence
           // (events.md §5) — the echo still retires, and subscribers
@@ -825,6 +905,11 @@ export class SpeculationOverlayDestination
     this.#intentSinks.clear();
     this.#trackedIntents.clear();
     this.#intentOutcomeSubscribers.clear();
+    for (const waiters of this.#intentConsequenceWaiters.values()) {
+      for (const resolve of waiters) resolve({ kind: "unsettled" });
+    }
+    this.#intentConsequenceWaiters.clear();
+    this.#intentConsequenceMemo.clear();
     for (const release of this.#ackObserverReleases.values()) {
       try {
         release();
