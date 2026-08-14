@@ -58,13 +58,20 @@ const DECLARED_PROGRAM = {
  * Nothing about these two verbs is hidden or unusual; they are simply absent
  * from the type the result cell reads through, so a walk of that cell never
  * proposes their names and never gets as far as classifying them.
+ *
+ * `hiddenTool` is the same omission for the OTHER kind of callable. A tool is
+ * not a stream and is wired to no handler node, so an enumeration keyed on
+ * handler nodes cannot propose it however wide it is — and a candidate the
+ * declared result type omits arrives with no evidence of its kind except its
+ * own stored value, which is what makes classifying it, rather than assuming
+ * it, load-bearing.
  */
 const UNDECLARED_PROGRAM = {
   main: "/main.tsx",
   files: [{
     name: "/main.tsx",
     contents: [
-      'import { handler, pattern, schema } from "commonfabric";',
+      'import { handler, pattern, patternTool, schema } from "commonfabric";',
       'import "commonfabric/schema";',
       "",
       "const model = schema({",
@@ -85,10 +92,15 @@ const UNDECLARED_PROGRAM = {
       "  state.value.set(state.value.get() - 1);",
       "});",
       "",
+      "const echo = pattern<{ query: string }, { echoed: string }>(",
+      "  ({ query }) => ({ echoed: query }),",
+      ");",
+      "",
       "export default pattern((cell) => {",
       "  return {",
       "    increment: increment(cell),",
       "    decrement: decrement(cell),",
+      "    hiddenTool: patternTool(echo),",
       "    value: cell.value,",
       "    stringField: cell.stringField,",
       "    arrayField: cell.arrayField,",
@@ -190,19 +202,35 @@ describe("listPieceCallables against a live piece", () => {
       "listing-live-undeclared",
     );
 
-    // Both verbs, and none of the three data fields. The two halves of this
-    // equality fail against opposite implementations, which is why they are
-    // asserted together: enumerating candidates from the result cell alone
-    // loses `decrement` and `increment` and leaves the listing EMPTY — what a
-    // caller sees today on a piece that accepts both — while classifying a
+    // Both handlers, the tool, and none of the three data fields. The halves
+    // of this equality fail against opposite implementations, which is why
+    // they are asserted together: enumerating candidates from the result cell
+    // alone loses all three and leaves the listing EMPTY — what a caller sees
+    // today on a piece that accepts every one of them — while classifying a
     // candidate on the forced-stream cast rather than on a stored stream adds
-    // `arrayField`, `stringField` and `value` back.
+    // `arrayField`, `stringField` and `value` back. `hiddenTool` fails a third
+    // way: an enumeration that proposes only the properties matching a handler
+    // node's `$event` never reaches a tool at all, since a tool compiles to no
+    // node and stores no stream.
     expect(listing.verbs.map((verb) => verb.name)).toEqual([
       "decrement",
+      "hiddenTool",
       "increment",
     ]);
+    const byName = new Map(listing.verbs.map((verb) => [verb.name, verb]));
+    expect(byName.get("decrement")?.kind).toBe("handler");
+    expect(byName.get("increment")?.kind).toBe("handler");
+    // Classified, not assumed: a fallback that hard-codes `"handler"` lists
+    // this row with the wrong kind and with a handler's `invoke` command spec,
+    // so `cf piece verbs` and `cf piece call` disagree about what it is.
+    expect(byName.get("hiddenTool")?.kind).toBe("tool");
+    // A tool's input schema rides its own callable cell, so a correctly
+    // classified row carries the sub-pattern's arguments; the handler branch
+    // of `callableCommandSpec` would offer the cell's own schema instead.
+    expect(byName.get("hiddenTool")?.inputSchema).toMatchObject({
+      properties: { query: { type: "string" } },
+    });
     for (const verb of listing.verbs) {
-      expect(verb.kind).toBe("handler");
       // The result cell is where the graph exposes them and where
       // `cf piece call` resolves them, whatever the result TYPE says.
       expect(verb.on).toBe("result");

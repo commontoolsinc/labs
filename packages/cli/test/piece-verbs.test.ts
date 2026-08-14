@@ -426,6 +426,94 @@ describe("listPieceCallables", () => {
       inputSchema: true,
       outputSchema: CREATE_NOTE_RESULT,
     });
+    // The graph WAS read, so the listing claims to be the whole surface. An
+    // implementation that reports `incomplete` unconditionally, or that reads
+    // the flag off anything other than whether the pattern resolved, fails
+    // here rather than only in the paired case below.
+    expect(listing.incomplete).toBeUndefined();
+  });
+
+  it("reports the listing as incomplete when the pattern cannot be read", async () => {
+    // The paired failure of the case above, and the reason the pattern is not
+    // advisory here the way the source identity is. `getPattern` rejects on a
+    // real piece that carries no pattern identity and on one whose source will
+    // not load in this space, and in both the piece still DISPATCHES every
+    // verb — resolution never consults the graph. So the listing keeps
+    // answering. What it must not do is answer as though it had looked
+    // everywhere: `hiddenVerb` is named by the graph alone, so it is gone, and
+    // a caller reading this listing would otherwise conclude the piece has
+    // nothing to call.
+    const streams = new Set(["hiddenVerb"]);
+    const resultRoot = schemaFilteredCell(
+      { noteCount: 3 },
+      { type: "object", properties: { noteCount: { type: "number" } } },
+      streams,
+    );
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
+      getCell: () => resultRoot,
+      getPattern: () =>
+        Promise.reject(new Error("could not load pattern sha256:x#default")),
+    };
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-792",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+
+    // The loss is real and is not recoverable — no second source names a verb
+    // the declared result type omits.
+    expect(listing.verbs).toEqual([]);
+    // ...so the listing says it is a lower bound. This is what fails against a
+    // `catch {}` that leaves the candidate names empty and returns the short
+    // list as though it were the surface: `incomplete` is undefined there, and
+    // an empty listing is indistinguishable from a piece with no verbs.
+    expect(listing.incomplete).toBe("pattern-unavailable");
+  });
+
+  it("checks the result view and the piece root for a stored signal independently", async () => {
+    // Two sources of stored evidence, and neither is allowed to mask the
+    // other. `notify` reads as an ordinary number through the declared result
+    // type while the piece root stores the stream sentinel at the same name —
+    // one cell in a live piece, two objects wherever a surface supplies them
+    // apart, which is the case this pins.
+    const resultRoot = cell(
+      { notify: 3 },
+      { type: "object", properties: { notify: { type: "number" } } },
+    );
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
+      getCell: () => ({ get: () => ({ notify: { $stream: true } }) }),
+    };
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-793",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+
+    // Fails against coalescing the two values before classifying either —
+    // `resultValue ?? pieceValue` and `resultValue || pieceValue` both yield
+    // `3` here, and `3` carries no stream signal, so the sentinel is never
+    // looked at and the listing is empty. It passes only when each stored
+    // value is put to classification on its own.
+    expect(listing.verbs.map((verb) => verb.name)).toEqual(["notify"]);
+    expect(listing.verbs[0].kind).toBe("handler");
   });
 
   it("lists a piece whose pattern cannot be resolved", async () => {

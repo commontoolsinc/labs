@@ -2063,6 +2063,14 @@ after --. Handlers interpret piped input when no input argument is present.`,
     const omission = hiddenCount > 0 && !options.all
       ? `${partition.wrapper} wrapper, ${partition.deprecated} deprecated hidden; --all lists them`
       : undefined;
+    // The same rule the hidden counts follow, applied to the other way this
+    // listing can be short: a verb the declared result type omits is named
+    // only by the compiled pattern, so when that could not be read the list is
+    // a lower bound and must say so instead of reading as the whole surface.
+    // `--all` does not recover these — nothing here can.
+    const incomplete = listing.incomplete === "pattern-unavailable"
+      ? "the pattern could not be read, so verbs its result type omits are missing; the verbs listed are still callable"
+      : undefined;
     if (options.json) {
       render({
         ...listing,
@@ -2084,6 +2092,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
           ? `<no callable verbs shown> (${omission})`
           : "<no callable verbs>",
       );
+      if (incomplete !== undefined) render(`(${incomplete})`);
       return;
     }
     if (listing.pattern) {
@@ -2104,6 +2113,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
       ]).toString(),
     );
     if (omission !== undefined) render(`(${omission})`);
+    if (incomplete !== undefined) render(`(${incomplete})`);
     hint(
       cliText(
         `TIP: --json includes each verb's input schema; 'cf piece call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,

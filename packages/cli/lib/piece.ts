@@ -1806,6 +1806,19 @@ export interface PieceCallablesListing {
   /** The deployed pattern's source identity; null when the piece exposes
    * none (e.g. harness doubles). */
   pattern: PiecePatternRef | null;
+  /** Present when the listing is a LOWER BOUND rather than the surface,
+   * naming what it could not read. `verbs` is still every callable the
+   * listing found, and every row in it is still real.
+   *
+   * `"pattern-unavailable"` means the compiled pattern could not be
+   * consulted, so a callable the declared result type omits had no other
+   * source of its name and is missing. Absent means the listing enumerated
+   * from every source it has — which is not the same as a guarantee that
+   * nothing else is callable, because a handler whose stored schema carries
+   * no stream marker is reachable by name and, by design, unlistable: see
+   * `probeForcedStreamCell`, whose cast is the only thing that finds one and
+   * finds every data field with it. */
+  incomplete?: "pattern-unavailable";
   verbs: PieceCallableListing[];
 }
 
@@ -1883,9 +1896,40 @@ function samePatternLink(left: unknown, right: unknown): boolean {
     leftAlias.scope === rightAlias.scope;
 }
 
-/** Every verb a compiled pattern drives from a result property, keyed by that
- * property and mapped to the verb's declared result — or to `undefined` where
- * nothing names one.
+/** Every property a compiled pattern hangs off its result — the graph's own
+ * account of what the piece exposes there.
+ *
+ * That account is independent of the pattern's declared result TYPE: a pattern
+ * may return a callable at a property its result type never mentions, and then
+ * no durable schema and no schema-filtered read ever offers the name. The
+ * listing enumerates candidates from here as well as from the result cell for
+ * exactly that case.
+ *
+ * These are CANDIDATE names and nothing more. A key here says the pattern
+ * wires something to the property — a handler's stream, a tool, or ordinary
+ * data — so every name is put to the same classification the result-cell walk
+ * uses, against the same stored signals, before any of it is listed. That is
+ * why the enumeration is deliberately not filtered to the handler-driven
+ * subset `handlerVerbResults` matches: a tool compiles to no node and stores
+ * no stream, so a handler-keyed enumeration cannot propose one however
+ * carefully it is written, and a filter that guesses a candidate's kind is a
+ * classification wearing an enumeration's clothes.
+ *
+ * A compiled pattern is CALLABLE, so it is not a record and must not be tested
+ * as one; only its `result` is read here. */
+function patternResultNames(
+  pattern: { result?: unknown } | null | undefined,
+): string[] {
+  const result = pattern?.result;
+  return isObjectOrArray(result) ? Object.keys(result) : [];
+}
+
+/** The declared result of each verb a compiled pattern drives from a result
+ * property, keyed by that property — or `undefined` where nothing names one.
+ *
+ * Metadata about candidates, never the list of them: a name absent here is a
+ * name with no declared result to report, which is the common case and says
+ * nothing about whether the property is callable.
  *
  * A handler node's `$event` input and the result property exposing that
  * handler's stream are one cell written twice in the pattern's own terms, so
@@ -1896,18 +1940,9 @@ function samePatternLink(left: unknown, right: unknown): boolean {
  * nodes share is still a verb and still keyed here, but it names no single
  * result, so it maps to `undefined` rather than to one node's arbitrarily.
  *
- * The KEYS are the graph's own account of which result properties are verbs,
- * and that account is independent of the pattern's declared result TYPE: a
- * pattern may wire a handler to a property its result type never mentions, and
- * then no durable schema and no schema-filtered read ever offers the name. The
- * listing enumerates candidates from these keys as well as from the result
- * cell for exactly that case — but a key here says the pattern wires a handler
- * to the property, never that the piece stores a stream at it, so every
- * candidate is still classified against the stored signal before it is listed.
- *
- * A compiled pattern is CALLABLE, so it is not a record and must not be tested
- * as one; only its `result` and `nodes` are read here. */
-function patternVerbResults(
+ * A tool is absent by construction: it is not driven by a node, and its result
+ * schema rides its own callable cell, where `callableCommandSpec` reads it. */
+function handlerVerbResults(
   pattern: { result?: unknown; nodes?: unknown } | null | undefined,
 ): Map<string, JSONSchema | undefined> {
   const verbs = new Map<string, JSONSchema | undefined>();
@@ -1950,7 +1985,7 @@ async function declaredVerbResult(
   callableName: string,
 ): Promise<JSONSchema | undefined> {
   try {
-    return patternVerbResults(await piece.getPattern()).get(callableName);
+    return handlerVerbResults(await piece.getPattern()).get(callableName);
   } catch {
     return undefined;
   }
@@ -1965,12 +2000,18 @@ async function declaredVerbResult(
  * `--all` shows the full surface.
  *
  * Candidate names come from the result cell, then the input cell, then the
- * piece root and the compiled pattern's verb properties; every one of them is
- * put to the same classification `cf piece call` resolves through, so the
+ * piece root and the compiled pattern's result properties; every one of them
+ * is put to the same classification `cf piece call` resolves through, so the
  * listing and the dispatcher can never disagree about what is callable. The
  * two halves are deliberately asymmetric — enumeration is generous because a
  * name it never proposes can never be listed, and classification is strict
  * because a name it wrongly accepts is a verb a caller cannot call.
+ *
+ * The listing degrades rather than fails, and reports the degradation on
+ * `incomplete` rather than absorbing it: the compiled pattern is the only
+ * source for a callable the declared result type omits, so losing it loses
+ * rows, and a shortened list presented as the whole surface is the failure
+ * this command exists to avoid.
  */
 export async function listPieceCallables(
   config: PieceConfig,
@@ -1986,19 +2027,33 @@ export async function listPieceCallables(
     }
   }
 
-  // A tool's result schema rides its callable cell, but a handler's declared
-  // result lives on its node in the compiled graph — so the listing resolves
-  // the pattern once and matches nodes to result properties. Resolution is
+  // The compiled pattern, read once for two independent jobs. Its result
+  // properties are candidate NAMES for the sweep below — the only source for a
+  // callable the declared result type omits. Its handler nodes carry declared
+  // RESULTS, which are metadata on rows enumerated from anywhere. Resolution is
   // cached by identity, so this costs one load per listing, not one per row.
-  // The same match also names every verb the graph drives, which is what the
-  // candidate sweep below enumerates from.
-  let patternVerbs = new Map<string, JSONSchema | undefined>();
+  //
+  // Unlike the identity above, this one is not advisory, and the listing says
+  // so when it is missing. `getPattern` throws on a piece carrying no pattern
+  // identity and on one whose pattern source will not load in this space
+  // (PieceController.#loadCurrentPattern) — both states in which every stored
+  // verb still DISPATCHES, because resolution never consults the graph. So the
+  // listing must not fail: it would refuse to describe a piece it can still
+  // drive, to tab-completion and to an agent that could have acted on the
+  // partial answer. What it must not do either is present a shortened list as
+  // the whole surface, which is the difference between losing a row's
+  // `outputSchema` and losing the row.
+  let graphNames: string[] = [];
+  let handlerResults = new Map<string, JSONSchema | undefined>();
+  let graphConsulted = false;
   if (typeof piece.getPattern === "function") {
     try {
-      patternVerbs = patternVerbResults(await piece.getPattern());
+      const compiled = await piece.getPattern();
+      graphNames = patternResultNames(compiled);
+      handlerResults = handlerVerbResults(compiled);
+      graphConsulted = true;
     } catch {
-      // Advisory in the same way the identity above is: a piece with no
-      // reachable pattern still lists every verb its stored surface offers.
+      // Reported as `incomplete` below rather than swallowed.
     }
   }
 
@@ -2035,7 +2090,7 @@ export async function listPieceCallables(
       // only a result-cell row can claim one: a same-named verb reached on the
       // input cell is a different stream that merely shares its name.
       const outputSchema = spec.outputSchemaSummary ??
-        (cellProp === "result" ? patternVerbs.get(name) : undefined);
+        (cellProp === "result" ? handlerResults.get(name) : undefined);
       listings.set(name, {
         name,
         kind,
@@ -2053,7 +2108,7 @@ export async function listPieceCallables(
   // The piece root's own keys mirror resolvePieceCallable's third resolution
   // path: a name the ordinary walk REJECTED can still be dispatched by name.
   //
-  // The graph's verb properties cover the walk never SEEING a name: the
+  // The graph's result properties cover the walk never SEEING a name: the
   // result cell reads through the pattern's declared result type, so a verb
   // that type omits is absent from the schema-filtered value and from the
   // durable schema alike, and no amount of classification reaches a name
@@ -2084,7 +2139,7 @@ export async function listPieceCallables(
       if (!listings.has(name)) rejected.add(name);
     }
   }
-  for (const name of patternVerbs.keys()) {
+  for (const name of graphNames) {
     if (!listings.has(name)) rejected.add(name);
   }
   const resultRootValue = resultRoot?.get?.();
@@ -2092,16 +2147,28 @@ export async function listPieceCallables(
     for (const name of rejected) {
       if (listings.has(name)) continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
-      // `rejected` collects names from the result/input walk AND from the
-      // piece root's own value, so the sentinel is looked for on both — one
-      // cell in a live piece, two objects wherever they are supplied apart.
-      const storedValue = getCallableValue(resultRootValue, name) ??
-        getCallableValue(pieceValue, name);
-      if (!isStreamValue(storedValue) && !isHandlerCell(callableCell)) {
-        continue;
-      }
-      const spec = callableCommandSpec(callableCell, "handler");
-      const outputSchema = patternVerbs.get(name);
+      // `detectCallableKind`, not an assumed "handler": the walk above uses it,
+      // `cf piece call` resolves through it, and a candidate proposed by the
+      // graph arrives with no evidence of its kind at all — a tool sits in the
+      // pattern's result exactly as a handler's stream does. Assuming here
+      // would list a tool as a handler and hand a caller `invoke` and the
+      // wrong input schema for it.
+      //
+      // `rejected` collects names from the result/input walk AND from the piece
+      // root's own value — one cell in a live piece, two objects wherever they
+      // are supplied apart — so the two stored values are two independent
+      // pieces of evidence and each is asked on its own. Coalescing them with
+      // `??` would let any non-null value on the result view, ordinary data
+      // included, hide a stream sentinel stored at the same name on the piece
+      // root.
+      const kind = detectCallableKind(
+        getCallableValue(resultRootValue, name),
+        callableCell,
+      ) ??
+        detectCallableKind(getCallableValue(pieceValue, name), callableCell);
+      if (!kind) continue;
+      const spec = callableCommandSpec(callableCell, kind);
+      const outputSchema = spec.outputSchemaSummary ?? handlerResults.get(name);
       // `result`, because that is where the row was reached and where
       // `cf piece call` reaches it: a graph candidate is a property of the
       // PATTERN's result, and a piece-root candidate is dispatched on the
@@ -2109,7 +2176,7 @@ export async function listPieceCallables(
       // would be a different stream.
       listings.set(name, {
         name,
-        kind: "handler",
+        kind,
         on: "result",
         inputSchema: spec.inputSchema,
         ...(outputSchema !== undefined ? { outputSchema } : {}),
@@ -2121,6 +2188,7 @@ export async function listPieceCallables(
   // must sort identically on every host (utf8Compare is the repo comparator).
   return {
     pattern,
+    ...(graphConsulted ? {} : { incomplete: "pattern-unavailable" as const }),
     verbs: [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name)),
   };
 }

@@ -373,7 +373,11 @@ never proposes is indistinguishable to that caller from one that was
 deprecated or retired. `cf piece verbs` therefore draws its candidates from
 the piece's stored surface and its compiled graph rather than from the
 pattern's declared result type, and a verb the type omits is listed on the
-same terms as one it names.
+same terms as one it names. Two residual gaps are the probing caller's to
+know about, and [the CLI verb guide](../common/verbs-over-the-cli.md) states
+both: a listing reporting `incomplete` is a lower bound, and a handler whose
+stored schema carries no stream marker is callable without ever being listed.
+Absence is evidence of retirement only on a listing that reports neither.
 
 | Provider evolution | Full Output | Fields only | Req. verb | Opt. verb | Versioned |
 | --- | --- | --- | --- | --- | --- |
@@ -634,10 +638,11 @@ channel exists — the shape already lifts deprecation out of JSDoc into
 listings — and it carries a standing precondition, because that channel is
 the listing surface: instructions served over a surface that drops their
 subject arrive incomplete, so whatever carries them must ride an enumeration
-that names every verb the piece has, not the subset its declared result type
-mentions. Scoped acknowledgment is the natural place to ask for the
-instructions themselves: a deliberate break proceeds when it says what those
-it breaks should do instead.
+no narrower than the piece's stored surface and its compiled graph, and must
+propagate that enumeration's own report of when it fell short rather than
+serving a quietly shortened set. Scoped acknowledgment is the natural place
+to ask for the instructions themselves: a deliberate break proceeds when it
+says what those it breaks should do instead.
 
 The anchors are the systems that permit breakage and manage it rather than
 forbid it. Kubernetes deprecates an API, keeps serving it for a published
