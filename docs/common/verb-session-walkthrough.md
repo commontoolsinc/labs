@@ -12,7 +12,10 @@ The subject is a work-item tracker — items in a tree, plus typed cross-links.
 It is a real pattern: `packages/cli/integration/pattern/tracker.tsx`, which
 belongs to this document and the two scripts beside it, so a change to a
 pattern the product ships can never break a demonstration of the verb surface.
-Every measurement below was taken against it on a local toolshed.
+The scripts are `packages/cli/integration/verb-session-demo.sh`, the session as
+it is meant to read, and `packages/cli/integration/verb-session-gaps.sh`, the
+gap harness CI runs to keep the **[today]**/**[blocked]** marks below honest.
+Every measurement below was taken against that pattern on a local toolshed.
 
 **Every step is marked for what is real.** The point of the document is the
 line between them.
