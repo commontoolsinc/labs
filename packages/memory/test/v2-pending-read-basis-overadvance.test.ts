@@ -377,8 +377,9 @@ Deno.test("memory v2 engine: CT-1910 repair — an own-session write accepted ou
     // session:1 localSeq 5 reads x through its layer [1] at basisSeq 0 and
     // claims it observed x = 1. The overtaking own write (localSeq 10, seq
     // 2) was NOT in its view: a session-wide exclusion would excuse it and
-    // accept the incoherent observation — predecessor-only exclusion
-    // (local_seq below the reader's) must conflict, like a foreign write.
+    // accept the incoherent observation — the declared-set exclusion
+    // (only the named layer 1 is excluded) must conflict, like a foreign
+    // write.
     assertThrows(
       () =>
         applyCommit(engine, {

@@ -191,8 +191,15 @@ durable history instead of trusting it; the phantom direction (an omitted
 rejected contributor) remains unverifiable, as recorded in §3.5.
 
 Checked by: the TLA+ model (both recording modes, under atomic and
-delayed-delivery configs); stacked-commit unit
-tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`).
+delayed-delivery configs) for recording completeness and sparse-omission
+reachability — its `Build` always names the view's full layer set, so the
+declared-set scan's VALIDATION half (a buggy omission of a durably
+integrated layer) is outside its reach and is checked instead by the
+engine unit tests (`packages/memory/test/v2-sparse-pending-dependencies.test.ts`),
+the differential harness's sparse mutation, and stacked-commit unit
+tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`); see the
+TLA README's "Canonical dependency arrays" note for the coincidence
+argument and the `SkipLayers` refinement that would bring it in scope.
 
 ### INV-4 — Cascade totality
 

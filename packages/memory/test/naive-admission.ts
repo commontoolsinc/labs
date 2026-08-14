@@ -17,10 +17,12 @@
 //     coarser than this, never finer.
 //   - Pending-read staleness: a read declaring its true confirmed basis
 //     (`basisSeq`, the CT-1910 repair) is scanned over the FULL interval
-//     from that basis, excluding only the reader's own session's TRUE
-//     PREDECESSOR commits (localSeq below the reader's — the layers its
-//     view included; an own write accepted out of submission order
-//     conflicts like a foreign one). A legacy read (no `basisSeq`) is
+//     from that basis, excluding only the own-session layers the read's
+//     dependency array NAMES — the layers whose inclusion in the reader's
+//     view the array attests. An own write the array does not name
+//     conflicts like a foreign one, whether accepted out of submission
+//     order or omitted while durably integrated (the declared-set
+//     validation of §3.6.3). A legacy read (no `basisSeq`) is
 //     based at the HIGHEST dependency's resolution seq — the pre-repair
 //     semantics whose over-advance is recorded against INV-1 in
 //     09-invariants.md and kept here as the reference for legacy traffic.

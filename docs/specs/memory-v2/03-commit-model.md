@@ -163,9 +163,9 @@ interface PendingRead {
   // space: the seq of the last accepted write to the document that the
   // client's confirmed view reflected at build time (0 for a document its
   // subscriptions never covered). When present, the staleness check scans
-  // the FULL interval from this basis, excluding only the session's TRUE
-  // PREDECESSOR commits — localSeq below the reader's — per §3.6.3 (the
-  // CT-1910 repair). When absent (a legacy client),
+  // the FULL interval from this basis, excluding only the own-session
+  // layers the `localSeq` array names, per §3.6.3 (the CT-1910 repair
+  // with declared-set validation). When absent (a legacy client),
   // staleness is based at the resolution of the HIGHEST localSeq element —
   // the document's top-of-stack layer below the reader, which the array
   // MUST include (§3.5). Servers ignore unknown fields, so clients attach
@@ -372,6 +372,11 @@ by the read's shape:
   basis never scanned. A `basisSeq` greater than the server's current head
   is a protocol error; values at or below head are trusted, like a
   confirmed read's `seq` (lying corrupts only the session's own data).
+  The declared-set restriction is server-side VALIDATION of the array's
+  completeness attestation, not an extension of what a client may omit:
+  the sanctioned omission remains a processed rejection (§3.5), and a
+  client has nothing to gain from omitting a live layer — the scan
+  converts exactly that bug into a retryable conflict.
 - **Legacy basis (`basisSeq` absent).** The scan is based at the HIGHEST
   element's resolution seq. Writes landing between the reader's confirmed
   basis and that seq are not scanned — the pending-read basis over-advance
