@@ -3234,6 +3234,49 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          // The schema-first authored form — handler<E, T[, R]>(eventSchema,
+          // stateSchema, callback[, options]) — already carries its schemas,
+          // so nothing is prepended: injecting generated ones on top would
+          // displace the callback out of the positions the runtime dispatch
+          // and the sandbox verifier accept (argument 0 or 2). What only the
+          // transformer can do — lowering a declared result onto the trailing
+          // options object — still applies.
+          if (
+            node.arguments.length >= 3 &&
+            !resolveFunctionLikeExpression(
+              node.arguments[0],
+              checker,
+              sourceFile,
+            ) &&
+            !resolveFunctionLikeExpression(
+              node.arguments[1],
+              checker,
+              sourceFile,
+            ) &&
+            resolveFunctionLikeExpression(
+              node.arguments[2],
+              checker,
+              sourceFile,
+            )
+          ) {
+            const updated = preserveSourceMapRange(
+              factory.createCallExpression(
+                node.expression,
+                undefined,
+                withDeclaredResultSchema(
+                  [...node.arguments],
+                  node,
+                  context,
+                  checker,
+                  typeRegistry,
+                ),
+              ),
+              node,
+            );
+            context.markSchemaInjected(updated);
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+
           let eventTypeNode: ts.TypeNode = eventType;
           let stateTypeNode: ts.TypeNode = stateType;
           const handlerCandidate = node.arguments[0];
