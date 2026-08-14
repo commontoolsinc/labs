@@ -261,4 +261,157 @@ describe("sparse pending dependencies", () => {
       });
     });
   });
+
+  it("rejects a scalar localSeq that omits an accepted layer", async () => {
+    await withEngine((engine) => {
+      seedHonoredRejection(engine);
+      applyCommit(engine, {
+        sessionId: SESSION,
+        commit: {
+          localSeq: 4,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "entity:A",
+            value: toEntityDocument({ revision: "v4" }),
+          }],
+        },
+      });
+
+      // The scalar shape is the degenerate single-element array and flows
+      // through the same declared-set exclusion: naming 4 alone leaves
+      // layer 3's durable write unexcluded in the interval.
+      expect(() =>
+        applyCommit(engine, {
+          sessionId: SESSION,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:A",
+                path: toDocumentPath([]),
+                localSeq: 4,
+                basisSeq: 1,
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:B",
+              value: toEntityDocument({ derivedFrom: "scalar" }),
+            }],
+          },
+        })
+      ).toThrow("stale pending read");
+    });
+  });
+
+  describe("patch-writing layers", () => {
+    /** Seeds A = { items: {} } at seq 1 (the confirmed basis), then an own
+     * PATCH layer at localSeq 1 adding items.first (accepted, seq 2) — the
+     * layer whose exclusion or omission the tests below exercise through
+     * the patch-scan statement rather than the set/delete one. */
+    const seedPatchLayer = (engine: Engine): void => {
+      applyCommit(engine, {
+        sessionId: "session:seed",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "entity:P",
+            value: toEntityDocument({ items: {} }),
+          }],
+        },
+      });
+      applyCommit(engine, {
+        sessionId: SESSION,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: "entity:P",
+            patches: [{ op: "add", path: "/value/items/first", value: 1 }],
+          }],
+        },
+      });
+    };
+
+    it("excludes a named layer whose write is a patch", async () => {
+      await withEngine((engine) => {
+        seedPatchLayer(engine);
+
+        // The patch-scan twin of the no-self-conflict control: layer 1's
+        // patch overlaps the read path and sits in (1, head], but the
+        // array names it, so the reader lands.
+        const applied = applyCommit(engine, {
+          sessionId: SESSION,
+          commit: {
+            localSeq: 2,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:P",
+                path: toDocumentPath(["value", "items"]),
+                localSeq: [1],
+                basisSeq: 1,
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:B",
+              value: toEntityDocument({ observedItems: ["first"] }),
+            }],
+          },
+        });
+
+        expect(applied.seq).toBe(3);
+      });
+    });
+
+    it("rejects an array that omits a patch-writing layer", async () => {
+      await withEngine((engine) => {
+        seedPatchLayer(engine);
+        // A second own layer so the array has something else to name.
+        applyCommit(engine, {
+          sessionId: SESSION,
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id: "entity:P",
+              patches: [{ op: "add", path: "/value/items/second", value: 2 }],
+            }],
+          },
+        });
+
+        // Omitting layer 1 leaves its durable patch at seq 2 unexcluded —
+        // the patch-scan statement's own omitted-durable doom.
+        expect(() =>
+          applyCommit(engine, {
+            sessionId: SESSION,
+            commit: {
+              localSeq: 3,
+              reads: {
+                confirmed: [],
+                pending: [{
+                  id: "entity:P",
+                  path: toDocumentPath(["value", "items"]),
+                  localSeq: [2],
+                  basisSeq: 1,
+                }],
+              },
+              operations: [{
+                op: "set",
+                id: "entity:B",
+                value: toEntityDocument({ observedItems: ["second"] }),
+              }],
+            },
+          })
+        ).toThrow("stale pending read");
+      });
+    });
+  });
 });
