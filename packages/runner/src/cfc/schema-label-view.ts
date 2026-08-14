@@ -46,9 +46,9 @@ export const cfcSchemaEntries = (
   const nextActive = { root: rootKey, schema, parent: active };
 
   const resolved = typeof schema.$ref === "string"
-    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
+    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot) ?? schema
     : schema;
-  if (resolved === undefined || typeof resolved === "boolean") {
+  if (typeof resolved === "boolean") {
     return entries;
   }
 

@@ -100,11 +100,17 @@ describe("CFC label view helpers", () => {
     expect(cfcLabelViewFromSchema(null as never)).toBeUndefined();
   });
 
-  it("ignores declarations beside an unresolved schema reference", () => {
+  it("keeps declarations beside an unresolved schema reference", () => {
     expect(cfcLabelViewFromSchema({
       $ref: "#/$defs/Missing",
       ifc: { confidentiality: ["workspace"] },
-    })).toBeUndefined();
+    })).toEqual({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: ["workspace"] },
+      }],
+    });
   });
 
   it("ignores an IFC block that is not an object", () => {
