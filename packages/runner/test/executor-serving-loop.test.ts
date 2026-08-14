@@ -833,6 +833,362 @@ describe("stage F serving loop", () => {
     releaseExecutionLease(engine, { space, holder: rival });
   });
 
+  it("completes the park when the factory dispose never resolves: whenParked resolves, the lease frees, and a re-activation drains new input (lunch-wall containment)", async () => {
+    // The lunch-wall persistence mechanism: a loop failure parks the
+    // space, the park awaits the factory dispose, and a serving runtime
+    // killed mid-wave can hang that dispose FOREVER — whenParked never
+    // resolves, every chained recovery (#reactivateAfterPark) waits
+    // behind it for eternity, and the space is permanently unserved
+    // while events append durably. Park liveness must not gate on an
+    // unbounded dispose: by dispose time the semantic obligations are
+    // already met (loop stopped, wave abandoned, seal chain drained),
+    // so the dispose gets a DEADLINE — on overrun the handle is
+    // abandoned (crash-equivalent teardown, the sanctioned model for
+    // abandoned waves) and the park completes anyway.
+    const created: {
+      runtime: Runtime;
+      manager: SharedServerStorageManager;
+    }[] = [];
+    let blowUp = false;
+    host = new ExecutorHost({
+      server,
+      serviceIdentity: serviceSigner.did(),
+      createRuntime: async () => {
+        const manager = SharedServerStorageManager.connectTo(server, {
+          as: serviceSigner,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: manager,
+          experimental: {
+            serverExecution: true,
+            systemPatternAutoUpdate: false,
+          },
+        });
+        created.push({ runtime, manager });
+        // The never-resolving dispose: the hang, made deterministic.
+        // The real teardown happens in the test's own cleanup below.
+        return { runtime, dispose: () => new Promise<void>(() => {}) };
+      },
+      policy: {
+        idleParkMs: 600_000,
+        renewIntervalMs: 25,
+        parkDisposeTimeoutMs: 100,
+        get flushDeadlineMs(): number {
+          if (blowUp) throw new Error("induced loop failure");
+          return 1_000;
+        },
+      } as ConstructorParameters<typeof ExecutorHost>[0]["policy"],
+    });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    const input = clientRuntime.getCell<{ value: number }>(
+      space,
+      "hung-dispose-input",
+      undefined,
+    );
+    const tx = clientRuntime.edit();
+    input.withTx(tx).set({ value: 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const first = host.spaceServer(space)!;
+
+    // Fail the next cycle and wake the loop: park("loop-failed") runs
+    // against the hung dispose.
+    blowUp = true;
+    first.noteDemandChanged();
+
+    // Park LIVENESS: whenParked must resolve despite the hung dispose.
+    // Pre-fix, the park awaits the dispose forever and this race times
+    // out — the observed zombie.
+    const parkOutcome = await Promise.race([
+      first.whenParked.then(() => "parked" as const),
+      new Promise<"hung">((resolve) =>
+        setTimeout(() => resolve("hung"), 5_000)
+      ),
+    ]);
+    expect(parkOutcome).toBe("parked");
+    // Counted, not just logged (§7 posture).
+    expect(host.stats().parkDisposeTimeouts).toBeGreaterThanOrEqual(1);
+
+    // The lease released: a rival can take the row immediately.
+    const rival = executionLeaseHolder("did:key:hung-dispose-rival");
+    expect(acquireExecutionLease(engine, { space, holder: rival })).toBe(true);
+    releaseExecutionLease(engine, { space, holder: rival });
+
+    // Recovery: the failure was transient; the next authored admission
+    // re-activates the space (the host's designed recovery arm) and the
+    // fresh tenure DRAINS the new input — the exact liveness the zombie
+    // never had.
+    blowUp = false;
+    const tx2 = clientRuntime.edit();
+    input.withTx(tx2).set({ value: 2 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    const authored2 = Engine.serverSeq(engine);
+    await waitUntil(
+      () => {
+        const current = host!.spaceServer(space);
+        return current !== undefined && current !== first &&
+          current.active === true;
+      },
+      "a fresh tenure to re-activate after the park",
+      15_000,
+    );
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authored2,
+      "the re-activated loop to drain the post-park input",
+      15_000,
+    );
+
+    // Cleanup: close the host (its parks are timeboxed over the same
+    // hung-dispose factory), then tear down the abandoned runtimes for
+    // real — the never-resolving dispose was the fixture, not a leak.
+    await host.close();
+    host = undefined;
+    for (const entry of created) {
+      await entry.runtime.dispose();
+      await entry.manager.close();
+    }
+  });
+
+  it("backs off failure-park re-activations: a permanently failing loop rebuilds at a bounded, growing spacing, and a served wave clears the streak", async () => {
+    // The cascade flag behind the lunch wall's second half: once park
+    // LIVENESS holds (the test above), a PERMANENTLY failing loop turns
+    // from zombie into crash-loop — every admission chains a
+    // re-activation, each rebuilds a full runtime, fails, and parks
+    // (~300 reactivations/s observed). The host must back off repeated
+    // failure-parks of the same space: streak-based exponential delay
+    // (base·2^(streak−1), capped), counted in §7, cleared by a
+    // successfully served wave.
+    const activationTimes: number[] = [];
+    let blowUp = true; // permanent failure, from the very first tenure
+    host = new ExecutorHost({
+      server,
+      serviceIdentity: serviceSigner.did(),
+      createRuntime: async () => {
+        activationTimes.push(Date.now());
+        const manager = SharedServerStorageManager.connectTo(server, {
+          as: serviceSigner,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: manager,
+          experimental: {
+            serverExecution: true,
+            systemPatternAutoUpdate: false,
+          },
+        });
+        return {
+          runtime,
+          dispose: async () => {
+            await runtime.dispose();
+            await manager.close();
+          },
+        };
+      },
+      policy: {
+        idleParkMs: 600_000,
+        renewIntervalMs: 25,
+        failureParkBackoffBaseMs: 150,
+        failureParkBackoffMaxMs: 4_800,
+        get flushDeadlineMs(): number {
+          if (blowUp) throw new Error("induced permanent loop failure");
+          return 1_000;
+        },
+      } as ConstructorParameters<typeof ExecutorHost>[0]["policy"],
+    });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    const input = clientRuntime.getCell<{ value: number }>(
+      space,
+      "backoff-input",
+      undefined,
+    );
+
+    // The trigger feed — the "clicks keep arriving" analogue: authored
+    // writes on a short cadence, each one an admission that chains a
+    // re-activation of the failing space.
+    let driving = true;
+    const driverDone = (async () => {
+      let n = 0;
+      while (driving) {
+        const tx = clientRuntime.edit();
+        input.withTx(tx).set({ value: n++ });
+        const committed = await tx.commit();
+        if (committed.error !== undefined) {
+          throw new Error(`driver write failed: ${committed.error.message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      }
+    })();
+
+    // Five tenures: the first undelayed, then four backoff-delayed
+    // rebuilds (150, 300, 600, 1200ms minimum spacing).
+    await waitUntil(
+      () => activationTimes.length >= 5,
+      "five failure-park tenures",
+      30_000,
+    );
+    driving = false;
+    await driverDone;
+
+    // The spacing bound: without backoff the gaps track the 15ms driver
+    // cadence (the observed storm); with it, gap n is at least
+    // base·2^(n−1) (capped). 10ms epsilon for clock granularity.
+    const gaps = activationTimes.slice(1, 5).map(
+      (t, i) => t - activationTimes[i],
+    );
+    const expectedMinimums = [150, 300, 600, 1200];
+    for (let i = 0; i < expectedMinimums.length; i++) {
+      expect(gaps[i]).toBeGreaterThanOrEqual(expectedMinimums[i] - 10);
+    }
+    // Counted, not just logged (§7 posture).
+    expect(host.stats().reactivationBackoffs).toBeGreaterThanOrEqual(4);
+
+    // Recovery: the failure clears; the next tenure (possibly already
+    // sleeping out its backoff) activates and SERVES — a wave commits,
+    // which clears the streak.
+    blowUp = false;
+    const tx = clientRuntime.edit();
+    input.withTx(tx).set({ value: 1_000 });
+    expect((await tx.commit()).error).toBeUndefined();
+    const healthySeq = Engine.serverSeq(engine);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= healthySeq,
+      "a healthy tenure to serve after the failures clear",
+      30_000,
+    );
+
+    // The streak is CLEARED by the served wave: one fresh failure backs
+    // off from the BASE again, not from the accumulated streak. With
+    // the streak still at 5+ the next rebuild could not arrive before
+    // 2400ms; cleared, it is due after ~150ms. The 1200ms ceiling
+    // separates the two regimes with wide margin on both sides.
+    // Capture the healthy tenure BEFORE inducing the failure, then
+    // trigger the failing cycle with an ADMISSION, not
+    // noteDemandChanged(): that wake only resolves a PARKED
+    // #waitForInput and is lost when the loop is mid-cycle (the
+    // healthy wave's self-echo drain) — a feed record instead
+    // guarantees the next cycle runs and reads the throwing policy.
+    const failing = host.spaceServer(space)!;
+    blowUp = true;
+    const failTx = clientRuntime.edit();
+    input.withTx(failTx).set({ value: 1_001 });
+    expect((await failTx.commit()).error).toBeUndefined();
+    await failing.whenParked;
+    const failedAgainAt = Date.now();
+    const countBefore = activationTimes.length;
+    const trigger = clientRuntime.edit();
+    input.withTx(trigger).set({ value: 1_002 });
+    expect((await trigger.commit()).error).toBeUndefined();
+    await waitUntil(
+      () => activationTimes.length > countBefore,
+      "the post-recovery failure to re-activate",
+      30_000,
+    );
+    const rebuildGap = activationTimes[countBefore] - failedAgainAt;
+    expect(rebuildGap).toBeGreaterThanOrEqual(140);
+    expect(rebuildGap).toBeLessThanOrEqual(1_200);
+
+    // Quiesce before teardown: the tenure that just re-activated read
+    // the policy while it still threw (or is about to) — let the doomed
+    // park finish and a HEALTHY tenure serve before afterEach closes
+    // the server, or a self-initiated park races server.close() into
+    // the closed engine (observed: SqliteError at releaseExecutionLease).
+    blowUp = false;
+    const finalTx = clientRuntime.edit();
+    input.withTx(finalTx).set({ value: 1_003 });
+    expect((await finalTx.commit()).error).toBeUndefined();
+    const finalSeq = Engine.serverSeq(engine);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= finalSeq,
+      "a healthy tenure to quiesce teardown",
+      30_000,
+    );
+  });
+
+  it("a serving-runtime foreign-space write refuses at ACCUMULATION: the action fails loudly and counted, the wave and the loop survive (RULED 2026-08-14 (c))", async () => {
+    // The lunch-wall trigger end to end: a wish materialization on the
+    // serving runtime resolves against the SERVICE identity's home
+    // space and writes it mid-wave. Pre-ruling, that write sealed fine
+    // and the wave DIED at the commit step (#foreignEngineFor) —
+    // loop-failed → park → (pre-containment) permanent zombie. Ruled
+    // (c): the write refuses at accumulation, only the wish action
+    // fails, the wave commits everything else, and the loop never
+    // parks at all.
+    host = newHost({ flushDeadlineMs: 2_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    const input = clientRuntime.getCell<{ value: number }>(
+      space,
+      "foreign-refusal-input",
+      undefined,
+    );
+    const tx = clientRuntime.edit();
+    input.withTx(tx).set({ value: 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const first = host.spaceServer(space)!;
+    const authoredSeq = Engine.serverSeq(engine);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authoredSeq,
+      "the activation cycle to settle",
+    );
+
+    // The trigger: a stamped serving-side tx writing a FOREIGN space
+    // (the profile-bootstrap shape — the wish resolved the service's
+    // home space, not the served space).
+    const foreignSigner = await Identity.fromPassphrase(
+      "serving loop foreign home",
+    );
+    const foreignSpace = foreignSigner.did() as MemorySpace;
+    const profileCell = servingRuntime!.getCell<{ name: string }>(
+      foreignSpace,
+      "profile-bootstrap-doc",
+      undefined,
+    );
+    await profileCell.sync();
+    const probeTx = servingRuntime!.edit();
+    stampWaveRunContext(probeTx, {
+      actionId: "wish/profile",
+      kind: "derivation",
+    });
+    profileCell.withTx(probeTx).set({ name: "bootstrap" });
+    const committed = await probeTx.commit();
+    // Action-scoped: THIS commit fails, loudly and counted.
+    expect(committed.error).toBeDefined();
+    expect(committed.error!.message).toContain("foreign-space write");
+    expect(host.stats().foreignWriteRefusals).toBeGreaterThanOrEqual(1);
+
+    // The loop SURVIVES — no loop-failed park, no tenure change: the
+    // same SpaceServer instance keeps serving, and a subsequent client
+    // write is drained by it.
+    const tx2 = clientRuntime.edit();
+    input.withTx(tx2).set({ value: 2 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    const authored2 = Engine.serverSeq(engine);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authored2,
+      "the loop to keep serving past the refused foreign write",
+      15_000,
+    );
+    expect(host.spaceServer(space)).toBe(first);
+    expect(first.active).toBe(true);
+  });
+
   it("close() during a mid-flight activation leaves no serving zombie: the activated space parks and the lease frees (thread r3731191438)", async () => {
     host = newHost({ flushDeadlineMs: 1_000, idleParkMs: 600_000 });
     // Initiate close WHILE the activation is mid-flight (createRuntime
