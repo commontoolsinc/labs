@@ -108,10 +108,14 @@ function outputSymbolIndex(
         if (
           callKind?.kind === "builder" && callKind.builderName === "pattern"
         ) {
-          // `pattern<Input, Output>` — Output rides second; `pattern<T>` —
-          // T serves both positions. The guard above proves one exists.
-          const outputNode = node.typeArguments[1] ?? node.typeArguments[0]!;
-          const symbol = namedSymbolForTypeNode(outputNode, checker);
+          // Only `pattern<Input, Output>` names an Output — it rides
+          // second. The one-generic form's argument is the INPUT (the api
+          // overload returns `PatternFactory<StripCell<T>, any>`), and an
+          // inferred result has no name to index.
+          const outputNode = node.typeArguments[1];
+          const symbol = outputNode
+            ? namedSymbolForTypeNode(outputNode, checker)
+            : undefined;
           if (symbol && !hasSharedContractTag(symbol)) {
             index.set(symbol, {
               typeName: symbol.name,
@@ -232,21 +236,17 @@ export function foreignOutputEmbeddingLint(
   const index = outputSymbolIndex(program, checker);
   if (index.size === 0) return [];
 
-  // Only the OUTPUT-position type argument is exempt: a pattern's own
-  // output referencing itself is the documented self-reference shape. A
-  // foreign Output in the INPUT position is the anti-pattern at its
-  // largest — the whole contract embedded as the argument — and stays
-  // eligible. (`pattern<T>`'s single argument serves both positions, so
-  // its self-reference stays exempt through the same expression.)
+  // Only the pattern's own RESULT contract is exempt: an output
+  // referencing itself is the documented self-reference shape. For
+  // `pattern<I, O>` the result node IS the second type argument; for the
+  // one-generic form the single argument is the INPUT (the api overload
+  // returns `PatternFactory<StripCell<T>, any>`), so nothing explicit is
+  // exempt and a foreign Output used as that input stays eligible — the
+  // anti-pattern at its largest, the whole contract embedded as the
+  // argument.
   const ownSymbols = new Set<ts.Symbol>();
-  const typeArgs = callNode.typeArguments;
-  if (typeArgs && typeArgs.length > 0) {
-    const symbol = namedSymbolForTypeNode(
-      typeArgs[1] ?? typeArgs[0]!,
-      checker,
-    );
-    if (symbol) ownSymbols.add(symbol);
-  }
+  const resultSymbol = namedSymbolForTypeNode(input.resultTypeNode, checker);
+  if (resultSymbol) ownSymbols.add(resultSymbol);
 
   const sides: ReadonlyArray<{
     role: "argument" | "result";

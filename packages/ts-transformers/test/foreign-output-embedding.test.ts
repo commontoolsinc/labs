@@ -145,6 +145,79 @@ Deno.test("Foreign-output embedding check", async (t) => {
   );
 
   await t.step(
+    "warns when a foreign Output is the single-generic input",
+    async () => {
+      // `pattern<T>`'s one argument is the INPUT (the result is inferred),
+      // so a foreign Output there is the whole-contract embed and must not
+      // ride any self-reference exemption.
+      const source = [
+        'import { pattern } from "commonfabric";',
+        "",
+        "export interface NoteOutput {",
+        "  title: string;",
+        "}",
+        "",
+        "interface NoteInput {",
+        "  title?: string;",
+        "}",
+        "",
+        "export const Note = pattern<NoteInput, NoteOutput>(({ title }) => ({",
+        "  title,",
+        "}));",
+        "",
+        "export default pattern<NoteOutput>(({ title }) => ({",
+        "  label: title,",
+        "}));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const warnings = embeddingWarnings(diagnostics);
+      assertEquals(warnings.length, 1);
+      assertStringIncludes(warnings[0]!.message, "NoteOutput");
+      assertStringIncludes(warnings[0]!.message, "argument");
+    },
+  );
+
+  await t.step(
+    "never indexes a single-generic pattern's input as an Output",
+    async () => {
+      // The provider below only ever declares its INPUT explicitly; its
+      // result is inferred. A consumer embedding that input type is not
+      // embedding anyone's output contract.
+      const source = [
+        'import { pattern } from "commonfabric";',
+        "",
+        "export interface NoteState {",
+        "  title?: string;",
+        "}",
+        "",
+        "export const Note = pattern<NoteState>(({ title }) => ({",
+        "  title,",
+        "}));",
+        "",
+        "interface BoardInput {",
+        "  notes?: NoteState[];",
+        "}",
+        "",
+        "interface BoardOutput {",
+        "  noteCount: number;",
+        "}",
+        "",
+        "export default pattern<BoardInput, BoardOutput>(() => ({",
+        "  noteCount: 0,",
+        "}));",
+      ].join("\n");
+
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      assertEquals(embeddingWarnings(diagnostics).length, 0);
+    },
+  );
+
+  await t.step(
     "stays silent for inline-literal type arguments",
     async () => {
       // An anonymous output shape has no name to hold anyone to, so it is
