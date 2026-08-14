@@ -40,6 +40,7 @@ export { BaseFabricInstance } from "./BaseFabricInstance.ts";
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 export { ProblematicStateError } from "./ProblematicStateError.ts";
 export { ProblematicValue } from "./ProblematicValue.ts";
+export { SymbolCodec } from "./SymbolCodec.ts";
 export { toReportableState } from "./toReportableState.ts";
 export { toReportableTag } from "./toReportableTag.ts";
 export { UnknownValue } from "./UnknownValue.ts";

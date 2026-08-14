@@ -36,7 +36,11 @@ import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
  * repeated `toString()` calls are O(1).
  */
 export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
-  readonly #hash: Uint8Array;
+  /**
+   * Private byte storage. Guaranteed to be backed by an exact-sized and
+   * unshared `ArrayBuffer`.
+   */
+  readonly #hash: Uint8Array<ArrayBuffer>;
   readonly #tag: string;
   readonly #justHashString: string;
   readonly #fullStringForm: string;
