@@ -477,6 +477,10 @@ export class WaveAccumulator
   readonly #replicaFor: (space: MemorySpace) => ISpaceReplica;
   readonly #lease: WaveLease | undefined;
   readonly #sealedTenure: number;
+  readonly #foreignWrites: "refuse" | "accept";
+  readonly #onForeignWriteRefusal:
+    | ((info: { space: MemorySpace; actionId?: string }) => void)
+    | undefined;
   #contributions: WaveContribution[] = [];
   #assembly: PendingAssembly | undefined;
   #closed = false;
@@ -524,6 +528,26 @@ export class WaveAccumulator
      * before the refusal throws. The refusal semantics are unchanged
      * — this only makes the storm a counter fact. */
     onUnstampedSeal?: () => void;
+    /** Foreign-space writes at ACCUMULATION (serving-loop.md §3d, RULED
+     * 2026-08-14 (c) — the lunch-wall trigger's ruled seat): on
+     * `"refuse"` (the DEFAULT — the Phase-1..4 truth that no sanctioned
+     * producer writes a foreign space from a serving wave yet), a
+     * sealing tx carrying a foreign-space commit is refused
+     * ACTION-SCOPED — that tx fails loudly (its already-sealed spaces
+     * withdraw per §3d's failure isolation) and the wave keeps serving
+     * everything else, instead of the whole wave dying later at the
+     * commit step's foreign-engine guard (loop-failed → park: a space
+     * outage from one misdirected wish materialization). `"accept"`
+     * is the Phase-5 posture — per-demanding-identity resolution
+     * riding §2b's `.inSpace` sanctioned crossing — kept dark-but-
+     * tested by the §2b accumulator tests until Phase 5 flips the
+     * serving loop over. The commit-step guard stays as backstop. */
+    foreignWrites?: "refuse" | "accept";
+    /** Fired once per refused foreign-space write (above): the serving
+     * loop counts it into §7's `foreignWriteRefusals`. */
+    onForeignWriteRefusal?: (
+      info: { space: MemorySpace; actionId?: string },
+    ) => void;
   }) {
     this.#space = options.space;
     this.#basisSeq = options.basisSeq;
@@ -532,6 +556,8 @@ export class WaveAccumulator
     this.#lease = options.lease;
     this.#sealedTenure = options.lease?.tenure ?? 0;
     this.#onUnstampedSeal = options.onUnstampedSeal;
+    this.#foreignWrites = options.foreignWrites ?? "refuse";
+    this.#onForeignWriteRefusal = options.onForeignWriteRefusal;
   }
 
   get space(): MemorySpace {
@@ -829,6 +855,40 @@ export class WaveAccumulator
           name: "StorageTransactionAborted",
           message: "sealSpaceCommit outside a seal() call",
           reason: new Error("seal-out-of-order"),
+        },
+      });
+    }
+    if (space !== this.#space && this.#foreignWrites === "refuse") {
+      // Accumulation-time refusal (serving-loop.md §3d, RULED 2026-08-14
+      // (c)): a foreign-space write from a serving-wave action — the
+      // lunch-wall trigger was a wish materialization resolving against
+      // the SERVICE identity's home space — refuses HERE, action-scoped:
+      // seal() fails this tx (withdrawing its already-sealed spaces) and
+      // the wave keeps every other contribution, where the pre-ruling
+      // behavior let the batch through and the whole wave died at the
+      // commit step's foreign-engine guard, parking the space. Loud and
+      // counted; Phase 5 (per-demanding-identity resolution riding §2b's
+      // `.inSpace` crossing) flips the posture.
+      const actionId = assembly.context?.actionId;
+      logger.warn("foreign-write-refused", () => [
+        `foreign-space write refused at wave accumulation: action ` +
+        `${actionId ?? "<unstamped>"} attempted to write ${space} from ` +
+        `the wave serving ${this.#space} (serving-loop.md §3d, RULED ` +
+        "2026-08-14 (c); cross-space serving is Phase 5)",
+      ]);
+      this.#onForeignWriteRefusal?.({
+        space,
+        ...(actionId !== undefined ? { actionId } : {}),
+      });
+      return Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted",
+          message: `foreign-space write refused at wave accumulation ` +
+            `(serving-loop.md §3d, RULED 2026-08-14 (c)): action ` +
+            `${actionId ?? "<unstamped>"} may not write ${space} from ` +
+            `the wave serving ${this.#space}; cross-space serving is ` +
+            "Phase 5",
+          reason: new Error("foreign-write-refused"),
         },
       });
     }

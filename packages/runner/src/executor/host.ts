@@ -35,6 +35,27 @@ import {
 
 const logger = getLogger("executor-host", { enabled: true, level: "warn" });
 
+// The failure-park re-activation backoff (the lunch-wall cascade flag):
+// with park liveness in place, a PERMANENTLY failing loop turns from
+// zombie into crash-loop — every admission chains a re-activation, each
+// rebuilds a full runtime, fails, and parks (~300 reactivations/s
+// observed). Streak-based exponential delay, the same 25·2^n shape as
+// the commit-backpressure precedent (scheduler/backpressure.ts), capped;
+// a successfully committed wave clears the streak.
+const DEFAULT_FAILURE_PARK_BACKOFF_BASE_MS = 25;
+const DEFAULT_FAILURE_PARK_BACKOFF_MAX_MS = 30_000;
+
+const failureParkBackoffDelayMs = (
+  streak: number,
+  policy: SpaceServerPolicy | undefined,
+): number => {
+  const base = policy?.failureParkBackoffBaseMs ??
+    DEFAULT_FAILURE_PARK_BACKOFF_BASE_MS;
+  const max = policy?.failureParkBackoffMaxMs ??
+    DEFAULT_FAILURE_PARK_BACKOFF_MAX_MS;
+  return Math.min(max, base * 2 ** Math.min(streak - 1, 30));
+};
+
 export type ExecutorHostOptions = {
   server: MemoryServer;
   /** The service identity (DID) DR1 holders are minted from — also the
@@ -66,6 +87,14 @@ export class ExecutorHost {
    * keying — engine-wave-sink.ts): survive park/re-activate, floored at
    * the engine's stored max on first use. */
   readonly #localSeqBySpace = new Map<string, { value: number }>();
+  /** Consecutive `loop-failed` parks per space (the re-activation
+   * backoff's streak). Incremented at each failure park, cleared by a
+   * successfully committed wave — real served progress, not merely a
+   * runtime that got built (every crash-loop tenure builds one). */
+  readonly #failureParkStreaks = new Map<string, number>();
+  /** Wakers for in-flight backoff sleeps — close() flushes them so a
+   * delayed re-activation never stalls shutdown. */
+  readonly #backoffWakers = new Set<() => void>();
   readonly #stats: ServingLoopStats = emptyServingLoopStats();
   #releaseServerExecution: () => void = () => {};
   #closed = false;
@@ -249,6 +278,21 @@ export class ExecutorHost {
     pending: AdmittedCommitNotice[],
   ): Promise<void> {
     if (this.#closed || this.#spaces.get(space)?.active) return;
+    const streak = this.#failureParkStreaks.get(space) ?? 0;
+    if (streak > 0) {
+      // Failure-park backoff: the space's last tenure(s) died in
+      // `loop-failed` parks. Delay this rebuild; admissions arriving
+      // meanwhile buffer into #pendingNotices behind this #activating
+      // entry (never dropped, never additional activations).
+      const delayMs = failureParkBackoffDelayMs(streak, this.#options.policy);
+      this.#stats.reactivationBackoffs += 1;
+      logger.warn("reactivation-backoff", () => [
+        `space ${space}: ${streak} consecutive failure park(s); ` +
+        `delaying re-activation ${delayMs}ms`,
+      ]);
+      await this.#backoffSleep(delayMs);
+      if (this.#closed || this.#spaces.get(space)?.active) return;
+    }
     try {
       const engine = await this.#options.server.engineForSpace(space);
       let localSeqRef = this.#localSeqBySpace.get(space);
@@ -273,7 +317,20 @@ export class ExecutorHost {
         localSeqRef,
         stats: this.#stats,
         policy: this.#options.policy,
-        onParked: () => {
+        onParked: (reason) => {
+          // The backoff streak: a `loop-failed` park extends it; an
+          // idle park (a healthy tenure winding down) clears it. Parks
+          // that say nothing about the space's health — lease loss,
+          // host close — leave it alone; a committed wave (below) is
+          // what clears it on the serving path.
+          if (reason === "loop-failed") {
+            this.#failureParkStreaks.set(
+              space,
+              (this.#failureParkStreaks.get(space) ?? 0) + 1,
+            );
+          } else if (reason === "idle") {
+            this.#failureParkStreaks.delete(space);
+          }
           // Delete by IDENTITY: a successor activation may already have
           // registered over this entry (the M5 park race), and the
           // dying server must not evict it.
@@ -284,6 +341,12 @@ export class ExecutorHost {
           // at construction, shared refcount with Runtime enablers)
           // keeps the ambient flag on until close — a parked runtime's
           // dispose releases only its own claim.
+        },
+        onWaveCommitted: () => {
+          // Real served progress clears the failure streak — the
+          // signal a crash-looping tenure never produces (its first
+          // wave commit is exactly what fails).
+          this.#failureParkStreaks.delete(space);
         },
       });
       // Register BEFORE the async activation so admissions racing it
@@ -314,12 +377,30 @@ export class ExecutorHost {
     }
   }
 
+  /** A cancellable backoff sleep: close() flushes the wakers so a
+   * delayed re-activation (which close() awaits through #activating)
+   * never stalls shutdown by its full delay. */
+  #backoffSleep(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        this.#backoffWakers.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, ms);
+      this.#backoffWakers.add(wake);
+    });
+  }
+
   /** Park every space and detach from the memory server. */
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
     this.#options.server.setServerExecutionObserver(undefined);
     registerServingLoopStatsProvider(undefined);
+    // Wake sleeping backoffs first: their activations re-check #closed
+    // and bail, so the #activating drain below is prompt.
+    for (const wake of [...this.#backoffWakers]) wake();
     // Await in-flight activations FIRST: an activation past its #closed
     // check would otherwise register and start serving after close
     // returned (a leaked runtime renewing a lease nobody can take), and
