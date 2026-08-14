@@ -98,17 +98,19 @@ const conflictSeq = (
   id: string,
   readPath: readonly string[],
   afterSeq: number,
-  // CT-1910 true-basis scans exclude the reader's own session's TRUE
-  // PREDECESSOR commits (localSeq below the reader's): those were part of
-  // its materialized view. An own write with a higher localSeq accepted
-  // first (out-of-order submission) conflicts like a foreign write.
-  exclude?: { sessionId: string; beforeLocalSeq: number },
+  // CT-1910 true-basis scans exclude the own-session layers the read
+  // NAMES in its dependency array: those are the layers whose inclusion in
+  // the reader's materialized view the array attests. Any own write the
+  // array does not name — a higher localSeq accepted first (out-of-order
+  // submission) or an omitted predecessor whose write is durable —
+  // conflicts like a foreign write.
+  exclude?: { sessionId: string; namedLocalSeqs: readonly number[] },
 ): number | null => {
   for (const commit of history.accepted) {
     if (commit.seq <= afterSeq) continue;
     if (
       exclude !== undefined && commit.sessionId === exclude.sessionId &&
-      commit.localSeq < exclude.beforeLocalSeq
+      exclude.namedLocalSeqs.includes(commit.localSeq)
     ) {
       continue;
     }
@@ -156,7 +158,7 @@ export const naiveAdmit = (
     const cs = read.basisSeq !== undefined
       ? conflictSeq(history, read.id, read.path, read.basisSeq, {
         sessionId,
-        beforeLocalSeq: commit.localSeq,
+        namedLocalSeqs: layers,
       })
       : conflictSeq(history, read.id, read.path, basis!);
     if (cs !== null) {

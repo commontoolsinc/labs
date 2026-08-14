@@ -4,10 +4,14 @@
  * NON-CONTIGUOUS in the session's sequence space. A rejected layer the
  * client honored — dropped from its overlay before the read view was built —
  * is legitimately unnamed and imposes no resolution requirement, while a
- * NAMED layer without a commit row still dooms the commit. The server never
- * checks completeness (it cannot know the client's view); these tests pin
- * the acceptance side of that contract so a future "help the client" check
- * does not quietly forbid the sparse shape.
+ * NAMED layer without a commit row still dooms the commit, and an omission
+ * is verified against durable history: the staleness scan excludes only
+ * the own-session layers the array NAMES (§3.6.3's declared-set
+ * exclusion), so omitting a layer whose write is durably integrated
+ * conflicts like a foreign write. These tests pin all three sides —
+ * sparse acceptance, named-rejected doom, and omitted-durable doom — so a
+ * future change cannot quietly forbid the sparse shape or quietly re-trust
+ * client discipline.
  */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -158,6 +162,103 @@ describe("sparse pending dependencies", () => {
           },
         })
       ).toThrow("pending dependency not resolved: 2");
+    });
+  });
+
+  it("rejects an array that omits an accepted layer whose write is durable", async () => {
+    await withEngine((engine) => {
+      seedHonoredRejection(engine);
+      // A second surviving layer on A: localSeq 4, accepted at seq 3. The
+      // stack a complete view sits on is now [3, 4].
+      applyCommit(engine, {
+        sessionId: SESSION,
+        commit: {
+          localSeq: 4,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "entity:A",
+            value: toEntityDocument({ revision: "v4" }),
+          }],
+        },
+      });
+
+      // The buggy omission the declared-set exclusion exists to catch: the
+      // array names only layer 4, silently dropping layer 3 — whose write
+      // is durably integrated at seq 2, inside the scan interval, and NOT
+      // declared away by a processed rejection. Under a predecessor-mask
+      // exclusion this commit would be wrongly accepted (layer 3 is an own
+      // predecessor); the declared set makes it conflict like a foreign
+      // write.
+      expect(() =>
+        applyCommit(engine, {
+          sessionId: SESSION,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:A",
+                path: toDocumentPath([]),
+                localSeq: [4],
+                basisSeq: 1,
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:B",
+              value: toEntityDocument({ derivedFrom: "v4-missing-v3" }),
+            }],
+          },
+        })
+      ).toThrow("stale pending read");
+    });
+  });
+
+  it("accepts the same read when the array names every surviving layer", async () => {
+    await withEngine((engine) => {
+      seedHonoredRejection(engine);
+      applyCommit(engine, {
+        sessionId: SESSION,
+        commit: {
+          localSeq: 4,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "entity:A",
+            value: toEntityDocument({ revision: "v4" }),
+          }],
+        },
+      });
+
+      // The no-self-conflict guarantee the exclusion preserves: naming both
+      // surviving layers ([3, 4], sparse only past the rejected 2) excludes
+      // exactly the reader's own attested view, and the commit lands.
+      const applied = applyCommit(engine, {
+        sessionId: SESSION,
+        commit: {
+          localSeq: 5,
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "entity:A",
+              path: toDocumentPath([]),
+              localSeq: [3, 4],
+              basisSeq: 1,
+            }],
+          },
+          operations: [{
+            op: "set",
+            id: "entity:B",
+            value: toEntityDocument({ derivedFrom: "v4" }),
+          }],
+        },
+      });
+
+      expect(applied.seq).toBe(4);
+      expect(read(engine, { id: "entity:B" })).toEqual({
+        value: { derivedFrom: "v4" },
+      });
     });
   });
 });

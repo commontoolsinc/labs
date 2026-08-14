@@ -694,17 +694,24 @@ WHERE session_id = :session_id
 `;
 
 // True-basis (CT-1910) variants of the conflict scans: identical intervals,
-// but writes produced by the reader's own session's TRUE PREDECESSORS
-// (`local_seq` below the reader's) are excluded — the accepted own layers
-// the reader's materialized view included; conflicting with them would be
-// the self-conflict that forced pending reads to over-advance their basis
-// in the first place. The exclusion is deliberately NOT session-wide: an
-// own write with a HIGHER localSeq that was accepted first (out-of-order
-// submission — e.g. the runner's hold-mode admission can release a later
-// blind commit while an earlier read-bearing commit waits) was NOT in the
-// reader's view and must conflict exactly like a foreign write. Checking
-// `local_seq` here, rather than assuming the §3.6.3 same-session ordering
-// holds on the wire, keeps the scan sound without trusting the transport.
+// but writes produced by the layers the read NAMES (`local_seq` in the
+// read's declared dependency array, same session) are excluded — the
+// accepted own layers the reader's materialized view included; conflicting
+// with them would be the self-conflict that forced pending reads to
+// over-advance their basis in the first place. The exclusion is the
+// DECLARED SET, not a predecessor mask (`local_seq <` the reader's): the
+// declared array is the reader's claim of exactly which own layers its
+// view sat on, so an own write the array does NOT name conflicts like a
+// foreign write whatever its localSeq. That covers both an own write with
+// a HIGHER localSeq accepted first (out-of-order submission — e.g. the
+// runner's hold-mode admission can release a later blind commit while an
+// earlier read-bearing commit waits) and an own PREDECESSOR the client
+// omitted while its write is durable — a buggy or selectively-excluding
+// client whose view is missing integrated state (the missed-write
+// direction of INV-1). The declared shape thus validates itself:
+// basisSeq plus the named layers must fully account for the doc's durable
+// history at the read path, and the server checks that rather than
+// trusting client discipline.
 const SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION = `
 SELECT r.seq AS seq
 FROM revision r
@@ -714,7 +721,8 @@ WHERE r.branch = :branch
   AND r.scope_key = :scope_key
   AND r.seq > :after_seq
   AND r.op IN ('set', 'delete')
-  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
+  AND (c.session_id <> :exclude_session
+       OR c.local_seq NOT IN (SELECT value FROM json_each(:named_local_seqs)))
 ORDER BY r.seq DESC, r.op_index DESC
 LIMIT 1
 `;
@@ -728,7 +736,8 @@ WHERE r.branch = :branch
   AND r.scope_key = :scope_key
   AND r.seq > :after_seq
   AND r.op = 'patch'
-  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
+  AND (c.session_id <> :exclude_session
+       OR c.local_seq NOT IN (SELECT value FROM json_each(:named_local_seqs)))
 ORDER BY r.seq DESC, r.op_index DESC
 `;
 
@@ -5692,10 +5701,13 @@ const resolvePendingReads = (
     }
 
     // CT-1910 repair: a reader that names its true confirmed basis is
-    // scanned over the FULL interval (basisSeq, head], excluding only its
-    // own session's predecessor commits (local_seq below the reader's) —
-    // the accepted layers its materialized view included. A legacy reader
-    // (no basisSeq) keeps the max-dependency basis, so the over-advance
+    // scanned over the FULL interval (basisSeq, head], excluding only the
+    // own-session layers its dependency array NAMES — the accepted layers
+    // its materialized view included, per its own attestation. An own
+    // write the array omits conflicts like a foreign one, so the scan
+    // verifies that basisSeq plus the named layers fully account for the
+    // doc's durable history at the read path. A legacy reader (no
+    // basisSeq) keeps the max-dependency basis, so the over-advance
     // deviation persists for it alone
     // (docs/specs/memory-v2/09-invariants.md, INV-1).
     const trueBasis = pendingReadBasisSeq(engine, read);
@@ -5708,7 +5720,7 @@ const resolvePendingReads = (
         trueBasis,
         read.path,
         read.nonRecursive ?? false,
-        { sessionKey, beforeLocalSeq: commit.localSeq },
+        { sessionKey, namedLocalSeqs: layers },
       )
       : findConflictSeq(
         engine,
@@ -5744,12 +5756,14 @@ const findConflictSeq = (
   // replace/delete changes the container the shape read observed, so it must
   // still conflict. Only Tier-2 (patch) granularity is refined.
   nonRecursive: boolean = false,
-  // True-basis reads (CT-1910): skip writes produced by this commit session
-  // key's TRUE PREDECESSOR commits (`local_seq < beforeLocalSeq`) — the
-  // reader's own accepted layers, which its view included. Own writes with
-  // a higher localSeq (accepted out of submission order) conflict like
-  // foreign writes; see the comment on the *_EXCLUDING_SESSION statements.
-  exclude?: { sessionKey: string; beforeLocalSeq: number },
+  // True-basis reads (CT-1910): skip writes produced by the own-session
+  // layers the read NAMES — the accepted layers whose inclusion in the
+  // reader's view the declared array attests. Any own write the array does
+  // not name conflicts like a foreign write, whether it is a higher
+  // localSeq accepted out of submission order or an omitted predecessor
+  // whose write is durable; see the comment on the *_EXCLUDING_SESSION
+  // statements.
+  exclude?: { sessionKey: string; namedLocalSeqs: readonly number[] },
 ): number | null => {
   const setDeleteStatement = exclude === undefined
     ? engine.statements.selectSetDeleteConflict
@@ -5759,7 +5773,7 @@ const findConflictSeq = (
     : engine.statements.selectPatchConflictsExcludingSession;
   const exclusionParams = exclude === undefined ? {} : {
     exclude_session: exclude.sessionKey,
-    before_local_seq: exclude.beforeLocalSeq,
+    named_local_seqs: JSON.stringify(exclude.namedLocalSeqs),
   };
   const setOrDeleteConflict = setDeleteStatement.get({
     branch,
@@ -5808,16 +5822,12 @@ const schedulerObservationReadDropReason = (
     principal,
     branch,
     reads,
-    localSeq,
   }: {
     sessionKey: string;
     sessionId: SessionId;
     principal: string | undefined;
     branch: BranchName;
     reads: ClientCommit["reads"];
-    /** The observation commit's localSeq — the predecessor bound for the
-     * true-basis own-session exclusion (CT-1910). */
-    localSeq: number;
   },
 ): SchedulerObservationDropReason | undefined => {
   for (const read of reads.confirmed) {
@@ -5865,7 +5875,7 @@ const schedulerObservationReadDropReason = (
     }
 
     // Same CT-1910 basis selection as resolvePendingReads: true basis with
-    // predecessor-only own-session exclusion when declared, legacy
+    // declared-set own-session exclusion when declared, legacy
     // max-dependency basis otherwise.
     const trueBasis = pendingReadBasisSeq(engine, read);
     const conflictSeq = trueBasis !== undefined
@@ -5877,7 +5887,7 @@ const schedulerObservationReadDropReason = (
         trueBasis,
         read.path,
         read.nonRecursive ?? false,
-        { sessionKey, beforeLocalSeq: localSeq },
+        { sessionKey, namedLocalSeqs: layers },
       )
       : findConflictSeq(
         engine,
@@ -6002,7 +6012,6 @@ const applySchedulerObservationOnlyCommit = (
     principal,
     branch,
     reads,
-    localSeq,
   });
   if (dropReason) {
     recordSchedulerObservationReplay(engine, {
