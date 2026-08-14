@@ -215,8 +215,9 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   TypeScript structural rule that a `FabricBytes` is assignable to
   `{length: number}`. The nominal brand key
   (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`), which
-  generated schemas name in `required`, has no runtime existence and counts
-  as present on any fabric value. Property sub-schemas are still not walked
+  schemas from pre-vocabulary compilations name in `required` (current
+  generator emissions omit it everywhere), has no runtime existence and
+  counts as present on any fabric value. Property sub-schemas are still not walked
   against a primitive: presence is checked, shapes are not, so
   `{ "type": "object", "properties": { "source": { "type": "number" } } }`
   matches a `FabricRegExp` even though its `source` is a string. Schemas
