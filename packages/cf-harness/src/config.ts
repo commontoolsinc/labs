@@ -18,7 +18,7 @@ import type { DockerRunscSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
-  "enforce-explicit" as const satisfies CfcEnforcementMode;
+  "enforce-strict" as const satisfies CfcEnforcementMode;
 export type HarnessGatewayAuthMode = "bearer" | "none";
 
 /**

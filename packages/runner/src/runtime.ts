@@ -63,6 +63,13 @@ import {
   type CfcTrustConfig,
   type CfcTrustConfigInput,
   type CfcWriteFloorMode,
+  DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
+  DEFAULT_CFC_ENFORCEMENT_MODE,
+  DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
+  DEFAULT_CFC_POLICY_EVALUATION_MODE,
+  DEFAULT_CFC_TRIGGER_READ_GATING,
+  DEFAULT_CFC_WRITE_FLOOR_MODE,
   DEFAULT_SINK_MAX_CONFIDENTIALITY,
   externalIngestStamp,
   flowLabelWorkExists,
@@ -1099,14 +1106,19 @@ export class Runtime {
     this.runner = new Runner(this);
     this.onPatternInstantiated = options.onPatternInstantiated;
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
-      "enforce-explicit";
-    this.cfcFlowLabels = options.cfcFlowLabels ?? "off";
-    this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
-    this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
-    this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
+      DEFAULT_CFC_ENFORCEMENT_MODE;
+    this.cfcFlowLabels = options.cfcFlowLabels ??
+      DEFAULT_CFC_FLOW_LABELS_MODE;
+    this.cfcWriteFloor = options.cfcWriteFloor ??
+      DEFAULT_CFC_WRITE_FLOOR_MODE;
+    this.cfcTriggerReadGating = options.cfcTriggerReadGating ??
+      DEFAULT_CFC_TRIGGER_READ_GATING;
+    this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ??
+      DEFAULT_CFC_POLICY_EVALUATION_MODE;
     this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
-      "off";
-    this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
+      DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE;
+    this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ??
+      DEFAULT_CFC_DECLARED_MONOTONICITY_MODE;
     this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to

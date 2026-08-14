@@ -227,7 +227,7 @@ export function createRuntimeClientOptions({
   apiUrl,
   spaceHostMap,
   experimental,
-  cfcEnforcementMode = "enforce-explicit",
+  cfcEnforcementMode = "enforce-strict",
   // Epic H2 (docs/history/plans/cfc-future-work-implementation.md): shell hosts run the
   // flow-label dial at "persist" — the per-tx conservative join is derived AND
   // written as a `derived` label component on every value write. This

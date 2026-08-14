@@ -45,20 +45,13 @@
  * | experimental               | per-site (required param — pass                  |
  * |                            | `experimentalOptionsFromEnv(...)`, host data, or |
  * |                            | an explicit `{}`; requiredness is the seal)      |
- * | cfcEnforcementMode         | core-pinned `"enforce-explicit"`; overridable in |
- * |                            | patternTest/unitTest (per-test laxer mode) and   |
- * |                            | remoteClient/browserWorker (host-controlled      |
- * |                            | rollout)                                         |
- * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
- * |                            | delta (host-controlled rollout)                  |
- * | cfcWriteFloor              | core-default (off) — flip in coreOptions when a  |
- * |                            | first-party rollout begins                       |
- * | cfcTriggerReadGating       | core-default (off) — same                        |
- * | cfcPolicyEvaluation        | core-default (off) — same                        |
- * | cfcLabelMetadataProtection | core-default (off) — same (inv-12 Stage 1        |
- * |                            | rollout: observe first, then enforce)            |
- * | cfcDeclaredMonotonicity    | core-default (off) — same (WP5 §8.12.1 rollout:  |
- * |                            | observe first, then enforce)                     |
+ * | cfcEnforcementMode         | core-pinned `"enforce-strict"`                  |
+ * | cfcFlowLabels              | core-pinned `"persist"`                         |
+ * | cfcWriteFloor              | core-pinned `"enforce"`                         |
+ * | cfcTriggerReadGating       | core-pinned `true`                               |
+ * | cfcPolicyEvaluation        | core-pinned `"enforce"`                         |
+ * | cfcLabelMetadataProtection | core-pinned `"enforce"`                         |
+ * | cfcDeclaredMonotonicity    | core-pinned `"enforce"`                         |
  * | cfcPolicyRecords           | core-default (none declared) — same              |
  * | cfcPrefixProvenanceStats   | core-default (off) — measurement opt-in, per     |
  * |                            | deployment (value-level provenance Stage 0)      |
@@ -268,13 +261,15 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // Pinned, not defaulted: several sites pinned this individually so that a
     // changed constructor default could not silently relax them; the pin now
     // lives once. Same value as the constructor default today.
-    cfcEnforcementMode: "enforce-explicit",
-    // cfcFlowLabels / cfcWriteFloor / cfcTriggerReadGating /
-    // cfcPolicyEvaluation / cfcLabelMetadataProtection /
-    // cfcDeclaredMonotonicity / cfcPolicyRecords /
-    // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor
-    // defaults (off / none) — deliberately absent here until a first-party
-    // rollout begins.
+    cfcEnforcementMode: "enforce-strict",
+    cfcFlowLabels: "persist",
+    cfcWriteFloor: "enforce",
+    cfcTriggerReadGating: true,
+    cfcPolicyEvaluation: "enforce",
+    cfcLabelMetadataProtection: "enforce",
+    cfcDeclaredMonotonicity: "enforce",
+    // cfcPolicyRecords / cfcTrustConfig / cfcSinkMaxConfidentiality ride the
+    // constructor defaults because they contain deployment-specific policy.
   };
 }
 

@@ -448,7 +448,7 @@ const createCfcCapabilitySnapshot = (
   sandbox: SandboxRuntime,
   options: CollectHarnessCapabilitySnapshotOptions,
 ): HarnessCfcCapabilitySnapshot => {
-  const mode = options.cfcEnforcementMode ?? "enforce-explicit";
+  const mode = options.cfcEnforcementMode ?? "enforce-strict";
   const sandboxDescription = sandbox.describe();
   return {
     enforcementMode: mode,
