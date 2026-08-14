@@ -1994,7 +1994,7 @@ export function wish(
   // cell on its own committed transaction, surfacing any commit failure as an
   // error UI in that cell. Shared by launchProfileCreatePattern and
   // launchProfilePickerPattern so the commit/error lifecycle lives in one place.
-  function runSidecarInOwnTx(
+  async function runSidecarInOwnTx(
     resultCell: Cell<any>,
     pattern: Pattern,
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
@@ -2003,16 +2003,12 @@ export function wish(
       const runTx = runtime.edit();
       runtime.run(runTx, pattern, inputForTx(runTx), resultCell.withTx(runTx));
       runtime.prepareTxForCommit(runTx);
-      return runTx.commit().then(({ error }) => {
-        if (error) {
-          commitPatternErrorUI(resultCell, toCompactDebugString(error));
-        }
-      }).catch((error) => {
-        commitPatternErrorUI(resultCell, errorMessage(error));
-      });
+      const { error } = await runTx.commit();
+      if (error) {
+        commitPatternErrorUI(resultCell, toCompactDebugString(error));
+      }
     } catch (error) {
       commitPatternErrorUI(resultCell, errorMessage(error));
-      return Promise.resolve();
     }
   }
 
