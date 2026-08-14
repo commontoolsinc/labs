@@ -313,6 +313,13 @@ can hold something a container projection rejects, and the whole point of
 deriving the key this way is that a rejected position is omitted rather than
 emptying the object holding it.
 
+A source that spells its shape as `{"$ref": "#/$defs/Thing"}` is followed to
+what it names, at the document root and at any depth below it, so a named
+interface carries the same `required` an inline one does. A reference that does
+not resolve, or one that closes a circle, proves nothing and derives nothing —
+the conservative direction, since the cost of declining is a key that would have
+survived and the cost of guessing is the whole read.
+
 #### Asking for an address instead of contents
 
 A projection marks a position to get that position's address rather than what is

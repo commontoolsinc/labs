@@ -6,9 +6,11 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
 import {
   deriveSelectedValue,
+  outputSchemaWithSourceRequired,
   parseSelectionProjection,
   PROJECTION_ANNOTATION_EXCEPTIONS,
   projectionKeyTier,
+  TOLERATED_PROJECTION_KEYS,
 } from "../lib/cell-selection.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -38,8 +40,20 @@ const CONSULTED = [
   "uniqueItems",
 ];
 
-/** A tolerated keyword, beside a value of the right JSON type for it. */
-const TOLERATED_VALUES: ReadonlyArray<[string, unknown]> = [
+/**
+ * A value each tolerated keyword is probed with — one the key could plausibly
+ * disturb a read by carrying, since a probe the runner would ignore whatever
+ * the tier said proves nothing.
+ *
+ * This is a fixture, not a registry. The keys the inertness loop walks are
+ * derived from {@link TOLERATED_PROJECTION_KEYS}, and a tier T key missing
+ * from here fails rather than being skipped: membership in `ANNOTATION_KEYS`
+ * makes a keyword a *candidate*, and that carrying it changes nothing is a
+ * separate obligation discharged against the runner, per key. A loop over its
+ * own hard-coded list would carry a newly-admitted keyword across the read
+ * boundary and never test it — which is how `$comment` got in.
+ */
+const TOLERATED_PROBE_VALUES = new Map<string, unknown>([
   // `$comment` carries the value the runner reserves as a control marker,
   // which is the only value of it that could disturb a read.
   ["$comment", "emptyProperties"],
@@ -51,7 +65,7 @@ const TOLERATED_VALUES: ReadonlyArray<[string, unknown]> = [
   ["tags", ["a tag"]],
   ["tier", "wrapper"],
   ["title", "A title"],
-];
+]);
 
 /** Every key in keyword position anywhere in `schema`. */
 function keywordsIn(schema: unknown, into = new Set<string>()): Set<string> {
@@ -193,7 +207,7 @@ describe("projection-key-classification", () => {
       for (const key of CONSULTED) {
         expect(projectionKeyTier(key)).toBe("consulted");
       }
-      for (const [key] of TOLERATED_VALUES) {
+      for (const key of TOLERATED_PROJECTION_KEYS) {
         expect(projectionKeyTier(key)).toBe("tolerated");
       }
       for (const key of ["propertes", "pattern", "minLength", "format"]) {
@@ -275,6 +289,28 @@ describe("projection-key-classification", () => {
   });
 
   describe("a tier T key the caller wrote", () => {
+    it("has a probe value for every keyword the tier admits", () => {
+      const undischarged = [...TOLERATED_PROJECTION_KEYS]
+        .filter((key) => !TOLERATED_PROBE_VALUES.has(key))
+        .map((key) =>
+          `${key}: tier T admits this keyword, and nothing has shown that ` +
+          "carrying it changes no read. Add a value it could plausibly " +
+          "disturb to TOLERATED_PROBE_VALUES and watch the read below come " +
+          "back unchanged. Membership in ANNOTATION_KEYS makes a keyword a " +
+          "candidate; inertness is a separate obligation, discharged per key " +
+          "against the runner, and `$comment` is in the tree because nobody " +
+          "discharged it."
+        );
+      expect(undischarged).toEqual([]);
+
+      // The other direction: a probe value for a keyword the tier no longer
+      // admits is a fixture nothing walks, and it would quietly stop covering
+      // the key it was written for.
+      const stranded = [...TOLERATED_PROBE_VALUES.keys()]
+        .filter((key) => !TOLERATED_PROJECTION_KEYS.has(key));
+      expect(stranded).toEqual([]);
+    });
+
     it("returns what the same projection returns without it", async () => {
       const source = await seed("classification-tier-t-source", {
         type: "object",
@@ -287,11 +323,13 @@ describe("projection-key-classification", () => {
       });
       expect(baseline).toEqual({ title: "Visible" });
 
-      for (const [key, value] of TOLERATED_VALUES) {
+      // Derived from the tier, so a keyword admitted to `ANNOTATION_KEYS`
+      // tomorrow is read through here without anyone remembering to add it.
+      for (const key of TOLERATED_PROJECTION_KEYS) {
         expect(
           await read(source, {
             type: "object",
-            properties: { title: { [key]: value } },
+            properties: { title: { [key]: TOLERATED_PROBE_VALUES.get(key) } },
           }),
         ).toEqual(baseline);
       }
@@ -459,6 +497,61 @@ describe("projection-key-classification", () => {
       expect((schema as Record<string, unknown>).required).toEqual(["topic"]);
     });
 
+    it("carries a source-required array into the output schema where a `$ref` names it", async () => {
+      const source = await seed("classification-ref-source", {
+        type: "object",
+        properties: {
+          values: { $ref: "#/$defs/Values" },
+          title: { type: "string" },
+        },
+        required: ["values"],
+        $defs: { Values: { type: "array", items: { type: "number" } } },
+      }, { values: [1], title: "Visible" });
+
+      const schema = await outputSchemaOf(source, {
+        type: "object",
+        properties: { values: { type: "array", items: true }, title: true },
+      });
+
+      expect((schema as Record<string, unknown>).required).toEqual(["values"]);
+    });
+
+    it("carries a source-required array into the output schema where a `$ref` below the root names it", async () => {
+      const source = await seed("classification-ref-depth-source", {
+        type: "object",
+        properties: {
+          topic: {
+            type: "object",
+            properties: {
+              values: { $ref: "#/$defs/Values" },
+              name: { type: "string" },
+            },
+            required: ["values"],
+          },
+          title: { type: "string" },
+        },
+        $defs: { Values: { type: "array", items: { type: "number" } } },
+      }, { topic: { values: [1], name: "a" }, title: "Visible" });
+
+      const schema = await outputSchemaOf(source, {
+        type: "object",
+        properties: {
+          topic: {
+            type: "object",
+            properties: { values: { type: "array", items: true }, name: true },
+          },
+          title: true,
+        },
+      });
+
+      // The reference names the ROOT document's `$defs` from two levels down,
+      // so the walk has to carry the document rather than the subtree it is
+      // standing in.
+      const topic = (schema as { properties: Record<string, unknown> })
+        .properties.topic as Record<string, unknown>;
+      expect(topic.required).toEqual(["values"]);
+    });
+
     it("derives no `required` for a position whose container the source spells under `allOf`", async () => {
       const source = await seed("classification-allof-source", {
         type: "object",
@@ -541,6 +634,132 @@ describe("projection-key-classification", () => {
           },
         }),
       ).toEqual({ rows: [{ name: "a" }], title: "Visible" });
+    });
+  });
+
+  describe("a `$ref` the derivation cannot follow", () => {
+    /**
+     * These reach {@link outputSchemaWithSourceRequired} directly rather than
+     * through a read. The runner resolves a source schema's references eagerly
+     * — `resolveCfcSchemaRefsOrThrow` — so a source carrying an unresolvable
+     * reference or a circle with no base case fails the read outright, before
+     * any derivation is consulted. That is behavior this change neither
+     * introduces nor alters, and asserting through a read would pin it instead
+     * of the question here: what the derivation does when a reference gives it
+     * nothing.
+     */
+    async function derivedRequired(
+      source: JSONSchema,
+      projection: unknown,
+    ): Promise<unknown> {
+      const parsed = await parseSelectionProjection(JSON.stringify(projection));
+      const derived = outputSchemaWithSourceRequired(
+        parsed.schema,
+        source,
+        source,
+      );
+      return (derived as Record<string, unknown>).required;
+    }
+
+    const arrayProjection = {
+      type: "object",
+      properties: { values: { type: "array", items: true }, title: true },
+    };
+
+    it("derives `required` for every projected property where the source's own root is a `$ref`", async () => {
+      // A root spelled as a reference fails differently from a referenced
+      // child: nothing below it resolves at all, so every projected property
+      // loses its guarantee at once. The value still reads in simple cases,
+      // which is what makes this invisible at the call site — the output
+      // schema is weakened, and a consumer downstream of it sees required
+      // data as optional.
+      expect(
+        await derivedRequired({
+          $ref: "#/$defs/Board",
+          $defs: {
+            Board: {
+              type: "object",
+              properties: {
+                values: { type: "array", items: { type: "number" } },
+                title: { type: "string" },
+              },
+              required: ["values", "title"],
+            },
+          },
+        }, arrayProjection),
+      ).toEqual(["values", "title"]);
+    });
+
+    it("derives no `required` for a position whose `$ref` names nothing in the document", async () => {
+      // A reference that does not resolve proves nothing, and proving nothing
+      // declines to require. Resolving optimistically would require a position
+      // whose shape the reader never established.
+      expect(
+        await derivedRequired({
+          type: "object",
+          properties: {
+            values: { $ref: "#/$defs/Missing" },
+            title: { type: "string" },
+          },
+          required: ["values"],
+          $defs: { Values: { type: "array", items: { type: "number" } } },
+        }, arrayProjection),
+      ).toBeUndefined();
+    });
+
+    it("derives no `required` for a position whose `$ref` chain closes a circle", async () => {
+      // Returning at all is half of what this pins; the other half is that a
+      // circle proves no container.
+      expect(
+        await derivedRequired({
+          type: "object",
+          properties: {
+            values: { $ref: "#/$defs/Left" },
+            title: { type: "string" },
+          },
+          required: ["values"],
+          $defs: {
+            Left: { $ref: "#/$defs/Right" },
+            Right: { $ref: "#/$defs/Left" },
+          },
+        }, arrayProjection),
+      ).toBeUndefined();
+    });
+
+    it("derives no `required` for a position whose union refers back to itself", async () => {
+      expect(
+        await derivedRequired({
+          type: "object",
+          properties: {
+            values: { $ref: "#/$defs/Loop" },
+            title: { type: "string" },
+          },
+          required: ["values"],
+          $defs: {
+            Loop: { anyOf: [{ $ref: "#/$defs/Loop" }, { type: "string" }] },
+          },
+        }, arrayProjection),
+      ).toBeUndefined();
+    });
+
+    it("derives `required` for a `$ref` chain that resolves through two hops", async () => {
+      // The negative beside the three above: a chain the resolver can follow
+      // still proves what it names, so "never follow a reference" does not
+      // pass this block.
+      expect(
+        await derivedRequired({
+          type: "object",
+          properties: {
+            values: { $ref: "#/$defs/Alias" },
+            title: { type: "string" },
+          },
+          required: ["values"],
+          $defs: {
+            Alias: { $ref: "#/$defs/Values" },
+            Values: { type: "array", items: { type: "number" } },
+          },
+        }, arrayProjection),
+      ).toEqual(["values"]);
     });
   });
 

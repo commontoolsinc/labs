@@ -664,8 +664,14 @@ export const PROJECTION_ANNOTATION_EXCEPTIONS: ReadonlySet<string> = new Set([
  * restated, so that admitting a keyword to the durable dialect's annotations
  * admits it here too — unless it is one of the three
  * {@link PROJECTION_ANNOTATION_EXCEPTIONS} names.
+ *
+ * @internal Exported so the inertness test derives the keys it probes from
+ * this set rather than from a list someone typed. Membership here makes a key
+ * a candidate; that it changes nothing on a read is a separate obligation, and
+ * a test iterating its own copy would never notice a key that arrived without
+ * discharging it.
  */
-const TOLERATED_PROJECTION_KEYS: ReadonlySet<string> = new Set(
+export const TOLERATED_PROJECTION_KEYS: ReadonlySet<string> = new Set(
   [...ANNOTATION_KEYS].filter((key) =>
     !PROJECTION_ANNOTATION_EXCEPTIONS.has(key)
   ),
@@ -2006,6 +2012,74 @@ export function selectSourceSchema(
 }
 
 /**
+ * `source` with its `$ref` chain followed, paired with the local-ref scope the
+ * result sits in — or `undefined` where the chain does not resolve or closes
+ * on itself.
+ *
+ * A named interface is ordinarily spelled as a reference, so a reader that
+ * declined to follow one would prove a container only for sources written
+ * inline. The scope travels beside the schema because a subtree carrying its
+ * own `$defs` opens a new `#/...` scope while everything else keeps resolving
+ * against the document root — which is exactly what a walk that re-roots on
+ * each descent would otherwise lose.
+ *
+ * Resolution is the canonical resolver's, one hop per iteration, never a
+ * private pointer parser. A reference repeated in its own scope closes a
+ * circle and resolves to nothing, which fails closed: `undefined` here proves
+ * no container and so requires nothing.
+ */
+function resolvedSourceNode(
+  source: JSONSchema | undefined,
+  root: JSONSchema,
+): { schema: Exclude<JSONSchema, boolean>; root: JSONSchema } | undefined {
+  const followed: Array<{ root: JSONSchema; ref: string }> = [];
+  let node = source;
+  let scope = root;
+  while (isObjectOrArray(node)) {
+    scope = cfcSchemaChildRoot(node, scope);
+    const ref = node.$ref;
+    if (typeof ref !== "string") return { schema: node, root: scope };
+    if (followed.some((step) => step.ref === ref && step.root === scope)) {
+      return undefined;
+    }
+    const target = resolveCfcSchemaRef(scope, ref);
+    if (target === undefined) return undefined;
+    followed.push({ root: scope, ref });
+    if (isEmbeddedCfcSchemaRef(ref)) scope = target;
+    node = target;
+  }
+  return undefined;
+}
+
+/**
+ * The child schema a resolved source node declares at `key`, **as written**.
+ *
+ * Deliberately not `ContextualFlowControl.schemaAtPath`, which resolves
+ * references eagerly and with no guard against one that closes a circle — a
+ * self-referential definition overflows the stack inside it, before any
+ * caller's own guard can run. {@link resolvedSourceNode} follows the reference
+ * instead, one hop at a time, so what this hands back is the child exactly as
+ * the document spells it.
+ */
+function sourcePropertySchema(
+  node: Exclude<JSONSchema, boolean> | undefined,
+  key: string,
+): JSONSchema | undefined {
+  const properties = node?.properties;
+  if (!isObjectNotArray(properties)) return undefined;
+  const child = properties[key] as JSONSchema | undefined;
+  return child === false ? undefined : child;
+}
+
+/** The element schema a resolved source node declares, as written. */
+function sourceItemSchema(
+  node: Exclude<JSONSchema, boolean> | undefined,
+): JSONSchema | undefined {
+  const items = node?.items as JSONSchema | undefined;
+  return items === false ? undefined : items;
+}
+
+/**
  * Whether `source` **proves** the position holds the container `named`.
  *
  * "Can this be a container" is the wrong question here and "must it be" is the
@@ -2025,32 +2099,43 @@ export function selectSourceSchema(
  * conjunction constrains one value from several members at once, which is not
  * a shape this derivation can state (#5761), and declining to require costs a
  * key that would have survived while requiring wrongly costs the whole read.
+ *
+ * A `$ref` is followed first, so a named interface proves what it names. The
+ * `visiting` set holds the resolved node as well as the one written at the
+ * position, which is what stops a branch that refers back to the union
+ * containing it from recurring.
  */
 function sourceProvesContainer(
   named: "object" | "array",
   source: JSONSchema | undefined,
+  root: JSONSchema,
   visiting = new Set<object>(),
 ): boolean {
-  if (!isObjectOrArray(source)) return false;
-  if (visiting.has(source)) return false;
-  const declared = schemaTypes(source);
+  if (!isObjectOrArray(source) || visiting.has(source)) return false;
+  const resolved = resolvedSourceNode(source, root);
+  if (resolved === undefined) return false;
+  const { schema: node, root: scope } = resolved;
+  if (visiting.has(node)) return false;
+  const declared = schemaTypes(node);
   if (declared.length > 0) {
     return declared.every((type) => type === named);
   }
-  if (source.allOf !== undefined) return false;
+  if (node.allOf !== undefined) return false;
   visiting.add(source);
+  visiting.add(node);
   try {
-    for (const branches of [source.anyOf, source.oneOf]) {
+    for (const branches of [node.anyOf, node.oneOf]) {
       if (
         Array.isArray(branches) && branches.length > 0 &&
         branches.every((branch) =>
-          sourceProvesContainer(named, branch, visiting)
+          sourceProvesContainer(named, branch, scope, visiting)
         )
       ) {
         return true;
       }
     }
   } finally {
+    visiting.delete(node);
     visiting.delete(source);
   }
   return false;
@@ -2104,6 +2189,7 @@ function sourceProvesContainer(
 function requiredSurvivesProjection(
   projection: JSONSchema | undefined,
   source: JSONSchema | undefined,
+  sourceRoot: JSONSchema,
 ): boolean {
   if (projection === false) return false;
   if (projection === undefined || projection === true) return true;
@@ -2112,14 +2198,21 @@ function requiredSurvivesProjection(
   // {@link projectionMask}, so a position naming both vocabularies is read as
   // the array the selector built from it reads.
   if (types.includes("array") || projection.items !== undefined) {
-    return sourceProvesContainer("array", source) &&
-      requiredSurvivesProjection(projection.items, schemaAtArrayItem(source));
+    if (!sourceProvesContainer("array", source, sourceRoot)) return false;
+    // The element sits inside whatever the reference resolved to, so it is
+    // read off the resolved node and carries that node's scope.
+    const resolved = resolvedSourceNode(source, sourceRoot);
+    return requiredSurvivesProjection(
+      projection.items,
+      sourceItemSchema(resolved?.schema),
+      resolved?.root ?? sourceRoot,
+    );
   }
   if (
     types.includes("object") || projection.properties !== undefined ||
     projection.additionalProperties !== undefined
   ) {
-    return sourceProvesContainer("object", source);
+    return sourceProvesContainer("object", source, sourceRoot);
   }
   return types.length === 0;
 }
@@ -2141,12 +2234,27 @@ function requiredSurvivesProjection(
  * A key is derived only for a property the constructed schema names. An open
  * position keeps whatever the source holds there without the reader vouching
  * for it, which declines to require rather than risking an unsatisfiable one.
+ *
+ * `sourceRoot` is the document `source` sits in, threaded down because this
+ * walk re-roots on every descent: a child three levels in still spells its
+ * shape as `#/$defs/Thing` against the root, and the subtree it was read out
+ * of cannot resolve that. It travels beside `source` rather than being
+ * recovered from it, since only the caller of the outermost call knows which
+ * document a position came from.
+ *
+ * @internal Exported for focused reference-resolution tests, which reach the
+ * cases a read cannot: the runner resolves a source schema's references
+ * eagerly, so an unresolvable one fails the read before this is consulted.
  */
-function outputSchemaWithSourceRequired(
+export function outputSchemaWithSourceRequired(
   projection: JSONSchema,
   source: JSONSchema | undefined,
+  sourceRoot: JSONSchema = source ?? true,
 ): JSONSchema {
   if (typeof projection === "boolean") return projection;
+  const resolved = resolvedSourceNode(source, sourceRoot);
+  const node = resolved?.schema;
+  const scope = resolved?.root ?? sourceRoot;
   const types = schemaTypes(projection);
   if (types.includes("array") || projection.items !== undefined) {
     if (projection.items === undefined) return projection;
@@ -2154,30 +2262,28 @@ function outputSchemaWithSourceRequired(
       ...projection,
       items: outputSchemaWithSourceRequired(
         projection.items,
-        schemaAtArrayItem(source),
+        sourceItemSchema(node),
+        scope,
       ),
     };
   }
   const declared = projection.properties;
   if (!isObjectNotArray(declared)) return projection;
-  const sourceRequired =
-    isObjectOrArray(source) && Array.isArray(source.required)
-      ? source.required
-      : [];
+  const sourceRequired = node !== undefined && Array.isArray(node.required)
+    ? node.required
+    : [];
   const properties: Record<string, JSONSchema> = {};
   const required: string[] = [];
   for (const [key, child] of Object.entries(declared)) {
-    const sourceChild = isObjectOrArray(source)
-      ? ContextualFlowControl.schemaAtPath(source, [key])
-      : undefined;
-    const childSource = sourceChild === false ? undefined : sourceChild;
+    const childSource = sourcePropertySchema(node, key);
     properties[key] = outputSchemaWithSourceRequired(
       child as JSONSchema,
       childSource,
+      scope,
     );
     if (
       sourceRequired.includes(key) &&
-      requiredSurvivesProjection(child as JSONSchema, childSource)
+      requiredSurvivesProjection(child as JSONSchema, childSource, scope)
     ) {
       required.push(key);
     }
@@ -2279,9 +2385,13 @@ function resolveProjection(
   // reads only `properties`, `items` and `additionalProperties` off it, so the
   // constructed projection is what it wants. The OUTPUT schema is the one the
   // runner acts on, and it carries the source's `required` besides.
+  // The source cell's own schema is the document every `#/...` in it resolves
+  // against, so it is both the position the walk starts at and the root it
+  // threads down.
   const outputSchema = outputSchemaWithSourceRequired(
     projection.schema,
     sourceSchema,
+    sourceSchema ?? true,
   );
   return {
     outputSchema,
