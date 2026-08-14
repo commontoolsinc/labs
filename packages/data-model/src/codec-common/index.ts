@@ -1,7 +1,7 @@
 /**
  * This directory holds the codec system's active machinery: the registry that
  * indexes codecs, the lookup that finds a class's codec, the abstract bases
- * described below, and the `ExplicitTagValue` family. It is also the package's
+ * described below, and the two classes a fault produces. It is also the package's
  * public face for the codec system as a whole, re-exporting the declarations
  * in `codec-interface/` so that an outside caller has one entry point rather
  * than two.
@@ -23,9 +23,9 @@
  * `BaseCodecEngine` is what an ENGINE extends, one per wire format -- the
  * thing that walks such values and drives their codecs.
  *
- * Besides those, the classes here are the `ExplicitTagValue` family, whose
- * members exist only because a decode went wrong or found a tag that no codec
- * claimed. A class a caller models data with belongs in `fabric-instances/`
+ * Besides those, the classes here are `UnknownValue` and `ProblematicValue`,
+ * which exist only because a decode found a tag no codec claimed or went
+ * wrong outright. A class a caller models data with belongs in `fabric-instances/`
  * or `fabric-primitives/` instead.
  */
 
@@ -38,8 +38,8 @@ export { BaseCodecEngine } from "./BaseCodecEngine.ts";
 
 export { BaseFabricInstance } from "./BaseFabricInstance.ts";
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-export { ExplicitTagValue } from "./ExplicitTagValue.ts";
 export { ProblematicStateError } from "./ProblematicStateError.ts";
 export { ProblematicValue } from "./ProblematicValue.ts";
 export { toReportableState } from "./toReportableState.ts";
+export { toReportableTag } from "./toReportableTag.ts";
 export { UnknownValue } from "./UnknownValue.ts";

@@ -26,7 +26,7 @@ type InstanceCodecClass = Constructor & FabricClassWithNonterminalCodec;
  * each via its static `[CODEC]`. This is the curated source of truth for which
  * instance types participate in serialization.
  *
- * `UnknownValue` / `ProblematicValue` (the `ExplicitTagValue` subclasses) are
+ * `UnknownValue` and `ProblematicValue` are
  * included too. Their codecs have no preferred wire tag -- the encode path uses
  * `tagForValue()` to read each instance's preserved per-instance tag -- and
  * they are not tag-routed on decode (an unrecognized tag is wrapped in an

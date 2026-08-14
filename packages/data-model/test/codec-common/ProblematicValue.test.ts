@@ -14,21 +14,21 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
 } from "@/codec-common/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { ExplicitTagValue } from "@/codec-common/ExplicitTagValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("ProblematicValue", () => {
   // Subclass-checking-superclass identity: lives directly under the class
   // describe (the rule's cross-cutting carve-out).
-  it("is an instance of `ExplicitTagValue`", () => {
-    const ps = new ProblematicValue("Test@1", "state", "oops");
-    expect(ps instanceof ExplicitTagValue).toBe(true);
+  it("is an instance of `BaseFabricInstance`", () => {
+    const value = new ProblematicValue("Test@1", "state", "oops");
+    expect(value instanceof BaseFabricInstance).toBe(true);
   });
 
   describe("constructor()", () => {
@@ -127,19 +127,72 @@ describe("ProblematicValue", () => {
     });
   });
 
+  describe("equals()", () => {
+    it("returns `true` for an instance reporting the same fault", () => {
+      const state = { x: 1 };
+
+      expect(new ProblematicValue("T@1", state, "boom").equals(
+        new ProblematicValue("T@1", state, "boom"),
+      )).toBe(true);
+    });
+
+    it("returns `false` when any of the three facts differs", () => {
+      const state = { x: 1 };
+      const pv = new ProblematicValue("T@1", state, "boom");
+
+      expect(pv.equals(new ProblematicValue("Other@1", state, "boom")))
+        .toBe(false);
+      expect(pv.equals(new ProblematicValue("T@1", { x: 1 }, "boom")))
+        .toBe(false);
+      expect(pv.equals(new ProblematicValue("T@1", state, "different")))
+        .toBe(false);
+    });
+
+    it("returns `false` for anything that is not a `ProblematicValue`", () => {
+      const pv = new ProblematicValue("T@1", "s", "boom");
+
+      expect(pv.equals(undefined)).toBe(false);
+      expect(pv.equals(null)).toBe(false);
+      expect(pv.equals("T@1")).toBe(false);
+      expect(pv.equals({ wireTypeTag: "T@1", state: "s", error: "boom" }))
+        .toBe(false);
+    });
+
+    it("compares a non-string tag by the rendering it kept", () => {
+      // The tag is normalized on the way in, so two instances built from the
+      // same unusable tag agree.
+      expect(new ProblematicValue(42, "s", "boom").equals(
+        new ProblematicValue(42, "s", "boom"),
+      )).toBe(true);
+    });
+  });
+
   describe("static members", () => {
     describe("[CODEC]", () => {
       describe("tagForValue()", () => {
-        it("returns the value's own (per-instance) wire type tag", () => {
-          const pv = new ProblematicValue("Weird@7", "s", "oops");
-          expect(ProblematicValue[CODEC].tagForValue(pv)).toBe("Weird@7");
+        it("returns `Problematic@1` whatever tag the value preserved", () => {
+          // A preserved tag need not be a tag, so it cannot be the tag this
+          // encodes under; `UnknownValue` is the class that round-trips to
+          // what it preserved.
+          const preserved = new ProblematicValue("Weird@7", "s", "oops");
+          const malformed = new ProblematicValue("hole", "s", "oops");
+
+          expect(ProblematicValue[CODEC].tagForValue(preserved))
+            .toBe("Problematic@1");
+          expect(ProblematicValue[CODEC].tagForValue(malformed))
+            .toBe("Problematic@1");
         });
       });
 
       describe("encode()", () => {
-        it("returns the bare `state` (the tag is carried separately)", () => {
+        it("returns the tag, state, and error together", () => {
           const pv = new ProblematicValue("Weird@7", { x: 1 }, "oops");
-          expect(ProblematicValue[CODEC].encode(pv)).toEqual({ x: 1 });
+
+          expect(ProblematicValue[CODEC].encode(pv)).toEqual({
+            tag: "Weird@7",
+            state: { x: 1 },
+            error: "oops",
+          });
         });
       });
     });

@@ -105,9 +105,8 @@ export abstract class FabricInstance extends FabricSpecialObject {
  * class instances for type safety and dispatch. Covers temporal types,
  * content IDs, byte sequences, and similar.
  *
- * Analogous to `ExplicitTagValue`, this class enables a single
- * `instanceof` check where code needs to handle any special primitive
- * uniformly.
+ * This class enables a single `instanceof` check where code needs to handle
+ * any special primitive uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable).
  * Each leaf subclass must call `Object.freeze(this)` at the end of its
