@@ -31,6 +31,10 @@ import type { JsonCodecValue } from "@/codec-json/interface.ts";
 const _refusesNumber = new SymbolCodec<number>((key) => key);
 // @ts-expect-error -- nor a `(key: string) => never`.
 const _refusesNever = new SymbolCodec<never>((key) => key);
+// A format cannot wrap the key in something its own union admits either, since
+// `decode()` accepts only a string and would refuse what that emitted.
+// @ts-expect-error -- an object is not `JsonCodecValue & string`.
+const _refusesAWrapper = new SymbolCodec<JsonCodecValue>((key) => ({ key }));
 
 describe("SymbolCodec", () => {
   const codec = new SymbolCodec<JsonCodecValue>((key) => key);

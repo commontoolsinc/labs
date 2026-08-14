@@ -44,7 +44,7 @@ import { ProblematicValue } from "./ProblematicValue.ts";
  */
 export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
   /** The value of {@link #keyAsEncoded}, supplied by the registering format. */
-  readonly #keyAsEncoded: (key: string) => Encoded;
+  readonly #keyAsEncoded: (key: string) => Encoded & string;
 
   /**
    * Constructs an instance.
@@ -52,8 +52,13 @@ export class SymbolCodec<Encoded> extends BaseTerminalCodec<Encoded> {
    * @param keyAsEncoded - How this format holds a registry key. A format that
    *   has a `string` arm writes `(key) => key`; one that has none cannot write
    *   this at all, which is the point.
+   *
+   *   The result is `Encoded & string` rather than `Encoded`, so that what is
+   *   handed back is still a string. `decode()` accepts only a string, and a
+   *   format free to wrap the key in something its union also admits could
+   *   emit state its own decoder refuses.
    */
-  constructor(keyAsEncoded: (key: string) => Encoded) {
+  constructor(keyAsEncoded: (key: string) => Encoded & string) {
     super(CODEC_TYPE_TAGS.Symbol, Symbol as unknown as Constructor);
 
     this.#keyAsEncoded = keyAsEncoded;
