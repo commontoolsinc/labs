@@ -63,8 +63,9 @@ can run their own spaces or use hosted versions.
 
 Installing
 [Deno 2 directly](https://docs.deno.com/runtime/getting_started/installation/)
-also works. `deno task check` accepts the supported range in `tasks/check.sh`
-and warns when the installed version differs from the pin in `mise.toml`.
+also works. `deno task check` refuses a version that differs from the pin in
+`mise.toml`; set `DENO_CHECK_VERSION_LENIENT=1` to accept one inside the
+supported range in `tasks/check.sh`.
 
 For Claude Code users, run [`/deps`](.claude/commands/deps.md) to verify
 prerequisites, [`/start-local-dev`](.claude/commands/start-local-dev.md) to
