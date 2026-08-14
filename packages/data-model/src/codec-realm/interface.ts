@@ -27,7 +27,6 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
  *   this: a `FabricBytes` encodes to one directly, and a `FabricHash` to one
  *   beside its algorithm tag. A bare `Uint8Array` is therefore not a form this
  *   format emits, and `decodeValue()` refuses one.
- * * `RegExp` appears for the same reason, source and flags intact.
  * * `Map` is the tagged form (see {@link RealmTaggedValue}). An encoded value
  *   carries no envelope of its own: both ends of this format are the same
  *   engine from the same build, so there is nothing for a format tag to
@@ -45,7 +44,6 @@ export type RealmCodecValue =
   | bigint
   | string
   | ArrayBuffer
-  | RegExp
   | readonly RealmCodecValue[]
   | RealmTaggedValue
   | { readonly [key: string]: RealmCodecValue };

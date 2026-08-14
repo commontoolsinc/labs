@@ -55,11 +55,19 @@ import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
  * needs encoding rather than to the size of the value. `JsonCodecEngine` never
  * faces the choice, having to reach text.
  *
- * **Cycles are refused**, and **a shared reference survives exactly where
- * nothing beneath it needed encoding**, per Section 1.6 of the formal spec,
- * which requires an engine to say which of these it does. Neither answer comes
- * from the transport, which would carry either faithfully; both come from the
- * walk.
+ * **Cycles are refused by both walks**, and **a shared reference survives
+ * exactly where nothing beneath it needed encoding**, per Section 1.6 of the
+ * formal spec, which requires an engine to say which of these it does. Neither
+ * answer comes from the transport, which would carry either faithfully; both
+ * come from the walk.
+ *
+ * The two walks refuse a cycle differently, and for the reason they differ
+ * everywhere else. Encoding raises: the value is a local caller's, and a cycle
+ * in it is that caller's bug. Decoding reports, settled against `lenient`,
+ * because a cycle arriving on a channel is untrusted data like any other
+ * malformation -- and cloning delivers one faithfully, so a peer can send one.
+ * Leniently the report lands at the cycle, leaving the rest of the value
+ * intact.
  *
  * Copy-on-write is what preserves the sharing it preserves. A subtree needing
  * no encoding comes back by identity, so every position that held the one
@@ -76,6 +84,18 @@ import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
  * readily as through a container.
  */
 export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
+  /**
+   * Containers whose decoding is in progress, or `undefined` outside a decode.
+   *
+   * A field rather than a threaded argument because `decodeValue()` takes only
+   * the data and the context, so a decode walk has nowhere to carry state --
+   * the encode walk gets its `seen` from `encodeValue()`. A walk is
+   * synchronous and does not re-enter, so one field per instance is enough,
+   * and {@link #decode} clears it however the walk ends. The `TODO(danfuzz)`
+   * below is where this belongs once the base carries walk state.
+   */
+  #decodeSeen: Set<object> | undefined;
+
   //
   // Instance members
   //
@@ -118,7 +138,13 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     data: RealmCodecValue,
     context: ReconstructionContext,
   ): FabricValue {
-    return this.decodeValue(data, context);
+    this.#decodeSeen = new Set();
+
+    try {
+      return this.decodeValue(data, context);
+    } finally {
+      this.#decodeSeen = undefined;
+    }
   }
 
   /** @inheritDoc */
@@ -268,6 +294,11 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     data: readonly RealmCodecValue[],
     context: ReconstructionContext,
   ): FabricValue {
+    const cycle = this.#enterOrReport(data);
+    if (cycle !== null) {
+      return cycle;
+    }
+
     const length = data.length;
     let result: FabricValue[] | undefined;
 
@@ -292,6 +323,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       }
     }
 
+    this.#decodeSeen?.delete(data);
     return Object.freeze(result ?? (data as FabricValue));
   }
 
@@ -307,6 +339,11 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     data: Record<string, RealmCodecValue>,
     context: ReconstructionContext,
   ): FabricValue {
+    const cycle = this.#enterOrReport(data);
+    if (cycle !== null) {
+      return cycle;
+    }
+
     const keys = Object.keys(data);
     let result: Record<string, FabricValue> | undefined;
 
@@ -314,6 +351,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       const key = keys[i]!;
 
       if (isUnsafeObjectKey(key)) {
+        this.#decodeSeen?.delete(data);
         return this.reportReservedKey(key, data);
       }
 
@@ -331,7 +369,34 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       }
     }
 
+    this.#decodeSeen?.delete(data);
     return Object.freeze(result ?? (data as FabricValue));
+  }
+
+  /**
+   * Enters a container into the in-progress set, reporting rather than
+   * entering if it is already there.
+   *
+   * Reported rather than raised, unlike the encode side's refusal: a cycle
+   * here arrived from a channel, and every malformation off a channel settles
+   * against `lenient`. Raising would also be the one refusal `lenient` could
+   * not contain.
+   *
+   * @returns The report, or `null` if the container was entered.
+   */
+  #enterOrReport(value: object): FabricValue | null {
+    if (this.#decodeSeen === undefined) {
+      return null;
+    } else if (this.#decodeSeen.has(value)) {
+      return this.reportMalformed(
+        "",
+        toCompactDebugString(value, 50),
+        "circular reference in decoded data",
+      );
+    }
+
+    this.#decodeSeen.add(value);
+    return null;
   }
 
   //

@@ -339,6 +339,35 @@ describe("RealmCodecEngine", () => {
       expect((decoded as UnknownValue).wireTypeTag).toBe("nope@1");
     });
 
+    it("refuses a circular reference", () => {
+      // Cloning reproduces a cyclic graph faithfully, so unlike JSON -- whose
+      // `JSON.parse()` cannot produce one -- this format can actually be sent
+      // a cycle by a peer. Without a guard the walk recurses until the stack
+      // gives out, which is the one refusal `lenient` could not contain.
+      const object: Record<string, RealmCodecValue> = { a: 1 };
+      object.self = object;
+      const array: RealmCodecValue[] = [1];
+      array.push(array);
+
+      expect(() => fabricFromRealmValue(object)).toThrow(/circular reference/);
+      expect(() => fabricFromRealmValue(array)).toThrow(/circular reference/);
+    });
+
+    it("reports a circular reference at the cycle when lenient", () => {
+      const engine = newDefaultRealmCodecEngine({ lenient: true });
+      const object: Record<string, RealmCodecValue> = { a: 1 };
+      object.self = object;
+      const decoded = engine.decode(
+        object,
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      ) as Record<string, FabricValue>;
+
+      // The report replaces the back-edge rather than the whole value, so
+      // everything else survives.
+      expect(decoded.a).toBe(1);
+      expect(decoded.self).toBeInstanceOf(ProblematicValue);
+    });
+
     it("refuses a key this runtime reserves", () => {
       // The rebuild below assigns, and on a host with the standard
       // `__proto__` accessor that would drop the key and repoint the result's
