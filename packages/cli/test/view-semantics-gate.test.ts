@@ -6,7 +6,7 @@
  * and no-program paths directly through the test-only `_internal` handle. The
  * redundant `prewarm` and `realDir` try/catch wrappers and the always-true
  * `splitSections` guard were removed at the source. The remaining tests drive
- * the surrounding, reachable behaviour: the observable degrade-to-null and
+ * the surrounding, reachable behavior: the observable degrade-to-null and
  * degrade-to-empty results the failure isolation protects.
  */
 import { assert, assertEquals } from "@std/assert";
@@ -243,7 +243,7 @@ Deno.test("lazyProgram: caches a success and latches a failed build", () => {
   assertEquals(nullCalls, 1, "a program-less build latches and is not retried");
 });
 
-// makeHost's readReal memoises real-file reads. Under the pager's module
+// makeHost's readReal memoizes real-file reads. Under the pager's module
 // resolution TypeScript reads each file once, so the cache hit never fires
 // there; reading the same path twice through the host exercises it directly.
 Deno.test("makeHost: a repeated read of the same file is served from the cache", () => {

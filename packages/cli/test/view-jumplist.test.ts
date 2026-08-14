@@ -88,7 +88,7 @@ const SHOW = [
   "",
 ].join("\n");
 
-Deno.test("jumplist: i lists the diff's files, dirs summarised", () => {
+Deno.test("jumplist: i lists the diff's files, dirs summarized", () => {
   const s = diffSession(TWO_FILES);
   press(s, "i");
   assertEquals(entryText(s), [

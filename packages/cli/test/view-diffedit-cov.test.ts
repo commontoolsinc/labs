@@ -838,10 +838,10 @@ describe("deferred diff parsing", () => {
   });
 });
 
-Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the +++ header scan", () => {
+Deno.test("diffedit cov: the highlighter recolors a Markdown body line via the +++ header scan", () => {
   // Seed-less so the highlighter renders every line itself, then edit a body
   // line whose nearest preceding header is `+++ b/doc.md` — exercising the
-  // Markdown-aware path in the recolour.
+  // Markdown-aware path in the recolor.
   const diff = `diff --git a/doc.md b/doc.md
 --- a/doc.md
 +++ b/doc.md
@@ -856,7 +856,7 @@ Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the 
   raw[bodyIdx] = "+new body text changed";
   const out = hl.update(raw.join("\n"));
   assertEquals(out[bodyIdx].text, "+new body text changed");
-  // The marker keeps its added-line colour.
+  // The marker keeps its added-line color.
   assertEquals(out[bodyIdx].spans[0].cls, "diffAdd");
 });
 
@@ -941,7 +941,7 @@ Deno.test("diffedit cov: the highlighter scans past a missing +++ to the diff --
   assertEquals(out[idx].spans[0].cls, "diffAdd");
 });
 
-Deno.test("diffedit cov: the highlighter returns plain (non-Markdown) colouring when no header precedes a line", () => {
+Deno.test("diffedit cov: the highlighter returns plain (non-Markdown) coloring when no header precedes a line", () => {
   // A body-only fragment with no preceding header: the backward scan finds
   // nothing and reports not-Markdown.
   const text = [" context", "-old", "+changed"].join("\n");

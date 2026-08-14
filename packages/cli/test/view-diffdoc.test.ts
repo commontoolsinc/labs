@@ -44,7 +44,7 @@ Deno.test("buildDiffDocument: a deleted Markdown file (new path /dev/null) highl
       JSON.stringify(doc.lines[headIdx].spans)
     }`,
   );
-  // The marker keeps its removal colour.
+  // The marker keeps its removal color.
   assertEquals(doc.lines[headIdx].spans[0].cls, "diffDel", "marker is diffDel");
 
   // No TypeScript identifier classification leaked onto the removed prose.

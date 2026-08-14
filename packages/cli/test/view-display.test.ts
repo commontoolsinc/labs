@@ -52,7 +52,7 @@ Deno.test("DISPLAY_MODES: pictures is first, and every mode has a label", () => 
   assertEquals(DISPLAY_MODES[0], "pictures");
   assertEquals(DISPLAY_MODES.length, 3);
   assertEquals(displayModeLabel("pictures"), "control pictures");
-  assertEquals(displayModeLabel("ansi"), "ANSI colour");
+  assertEquals(displayModeLabel("ansi"), "ANSI color");
   assertEquals(displayModeLabel("hidden"), "hidden");
 });
 
@@ -74,20 +74,20 @@ Deno.test("pictures: printable text is untouched and maps 1:1 to columns", () =>
 });
 
 Deno.test("pictures: does not interpret ANSI — the escape shows as ␛", () => {
-  // A colour sequence is shown literally: ␛ then its printable bytes.
+  // A color sequence is shown literally: ␛ then its printable bytes.
   assertEquals(glyphs("\x1b[31mx", "pictures"), "␛[31mx");
 });
 
 // --- ansi mode ---------------------------------------------------------------
 
-Deno.test("ansi: an SGR colour sequence is hidden and colours the text after it", () => {
+Deno.test("ansi: an SGR color sequence is hidden and colors the text after it", () => {
   const cells = displayLine(ln("a\x1b[31mb"), "ansi");
   // The 5-code-point sequence (ESC [ 3 1 m) is consumed; two cells remain.
   assertEquals(cells.map((c) => c.ch).join(""), "ab");
   assertEquals(
     cells[0].ansi,
     undefined,
-    "text before the sequence is uncoloured",
+    "text before the sequence is uncolored",
   );
   assertEquals(cells[1].ansi?.fg, [205, 49, 49], "text after is ANSI red");
   // The surviving cells keep their original source columns.
@@ -95,12 +95,12 @@ Deno.test("ansi: an SGR colour sequence is hidden and colours the text after it"
   assertEquals(cells[1].col, 6);
 });
 
-Deno.test("ansi: a reset (and a bare ESC[m) clears the colour override", () => {
+Deno.test("ansi: a reset (and a bare ESC[m) clears the color override", () => {
   for (const reset of ["\x1b[0m", "\x1b[m"]) {
     const cells = displayLine(ln(`\x1b[31ma${reset}b`), "ansi");
     assertEquals(cells.map((c) => c.ch).join(""), "ab");
     assertEquals(cells[0].ansi?.fg, [205, 49, 49], "a is red");
-    assertEquals(cells[1].ansi, undefined, `b is uncoloured after ${reset}`);
+    assertEquals(cells[1].ansi, undefined, `b is uncolored after ${reset}`);
   }
 });
 
@@ -111,12 +111,12 @@ Deno.test("ansi: attributes and background codes accumulate", () => {
   assertEquals(cells[0].ansi?.bg, [13, 188, 121], "green background");
 });
 
-Deno.test("ansi: a non-colour CSI sequence is not hidden", () => {
+Deno.test("ansi: a non-color CSI sequence is not hidden", () => {
   // ESC [ 2 J (clear screen) does not end in `m`, so it is shown, not consumed.
   assertEquals(glyphs("\x1b[2Jx", "ansi"), "␛[2Jx");
 });
 
-Deno.test("ansi: 256-colour and truecolor foregrounds", () => {
+Deno.test("ansi: 256-color and truecolor foregrounds", () => {
   const c256 = displayLine(ln("\x1b[38;5;196mx"), "ansi")[0];
   assertEquals(c256.ansi?.fg, [255, 0, 0], "palette index 196 is red");
   const truecolor = displayLine(ln("\x1b[38;2;10;20;30mx"), "ansi")[0];
@@ -186,7 +186,7 @@ Deno.test("displayColumnOf: hidden maps a source column to the compacted column"
   );
 });
 
-Deno.test("displayColumnOf: ansi skips a hidden colour sequence", () => {
+Deno.test("displayColumnOf: ansi skips a hidden color sequence", () => {
   const line = ln("a\x1b[31mb"); // display cells stand at source cols 0 and 6
   assertEquals(displayColumnOf(line, "ansi", 0), 0);
   assertEquals(
@@ -228,16 +228,16 @@ Deno.test("internal applySgr: the full code range folds into a style", () => {
   assertEquals(applySgr({ bg: [1, 2, 3] }, "49").bg, undefined, "default bg");
   assertEquals(applySgr({}, "92").fg, [35, 209, 139], "bright green fg");
   assertEquals(applySgr({}, "105").bg, [214, 112, 214], "bright magenta bg");
-  // A malformed extended-colour code (missing its arguments) is ignored.
+  // A malformed extended-color code (missing its arguments) is ignored.
   assertEquals(applySgr({}, "38").fg, undefined);
-  // A `48` extended-colour code sets the background.
+  // A `48` extended-color code sets the background.
   assertEquals(applySgr({}, "48;5;21").bg, [0, 0, 255], "256-index background");
   assertEquals(
     applySgr({}, "48;2;9;8;7").bg,
     [9, 8, 7],
     "truecolor background",
   );
-  // Anything unrecognised leaves the style unchanged.
+  // Anything unrecognized leaves the style unchanged.
   assertEquals(applySgr({ bold: true }, "73").bold, true);
 });
 

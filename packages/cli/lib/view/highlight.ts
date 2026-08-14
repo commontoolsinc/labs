@@ -1,9 +1,9 @@
 /**
- * Turns model {@link Span}s into ANSI-coloured strings. Used both by the
+ * Turns model {@link Span}s into ANSI-colored strings. Used both by the
  * non-interactive print path (`renderLineColored` over every line) and as the
  * per-span styling primitive for the interactive renderer.
  *
- * Colour never changes the active representation's characters:
+ * Color never changes the active representation's characters:
  * `renderLinePlain` and the concatenated span text of `renderLineColored` are
  * byte-for-byte identical to the document line.
  */
@@ -19,8 +19,8 @@ export function spanStyle(span: Span): Style {
   return withRichModifiers(base, span);
 }
 
-/** The style for a span shown inside a dialog (a light-grey panel), where the
- * editor's bright colours would not read. */
+/** The style for a span shown inside a dialog (a light-gray panel), where the
+ * editor's bright colors would not read. */
 export function overlaySpanStyle(span: Span): Style {
   return withRichModifiers(dialogStyleFor(span.cls), span);
 }
@@ -36,7 +36,7 @@ function withRichModifiers(style: Style, span: Span): Style {
   };
 }
 
-/** The active source or rendered line, with no colour. */
+/** The active source or rendered line, with no color. */
 export function renderLinePlain(line: Line): string {
   return line.text;
 }

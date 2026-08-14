@@ -432,7 +432,7 @@ Deno.test("realFileGateway.open: returns null when the file cannot be read", () 
   assertEquals(gw.open(missing), null);
 });
 
-Deno.test("realFileGateway.join: joins and normalises a directory and segment", () => {
+Deno.test("realFileGateway.join: joins and normalizes a directory and segment", () => {
   const gw = realFileGateway();
   assertEquals(gw.join("/work", "a.ts"), join("/work", "a.ts"));
   assertEquals(gw.join("/work/sub", ".."), join("/work/sub", ".."));

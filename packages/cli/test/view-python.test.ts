@@ -78,7 +78,7 @@ Deno.test("python: the language registry selects Python extensions", () => {
   );
 });
 
-Deno.test("python: declarations, keywords, calls, properties, and comments colour", () => {
+Deno.test("python: declarations, keywords, calls, properties, and comments color", () => {
   const source = [
     "#!/usr/bin/env python3",
     "@decorator",

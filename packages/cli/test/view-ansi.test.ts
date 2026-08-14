@@ -30,7 +30,7 @@ Deno.test("stripAnsi / visibleWidth ignore escapes", () => {
   const colored = paint("hello", { fg: [10, 20, 30], bold: true });
   assertEquals(stripAnsi(colored), "hello");
   assertEquals(visibleWidth(colored), 5);
-  assert(colored.length > 5, "the coloured form has escapes");
+  assert(colored.length > 5, "the colored form has escapes");
 });
 
 Deno.test("cpLen counts a non-BMP glyph as one display column", () => {

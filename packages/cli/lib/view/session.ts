@@ -283,7 +283,7 @@ export class Session {
   private semantics?: Semantics;
   quit = false;
   /** An edit patched only the changed lines for speed; a full re-parse (for
-   * structure, cross-references, and multi-line token colours) is owed. The
+   * structure, cross-references, and multi-line token colors) is owed. The
    * driver runs it on a short idle, so typing stays responsive. */
   needsReparse = false;
   /** What the last key revealed (Ctrl-L in pager mode), for the driver to walk
@@ -903,7 +903,7 @@ export class Session {
           ? o.targets[o.cardSel]?.cardLine
           : undefined,
         // Source (the toggled-to source view, or a peek that is itself source)
-        // is drawn as a blue editor window; a structured card is a grey dialog.
+        // is drawn as a blue editor window; a structured card is a gray dialog.
         sourceView: o.mode === "source" ||
           (o.mode === "info" && !!o.infoIsSource),
       }
@@ -1362,7 +1362,7 @@ export class Session {
       this.message = `Cannot open ${target.filePath}`;
       return;
     }
-    // Lead the title with the filename and line: the overlay centres and
+    // Lead the title with the filename and line: the overlay centers and
     // left-truncates titles, so a raw absolute path would keep only its shared
     // workspace prefix and drop the identifying part.
     const name = target.filePath!.split(/[\\/]/).pop() ?? target.filePath!;
@@ -1707,7 +1707,7 @@ export class Session {
       case "z":
       case "Z": {
         // Reveal the target: an external file opens in place; an in-blob target
-        // closes the card and centres the main view on it. A "… N more" line has
+        // closes the card and centers the main view on it. A "… N more" line has
         // no destination to reveal.
         const reveal = this.overlayRevealTarget(overlay);
         if (reveal?.expand) break;
@@ -2197,10 +2197,10 @@ export class Session {
   }
 
   /** Create (or re-baseline) the incremental highlighter, seeded with the
-   * current document's colours at the current buffer text. Called when editing
+   * current document's colors at the current buffer text. Called when editing
    * starts and after the deferred re-parse — the two moments the document's
    * lines and the buffer text are known to agree — so a diff's live highlighter
-   * can reuse the workspace-coloured lines for everything an edit doesn't touch. */
+   * can reuse the workspace-colored lines for everything an edit doesn't touch. */
   private seedHighlighter(): void {
     this.highlighter = this.source?.createHighlighter?.(
       this.buffer!.text(),
@@ -3684,7 +3684,7 @@ export class Session {
     // upwards holds the hunk's header and pushes the body down; expanding
     // downwards holds what follows the hunk and lifts the body up. A join takes
     // that very header away, so what is held is the line the other side of it —
-    // the neighbouring hunk's body, which is what is left to hold on to.
+    // the neighboring hunk's body, which is what is left to hold on to.
     const pinDoc = r.removedAt !== null
       ? (r.up ? r.removedAt - 1 : r.removedAt + 1)
       : (r.up ? r.insertedAt - 1 : r.insertedAt);
@@ -4710,7 +4710,7 @@ export function helpOverlay(): {
     ["  W / S", "previous / next sibling (W → parent, S → out, at ends)"],
     ["  A / D", "parent / first child"],
     ["  Tab / ⇧Tab", "next / previous node (depth-first)"],
-    ["  Z", "centre selected node"],
+    ["  Z", "center selected node"],
     ["  ^L", "diff: reveal more context at the marked edge"],
     ["  Esc", "clear selection / search"],
     ["", ""],
@@ -4730,7 +4730,7 @@ export function helpOverlay(): {
     ["Info card (Enter on a node)", ""],
     ["  Enter", "open the reference — or expand a “… N more” line"],
     ["  Esc", "back to the card you came from (or close)"],
-    ["  Z", "close & centre the main view on the target"],
+    ["  Z", "close & center the main view on the target"],
     ["  Tab", "toggle info card ⇄ source"],
     ["  t", "look up a definition by name"],
     ["", ""],
@@ -4738,7 +4738,7 @@ export function helpOverlay(): {
     ["  V", "toggle source / rendered view when the language supports it"],
     ["  #", "line numbers: off / input position / file or message line"],
     ["  \\", "line wrapping: off / hard / word"],
-    ["  C", "cycle non-printables: pictures / ANSI colour / hidden"],
+    ["  C", "cycle non-printables: pictures / ANSI color / hidden"],
     ["  ?", "this help   ·   Q  quit"],
   ];
   const info: Line[] = rows.map(([k, v]) => {

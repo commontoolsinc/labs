@@ -47,7 +47,7 @@ interface HighlightState {
   pendingNodeIndent?: number;
 }
 
-/** Colour YAML text into rendered lines. */
+/** Color YAML text into rendered lines. */
 export function yamlHighlightLines(text: string): Line[] {
   const rawLines = text.split("\n");
   const state: HighlightState = {
@@ -60,7 +60,7 @@ export function yamlHighlightLines(text: string): Line[] {
   );
 }
 
-/** A full YAML document. YAML currently contributes syntax colour only. */
+/** A full YAML document. YAML currently contributes syntax color only. */
 export function yamlDocument(text: string): Document {
   return {
     text,

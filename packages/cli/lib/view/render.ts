@@ -5,7 +5,7 @@
  *
  * Composition is cell-based: each visible content row is built as an array of
  * (char, style) cells so overlays layer with a clear precedence
- * (search match > node selection > schema/closure region tint > token colour),
+ * (search match > node selection > schema/closure region tint > token color),
  * then run-length encoded into ANSI. Horizontal scrolling, the line-number
  * gutter and the structure guide bar are all column maths over that grid.
  */
@@ -109,8 +109,8 @@ function diffTotalsSegments(totals: DiffTotals): [string, string] {
   return [`+${totals.adds} `, `−${totals.dels}`];
 }
 
-/** The corner label's cells: the added count in the addition colour, the
- * removed count in the removal colour. */
+/** The corner label's cells: the added count in the addition color, the
+ * removed count in the removal color. */
 function diffTotalsCells(totals: DiffTotals): SuffixCell[] {
   const [add, del] = diffTotalsSegments(totals);
   return [
@@ -209,7 +209,7 @@ export interface ViewState {
   /** Command/search input line, e.g. "/token"; null in normal mode. */
   inputLine: string | null;
   overlay: OverlayState | null;
-  /** A modal prompt drawn as a centred Turbo Vision dialog (the save, revert and
+  /** A modal prompt drawn as a centered Turbo Vision dialog (the save, revert and
    * amend confirmations). Covers the content like an overlay; the two never
    * coexist. */
   dialog?: DialogState | null;
@@ -337,7 +337,7 @@ export interface OverlayState {
   /** Index into `lines` of the selected (highlighted) reference, if any. */
   readonly selectedLine?: number;
   /** The overlay shows source code, so it is drawn as a blue editor window
-   * rather than a grey dialog. */
+   * rather than a gray dialog. */
   readonly sourceView?: boolean;
 }
 
@@ -350,7 +350,7 @@ export interface DialogButton {
   readonly kind?: "default" | "cancel" | "normal";
 }
 
-/** A centred modal prompt: a title, one or more body lines, and a button row. */
+/** A centered modal prompt: a title, one or more body lines, and a button row. */
 export interface DialogState {
   readonly title: string;
   readonly body: readonly string[];
@@ -866,7 +866,7 @@ function composeContent(
 ): string {
   const { color } = view;
   // Every content cell sits on the blue editor background; a diff line carries a
-  // full-row add/removed tint instead. Syntax colours paint on top, and the
+  // full-row add/removed tint instead. Syntax colors paint on top, and the
   // selection background still wins inside its range.
   const rowBg: Style = color
     ? { bg: line?.bg ? lineBg(line.bg) : ui.editorBg }
@@ -1163,7 +1163,7 @@ function hintsPlain(hints: readonly KeyHint[]): string {
   return hints.map((h) => `${h.key} ${h.label}`).join("  ");
 }
 
-/** The same, coloured: each key highlighted, the labels plain, on the bar bg. */
+/** The same, colored: each key highlighted, the labels plain, on the bar bg. */
 function hintsAnsi(hints: readonly KeyHint[]): string {
   let out = "";
   hints.forEach((h, i) => {
@@ -1198,7 +1198,7 @@ export interface OverlayBox {
   innerH: number;
 }
 
-/** Geometry of the centred overlay box for the given terminal size. The box is
+/** Geometry of the centered overlay box for the given terminal size. The box is
  * clamped to fit inside the terminal, so on a terminal too small to hold the box
  * the dimensions collapse to the terminal size rather than going negative. Inner
  * dimensions never go below 0, which keeps {@link applyOverlay}'s repeat/slice
@@ -1237,7 +1237,7 @@ function applyOverlay(
   if (boxW < 2 || boxH < 2) return;
 
   // An overlay showing source code is a blue editor window; everything else is
-  // a grey dialog. The border carries the same background as the body, so the
+  // a gray dialog. The border carries the same background as the body, so the
   // panel reads as one solid block rather than a frame over the content behind.
   const source = !!overlay.sourceView;
   const panelBg = source ? ui.editorBg : ui.overlayBg;
@@ -1303,7 +1303,7 @@ function castShadow(
 }
 
 /** Repaint `count` cells at visible column `from` of row `r` in the shadow
- * colour, keeping whatever characters were there. Clamped to the row and the
+ * color, keeping whatever characters were there. Clamped to the row and the
  * terminal width so the fixed row width is preserved. */
 function darkenSpan(
   rows: string[],
@@ -1359,7 +1359,7 @@ export interface DialogBox {
   innerH: number;
 }
 
-/** Geometry of the centred dialog box, sized to its content (title, body and
+/** Geometry of the centered dialog box, sized to its content (title, body and
  * button row) and clamped to leave two cells for the drop shadow. */
 export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
   const titleW = cpLen(dialog.title) + 4; // the padding spaces and some fill
@@ -1384,7 +1384,7 @@ export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
   };
 }
 
-/** The top border of a dialog: the title centred in the width and filled with
+/** The top border of a dialog: the title centered in the width and filled with
  * the double rule. */
 function titleBar(title: string, width: number): string {
   if (width <= 0) return "";
@@ -1397,7 +1397,7 @@ interface ButtonPos {
   faceW: number;
 }
 
-/** Left-to-right positions of the buttons, as a block centred in `innerW`. */
+/** Left-to-right positions of the buttons, as a block centered in `innerW`. */
 function layoutButtons(
   buttons: readonly DialogButton[],
   innerW: number,
@@ -1470,7 +1470,7 @@ function applyDialog(
   if (view.color) castShadow(rows, view, x, y, boxW, boxH);
 }
 
-/** Write `text` centred in `cells`, one blank margin column inside each edge. */
+/** Write `text` centered in `cells`, one blank margin column inside each edge. */
 function placeCentered(cells: Cell[], text: string, style: Style): void {
   const innerW = cells.length;
   const chars = [...showControls(text)];

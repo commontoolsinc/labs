@@ -1,7 +1,7 @@
 /**
  * Minimal ANSI escape-sequence helpers for the `cf view` pager.
  *
- * Self-contained (no dependencies) so the viewer stays lean. Colours use
+ * Self-contained (no dependencies) so the viewer stays lean. Colors use
  * 24-bit truecolor (`\x1b[38;2;r;g;bm`), which every modern macOS/Linux
  * terminal we target supports. When the output stream is not a TTY (or the
  * user passes `--no-color`) styling is suppressed at the call site, never here.
@@ -99,7 +99,7 @@ export const term = {
   moveTo(row: number, col: number): string {
     return `${CSI}${row};${col}H`;
   },
-  /** Set the terminal's default background colour (OSC 11). This is the colour
+  /** Set the terminal's default background color (OSC 11). This is the color
    * the terminal fills the area outside the character grid with — the sub-cell
    * padding below the last row and beside the last column — which no cell can
    * reach. */
@@ -107,6 +107,6 @@ export const term = {
     const h = rgb.map((c) => c.toString(16).padStart(2, "0")).join("");
     return `${OSC}11;#${h}${BEL}`;
   },
-  /** Restore the terminal's own default background colour (OSC 111). */
+  /** Restore the terminal's own default background color (OSC 111). */
   resetDefaultBg: `${OSC}111${BEL}`,
 };

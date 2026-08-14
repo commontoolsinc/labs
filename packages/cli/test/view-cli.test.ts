@@ -1,7 +1,7 @@
 /**
  * End-to-end coverage of the `cf view` command and its non-interactive entry
  * (mod.ts). Each case runs the real CLI as a subprocess: with stdout piped the
- * viewer prints the colourised text and exits, like `less` when redirected, so
+ * viewer prints the colorized text and exits, like `less` when redirected, so
  * these exercise the command wiring, argument handling, input reading and the
  * print path without a terminal.
  */
@@ -46,7 +46,7 @@ function runViewForBytes(args: string[]): Promise<Deno.CommandOutput> {
   });
 }
 
-Deno.test("cf view --plain prints colourised source and exits 0", async () => {
+Deno.test("cf view --plain prints colorized source and exits 0", async () => {
   const { code, stdout } = await cf("view --plain", { stdin: SRC });
   assertEquals(code, 0);
   assert(stdout.join("\n").includes("pattern"), stdout.join("\n"));
