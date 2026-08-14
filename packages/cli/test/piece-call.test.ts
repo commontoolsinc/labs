@@ -1317,6 +1317,10 @@ function createPieceCallableHarness(options: {
   callableScope?: "space" | "user" | "session";
   /** Value the handling's receipt cell reads back ({} = value-less verb). */
   receiptValue?: unknown;
+  /** The receipt's STORED form, when it differs from the materialized
+   * `receiptValue` — a proxied instance's codec shape, most usefully.
+   * Presence is decided on this, mirroring the production readback. */
+  receiptRaw?: unknown;
   /** Simulate the create-only receipt collision: commit fails with
    * precondition "receipt-exists" while the link addresses the winner's
    * original receipt. */
@@ -1491,6 +1495,11 @@ function createPieceCallableHarness(options: {
   const defaultReceiptCell = {
     get: () => options.receiptValue,
     pull: () => Promise.resolve(options.receiptValue),
+    // The stored form presence is decided on. Defaults to the materialized
+    // value — faithful for plain JSON; a test modeling a proxied instance
+    // sets `receiptRaw` to the stored shape the runtime would hold.
+    getRaw: () =>
+      "receiptRaw" in options ? options.receiptRaw : options.receiptValue,
     key: (_key: string) => defaultReceiptCell,
   };
 
@@ -2943,6 +2952,9 @@ function linkedReceiptCell(
   return mockCell({
     get: () => value,
     pull: () => Promise.resolve(value),
+    // These receipts hold plain JSON, whose stored form is the value itself;
+    // presence is decided on this, mirroring the production readback.
+    getRaw: () => value,
     key: () => barren,
     resolveAsCell: () => resolvedRoot,
     getAsNormalizedFullLink: () => mockLink(receiptDoc),
@@ -3502,6 +3514,7 @@ describe("piece call selection", () => {
     const receiptCell = {
       get: () => topicResult,
       pull: () => Promise.resolve(topicResult),
+      getRaw: () => topicResult,
       key: () => receiptCell,
     } as unknown as Cell<any>;
     const harness = createPieceCallableHarness({ ...addTopic, receiptCell });

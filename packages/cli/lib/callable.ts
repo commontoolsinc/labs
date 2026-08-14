@@ -958,15 +958,20 @@ export async function executeResolvedCallable(
     if (link) {
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
       const value = await receipt.pull();
-      // A value-less verb's receipt is an empty record — existence-only. The
-      // witness is a PLAIN empty record specifically: a keyless instance (a
-      // fabric primitive whose slots are private, `FabricBytes`) is a verb's
-      // result, and counting enumerable keys alone would swallow it.
-      if (
-        value !== undefined &&
-        !(isRecord(value) && !isInstance(value) &&
-          Object.keys(value).length === 0)
-      ) {
+      // A value-less verb's receipt is an empty record — existence-only.
+      // Presence is decided on the receipt's STORED value, never on the
+      // materialized one: a `FabricInstance` crossing the cell read arrives
+      // as a query-result proxy over an empty ordinary stub (the
+      // `getPrototypeOf` note in packages/runner/src/query-result-proxy.ts),
+      // so prototype and key enumeration on `value` cannot tell a real
+      // instance result from the witness. The witness is stored as exactly
+      // the plain empty record; every other stored shape — plain JSON, the
+      // link a launched or chained-cell result converts to, an instance's
+      // codec form, a keyless raw primitive — is a result.
+      const raw = receipt.getRaw();
+      const valueLess = isRecord(raw) && !isInstance(raw) &&
+        Object.keys(raw).length === 0;
+      if (value !== undefined && !valueLess) {
         result = value;
       }
       if (result !== undefined) {
