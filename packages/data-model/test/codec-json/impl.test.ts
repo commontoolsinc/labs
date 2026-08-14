@@ -1,8 +1,19 @@
+/**
+ * The cheap test for whether a string is this package's encoded form rather
+ * than JSON from somewhere else.
+ *
+ * It decides on the prefix alone and never parses, so the cases are about
+ * where that suffices and where it would be too eager: the bare prefix counts,
+ * a prefix that is partial or not at the front does not, and plain JSON that
+ * happens to look similar does not. One case feeds it real encoder output, so
+ * the shape recognized here cannot drift from the shape produced.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
-import { jsonFromValue } from "@/codecs.ts";
+import { jsonFromFabricValue } from "@/codecs.ts";
 
 describe("impl", () => {
   describe("seemsLikeJsonEncodedFabricValue", () => {
@@ -16,8 +27,8 @@ describe("impl", () => {
       expect(seemsLikeJsonEncodedFabricValue("fvj1:")).toBe(true);
     });
 
-    it("recognizes the actual output of `jsonFromValue()` (round-trip check)", () => {
-      const encoded = jsonFromValue({ a: 1, b: 42n });
+    it("recognizes the actual output of `jsonFromFabricValue()` (round-trip check)", () => {
+      const encoded = jsonFromFabricValue({ a: 1, b: 42n });
       expect(seemsLikeJsonEncodedFabricValue(encoded)).toBe(true);
     });
 

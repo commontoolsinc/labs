@@ -40,7 +40,7 @@ import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type {
   ChildNodeState,
   NodeState,
@@ -89,6 +89,23 @@ const TEXT_INTEGRITY_PROP_SINKS: ReadonlyMap<string, ReadonlySet<string>> =
   new Map([
     ["cf-chat-message", new Set(["name", "content"])],
   ]);
+
+function isNestedPatternOutput(value: unknown, cell: Cell<unknown>): boolean {
+  if (
+    typeof value !== "object" || value === null || !(UI in value) ||
+    !(value as Record<PropertyKey, unknown>)[UI]
+  ) return false;
+
+  try {
+    const patternIdentity = cell.getMetaRaw("patternIdentity");
+    return typeof patternIdentity === "object" && patternIdentity !== null &&
+      typeof (patternIdentity as Record<string, unknown>).identity ===
+        "string" &&
+      typeof (patternIdentity as Record<string, unknown>).symbol === "string";
+  } catch {
+    return false;
+  }
+}
 // Props whose live DOM value can drift from the authored VDOM value
 // independently of any worker-side change — user input (`value`), scrolling
 // (`scrollTop`/`scrollLeft`), or browser / custom-element state (`checked`,
@@ -125,6 +142,54 @@ const logger = getLogger("worker-reconciler", {
   enabled: false,
   level: "debug",
 });
+
+/**
+ * Positions holding a longest strictly increasing run of `previousPositions`,
+ * skipping the negative entries that stand for a child the document does not
+ * hold yet.
+ *
+ * Children at those positions already sit in the order the new list wants them
+ * in, relative to one another, so they are the ones that can stay where they
+ * are while everything else is placed around them. Taking a *longest* such run
+ * is what keeps the number of moves near the number of children that actually
+ * changed place.
+ *
+ * @param previousPositions One entry per child of the new list, holding the
+ *   position that child had in the old list, or a negative number for a child
+ *   the document cannot move because it is not in it.
+ */
+function stationaryPositions(
+  previousPositions: readonly number[],
+): ReadonlySet<number> {
+  // `runEnds[l]` is the position ending the smallest run of length `l + 1`
+  // found so far, and `predecessor[p]` the position before `p` in the run that
+  // ends there -- together enough to walk one longest run back out.
+  const runEnds: number[] = [];
+  const predecessor = new Array<number>(previousPositions.length).fill(-1);
+
+  for (let position = 0; position < previousPositions.length; position++) {
+    const previous = previousPositions[position];
+    if (previous < 0) continue;
+
+    let low = 0;
+    let high = runEnds.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (previousPositions[runEnds[middle]] < previous) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0) predecessor[position] = runEnds[low - 1];
+    runEnds[low] = position;
+  }
+
+  const stationary = new Set<number>();
+  let position = runEnds.length > 0 ? runEnds[runEnds.length - 1] : -1;
+  while (position >= 0) {
+    stationary.add(position);
+    position = predecessor[position];
+  }
+  return stationary;
+}
 
 /**
  * Main reconciler class for worker-side VDOM rendering.
@@ -201,13 +266,6 @@ export class WorkerReconciler {
     };
   }
 
-  /**
-   * Mount a VDOM tree, starting the reconciliation process.
-   * Children are inserted directly into the container (CONTAINER_NODE_ID).
-   *
-   * @param vnode - The root VNode, Cell<VNode>, or Cell<unknown> to mount
-   * @returns A cancel function to unmount the tree
-   */
   /** Best-effort space of a cell; undefined when it can't name one. */
   private spaceOfCell(cell: Cell<unknown>): string | undefined {
     try {
@@ -217,6 +275,13 @@ export class WorkerReconciler {
     }
   }
 
+  /**
+   * Mount a VDOM tree, starting the reconciliation process.
+   * Children are inserted directly into the container (CONTAINER_NODE_ID).
+   *
+   * @param vnode - The root VNode, Cell<VNode>, or Cell<unknown> to mount
+   * @returns A cancel function to unmount the tree
+   */
   mount(vnode: WorkerVNode | Cell<WorkerVNode> | Cell<unknown>): Cancel {
     logger.debug(
       "mount",
@@ -760,6 +825,40 @@ export class WorkerReconciler {
     }];
   }
 
+  /** Keep the nested pattern's whole result cell on its existing root node. */
+  private updatePieceBoundary(
+    childState: ChildNodeState,
+    resolvedChild: unknown,
+    resultCell: Cell<unknown>,
+  ): void {
+    const shouldBind = isNestedPatternOutput(resolvedChild, resultCell);
+    if (!childState.elementState) return;
+
+    if (shouldBind) {
+      childState.hasPieceBoundary = true;
+      this.queueOps([{
+        op: "set-piece-boundary",
+        nodeId: childState.elementState.nodeId,
+        cellRef: this.cellRefForBinding(resultCell),
+      }]);
+    } else if (childState.hasPieceBoundary) {
+      childState.hasPieceBoundary = false;
+      this.queueOps([{
+        op: "clear-piece-boundary",
+        nodeId: childState.elementState.nodeId,
+      }]);
+    }
+  }
+
+  /** Follow a link-valued child to the result cell whose UI is rendered. */
+  private resolveCellForBinding(cell: Cell<unknown>): Cell<unknown> {
+    try {
+      return cell.resolveAsCell();
+    } catch {
+      return cell;
+    }
+  }
+
   private cellRefForBinding(cell: Cell<unknown>): CellRef {
     const link = cell.getAsNormalizedFullLink();
     let labelView: CfcLabelView | undefined;
@@ -1241,7 +1340,7 @@ export class WorkerReconciler {
     const kinds = policy.caveatKindAllow;
     if (
       kinds !== undefined && kinds.length > 0 &&
-      isRecord(atom) && atom.type === CFC_CAVEAT_ATOM_TYPE &&
+      isObjectOrArray(atom) && atom.type === CFC_CAVEAT_ATOM_TYPE &&
       typeof atom.kind === "string" && kinds.includes(atom.kind)
     ) {
       return true;
@@ -1870,9 +1969,6 @@ export class WorkerReconciler {
   }
 
   /**
-   * Update an event prop.
-   */
-  /**
    * Helper to get a debug ID for a cell (space/id or similar).
    */
   private getCellDebugId(cell: Cell<unknown>): string {
@@ -1886,6 +1982,9 @@ export class WorkerReconciler {
     }
   }
 
+  /**
+   * Update an event prop.
+   */
   private updateEventProp(
     ctx: ReconcileContext,
     state: NodeState,
@@ -2664,6 +2763,9 @@ export class WorkerReconciler {
       childrenBlockedByPolicy: policyChildren.blocked,
       sourceChildren: sanitized.children,
       sourceProps: sanitized.props,
+      // `ctx` carries the stamp this node just emitted, if it emitted one, so
+      // this is what its descendants inherit.
+      childEmittedSpace: ctx.emittedSpace,
     };
     addCancel(() => this.cleanupNodeHandlers(state));
     this.initializeTextIntegrityBoundary(childPolicy, nodeId);
@@ -3226,6 +3328,14 @@ export class WorkerReconciler {
     const newMapping = new Map<string, ChildNodeState>();
     const newKeyOrder: string[] = [];
 
+    // Where each key sat in the old order, to tell a child that merely stayed
+    // put from one that has to move.
+    const previousPosition = new Map<string, number>();
+    for (let i = 0; i < state.childOrder.length; i++) {
+      previousPosition.set(state.childOrder[i], i);
+    }
+    const keptInPlace = new Set<string>();
+
     // Process each new child
     let hasNewChildren = false;
     for (let i = 0; i < newChildren.length; i++) {
@@ -3246,6 +3356,7 @@ export class WorkerReconciler {
         state.children.delete(key);
         if (canReuse) {
           newMapping.set(key, existingState);
+          keptInPlace.add(key);
         } else {
           existingState.cancel();
           this.cleanupNodeHandlers(existingState);
@@ -3302,29 +3413,41 @@ export class WorkerReconciler {
 
     state.childOrder = newKeyOrder;
 
-    // Update children order by inserting from END to BEGINNING.
-    // This ensures each insertBefore has a valid reference node.
-    // Processing in reverse means each child is inserted before the
-    // previously processed child (which is already in the DOM).
-    // Skip children with nodeId === -1 (pending Cell children that haven't
-    // resolved yet). Using -1 as a beforeId would break the ordering chain
-    // because the applicator can't find the node and falls back to appendChild.
-    // Pending children will self-insert via renderCellChild when they resolve.
+    // The document holds exactly the children that were kept, in the order they
+    // had before. A child whose position among those is unchanged is already
+    // where it belongs, so the ones forming a longest such run need no op at
+    // all; every other child is placed against them below.
+    //
+    // A child with nodeId === -1 is a Cell child that has not resolved, so the
+    // document does not hold it and it cannot anchor anything. It self-inserts
+    // through renderCellChild once it resolves.
+    const previousPositions = newKeyOrder.map((key) => {
+      const childState = newMapping.get(key);
+      if (!childState || childState.nodeId === -1) return -1;
+      return keptInPlace.has(key) ? previousPosition.get(key) ?? -1 : -1;
+    });
+    const stationary = stationaryPositions(previousPositions);
+
+    // Walk from END to BEGINNING so each insert names a child already in its
+    // final place. A stationary child emits nothing but still anchors the
+    // children before it, because it is their next sibling either way.
     let nextNodeId: number | null = null;
     for (let i = newKeyOrder.length - 1; i >= 0; i--) {
       const key = newKeyOrder[i];
       const childState = newMapping.get(key);
       if (!childState || childState.nodeId === -1) continue;
 
-      // Insert this child before the next one (or append if it's the last)
-      this.queueOps([
-        {
-          op: "insert-child",
-          parentId: state.nodeId,
-          childId: childState.nodeId,
-          beforeId: nextNodeId,
-        },
-      ]);
+      if (!stationary.has(i)) {
+        // Insert this child before the next one (or append if it's the last)
+        this.queueOps([
+          {
+            op: "insert-child",
+            parentId: state.nodeId,
+            childId: childState.nodeId,
+            beforeId: nextNodeId,
+          },
+        ]);
+      }
 
       nextNodeId = childState.nodeId;
     }
@@ -3356,15 +3479,10 @@ export class WorkerReconciler {
       (typeof child === "string" || typeof child === "number" ||
         typeof child === "boolean" || child === null || child === undefined)
     ) {
-      const text = this.stringifyText(child);
-      if (text !== childState.currentValue) {
-        childState.currentValue = text;
-        this.queueOps([{
-          op: "update-text",
-          nodeId: childState.nodeId,
-          text,
-        }]);
-      }
+      // Nothing to update. A text child is keyed by a hash of the very value
+      // it renders, so one that was reused under its old key holds the text it
+      // was built with; a child whose text differs keys differently and is
+      // built rather than reused.
       return true;
     }
 
@@ -3397,6 +3515,11 @@ export class WorkerReconciler {
     childState.elementState.renderPolicy = policy;
     childState.elementState.childRenderPolicy = childPolicy;
     childState.elementState.childrenBlockedByPolicy = policyChildren.blocked;
+    // Same reasoning as the keyed path above: an authored node holding this
+    // element is not a wrapper, whatever it was before. A key derived from
+    // content cannot match an array against a VNode today, so this only holds
+    // the invariant for a keying that one day could.
+    childState.elementState.isArrayWrapper = false;
     childState.elementState.sourceChildren = sanitized.children;
     childState.elementState.sourceProps = sanitized.props;
 
@@ -3487,9 +3610,15 @@ export class WorkerReconciler {
       isText: false,
       cancel,
       cell,
+      hasPieceBoundary: false,
     };
 
     let currentCancel: Cancel | undefined;
+    let currentContentState:
+      | "rendered"
+      | "policy-blocked"
+      | "integrity-blocked"
+      | undefined;
 
     // §4.9.3 Stage 2: on each render, watch the ACL docs of the spaces this
     // cell is labeled with, so a fail-closed over-block upgrades to an admit
@@ -3499,16 +3628,11 @@ export class WorkerReconciler {
 
     const renderResolved = (resolvedChild: unknown, forced = false) => {
       const isInitialRender = childState.nodeId === -1;
-
-      // Dedupe updates. A forced re-eval (an ACL sync/change) bypasses the
-      // value-identity check: the value is unchanged but the render DECISION
-      // may have flipped.
-      if (
-        !forced && !isInitialRender &&
-        Object.is(resolvedChild, childState.currentValue)
-      ) {
-        return;
-      }
+      const resultCell = this.resolveCellForBinding(cell);
+      const valueUnchanged = Object.is(
+        resolvedChild,
+        childState.currentValue,
+      );
       childState.currentValue = resolvedChild;
       this.watchCellMembership(
         cell,
@@ -3516,8 +3640,31 @@ export class WorkerReconciler {
         addCancel,
         () => renderResolved(childState.currentValue, true),
       );
+      const blockedByPolicy = !this.canRenderCellUnderPolicy(cell, policy);
+      const blockedByIntegrity = !blockedByPolicy &&
+        this.shouldBlockTextFromCell(resolvedChild, cell, policy);
 
-      if (!this.canRenderCellUnderPolicy(cell, policy)) {
+      if (
+        !forced && !isInitialRender && valueUnchanged
+      ) {
+        if (blockedByPolicy && currentContentState === "policy-blocked") {
+          return;
+        }
+        if (
+          blockedByIntegrity && currentContentState === "integrity-blocked"
+        ) {
+          return;
+        }
+        if (
+          !blockedByPolicy && !blockedByIntegrity &&
+          currentContentState === "rendered"
+        ) {
+          this.updatePieceBoundary(childState, resolvedChild, resultCell);
+          return;
+        }
+      }
+
+      if (blockedByPolicy) {
         if (!isInitialRender) {
           if (currentCancel) {
             currentCancel();
@@ -3530,12 +3677,14 @@ export class WorkerReconciler {
         childState.nodeId = -1;
         childState.elementState = undefined;
         childState.isText = false;
+        childState.hasPieceBoundary = false;
 
         const blockedState = this.createBlockedPlaceholder(ctx, policy);
         childState.nodeId = blockedState.nodeId;
         childState.elementState = blockedState;
         childState.isText = false;
         currentCancel = blockedState.cancel;
+        currentContentState = "policy-blocked";
 
         const beforeId = this.findNextSiblingId(
           parentState.children,
@@ -3550,7 +3699,7 @@ export class WorkerReconciler {
         return;
       }
 
-      if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
+      if (blockedByIntegrity) {
         if (!isInitialRender) {
           if (currentCancel) {
             currentCancel();
@@ -3563,6 +3712,7 @@ export class WorkerReconciler {
         childState.nodeId = -1;
         childState.elementState = undefined;
         childState.isText = false;
+        childState.hasPieceBoundary = false;
 
         const blockedState = this.createBlockedPlaceholder(
           ctx,
@@ -3573,6 +3723,7 @@ export class WorkerReconciler {
         childState.elementState = blockedState;
         childState.isText = false;
         currentCancel = blockedState.cancel;
+        currentContentState = "integrity-blocked";
 
         const beforeId = this.findNextSiblingId(
           parentState.children,
@@ -3607,7 +3758,9 @@ export class WorkerReconciler {
         }
 
         // Case 2: VNode in-place update (same tag)
-        if (childState.elementState) {
+        if (
+          childState.elementState && currentContentState === "rendered"
+        ) {
           const newVNode = this.extractVNode(
             resolvedChild as WorkerRenderNode,
           );
@@ -3638,6 +3791,12 @@ export class WorkerReconciler {
                 policyChildren.blocked;
               childState.elementState.sourceChildren = sanitized.children;
               childState.elementState.sourceProps = sanitized.props;
+              // Taking over a wrapper for an authored node of the same tag is
+              // sound -- the props below replace the wrapper's own -- but the
+              // node stops being a wrapper, and a later array must not adopt
+              // the authored props it now carries.
+              childState.elementState.isArrayWrapper = false;
+              this.updatePieceBoundary(childState, resolvedChild, resultCell);
               // Same tag - update props in place
               this.updatePropsInPlace(
                 ctx,
@@ -3669,6 +3828,41 @@ export class WorkerReconciler {
             }
           }
         }
+
+        // Case 3: array in-place update (same wrapper). A mapped list resolves
+        // to an array rather than to a VNode, so Case 2 never sees it. Keeping
+        // the wrapper hands the array to the keyed reconciler, which reuses
+        // every row whose key is unchanged; replacing it instead rebuilds the
+        // whole list for a one-row change.
+        //
+        // Only a wrapper qualifies, and only while it holds rendered content
+        // rather than a placeholder. The reconciler synthesizes it with fixed
+        // props, so nothing about it can change but its children, and the child
+        // policy it stored still holds -- it carries no policy-bearing props to
+        // derive a new one from.
+        //
+        // An array cannot be a nested pattern's output, which is an object
+        // carrying `UI`, so reaching here leaves no piece boundary to update.
+        if (
+          Array.isArray(resolvedChild) &&
+          childState.elementState?.isArrayWrapper &&
+          currentContentState === "rendered"
+        ) {
+          const wrapper = childState.elementState;
+          const children = resolvedChild as WorkerRenderNode[];
+          wrapper.sourceChildren = children;
+          this.updateChildrenInPlace(
+            // Rows render below the wrapper, so they inherit the space it
+            // stamped; handing them the surrounding ctx would have each row
+            // re-stamp a space the wrapper already carries.
+            { ...ctx, emittedSpace: wrapper.childEmittedSpace },
+            wrapper,
+            children,
+            new Set(visited),
+            wrapper.childRenderPolicy,
+          );
+          return;
+        }
       }
 
       // Fallback: Replace (existing logic)
@@ -3697,6 +3891,8 @@ export class WorkerReconciler {
       childState.nodeId = -1;
       childState.elementState = undefined;
       childState.isText = false;
+      childState.hasPieceBoundary = false;
+      currentContentState = undefined;
 
       if (resolvedChild === null || resolvedChild === undefined) {
         return;
@@ -3730,6 +3926,8 @@ export class WorkerReconciler {
         childState.elementState = newState.elementState;
         childState.isText = newState.isText;
         currentCancel = newState.cancel;
+        currentContentState = "rendered";
+        this.updatePieceBoundary(childState, resolvedChild, resultCell);
 
         // Always insert the child into its parent. On initial render,
         // updateChildren also emits insert-child but may see nodeId=-1
@@ -3791,6 +3989,7 @@ export class WorkerReconciler {
         policy,
       );
       if (!state) return null;
+      state.isArrayWrapper = true;
 
       return {
         nodeId: state.nodeId,
@@ -3846,12 +4045,13 @@ export class WorkerReconciler {
     // Handle primitive values (text nodes)
     const text = this.stringifyText(child);
     const state = this.createTextNode(ctx, text, policy);
+    const isText = state.tagName === "#text";
 
     return {
       nodeId: state.nodeId,
-      isText: state.tagName === "#text",
+      isText,
       cancel: state.cancel,
-      elementState: state.tagName === "#text" ? undefined : state,
+      elementState: isText ? undefined : state,
     };
   }
 

@@ -22,6 +22,28 @@ describe("weighted-shards", () => {
     expect(Object.fromEntries(assignments)).toEqual({ a: 1, b: 2, c: 1 });
   });
 
+  it("starts placement from existing shard loads", () => {
+    const initialLoads = [10, 0];
+    const items = [9, 8].map((weight) => ({
+      name: `item-${weight}`,
+      weight,
+    }));
+
+    expect(weightedShardLoads(items, 2, initialLoads)).toEqual([10, 17]);
+    expect(initialLoads).toEqual([10, 0]);
+  });
+
+  it("validates existing shard loads", () => {
+    expect(() => assignWeightedShards([], 2, [0])).toThrow(
+      "Initial shard load count 1 does not match shard count 2.",
+    );
+    for (const load of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => assignWeightedShards([], 1, [load])).toThrow(
+        "Initial shard loads must be non-negative and finite.",
+      );
+    }
+  });
+
   it("places grouped items on distinct shards", () => {
     const assignments = assignWeightedShards([
       { name: "piece-1", weight: 5, group: "piece" },

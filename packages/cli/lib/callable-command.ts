@@ -33,7 +33,16 @@ export interface CallableCommandExecutionOptions<
   commandSpec: ExecCommandSpec;
   rawArgs: string[];
   deps?: TDeps;
-  renderHelp: (commandSpec: ExecCommandSpec, parsed: ParsedExecArgs) => string;
+  /** Render the help page, once the parse has established one was asked for.
+   *
+   * Allowed to be async so a renderer can resolve something it needs ONLY
+   * here: `cf piece call` reads a handler's declared result off the compiled
+   * pattern, and every other invocation of the command has no use for it. A
+   * synchronous renderer satisfies this signature unchanged. */
+  renderHelp: (
+    commandSpec: ExecCommandSpec,
+    parsed: ParsedExecArgs,
+  ) => string | Promise<string>;
   validateRawArgs?: (
     rawArgs: string[],
     commandSpec: ExecCommandSpec,
@@ -96,7 +105,7 @@ export async function executeCallableCommand<
 
   if (parsed.showHelp) {
     return {
-      helpText: renderHelp(commandSpec, parsed),
+      helpText: await renderHelp(commandSpec, parsed),
       parsed,
       resolved,
     };

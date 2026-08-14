@@ -1,9 +1,11 @@
-// Focused coverage guard for the public `toIndentedDebugString` wrapper.
-//
-// `toIndentedDebugString` is a one-line public function that forwards to the
-// module-private `renderDebugString(value, 2)`. This file calls it directly on
-// a spread of representative values so the wrapper is exercised on its own,
-// independent of whichever larger suite happens to reach it indirectly.
+/**
+ * Focused coverage guard for the public `toIndentedDebugString` wrapper.
+ *
+ * `toIndentedDebugString` is a one-line public function that forwards to the
+ * module-private `renderDebugString(value, 2)`. This file calls it directly on
+ * a spread of representative values so the wrapper is exercised on its own,
+ * independent of whichever larger suite happens to reach it indirectly.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

@@ -6,6 +6,7 @@ import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { initializePiecesController } from "./pieces-controller.ts";
 import {
+  COMPILE_ALL_PATTERN_SHARD_ASSIGNMENTS,
   currentPatternIntegrationShard,
   selectPatternIntegrationShard,
 } from "./pattern-integration-shard.ts";
@@ -29,9 +30,15 @@ describe("Compile all patterns", () => {
     .filter((name) => !name.endsWith(".test.tsx") && !name.endsWith(".test.ts"))
     .filter((name) => !skippedPatterns.includes(name))
     .sort();
+  for (const name of Object.keys(COMPILE_ALL_PATTERN_SHARD_ASSIGNMENTS)) {
+    if (!patterns.includes(name)) {
+      throw new Error(`Pattern shard assignment ${name} does not run here.`);
+    }
+  }
   const selectedPatterns = selectPatternIntegrationShard(
     patterns,
     currentPatternIntegrationShard(),
+    (name) => COMPILE_ALL_PATTERN_SHARD_ASSIGNMENTS[name],
   );
 
   // Add a test for each pattern in this shard's slice.

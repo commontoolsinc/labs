@@ -1,3 +1,15 @@
+/**
+ * Membership in the `FabricValue` type, asked one level deep and asked all the
+ * way down, plus the narrowing to its plain-record arm.
+ *
+ * The two depths ask the same question at different scopes, and the cases are
+ * arranged around where that difference tells.
+ *
+ * Frozen-ness is deliberately not part of membership, and a group here says so
+ * outright -- the two are easy to conflate when nearly every fabric value in
+ * circulation happens to be frozen. Cycles are handled rather than refused.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

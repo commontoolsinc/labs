@@ -3,7 +3,7 @@ import type {
   MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { GenerationContext, UiContractHint } from "./interface.ts";
 
 type EmittedUiContract = NonNullable<
@@ -45,7 +45,7 @@ export function attachUiContract(
       : { ifc: { uiContract } };
   }
 
-  const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
+  const existingIfc = isObjectOrArray(schema.ifc) ? schema.ifc : {};
   return {
     ...schema,
     ifc: {

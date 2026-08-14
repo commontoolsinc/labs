@@ -1,9 +1,19 @@
+/**
+ * `undefined` on a wire whose nearest neighbor is `null`, and the care that
+ * distinction takes.
+ *
+ * The encoded state is itself `null`, so the codec's whole job is keeping the
+ * two apart: it claims `undefined` and refuses `null`, and on the way back a
+ * state that is not `null` is treated as a malformed encoding rather than as
+ * something to salvage.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { UndefinedCodec } from "@/codec-json/UndefinedCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 
 describe("UndefinedCodec", () => {
   const codec = new UndefinedCodec();

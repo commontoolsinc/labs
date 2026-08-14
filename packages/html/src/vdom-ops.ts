@@ -93,6 +93,19 @@ export interface SetBindingOp {
   cellRef: CellRef;
 }
 
+/** Associate a rendered nested pattern root with its whole result cell. */
+export interface SetPieceBoundaryOp {
+  op: "set-piece-boundary";
+  nodeId: number;
+  cellRef: CellRef;
+}
+
+/** Remove a nested pattern association from a reused root element. */
+export interface ClearPieceBoundaryOp {
+  op: "clear-piece-boundary";
+  nodeId: number;
+}
+
 /**
  * Insert a child node into a parent.
  * If beforeId is null, appends to the end.
@@ -124,6 +137,8 @@ export type VDomOp =
   | SetEventOp
   | RemoveEventOp
   | SetBindingOp
+  | SetPieceBoundaryOp
+  | ClearPieceBoundaryOp
   | InsertChildOp
   | RemoveNodeOp;
 

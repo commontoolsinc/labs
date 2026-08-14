@@ -667,19 +667,6 @@ export type StorageTransactionStatus =
   };
 
 /**
- * Representation of a storage transaction, which can be used to query facts and
- * assert / retract while maintaining consistency guarantees. Storage ensures
- * that transactions retain consistent view of the whole storage through it's
- * lifetime by notifying pending transaction of every change that is integrated
- * into the storage, if changes affect any data read through a transaction
- * lifecycle it can not be committed because it would violate consistency. If
- * no change occurs or changes do not affect any data reading it would not
- * affect transaction consistency guarantees and therefor committing transaction
- * will send it to an upstream storage provider which will either accept, if no
- * invariants have being invalidated, or reject and fail commit.
- */
-
-/**
  * Options for {@link IStorageTransaction.commit}.
  */
 export interface TransactionCommitOptions {
@@ -704,6 +691,18 @@ export interface TransactionCommitOptions {
   resolveAt?: "coverage" | "verdict";
 }
 
+/**
+ * Representation of a storage transaction, which can be used to query facts and
+ * assert / retract while maintaining consistency guarantees. Storage ensures
+ * that transactions retain consistent view of the whole storage through it's
+ * lifetime by notifying pending transaction of every change that is integrated
+ * into the storage, if changes affect any data read through a transaction
+ * lifecycle it can not be committed because it would violate consistency. If
+ * no change occurs or changes do not affect any data reading it would not
+ * affect transaction consistency guarantees and therefor committing transaction
+ * will send it to an upstream storage provider which will either accept, if no
+ * invariants have being invalidated, or reject and fail commit.
+ */
 export interface IStorageTransaction {
   /**
    * Optional change group used to associate commits with scheduler actions.
@@ -1234,35 +1233,85 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   resetNarrowestReadScope(scope?: CellScope): void;
 
   /**
-   * CFC recording / ownership-transfer API.
+   * Turn lazy materialization on (or off) for this transaction.
    *
-   * The methods below all hand a caller-constructed record into the CFC
-   * subsystem's transaction-scoped state. Each one establishes an
-   * ownership transfer at the call boundary: from the moment the call
-   * returns, the supplied record is owned by the transaction. Callers
-   * MUST NOT subsequently mutate it (or any object reachable from it),
-   * and MUST NOT retain it for use anywhere else that depends on it
-   * remaining mutable.
+   * A marked transaction hands a reader views that resolve each path as it is
+   * touched, rather than a value built in one pass before the reader looks at
+   * any of it. A view also keeps the transaction it was created with, so the
+   * value it describes stays the value that was there when it was taken, and
+   * reading after the transaction finishes throws rather than quietly
+   * answering from committed state.
    *
-   * The CFC subsystem treats these records as identity-stable structural
-   * fingerprints — they participate in canonicalization, sorting, and
-   * `hashStringOf()`-based equality. The CFC implementation is therefore
-   * permitted to `deepFreeze()` the record on entry, both as a tripwire
-   * for accidental mutation and to make it eligible for the
-   * `hashStringOf()` WeakMap cache. The
-   * `record*` methods that take a structurally-shaped record
-   * (`recordCfcDereferenceTrace()` and `recordCfcWritePolicyInput()`)
-   * actively do this on entry; the contract applies uniformly to every
-   * method in the group.
-   *
-   * Callers do not need to freeze the record themselves — the CFC
-   * implementation will, where it's useful. Freezing on the caller side
-   * is equally welcome though, and is often a reasonable choice when
-   * the same record (or sub-objects) is also handed to other consumers
-   * with similar contracts; `deepFreeze()` short-circuits on input
-   * that's already deeply frozen, so a redundant freeze costs almost
-   * nothing.
+   * Unmarked, every read behaves exactly as it did before lazy materialization
+   * existed — including the standing-handle semantics that long-lived
+   * consumers rely on, where a query-result proxy keeps tracking current state
+   * after the transaction it was made against has finished.
    */
+  markLazyMaterialize(enabled?: boolean): void;
+  isLazyMaterialize(): boolean;
+
+  /**
+   * Whether this transaction has written anything yet.
+   *
+   * Lazy materialization reads it to decide whether a view can still describe
+   * one instant: a view resolves each path when it is touched, so once the
+   * transaction has written, a view taken earlier would report the new value
+   * where an eager read hands back a detached one taken before the write.
+   */
+  hasWrites(): boolean;
+
+  /**
+   * Record that a reader touched data its schema does not describe.
+   *
+   * Recorded on the transaction rather than left to the throw alone, because a
+   * reader can catch a `SchemaMismatchError` and carry on. Whoever dispatched
+   * the read checks `takeSchemaRefusal()` after the body returns and disposes
+   * of the run the same way either way.
+   */
+  noteSchemaRefusal(refusal: unknown): void;
+  takeSchemaRefusal(): unknown;
+
+  /**
+   * Withdraw a refusal that never reached the reader.
+   *
+   * A view refuses at the property it is reading and decides at the property
+   * above whether that refusal escapes: one the schema does not require reads
+   * as `undefined` instead, which is what an eager read leaves behind. The
+   * record has to go with the throw it belonged to. Clears only if this exact
+   * refusal is the one held.
+   */
+  clearSchemaRefusal(refusal: unknown): void;
+
+  //
+  // CFC recording / ownership-transfer API
+  //
+  // The methods below all hand a caller-constructed record into the CFC
+  // subsystem's transaction-scoped state. Each one establishes an
+  // ownership transfer at the call boundary: from the moment the call
+  // returns, the supplied record is owned by the transaction. Callers
+  // MUST NOT subsequently mutate it (or any object reachable from it),
+  // and MUST NOT retain it for use anywhere else that depends on it
+  // remaining mutable.
+  //
+  // The CFC subsystem treats these records as identity-stable structural
+  // fingerprints — they participate in canonicalization, sorting, and
+  // `hashStringOf()`-based equality. The CFC implementation is therefore
+  // permitted to `deepFreeze()` the record on entry, both as a tripwire
+  // for accidental mutation and to make it eligible for the
+  // `hashStringOf()` WeakMap cache. The
+  // `record*` methods that take a structurally-shaped record
+  // (`recordCfcDereferenceTrace()` and `recordCfcWritePolicyInput()`)
+  // actively do this on entry; the contract applies uniformly to every
+  // method in the group.
+  //
+  // Callers do not need to freeze the record themselves — the CFC
+  // implementation will, where it's useful. Freezing on the caller side
+  // is equally welcome though, and is often a reasonable choice when
+  // the same record (or sub-objects) is also handed to other consumers
+  // with similar contracts; `deepFreeze()` short-circuits on input
+  // that's already deeply frozen, so a redundant freeze costs almost
+  // nothing.
+  //
 
   /**
    * Records a CFC dereference trace produced by following a write

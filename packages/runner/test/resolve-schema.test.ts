@@ -1,6 +1,8 @@
-// Unit tests for resolveSchema — basic resolution behavior.
-// Note: Robin's #3118 removed the filterAsCell parameter from resolveSchema,
-// so these tests only cover the single-argument form.
+/**
+ * Unit tests for resolveSchema — basic resolution behavior.
+ * Note: Robin's #3118 removed the filterAsCell parameter from resolveSchema,
+ * so these tests only cover the single-argument form.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

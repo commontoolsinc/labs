@@ -1,3 +1,14 @@
+/**
+ * Decides whether a series of measurements is trending, and turns that into
+ * the status and the label a tile shows. A series is read two ways at once:
+ * as a run of flat levels separated by change points, which is what a
+ * regression that lands in one commit looks like, and as a single straight
+ * line, which is what a gradual drift looks like. Whichever describes the
+ * series more closely supplies the change that gets reported. Working in logs
+ * throughout makes the answer a ratio, so a series of milliseconds and a
+ * series of megabytes are judged on the same scale.
+ */
+
 import type { Status } from "./types.ts";
 
 const DAY_MS = 86_400_000;

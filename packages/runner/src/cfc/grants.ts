@@ -1,6 +1,6 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { URI } from "@commonfabric/memory/interface";
 import { getCommitPreconditionsConfig } from "@commonfabric/memory/v2";
 import type {
@@ -338,7 +338,7 @@ const isDid = (value: unknown): value is string =>
 // pattern matching when the entry later lands in a clause — refuse at write.
 const containsVarKey = (value: unknown): boolean => {
   if (Array.isArray(value)) return value.some(containsVarKey);
-  if (!isRecord(value)) return false;
+  if (!isObjectOrArray(value)) return false;
   if (Object.hasOwn(value, "var")) return true;
   return Object.values(value).some(containsVarKey);
 };
@@ -353,7 +353,7 @@ const containsVarKey = (value: unknown): boolean => {
 export const disallowedGrantAudienceEntryReason = (
   entry: unknown,
 ): string | undefined => {
-  if (!isRecord(entry) || Array.isArray(entry)) {
+  if (!isObjectNotArray(entry)) {
     return "audience entries must be principal-like atom records";
   }
   if (isOrClause(entry)) {
@@ -391,7 +391,7 @@ export const prepareCfcGrantWrite = (
   actingPrincipal: string | undefined,
   now: number = Date.now(),
 ): { space: MemorySpace; id: URI; value: CfcGrant } => {
-  if (!isRecord(input) || Array.isArray(input)) {
+  if (!isObjectNotArray(input)) {
     throw new Error("cfc-grant: write input must be an object");
   }
   const { kind, owner, resource, audience } = input;
@@ -453,7 +453,7 @@ export const prepareCfcGrantWrite = (
   if (input.revoked !== undefined) {
     const revoked = input.revoked;
     if (
-      !isRecord(revoked) || typeof revoked.at !== "number" ||
+      !isObjectOrArray(revoked) || typeof revoked.at !== "number" ||
       !Number.isFinite(revoked.at) || !isDid(revoked.by)
     ) {
       throw new Error("cfc-grant: revoked must be { at: number, by: DID }");
@@ -508,7 +508,7 @@ export const verifyCfcGrantDocument = (
   id: string,
   value: unknown,
 ): CfcGrant | undefined => {
-  if (!isRecord(value) || Array.isArray(value)) return undefined;
+  if (!isObjectNotArray(value)) return undefined;
   const candidate = value as Partial<CfcGrant> & Record<string, unknown>;
   if (candidate.version !== CFC_GRANT_VERSION) return undefined;
   if (
@@ -542,7 +542,7 @@ export const verifyCfcGrantDocument = (
   if (candidate.revoked !== undefined) {
     const revoked = candidate.revoked;
     if (
-      !isRecord(revoked) || typeof revoked.at !== "number" ||
+      !isObjectOrArray(revoked) || typeof revoked.at !== "number" ||
       !isDid((revoked as { by?: unknown }).by)
     ) {
       return undefined;

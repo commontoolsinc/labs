@@ -78,9 +78,18 @@ export class EmulatedStorageManager extends StorageManager {
         memoryHost: new URL("memory://"),
       },
       // Single-manager emulation wants prompt fan-out: a zero-delay flush
-      // timer keeps marker delivery in the same scheduling class as the
-      // request round trips that stage it (each is a zero-delay timer
-      // turn), so awaited commits settle without wall-clock coalescing.
+      // keeps marker delivery in the same scheduling class as the request
+      // round trips that stage it (each is one turn of the event loop), so
+      // awaited commits settle without wall-clock coalescing.
+      //
+      // The turn is the point here, not the delay. A deployed server does
+      // its own work on microtasks and then the sync frame crosses a real
+      // boundary before any client sees it. Fan-out that arrives inside the
+      // committing caller's own microtask cascade puts a client where no
+      // deployment puts it, and leaves whatever races live at that boundary
+      // invisible. Zero is as short as the boundary gets; it is still a
+      // boundary.
+      //
       // Harnesses that share one server across managers use connectTo()
       // and pick their own cadence — "manual" for controlled-staleness
       // premises that depend on frames NOT spreading until the test says.

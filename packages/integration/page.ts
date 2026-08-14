@@ -4,7 +4,6 @@ import {
   ElementHandle as AstralElementHandle,
   EvaluateFunction,
   EvaluateOptions,
-  GoToOptions,
   Keyboard,
   KeyboardTypeOptions,
   Page as AstralPage,
@@ -20,6 +19,7 @@ import type {
   SelectorOptions,
 } from "./astral-adapter.ts";
 import {
+  measureRetainedContentQuad,
   queryAllPierce,
   queryPierce,
   waitForPierceSelector,
@@ -29,6 +29,11 @@ import { Mutable } from "@commonfabric/utils/types";
 import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { ConsoleMethod } from "./console.ts";
+
+export interface NavigationOptions {
+  waitUntil?: "load" | "none";
+  referrer?: string;
+}
 
 // To handle `console` events from `Page`, logging to outer context:
 //
@@ -71,6 +76,7 @@ export class Page extends EventTarget {
   private decoratedElements = new WeakSet<AstralElementHandle>();
   private patchedKeyboard?: Keyboard;
   private originalKeyboardType?: Keyboard["type"];
+  private navigationQueue: Promise<void> = Promise.resolve();
 
   constructor(page: AstralPage, options: { timeout: number }) {
     super();
@@ -326,18 +332,217 @@ export class Page extends EventTarget {
     return await this.page!.evaluate(evaluate, evaluateOptions);
   }
 
-  // Passthru of `@astral/astral`'s `Page#goto`
-  async goto(url: string, options?: GoToOptions): Promise<void> {
+  // Navigates through the browser protocol and waits for the requested
+  // lifecycle event.
+  async goto(url: string, options?: NavigationOptions): Promise<void> {
     this.checkIsOk();
-    await this.page!.goto(url, options);
+    await this.runNavigation(() => this.navigate(url, options));
+  }
+
+  private async runNavigation(operation: () => Promise<void>): Promise<void> {
+    const previousNavigation = this.navigationQueue;
+    let releaseNavigation!: () => void;
+    this.navigationQueue = new Promise((resolve) => {
+      releaseNavigation = resolve;
+    });
+    await previousNavigation;
+    try {
+      await operation();
+    } finally {
+      releaseNavigation();
+    }
+  }
+
+  private async navigate(
+    url: string,
+    options?: NavigationOptions,
+  ): Promise<void> {
+    const waitUntil = options?.waitUntil;
+    const navigateOptions = options?.referrer === undefined
+      ? { url }
+      : { url, referrer: options.referrer };
+
+    const celestial = this.page!.unsafelyGetCelestialBindings();
+    if (waitUntil === "none") {
+      const result = await celestial.Page.navigate(navigateOptions);
+      if (result.errorText) throw new Error(result.errorText);
+      await this.afterNavigation?.();
+      return;
+    }
+    const lifecycleNames = waitUntil === "load"
+      ? new Set(["load"])
+      : new Set(["DOMContentLoaded", "networkAlmostIdle"]);
+    type NavigationSignal =
+      | { type: "lifecycle"; loaderId: string; name: string }
+      | { type: "frame-detached"; frameId: string }
+      | { type: "frame-stopped"; frameId: string }
+      | {
+        type: "frame-navigated";
+        frameId: string;
+        loaderId: string;
+      }
+      | { type: "inspector-detached"; reason: string };
+    const navigationSignals: NavigationSignal[] = [];
+    let terminalError: Error | undefined;
+    let inspectorDetached = false;
+    let loaderEstablished = false;
+    let lifecycleAccepted = false;
+    let resolveLifecycle!: () => void;
+    const lifecycleReady = new Promise<void>((resolve) => {
+      resolveLifecycle = resolve;
+    });
+    let loaderId: string | undefined;
+    let frameId: string | undefined;
+    const handleNavigationSignal = (signal: NavigationSignal) => {
+      switch (signal.type) {
+        case "lifecycle":
+          if (signal.loaderId === loaderId) {
+            loaderEstablished = true;
+            if (
+              terminalError === undefined && lifecycleNames.has(signal.name)
+            ) {
+              lifecycleAccepted = true;
+              resolveLifecycle();
+            }
+          }
+          break;
+        case "frame-detached":
+          if (signal.frameId === frameId) {
+            terminalError = new Error("Navigation frame was detached.");
+            resolveLifecycle();
+          }
+          break;
+        case "frame-stopped":
+          if (
+            signal.frameId === frameId && loaderEstablished &&
+            !lifecycleAccepted
+          ) {
+            terminalError = new Error(
+              "Navigation frame stopped loading before it became ready.",
+            );
+            resolveLifecycle();
+          }
+          break;
+        case "frame-navigated":
+          if (signal.frameId !== frameId) break;
+          if (signal.loaderId === loaderId) {
+            loaderEstablished = true;
+          } else if (loaderEstablished && !lifecycleAccepted) {
+            terminalError = new Error(
+              "Navigation was superseded by another document.",
+            );
+            resolveLifecycle();
+          }
+          break;
+        case "inspector-detached":
+          inspectorDetached = true;
+          terminalError = new Error(
+            `Browser session detached during navigation: ${signal.reason}`,
+          );
+          resolveLifecycle();
+          break;
+      }
+    };
+    const recordNavigationSignal = (signal: NavigationSignal) => {
+      navigationSignals.push(signal);
+      handleNavigationSignal(signal);
+    };
+    const lifecycleListener = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        loaderId: string;
+        name: string;
+      }>).detail;
+      recordNavigationSignal({ type: "lifecycle", ...detail });
+    };
+    const frameDetachedListener = (event: Event) => {
+      const detail = (event as CustomEvent<{ frameId: string }>).detail;
+      recordNavigationSignal({ type: "frame-detached", ...detail });
+    };
+    const frameStoppedListener = (event: Event) => {
+      const detail = (event as CustomEvent<{ frameId: string }>).detail;
+      recordNavigationSignal({ type: "frame-stopped", ...detail });
+    };
+    const frameNavigatedListener = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        frame: { id: string; loaderId: string };
+      }>).detail;
+      recordNavigationSignal({
+        type: "frame-navigated",
+        frameId: detail.frame.id,
+        loaderId: detail.frame.loaderId,
+      });
+    };
+    const inspectorDetachedListener = (event: Event) => {
+      const detail = (event as CustomEvent<{ reason: string }>).detail;
+      recordNavigationSignal({ type: "inspector-detached", ...detail });
+    };
+
+    await celestial.Page.setLifecycleEventsEnabled({ enabled: true });
+    celestial.addEventListener("Page.lifecycleEvent", lifecycleListener);
+    celestial.addEventListener("Page.frameDetached", frameDetachedListener);
+    celestial.addEventListener(
+      "Page.frameStoppedLoading",
+      frameStoppedListener,
+    );
+    celestial.addEventListener("Page.frameNavigated", frameNavigatedListener);
+    celestial.addEventListener("Inspector.detached", inspectorDetachedListener);
+    let navigationFailed = false;
+    let navigationError: unknown;
+    try {
+      const result = await celestial.Page.navigate(navigateOptions);
+      if (result.errorText) throw new Error(result.errorText);
+      loaderId = result.loaderId;
+      frameId = result.frameId;
+      for (const signal of navigationSignals) handleNavigationSignal(signal);
+      if (terminalError) throw terminalError;
+      if (loaderId !== undefined) {
+        await lifecycleReady;
+        if (terminalError) throw terminalError;
+      }
+    } catch (error) {
+      navigationFailed = true;
+      navigationError = error;
+    } finally {
+      celestial.removeEventListener("Page.lifecycleEvent", lifecycleListener);
+      celestial.removeEventListener(
+        "Page.frameDetached",
+        frameDetachedListener,
+      );
+      celestial.removeEventListener(
+        "Page.frameStoppedLoading",
+        frameStoppedListener,
+      );
+      celestial.removeEventListener(
+        "Page.frameNavigated",
+        frameNavigatedListener,
+      );
+      celestial.removeEventListener(
+        "Inspector.detached",
+        inspectorDetachedListener,
+      );
+    }
+    let cleanupFailed = false;
+    let cleanupError: unknown;
+    if (!inspectorDetached) {
+      try {
+        await celestial.Page.setLifecycleEventsEnabled({ enabled: false });
+      } catch (error) {
+        cleanupFailed = true;
+        cleanupError = error;
+      }
+    }
+    if (navigationFailed) throw navigationError;
+    if (cleanupFailed) throw cleanupError;
     await this.afterNavigation?.();
   }
 
   // Passthru of `@astral/astral`'s `Page#reload`
   async reload(options?: WaitForOptions): Promise<void> {
     this.checkIsOk();
-    await this.page!.reload(options);
-    await this.afterNavigation?.();
+    await this.runNavigation(async () => {
+      await this.page!.reload(options);
+      await this.afterNavigation?.();
+    });
   }
 
   // Passthru of `@astral/astral`'s `Page#waitForSelector`.
@@ -553,7 +758,7 @@ export class Page extends EventTarget {
     element: AstralElementHandle,
     options?: Parameters<AstralElementHandle["click"]>[0],
   ): Promise<void> {
-    const aim = await aimAtElement(element, options?.offset);
+    const aim = await aimAtElement(this.page!, element, options?.offset);
     if ("unclickable" in aim) {
       throw new Error(`Cannot click ${describeAimTarget(aim)}`);
     }
@@ -637,7 +842,7 @@ export class Page extends EventTarget {
 export type AimResult =
   | { x: number; y: number }
   | {
-    unclickable: "detached" | "not-rendered" | "unresolvable";
+    unclickable: "detached" | "not-rendered" | "off-page" | "unresolvable";
     tag?: string;
     id?: string;
     rootHost?: string;
@@ -648,30 +853,55 @@ export type AimResult =
     detail?: string;
   };
 
+type RetainedAim = {
+  retained: true;
+  tag: string;
+  id: string;
+  rootHost?: string;
+  width: number;
+  height: number;
+  pageWidth: number;
+  pageHeight: number;
+  rect: { x: number; y: number; width: number; height: number };
+};
+
 /**
- * Scroll `element` into view and measure the point to click, both inside a
- * single page turn.
+ * Scroll `element` into view and measure the point to click.
  *
- * Aiming is one turn on purpose. Scrolling and measuring as two protocol
- * commands leaves the page free to relayout or rebuild between them, and the
- * second command then measures something other than what the first scrolled to.
- * Doing both in the page means the coordinates describe the element as it was
- * at one instant, and the only remaining gap is the one dispatch that follows.
+ * A center aim scrolls and measures in one page turn. An offset aim scrolls and
+ * retains the exact element in that turn, then asks CDP for its composed content
+ * quad. The remote-object reference survives DOM-agent node-id invalidation and
+ * CDP accounts for ancestor transforms, 3D projection, and SVG layout.
  *
- * An element with no layout box yields `unclickable` naming what is wrong with
- * it, rather than an empty measurement the caller has to guess at.
+ * The point is the middle of the part of the element's box that lies inside the
+ * page, which for an element the page has room for is the middle of the whole
+ * box. An element reaching past the edge of the page can have its middle
+ * outside the page, and the browser accepts a trusted click dispatched there,
+ * delivers it to nothing, and reports no error for having done so. What the
+ * page shows of an element is a wider question than this: an ancestor's
+ * overflow can clip it, and anything painted over it can cover it. Neither
+ * moves this point.
+ *
+ * An element with no layout box, and one with no part of it inside the page,
+ * yield `unclickable` naming what is wrong with it, rather than an empty
+ * measurement the caller has to guess at.
  */
+let aimElementSequence = 0;
+
 async function aimAtElement(
+  page: AstralPage,
   element: AstralElementHandle,
   offset?: { x: number; y: number },
 ): Promise<AimResult> {
+  const retainedKey = offset
+    ? `__common_tools_aim_element_${++aimElementSequence}`
+    : null;
   try {
-    return await element.evaluate(
+    const prepared = await element.evaluate(
       (
         el: Element,
-        offsetX: number | null,
-        offsetY: number | null,
-      ): AimResult => {
+        retainedKey: string | null,
+      ): AimResult | RetainedAim => {
         const describe = () => ({
           tag: el.tagName.toLowerCase(),
           id: el.id,
@@ -703,12 +933,89 @@ async function aimAtElement(
             height: rect.height,
           };
         }
-        return offsetX === null || offsetY === null
-          ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-          : { x: rect.x + offsetX, y: rect.y + offsetY };
+        // The area a click can land in, in the same coordinates the rect is
+        // reported in. The root element's client box rather than the window,
+        // because a classic scrollbar takes columns the window counts and a
+        // click cannot reach.
+        const pageWidth = document.documentElement.clientWidth;
+        const pageHeight = document.documentElement.clientHeight;
+        const left = Math.max(rect.x, 0);
+        const right = Math.min(rect.x + rect.width, pageWidth);
+        const top = Math.max(rect.y, 0);
+        const bottom = Math.min(rect.y + rect.height, pageHeight);
+        if (right <= left || bottom <= top) {
+          return {
+            unclickable: "off-page",
+            ...describe(),
+            width: rect.width,
+            height: rect.height,
+            detail: `box ${JSON.stringify(rect)}, ` +
+              `page ${
+                JSON.stringify({ width: pageWidth, height: pageHeight })
+              }`,
+          };
+        }
+        if (retainedKey !== null) {
+          Object.defineProperty(globalThis, retainedKey, {
+            configurable: true,
+            value: el,
+          });
+          return {
+            retained: true,
+            ...describe(),
+            width: rect.width,
+            height: rect.height,
+            pageWidth,
+            pageHeight,
+            rect: {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            },
+          };
+        }
+
+        return { x: (left + right) / 2, y: (top + bottom) / 2 };
       },
-      { args: [offset?.x ?? null, offset?.y ?? null] },
+      { args: [retainedKey] },
     );
+    if (!("retained" in prepared)) return prepared;
+
+    const contentQuad = await measureRetainedContentQuad(page, retainedKey!);
+    let contentOrigin = contentQuad[0];
+    for (const point of contentQuad) {
+      // This deliberately mirrors published Astral's definition of top-left.
+      if (point.x < contentOrigin.x && point.y < contentOrigin.y) {
+        contentOrigin = point;
+      }
+    }
+    const point = {
+      x: contentOrigin.x + offset!.x,
+      y: contentOrigin.y + offset!.y,
+    };
+    if (
+      point.x < 0 || point.x >= prepared.pageWidth ||
+      point.y < 0 || point.y >= prepared.pageHeight
+    ) {
+      return {
+        unclickable: "off-page",
+        tag: prepared.tag,
+        id: prepared.id,
+        rootHost: prepared.rootHost,
+        width: prepared.width,
+        height: prepared.height,
+        detail: `box ${JSON.stringify(prepared.rect)}, ` +
+          `point ${JSON.stringify(point)}, ` +
+          `page ${
+            JSON.stringify({
+              width: prepared.pageWidth,
+              height: prepared.pageHeight,
+            })
+          }`,
+      };
+    }
+    return point;
   } catch (error) {
     // A handle whose node the DOM agent no longer knows about cannot be
     // resolved to a page object at all. That happens to every outstanding
@@ -729,6 +1036,9 @@ function describeAimTarget(aim: Extract<AimResult, { unclickable: string }>) {
       return `${named}${inside}: it has no layout box ` +
         `(display: ${aim.display}, visibility: ${aim.visibility}, ` +
         `${aim.width}x${aim.height})`;
+    case "off-page":
+      return `${named}${inside}: the point to click lies outside the page, ` +
+        `so a click there would reach nothing (${aim.detail})`;
     default:
       return `the element: its handle no longer resolves to a node ` +
         `(${aim.detail})`;

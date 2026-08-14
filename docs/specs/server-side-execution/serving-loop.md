@@ -157,9 +157,12 @@ processes* (deploy overlap, partition) it holds via the lease:
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
   match the live lease. This is one equality check, not admission
-  machinery. (Stage F adds the envelope-session half of the same
-  check — protocol.md §2's derived-envelope defense-in-depth, RULED
-  2026-08-05.)
+  machinery. It binds fresh commits: an exact replay of an already-accepted
+  commit answers from the store first (replay detection precedes
+  current-authority admission), so a network retry of an accepted commit is
+  never re-admitted against current authority. (Stage F adds the
+  envelope-session half of the same check — protocol.md §2's
+  derived-envelope defense-in-depth, RULED 2026-08-05.)
 - Liveness is judged by the MEMORY SERVER's clock: admission compares
   `expiresAt` against its own clock, and an expired row matches NOBODY —
   a derived commit under an expired lease is rejected even before any

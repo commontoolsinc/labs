@@ -4,7 +4,7 @@
  * Exercises the thin extractor wrappers that pass a shared Google auth cell
  * through to GmailImporter, GmailExtractor, and BillExtractor children.
  */
-import { assert, NAME, pattern, Writable } from "commonfabric";
+import { assert, NAME, pattern, TESTS, Writable } from "commonfabric";
 import type { Auth } from "../core/gmail-importer.tsx";
 import BofABillTracker from "./bofa-bill-tracker.tsx";
 import ChaseBillTracker from "./chase-bill-tracker.tsx";
@@ -40,7 +40,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [{ assertion: assert_bill_wrappers_start_empty }],
+    [TESTS]: [{ assertion: assert_bill_wrappers_start_empty }],
     bofa,
     chase,
     pge,

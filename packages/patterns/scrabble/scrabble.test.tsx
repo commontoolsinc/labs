@@ -1,4 +1,4 @@
-import { action, assert, computed, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import Scrabble, { type Letter } from "./scrabble.tsx";
 
 const tile = (char: string, id: string): Letter => ({
@@ -84,7 +84,7 @@ export default pattern(() => {
     scrabble.message === "You already joined as Alice."
   );
 
-  const assert_center_word_submitted = computed(() => {
+  const assert_center_word_submitted = assert(() => {
     const board = scrabble.board;
     const player = scrabble.players[0];
     const lastEvent = scrabble.gameEvents.at(-1);
@@ -100,7 +100,7 @@ export default pattern(() => {
       scrabble.bagIndex === 9 &&
       player?.score === 4 &&
       lastEvent?.type === "word" &&
-      lastEvent.details.includes("AT (+4)") &&
+      lastEvent?.details?.includes("AT (+4)") &&
       scrabble.message.startsWith("Scored 4:");
   });
 
@@ -121,7 +121,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join_alice },
       { action: action_try_rename_after_join },
       { assertion: assert_joined_name_is_immutable },

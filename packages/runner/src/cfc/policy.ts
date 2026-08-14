@@ -1,6 +1,6 @@
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { type AtomPattern, isAtomVarPlaceholder } from "./atom-pattern.ts";
 
 export const CFC_POLICY_MANIFEST_ID_PREFIX = "of:cfc-policy-manifest:";
@@ -245,13 +245,13 @@ const rejectUnknownKeys = (
 };
 
 // A PLAIN object (prototype `Object.prototype` or null) — the shape authored
-// TS literals and parsed JSON produce. `isRecord` alone admits `Map`, `Set`,
+// TS literals and parsed JSON produce. `isObjectOrArray` alone admits `Map`, `Set`,
 // and class instances, whose own-enumerable string keys are usually empty, so
 // the field-by-field validation below would read NO guards and wave through
 // an unguarded rule (cubic P1 on #4562). Config that is not a plain object
 // fails closed here.
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
-  if (!isRecord(value) || Array.isArray(value)) return false;
+  if (!isObjectNotArray(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 };
@@ -295,7 +295,7 @@ const validateTemplatePattern = (
     );
     return;
   }
-  if (!isRecord(value)) return;
+  if (!isObjectOrArray(value)) return;
   if (Object.hasOwn(value, "var")) {
     if (!isAtomVarPlaceholder(value)) {
       throw new Error(`cfcPolicyManifest: malformed variable in ${where}`);
@@ -333,7 +333,7 @@ const collectPatternVariables = (
     value.forEach((entry) => collectPatternVariables(entry, variables));
     return;
   }
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     Object.values(value).forEach((field) =>
       collectPatternVariables(field, variables)
     );

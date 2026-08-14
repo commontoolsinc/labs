@@ -110,6 +110,7 @@ import { ModuleRegistry } from "./module.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
@@ -233,6 +234,15 @@ export interface ExperimentalOptions {
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
+  /**
+   * Materialize a lift's argument lazily: the body reads the paths it touches
+   * and nothing else, instead of the whole of what its schema selects. A
+   * reader that touches data the schema no longer describes refuses, and the
+   * run is disposed of as an argument that did not resolve. On by default; pass
+   * `false` as a temporary rollback override. See
+   * `docs/plans/lazy-cell-materialization.md`.
+   */
+  lazyMaterialization?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -1024,6 +1034,7 @@ export class Runtime {
       commitPreconditions: undefined,
       plainResultReceipts: undefined,
       computedCellIds: undefined,
+      lazyMaterialization: undefined,
       eagerSourceAnnotation: undefined,
       serverExecution: undefined,
       ...options.experimental,
@@ -1054,6 +1065,7 @@ export class Runtime {
     // `true` override.
     this.experimental.computedCellIds ??= true;
     this.experimental.plainResultReceipts ??= true;
+    this.experimental.lazyMaterialization ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -1848,7 +1860,19 @@ export class Runtime {
    * locally replicated memory spaces. Transaction allows reading from many
    * multiple spaces but writing only to one space.
    *
-   * If the transaction fails, it will be retried up to maxRetries times.
+   * If the transaction fails with a RETRYABLE commit rejection, it will be
+   * retried up to maxRetries times. Retryability is decided by the shared
+   * rejection vocabulary (`isRetryableCommitRejection`, storage/rejection.ts),
+   * which is an allow-list: a stale basis (server conflict or the local
+   * inconsistency guard), a liveness failure the memory client heals on its own
+   * (a transport failure, an undecodable frame), a discarded attempt
+   * (`tx.abort()` or a CFC pre-storage refusal), or an authorization denial the
+   * server itself marked `retriable`. Every other rejection — an ACL/protocol
+   * refusal, an authorization denial, a precondition failure, a commit-rule
+   * violation, a `SessionError` (nothing on this path remounts the session, so
+   * every attempt reuses the handle the server just refused) — is returned on
+   * the FIRST attempt, because re-running cannot change the outcome and each
+   * doomed attempt costs a round-trip plus a subscriber revert notification.
    *
    * @param fn - Function to execute with the transaction.
    * @param maxRetries - Maximum number of retries.
@@ -1882,7 +1906,7 @@ export class Runtime {
     this.prepareTxForCommit(tx);
     return tx.commit().then(async ({ error }) => {
       if (error) {
-        if (maxRetries > 0) {
+        if (maxRetries > 0 && isRetryableCommitRejection(error)) {
           // A CONFLICT means this replica is behind the authoritative
           // version: re-running immediately re-reads the same stale local
           // state and fails identically, so without waiting the retries all
@@ -2237,7 +2261,9 @@ export class Runtime {
     // artifact's encodable form is walked in turn, so a cell inside one is
     // reached as well.
     const asDataURI = dataUriFromValue(
-      fabricFromNativeValue(flattenBuilderArtifacts(data, cellAsLink)),
+      fabricFromNativeValue(
+        flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
+      ),
     );
     return createCell(
       this,

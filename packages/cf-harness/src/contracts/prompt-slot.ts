@@ -1,5 +1,5 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 export type PromptSlotRole = "direct-command" | "context" | "quote";
 
@@ -48,7 +48,7 @@ const PROMPT_SLOT_ROLES: readonly PromptSlotRole[] = [
 ];
 
 const isJsonObject = (input: unknown): input is Record<string, unknown> =>
-  isRecord(input) && !Array.isArray(input);
+  isObjectNotArray(input);
 
 const isPromptSlotRole = (input: unknown): input is PromptSlotRole =>
   typeof input === "string" &&

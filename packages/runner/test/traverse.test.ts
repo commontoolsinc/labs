@@ -2139,7 +2139,7 @@ describe("mergeAnyOfMatches", () => {
   // CT-1562 / B2: when an anyOf produces multiple successful matches and all
   // of them are arrays, the current `Object.assign({}, ...arrays)` merge
   // strips array-ness, returning `{ "0": …, "1": … }` instead of `[…, …]`.
-  // Arrays satisfy `isRecord` (typeof [] === "object" && [] !== null), so
+  // Arrays satisfy `isObjectOrArray` (typeof [] === "object" && [] !== null), so
   // the object-merge branch fires erroneously.
   //
   // The existing object-merge semantic is intentional for object branches

@@ -3,13 +3,7 @@ import { z } from "zod";
 
 import { resolveGitSha } from "@/lib/build-info.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type {
-  DashRoute,
-  IndexRoute,
-  LLMRoute,
-  StatsRoute,
-} from "./health.routes.ts";
-import { checkLLMHealth } from "./llm-health.service.ts";
+import type { DashRoute, IndexRoute, StatsRoute } from "./health.routes.ts";
 import { getSlowQueries } from "@commonfabric/memory/v2/server";
 import { getServingLoopStats } from "@commonfabric/runner/executor/stats";
 import {
@@ -28,26 +22,6 @@ export const HealthResponseSchema = z.object({
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
 const GIT_SHA = resolveGitSha();
-
-export const LLMHealthResponseSchema = z.object({
-  status: z.enum(["healthy", "degraded", "unhealthy"]),
-  timestamp: z.number(),
-  summary: z.object({
-    total: z.number(),
-    healthy: z.number(),
-    failed: z.number(),
-  }),
-  models: z.record(
-    z.string(),
-    z.object({
-      status: z.enum(["healthy", "failed"]),
-      latencyMs: z.number().nullable(),
-      error: z.string().optional(),
-    }),
-  ),
-  alertSent: z.boolean(),
-});
-export type LLMHealthResponse = z.infer<typeof LLMHealthResponseSchema>;
 
 /** Header carrying the same commit as the body's `gitSha`. Clients that only
  * need liveness + version (the cf CLI) read this instead of the body, so
@@ -575,23 +549,4 @@ setInterval(refresh, 5000);
 </html>`;
 
   return c.html(html);
-};
-
-export const llm: AppRouteHandler<LLMRoute> = async (c) => {
-  const { verbose, alert, models: modelFilter, forceAlert } = c.req.query();
-
-  // Call the service to perform the health check
-  const result = await checkLLMHealth({
-    modelFilter,
-    isVerbose: verbose === "true",
-    shouldAlert: alert === "true",
-    shouldForceAlert: forceAlert === "true",
-  });
-
-  // Return appropriate status code based on health status
-  const statusCode = result.status === "unhealthy"
-    ? HttpStatusCodes.SERVICE_UNAVAILABLE
-    : HttpStatusCodes.OK;
-
-  return c.json(result, statusCode);
 };

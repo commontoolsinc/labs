@@ -4,14 +4,17 @@
 # Check syntax (fast)
 deno task cf check pattern.tsx --no-run
 
-# Test locally
+# Check graph construction
 deno task cf check pattern.tsx
 
-# Deploy
-deno task cf piece new ... pattern.tsx
+# Run every authored automated pattern test
+deno task cf test pattern.test.tsx
 
-# Update existing (faster iteration)
-deno task cf piece setsrc ... --piece PIECE_ID pattern.tsx
+# Deploy with every test entry attached
+deno task cf piece new ... --test pattern.test.tsx pattern.tsx
+
+# Update existing and retain the complete test package
+deno task cf piece setsrc ... --test pattern.test.tsx --piece PIECE_ID pattern.tsx
 
 # Inspect data
 deno task cf piece inspect ... --piece PIECE_ID
@@ -22,7 +25,12 @@ deno task cf piece link ... editor-id/items viewer-id/items
 
 **Tips:**
 - Use `check` first to catch TypeScript errors
+- Write automated pattern tests for new or changed behavior, run every test
+  entry with `cf test`, and repeat `--test` for every entry during deployment.
+  Deployment packages and type-checks attached tests but does not run them.
 - Deploy once, then use `setsrc` for updates
+- Repeat the complete set of `--test` flags on every `setsrc`. Each update
+  defines a complete source revision, so omitted test roots are not retained.
 - `setsrc` preserves `WriteAuthorizedBy` authority across changed modules when
   the old and new recursive source closures contain the same normalized module
   path. The handoff is scoped to the space whose authenticated cache documents
@@ -71,4 +79,5 @@ deno task cf piece link ... editor-id/items viewer-id/items
   bypass compilation, normal value validation, or atomic stale-update checks.
   `piece new` accepts the same flag for deploy-script symmetry, but a fresh
   piece has no predecessor schema to compare.
-- Test one feature at a time
+- Test one feature at a time. Manual CLI and browser checks complement automated
+  pattern tests; they do not replace them.

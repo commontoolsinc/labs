@@ -29,7 +29,7 @@ import {
   symbolHasDeprecatedTag,
 } from "../doc-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 const logger = getLogger("schema-generator.object", {
   enabled: true,
@@ -330,7 +330,7 @@ export class ObjectFormatter implements TypeFormatter {
         context,
         propTypeNode,
       );
-      if (isRecord(generated)) {
+      if (isObjectOrArray(generated)) {
         attachDeprecatedStreamMark(
           generated as Record<string, unknown>,
           prop,
@@ -339,7 +339,7 @@ export class ObjectFormatter implements TypeFormatter {
       }
       // Attach property description from JSDoc (if any)
       const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
-      if (text && isRecord(generated)) {
+      if (text && isObjectOrArray(generated)) {
         const conflicts = all.filter((s) => s && s !== text);
         (generated as Record<string, unknown>).description = text;
         attachDocTags(generated as Record<string, unknown>, text);
@@ -398,7 +398,7 @@ export class ObjectFormatter implements TypeFormatter {
           }
         }
       }
-      if (foundDocs.length > 0 && isRecord(apSchema)) {
+      if (foundDocs.length > 0 && isObjectOrArray(apSchema)) {
         (apSchema as Record<string, unknown>).description = foundDocs[0]!;
         attachDocTags(apSchema as Record<string, unknown>, foundDocs[0]!);
         if (foundDocs.length > 1) {

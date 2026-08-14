@@ -689,8 +689,6 @@ function tokenAt(sf: ts.SourceFile, pos: number): ts.Node {
   }
 }
 
-/** Leaf tokens whose start lies in [from, to). The walk prunes subtrees that do
- * not overlap the range, so it costs the range size, not the document size. */
 /** Whether `kind` is a JSDoc node. The token walk does not descend into these:
  * a `{@link Name}` tag parses `Name` as an Identifier leaf, which would split
  * the comment and leave the text after it uncoloured — a JSDoc comment stays
@@ -699,6 +697,8 @@ function isJSDocNode(kind: ts.SyntaxKind): boolean {
   return kind >= SK.FirstJSDocNode && kind <= SK.LastJSDocNode;
 }
 
+/** Leaf tokens whose start lies in [from, to). The walk prunes subtrees that do
+ * not overlap the range, so it costs the range size, not the document size. */
 function collectTokensInRange(
   sf: ts.SourceFile,
   from: number,

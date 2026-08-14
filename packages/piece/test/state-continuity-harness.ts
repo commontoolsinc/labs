@@ -415,9 +415,6 @@ async function seedSpaceStore(
   await Deno.copyFile(snapshotPath, target);
 }
 
-/** The root key a fixture uses when it holds exactly one pattern. */
-export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
-
 /**
  * The cause of a captured space's root cell — shared by the harness helper
  * below and by the capture, which pins the test pattern's result cell to it.
@@ -429,30 +426,24 @@ export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
  * `Date.now()` into its cause for the same reason, so a root fixture has to go
  * around that path.)
  *
- * `key` is what keeps that determinism from becoming ALIASING. `getCell`
- * derives the entity id as `createRef({}, cause)` (`runtime.ts`), and that
- * derivation does not include the space — so a single fixed cause would give
- * every root in every fixture the same entity id. Within one space store that
- * is a silent collision: materializing a second pattern would stamp its
- * identity over the first pattern's root, no error, and the fixture would
- * replay something nobody captured. One key per pattern keeps roots distinct
- * while each stays addressable across captures.
+ * A fixture pins exactly one root under this cause. `getCell` derives the
+ * entity id as `createRef({}, cause)` (`runtime.ts`), and that derivation does
+ * not include the space, so two roots caused this way in one space store are
+ * one cell. The other patterns a fixture holds are reached by the cell ids its
+ * manifest records, through `materializeOnCell`.
  */
-export function vintageRootCause(
-  key: string = DEFAULT_VINTAGE_ROOT_KEY,
-): { stateContinuity: string } {
-  return { stateContinuity: key };
+export function vintageRootCause(): { stateContinuity: string } {
+  return { stateContinuity: "vintage-root" };
 }
 
 /** A stable root cell for a captured space, addressable across captures. */
 export function vintageRoot<T>(
   vintage: VintageRuntime,
   schema: unknown,
-  key: string = DEFAULT_VINTAGE_ROOT_KEY,
 ): Cell<T> {
   return vintage.runtime.getCell<T>(
     vintage.space as never,
-    vintageRootCause(key),
+    vintageRootCause(),
     schema as never,
   );
 }
@@ -582,13 +573,8 @@ export async function readVintageManifest(
 export async function vintageArgumentLink(
   vintage: VintageRuntime,
   resultSchema: unknown,
-  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
 ): Promise<NormalizedFullLink> {
-  const root = vintageRoot<Record<string, unknown>>(
-    vintage,
-    resultSchema,
-    rootKey,
-  );
+  const root = vintageRoot<Record<string, unknown>>(vintage, resultSchema);
   await root.sync();
   const link = getMetaLink(root as never, "argument");
   if (link === undefined) {
@@ -829,15 +815,6 @@ export async function readStateUnder(
 }
 
 /**
- * A captured root's state, read the way the version that WROTE it saw it.
- *
- * Read under the root's OWN stored result schema, which it carries in meta — so
- * the writing version's view of its data is recoverable without its source, and
- * without this replay having to decide what that view should be. Relaxed at its
- * `unknown` positions first — see `schemaRelaxedForComparison` for what that
- * buys and why it is still the writer's own schema.
- */
-/**
  * The result schema a root carries in meta, or `undefined` if it carries none.
  *
  * Split out so a caller reporting a failed read can say WHICH half failed —
@@ -864,6 +841,15 @@ export async function readStoredResultSchema(
   }
 }
 
+/**
+ * A captured root's state, read the way the version that WROTE it saw it.
+ *
+ * Read under the root's OWN stored result schema, which it carries in meta — so
+ * the writing version's view of its data is recoverable without its source, and
+ * without this replay having to decide what that view should be. Relaxed at its
+ * `unknown` positions first — see `schemaRelaxedForComparison` for what that
+ * buys and why it is still the writer's own schema.
+ */
 export async function readVintageState(
   vintage: VintageRuntime,
   space: string,
@@ -1274,13 +1260,8 @@ export async function vintageHoldsRoot(
  */
 export async function vintageRootHasState(
   vintage: VintageRuntime,
-  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
 ): Promise<boolean> {
-  const root = vintageRoot<Record<string, unknown>>(
-    vintage,
-    undefined,
-    rootKey,
-  );
+  const root = vintageRoot<Record<string, unknown>>(vintage, undefined);
   await root.sync();
   try {
     return isPresentRootValue(root.get());
@@ -1384,12 +1365,11 @@ export interface MaterializeOutcome {
 export async function materializeOver(
   vintage: VintageRuntime,
   program: RuntimeProgram,
-  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
 ): Promise<MaterializeOutcome> {
   return await materializeOnCell(
     vintage,
     program,
-    (v, schema) => vintageRoot<Record<string, unknown>>(v, schema, rootKey),
+    (v, schema) => vintageRoot<Record<string, unknown>>(v, schema),
   );
 }
 

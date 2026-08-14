@@ -160,6 +160,118 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(typeof utilExports["triple"]).toBe("function");
   });
 
+  it("retains source roots without evaluating them", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      sourceRoots: ["/main.test.tsx"],
+      files: [
+        {
+          name: "/main.tsx",
+          contents: "export default 42;",
+        },
+        {
+          name: "/main.test.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "export default pattern(() => ({ test: true }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    expect(
+      [...graph.specifierByPath.keys()].some((path) =>
+        path.endsWith("/main.test.tsx")
+      ),
+    ).toBe(true);
+
+    const result = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
+    expect(result.main?.default).toBe(42);
+    expect(
+      Object.keys(result.exportMap ?? {}).some((path) =>
+        path.endsWith("/main.test.tsx")
+      ),
+    ).toBe(false);
+    expect(graph.registrationSink.size).toBe(0);
+  });
+
+  it("separates load identities for different source-root sets", async () => {
+    const files = [
+      {
+        name: "/main.tsx",
+        contents: "export default 42;",
+      },
+      {
+        name: "/a.test.tsx",
+        contents: [
+          'import "./b.test.tsx";',
+          'import type { Marker } from "./types.d.ts";',
+          "export type TestMarker = Marker;",
+          "export default 1;",
+        ].join("\n"),
+      },
+      {
+        name: "/b.test.tsx",
+        contents: "export default 2;",
+      },
+      {
+        name: "/types.d.ts",
+        contents: "export interface Marker { value: number; }",
+      },
+    ];
+
+    const aOnly = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      sourceRoots: ["/a.test.tsx"],
+    });
+    const both = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      sourceRoots: ["/a.test.tsx", "/b.test.tsx"],
+    });
+    const reordered = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files,
+      sourceRoots: ["/b.test.tsx", "/a.test.tsx", "/a.test.tsx"],
+    });
+    const declarationChanged = await engine.compileToRecordGraph({
+      main: "/main.tsx",
+      files: files.map((file) =>
+        file.name === "/types.d.ts"
+          ? {
+            ...file,
+            contents: "export interface Marker { value: string; }",
+          }
+          : file
+      ),
+      sourceRoots: ["/a.test.tsx", "/b.test.tsx"],
+    });
+
+    expect(aOnly.id).not.toBe(both.id);
+    expect(aOnly.entryIdentity).not.toBe(both.entryIdentity);
+    expect(reordered.id).toBe(both.id);
+    expect(reordered.entryIdentity).toBe(both.entryIdentity);
+    expect(declarationChanged.id).not.toBe(both.id);
+    expect(declarationChanged.entryIdentity).not.toBe(both.entryIdentity);
+    expect(
+      reordered.modules.find((module) =>
+        module.identity === reordered.entryIdentity
+      )?.imports,
+    ).toEqual(
+      both.modules.find((module) => module.identity === both.entryIdentity)
+        ?.imports,
+    );
+  });
+
   it("serializes verified javascript modules by stable $implRef", async () => {
     const program: RuntimeProgram = {
       main: "/main.tsx",

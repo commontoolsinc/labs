@@ -1,3 +1,18 @@
+/**
+ * Preparing a value for a structured mutation by thawing only the spine along
+ * a path.
+ *
+ * The payoff is in what goes untouched. Subtrees off the spine keep their
+ * identity and with it their place in the deep-frozen cache, so re-freezing
+ * the result afterward short-circuits on them rather than walking them again
+ * -- which is why a case here inspects the cache and not only the values.
+ *
+ * The remainder is what a path can mean against a structure that does not
+ * already match it: whether a missing intermediate is created and in what
+ * shape, where a fabric instance is allowed to sit, and which of those
+ * situations is an error carrying enough detail for a caller to act on.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

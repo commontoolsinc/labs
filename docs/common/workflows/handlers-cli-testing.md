@@ -53,10 +53,16 @@ export default pattern<Input, Output>(({ items }) => {
 
 ## CLI Commands
 
+Run every authored pattern test first. Attach each test entry to both the first
+deployment and every later source update:
+
 ```bash
+# Run automated pattern tests
+deno task cf test pattern.test.tsx
+
 # Deploy or update the pattern
-deno task cf piece new ... pattern.tsx
-deno task cf piece setsrc ... pattern.tsx
+deno task cf piece new ... --test pattern.test.tsx pattern.tsx
+deno task cf piece setsrc ... --test pattern.test.tsx pattern.tsx
 
 # Call a handler directly with JSON payload
 deno task cf piece call ... addItem '{"title": "Test Item", "category": "demo"}'
@@ -82,12 +88,19 @@ deno task cf exec /tmp/cf/<space>/pieces/<piece>/result/search.tool --query "dem
 deno task cf exec /tmp/cf/<space>/entities/<piece-id>/result/search.tool --query "demo"
 ```
 
+Repeat `--test` for multiple test entries. These flags package and type-check
+the tests but do not run them, so the `cf test` command remains required.
+Handler calls below are runtime checks, not replacements for automated coverage.
+
 ## Workflow
 
-1. Deploy pattern: `cf piece new`
-2. Either call the handler directly with `cf piece call` or mount the space with `cf fuse mount`
-3. Use `cf exec <mounted-callable-file> --help` to inspect the mounted schema-derived interface without invoking it
-4. Execute `*.handler` or `*.tool` via `cf exec`; after the verb, schema-derived flags own the namespace, so a tool input field named `help` is parsed normally
-5. Legacy `echo ... > file.handler` still works for handlers
-6. Inspect state with `cf piece inspect` or `cf piece get`
-7. Iterate until the callable works correctly, then build UI on top
+1. Write or update automated tests for changed behavior
+2. Run every test entry with `cf test`
+3. Deploy with every test attached using repeatable `--test`
+4. Either call the handler directly with `cf piece call` or mount the space with `cf fuse mount`
+5. Use `cf exec <mounted-callable-file> --help` to inspect the mounted schema-derived interface without invoking it
+6. Execute `*.handler` or `*.tool` via `cf exec`; after the verb, schema-derived flags own the namespace, so a tool input field named `help` is parsed normally
+7. Legacy `echo ... > file.handler` still works for handlers
+8. Inspect state with `cf piece inspect` or `cf piece get`
+9. Iterate until the callable works correctly, running tests and retaining every
+   `--test` flag on `setsrc`, then build UI on top

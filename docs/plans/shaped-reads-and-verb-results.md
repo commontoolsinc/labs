@@ -469,12 +469,13 @@ result holding anything reactive does not have one at the moment the receipt is
 written. So a verb returning a child piece — the case this design exists to
 serve — gets a receipt with no schema, and a selection over it matches a runtime
 value rather than a declaration. What that costs is bounded: a `$link` marker
-*on a link position* still renders an address and still suppresses the fetch,
-because a rejecting selector short-circuits before a source schema is consulted.
-A marker below a link is a separate matter — the rejection has to propagate up
-through the containers holding it, which is its own piece of work. What is lost is
-narrowing on field selection, and any check of a selection before the call. The
-open question below is how that gap closes.
+renders an address and suppresses the fetch wherever it sits, because a
+rejecting selector short-circuits before a source schema is consulted, and a
+container whose every position rejects rejects in turn — so a marker below a
+link carries its rejection up to the position holding that link and costs the
+same one read as a marker on it. What is lost is narrowing on field selection,
+and any check of a selection before the call. The open question below is how
+that gap closes.
 
 It records nothing about which positions hold links. A link position in a source
 schema is spelled `asCell`, and `["cell"]` asserts a writable handle; writing

@@ -1,3 +1,17 @@
+/**
+ * This file runs the fixture corpus against every hasher implementation
+ * rather than against whichever one `createHasher()` selects here, so that a
+ * platform resolving to a different implementation cannot yield a different
+ * hash for the same bytes. `createHasher()` is separately pinned to be one of
+ * those implementations and not a fourth thing.
+ *
+ * Each implementation is also held to the base class's post-`digest()`
+ * refusal in all three ways an instance can be misused: a small `update()`,
+ * an `update()` too large for the small-chunk buffer, and a second
+ * `digest()`. Those are three distinct paths rather than one, because an
+ * implementation may sit behind the buffering layer.
+ */
+
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";

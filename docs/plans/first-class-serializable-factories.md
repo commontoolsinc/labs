@@ -188,7 +188,7 @@ Expected implementation files:
 ### WP1.2 — Add `Factory@1` codec dispatch
 
 - [ ] Add the `Factory@1` constant to
-  `packages/data-model/src/codec-common/codec-type-tags.ts`.
+  `packages/data-model/src/codec-interface/codec-type-tags.ts`.
 - [ ] Implement a `FactoryCodec` with wire tag `Factory@1`.
 - [ ] Validate discriminant, exact allowed fields, content-addressed ref shape,
   schemas, modifiers, and pattern-only params fields during decode.
@@ -209,12 +209,12 @@ Expected implementation and test files:
 
 - `packages/data-model/src/codec-common/` for the codec/state validator
 - `packages/data-model/src/codec-common/CodecRegistry.ts`
-- `packages/data-model/src/codec-json/JsonCodec.ts`
+- `packages/data-model/src/codec-json/JsonCodecEngine.ts`
 - `packages/data-model/src/codecs.ts`
 - `packages/data-model/src/codec-json/impl.ts`
 - `packages/data-model/test/codec-common/FactoryCodec.test.ts`
 - `packages/data-model/test/codec-common/CodecRegistry.test.ts`
-- `packages/data-model/test/codec-json/JsonCodec.test.ts`
+- `packages/data-model/test/codec-json/JsonCodecEngine.test.ts`
 - `packages/data-model/test/codec-json/impl.test.ts`
 - a focused `packages/data-model/test/fabric-factory.test.ts`
 

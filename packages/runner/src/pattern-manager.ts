@@ -24,13 +24,17 @@ import type {
   TypeScriptHarnessProcessOptions,
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
-import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
+import {
+  type CachedCompiledModule,
+  SOURCE_ROOT_SPECIFIER,
+} from "./sandbox/module-record-compiler.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
 } from "./storage/interface.ts";
 import {
   buildSourceDocs,
+  COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
   deriveModuleDelegations,
   getCompileCacheRuntimeVersion,
@@ -46,13 +50,15 @@ import {
   writeSourceAndCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
+import { readStoredCfcMetadata } from "./cfc/metadata.ts";
+import type { CfcMetadata } from "./cfc/types.ts";
 import {
   isFabricImportSpecifier,
   parseFabricRef,
   pinnedIdentity,
 } from "./sandbox/fabric-import-specifier.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { interleaveCompileYield } from "./harness/compile-interleave.ts";
 
 const logger = getLogger("pattern-manager");
@@ -63,6 +69,21 @@ const logger = getLogger("pattern-manager");
 // namespace).
 const MAX_EVALUATED_MODULE_CACHE_SIZE = 1000;
 const PATTERN_COVERAGE_CACHE_VARIANT = "pattern-coverage";
+
+/** Whether copying source bytes would discard a meaningful stored CFC label. */
+export function sourceCfcMetadataProhibitsCrossSpaceCopy(
+  metadata: CfcMetadata | undefined,
+): boolean {
+  return metadata?.labelMap.entries.some((entry) => {
+    const confidentiality = entry.label.confidentiality ?? [];
+    const integrity = entry.label.integrity ?? [];
+    if (confidentiality.length > 0) return true;
+    if (integrity.length === 0) return false;
+    return entry.path.length !== 1 ||
+      entry.path[0] !== "delegatedModuleIdentities" ||
+      integrity.some((atom) => atom !== COMPILED_INTEGRITY_ATOM);
+  }) ?? false;
+}
 
 function throwableStorageError(error: CommitError): Error {
   if (error instanceof Error) return error;
@@ -528,8 +549,8 @@ export class PatternManager {
         ...(compiled?.policyManifests !== undefined
           ? { policyManifests: compiled.policyManifests }
           : {}),
-        // The write functions re-derive the entry's root links; keep only the
-        // real import edges.
+        // The write functions re-derive cache-retention links. Authored and
+        // source-package identity edges remain attached to the module.
         imports: uniqueCacheableImports([
           ...doc.imports
             .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
@@ -649,6 +670,17 @@ export class PatternManager {
   }
 
   /**
+   * The pattern-coverage collector to instrument a compile with: a per-call
+   * option wins, else the runtime-level default (`RuntimeOptions.patternCoverage`).
+   * Undefined leaves the compile uninstrumented.
+   */
+  private patternCoverageFor(
+    options?: TypeScriptHarnessProcessOptions,
+  ): PatternCoverageCollector | undefined {
+    return options?.patternCoverage ?? this.runtime.patternCoverage;
+  }
+
+  /**
    * Compile + evaluate a program's modules AND register the evaluated artifacts,
    * returning the full module namespace (`EvaluateResult`).
    *
@@ -667,17 +699,6 @@ export class PatternManager {
    * `Engine.compileAndEvaluateModules` only to inspect serialized/verified output
    * *without running* (engine unit tests), where stamping entry refs is unwanted.
    */
-  /**
-   * The pattern-coverage collector to instrument a compile with: a per-call
-   * option wins, else the runtime-level default (`RuntimeOptions.patternCoverage`).
-   * Undefined leaves the compile uninstrumented.
-   */
-  private patternCoverageFor(
-    options?: TypeScriptHarnessProcessOptions,
-  ): PatternCoverageCollector | undefined {
-    return options?.patternCoverage ?? this.runtime.patternCoverage;
-  }
-
   async compileAndRegisterModules(
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
@@ -1062,10 +1083,12 @@ export class PatternManager {
         ...(doc.patternCoverageSpans !== undefined
           ? { patternCoverageSpans: doc.patternCoverageSpans }
           : {}),
-        // Drop the synthetic entry→root links (cfc.ts etc.); only real
-        // require/export-* edges resolve module records.
+        // Identity and cache-retention edges do not resolve module records.
         imports: doc.imports
-          .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .filter((i) =>
+            !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER)
+          )
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
       }),
     );
@@ -1246,7 +1269,10 @@ export class PatternManager {
           ? { patternCoverageSpans: doc.patternCoverageSpans }
           : {}),
         imports: doc.imports
-          .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .filter((i) =>
+            !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER)
+          )
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
       }),
     );
@@ -1313,6 +1339,10 @@ export class PatternManager {
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
+    const sourceRoots = entry.imports
+      .filter((edge) => edge.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
+      .map((edge) => sourceDocs.get(edge.identity)?.filename)
+      .filter((filename): filename is string => filename !== undefined);
 
     const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
       name: doc.filename,
@@ -1327,6 +1357,7 @@ export class PatternManager {
         {
           fabricImports: { space },
           ...(patternCoverage ? { patternCoverage } : {}),
+          ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
         },
       );
       if (compiled.entryIdentity !== entryIdentity) {
@@ -2082,14 +2113,20 @@ export class PatternManager {
    * closure in `space`. The single-source replacement for the deleted meta
    * cell's `program`: the source docs are written (awaited) by every cold
    * compile, so this returns the same bytes that produced the identity. `main`
-   * is the entry document's authored filename. Returns `undefined` when no
-   * verified source closure exists in the space.
+   * is the executable entry document's authored filename. `sourceRoots` names
+   * retained source entry points such as attached tests. Returns `undefined`
+   * when no verified source closure exists in the space.
    */
   async getPatternSourceProgramByIdentity(
     entryIdentity: string,
     space: MemorySpace,
+    destinationSpace?: MemorySpace,
   ): Promise<
-    { main: string; files: { name: string; contents: string }[] } | undefined
+    {
+      main: string;
+      files: { name: string; contents: string }[];
+      sourceRoots?: string[];
+    } | undefined
   > {
     const readTx = this.runtime.edit();
     let sourceDocs;
@@ -2100,12 +2137,44 @@ export class PatternManager {
         entryIdentity,
         readTx,
       );
+      if (
+        sourceDocs !== undefined && destinationSpace !== undefined &&
+        destinationSpace !== space
+      ) {
+        for (const identity of sourceDocs.keys()) {
+          const sourceId = this.runtime.getCell(
+            space,
+            sourceDocKey(identity),
+            undefined,
+            readTx,
+          ).getAsNormalizedFullLink().id;
+          const metadata = readStoredCfcMetadata(readTx, {
+            space,
+            id: sourceId,
+          });
+          const prohibited = sourceCfcMetadataProhibitsCrossSpaceCopy(
+            metadata,
+          );
+          if (prohibited) {
+            throw new Error(
+              `pattern source ${entryIdentity} carries CFC provenance that ` +
+                `cannot be copied from ${space} to ${destinationSpace}`,
+            );
+          }
+        }
+      }
     } finally {
       readTx.abort?.("get-pattern-source-files read complete");
     }
     if (sourceDocs === undefined) return undefined;
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
+    const sourceRoots = entry.imports
+      .filter((edge) => edge.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
+      .map((edge) => sourceDocs.get(edge.identity)?.filename)
+      .filter((filename): filename is string =>
+        filename?.startsWith("/") === true
+      );
     // Return only the AUTHORED files — the faithful replacement for the old
     // meta-cell `program`. The verified source closure also contains
     // runtime-INJECTED helper modules (e.g. `cfc.ts`), which the compiler
@@ -2120,6 +2189,7 @@ export class PatternManager {
           name: doc.filename,
           contents: doc.code,
         })),
+      ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
     };
   }
 
@@ -2149,7 +2219,7 @@ export class PatternManager {
       );
       const current = cell.get();
       const annotations = {
-        ...(isRecord(current?.annotations) ? current!.annotations : {}),
+        ...(isObjectOrArray(current?.annotations) ? current!.annotations : {}),
         [key]: link,
       };
       cell.key("annotations").set(annotations);

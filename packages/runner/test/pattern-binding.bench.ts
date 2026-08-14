@@ -1,27 +1,29 @@
-// Micro-benchmark for `unwrapOneLevelAndBindToDoc`.
-//
-// CONTEXT / CONCLUSION: reload profiling showed `bindNodeIO` is ~90% of per-node
-// instantiation cost during the `raw:map` notes-list reconcile (~3ms/node, up to
-// ~52ms for one node). `bindNodeIO` = unwrapOneLevelAndBindToDoc(in/out) +
-// findAllWriteRedirectCells(in/out). This bench was written to study the unwrap
-// part — and it PROVED unwrap is NOT the bottleneck:
-//   * unwrap is ~1.9µs/alias (5.2µs with $ref/$defs schemas) and linear — a real
-//     UI node (~30 aliases) is sub-millisecond.
-//   * A browser split-probe confirmed it: per reload, bio/unwrap = 6ms total
-//     across 133 nodes, while bio/findRedir (findAllWriteRedirectCells) = 356ms.
-// So the real cost is `findAllWriteRedirectCells`, which is NOT a pure transform:
-// it follows every write-redirect link via
-// `parseLink -> runtime.getCellFromLink -> linkCell.getRaw() -> recurse`, i.e.
-// recursive cell/storage resolution per node. That part needs a Runtime, so it
-// isn't covered by this pure micro-bench (TODO: add an emulate-runtime bench for
-// findAllWriteRedirectCells to study/optimize the actual hotspot).
-//
-// unwrapOneLevelAndBindToDoc itself is PURE (CFC schema traversal + deep
-// clone/rebind of the binding tree; no storage/tx), studied in isolation below.
-//
-// Run as a bench:        deno bench -A packages/runner/test/pattern-binding.bench.ts
-// Run directly (study):  deno run  -A packages/runner/test/pattern-binding.bench.ts
-//                        deno run  -A packages/runner/test/pattern-binding.bench.ts 2000   # custom size
+/**
+ * Micro-benchmark for `unwrapOneLevelAndBindToDoc`.
+ *
+ * CONTEXT / CONCLUSION: reload profiling showed `bindNodeIO` is ~90% of per-node
+ * instantiation cost during the `raw:map` notes-list reconcile (~3ms/node, up to
+ * ~52ms for one node). `bindNodeIO` = unwrapOneLevelAndBindToDoc(in/out) +
+ * findAllWriteRedirectCells(in/out). This bench was written to study the unwrap
+ * part — and it PROVED unwrap is NOT the bottleneck:
+ *   * unwrap is ~1.9µs/alias (5.2µs with $ref/$defs schemas) and linear — a real
+ *     UI node (~30 aliases) is sub-millisecond.
+ *   * A browser split-probe confirmed it: per reload, bio/unwrap = 6ms total
+ *     across 133 nodes, while bio/findRedir (findAllWriteRedirectCells) = 356ms.
+ * So the real cost is `findAllWriteRedirectCells`, which is NOT a pure transform:
+ * it follows every write-redirect link via
+ * `parseLink -> runtime.getCellFromLink -> linkCell.getRaw() -> recurse`, i.e.
+ * recursive cell/storage resolution per node. That part needs a Runtime, so it
+ * isn't covered by this pure micro-bench (TODO: add an emulate-runtime bench for
+ * findAllWriteRedirectCells to study/optimize the actual hotspot).
+ *
+ * unwrapOneLevelAndBindToDoc itself is PURE (CFC schema traversal + deep
+ * clone/rebind of the binding tree; no storage/tx), studied in isolation below.
+ *
+ * Run as a bench:        deno bench -A packages/runner/test/pattern-binding.bench.ts
+ * Run directly (study):  deno run  -A packages/runner/test/pattern-binding.bench.ts
+ *                        deno run  -A packages/runner/test/pattern-binding.bench.ts 2000   # custom size
+ */
 
 import { unwrapOneLevelAndBindToDoc } from "../src/pattern-binding.ts";
 import type { AnyCell } from "../src/cell.ts";

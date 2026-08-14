@@ -308,7 +308,7 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
       // exactly as it reached the plaintext form.
       const committed = {
         type: CFC_ATOM_TYPE.Caveat,
-        kind: "prompt-injection-risk",
+        kind: "prompt-injection-risk-unscreened",
         source: commitCfcFieldValue(source),
       };
       expect(dischargeMaterialRiskAtoms([committed])).toEqual([]);

@@ -1,4 +1,4 @@
-import { isPlainContainer, isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainContainer } from "@commonfabric/utils/types";
 import {
   type FabricValue,
   valueEqual,
@@ -145,15 +145,15 @@ export function determineTriggeredActions(
 
   // *LastObject: Last key-able object along currentPath
   //
-  // TODO(danfuzz): `isRecord` counts a `FabricSpecialObject` as key-able, so
+  // TODO(danfuzz): `isObjectOrArray` counts a `FabricSpecialObject` as key-able, so
   // the descent below indexes into one: every key reads `undefined` (or, via
   // the prototype chain, an accessor result) on both the before and after
   // side, so a subscriber path continuing below a `FabricInstance` compares
   // equal-by-vacancy and its action never triggers, however the instance's
   // contents changed. The `shallowEqual` marker at the bottom of this file
   // covers the leaf comparison; this is the descent's half of the same gap.
-  let beforeLastObject = isRecord(before) ? 0 : -1;
-  let afterLastObject = isRecord(after) ? 0 : -1;
+  let beforeLastObject = isObjectOrArray(before) ? 0 : -1;
+  let afterLastObject = isObjectOrArray(after) ? 0 : -1;
 
   while (subscribers.length > 0) {
     // Pull the next path from the queue
@@ -173,12 +173,12 @@ export function determineTriggeredActions(
     for (let i = overlap; i < targetPath.length; i++) {
       if (i <= beforeLastObject) {
         beforeValues[i + 1] = (beforeValues[i] as Keyable)[targetPath[i]!];
-        if (isRecord(beforeValues[i + 1])) beforeLastObject = i + 1;
+        if (isObjectOrArray(beforeValues[i + 1])) beforeLastObject = i + 1;
         else beforeLastObject = i;
       }
       if (i <= afterLastObject) {
         afterValues[i + 1] = (afterValues[i] as Keyable)[targetPath[i]!];
-        if (isRecord(afterValues[i + 1])) afterLastObject = i + 1;
+        if (isObjectOrArray(afterValues[i + 1])) afterLastObject = i + 1;
         else afterLastObject = i;
       }
     }

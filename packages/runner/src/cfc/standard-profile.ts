@@ -31,26 +31,17 @@ import type { CfcPolicyRecordInput, ExchangeRule } from "./policy.ts";
  *   `InjectionSafe`.
  */
 
-/** Legacy single-risk kind: behaves as unscreened (§10.1). */
-export const PROMPT_INJECTION_RISK_LEGACY =
-  "https://commonfabric.org/cfc/concepts/prompt-injection-risk";
-
 /** The canonical material-risk tier kinds (the screening gradient). */
 export const MATERIAL_RISK_KINDS: readonly string[] = [
-  PROMPT_INJECTION_RISK_LEGACY,
   CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened,
   CFC_CONCEPT_KIND.PromptInjectionRiskIngressScreened,
   CFC_CONCEPT_KIND.PromptInjectionRiskValueScreened,
 ];
 
-// The bare-string aliases the legacy single-risk profile used (§4.7.3). A
-// discharge rule must recognize them too so the profile reproduces the old
-// `filterMaterialRiskAtoms` strip byte-for-byte (which matched both forms).
-// They participate in DISCHARGE only; the tier gradient is defined over the
-// canonical URIs, into which a deployment normalizes aliases before tier
-// evaluation (§10.1 SHOULD-normalize).
+// Short aliases participate in discharge only. The tier gradient is defined
+// over the canonical URIs, into which a deployment normalizes aliases before
+// tier evaluation (§10.1 SHOULD-normalize).
 const MATERIAL_RISK_ALIAS_KINDS: readonly string[] = [
-  "prompt-injection-risk",
   "prompt-injection-risk-unscreened",
   "prompt-injection-risk-ingress-screened",
   "prompt-injection-risk-value-screened",

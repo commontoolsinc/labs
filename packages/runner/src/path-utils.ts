@@ -1,5 +1,5 @@
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * Read one path segment out of a data container WITHOUT falling through to the
@@ -19,7 +19,7 @@ import { isRecord } from "@commonfabric/utils/types";
  * Primitives need none either, and must not be excluded. `Object.hasOwn()`
  * coerces with `ToObject`, so it answers `true` for a string's `length` and its
  * indices — genuinely own — and `false` for `toUpperCase`/`toString`, which
- * live on `String.prototype`. Bailing out on everything non-`isRecord` would
+ * live on `String.prototype`. Bailing out on everything non-`isObjectOrArray` would
  * lose `getValueAtPath("abc", ["length"])`, which callers rely on to
  * reconstruct write details over primitive subtrees; indexing unconditionally,
  * as this did before, would hand back the prototype methods. `Object.hasOwn`
@@ -87,7 +87,7 @@ export function getValueAtPath(obj: any, path: readonly PropertyKey[]): any {
 export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
   let current = obj;
   for (const key of path) {
-    if (!isRecord(current) || !Object.hasOwn(current, key as string)) {
+    if (!isObjectOrArray(current) || !Object.hasOwn(current, key as string)) {
       return false;
     }
     current = (current as Record<PropertyKey, unknown>)[key];

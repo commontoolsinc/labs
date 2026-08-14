@@ -1,10 +1,15 @@
 import { dirname, join, resolve } from "@std/path";
 import type {
   HarnessCredential,
+  HarnessCredentialHealth,
   HarnessCredentialProviderId,
 } from "./types.ts";
 
 export interface HarnessCredentialStore {
+  getRecord(
+    ownerKey: string,
+    providerId: HarnessCredentialProviderId,
+  ): Promise<HarnessCredentialRecord>;
   get(
     ownerKey: string,
     providerId: HarnessCredentialProviderId,
@@ -26,7 +31,33 @@ export interface HarnessCredentialStore {
     ownerKey: string,
     providerId: HarnessCredentialProviderId,
   ): Promise<void>;
+  getHealth(
+    ownerKey: string,
+    providerId: HarnessCredentialProviderId,
+  ): Promise<HarnessCredentialHealth | undefined>;
+  updateRecord(
+    ownerKey: string,
+    providerId: HarnessCredentialProviderId,
+    updater: (
+      current: HarnessCredentialRecord,
+    ) => Promise<HarnessCredentialRecord> | HarnessCredentialRecord,
+    signal?: AbortSignal,
+  ): Promise<HarnessCredentialRecord>;
 }
+
+export interface HarnessCredentialRecord {
+  credential?: HarnessCredential;
+  health?: HarnessCredentialHealth;
+}
+
+const assertValidCredentialRecord = (
+  record: HarnessCredentialRecord,
+): HarnessCredentialRecord => {
+  if (record.health !== undefined && record.credential === undefined) {
+    throw new Error("credential health requires a credential");
+  }
+  return record;
+};
 
 /**
  * Host-side Loom adapter contract. Implementations keep token material in
@@ -88,15 +119,23 @@ const fileMutationQueue = new KeyedMutationQueue();
 
 export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
   readonly #credentials = new Map<string, HarnessCredential>();
+  readonly #health = new Map<string, HarnessCredentialHealth>();
   readonly #queue = new KeyedMutationQueue();
 
-  get(ownerKey: string, providerId: HarnessCredentialProviderId) {
-    const credential = this.#credentials.get(
-      credentialKey(ownerKey, providerId),
-    );
-    return Promise.resolve(
-      credential === undefined ? undefined : structuredClone(credential),
-    );
+  getRecord(ownerKey: string, providerId: HarnessCredentialProviderId) {
+    const key = credentialKey(ownerKey, providerId);
+    const credential = this.#credentials.get(key);
+    const health = this.#health.get(key);
+    return Promise.resolve({
+      ...(credential === undefined
+        ? {}
+        : { credential: structuredClone(credential) }),
+      ...(health === undefined ? {} : { health: structuredClone(health) }),
+    });
+  }
+
+  async get(ownerKey: string, providerId: HarnessCredentialProviderId) {
+    return (await this.getRecord(ownerKey, providerId)).credential;
   }
 
   async set(
@@ -104,7 +143,7 @@ export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
     providerId: HarnessCredentialProviderId,
     credential: HarnessCredential,
   ): Promise<void> {
-    await this.update(ownerKey, providerId, () => credential);
+    await this.updateRecord(ownerKey, providerId, () => ({ credential }));
   }
 
   update(
@@ -115,27 +154,56 @@ export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
     ) => Promise<HarnessCredential | undefined> | HarnessCredential | undefined,
     signal?: AbortSignal,
   ): Promise<HarnessCredential | undefined> {
-    const key = credentialKey(ownerKey, providerId);
-    return this.#queue.run(key, async () => {
-      const current = this.#credentials.get(key);
-      const next = await updater(
-        current === undefined ? undefined : structuredClone(current),
-      );
-      if (next === undefined) this.#credentials.delete(key);
-      else this.#credentials.set(key, structuredClone(next));
-      return next === undefined ? undefined : structuredClone(next);
-    }, signal);
+    return this.updateRecord(ownerKey, providerId, async (current) => {
+      const credential = await updater(current.credential);
+      return credential === undefined ? {} : {
+        credential,
+        ...(current.health !== undefined ? { health: current.health } : {}),
+      };
+    }, signal).then((record) => record.credential);
   }
 
   async delete(
     ownerKey: string,
     providerId: HarnessCredentialProviderId,
   ): Promise<void> {
-    await this.update(ownerKey, providerId, () => undefined);
+    await this.updateRecord(ownerKey, providerId, () => ({}));
+  }
+
+  async getHealth(ownerKey: string, providerId: HarnessCredentialProviderId) {
+    return (await this.getRecord(ownerKey, providerId)).health;
+  }
+
+  updateRecord(
+    ownerKey: string,
+    providerId: HarnessCredentialProviderId,
+    updater: (
+      current: HarnessCredentialRecord,
+    ) => Promise<HarnessCredentialRecord> | HarnessCredentialRecord,
+    signal?: AbortSignal,
+  ): Promise<HarnessCredentialRecord> {
+    const key = credentialKey(ownerKey, providerId);
+    return this.#queue.run(key, async () => {
+      const next = assertValidCredentialRecord(
+        await updater({
+          ...(this.#credentials.get(key) !== undefined
+            ? { credential: structuredClone(this.#credentials.get(key)!) }
+            : {}),
+          ...(this.#health.get(key) !== undefined
+            ? { health: structuredClone(this.#health.get(key)!) }
+            : {}),
+        }),
+      );
+      if (next.credential === undefined) this.#credentials.delete(key);
+      else this.#credentials.set(key, structuredClone(next.credential));
+      if (next.health === undefined) this.#health.delete(key);
+      else this.#health.set(key, structuredClone(next.health));
+      return structuredClone(next);
+    }, signal);
   }
 }
 
-interface CredentialDocument {
+interface CredentialDocumentV1 {
   version: 1;
   owners: Record<
     string,
@@ -143,9 +211,19 @@ interface CredentialDocument {
   >;
 }
 
+interface CredentialDocument {
+  version: 2;
+  owners: CredentialDocumentV1["owners"];
+  health: Record<
+    string,
+    Partial<Record<HarnessCredentialProviderId, HarnessCredentialHealth>>
+  >;
+}
+
 const emptyDocument = (): CredentialDocument => ({
-  version: 1,
+  version: 2,
   owners: Object.create(null),
+  health: Object.create(null),
 });
 
 const setOwn = <T extends object>(
@@ -173,6 +251,16 @@ const isCredential = (value: unknown): value is HarnessCredential => {
     typeof input.accountId === "string";
 };
 
+const isHealth = (value: unknown): value is HarnessCredentialHealth => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const input = value as Record<string, unknown>;
+  return input.status === "reconnect-required" &&
+    (input.reason === "invalid-grant" || input.reason === "revoked" ||
+      input.reason === "refresh-token-reused");
+};
+
 const parseDocument = (text: string): CredentialDocument => {
   const parsed = JSON.parse(text) as unknown;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -180,7 +268,8 @@ const parseDocument = (text: string): CredentialDocument => {
   }
   const input = parsed as Record<string, unknown>;
   if (
-    input.version !== 1 || typeof input.owners !== "object" ||
+    (input.version !== 1 && input.version !== 2) ||
+    typeof input.owners !== "object" ||
     input.owners === null || Array.isArray(input.owners)
   ) {
     throw new Error("unsupported credential store format");
@@ -204,7 +293,42 @@ const parseDocument = (text: string): CredentialDocument => {
       credential === undefined ? {} : { "openai-codex": credential },
     );
   }
-  return { version: 1, owners };
+  const health: CredentialDocument["health"] = Object.create(null);
+  if (input.version === 2) {
+    if (
+      typeof input.health !== "object" || input.health === null ||
+      Array.isArray(input.health)
+    ) {
+      throw new Error("invalid credential health entries");
+    }
+    for (const [owner, rawProviders] of Object.entries(input.health)) {
+      if (
+        typeof rawProviders !== "object" || rawProviders === null ||
+        Array.isArray(rawProviders)
+      ) {
+        throw new Error("invalid credential health owner entry");
+      }
+      const raw = rawProviders as Record<string, unknown>;
+      const providerHealth = raw["openai-codex"];
+      if (providerHealth !== undefined && !isHealth(providerHealth)) {
+        throw new Error("invalid openai-codex credential health entry");
+      }
+      setOwn(
+        health,
+        owner,
+        providerHealth === undefined ? {} : { "openai-codex": providerHealth },
+      );
+      if (
+        providerHealth !== undefined &&
+        owners[owner]?.["openai-codex"] === undefined
+      ) {
+        throw new Error(
+          "openai-codex credential health requires a credential",
+        );
+      }
+    }
+  }
+  return { version: 2, owners, health };
 };
 
 export interface FileHarnessCredentialStoreOptions {
@@ -392,12 +516,29 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
     }
   }
 
-  async get(ownerKey: string, providerId: HarnessCredentialProviderId) {
+  async getRecord(
+    ownerKey: string,
+    providerId: HarnessCredentialProviderId,
+  ): Promise<HarnessCredentialRecord> {
     const document = await this.#read();
     const providers = Object.hasOwn(document.owners, ownerKey)
       ? document.owners[ownerKey]
       : undefined;
-    return providers?.[providerId];
+    const health = Object.hasOwn(document.health, ownerKey)
+      ? document.health[ownerKey]
+      : undefined;
+    return {
+      ...(providers?.[providerId] === undefined
+        ? {}
+        : { credential: providers[providerId] }),
+      ...(health?.[providerId] === undefined
+        ? {}
+        : { health: health[providerId] }),
+    };
+  }
+
+  async get(ownerKey: string, providerId: HarnessCredentialProviderId) {
+    return (await this.getRecord(ownerKey, providerId)).credential;
   }
 
   async set(
@@ -405,7 +546,7 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
     providerId: HarnessCredentialProviderId,
     credential: HarnessCredential,
   ): Promise<void> {
-    await this.update(ownerKey, providerId, () => credential);
+    await this.updateRecord(ownerKey, providerId, () => ({ credential }));
   }
 
   update(
@@ -416,9 +557,39 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
     ) => Promise<HarnessCredential | undefined> | HarnessCredential | undefined,
     signal?: AbortSignal,
   ): Promise<HarnessCredential | undefined> {
-    // Every mutation rewrites the whole document. The stable advisory lock
-    // serializes read/modify/write transactions across processes as well as
-    // across distinct store instances in this process.
+    return this.updateRecord(ownerKey, providerId, async (current) => {
+      const credential = await updater(current.credential);
+      return credential === undefined ? {} : {
+        credential,
+        ...(current.health !== undefined ? { health: current.health } : {}),
+      };
+    }, signal).then((record) => record.credential);
+  }
+
+  async delete(
+    ownerKey: string,
+    providerId: HarnessCredentialProviderId,
+  ): Promise<void> {
+    await this.updateRecord(ownerKey, providerId, () => ({}));
+  }
+
+  async getHealth(
+    ownerKey: string,
+    providerId: HarnessCredentialProviderId,
+  ): Promise<HarnessCredentialHealth | undefined> {
+    return (await this.getRecord(ownerKey, providerId)).health;
+  }
+
+  updateRecord(
+    ownerKey: string,
+    providerId: HarnessCredentialProviderId,
+    updater: (
+      current: HarnessCredentialRecord,
+    ) => Promise<HarnessCredentialRecord> | HarnessCredentialRecord,
+    signal?: AbortSignal,
+  ): Promise<HarnessCredentialRecord> {
+    // Credentials and their health share this transaction so a refresh cannot
+    // expose a terminal result without durably recording the same conclusion.
     return fileMutationQueue.run(
       this.path,
       () =>
@@ -427,28 +598,40 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
           const currentProviders = Object.hasOwn(document.owners, ownerKey)
             ? document.owners[ownerKey]
             : undefined;
-          const current = currentProviders?.[providerId];
-          const next = await updater(current);
+          const currentHealth = Object.hasOwn(document.health, ownerKey)
+            ? document.health[ownerKey]
+            : undefined;
+          const next = assertValidCredentialRecord(
+            await updater({
+              ...(currentProviders?.[providerId] !== undefined
+                ? { credential: currentProviders[providerId] }
+                : {}),
+              ...(currentHealth?.[providerId] !== undefined
+                ? { health: currentHealth[providerId] }
+                : {}),
+            }),
+          );
           const providers = { ...(currentProviders ?? {}) };
-          if (next === undefined) delete providers[providerId];
-          else providers[providerId] = next;
+          if (next.credential === undefined) delete providers[providerId];
+          else providers[providerId] = next.credential;
           if (Object.keys(providers).length === 0) {
             delete document.owners[ownerKey];
           } else {
             setOwn(document.owners, ownerKey, providers);
           }
+          const health = { ...(currentHealth ?? {}) };
+          if (next.health === undefined) delete health[providerId];
+          else health[providerId] = next.health;
+          if (Object.keys(health).length === 0) {
+            delete document.health[ownerKey];
+          } else {
+            setOwn(document.health, ownerKey, health);
+          }
           await this.#write(document);
-          return next;
+          return structuredClone(next);
         }, signal),
       signal,
     );
-  }
-
-  async delete(
-    ownerKey: string,
-    providerId: HarnessCredentialProviderId,
-  ): Promise<void> {
-    await this.update(ownerKey, providerId, () => undefined);
   }
 
   lastValidSnapshot(): unknown {

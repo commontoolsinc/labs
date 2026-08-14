@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -43,6 +43,7 @@ import {
   formatPatternIdentity,
   formatPatternRef,
   localPatternEntry,
+  mergePiecePath,
   normalizeApiUrl,
   parseLink,
   parsePieceOptions,
@@ -62,8 +63,19 @@ const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
 const PIECE = "abcdefghijklmnopqrstuvwxyz";
 const ID = "~/.my.key";
+// The 43-character id length matches the entity ids the runtime mints, and
+// clears the runner parser's handle-length threshold.
+const LLM_HANDLE = `of:fid1:${"baedreiabcdefghijklmnopqrstuvwxyz0123456789"}`;
+const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const OTHER_SPACE_DID =
+  "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
 const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
+// A key the commands below can open a session with; they never reach a
+// server, so which identity it names does not matter.
+const TEST_PKCS8_KEY = `-----BEGIN PRIVATE KEY-----
+MMC4CAQAwBQYDK2VwBCIEICWSvx4QOW+mogjWSsjInQaPpmjErsDBqf2ZOoK+Y4IO
+-----END PRIVATE KEY-----`;
 
 describe("cli piece parsing", () => {
   it("formats structured pattern references for human output", () => {
@@ -313,6 +325,69 @@ describe("cli piece parsing", () => {
       pieceScope: "session",
     });
   });
+  it("parsePieceOptions() resolves an LLM-friendly --piece like the bare handle", () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    expect(parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}` })).toEqual(
+      parsePieceOptions({ ...base, piece: LLM_HANDLE }),
+    );
+    expect(
+      parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}@session` }),
+    ).toMatchObject({
+      piece: LLM_HANDLE,
+      pieceScope: "session",
+    });
+  });
+
+  it("parsePieceOptions() carries an embedded path only where the command accepts one", () => {
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID };
+    const config = parsePieceOptions(
+      { ...base, piece: `/${LLM_HANDLE}/items/0` },
+      { acceptsPath: true },
+    );
+    expect(config).toMatchObject({
+      piece: LLM_HANDLE,
+      piecePath: ["items", 0],
+    });
+    expect(mergePiecePath(config, "title")).toEqual(["items", 0, "title"]);
+    expect(mergePiecePath(config)).toEqual(["items", 0]);
+    expect(() => parsePieceOptions({ ...base, piece: `/${LLM_HANDLE}/items` }))
+      .toThrow(/takes a piece id only/);
+  });
+
+  it("parsePieceOptions() checks an embedded space DID against the target space", () => {
+    const base = { apiUrl: API_URL, identity: ID };
+    expect(parsePieceOptions({
+      ...base,
+      space: SPACE_DID,
+      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+    })).toMatchObject({
+      space: SPACE_DID,
+      piece: LLM_HANDLE,
+    });
+    expect(() =>
+      parsePieceOptions({
+        ...base,
+        space: OTHER_SPACE_DID,
+        piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+      })
+    ).toThrow(
+      `Reference names space "${SPACE_DID}" but the command targets ` +
+        `space "${OTHER_SPACE_DID}".`,
+    );
+    // A named space resolves to a DID only once the session opens, so the
+    // embedded DID is carried for loadPieces' deferred check rather than
+    // compared against the raw name here.
+    expect(parsePieceOptions({
+      ...base,
+      space: SPACE,
+      piece: `/@${SPACE_DID}/${LLM_HANDLE}`,
+    })).toMatchObject({
+      space: SPACE,
+      piece: LLM_HANDLE,
+      embeddedSpaces: [SPACE_DID],
+    });
+  });
+
   it("parsePieceOptions() throws on incomplete input", () => {
     expect(() =>
       parsePieceOptions({
@@ -527,6 +602,114 @@ describe("cli piece parsing", () => {
       expect(result.pieceId).toBe("piece");
       expect(result.path).toEqual(["field", ""]);
     });
+
+    it("parses an LLM-friendly reference like the bare form", () => {
+      expect(parseLink(`/${LLM_HANDLE}`)).toEqual({ pieceId: LLM_HANDLE });
+      expect(parseLink(`/${LLM_HANDLE}/data/items/0/title`)).toEqual(
+        parseLink(`${LLM_HANDLE}/data/items/0/title`),
+      );
+      expect(parseLink(`/${LLM_HANDLE}@user/field`)).toEqual({
+        pieceId: LLM_HANDLE,
+        scope: "user",
+        path: ["field"],
+      });
+    });
+
+    it("checks an embedded space DID against the target space", () => {
+      expect(
+        parseLink(`/@${SPACE_DID}/${LLM_HANDLE}/field`, { space: SPACE_DID }),
+      ).toEqual({
+        pieceId: LLM_HANDLE,
+        path: ["field"],
+      });
+      expect(() =>
+        parseLink(`/@${SPACE_DID}/${LLM_HANDLE}/field`, {
+          space: OTHER_SPACE_DID,
+        })
+      ).toThrow(/names space/);
+      // With a named target space the DID rides along for the deferred
+      // check loadPieces runs against the session's resolved space.
+      expect(
+        parseLink(`/@${SPACE_DID}/${LLM_HANDLE}/field`, { space: SPACE }),
+      ).toEqual({
+        pieceId: LLM_HANDLE,
+        embeddedSpace: SPACE_DID,
+        path: ["field"],
+      });
+    });
+  });
+
+  describe("embedded space DIDs given to a link command", () => {
+    // A `--space` given as a name resolves to a DID only when the session
+    // opens, so a DID embedded in a reference rides along to that point and
+    // is compared there. Each command below reaches the comparison without a
+    // server: the session derives the space key from the name locally, and
+    // the check runs before any storage is opened.
+    let identityPath = "";
+
+    beforeEach(async () => {
+      identityPath = await Deno.makeTempFile({ suffix: ".key" });
+      await Deno.writeTextFile(identityPath, TEST_PKCS8_KEY);
+    });
+
+    afterEach(async () => {
+      await Deno.remove(identityPath);
+    });
+
+    const options = () =>
+      `--identity ${identityPath} --api-url ${API_URL} --space ${SPACE}`;
+
+    const spaceRefusal = async (command: string) => {
+      const { code, stderr } = await cf(command);
+      expect(code).toBe(1);
+      return stripAnsi(stderr.join("\n"));
+    };
+
+    it("refuses a link whose source names another space", async () => {
+      expect(
+        await spaceRefusal(
+          `piece link ${options()} ` +
+            `/@${SPACE_DID}/${LLM_HANDLE}/notes ${LLM_HANDLE}/inbox`,
+        ),
+      ).toContain(`Reference names space "${SPACE_DID}"`);
+    });
+
+    it("refuses a link whose target names another space", async () => {
+      expect(
+        await spaceRefusal(
+          `piece link ${options()} ` +
+            `${LLM_HANDLE}/notes /@${SPACE_DID}/${LLM_HANDLE}/inbox`,
+        ),
+      ).toContain(`Reference names space "${SPACE_DID}"`);
+    });
+
+    it("refuses a sqlite link whose target names another space", async () => {
+      expect(
+        await spaceRefusal(
+          `piece link ${options()} ` +
+            `sqlite:/tmp/reference-data.db /@${SPACE_DID}/${LLM_HANDLE}/refDb`,
+        ),
+      ).toContain(`Reference names space "${SPACE_DID}"`);
+    });
+
+    it("refuses a slug whose source names another space", async () => {
+      expect(
+        await spaceRefusal(
+          `piece set-slug ${options()} ` +
+            `project-notes /@${SPACE_DID}/${LLM_HANDLE}/notes`,
+        ),
+      ).toContain(`Reference names space "${SPACE_DID}"`);
+    });
+
+    it("still requires a path on a link target given in the canonical form", async () => {
+      // The path rule is the bare form's, and reaching it proves the
+      // canonical endpoint was parsed rather than refused as unrecognized.
+      expect(
+        await spaceRefusal(
+          `piece link ${options()} ${LLM_HANDLE}/notes /${LLM_HANDLE}`,
+        ),
+      ).toContain("Target reference must include a path.");
+    });
   });
 
   it("shows source-location options for every local deployment command", () => {
@@ -536,12 +719,14 @@ describe("cli piece parsing", () => {
     expect(newFlags).toContain("--slug");
     expect(newFlags).toContain("--root");
     expect(newFlags).toContain("--repository");
+    expect(newFlags).toContain("--test");
     expect(newFlags).toContain("--dangerously-allow-incompatible-schema");
 
     for (const command of ["setsrc", "set-home"]) {
       const flags = optionFlags(command);
       expect(flags).toContain("--root");
       expect(flags).toContain("--repository");
+      expect(flags).toContain("--test");
     }
     expect(optionFlags("setsrc")).toContain(
       "--dangerously-allow-incompatible-schema",
@@ -594,6 +779,11 @@ describe("cli piece parsing", () => {
       schemaOnly?.projection
         ?.schema,
     );
+
+    const marked = await parseCellSelectionOptions({ select: "topic@" });
+    expect(marked?.projection?.markers).toEqual({
+      properties: { topic: { marked: true } },
+    });
 
     const both = await parseCellSelectionOptions({
       filter: ".active",
@@ -846,6 +1036,17 @@ describe("cli piece parsing", () => {
       option.flags
     );
     expect(callFlags).toContain("--show-links");
+  });
+
+  it("describes piece call's `--schema` as taking a field list as well", () => {
+    // The call reads its selection through the read's grammar, so the flag
+    // takes every form the read's does. Its own `--help` line is where a
+    // caller learns which, and one naming fewer forms than the parser takes
+    // reads as a narrowing that is not there.
+    const schemaOption = piece.getCommand("call")!.getOptions().find((option) =>
+      option.flags.includes("--schema")
+    )!;
+    expect(schemaOption.description).toContain("--select field list");
   });
 
   it("steps, reads, syncs, and stops in one get operation", async () => {
@@ -1468,16 +1669,31 @@ describe("cli piece parsing", () => {
     ])).rejects.toThrow("Cannot use --repository with --reset");
   });
 
+  it("rejects attached tests when resetting the home pattern", async () => {
+    const { piece: command } = await import(
+      "../commands/piece.ts?test-reset-test"
+    );
+    command.throwErrors();
+    await expect(command.parse([
+      "set-home",
+      "--reset",
+      "--test",
+      "/repo/home.test.tsx",
+    ])).rejects.toThrow("Cannot use --test with --reset");
+  });
+
   it("builds repository-aware entries from deployment flags", () => {
     expect(localPatternEntry("/repo/pattern.tsx", {
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       root: "/repo",
+      test: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
     })).toEqual({
       mainPath: "/repo/pattern.tsx",
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       rootPath: "/repo",
+      testPaths: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
     });
   });
 
@@ -1492,6 +1708,7 @@ describe("cli piece parsing", () => {
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         root: "/repo",
+        test: ["/repo/pattern.test.tsx"],
         dangerouslyAllowIncompatibleSchema: true,
       },
       "/repo/pattern.tsx",
@@ -1516,6 +1733,7 @@ describe("cli piece parsing", () => {
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         rootPath: "/repo",
+        testPaths: ["/repo/pattern.test.tsx"],
       },
       options: { dangerouslyAllowIncompatibleSchema: true },
     });
@@ -1535,6 +1753,7 @@ describe("cli piece parsing", () => {
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         root: "/repo",
+        test: ["/repo/pattern.test.tsx"],
       },
       "/repo/pattern.tsx",
       {
@@ -1558,6 +1777,7 @@ describe("cli piece parsing", () => {
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         rootPath: "/repo",
+        testPaths: ["/repo/pattern.test.tsx"],
       },
     });
   });

@@ -1,10 +1,24 @@
+/**
+ * `bigint` over a wire that has no such type, encoded as two's-complement
+ * bytes in unpadded base64url.
+ *
+ * Two's complement is what gives the boundary values their weight: a magnitude
+ * that would otherwise set the top bit needs a sign-extension byte in front of
+ * it, so the round trips step across that point in both signs as well as
+ * covering zero and the large cases.
+ *
+ * Malformed state decodes to a `ProblematicValue` rather than throwing. The
+ * wire is not trusted, and a decode that cannot make sense of what it was
+ * handed still has to produce a value.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { BigIntCodec } from "@/codec-json/BigIntCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("BigIntCodec", () => {
   const codec = new BigIntCodec();
