@@ -21,6 +21,7 @@ import {
   action,
   computed,
   type Default,
+  type Demand,
   NAME,
   pattern,
   type Stream,
@@ -28,14 +29,7 @@ import {
 } from "commonfabric";
 
 /** One note. Deliberately small: this fixture is about what a verb hands back,
- * not about modelling notes.
- *
- * The board below stores `NoteOutput[]` on purpose — the walkthrough's whole
- * subject is calling verbs on a stored child — so this is the deliberate
- * full-contract forwarding composition.md permits, and the tag records that
- * intent for the foreign-output embedding check.
- *
- * @sharedContract */
+ * not about modelling notes. */
 export interface NoteOutput {
   [NAME]: string;
   title: string;
@@ -112,15 +106,24 @@ interface SetLabelResult {
   revision: number;
 }
 
+/** The board's demand on the notes it stores: only the title it projects.
+ * This is the narrow-demand exemplar — the board never calls `append`, so
+ * it does not mention it, and adding verbs to notes never touches the
+ * board's shape. The walkthrough reaches note contents and verbs through
+ * each note's own address and schema, not through this demand. */
+interface NotePreview {
+  title?: string;
+}
+
 interface BoardInput {
-  notes?: Writable<NoteOutput[] | Default<[]>>;
+  notes?: Writable<Demand<NotePreview>[] | Default<[]>>;
   label?: Writable<string | Default<"untitled">>;
   revision?: Writable<number | Default<0>>;
 }
 
 interface BoardOutput {
   [NAME]: string;
-  notes: NoteOutput[];
+  notes: NotePreview[];
   noteCount: number;
   label: string;
   revision: number;

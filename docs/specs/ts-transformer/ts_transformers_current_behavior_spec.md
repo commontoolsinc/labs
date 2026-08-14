@@ -762,7 +762,10 @@ report these through the same collector (deduplicated via §2.2's
   in the registry's policy table (advisory by default), one
   `runContractLints` hook called from the pattern branch of
   `schema-injection.ts` after contract resolution, and never any effect on
-  emission. This one fires when a pattern's argument or result contract
+  emission. This one fires when a pattern's argument contract — argument
+  side only, by review ruling: result-side re-exposure is the documented
+  composition shape, and the branch returns when Fabric-types makes result
+  contracts load-bearing —
   embeds a type that is the Output-position type argument of a DIFFERENT
   `pattern<I, O>` call somewhere in the program (Output symbols are indexed
   program-wide, WeakMap-cached per `ts.Program`). The pattern's own

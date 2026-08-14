@@ -581,7 +581,12 @@ capability), and nesting collapses: `Demand<Demand<T>>` is one demand
 (demand-wrapper.test.ts). The key is annotation-class for the update gate
 (`ANNOTATION_KEYS`, `packages/piece/src/schema-compatibility.ts`), where a
 two-sided marker also relaxes evolution-mode removal to narrowing
-(`demandSubtree`; introduced with the #5746 prototype).
+(`demandSubtree`; introduced with the #5746 prototype). The link-proof
+safe-ancestor set (`LINK_PATH_SAFE_ANCESTOR_KEYS`,
+`packages/piece/src/ops/piece-controller.ts`) derives from
+`ANNOTATION_KEYS`, so an annotation key is link-path safe by
+classification rather than by a second registration — `deprecated`,
+`tier`, and `demand` each missed the older hand list in turn.
 
 ## 11. CFC Alias Lowering (`ifc` Metadata)
 

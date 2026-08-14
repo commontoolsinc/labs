@@ -6,6 +6,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  collectNewDemandDeclarationAdvisories,
 } from "../src/schema-compatibility.ts";
 
 function pattern(
@@ -2297,5 +2298,71 @@ describe("demand-marked narrowing", () => {
         pattern(holderArgument(candidate), emptyResult),
       )
     ).toThrow(/existing argument field was removed/);
+  });
+});
+
+// The two-sided narrowing condition is a timing requirement: the marker
+// must predate any drop by one deploy. This scan makes the first deploy
+// loud — an update newly marking deployed contract as a demand is named,
+// so "a future update may narrow beneath it" is said when it becomes true.
+describe("new-demand declaration advisories", () => {
+  const emptyResult: JSONSchema = { type: "object", properties: {} };
+
+  const holder = (
+    marked: boolean,
+    inner?: Record<string, JSONSchema>,
+  ): JSONSchema => ({
+    type: "object",
+    properties: {
+      notes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { title: { type: "string" }, ...(inner ?? {}) },
+          ...(marked ? { demand: true } : {}),
+        },
+      },
+    },
+  });
+
+  it("names a deployed subtree the candidate newly marks", () => {
+    expect(collectNewDemandDeclarationAdvisories(
+      pattern(holder(false), emptyResult),
+      pattern(holder(true), emptyResult),
+    )).toEqual([
+      "argument.notes[] is newly declared a demand; a future update may " +
+      "narrow beneath it",
+    ]);
+  });
+
+  it("stays silent when the deployed contract already marked it", () => {
+    expect(collectNewDemandDeclarationAdvisories(
+      pattern(holder(true), emptyResult),
+      pattern(holder(true), emptyResult),
+    )).toEqual([]);
+  });
+
+  it("stays silent for a property the previous contract never carried", () => {
+    expect(collectNewDemandDeclarationAdvisories(
+      pattern({ type: "object", properties: {} }, emptyResult),
+      pattern(holder(true), emptyResult),
+    )).toEqual([]);
+  });
+
+  it("reports the boundary node only", () => {
+    const inner: Record<string, JSONSchema> = {
+      meta: {
+        type: "object",
+        properties: { origin: { type: "string" } },
+        demand: true,
+      },
+    };
+    expect(collectNewDemandDeclarationAdvisories(
+      pattern(holder(false), emptyResult),
+      pattern(holder(true, inner), emptyResult),
+    )).toEqual([
+      "argument.notes[] is newly declared a demand; a future update may " +
+      "narrow beneath it",
+    ]);
   });
 });

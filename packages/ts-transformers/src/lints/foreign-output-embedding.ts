@@ -267,54 +267,44 @@ export function foreignOutputEmbeddingLint(
   const resultSymbol = namedSymbolForTypeNode(input.resultTypeNode, checker);
   if (resultSymbol) ownSymbols.add(resultSymbol);
 
-  const sides: ReadonlyArray<{
-    role: "argument" | "result";
-    type: ts.Type | undefined;
-    typeNode: ts.TypeNode;
-  }> = [
-    { role: "argument", type: input.inputType, typeNode: input.inputTypeNode },
-    { role: "result", type: input.resultType, typeNode: input.resultTypeNode },
-  ];
+  // Argument side only, by ruling: result-side re-exposure
+  // (`BoardOutput { notes: NoteOutput[] }`) is the documented composition
+  // shape, the design's cost table has no result-side refusal, and most
+  // result hits would duplicate the argument-side hit on the same pattern.
+  // The result branch can return with its own message and evidence once
+  // Fabric-types makes result contracts load-bearing.
+  const type = input.inputType ??
+    getTypeFromTypeNodeWithFallback(input.inputTypeNode, checker);
+
+  const walk = collectEmbeddingHits(type, checker, callNode, index, ownSymbols);
+  if (walk.capTripped) {
+    // The note composes from context.sourceFile, never from the call
+    // node: earlier pipeline stages can hand this lint a synthetic node
+    // with no source file attached.
+    lintLogger.debug(
+      "walk-depth-cap",
+      `type walk stopped at depth ${WALK_DEPTH_LIMIT} in the argument ` +
+        `contract of a pattern call in ${context.sourceFile.fileName}; ` +
+        "deeper structure was not scanned for foreign outputs",
+    );
+  }
 
   const findings: ContractLintFinding[] = [];
-  for (const side of sides) {
-    const type = side.type ??
-      getTypeFromTypeNodeWithFallback(side.typeNode, checker);
-
-    const walk = collectEmbeddingHits(
-      type,
-      checker,
-      callNode,
-      index,
-      ownSymbols,
-    );
-    if (walk.capTripped) {
-      // The note composes from context.sourceFile, never from the call
-      // node: earlier pipeline stages can hand this lint a synthetic node
-      // with no source file attached.
-      lintLogger.debug(
-        "walk-depth-cap",
-        `type walk stopped at depth ${WALK_DEPTH_LIMIT} in the ` +
-          `${side.role} contract of a pattern call in ` +
-          `${context.sourceFile.fileName}; deeper structure was not ` +
-          "scanned for foreign outputs",
-      );
-    }
-    for (const hit of walk.hits) {
-      const anchor =
-        referenceNodeForSymbol(side.typeNode, hit.symbol, checker) ?? callNode;
-      findings.push({
-        type: FOREIGN_OUTPUT_EMBEDDING_DIAGNOSTIC,
-        node: anchor,
-        message: `Pattern ${side.role} embeds ${hit.info.typeName}, the ` +
-          `output type of another pattern. A holder should declare only its ` +
-          `demand — the fields it reads and the verbs it calls — as its own ` +
-          `narrow type (optionally marked Demand<T>); embedding the full ` +
-          `output ties this pattern's update gate to the provider's whole ` +
-          `shape. If ${hit.info.typeName} is itself the intended shared ` +
-          `protocol, tag its declaration @sharedContract.`,
-      });
-    }
+  for (const hit of walk.hits) {
+    const anchor =
+      referenceNodeForSymbol(input.inputTypeNode, hit.symbol, checker) ??
+        callNode;
+    findings.push({
+      type: FOREIGN_OUTPUT_EMBEDDING_DIAGNOSTIC,
+      node: anchor,
+      message: `Pattern argument embeds ${hit.info.typeName}, the ` +
+        `output type of another pattern. A holder should declare only its ` +
+        `demand — the fields it reads and the verbs it calls — as its own ` +
+        `narrow type (optionally marked Demand<T>); embedding the full ` +
+        `output ties this pattern's update gate to the provider's whole ` +
+        `shape. If ${hit.info.typeName} is itself the intended shared ` +
+        `protocol, tag its declaration @sharedContract.`,
+    });
   }
   return findings;
 }

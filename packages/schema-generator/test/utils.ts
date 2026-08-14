@@ -40,7 +40,10 @@ declare type PerSession<T> = T & { readonly [SCOPE_BRAND]?: "session" };
 declare type PerAny<T> = T & { readonly [SCOPE_BRAND]?: "any" };
 
 declare const DEMAND_BRAND: unique symbol;
-declare type Demand<T> = T & { readonly [DEMAND_BRAND]?: true };
+declare interface DemandMarker {
+  readonly [DEMAND_BRAND]?: true;
+}
+declare type Demand<T> = T & DemandMarker;
 `;
 
 /**

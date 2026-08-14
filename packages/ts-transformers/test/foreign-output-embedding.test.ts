@@ -253,16 +253,20 @@ Deno.test("Foreign-output embedding check", async (t) => {
   await t.step(
     "stays silent for documented self-reference",
     async () => {
+      // Self-reference in the ARGUMENT contract: the tree holds pieces of
+      // its own pattern. The exemption keys on the result contract's root
+      // symbol, so `TreeOutput` inside `TreeInput` stays legal.
       const source = [
         'import { pattern } from "commonfabric";',
-        "",
-        "interface TreeInput {",
-        "  label?: string;",
-        "}",
         "",
         "export interface TreeOutput {",
         "  label: string;",
         "  children: TreeOutput[];",
+        "}",
+        "",
+        "interface TreeInput {",
+        "  label?: string;",
+        "  parent?: TreeOutput;",
         "}",
         "",
         "export default pattern<TreeInput, TreeOutput>(() => ({",
