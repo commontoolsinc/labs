@@ -22,6 +22,7 @@ import { pattern } from "commonfabric";
 import Topics, {
   submitProfileTopic,
   topicCellLink,
+  type TopicCrossrefRow,
   type TopicPiece,
 } from "./main.tsx";
 import Topic, {
@@ -29,6 +30,9 @@ import Topic, {
   type AddLinkResult,
   fidPayload,
   isSafeLinkUrl,
+  type MentionEvent,
+  type MentionResult,
+  mintMentionKey,
   saveProfileBody,
   type SetBodyResult,
   snippet,
@@ -39,6 +43,8 @@ import Topic, {
   type TopicComment,
   type TopicLink,
   type TopicLinkKind,
+  type UnmentionEvent,
+  type UnmentionResult,
   whenLabel,
 } from "./topic.tsx";
 
@@ -101,6 +107,10 @@ const LegacyUnsignedTopic = pattern(() => {
   const setBody = action<{ body: string }, SetBodyResult>((event) => ({
     body: event.body,
   }));
+  const mention = action<MentionEvent, MentionResult>(() => ({ key: "" }));
+  const unmention = action<UnmentionEvent, UnmentionResult>(() => ({
+    keys: [],
+  }));
   return {
     [NAME]: undefined,
     title: "Legacy unsigned sibling",
@@ -112,11 +122,18 @@ const LegacyUnsignedTopic = pattern(() => {
     // a present undefined value, which must survive current list validation.
     createdBy: undefined,
     createdByName: "Legacy Person",
+    // Absent for the same reason `createdBy` is: this sibling predates these
+    // paths, and the current projection has to accept that.
+    mentions: undefined,
+    references: undefined,
+    referencedBy: undefined,
     commentCount: undefined,
     lastActivityAt: undefined,
     addComment,
     addLink,
     setBody,
+    mention,
+    unmention,
   };
 });
 
@@ -154,6 +171,12 @@ export default pattern(() => {
   // resolved snapshot values directly here rather than inventing a production
   // fallback identity.
   const profileTopics = new Writable<TopicPiece[] | Default<[]>>([]);
+  // Standalone: no board built this, so there is no pivot to read and the topic
+  // it creates simply shows no inbound references. Required rather than
+  // optional so a real composer cannot forget it and silently lose them.
+  const profileBoardCrossrefs = new Writable<TopicCrossrefRow[] | Default<[]>>(
+    [],
+  );
   const profileTitleDraft = new Writable("Profile topic");
   const profileLegacyName = new Writable<string | Default<"">>("");
   const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
@@ -184,6 +207,7 @@ export default pattern(() => {
   const profileSubmitTopic = submitProfileTopic({
     topics: profileTopics,
     mentionable: profileTopics,
+    boardCrossrefs: profileBoardCrossrefs,
     newTitle: profileTitleDraft,
     myName: profileLegacyName,
     profileName: " Ada ",
@@ -608,6 +632,73 @@ export default pattern(() => {
   // the tagged form it accepts and the shapes it must reject (storage form,
   // short payloads, a non-fid hash).
   const P1 = "A".repeat(43);
+  // --- cross-references: the board's mention pivot ---
+
+  // Driven entirely through the real board, so the wiring under test is the
+  // wiring `addTopic` gives its own children.
+  const graphBoard = Topics({});
+  const action_add_graph_topics = action(() => {
+    graphBoard.addTopic.send({ title: "Graph target", agentName: "Sol" });
+    graphBoard.addTopic.send({ title: "Graph source", agentName: "Sol" });
+  });
+
+  // No mentions yet: a row exists per topic and claims no edges.
+  const assert_graph_baseline = assert(() =>
+    (graphBoard.crossrefs ?? []).length === 2 &&
+    (graphBoard.topics?.[0]?.referencedBy ?? []).length === 0 &&
+    (graphBoard.topics?.[0]?.mentions ?? []).length === 0
+  );
+
+  // Making a mention passes the PIECE, not an address. Nothing parses text and
+  // no id is minted: the reference is the identity.
+  const action_source_mentions_target = action(() => {
+    graphBoard.topics?.[1]?.mention?.send({ topic: graphBoard.topics?.[0] });
+  });
+  const assert_reference_edge = assert(() =>
+    (graphBoard.topics?.[1]?.mentions ?? []).length === 1 &&
+    (graphBoard.topics?.[0]?.referencedBy ?? []).length === 1 &&
+    graphBoard.topics?.[0]?.referencedBy?.[0]?.title === "Graph source" &&
+    // Mentioning is not symmetric.
+    (graphBoard.topics?.[1]?.referencedBy ?? []).length === 0
+  );
+
+  // A topic that mentions ITSELF records the mention but earns no inbound edge:
+  // referencing yourself is not being referenced from somewhere else.
+  const action_target_mentions_itself = action(() => {
+    graphBoard.topics?.[0]?.mention?.send({ topic: graphBoard.topics?.[0] });
+  });
+  const assert_self_reference_ignored = assert(() =>
+    (graphBoard.topics?.[0]?.mentions ?? []).length === 1 &&
+    (graphBoard.topics?.[0]?.referencedBy ?? []).length === 1
+  );
+
+  // Nothing was written into the target: retract the mention and the edge is
+  // simply gone from the topic that was being referenced.
+  const action_source_retracts_mention = action(() => {
+    graphBoard.topics?.[1]?.unmention?.send({ topic: graphBoard.topics?.[0] });
+  });
+  const assert_reference_retracted = assert(() =>
+    (graphBoard.topics?.[1]?.mentions ?? []).length === 0 &&
+    (graphBoard.topics?.[0]?.referencedBy ?? []).length === 0
+  );
+
+  // A piece with no board wired in shows no inbound references rather than
+  // failing: `boardCrossrefs` is optional, as `mentionable` is.
+  const assert_boardless_topic_has_no_backlinks = assert(() =>
+    (directTopic.referencedBy ?? []).length === 0
+  );
+
+  // The key minting the verb uses: six characters over [0-9a-z], skipping what
+  // the map already holds, and counting rather than guessing so the same call
+  // against the same map writes the same document.
+  const assert_mention_keys = assert(() =>
+    mintMentionKey([]) === "000000" &&
+    mintMentionKey(["000000"]) === "000001" &&
+    mintMentionKey(["000000", "000001"]) === "000002" &&
+    mintMentionKey(["000001"]) === "000000" &&
+    /^[0-9a-z]{6}$/.test(mintMentionKey([]))
+  );
+
   const assert_fid_payload = assert(() =>
     fidPayload(`fid1:${P1}`) === P1 &&
     fidPayload(` fid1:${P1} `) === P1 &&
@@ -689,6 +780,16 @@ export default pattern(() => {
       { assertion: assert_legacy_fields_load },
       { assertion: assert_pure_helpers },
       { assertion: assert_fid_payload },
+      { action: action_add_graph_topics },
+      { assertion: assert_graph_baseline },
+      { action: action_source_mentions_target },
+      { assertion: assert_reference_edge },
+      { action: action_target_mentions_itself },
+      { assertion: assert_self_reference_ignored },
+      { action: action_source_retracts_mention },
+      { assertion: assert_reference_retracted },
+      { assertion: assert_boardless_topic_has_no_backlinks },
+      { assertion: assert_mention_keys },
     ],
   };
 });

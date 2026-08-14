@@ -12,9 +12,15 @@ reads (`title`, `createdAt`, `createdBy`, `commentCount`, `lastActivityAt`). The
 same rows render the board's cards, so a headless survey and the rendered board
 read one derivation rather than two.
 
+Topics reference each other. A reference is a **cell**, not a string: picking a
+completion in the body editor stores the destination piece itself, and a link
+whose URL names a piece resolves to that piece. Nothing scans prose for pasted
+addresses, so a reference survives a rename, a move, and a redirect, and there
+is no id to mint or keep in step.
+
 Deliberately absent until reached for: statuses (not even open/closed), labels,
-assignees, attachments, nesting, and a topic-to-topic reference graph. What a
-topic grows next is part of the experiment.
+assignees, attachments, nesting. What a topic grows next is part of the
+experiment.
 
 This is the first wedge of Common Fabric's internal dogfooding program — the
 team's own issue-tracker replacement, built on the platform it tracks. The
@@ -97,10 +103,35 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   topic re-keys every card and rebuilds its whole subtree.
 - **Authoring: cf-code-editor in the Edit→Save draft flow.** The editor binds
   the session-local `bodyDraft` (never live to the shared string — whole-value
-  conflict semantics hold) with `@`-mention autocomplete over `mentionable`. The
+  conflict semantics hold) with `@`-mention autocomplete over `mentionable`, and
+  `$references` — the map where a picked completion stores its destination. The
   read view renders the body as markdown.
-- **Nothing derived is persisted.** The index is recomputed from the board on
-  read; no derived field is written back into a topic. A pattern that writes
+- **A reference is a cell, and identity is the only thing compared.** The board
+  derives the whole graph once, in `crossrefTable`, from the same topics array
+  read under two minimal declared views: one for identity, one for what each
+  topic points at. Matching is a linear scan of `equals` — with a cell reference
+  as the identity there is nothing to key a map by, and at board scale it is a
+  few hundred comparisons of resolved links.
+
+  Each topic then does a lookup rather than the join: find yourself among the
+  siblings, take the row at that position. It searches `mentionable` rather than
+  the table itself because **a link survives being read as an element of an
+  array a parameter declares at its top level, and does not survive being read
+  as a field nested inside one** — the nested read resolves it to a plain object
+  and leaves `equals` nothing to follow. Rows align with the topics array by
+  construction, since the pivot maps over it.
+
+  Every row is addressed by the topic it describes (`Writable.for(topic)`), so a
+  row keeps its identity however the board is reordered, and a lookup re-run by
+  an unrelated change recomputes the same links at the same address and writes
+  nothing.
+- **Agents reference through a verb.** `mention` and `unmention` take the piece
+  itself. With prose no longer scanned there is otherwise no headless way to
+  make a reference, and `kind: "topic"` links are ordinary links unless their
+  URL resolves.
+- **Nothing derived is persisted.** The index and the reference graph are
+  recomputed from the board on read; no derived field is written back into a
+  topic, so retracting a mention simply removes the edge. A pattern that writes
   derived data into its own children can destroy real data when it runs from a
   partial-view replica, so any future persisted index needs single-writer +
   full-view preconditions first.

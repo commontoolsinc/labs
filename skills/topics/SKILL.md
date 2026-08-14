@@ -220,9 +220,23 @@ and what comes next; use the body for the synthesized narrative rather than
 trying to revise earlier comments.
 
 Add every relevant pull request explicitly with `addLink` and `kind: "pr"`;
-mentioning it only in prose is not enough. The same holds for a connection to
-another Topic: nothing derives one from a fid or page URL in prose, so record it
-with `addLink` and `kind: "topic"` when it should be navigable.
+mentioning it only in prose is not enough.
+
+A connection to another Topic is a **reference**, not a string. Record it with
+`mention`, which takes the piece itself — writing the fid into the body does
+nothing, because nothing scans prose for addresses:
+
+```bash
+deno task cf piece call --url "$TOPIC_URL" mention '{"topic":"<other topic>"}'
+deno task cf piece call --url "$TOPIC_URL" unmention '{"topic":"<other topic>"}'
+```
+
+`mention` returns the key it recorded under. `unmention` removes every mention
+of that piece and returns the keys it removed. Each Topic publishes what it
+points at as `mentions`, and who points at it as `referencedBy` — both derived,
+so retracting a mention removes the edge and nothing is left behind in the
+target. An `addLink` whose URL names a piece also becomes a reference; one that
+names a web page stays a web page.
 
 ## Persistence and computed results
 
