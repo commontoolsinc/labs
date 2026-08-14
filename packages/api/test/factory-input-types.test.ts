@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import "@commonfabric/api/schema";
+import * as schemaModule from "@commonfabric/api/schema";
 import type {
   Default,
   FactoryInput,
@@ -116,9 +116,7 @@ const _schemaWishOverload: MustBeTrue<
   SchemaWishOverloadAcceptsFactoryInput
 > = true;
 
-Deno.test("FactoryInput accepts reactive cell handles in factory bindings", async () => {
-  const schemaModule = await import("@commonfabric/api/schema");
-
+Deno.test("FactoryInput accepts reactive cell handles in factory bindings", () => {
   assertEquals(
     [
       typeof schemaModule,

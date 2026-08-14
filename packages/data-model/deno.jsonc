@@ -5,7 +5,8 @@
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
-    "@/": "./src/"
+    "@/": "./src/",
+    "@node/crypto": "node:crypto"
   },
   "tasks": {
     "check": "deno check .",

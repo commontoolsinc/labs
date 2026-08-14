@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { normalizeEntityId } from "../src/lib/debug-utils.ts";
+import { XSchedulerGraph } from "../src/views/SchedulerGraphView.ts";
 
 // The debug command surface and the scheduler graph both bridge between
 // human/bare ids and the full schemed URIs that programmatic surfaces
@@ -24,10 +25,7 @@ Deno.test("normalizeEntityId prefixes bare ids and passes schemed ids through", 
   );
 });
 
-Deno.test("SchedulerGraphView preserves entity URI schemes when parsing action ids", async () => {
-  const { XSchedulerGraph } = await import(
-    "../src/views/SchedulerGraphView.ts"
-  );
+Deno.test("SchedulerGraphView preserves entity URI schemes when parsing action ids", () => {
   const proto = XSchedulerGraph.prototype as unknown as {
     extractEntityId(actionId: string): string | undefined;
     truncateLabel(label: string, maxLen?: number): string;

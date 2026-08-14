@@ -29,9 +29,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-
-// Dynamic import to satisfy the no-external-import lint rule.
-const nodeCrypto = await import("node:crypto");
+import * as nodeCrypto from "@node/crypto";
 
 /**
  * Returns the SHA-256 hash of a raw byte sequence, for verifying against

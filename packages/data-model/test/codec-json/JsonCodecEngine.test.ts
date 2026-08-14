@@ -52,6 +52,7 @@ import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 /**
  * Shared test `LiveEnvironment`: `getCell()` always throws (no test
@@ -997,12 +998,9 @@ describe("JsonCodecEngine", () => {
         expect(Object.keys(encoded)).toEqual(["", "\u{10000}"]);
       });
 
-      it("matches the key order used by `value-hash.ts`", async () => {
+      it("matches the key order used by `value-hash.ts`", () => {
         // Both subsystems must agree on the canonical sort order. Cross-check
         // via `utf8SortedKeysOf`, which is the function value-hash.ts uses.
-        const { utf8SortedKeysOf } = await import(
-          "@commonfabric/utils/utf8"
-        );
         const obj = {
           ["\u{1F600}"]: 1,
           b: 2,
