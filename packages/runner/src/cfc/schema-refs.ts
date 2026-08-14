@@ -20,6 +20,13 @@ const ALL_SUBSCHEMAS: SchemaWalkOptions = { includeUnused: true };
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
 import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
+import {
+  containsExternalSchemaRef,
+  type ExternalSchemaRef,
+  isExternalSchemaRef,
+  parseExternalSchemaRef,
+} from "../schema-decompose.ts";
+import { lookupSchemaDocument } from "../schema-registry.ts";
 
 const logger = getLogger("cfc");
 
@@ -416,6 +423,71 @@ const pruneCfcSchemaDefinitionsInternal = (
 export const pruneCfcSchemaDefinitions = (schema: JSONSchema): JSONSchema =>
   pruneCfcSchemaDefinitionsInternal(schema, false);
 
+// Member views of cyclic-group documents, per document per member name. A
+// fragment ref resolves to the member with the group's `$defs` attached (so
+// its internal refs keep a scope), and that view is minted once so downstream
+// identity-keyed caches see one object rather than a fresh spread per
+// resolution. Documents are interned before entering the registry, so keying
+// weakly on the document is stable.
+const memberViewCache = new WeakMap<
+  JSONSchemaObj,
+  Map<string, JSONSchema | undefined>
+>();
+
+/**
+ * Resolve an external `cid:` ref through the schema-document registry.
+ * Returns `undefined` on a miss — an unregistered document may still arrive,
+ * which is exactly why callers must never memoize this failure (see
+ * `containsExternalSchemaRef`).
+ */
+const resolveExternalCfcSchemaRef = (
+  parsed: ExternalSchemaRef,
+): JSONSchema | undefined => {
+  const document = lookupSchemaDocument(parsed.taggedHash);
+  if (document === undefined) {
+    logger.debug("cfc", () => [
+      "Schema document not (yet) registered: ",
+      parsed.taggedHash,
+    ]);
+    return undefined;
+  }
+  if (parsed.defName === undefined) return document;
+  if (!isObjectOrArray(document) || !isObjectOrArray(document.$defs)) {
+    logger.warn("cfc", () => [
+      "Fragment ref into a schema document without `$defs`: ",
+      parsed.taggedHash,
+    ]);
+    return undefined;
+  }
+  let views = memberViewCache.get(document);
+  if (views === undefined) {
+    views = new Map();
+    memberViewCache.set(document, views);
+  }
+  if (views.has(parsed.defName)) return views.get(parsed.defName);
+  const member = Object.hasOwn(document.$defs, parsed.defName)
+    ? document.$defs[parsed.defName]
+    : undefined;
+  let view: JSONSchema | undefined;
+  if (member === undefined || !isSubschema(member)) {
+    logger.warn("cfc", () => [
+      "Fragment ref names no member of its schema document: ",
+      `${parsed.taggedHash}#/$defs/${parsed.defName}`,
+    ]);
+    view = undefined;
+  } else if (isObjectOrArray(member) && member.$defs === undefined) {
+    // Same rule as resolveCfcSchemaRefUncached: only local refs need the
+    // group's definition scope attached.
+    view = summarizeCfcSchemaRefs(member).localDefinitions.size > 0
+      ? internSchema({ ...member, $defs: document.$defs })
+      : member;
+  } else {
+    view = member;
+  }
+  views.set(parsed.defName, view);
+  return view;
+};
+
 export const resolveCfcSchemaRef = (
   fullSchema: JSONSchema,
   schemaRef: string,
@@ -423,6 +495,11 @@ export const resolveCfcSchemaRef = (
   if (Object.hasOwn(embeddedSchemas, schemaRef)) {
     return embeddedSchemas[schemaRef];
   }
+  // External refs resolve through the registry and bypass the per-root cache
+  // entirely: a hit is already one probe, and a MISS must never be memoized —
+  // the document can arrive after the first failed lookup.
+  const external = parseExternalSchemaRef(schemaRef);
+  if (external !== undefined) return resolveExternalCfcSchemaRef(external);
   const cacheable = isObjectOrArray(fullSchema) && isDeepFrozen(fullSchema);
   if (cacheable) {
     const byRef = resolvedRefCache.get(fullSchema);
@@ -461,7 +538,10 @@ export const resolveCfcSchemaRefRoot = (
     refsForRoot.add(ref);
     const next = resolveCfcSchemaRef(root, ref);
     if (next === undefined) break;
-    const inheritedRoot = isEmbeddedCfcSchemaRef(ref) ? next : root;
+    // An embedded or external target is its own document: local refs inside
+    // it must bind to its scope, never to the referrer's.
+    const inheritedRoot =
+      isEmbeddedCfcSchemaRef(ref) || isExternalSchemaRef(ref) ? next : root;
     root = cfcSchemaChildRoot(next, inheritedRoot);
     current = next;
   }
@@ -517,9 +597,11 @@ const resolveCfcSchemaRefUncached = (
     return undefined;
   }
   if (isObjectOrArray(schemaCursor)) {
-    const schemaRefs = new Set<string>();
-    findCfcSchemaRefs(schemaCursor, schemaRefs);
-    if (schemaRefs.size > 0 && schemaCursor.$defs === undefined) {
+    // Only LOCAL refs need the containing document's definition scope;
+    // embedded and external refs resolve against their own documents, so a
+    // target carrying only those stays as it is.
+    const { localDefinitions } = summarizeCfcSchemaRefs(schemaCursor);
+    if (localDefinitions.size > 0 && schemaCursor.$defs === undefined) {
       schemaCursor = {
         ...schemaCursor,
         ...(isObjectOrArray(fullSchema) && fullSchema.$defs &&
@@ -567,6 +649,15 @@ export const resolveCfcSchemaRefs = (
     // is safe. Primitive and `undefined` results intern to themselves.
     const raw = resolveCfcSchemaRefsUncached(schemaObj, fullSchema);
     const result = internSchema(raw);
+    if (
+      result === undefined &&
+      (containsExternalSchemaRef(schemaObj) ||
+        containsExternalSchemaRef(fullSchema))
+    ) {
+      // The failure may be an unregistered schema document; the document can
+      // arrive later, so this miss must not be pinned.
+      return undefined;
+    }
     byFull.set(fullKey, result === undefined ? RESOLVED_UNDEFINED : result);
     return result;
   }
@@ -657,9 +748,12 @@ const resolveCfcSchemaRefsUncached = (
     if (resolved === undefined) {
       return undefined;
     }
-    const inheritedRoot = Object.hasOwn(embeddedSchemas, $ref)
-      ? resolved
-      : fullSchema;
+    // As in resolveCfcSchemaRefRoot: an embedded or external target owns its
+    // definition scope.
+    const inheritedRoot =
+      Object.hasOwn(embeddedSchemas, $ref) || isExternalSchemaRef($ref)
+        ? resolved
+        : fullSchema;
     const resolvedRoot = cfcSchemaChildRoot(resolved, inheritedRoot);
     if (Object.keys(rest).length > 0) {
       // Delay ref-site siblings until the referenced target's own ref chain is

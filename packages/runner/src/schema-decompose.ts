@@ -26,8 +26,10 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  anySchema,
   forEachSubschema,
   isSubschema,
   mapSubschemas,
@@ -118,6 +120,37 @@ export function parseExternalSchemaRef(
 /** Whether `ref` parses as an external schema reference. */
 export function isExternalSchemaRef(ref: string): boolean {
   return parseExternalSchemaRef(ref) !== undefined;
+}
+
+// Presence of an external ref anywhere in a schema, memoized for frozen
+// inputs. This is the guard the resolution caches consult before memoizing a
+// FAILED resolution: a schema that can reach an external ref may resolve
+// later, once the referenced document arrives, so pinning the miss would
+// pin the failure past the arrival. Presence itself is safe to memoize —
+// frozen content cannot gain or lose a ref.
+const externalRefPresenceCache = new WeakMap<JSONSchemaObj, boolean>();
+
+/**
+ * Whether `schema` contains an external schema reference anywhere — its own
+ * `$ref`, any subschema's (the never-emitted keywords included), or inside
+ * a `$defs` body.
+ */
+export function containsExternalSchemaRef(
+  schema: JSONSchema | undefined,
+): boolean {
+  if (!isObjectOrArray(schema)) return false;
+  const cached = externalRefPresenceCache.get(schema);
+  if (cached !== undefined) return cached;
+  const result = anySchema(
+    schema,
+    (node) =>
+      isObjectOrArray(node.schema) &&
+      typeof node.schema.$ref === "string" &&
+      isExternalSchemaRef(node.schema.$ref),
+    { includeDefs: true, includeUnused: true },
+  );
+  if (isDeepFrozen(schema)) externalRefPresenceCache.set(schema, result);
+  return result;
 }
 
 /** The `<name>` of a `#/$defs/<name>` ref, or `undefined` for any other. */

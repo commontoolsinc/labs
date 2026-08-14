@@ -45,26 +45,32 @@ the canonical document forms every later stage must accept.
 
 ### Stage 2 — session schema registry and ref resolution
 
-- [ ] The registry: a strong `Map` from tagged hash to interned schema,
-      session lifetime, hanging off the client `StorageManager` (the server
-      resolves from its own storage and does not use the client registry).
-      Registration verifies content against the claimed hash — a mismatched
-      document is rejected and never enters the registry (the
+- [x] The registry (`packages/runner/src/schema-registry.ts`): a strong
+      `Map` from tagged hash to interned schema, module-level rather than
+      hanging off `StorageManager` — resolution happens in pure schema code
+      (`resolveCfcSchemaRef`) with no storage handle, and content
+      addressing makes realm-wide sharing safe: registration verifies every
+      document against its claimed hash, on every call, so a mismatched
+      document throws and never enters the registry (the
       `loadSchemaDocument` precedent in `packages/runner/src/cfc/prepare.ts`).
-- [ ] `resolveSchemaRefs` (`packages/runner/src/cfc/schema-refs.ts`) and the
-      `resolveSchema` entry (`packages/runner/src/schema.ts`) extend from
-      `#/$defs/<name>`-only to `cid:` refs with an optional `#/$defs/<name>`
-      fragment, resolving through the registry. An unresolvable ref keeps
-      the fail-closed contract: `resolveSchema` returns `false`.
-- [ ] Cache discipline: a `cid:` resolution **hit** may be memoized (the
+- [x] `resolveCfcSchemaRef` (`packages/runner/src/cfc/schema-refs.ts`) and
+      through it the `resolveSchema` entry (`packages/runner/src/schema.ts`)
+      extend from `#/$defs/<name>`-only to `cid:` refs with an optional
+      `#/$defs/<name>` fragment, resolving through the registry. An
+      external target owns its definition scope (the embedded-schema
+      precedent); a fragment ref resolves to the member with the group's
+      `$defs` attached when the member carries local refs, so the existing
+      scope-switching handles the rest. An unresolvable ref keeps the
+      fail-closed contract: `resolveSchema` returns `false`.
+- [x] Cache discipline: a `cid:` resolution **hit** may be memoized (the
       documents are immutable), but a **miss must not be** — a document can
       arrive after the first failed lookup, and a memoized `false` would
-      pin the failure. The existing failure-sentinel caches
-      (`_resolvedRefCache` in `packages/runner/src/traverse.ts`,
-      `resolvedRefCache` in `schema-refs.ts`) memoize unresolvable refs
-      today; `cid:` misses either bypass those caches or registration
-      invalidates them. This is the subtlest point in the phase — it gets
-      its own tests (resolve-fails, document arrives, resolve-succeeds).
+      pin the failure. External refs bypass the per-root cache in
+      `resolveCfcSchemaRef` entirely, and the failure-sentinel caches
+      (`resolvedRefsCache` in `schema-refs.ts`, `_resolvedRefCache` in
+      `packages/runner/src/traverse.ts`) skip memoizing a failure whenever
+      `containsExternalSchemaRef` sees an external ref in the input. Tested
+      by resolve-fails, documents-arrive, same-frozen-schema-resolves.
 
 ### Stage 3 — traversal and the memory walkers
 
@@ -139,10 +145,10 @@ writers) in the spec.
 
 ## Open items
 
-- Where the registry hangs is proposed as `StorageManager` (one per client
-  session, visible to the storage layer that registers arrivals); if
-  resolution turns out to be needed somewhere without a `StorageManager`
-  handle, revisit before Stage 2 lands.
+- Where the registry hangs — resolved with Stage 2: module-level in the
+  runner, because `resolveCfcSchemaRef` has no storage handle and verified
+  content-addressed entries are safe to share realm-wide. Stage 4's sync
+  registration writes into the same module-level registry.
 - Whether a fragment ref may point into a singleton document
   (`cid:<hash>#/$defs/<name>` where the document is not a cyclic group) is
   disallowed until something needs it: singleton documents are referenced

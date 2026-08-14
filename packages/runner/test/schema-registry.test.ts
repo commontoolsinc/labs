@@ -1,0 +1,249 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
+import {
+  internSchema,
+  internSchemaAsTaggedHashString,
+} from "@commonfabric/data-model/schema-hash";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+  SchemaDocumentHashMismatchError,
+} from "../src/schema-registry.ts";
+import {
+  containsExternalSchemaRef,
+  type DecomposedSchema,
+  decomposeSchema,
+} from "../src/schema-decompose.ts";
+import { resolveSchema } from "../src/schema.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
+import { resolveSchemaRefsCanonical } from "../src/traverse.ts";
+
+/** Registers every document of a decomposition. */
+const registerAll = (decomposed: DecomposedSchema): void => {
+  for (const [hash, document] of decomposed.documents) {
+    registerSchemaDocument(hash, document);
+  }
+};
+
+describe("schema-registry", () => {
+  describe("registerSchemaDocument()", () => {
+    it("returns the interned schema and makes it retrievable by hash", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { registered: { type: "string" } },
+      };
+      const hash = internSchemaAsTaggedHashString(schema);
+      const interned = registerSchemaDocument(hash, schema);
+      expect(interned).toEqual(schema);
+      expect(lookupSchemaDocument(hash)).toBe(interned);
+    });
+
+    it("is idempotent for the same hash", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { idempotent: { type: "number" } },
+      };
+      const hash = internSchemaAsTaggedHashString(schema);
+      const first = registerSchemaDocument(hash, schema);
+      expect(registerSchemaDocument(hash, { ...schema })).toBe(first);
+    });
+
+    it("throws for content that does not hash to the claimed id, and registers nothing", () => {
+      const claimed = internSchemaAsTaggedHashString({
+        type: "number",
+        title: "forgery target",
+      });
+      expect(() =>
+        registerSchemaDocument(claimed, {
+          type: "string",
+          title: "forged content",
+        })
+      ).toThrow(SchemaDocumentHashMismatchError);
+      expect(lookupSchemaDocument(claimed)).toBeUndefined();
+    });
+
+    it("throws for mismatched content even when the hash already holds the correct document", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { occupied: { type: "boolean" } },
+      };
+      const hash = internSchemaAsTaggedHashString(schema);
+      registerSchemaDocument(hash, schema);
+      expect(() =>
+        registerSchemaDocument(hash, { type: "string", title: "late forgery" })
+      ).toThrow(SchemaDocumentHashMismatchError);
+      expect(lookupSchemaDocument(hash)).toEqual(schema);
+    });
+  });
+
+  describe("lookupSchemaDocument()", () => {
+    it("returns `undefined` for a hash nothing registered", () => {
+      expect(lookupSchemaDocument("fid1:never-registered")).toBeUndefined();
+    });
+  });
+
+  describe("resolution through the registry", () => {
+    it("resolves a bare external ref to the registered document", () => {
+      const schema: JSONSchemaObj = {
+        type: "object",
+        properties: {
+          home: { $ref: "#/$defs/BareAddress" },
+        },
+        $defs: {
+          BareAddress: {
+            type: "object",
+            properties: { bareStreet: { type: "string" } },
+          },
+        },
+      };
+      const decomposed = decomposeSchema(schema);
+      registerAll(decomposed);
+      const resolved = resolveSchema({ $ref: decomposed.rootRef });
+      // The root document resolves shallowly: its property refs stay
+      // external, dereferenced later when traversal visits them.
+      expect(resolved).toEqual({
+        type: "object",
+        properties: {
+          home: {
+            $ref: `cid:${
+              internSchemaAsTaggedHashString({
+                type: "object",
+                properties: { bareStreet: { type: "string" } },
+              })
+            }`,
+          },
+        },
+      });
+    });
+
+    it("resolves a fragment ref to the member with the group's `$defs` attached", () => {
+      const schema: JSONSchemaObj = {
+        $ref: "#/$defs/FragFolder",
+        $defs: {
+          FragFolder: {
+            type: "object",
+            properties: {
+              children: {
+                type: "array",
+                items: { $ref: "#/$defs/FragEntry" },
+              },
+            },
+          },
+          FragEntry: {
+            anyOf: [{ type: "string" }, { $ref: "#/$defs/FragFolder" }],
+          },
+        },
+      };
+      const decomposed = decomposeSchema(schema);
+      registerAll(decomposed);
+      const resolved = resolveSchema({
+        $ref: decomposed.rootRef,
+      }) as JSONSchemaObj;
+      expect(resolved.type).toBe("object");
+      // The group's definitions ride along so the member's internal refs
+      // keep a scope...
+      expect(Object.keys(resolved.$defs!).toSorted()).toEqual([
+        "FragEntry",
+        "FragFolder",
+      ]);
+      // ...and a local ref inside the view resolves against it.
+      const items = (resolved.properties!.children as JSONSchemaObj)
+        .items as JSONSchemaObj;
+      expect(items).toEqual({ $ref: "#/$defs/FragEntry" });
+      const entry = ContextualFlowControl.resolveSchemaRefs(
+        items,
+        resolved,
+      ) as JSONSchemaObj;
+      expect(entry.anyOf).toEqual([
+        { type: "string" },
+        { $ref: "#/$defs/FragFolder" },
+      ]);
+    });
+
+    it("follows a local ref whose definition body is an external ref", () => {
+      const inner: JSONSchemaObj = {
+        type: "object",
+        properties: { chainedLeaf: { type: "string" } },
+      };
+      const innerHash = internSchemaAsTaggedHashString(inner);
+      registerSchemaDocument(innerHash, inner);
+      const outer: JSONSchemaObj = {
+        type: "object",
+        properties: { x: { type: "number" } },
+        $defs: { Chained: { $ref: `cid:${innerHash}` } },
+      };
+      const resolved = ContextualFlowControl.resolveSchemaRefs(
+        { $ref: "#/$defs/Chained" },
+        outer,
+      );
+      expect(resolved).toEqual(inner);
+    });
+
+    it("returns `false` from resolveSchema() for an unregistered document", () => {
+      const orphanRef = `cid:${
+        internSchemaAsTaggedHashString({
+          type: "object",
+          properties: { neverRegistered: { type: "string" } },
+        })
+      }`;
+      expect(resolveSchema({ $ref: orphanRef })).toBe(false);
+    });
+
+    it("resolves after the document arrives, through the same frozen ref schema", () => {
+      const schema: JSONSchemaObj = {
+        type: "object",
+        properties: { arrival: { $ref: "#/$defs/LateDoc" } },
+        $defs: {
+          LateDoc: {
+            type: "object",
+            properties: { lateMarker: { type: "number" } },
+          },
+        },
+      };
+      const decomposed = decomposeSchema(schema);
+      const refSchema = internSchema({
+        $ref: decomposed.rootRef,
+      }) as JSONSchemaObj;
+
+      // Two failed resolutions through every cache layer, then the
+      // documents arrive, then the SAME schema object resolves. A memoized
+      // miss anywhere pins the first `false` forever and fails this test.
+      expect(resolveSchema(refSchema)).toBe(false);
+      expect(resolveSchemaRefsCanonical(refSchema)).toBeUndefined();
+      expect(resolveSchema(refSchema)).toBe(false);
+
+      registerAll(decomposed);
+
+      const resolved = resolveSchema(refSchema) as JSONSchemaObj;
+      expect(resolved.type).toBe("object");
+      expect(Object.keys(resolved.properties!)).toEqual(["arrival"]);
+      expect(resolveSchemaRefsCanonical(refSchema)).toBe(resolved);
+    });
+  });
+
+  describe("containsExternalSchemaRef()", () => {
+    it("returns `true` for an external ref at the root, in a subschema, and inside `$defs`", () => {
+      expect(containsExternalSchemaRef({ $ref: "cid:fid1:abc" })).toBe(true);
+      expect(containsExternalSchemaRef({
+        type: "object",
+        properties: { x: { $ref: "cid:fid1:abc" } },
+      })).toBe(true);
+      expect(containsExternalSchemaRef({
+        type: "object",
+        $defs: { T: { $ref: "cid:fid1:abc" } },
+      })).toBe(true);
+    });
+
+    it("returns `false` for local refs and for boolean schemas", () => {
+      expect(containsExternalSchemaRef({
+        type: "object",
+        properties: { x: { $ref: "#/$defs/T" } },
+        $defs: { T: { type: "string" } },
+      })).toBe(false);
+      expect(containsExternalSchemaRef(true)).toBe(false);
+      expect(containsExternalSchemaRef(undefined)).toBe(false);
+    });
+  });
+});

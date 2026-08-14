@@ -34,6 +34,7 @@ import {
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
+import { containsExternalSchemaRef } from "./schema-decompose.ts";
 import {
   DEFAULT_SELECTOR,
   internPathSelector,
@@ -681,6 +682,11 @@ export function resolveSchemaRefsCanonical(
   let cached = _resolvedRefCache.get(schema);
   if (cached === undefined) {
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema);
+    if (resolved === undefined && containsExternalSchemaRef(schema)) {
+      // The failure may be an unregistered schema document, which can arrive
+      // later; memoizing it would pin the miss past the arrival.
+      return undefined;
+    }
     // `null` (not `undefined`) is the cache's "resolved to nothing" sentinel,
     // so it stays distinct from "absent" on `Map.get()`.
     cached = internSchema(resolved) ?? null;
