@@ -1,5 +1,6 @@
 import {
   action,
+  type ComparableCell,
   Default,
   entityRefToString,
   handler,
@@ -172,15 +173,28 @@ export interface TopicIndexRow {
  * an input reference type through to the output would remove the need for it.
  */
 const crossrefRows = lift(
-  (topics: Writable<TopicScan[] | Default<[]>>): TopicCrossref[] => {
-    const list = topics.get();
+  (
+    { scan, identities }: {
+      scan: Writable<TopicScan[] | Default<[]>>;
+      // The SAME array, declared a second time as cells. The edge sets below
+      // hold REFERENCES to siblings, and a cell always writes as a link; an
+      // element read as a value writes a link only while it still carries
+      // provenance and an inline copy once it does not, so the same inputs
+      // would produce two different documents and fail the idempotency
+      // recheck. Reading identity and prose through separate declarations is
+      // what lets each stay minimal.
+      identities: Writable<ComparableCell<unknown>[] | Default<[]>>;
+    },
+  ): TopicCrossref[] => {
+    const list = scan.get();
+    const cells = identities.get();
     // Each entry's own fid payload ("" while unresolved, e.g. mid-sync — such
     // entries simply hold no edges this render). resolveAsCell/entityId are
     // cell-runtime surface, not on the pattern Writable type (same cast as
     // notes' appendLink).
     const payloads = list.map((t, i) => {
       if (!t) return "";
-      const ref = (topics.key(i) as any).resolveAsCell?.()?.entityId;
+      const ref = (scan.key(i) as any).resolveAsCell?.()?.entityId;
       return ref ? fidPayload(entityRefToString(ref)) : "";
     });
     const { refsOut, referencedBy } = crossrefJoin(
@@ -214,11 +228,20 @@ const crossrefRows = lift(
           topic: t as TopicPiece,
           title: t.title,
           createdAt: t.createdAt,
-          createdBy: t.createdBy,
+          // Copied as a VALUE, not passed through: an object handed straight
+          // from a read into `.set()` writes a link while it carries
+          // provenance and an inline copy once it does not, and a row is a
+          // snapshot of the scalars a survey summarises anyway.
+          createdBy: t.createdBy ? { ...t.createdBy } : undefined,
           commentCount: t.commentCount ?? 0,
           lastActivityAt: t.lastActivityAt ?? 0,
-          refsOut: refsOut[i].map((j) => list[j] as TopicPiece),
-          referencedBy: referencedBy[i].map((j) => list[j] as TopicPiece),
+          // Built as `unknown[]` and asserted once, the same shape the `rows`
+          // array uses: what goes in is a cell and what a consumer resolves is
+          // the topic behind it.
+          refsOut: refsOut[i].map((j) => cells[j]) as unknown[] as TopicPiece[],
+          referencedBy: referencedBy[i].map((j) =>
+            cells[j]
+          ) as unknown[] as TopicPiece[],
           refsOutLinks: refsOut[i].map((j) => ({
             fid: payloads[j] ? `fid1:${payloads[j]}` : "",
             title: list[j].title,
@@ -365,7 +388,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   // `.length` — or through a helper this analysis cannot see into — is what
   // puts the whole board back in the read.
   const topicCount = topics.get().length;
-  const rows = crossrefRows(topics);
+  const rows = crossrefRows({ scan: topics, identities: topics });
   const cards = cardsByActivity(rows);
   const hasNoTopics = rows.length === 0;
 
