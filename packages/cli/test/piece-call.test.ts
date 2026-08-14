@@ -58,6 +58,15 @@ import {
 } from "../lib/cell-selection.ts";
 import { cf, stripAnsi } from "./utils.ts";
 
+/**
+ * The runner's own stream-send options, derived from `Cell["send"]` rather
+ * than restated by hand — so a runner-side rename (`session`, `eventId`)
+ * fails `deno task check` on this file instead of leaving these doubles
+ * green while production breaks: the #5505/#5582 drift class, one layer
+ * down.
+ */
+type CellSendOptions = NonNullable<Parameters<Cell<unknown>["send"]>[2]>;
+
 // The session an invocation id is chosen within, for the calls whose subject
 // is something else: a call names the pair or it names no invocation.
 const callerSession = "ses:piece-call-test";
@@ -1333,9 +1342,7 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
-    sendOptions: [] as Array<
-      { eventId?: string; session?: string } | undefined
-    >,
+    sendOptions: [] as Array<CellSendOptions | undefined>,
     receiptLinkRequested: undefined as { id?: string } | undefined,
     idleCalls: 0,
     syncedCalls: 0,
@@ -1381,7 +1388,7 @@ function createPieceCallableHarness(options: {
                 handlingReceiptLink?: NormalizedFullLink;
               },
             ) => void,
-            sendOptions?: { eventId?: string; session?: string },
+            sendOptions?: CellSendOptions,
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
