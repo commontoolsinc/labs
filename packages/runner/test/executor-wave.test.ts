@@ -1252,6 +1252,78 @@ describe("stage D seal-into-wave", () => {
     }
   });
 
+  it("a symbol-bearing FabricValue payload survives wave assembly and stamping — the spine clones never re-encode payloads (verdict blocker, 2026-08-12)", async () => {
+    // Registry-interned symbols are valid FabricValues
+    // (data-model/interface.ts). Pre-fix, BOTH the batch build
+    // (wave.ts) and the engine's stamping helper (engine.ts) ran
+    // `structuredClone` over the whole sidecar op: a valid symbol
+    // payload threw `DataCloneError` mid-assembly and the
+    // event-and-consequence commit aborted.
+    const lease = liveLease();
+    const servingManager = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const servingRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingManager,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const streamCell = servingRuntime.getCell<{ $stream: boolean }>(
+        space,
+        "symbol-payload-stream",
+        undefined,
+      );
+      {
+        const tx = servingRuntime.edit();
+        streamCell.withTx(tx).set({ $stream: true });
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      const wave = new WaveAccumulator({
+        space,
+        basisSeq: Engine.serverSeq(engine),
+        scopeKeyIdentity: {
+          principal: signer.did(),
+          sessionId: "symbol-session",
+        },
+        replicaFor: (s) => servingManager.open(s).replica,
+        lease,
+      });
+      servingRuntime.installSealDestination(wave);
+      const emitTx = servingRuntime.edit();
+      stampWaveRunContext(emitTx, {
+        actionId: "symbol-emitter",
+        kind: "derivation",
+      });
+      streamCell.withTx(emitTx).send(
+        { tag: Symbol.for("cf:test-tag") } as never,
+      );
+      expect((await emitTx.commit()).error).toBeUndefined();
+      servingRuntime.clearSealDestination();
+      const outcome = await wave.commitWave(newSink());
+      await wave.settled();
+      // Pre-fix: DataCloneError aborted the wave right here.
+      expect(outcome.aborted).toBeUndefined();
+      expect(outcome.seq).toBeDefined();
+      const streamLink = streamCell.getAsNormalizedFullLink();
+      const sidecarId = streamEntriesDocId({
+        id: streamLink.id,
+        path: [...streamLink.path],
+      });
+      const sidecar = Engine.readState(engine, { id: sidecarId })?.document
+        ?.value as
+          | { entries?: Array<{ seq?: number }> }
+          | undefined;
+      expect(sidecar?.entries?.length).toBe(1);
+      expect(typeof sidecar?.entries?.[0].seq).toBe("number");
+    } finally {
+      lease.release();
+      await servingRuntime.dispose();
+      await servingManager.close();
+    }
+  });
+
   it("drops a derivation that read a requeued handler's sealed write (nothing derived from withdrawn state commits)", async () => {
     const lease = liveLease();
     const consequence = runtime.getCell<{ value: number }>(

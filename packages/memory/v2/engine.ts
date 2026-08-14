@@ -2260,6 +2260,77 @@ const validateEventAppends = (
   return plan;
 };
 
+/** A fresh entry list whose OBJECT entries are shallow-copied — the
+ * stamping writes (seq, firedAt) land on the copies; every deeper value
+ * (payload included) stays SHARED by reference. */
+const spineCloneEntryList = (entries: readonly unknown[]): unknown[] =>
+  entries.map((entry) =>
+    entry !== null && typeof entry === "object" && !Array.isArray(entry)
+      ? { ...(entry as Record<string, unknown>) }
+      : entry
+  );
+
+/** Clone exactly the SPINE the stamping mutates: the operation object,
+ * the containers down to `/value/entries`, and the entry objects
+ * themselves. NEVER `structuredClone` (verdict blocker, 2026-08-12):
+ * the co-hosted wave sink hands this path the runner's own op objects,
+ * whose FabricValue payloads can carry registry symbols —
+ * `structuredClone` throws `DataCloneError` on those and demotes
+ * fabric classes it can copy. Payload values are never mutated here,
+ * so sharing them is sound. */
+const spineCloneSidecarOperation = <
+  Op extends Exclude<Operation, SqliteOperation>,
+>(operation: Op): Op => {
+  if (operation.op === "set") {
+    const outer = (operation.value ?? undefined) as
+      | Record<string, unknown>
+      | undefined;
+    const inner = (outer?.value ?? undefined) as
+      | Record<string, unknown>
+      | undefined;
+    if (inner === undefined || !Array.isArray(inner.entries)) {
+      return { ...operation };
+    }
+    return {
+      ...operation,
+      value: {
+        ...outer,
+        value: { ...inner, entries: spineCloneEntryList(inner.entries) },
+      },
+    } as Op;
+  }
+  if (operation.op === "patch") {
+    return {
+      ...operation,
+      patches: operation.patches.map((patch) => {
+        if (
+          (patch.op === "append" || patch.op === "add-unique") &&
+          patch.path === STREAM_ENTRIES_POINTER
+        ) {
+          return {
+            ...patch,
+            values: spineCloneEntryList(patch.values as unknown[]) as never,
+          };
+        }
+        if (
+          (patch.op === "add" || patch.op === "replace") &&
+          patch.path === STREAM_ENTRIES_POINTER &&
+          Array.isArray((patch as unknown as { value?: unknown }).value)
+        ) {
+          return {
+            ...patch,
+            value: spineCloneEntryList(
+              (patch as unknown as { value: unknown[] }).value,
+            ) as never,
+          };
+        }
+        return patch;
+      }),
+    } as Op;
+  }
+  return { ...operation };
+};
+
 /** Apply one op's stamp plan onto a CLONE (the input operation object is
  * shared with replica overlays and must never be mutated). */
 const stampEventAppendOperation = <
@@ -2269,7 +2340,7 @@ const stampEventAppendOperation = <
   stamps: readonly EventAppendStamp[],
   seq: number,
 ): Op => {
-  const cloned = structuredClone(operation) as Op;
+  const cloned = spineCloneSidecarOperation(operation);
   for (const stamp of stamps) {
     let entry: StreamEventEntry | undefined;
     if (cloned.op === "set") {

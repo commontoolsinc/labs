@@ -1608,36 +1608,67 @@ export class WaveAccumulator
       }
     }
     const eventAppends: Array<{ id: string; eventId: string }> = [];
+    // A fresh entry list whose OBJECT entries are shallow-copied: the
+    // consequenced mark below lands on the copies while every deeper
+    // value (payload included) stays SHARED by reference.
+    const spineCloneEntryList = (entries: readonly unknown[]): unknown[] =>
+      entries.map((entry) =>
+        entry !== null && typeof entry === "object" && !Array.isArray(entry)
+          ? { ...(entry as Record<string, unknown>) }
+          : entry
+      );
     for (const [opIndex, original] of operations.entries()) {
       if (original.op === "sqlite" || original.op === "delete") continue;
       if (!original.id.startsWith(STREAM_ENTRIES_DOC_PREFIX)) continue;
       // Clone before any possible mark: the batch holds the SEALED
-      // commits' own op objects (shared with replica overlays).
-      const operation = structuredClone(original);
-      operations[opIndex] = operation;
+      // commits' own op objects (shared with replica overlays). Only
+      // the SPINE is cloned — the op object, the containers down to
+      // `/value/entries`, and the entry objects — NEVER
+      // `structuredClone` (verdict blocker, 2026-08-12): event payloads
+      // are FabricValues that can carry registry symbols, which
+      // `structuredClone` refuses with `DataCloneError`, aborting wave
+      // assembly for a valid event; cells it can copy get demoted.
       const entryLists: unknown[][] = [];
-      if (operation.op === "set") {
-        const value = (operation.value as { value?: { entries?: unknown[] } })
-          ?.value;
-        if (Array.isArray(value?.entries)) entryLists.push(value.entries);
-      } else if (operation.op === "patch") {
-        for (const patch of operation.patches) {
+      let operation = original;
+      if (original.op === "set") {
+        const outer = original.value as
+          | { value?: { entries?: unknown[] } }
+          | undefined;
+        const inner = outer?.value;
+        if (Array.isArray(inner?.entries)) {
+          const entries = spineCloneEntryList(inner.entries);
+          operation = {
+            ...original,
+            value: { ...outer, value: { ...inner, entries } } as never,
+          };
+          entryLists.push(entries);
+        }
+      } else if (original.op === "patch") {
+        const patches = original.patches.map((patch) => {
           if (
             (patch.op === "append" || patch.op === "add-unique") &&
             patch.path === "/value/entries"
           ) {
-            entryLists.push(patch.values as unknown[]);
-          } else if (
+            const values = spineCloneEntryList(patch.values as unknown[]);
+            entryLists.push(values);
+            return { ...patch, values: values as never };
+          }
+          if (
             (patch.op === "add" || patch.op === "replace") &&
             patch.path === "/value/entries" &&
             Array.isArray((patch as unknown as { value?: unknown }).value)
           ) {
-            entryLists.push(
+            const values = spineCloneEntryList(
               (patch as unknown as { value: unknown[] }).value,
             );
+            entryLists.push(values);
+            return { ...patch, value: values as never };
           }
-        }
+          return patch;
+        });
+        operation = { ...original, patches };
       }
+      operations[opIndex] = operation;
       for (const list of entryLists) {
         for (const [entryIndex, candidate] of list.entries()) {
           const entry = candidate as {
@@ -1666,8 +1697,8 @@ export class WaveAccumulator
             survivedEventIds.has(entry.eventId)
           ) {
             // Same-wave processing: mark the CLONE in place. `list` is
-            // the clone's own array (cloneSidecarOp below), so the
-            // sealed originals stay pristine.
+            // the spine clone's own array (spineCloneEntryList above),
+            // so the sealed originals stay pristine.
             (list[entryIndex] as { consequenced?: boolean })
               .consequenced = true;
           }
