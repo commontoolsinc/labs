@@ -31,6 +31,7 @@ import {
   type IFCLabel,
   mergeCfcLabelViews,
   redactCaveatSourcesForDisplay,
+  resolveCfcSchemaRefs,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import type { CellScope, JSONSchema } from "@commonfabric/api";
@@ -315,6 +316,13 @@ async function resultProjectionFailedAtPath(
  */
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
+  /** This verb's documentation, resolved on demand — a thunk for the same
+   * reason `declaredResult` is one, and attached under the same condition:
+   * the pattern declaring the verb is the only document that carries it, and
+   * reaching it costs a load no dispatch should pay.
+   *
+   * Only the help page pulls it. A dispatch needs nothing an author wrote. */
+  declaredProse?: () => Promise<DeclaredVerbProse | undefined>;
 }
 
 export interface PieceCallableDependencies extends CallableExecutionDeps {
@@ -1771,9 +1779,17 @@ async function resolvePieceCallable(
     // does. A piece surface with no pattern to consult carries no thunk at all,
     // which is the honest statement — the absence says this resolution cannot
     // describe a result, rather than promising an answer that is always none.
+    //
+    // Both thunks read ONE load. They answer from the same compiled pattern
+    // and a help page pulls both, so a loader per thunk would double what a
+    // page costs — and the reason the result is a thunk at all is that the
+    // load is the expensive part.
+    let patternOnce: Promise<any> | undefined;
+    const loadPattern = () => (patternOnce ??= piece.getPattern());
     return {
       ...resolved,
-      declaredResult: () => declaredVerbResult(piece, callableName),
+      declaredResult: () => declaredVerbResult(loadPattern, callableName),
+      declaredProse: () => declaredVerbProseFor(loadPattern, callableName),
     };
   }
 
@@ -1836,6 +1852,15 @@ export interface PieceCallableListing {
    * declared result. Absent when the verb declares none — the value-less
    * shape, which is the common one. */
   outputSchema?: JSONSchema;
+  /** What the verb is FOR, in the author's own words: the doc comment on the
+   * pattern property declaring it, the same prose `call <verb> --help` prints
+   * as its summary line.
+   *
+   * Absent where the author documented nothing, and absent where the pattern
+   * could not be read (`incomplete`). Never derived from the name — a listing
+   * that restates `addItem` as "add item" reports the schema back to the
+   * caller who wrote it and calls it documentation. */
+  description?: string;
   /** Listing mark: a UI affordance outside the headless contract (inferred
    * from session-scoped handler bindings at compile time). Hidden from the
    * default listing; always callable. */
@@ -1967,6 +1992,151 @@ function handlerVerbResults(
   return verbs;
 }
 
+/** What a pattern's own result schema says a verb is for, and what its event
+ * fields mean — the author's doc comments, as the compiler lowered them. */
+interface DeclaredVerbProse {
+  /** The doc comment on the property declaring the verb: what the verb DOES.
+   * A sibling of the property's `$ref`, and never a statement about the event
+   * object, which is why it is held apart from `eventSchema` below rather than
+   * merged into it. */
+  description?: string;
+  /** The verb's declared event schema with its `$ref` followed against the
+   * result schema's own root, so the field descriptions inside the `$defs`
+   * target are reachable. Read for annotations ONLY — never to decide a shape;
+   * see `withDeclaredFieldProse`. */
+  eventSchema?: JSONSchema;
+}
+
+/** Every verb's prose, keyed by the result property declaring it.
+ *
+ * A pattern's `resultSchema` is the only place both descriptions survive
+ * compilation. Neither reaches the callable cell a verb dispatches through:
+ * that cell adopts the schema embedded in its resolved link chain
+ * (`Cell.asSchemaFromLinks`), which for a verb is the handler node's `$event`
+ * input — the handler's READ of the event, narrowed to the fields its
+ * implementation touches, rather than a rendering of the declared event type.
+ * A query carries no author's words, so a caller's schema is not the declared
+ * one stripped of prose; reading the declared one here is what recovers it.
+ *
+ * A name absent here is a name the pattern's declared result type does not
+ * mention — the same condition that hides a verb from the result-cell walk —
+ * and says nothing about whether the verb is callable.
+ *
+ * The `$defs` live at the result schema's ROOT while the `$ref` sits on the
+ * property, so the root is passed explicitly. Resolving the property alone
+ * would consult a document that carries no definitions at all. */
+function declaredVerbProse(
+  pattern: { resultSchema?: unknown } | null | undefined,
+): Map<string, DeclaredVerbProse> {
+  const prose = new Map<string, DeclaredVerbProse>();
+  const resultSchema = pattern?.resultSchema;
+  if (
+    !isObjectOrArray(resultSchema) || !isObjectOrArray(resultSchema.properties)
+  ) {
+    return prose;
+  }
+  for (const [name, property] of Object.entries(resultSchema.properties)) {
+    if (!isObjectOrArray(property)) continue;
+    const description = typeof property.description === "string"
+      ? property.description
+      : undefined;
+    const eventSchema = typeof property.$ref === "string"
+      ? resolveCfcSchemaRefs(property, resultSchema as JSONSchema)
+      : property as JSONSchema;
+    if (description === undefined && eventSchema === undefined) continue;
+    prose.set(name, {
+      ...(description !== undefined && { description }),
+      ...(eventSchema !== undefined && { eventSchema }),
+    });
+  }
+  return prose;
+}
+
+/** `served` with `description` annotations filled in from `declared` wherever
+ * it has none, at every position the two schemas share.
+ *
+ * ANNOTATIONS ONLY, and that bound is the point rather than a simplification.
+ * The two schemas disagree about shape by construction, not by accident:
+ * `served` is the handler's read of the event, narrowed to what its body
+ * touches, while `declared` is the event TYPE the pattern's result publishes.
+ * A field declared and never read appears in one and not the other. Copying a
+ * `description` cannot change which payloads pass, so this can never make the
+ * served schema disagree with the dispatch it governs. Copying anything else
+ * could, which is why nothing else is copied and no position is ADDED: a key
+ * absent from `served` stays absent, and a page never offers a flag the
+ * handler does not read.
+ *
+ * The root description is never taken. It belongs to the verb, not to the
+ * event object, and it travels as the spec's own `description`. */
+function withDeclaredFieldProse(
+  served: JSONSchema | true,
+  declared: JSONSchema | undefined,
+): JSONSchema | true {
+  return served === true
+    ? served
+    : fillDescriptions(served, declared, false) as JSONSchema;
+}
+
+function fillDescriptions(
+  served: JSONSchema,
+  declared: JSONSchema | undefined,
+  fillRoot: boolean,
+): JSONSchema {
+  if (
+    declared === undefined || !isObjectOrArray(served) ||
+    !isObjectOrArray(declared)
+  ) {
+    return served;
+  }
+  let next: Record<string, unknown> | undefined;
+  const patched = () => (next ??= { ...served });
+
+  if (
+    fillRoot && served.description === undefined &&
+    typeof declared.description === "string"
+  ) {
+    patched().description = declared.description;
+  }
+
+  if (
+    isObjectOrArray(served.properties) && isObjectOrArray(declared.properties)
+  ) {
+    const declaredProperties = declared.properties as Record<
+      string,
+      JSONSchema
+    >;
+    let properties: Record<string, JSONSchema> | undefined;
+    for (
+      const [key, child] of Object.entries(
+        served.properties as Record<string, JSONSchema>,
+      )
+    ) {
+      const filled = fillDescriptions(child, declaredProperties[key], true);
+      if (filled !== child) {
+        (properties ??= { ...served.properties as Record<string, JSONSchema> })[
+          key
+        ] = filled;
+      }
+    }
+    if (properties !== undefined) patched().properties = properties;
+  }
+
+  // An array's element schema, so a documented field inside a list of objects
+  // keeps its prose. Tuple `items` (an array of schemas) needs no case of its
+  // own: `isObjectOrArray` admits it, and the recursion then finds no
+  // `properties` on either side and hands the input straight back.
+  if (served.items !== undefined && declared.items !== undefined) {
+    const filled = fillDescriptions(
+      served.items as JSONSchema,
+      declared.items as JSONSchema,
+      true,
+    );
+    if (filled !== served.items) patched().items = filled;
+  }
+
+  return (next ?? served) as JSONSchema;
+}
+
 /** One verb's declared result, matched through the piece's compiled pattern.
  *
  * The same lookup a listing makes for every row, made for a single name — one
@@ -1981,11 +2151,28 @@ function handlerVerbResults(
  * whether a piece HAS one is settled before the thunk is attached.
  */
 async function declaredVerbResult(
-  piece: any,
+  loadPattern: () => Promise<any>,
   callableName: string,
 ): Promise<JSONSchema | undefined> {
   try {
-    return handlerVerbResults(await piece.getPattern()).get(callableName);
+    return handlerVerbResults(await loadPattern()).get(callableName);
+  } catch {
+    return undefined;
+  }
+}
+
+/** One verb's prose, read through the piece's compiled pattern.
+ *
+ * The listing's `declaredVerbProse` narrowed to a single name, on the same
+ * terms `declaredVerbResult` above states: one reader, so a help page and
+ * `cf piece verbs` cannot describe the same verb differently, and a pattern
+ * that will not load costs the page its prose rather than the whole page. */
+async function declaredVerbProseFor(
+  loadPattern: () => Promise<any>,
+  callableName: string,
+): Promise<DeclaredVerbProse | undefined> {
+  try {
+    return declaredVerbProse(await loadPattern()).get(callableName);
   } catch {
     return undefined;
   }
@@ -2027,11 +2214,14 @@ export async function listPieceCallables(
     }
   }
 
-  // The compiled pattern, read once for two independent jobs. Its result
+  // The compiled pattern, read once for three independent jobs. Its result
   // properties are candidate NAMES for the sweep below — the only source for a
   // callable the declared result type omits. Its handler nodes carry declared
-  // RESULTS, which are metadata on rows enumerated from anywhere. Resolution is
-  // cached by identity, so this costs one load per listing, not one per row.
+  // RESULTS, which are metadata on rows enumerated from anywhere. And its
+  // result SCHEMA carries the author's prose, which no other document does —
+  // a verb's callable cell adopts the handler node's `$event` schema, an
+  // emission with no annotations in it at all. Resolution is cached by
+  // identity, so this costs one load per listing, not one per row.
   //
   // Unlike the identity above, this one is not advisory, and the listing says
   // so when it is missing. `getPattern` throws on a piece carrying no pattern
@@ -2045,17 +2235,30 @@ export async function listPieceCallables(
   // `outputSchema` and losing the row.
   let graphNames: string[] = [];
   let handlerResults = new Map<string, JSONSchema | undefined>();
+  let verbProse = new Map<string, DeclaredVerbProse>();
   let graphConsulted = false;
   if (typeof piece.getPattern === "function") {
     try {
       const compiled = await piece.getPattern();
       graphNames = patternResultNames(compiled);
       handlerResults = handlerVerbResults(compiled);
+      verbProse = declaredVerbProse(compiled);
       graphConsulted = true;
     } catch {
       // Reported as `incomplete` below rather than swallowed.
     }
   }
+
+  /** The prose row for a callable, on the same terms `handlerResults` is
+   * claimed: the pattern's result properties key it, so only a row reached on
+   * the RESULT cell may claim one. A same-named verb on the input cell is a
+   * different stream that merely shares its name, and handing it another
+   * verb's documentation would be worse than handing it none. */
+  const proseFor = (
+    on: "result" | "input",
+    name: string,
+  ): DeclaredVerbProse | undefined =>
+    on === "result" ? verbProse.get(name) : undefined;
 
   const listings = new Map<string, PieceCallableListing>();
   // Names ordinary detection rejected: candidates for the forced-stream
@@ -2091,12 +2294,21 @@ export async function listPieceCallables(
       // input cell is a different stream that merely shares its name.
       const outputSchema = spec.outputSchemaSummary ??
         (cellProp === "result" ? handlerResults.get(name) : undefined);
+      const prose = proseFor(cellProp, name);
       listings.set(name, {
         name,
         kind,
         on: cellProp,
-        inputSchema: spec.inputSchema,
+        // The prose is folded into the schema a caller is ALREADY served, not
+        // served in place of it: `--help --json` publishes this same schema,
+        // and the two surfaces must not describe one verb's payload two ways.
+        inputSchema: kind === "handler"
+          ? withDeclaredFieldProse(spec.inputSchema, prose?.eventSchema)
+          : spec.inputSchema,
         ...(outputSchema !== undefined ? { outputSchema } : {}),
+        ...(prose?.description !== undefined
+          ? { description: prose.description }
+          : {}),
         ...marks,
       });
     }
@@ -2212,12 +2424,24 @@ export async function listPieceCallables(
       // PATTERN's result, and a piece-root candidate is dispatched on the
       // result cell too. Neither is on the input cell, whose same-named verb
       // would be a different stream.
+      //
+      // Which is also why the prose is claimed on the same terms as above: a
+      // row placed here is a result-cell row. The common case is that the
+      // declared result type omits the name entirely — that is what sent it
+      // through this sweep — so there is no prose to claim, and the lookup
+      // simply misses.
+      const prose = proseFor("result", name);
       listings.set(name, {
         name,
         kind,
         on: "result",
-        inputSchema: spec.inputSchema,
+        inputSchema: kind === "handler"
+          ? withDeclaredFieldProse(spec.inputSchema, prose?.eventSchema)
+          : spec.inputSchema,
         ...(outputSchema !== undefined ? { outputSchema } : {}),
+        ...(prose?.description !== undefined
+          ? { description: prose.description }
+          : {}),
       });
     }
   }
@@ -2231,21 +2455,37 @@ export async function listPieceCallables(
   };
 }
 
-/** The command spec a help page is rendered from: the resolved one, plus the
- * verb's declared result where the resolution can supply one.
+/** The command spec a help page is rendered from: the resolved one, plus what
+ * only the declaring pattern can say — the verb's declared result, its own
+ * prose, and the prose on the event fields the page renders as flags.
  *
- * Only a handler's resolution carries the thunk, so a tool's spec passes
+ * Only a handler's resolution carries the thunks, so a tool's spec passes
  * through untouched and `callableCommandSpec` keeps deciding what a tool
  * publishes — its result schema rides its callable cell and is already on the
- * spec. */
-async function withDeclaredResult(
+ * spec.
+ *
+ * The served `inputSchema` stays the authority on shape. It is the document a
+ * payload is validated against, and only its `description` annotations are
+ * filled in here, so a page can never describe a flag the dispatch would
+ * refuse. */
+async function withDeclaredPatternDocs(
   spec: ExecCommandSpec,
   resolved: ResolvedPieceCallable,
 ): Promise<ExecCommandSpec> {
-  const declared = await resolved.declaredResult?.();
-  return declared === undefined ? spec : {
+  const [declared, prose] = await Promise.all([
+    resolved.declaredResult?.(),
+    resolved.declaredProse?.(),
+  ]);
+  const inputSchema = withDeclaredFieldProse(
+    spec.inputSchema,
+    prose?.eventSchema,
+  );
+  return {
     ...spec,
-    outputSchemaSummary: declared,
+    ...(declared !== undefined && { outputSchemaSummary: declared }),
+    ...(prose?.description !== undefined && { description: prose.description }),
+    ...(inputSchema !== spec.inputSchema &&
+      { inputSchema: inputSchema as JSONSchema }),
   };
 }
 
@@ -2267,12 +2507,14 @@ export async function executePieceCallable(
     rawArgs,
     deps,
     renderHelp: async (commandSpec, parsed) => {
-      // The declared result is fetched HERE and nowhere earlier: the parse has
-      // established that a page is being rendered, so the pattern load it
-      // costs is spent on a caller who asked what the verb hands back. Both
-      // spellings of the page take it — `--help --json` serves the schema
-      // itself as `outputSchema`, the text page enumerates its fields.
-      const spec = await withDeclaredResult(commandSpec, resolved);
+      // The pattern is consulted HERE and nowhere earlier: the parse has
+      // established that a page is being rendered, so the load it costs is
+      // spent on a caller who asked what the verb hands back and what it is
+      // for. Both spellings of the page take it — `--help --json` serves the
+      // declared result as `outputSchema` and the prose as `description`, the
+      // text page enumerates the result's fields and prints the prose as its
+      // summary line.
+      const spec = await withDeclaredPatternDocs(commandSpec, resolved);
       return parsed.showHelpJson
         ? renderExecHelpJson(spec)
         : renderPieceCallHelp(
