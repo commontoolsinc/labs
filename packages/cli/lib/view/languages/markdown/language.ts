@@ -1,5 +1,5 @@
 /**
- * The Markdown language for the pager. Colouring and structure live in {@link
+ * The Markdown language for the pager. Coloring and structure live in {@link
  * ./markdown.ts}; this module adapts them to the {@link Language} contract.
  *
  * Markdown has no semantic layer (no `createSemantics`/`createDiffSemantics`),

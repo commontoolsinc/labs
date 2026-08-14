@@ -1,8 +1,8 @@
 /**
  * A small Markdown highlighter, used when a diff (or a directly-opened file)
- * names a `.md`/`.markdown` file. The pager otherwise colours everything as
+ * names a `.md`/`.markdown` file. The pager otherwise colors everything as
  * TypeScript, which turns prose into a soup of identifiers and operators and
- * paints inline-code backticks as runaway template literals. This colours the
+ * paints inline-code backticks as runaway template literals. This colors the
  * things Markdown actually has — headings, fenced and inline code, block quotes,
  * list markers, rules and links — and leaves prose plain. Headings also become
  * the navigation tree, so `wasd`/Tab step through a document's sections.
@@ -24,7 +24,7 @@ import { computeLineStarts, lineIndexOf } from "../../lines.ts";
 import { Lexer } from "marked";
 import { decodeHTMLStrict as decodeEntities } from "entities";
 
-/** Colour Markdown text into rendered lines. */
+/** Color Markdown text into rendered lines. */
 export function highlightMarkdownLines(text: string): Line[] {
   const raw = text.split("\n");
   const out: Line[] = [];
@@ -1318,7 +1318,7 @@ function renderTableDivider(widths: readonly number[]): Line {
   return singleStyledLine(text, "punctuation");
 }
 
-/** Colour one non-fenced line by classifying each code point, then run-length
+/** Color one non-fenced line by classifying each code point, then run-length
  * encoding the classes into spans. */
 function renderLine(t: string): Line {
   if (t.length === 0) return { text: "", spans: [] };

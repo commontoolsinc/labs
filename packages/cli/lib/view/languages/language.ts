@@ -1,6 +1,6 @@
 /**
  * The contract every source language plugs into so the `cf view` pager can
- * colour, navigate, edit and (optionally) reason about it, plus selecting the
+ * color, navigate, edit and (optionally) reason about it, plus selecting the
  * right language and byte decoder for a file. A language is a stateless
  * strategy object: one instance describes each supported syntax. Selection
  * combines explicit language choices, filename or shebang metadata, and byte
@@ -80,7 +80,7 @@ export interface Semantics {
    * when nothing resolves.
    */
   definitionOf(offset: number): DefTarget[];
-  /** Read and colour an external file (within the workspace) so the pager can
+  /** Read and color an external file (within the workspace) so the pager can
    * show a definition that lives outside the document. Null when unreadable. */
   fileLines(filePath: string): readonly Line[] | null;
   /** Build the backing program now (off the interactive path), so the first
@@ -195,11 +195,11 @@ export interface Language {
   /** Filename, explicit-name, and shebang selectors for this language. */
   readonly metadata: LanguageMetadata;
 
-  /** Parse `text` into the full document model: coloured lines, a structure
+  /** Parse `text` into the full document model: colored lines, a structure
    * tree, and a name → definition index. `fileName` is advisory. */
   parseDocument(text: string, fileName?: string): Document;
 
-  /** Colour `text` into rendered lines only — the per-keystroke-safe subset of
+  /** Color `text` into rendered lines only — the per-keystroke-safe subset of
    * {@link parseDocument}, with no structure tree or definitions. Used by the
    * non-interactive fast path and the diff fragment renderer. `fileName` is
    * advisory (a language may parse `.ts` and `.tsx` differently). */
@@ -240,10 +240,10 @@ export interface Language {
   readonly renderNeedsCompleteFile?: boolean;
 
   /** Whether live diff edits need complete-file highlighting because an earlier
-   * line can determine how later lines are coloured. */
+   * line can determine how later lines are colored. */
   readonly highlightFullFileOnDiffEdit?: boolean;
 
-  /** Highlight one source-line edit from its previous complete-file colours, or
+  /** Highlight one source-line edit from its previous complete-file colors, or
    * return null when the edit can affect syntax outside one token. */
   highlightDiffLineEditLocally?(before: Line, after: string): Line | null;
 
@@ -358,7 +358,7 @@ export function readOnlyReasonFor(language: Language): string | undefined {
  * singletons: they and this module form an import cycle (a language's semantic
  * layer resolves external files back through {@link languageForFile}), and
  * building the array eagerly would read a singleton that a cycle-first load had
- * not yet initialised. By first use every module has finished evaluating.
+ * not yet initialized. By first use every module has finished evaluating.
  */
 let languages: readonly Language[] | undefined;
 function allLanguages(): readonly Language[] {

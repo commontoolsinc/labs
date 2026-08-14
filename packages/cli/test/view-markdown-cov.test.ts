@@ -1,5 +1,5 @@
 /**
- * Coverage-focused behavioural tests for the Markdown highlighter
+ * Coverage-focused behavioral tests for the Markdown highlighter
  * (`lib/view/languages/markdown/markdown.ts`). Each test drives a specific code path —
  * the whole-document `Highlighter` wrapper, the empty/non-empty single-span
  * helper, the horizontal-rule branch, mismatched and unclosed inline-code
@@ -59,7 +59,7 @@ Deno.test("markdown: a horizontal rule line is a single punctuation span", () =>
     assertEquals(line.text, rule);
   }
   // A line that merely starts with a dash is a list, not a rule, so it keeps
-  // its marker-plus-prose colouring rather than collapsing to one span.
+  // its marker-plus-prose coloring rather than collapsing to one span.
   const [list] = highlightMarkdownLines("- a real list item");
   assert(
     list.spans.length > 1,
@@ -83,7 +83,7 @@ Deno.test("markdown: inline code with an interior backtick run of a different le
   );
 });
 
-Deno.test("markdown: an unclosed inline backtick run does not colour the rest of the line", () => {
+Deno.test("markdown: an unclosed inline backtick run does not color the rest of the line", () => {
   // A lone opening backtick with no matching close: the scan finds no close,
   // advances past the run (`i += n`), and the rest of the line stays plain.
   const [line] = highlightMarkdownLines("an `unclosed run of prose");

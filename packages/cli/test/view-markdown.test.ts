@@ -1,6 +1,6 @@
 /**
  * The Markdown highlighter: a `.md` file (opened directly or seen in a diff) is
- * coloured as Markdown — headings, fenced/inline code, lists, quotes, links —
+ * colored as Markdown — headings, fenced/inline code, lists, quotes, links —
  * not parsed as TypeScript, and its headings form the navigation tree.
  */
 import { assert, assertEquals } from "@std/assert";
@@ -17,7 +17,7 @@ import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter } from "../lib/view/diffedit.ts";
 import { spanStyle } from "../lib/view/highlight.ts";
 
-Deno.test("markdown: language metadata recognises markdown extensions", () => {
+Deno.test("markdown: language metadata recognizes markdown extensions", () => {
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile("/a/b/AGENTS.markdown").id, "markdown");
   assertEquals(languageForFile("notes.MD").id, "markdown");
@@ -26,7 +26,7 @@ Deno.test("markdown: language metadata recognises markdown extensions", () => {
   assertEquals(languageForFile(undefined).id, "plain-text");
 });
 
-Deno.test("markdown: headings, code, lists, quotes and prose get distinct, non-TS colours", () => {
+Deno.test("markdown: headings, code, lists, quotes and prose get distinct, non-TS colors", () => {
   const lines = highlightMarkdownLines(
     `# Title
 
@@ -53,7 +53,7 @@ deno task cf
   );
   assert(
     !list.some((s) => s.cls === "identifier" || s.cls === "operator"),
-    "no TypeScript identifier/operator colours",
+    "no TypeScript identifier/operator colors",
   );
   // The fenced code block: fences are punctuation, content is a string.
   assertEquals(lines[3].spans.map((s) => s.cls), ["punctuation"]); // ```bash
@@ -128,7 +128,7 @@ Deno.test("markdown: languageForFile dispatches on a .md filename", () => {
   );
 });
 
-Deno.test("markdown: editing a line in a markdown diff recolours it as markdown", () => {
+Deno.test("markdown: editing a line in a markdown diff recolors it as markdown", () => {
   const diff = [
     "diff --git a/r.md b/r.md",
     "--- a/r.md",
@@ -140,7 +140,7 @@ Deno.test("markdown: editing a line in a markdown diff recolours it as markdown"
   ].join("\n");
   const hl = createDiffHighlighter(diff);
   const out = hl.update(diff.replace("`code`", "`codex`"));
-  // The edited markdown line colours its inline code as a string (markdown),
+  // The edited markdown line colors its inline code as a string (markdown),
   // not as a TypeScript template that swallows the rest.
   const edited = out[5];
   assert(
@@ -387,9 +387,9 @@ index 0000000..1111111 100644
     // The heading line, past its diff marker, is a section header.
     assert(
       doc.lines[5].spans.some((s) => s.cls === "sectionHeader"),
-      "the heading is markdown-coloured in the diff",
+      "the heading is markdown-colored in the diff",
     );
-    // The added line keeps its diff marker and colours the inline code green.
+    // The added line keeps its diff marker and colors the inline code green.
     const added = doc.lines[8];
     assertEquals(added.spans[0].cls, "diffAdd", "the + marker");
     assert(

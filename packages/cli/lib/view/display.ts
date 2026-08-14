@@ -7,8 +7,8 @@
  *     glyph (U+000B → ␋, tab → ␉, ESC → ␛), one column each. Nothing is hidden
  *     and every source code point maps to exactly one display column, so the
  *     column arithmetic the editor relies on is preserved.
- *   - "ansi": runs that parse as ANSI colour (SGR) sequences are consumed and
- *     their colours override the syntax highlighting of the text that follows,
+ *   - "ansi": runs that parse as ANSI color (SGR) sequences are consumed and
+ *     their colors override the syntax highlighting of the text that follows,
  *     until the next sequence or a reset. Every other non-printable is shown as
  *     its Control Pictures glyph.
  *   - "hidden": runs that parse as ANSI control sequences are dropped entirely.
@@ -37,14 +37,14 @@ export function displayModeLabel(mode: DisplayMode): string {
     case "pictures":
       return "control pictures";
     case "ansi":
-      return "ANSI colour";
+      return "ANSI color";
     case "hidden":
       return "hidden";
   }
 }
 
 /** One drawn column: the glyph, the source column it originates from, the token
- * colour of that source column, and an ANSI colour override when one is active
+ * color of that source column, and an ANSI color override when one is active
  * (mode "ansi"). */
 export interface DisplayCell {
   readonly ch: string;
@@ -55,7 +55,7 @@ export interface DisplayCell {
   readonly ansi?: Style;
 }
 
-/** One source code point with its column and token colour. */
+/** One source code point with its column and token color. */
 interface SourcePoint {
   readonly cp: string;
   readonly col: number;
@@ -63,7 +63,7 @@ interface SourcePoint {
 }
 
 /** Expand a line's spans into its code points, each tagged with its column (a
- * code-point index) and the token colour of the span it belongs to. The spans
+ * code-point index) and the token color of the span it belongs to. The spans
  * are gapless and concatenate to the verbatim line, so this reconstructs the
  * whole line. */
 function sourcePoints(line: Line, styler: SpanStyler): SourcePoint[] {
@@ -79,7 +79,7 @@ function sourcePoints(line: Line, styler: SpanStyler): SourcePoint[] {
   return out;
 }
 
-/** Resolves the colour for a span. The default is the editor palette; the
+/** Resolves the color for a span. The default is the editor palette; the
  * overlay passes the dialog palette. */
 export type SpanStyler = (span: Line["spans"][number]) => Style;
 
@@ -185,7 +185,7 @@ export function displayLine(
   }
 }
 
-/** ANSI mode: consume SGR colour sequences and carry their colour forward as an
+/** ANSI mode: consume SGR color sequences and carry their color forward as an
  * override; show every other non-printable as a Control Pictures glyph. */
 function displayAnsi(src: readonly SourcePoint[]): DisplayCell[] {
   const cells: DisplayCell[] = [];
@@ -265,7 +265,7 @@ function isNonPrintableCode(codePoint: number): boolean {
 }
 
 /** Whether `text` holds any non-printable character — the display modes only
- * differ (control pictures vs. ANSI colour vs. hidden) when it does. */
+ * differ (control pictures vs. ANSI color vs. hidden) when it does. */
 export function hasNonPrintable(text: string): boolean {
   for (const cp of text) if (isNonPrintable(cp)) return true;
   return false;
@@ -288,7 +288,7 @@ export function glyphFor(cp: string): string {
 interface CsiMatch {
   /** Number of source code points the whole sequence spans. */
   readonly len: number;
-  /** The final byte, e.g. "m" for a colour (SGR) sequence. */
+  /** The final byte, e.g. "m" for a color (SGR) sequence. */
   readonly final: string;
   /** The parameter bytes between `ESC [` and the final byte. */
   readonly params: string;
@@ -342,7 +342,7 @@ function hasStyle(style: Style): boolean {
     style.underline === true;
 }
 
-/** The 16 standard ANSI colours as RGB (Visual Studio Code's default palette). */
+/** The 16 standard ANSI colors as RGB (Visual Studio Code's default palette). */
 const ANSI_16: readonly Rgb[] = [
   [0, 0, 0],
   [205, 49, 49],
@@ -406,8 +406,8 @@ function applySgr(prev: Style, params: string): Style {
   return st;
 }
 
-/** Read a `38`/`48` extended-colour argument beginning after index `k`: either
- * `5;<n>` (a 256-colour index) or `2;<r>;<g>;<b>` (truecolor). Returns the RGB
+/** Read a `38`/`48` extended-color argument beginning after index `k`: either
+ * `5;<n>` (a 256-color index) or `2;<r>;<g>;<b>` (truecolor). Returns the RGB
  * and how many further parameters it consumed, or null when malformed. */
 function extendedColor(
   codes: readonly number[],
@@ -430,7 +430,7 @@ function byte(n: number): number {
   return Math.max(0, Math.min(255, n | 0));
 }
 
-/** Map a 256-colour palette index to RGB: 0–15 are the standard colours, 16–231
+/** Map a 256-color palette index to RGB: 0–15 are the standard colors, 16–231
  * a 6×6×6 cube, 232–255 a 24-step grayscale ramp. */
 function xterm256(index: number): Rgb {
   const n = byte(index);

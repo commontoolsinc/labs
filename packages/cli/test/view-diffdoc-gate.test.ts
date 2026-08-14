@@ -5,7 +5,7 @@ import { realWorkspace } from "../lib/view/diffdoc.ts";
 // --- realWorkspace.resolve: the file-vs-directory check ----------------------
 //
 // resolve() walks each base and, for a candidate that bounded() accepts, checks
-// Deno.statSync(abs).isFile. bounded() already canonicalised abs through
+// Deno.statSync(abs).isFile. bounded() already canonicalized abs through
 // realPathSync, so the stat resolves; the separate try/catch it once carried was
 // removed (read() guards the file contents). These tests pin resolve()'s data
 // paths — a bounded regular file, a directory, an out-of-bounds path — the ones
@@ -52,7 +52,7 @@ Deno.test("realWorkspace.resolve: a directory is bounded but not a file, so reso
     const ws = realWorkspace(root);
     // statSync succeeds on a directory and isFile is false, so the if-body never
     // returns and the catch never runs; resolve falls through every base to
-    // null. This is the closest reachable neighbour of the catch: statSync
+    // null. This is the closest reachable neighbor of the catch: statSync
     // returns rather than throws.
     assertEquals(ws.resolve("adir"), null, "a directory is not a file");
   } finally {

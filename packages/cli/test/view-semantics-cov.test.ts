@@ -620,7 +620,7 @@ Deno.test("diff semantics: a definition outside the diff opens as a file", () =>
     const lines = sem.fileLines(ext!.filePath!);
     assert(
       lines && lines.some((l) => l.text.includes("export function ext")),
-      "fileLines colours the external file",
+      "fileLines colors the external file",
     );
     assertEquals(sem.fileLines(join(root, "..", "outside.ts")), null);
   } finally {

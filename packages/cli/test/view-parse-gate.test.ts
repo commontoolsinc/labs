@@ -1,8 +1,8 @@
 /**
- * Behavioural tests for the parse paths the coverage gate flagged in
+ * Behavioral tests for the parse paths the coverage gate flagged in
  * `lib/view/languages/typescript/parse.ts`. The dead and duplicate branches at those lines were
  * removed or folded away at the source; these tests exercise the reachable
- * behaviour that remains, through the public API:
+ * behavior that remains, through the public API:
  *
  *   - classifyIdentifier: a leaf identifier is classified by its parent.
  *   - isTypePosition: a qualified name, a `typeof` operand, and a class or
@@ -117,7 +117,7 @@ Deno.test("gate 913: a qualified name in a type annotation resolves as a type", 
 
 // --- 916: typeof type resolves via ts.isTypeNode before the TypeQuery branch -
 
-Deno.test("gate 916: a `typeof` type colours its operand as a type name", () => {
+Deno.test("gate 916: a `typeof` type colors its operand as a type name", () => {
   // `typeof base` as a type makes `base`'s parent a TypeQueryNode. Because a
   // TypeQueryNode is itself a TypeNode, isTypePosition returns at the
   // ts.isTypeNode check above; the dedicated isTypeQueryNode branch never runs.
@@ -130,7 +130,7 @@ Deno.test("gate 916: a `typeof` type colours its operand as a type name", () => 
 
 // --- 917, 919, 920: heritage types resolve via ts.isTypeNode first ----------
 
-Deno.test("gate 917-920: a class heritage type colours as a type name", () => {
+Deno.test("gate 917-920: a class heritage type colors as a type name", () => {
   // `extends Parent<number>` produces an ExpressionWithTypeArguments whose
   // expression is `Parent`. That node is also a TypeNode, so `Parent` resolves
   // as a typeName at the ts.isTypeNode check, never reaching the
@@ -142,7 +142,7 @@ Deno.test("gate 917-920: a class heritage type colours as a type name", () => {
   );
 });
 
-Deno.test("gate 917-920: an interface heritage type colours as a type name", () => {
+Deno.test("gate 917-920: an interface heritage type colors as a type name", () => {
   const doc = parseDocument("interface Sub extends Sup { z: number }");
   assert(
     classesOf(doc, "Sup").has("typeName"),
@@ -303,7 +303,7 @@ Deno.test("gate 2045-2047: an arrow initializer becomes a closure node", () => {
 });
 
 Deno.test("gate 2045-2047: describeInitializer reports the reachable non-closure cases", () => {
-  // The reachable describeInitializer outputs: the uninitialised sentinel and
+  // The reachable describeInitializer outputs: the uninitialized sentinel and
   // the nodeFirstLine fall-through for a non-arrow initializer. Neither is the
   // "closure" string, confirming that branch stays dead for variable nodes.
   const doc = parseDocument(
@@ -318,7 +318,7 @@ Deno.test("gate 2045-2047: describeInitializer reports the reachable non-closure
   assertEquals(pending.meta?.kind, "variable");
   assertEquals(
     (pending.meta as { bindsTo?: string }).bindsTo,
-    "(uninitialised)",
+    "(uninitialized)",
   );
 
   const total = byName(doc, "total")!;
@@ -332,7 +332,7 @@ Deno.test("gate 2045-2047: describeInitializer reports the reachable non-closure
 });
 
 Deno.test("gate 2045-2047: incremental highlighter re-highlights an edited closure line", () => {
-  // Editing a line into an arrow keeps the byte-for-byte text and re-colours the
+  // Editing a line into an arrow keeps the byte-for-byte text and re-colors the
   // arrow token, exercising the incremental path that feeds the same classifier
   // and binding routing as a full parse.
   const h = createHighlighter("const a = 1;\nconst b = 2;\n");
