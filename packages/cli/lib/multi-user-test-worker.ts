@@ -275,6 +275,9 @@ const handlers: Record<
       spaceName: args.spaceName as string,
     });
     const space = session.space;
+    // The Deno storage cache opens SQLite as it loads, so it waits for the
+    // session it will open against.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const { StorageManager } = await import(
       "@commonfabric/runner/storage/cache.deno"
     );

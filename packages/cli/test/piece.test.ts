@@ -1973,6 +1973,9 @@ describe("cli piece parsing", () => {
   });
 
   it("rejects repository metadata when resetting the home pattern", async () => {
+    // The test mutates the command's error handling, so it needs a copy of its
+    // own; the query string is what makes the copy.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const { piece: command } = await import(
       "../commands/piece.ts?repository-reset-test"
     );
@@ -1986,6 +1989,9 @@ describe("cli piece parsing", () => {
   });
 
   it("rejects attached tests when resetting the home pattern", async () => {
+    // The test mutates the command's error handling, so it needs a copy of its
+    // own; the query string is what makes the copy.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const { piece: command } = await import(
       "../commands/piece.ts?test-reset-test"
     );

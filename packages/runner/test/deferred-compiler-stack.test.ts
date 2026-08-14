@@ -13,6 +13,7 @@ import { expect } from "@std/expect";
 
 describe("deferred compiler stack", () => {
   it("compilerStack() throws with instructions before any flow ensured", async () => {
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const fresh = await import(
       "../src/harness/deferred-compiler-stack.ts?virgin"
     );
@@ -32,6 +33,7 @@ describe("deferred compiler stack", () => {
   });
 
   it("identifies a compiler-stack load failure for worker recovery", async () => {
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const fresh = await import(
       "../src/harness/deferred-compiler-stack.ts?load-failure"
     );

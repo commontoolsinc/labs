@@ -5,10 +5,7 @@
 // surface, serialized spec + evaluator, fail-closed rules).
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import {
-  dbNeedsColumnProvenance,
-  tableDeclaresRowLabel,
-} from "../v2.ts";
+import { dbNeedsColumnProvenance, tableDeclaresRowLabel } from "../v2.ts";
 import { table } from "../v2/sqlite/schema.ts";
 import {
   all,

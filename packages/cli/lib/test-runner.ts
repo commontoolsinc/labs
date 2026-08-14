@@ -971,6 +971,9 @@ export async function runTestPattern(
     await withPhase(
       ["runTestPattern", "storageManager"],
       async () => {
+        // The Deno storage cache opens SQLite as it loads, which a
+        // caller-supplied storage host makes unnecessary.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         const { StorageManager } = await import(
           "@commonfabric/runner/storage/cache.deno"
         );

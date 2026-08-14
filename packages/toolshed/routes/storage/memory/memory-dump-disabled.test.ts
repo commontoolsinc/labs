@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the environment
+// is parsed once, as env.ts loads, so the variables this file sets must be set
+// before the router pulls it in.
+
 // The disabled state of the dump endpoint, as an integration test. env is a
 // module-load singleton, so this lives in its own test file (fresh module
 // graph): MEMORY_DUMP_ENABLED is deliberately NOT set before the router is

@@ -1,3 +1,7 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the OpenTelemetry
+// SDK probes the environment as it loads, which needs --allow-sys; it loads
+// only when telemetry is switched on.
+
 import {
   context,
   type Meter,

@@ -432,11 +432,15 @@ let _platform: FusePlatform | null = null;
 export async function getPlatform(): Promise<FusePlatform> {
   if (_platform) return _platform;
   if (Deno.build.os === "darwin") {
+    // The Darwin bindings cannot load anywhere else.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const mod = await import("./platform-darwin.ts");
     _platform = mod.default;
     return _platform;
   }
   if (Deno.build.os === "linux") {
+    // The Linux bindings cannot load anywhere else.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const mod = await import("./platform-linux.ts");
     _platform = mod.default;
     return _platform;

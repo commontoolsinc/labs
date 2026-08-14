@@ -24,6 +24,9 @@ const FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE =
 export async function createRuntime(
   options: { consoleToStderr?: boolean } = {},
 ) {
+  // The Deno storage cache opens SQLite as it loads, and a caller that never
+  // builds a runtime should not pay for that.
+  // deno-lint-ignore cf-imports/no-inline-module-import
   const { StorageManager } = await import(
     "@commonfabric/runner/storage/cache.deno"
   );

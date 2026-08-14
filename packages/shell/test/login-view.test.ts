@@ -93,6 +93,10 @@ function setState(
 Deno.test("login view renders each key store ready state", async () => {
   const restore = installBrowserGlobals();
   try {
+    // The view's module graph reaches @commonfabric/ui, whose components
+    // extend a bare HTMLElement as they load, so it can only load once the
+    // test has installed one.
+    // deno-lint-ignore cf-imports/no-inline-module-import
     const { XLoginView } = await import("../src/views/LoginView.ts");
     const keyStore = {
       get: () => Promise.resolve(undefined),

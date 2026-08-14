@@ -122,7 +122,8 @@
       ]
     },
     "plugins": [
-      "./tasks/lint-bench-console.ts"
+      "./tasks/lint-bench-console.ts",
+      "./tasks/lint-inline-imports.ts"
     ]
   },
   "fmt": {

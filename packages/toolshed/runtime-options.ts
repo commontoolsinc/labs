@@ -89,7 +89,10 @@ export async function attachRuntimeOtelBridge(
   try {
     const [{ attachRuntimeTelemetryOtelBridge }, { metrics, trace }] =
       await Promise.all([
+        // The OpenTelemetry bridge loads only for a run that reports.
+        // deno-lint-ignore cf-imports/no-inline-module-import
         import("@commonfabric/runner/telemetry-otel-bridge"),
+        // deno-lint-ignore cf-imports/no-inline-module-import
         import("@opentelemetry/api"),
       ]);
     detach = attachRuntimeTelemetryOtelBridge(runtime.telemetry, {

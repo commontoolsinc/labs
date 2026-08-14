@@ -17,6 +17,9 @@ mapped in [`../README.md`](../README.md).
   what earns one, the rule that a comment describes the system as it stands and
   the shapes that break it, the Markdown markup comments and error messages
   share, and what a doc comment carries
+- [`imports.md`](imports.md) — why a file's dependencies belong in its import
+  list, the two lint rules that keep them there, and what earns a deferred
+  `import()` the ignore directive that keeps it
 - [`LOCAL_DEV_SERVERS.md`](LOCAL_DEV_SERVERS.md) — starting the local servers,
   and what to do when they misbehave. Use `dev-local` for the shell, not `dev`
 - [`TESTING.md`](TESTING.md) — running the test suites, and how unit and
