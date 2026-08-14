@@ -6,11 +6,11 @@ import {
   isFunction,
   isInstance,
   isNumber,
-  isObject,
+  isObjectNotArray,
+  isObjectOrArray,
   isPlainContainer,
   isPlainObject,
-  isReadonlyRecord,
-  isRecord,
+  isReadonlyObjectOrArray,
   isString,
   isUnsafeObjectKey,
   Mutable,
@@ -70,45 +70,45 @@ describe("types", () => {
     });
   });
 
-  describe("isRecord()", () => {
+  describe("isObjectOrArray()", () => {
     it("returns `true` for plain objects", () => {
-      expect(isRecord({})).toBe(true);
-      expect(isRecord({ a: 1 })).toBe(true);
+      expect(isObjectOrArray({})).toBe(true);
+      expect(isObjectOrArray({ a: 1 })).toBe(true);
     });
 
     it("returns `true` for arrays", () => {
-      expect(isRecord([])).toBe(true);
-      expect(isRecord([1, 2, 3])).toBe(true);
+      expect(isObjectOrArray([])).toBe(true);
+      expect(isObjectOrArray([1, 2, 3])).toBe(true);
     });
 
     it("returns `true` for class instances", () => {
-      expect(isRecord(new Date())).toBe(true);
-      expect(isRecord(new Map())).toBe(true);
+      expect(isObjectOrArray(new Date())).toBe(true);
+      expect(isObjectOrArray(new Map())).toBe(true);
     });
 
     it("returns `false` for `null`", () => {
-      expect(isRecord(null)).toBe(false);
+      expect(isObjectOrArray(null)).toBe(false);
     });
 
     it("returns `false` for primitives", () => {
-      expect(isRecord(undefined)).toBe(false);
-      expect(isRecord(42)).toBe(false);
-      expect(isRecord("string")).toBe(false);
-      expect(isRecord(true)).toBe(false);
-      expect(isRecord(Symbol("test"))).toBe(false);
+      expect(isObjectOrArray(undefined)).toBe(false);
+      expect(isObjectOrArray(42)).toBe(false);
+      expect(isObjectOrArray("string")).toBe(false);
+      expect(isObjectOrArray(true)).toBe(false);
+      expect(isObjectOrArray(Symbol("test"))).toBe(false);
     });
 
     it("returns `false` for functions", () => {
-      expect(isRecord(() => {})).toBe(false);
+      expect(isObjectOrArray(() => {})).toBe(false);
     });
   });
 
-  describe("isReadonlyRecord()", () => {
+  describe("isReadonlyObjectOrArray()", () => {
     it("returns `true` for frozen records", () => {
-      expect(isReadonlyRecord(Object.freeze({ a: 1 }))).toBe(true);
+      expect(isReadonlyObjectOrArray(Object.freeze({ a: 1 }))).toBe(true);
     });
 
-    it("has the same runtime domain as `isRecord()`", () => {
+    it("has the same runtime domain as `isObjectOrArray()`", () => {
       for (
         const value of [
           {},
@@ -123,7 +123,7 @@ describe("types", () => {
           () => {},
         ]
       ) {
-        expect(isReadonlyRecord(value)).toBe(isRecord(value));
+        expect(isReadonlyObjectOrArray(value)).toBe(isObjectOrArray(value));
       }
     });
   });
@@ -196,35 +196,35 @@ describe("types", () => {
     });
   });
 
-  describe("isObject()", () => {
+  describe("isObjectNotArray()", () => {
     it("returns `true` for plain objects", () => {
-      expect(isObject({})).toBe(true);
-      expect(isObject({ a: 1 })).toBe(true);
+      expect(isObjectNotArray({})).toBe(true);
+      expect(isObjectNotArray({ a: 1 })).toBe(true);
     });
 
     it("returns `true` for class instances", () => {
-      expect(isObject(new Date())).toBe(true);
-      expect(isObject(new Map())).toBe(true);
+      expect(isObjectNotArray(new Date())).toBe(true);
+      expect(isObjectNotArray(new Map())).toBe(true);
     });
 
     it("returns `false` for arrays", () => {
-      expect(isObject([])).toBe(false);
-      expect(isObject([1, 2, 3])).toBe(false);
+      expect(isObjectNotArray([])).toBe(false);
+      expect(isObjectNotArray([1, 2, 3])).toBe(false);
     });
 
     it("returns `false` for `null`", () => {
-      expect(isObject(null)).toBe(false);
+      expect(isObjectNotArray(null)).toBe(false);
     });
 
     it("returns `false` for primitives", () => {
-      expect(isObject(undefined)).toBe(false);
-      expect(isObject(42)).toBe(false);
-      expect(isObject("string")).toBe(false);
-      expect(isObject(true)).toBe(false);
+      expect(isObjectNotArray(undefined)).toBe(false);
+      expect(isObjectNotArray(42)).toBe(false);
+      expect(isObjectNotArray("string")).toBe(false);
+      expect(isObjectNotArray(true)).toBe(false);
     });
 
     it("returns `false` for functions", () => {
-      expect(isObject(() => {})).toBe(false);
+      expect(isObjectNotArray(() => {})).toBe(false);
     });
   });
 

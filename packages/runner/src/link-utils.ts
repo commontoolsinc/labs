@@ -1,5 +1,5 @@
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
@@ -555,7 +555,7 @@ function schemaLosesStreamCellMarker(
   schema: unknown,
   context: SanitizeContext,
 ): boolean {
-  if (context.keepAsCell === KeepAsCell.All || !isRecord(schema)) {
+  if (context.keepAsCell === KeepAsCell.All || !isObjectOrArray(schema)) {
     return false;
   }
 
@@ -576,9 +576,9 @@ function removeStrippedStreamPropertiesFromRequired(
   result: unknown,
   context: SanitizeContext,
 ): void {
-  if (!isRecord(originalSchema) || !isRecord(result)) return;
+  if (!isObjectOrArray(originalSchema) || !isObjectOrArray(result)) return;
   const properties = originalSchema.properties;
-  if (!isRecord(properties)) return;
+  if (!isObjectOrArray(properties)) return;
   if (!Array.isArray(result.required)) return;
 
   const required = result.required.filter((property) =>
@@ -655,7 +655,7 @@ export function getStableInternalPathSegment(
   }
 
   if (cause !== undefined) {
-    if (isRecord(cause) && "stream" in cause) {
+    if (isObjectOrArray(cause) && "stream" in cause) {
       return `stream:${formatStableCauseSegment(cause.stream as JSONValue)}`;
     }
     return formatStableCauseSegment(cause as JSONValue);

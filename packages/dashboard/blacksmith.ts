@@ -1,3 +1,11 @@
+/**
+ * Reads the Blacksmith billing API, which supplies the Blacksmith share of the
+ * ci-spend tile: an all-in invoice total and a daily runner cost. A client
+ * exists only when BLACKSMITH_API_TOKEN is set, and the base URL it talks to
+ * has to be HTTPS unless it is localhost, so a misconfigured
+ * BLACKSMITH_API_URL cannot send the token in the clear.
+ */
+
 type Environment = (name: string) => string | undefined;
 
 const DEFAULT_API_URL = "https://backend.blacksmith.sh";

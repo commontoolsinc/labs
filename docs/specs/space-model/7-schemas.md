@@ -77,7 +77,15 @@ Schemas influence runtime behavior:
   and shapes data. Non-conforming values are rejected: required properties that
   don't match return `undefined` at the top level (and `null` for array elements
   where null is allowed). Optional properties that don't match are simply absent.
-  The result is always either a valid value or `undefined`.
+  A schema that cannot be read at all — a `$ref` naming a definition it does not
+  carry — matches nothing, rather than being treated as the absence of a schema
+  and letting every value through.
+  An eager read therefore returns either a valid value or `undefined`. A read
+  under lazy materialization decides the same questions where the reader touches
+  them, so it has a third outcome: a mismatch under a `required` property throws
+  a `SchemaMismatchError` at that access. The runner disposes of one as an
+  argument that did not resolve — an undefined result, not a fault — which is
+  what an eager read's `undefined` produces anyway.
 - **Cell creation**: `asCell` properties become cell references
 - **Stream detection**: `asStream` properties get event semantics
 

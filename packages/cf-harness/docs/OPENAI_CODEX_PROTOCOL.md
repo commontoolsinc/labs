@@ -45,6 +45,14 @@ may rotate the refresh token and must be persisted atomically. Every OAuth and
 Codex API fetch rejects HTTP redirects so credential-bearing bodies, account
 headers, and prompts cannot leave the pinned origins.
 
+The credential document stores credentials and bounded terminal refresh health
+in one versioned transaction. Version-1 documents remain readable without a
+status-side mutation and migrate on the next successful mutation. Successful
+login or refresh clears terminal health; `invalid_grant`, refresh-token reuse,
+and revoked responses persist `reconnect-required` before returning a typed auth
+failure. Transient failures do not change health, and structured status does not
+expose token material, account identifiers, expiry, or raw responses.
+
 ## Pinned Responses contract
 
 - Endpoint: `https://chatgpt.com/backend-api/codex/responses`

@@ -9,11 +9,16 @@ import {
   getPatternSetupIdentityRef,
   getPatternSource,
   getPieceSourceSnapshot,
+  type PieceSourceSnapshot,
   type PieceSourceTransition,
   type PieceSourceTransitionBaseline,
   preparePieceSourceTransitionBaseline,
 } from "./runner.ts";
 import type { Pattern } from "./builder/types.ts";
+import {
+  parseFabricRef,
+  pinnedIdentity,
+} from "./sandbox/fabric-import-specifier.ts";
 import {
   normalizePatternSource,
   resolveSystemPatternSource,
@@ -21,6 +26,11 @@ import {
 } from "./pattern-source-scheme.ts";
 import type { Runtime } from "./runtime.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
+import {
+  isConflictRejection,
+  isStorageTransactionInconsistent,
+} from "./storage/rejection.ts";
 
 const logger = getLogger("runner.pattern-update", {
   enabled: true,
@@ -55,7 +65,13 @@ type CheckMode =
 
 type PendingCheck = {
   abort: AbortController;
+  reschedule: boolean;
   promise: Promise<PatternUpdateOutcome>;
+};
+
+type FabricFollower = {
+  sourceKey: string;
+  cancel: () => void;
 };
 
 /**
@@ -70,6 +86,8 @@ type PendingCheck = {
 export class PatternUpdater {
   readonly #runtime: Runtime;
   readonly #pending = new Map<string, PendingCheck>();
+  readonly #fabricFollowers = new Map<string, FabricFollower>();
+  readonly #stoppedFabricFollowers = new Set<string>();
   #disposed = false;
 
   constructor(runtime: Runtime) {
@@ -78,20 +96,10 @@ export class PatternUpdater {
 
   /** Start a best-effort check without making instantiation await it. */
   schedule(resultCell: Cell<unknown>): void {
-    if (
-      this.#disposed ||
-      !this.#runtime.experimental.systemPatternAutoUpdate
-    ) return;
+    if (this.#disposed) return;
     try {
-      void this.#singleFlight(resultCell, { kind: "instantiated" }).catch(
-        (error) => {
-          logger.warn("schedule-failed", () => [
-            "background pattern update check failed",
-            resultCell.space,
-            error,
-          ]);
-        },
-      );
+      this.#stoppedFabricFollowers.delete(this.#followerKey(resultCell));
+      this.#startBackgroundCheck(resultCell);
     } catch (error) {
       // A best-effort background check must not turn a successful
       // instantiation commit into a failed start.
@@ -101,6 +109,18 @@ export class PatternUpdater {
         error,
       ]);
     }
+  }
+
+  #startBackgroundCheck(resultCell: Cell<unknown>): void {
+    void this.#singleFlight(resultCell, { kind: "instantiated" }).catch(
+      (error) => {
+        logger.warn("schedule-failed", () => [
+          "background pattern update check failed",
+          resultCell.space,
+          error,
+        ]);
+      },
+    );
   }
 
   /**
@@ -132,6 +152,8 @@ export class PatternUpdater {
   async dispose(): Promise<void> {
     this.#disposed = true;
     for (const { abort } of this.#pending.values()) abort.abort();
+    for (const { cancel } of this.#fabricFollowers.values()) cancel();
+    this.#fabricFollowers.clear();
     await this.idle();
   }
 
@@ -145,17 +167,59 @@ export class PatternUpdater {
       link.scope ?? "space"
     }\0${link.id}`;
     const existing = this.#pending.get(key);
-    if (existing !== undefined) return existing.promise;
+    if (existing !== undefined) {
+      if (existing.abort.signal.aborted) existing.reschedule = true;
+      return existing.promise;
+    }
 
     const abort = new AbortController();
     const pending = {} as PendingCheck;
     pending.abort = abort;
+    pending.reschedule = false;
     pending.promise = this.#check(resultCell, mode, abort.signal)
       .finally(() => {
         if (this.#pending.get(key) === pending) this.#pending.delete(key);
+        const followerKey = this.#followerKey(resultCell);
+        if (this.#stoppedFabricFollowers.delete(followerKey)) return;
+        if (
+          pending.reschedule && !this.#disposed
+        ) {
+          this.#startBackgroundCheck(resultCell);
+        }
       });
     this.#pending.set(key, pending);
     return pending.promise;
+  }
+
+  #requestCheckAfterCurrent(
+    resultCell: Cell<unknown>,
+    mode: CheckMode,
+  ): boolean {
+    const link = resultCell.getAsNormalizedFullLink();
+    const key = `${mode.kind}\0${link.space}\0${
+      link.scope ?? "space"
+    }\0${link.id}`;
+    const pending = this.#pending.get(key);
+    if (pending === undefined) return false;
+    pending.reschedule = true;
+    return true;
+  }
+
+  #scheduleFromSourceEvent(resultCell: Cell<unknown>): void {
+    if (
+      this.#disposed ||
+      this.#stoppedFabricFollowers.has(this.#followerKey(resultCell))
+    ) return;
+    if (
+      !this.#requestCheckAfterCurrent(resultCell, { kind: "instantiated" })
+    ) {
+      this.#startBackgroundCheck(resultCell);
+    }
+  }
+
+  #followerKey(follower: Cell<unknown>): string {
+    const link = follower.getAsNormalizedFullLink();
+    return `${link.space}\0${link.scope ?? "space"}\0${link.id}`;
   }
 
   async #check(
@@ -172,6 +236,12 @@ export class PatternUpdater {
       const storedRepository = getPatternRepository(resultCell);
       const storedSetupRef = getPatternSetupIdentityRef(resultCell);
       const sourceSnapshot = getPieceSourceSnapshot(resultCell)!;
+      const followsFabricSource = storedSource?.startsWith("cf:") === true;
+      if (!followsFabricSource) this.#unwatchFabricSource(resultCell);
+      if (
+        !runtime.experimental.systemPatternAutoUpdate &&
+        !followsFabricSource
+      ) return "current";
       if (storedRepository !== undefined) return "current";
 
       const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
@@ -210,9 +280,22 @@ export class PatternUpdater {
         if (source === undefined) return "current";
       }
 
-      // Only a `system:` ref names something this pass can fetch. A `cf:` ref
-      // has its own resolver, and everything else is provenance this pass has
-      // no route for.
+      if (source.startsWith("cf:")) {
+        return await this.#checkFabricSource(
+          resultCell,
+          source,
+          runningRef,
+          storedSource,
+          storedRepository,
+          storedSetupRef,
+          sourceSnapshot,
+          mode,
+          signal,
+        );
+      }
+
+      // Only a `system:` ref names something the web-backed pass can fetch.
+      // Everything else is provenance this pass has no route for.
       const routePath = resolveSystemPatternSource(source);
       if (routePath === undefined) return "current";
       // A piece still carrying a pre-scheme spelling is re-stamped in its
@@ -275,6 +358,15 @@ export class PatternUpdater {
           transitionBaseline,
         );
         const result = await runtime.editWithRetry((tx) => {
+          // editWithRetry re-runs this callback after a retryable rejection.
+          // A stop may abort this check while the previous commit is settling,
+          // so every attempt must re-enter through the lifecycle gate rather
+          // than relying on the checks that preceded the first attempt.
+          if (signal.aborted) {
+            // Throwing from the action is terminal in editWithRetry. Calling
+            // tx.abort() here would itself be classified as retryable.
+            signal.throwIfAborted();
+          }
           if (!canWrite(tx)) return false;
           // The updater runs from a raw single-flight promise (no
           // scheduler run stamps it), and the serving runtime runs with
@@ -293,6 +385,9 @@ export class PatternUpdater {
           );
           return true;
         });
+        // Cancellation is lifecycle control, not a failed source repair. Do
+        // not report the guarded action failure after stop/dispose.
+        if (signal.aborted) return "current";
         if (result.error) {
           logger.warn("provenance-repair-failed", () => [
             "pattern source provenance repair failed",
@@ -482,6 +577,15 @@ export class PatternUpdater {
         transitionBaseline,
       );
       const result = await runtime.editWithRetry((tx) => {
+        // This callback is the retry unit. stop()/dispose() can abort the
+        // updater while editWithRetry waits for conflict repair, so checking
+        // only before entering editWithRetry would let a later attempt install
+        // a new pointer and setup on a stopped piece.
+        if (signal.aborted) {
+          // An action throw ends the retry loop; tx.abort() would consume the
+          // remaining retries with the same cancellation on every attempt.
+          signal.throwIfAborted();
+        }
         if (!canWrite(tx)) return false;
         // Async source-update transition — bookkeeping per
         // serving-loop.md §3d, same reason as repairProvenance above.
@@ -523,6 +627,7 @@ export class PatternUpdater {
         }
         return true;
       });
+      if (signal.aborted) return "current";
       if (result.error) {
         logger.warn("swap-failed", () => [
           "pattern update setup failed",
@@ -541,5 +646,261 @@ export class PatternUpdater {
       ]);
       return "current";
     }
+  }
+
+  async #checkFabricSource(
+    resultCell: Cell<unknown>,
+    source: string,
+    runningRef: { identity: string; symbol: string },
+    storedSource: string | undefined,
+    storedRepository: string | undefined,
+    storedSetupRef: { identity: string; symbol: string } | undefined,
+    sourceSnapshot: PieceSourceSnapshot,
+    mode: CheckMode,
+    signal: AbortSignal,
+  ): Promise<PatternUpdateOutcome> {
+    if (mode.kind !== "instantiated") return "current";
+    const runtime = this.#runtime;
+    const destinationSpace = resultCell.space;
+    const ref = parseFabricRef(source);
+    if (
+      ref === undefined || ref.subpath !== undefined ||
+      ref.ref.kind !== "uri"
+    ) {
+      this.#unwatchFabricSource(resultCell);
+      return "current";
+    }
+    const sourceSpaceValue = ref.space === undefined
+      ? destinationSpace
+      : ref.space;
+    if (!sourceSpaceValue.startsWith("did:")) return "current";
+    const sourceSpace = sourceSpaceValue as typeof destinationSpace;
+    if (ref.host !== undefined) {
+      const routedHost = runtime.hostForSpace(sourceSpace);
+      if (
+        !fabricAuthorityMatchesSpaceHost(ref.host, routedHost)
+      ) {
+        this.#unwatchFabricSource(resultCell);
+        return "current";
+      }
+    }
+
+    let targetRef: { identity: string; symbol: string };
+    const pinned = pinnedIdentity(ref);
+    if (pinned !== undefined) {
+      this.#unwatchFabricSource(resultCell);
+      targetRef = { identity: pinned, symbol: runningRef.symbol };
+    } else {
+      const sourceCell = runtime.getCellFromEntityId(
+        sourceSpace,
+        `${ref.ref.scheme}:fid1:${ref.ref.hash}`,
+      );
+      const current = await abortable(async () => {
+        await sourceCell.sync();
+        if (
+          this.#disposed || signal.aborted ||
+          this.#stoppedFabricFollowers.has(this.#followerKey(resultCell))
+        ) return undefined;
+        const current = getPatternIdentityRef(sourceCell);
+        if (current !== undefined) {
+          this.#watchFabricSource(resultCell, sourceCell, source, current);
+        }
+        return current;
+      }, signal);
+      if (current === undefined) return "current";
+      targetRef = current;
+    }
+    if (
+      targetRef.identity === runningRef.identity &&
+      targetRef.symbol === runningRef.symbol
+    ) return "current";
+
+    const program = await runtime.patternManager
+      .getPatternSourceProgramByIdentity(
+        targetRef.identity,
+        sourceSpace,
+        destinationSpace,
+      );
+    if (program === undefined || signal.aborted) return "current";
+    const baseline = await preparePieceSourceTransitionBaseline(
+      runtime,
+      resultCell,
+      sourceSnapshot,
+    );
+    const pattern = await runtime.patternManager.compilePattern(
+      { ...program, mainExport: targetRef.symbol },
+      { space: destinationSpace },
+    );
+    const entryRef = runtime.patternManager.getArtifactEntryRef(pattern);
+    if (
+      entryRef === undefined || entryRef.identity !== targetRef.identity ||
+      entryRef.symbol !== targetRef.symbol
+    ) return "current";
+
+    const previousPattern = await runtime.patternManager.loadPatternByIdentity(
+      runningRef.identity,
+      runningRef.symbol,
+      destinationSpace,
+    );
+    if (
+      previousPattern === undefined ||
+      !deepEqual(previousPattern.argumentSchema, pattern.argumentSchema) ||
+      !deepEqual(previousPattern.resultSchema, pattern.resultSchema)
+    ) {
+      logger.warn("incompatible-fabric-source-update", () => [
+        "automatic fabric source update changed the piece contract",
+        destinationSpace,
+        runningRef,
+        entryRef,
+      ]);
+      return "current";
+    }
+
+    const stillMatches = (candidate: Cell<unknown>): boolean => {
+      const candidateRef = getPatternIdentityRef(candidate);
+      const candidateSetupRef = getPatternSetupIdentityRef(candidate);
+      return candidateRef?.identity === runningRef.identity &&
+        candidateRef.symbol === runningRef.symbol &&
+        candidateSetupRef?.identity === storedSetupRef?.identity &&
+        candidateSetupRef?.symbol === storedSetupRef?.symbol &&
+        getPatternSource(candidate) === storedSource &&
+        getPatternRepository(candidate) === storedRepository;
+    };
+    const tx = runtime.edit();
+    try {
+      if (this.#stoppedFabricFollowers.has(this.#followerKey(resultCell))) {
+        tx.abort?.("fabric follower stopped");
+        return "current";
+      }
+      const candidate = resultCell.withTx(tx);
+      if (!stillMatches(candidate)) {
+        tx.abort?.("fabric source changed before update");
+        return "current";
+      }
+      const defaultPattern = runtime.getSpaceCell(destinationSpace).withTx(tx)
+        .key("defaultPattern").get();
+      if (
+        defaultPattern !== undefined &&
+        defaultPattern.resolveAsCell().equals(candidate.resolveAsCell())
+      ) {
+        tx.abort?.("default pattern uses its dedicated update path");
+        return "current";
+      }
+      applyPieceSourceTransition(runtime, resultCell, tx, entryRef, {
+        revisionId: crypto.randomUUID(),
+        baseline,
+        timestamp: Date.now(),
+        operation: "origin-update",
+        origin: source,
+        expected: sourceSnapshot,
+      });
+      void runtime.setup(tx, pattern, undefined, candidate, {
+        prepareForResume: true,
+      });
+      if (
+        signal.aborted ||
+        this.#stoppedFabricFollowers.has(this.#followerKey(resultCell))
+      ) {
+        tx.abort?.("fabric follower stopped before update");
+        return "current";
+      }
+      runtime.prepareTxForCommit(tx);
+      const result = await tx.commit();
+      if (result.error) {
+        logger.warn("fabric-source-swap-failed", () => [
+          "fabric source update commit failed",
+          destinationSpace,
+          result.error,
+        ]);
+        if (isConflictRejection(result.error)) {
+          const readyToRetry = (result.error as {
+            readyToRetry?: () => Promise<unknown> | unknown;
+          }).readyToRetry;
+          if (typeof readyToRetry === "function") {
+            try {
+              await readyToRetry();
+              this.#scheduleFromSourceEvent(resultCell);
+            } catch {
+              // The readiness notification ended before the state arrived.
+            }
+          }
+        } else if (isStorageTransactionInconsistent(result.error)) {
+          this.#requestCheckAfterCurrent(resultCell, mode);
+        }
+        return "current";
+      }
+      return "updated";
+    } catch (error) {
+      tx.abort?.("fabric source update failed");
+      throw error;
+    }
+  }
+
+  #watchFabricSource(
+    follower: Cell<unknown>,
+    source: Cell<unknown>,
+    origin: string,
+    targetRef: { identity: string; symbol: string },
+  ): void {
+    const followerLink = follower.getAsNormalizedFullLink();
+    const sourceLink = source.getAsNormalizedFullLink();
+    const followerKey = `${followerLink.space}\0${
+      followerLink.scope ?? "space"
+    }\0${followerLink.id}`;
+    const sourceKey = `${origin}\0${sourceLink.space}\0${
+      sourceLink.scope ?? "space"
+    }\0${sourceLink.id}`;
+    const existing = this.#fabricFollowers.get(followerKey);
+    if (existing?.sourceKey === sourceKey) return;
+    existing?.cancel();
+    let sourcePrimed = false;
+    const cancelSource = source.sinkMeta("patternIdentity", (value) => {
+      if (!sourcePrimed) {
+        sourcePrimed = true;
+        const candidate = value as Record<string, unknown>;
+        if (
+          typeof value === "object" && value !== null &&
+          !Array.isArray(value) &&
+          candidate.identity === targetRef.identity &&
+          candidate.symbol === targetRef.symbol
+        ) return;
+      }
+      this.#scheduleFromSourceEvent(follower);
+    });
+    let followerPrimed = false;
+    const cancelFollower = follower.sinkMeta("patternSource", (value) => {
+      if (!followerPrimed) {
+        followerPrimed = true;
+        if (value === origin) return;
+      }
+      this.#scheduleFromSourceEvent(follower);
+    });
+    this.#fabricFollowers.set(followerKey, {
+      sourceKey,
+      cancel: () => {
+        cancelSource();
+        cancelFollower();
+      },
+    });
+  }
+
+  /** Stop following a source when its piece stops. */
+  unwatch(resultCell: Cell<unknown>): void {
+    const key = this.#followerKey(resultCell);
+    const pendingKey = `instantiated\0${key}`;
+    const pending = this.#pending.get(pendingKey);
+    if (pending !== undefined) {
+      this.#stoppedFabricFollowers.add(key);
+      pending.abort.abort("fabric follower stopped");
+    } else {
+      this.#stoppedFabricFollowers.delete(key);
+    }
+    this.#unwatchFabricSource(resultCell);
+  }
+
+  #unwatchFabricSource(follower: Cell<unknown>): void {
+    const key = this.#followerKey(follower);
+    this.#fabricFollowers.get(key)?.cancel();
+    this.#fabricFollowers.delete(key);
   }
 }

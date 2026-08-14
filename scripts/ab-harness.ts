@@ -68,7 +68,6 @@ const { dataUriFromValue } = await import(
   "@commonfabric/data-model/data-uri-codec"
 );
 
-/** The module serializer, under whichever name the tree spells it. */
 /** Identity on a tree with no preflight, so the same probe runs on both. */
 let flatten: (v: unknown) => unknown = (v) => v;
 try {

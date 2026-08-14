@@ -1,5 +1,7 @@
-// Unit tests for mergeDefaults — the internal helper that builds a schema with
-// a merged `.default` property for use by processDefaultValue/createCell.
+/**
+ * Unit tests for mergeDefaults — the internal helper that builds a schema with
+ * a merged `.default` property for use by processDefaultValue/createCell.
+ */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -78,7 +80,7 @@ describe("mergeDefaults", () => {
       expect(result.default).toBe(null);
     });
 
-    it("should spread-merge when defaultValue is an array (arrays pass isRecord)", () => {
+    it("should spread-merge when defaultValue is an array (arrays pass isObjectOrArray)", () => {
       // Arrays are records in JS, so they hit the merge path.
       // This is a known quirk — see the TODO in mergeDefaults.
       const schema: JSONSchema = {
@@ -194,7 +196,7 @@ describe("mergeDefaults", () => {
         properties: { a: { type: "number" } },
       };
       const result = expectNontrivial(mergeDefaults(schema, { a: 42 }));
-      // No existing default to merge with, so isRecord(result.default) is
+      // No existing default to merge with, so isObjectOrArray(result.default) is
       // false on the first pass — falls through to simple assignment.
       expect(result.default).toEqual({ a: 42 });
     });

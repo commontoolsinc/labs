@@ -1,5 +1,9 @@
-// The shared collection context: memoized data sources handed to every tile so
-// several tiles reading the same source (a repo's CI runs) trigger only one fetch.
+/**
+ * Builds the shared collection context handed to every tile. Its data sources
+ * are memoized, so several tiles reading the same source — one repository's CI
+ * runs, say — trigger only one fetch between them.
+ */
+
 import { github, memo } from "./lib.ts";
 import {
   CI_RUNS_MAX,

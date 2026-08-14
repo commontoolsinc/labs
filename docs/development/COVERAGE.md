@@ -269,6 +269,51 @@ the one-line and the braced form of the same guard, and it changed between deno
 condition's own count. See
 [deno coverage: one-line guard reported uncovered when its branch is not taken](deno-coverage-guard-line-artifact.md).
 
+### Paths reached only when something happens twice
+
+The other common shape is a line that runs only on the second occurrence of
+something within one process: a cache that is populated the second time it is
+asked, a guard that turns away a duplicate, a retry that only a second failure
+reaches. Whether a suite produces that second occurrence is often decided by
+scheduling rather than by anything a test asserts, so the line is covered on
+some runs and not on others.
+
+Write a test that produces the second occurrence itself rather than one that
+performs an operation and hopes the suite repeats it. The
+`records one violation for an action caught twice` case in
+`packages/runner/test/scheduler-pull-idempotency.test.ts` is the worked
+example. It reaches the deduplication guard in `runIdempotencyRecheck()` by
+running one action twice over an input it moves, and it distinguishes a
+deduplicated second detection from a single detection by having the action
+write an incrementing count, so the recorded violation says which detection it
+came from.
+
+An assertion that only counts the outcome would pass either way and would leave
+the line's coverage exactly as environment-dependent as it was.
+[The August 2026 record](../history/development/coverage-flake-idempotency-dedup-2026-08-12.md)
+follows one such line from a group-level `+2` down to the guard and the test.
+
+### What the check says when the regression is not the pull request's
+
+The gate compares whole-group counts, so a flapping line fails whichever pull
+request is measured against a run that happened to cover it, however unrelated
+the diff. The check recognizes that case and says so: when a gated group is over
+its baseline and none of the lines the pull request added are uncovered, it
+reads the coverage reports of the `main` run its baseline came from and names
+every line this run leaves uncovered that the baseline run covered.
+
+The comment lists those lines file by file, gives the `ACCEPT_COVERAGE_DEBT`
+line that lets the pull request through, and carries a prompt for a fresh agent
+session to make the lines cover the same way every time. The author's pull
+request is not the place to fix them, and it is not held up waiting for someone
+to.
+
+Only files the pull request left alone are compared. A file it changed has
+different content in the two checkouts, so the same line number means a
+different line in each report and no comparison is possible. When the baseline
+run's coverage artifacts cannot be read — expired, or the download failed — the
+check falls back to the ordinary regression comment.
+
 ## Ratchet baselines and accepting debt
 
 The ratchet applies per source group and only to the groups a PR changes: for
@@ -294,25 +339,42 @@ NEW_COVERAGE_BASELINE
 ```
 
 When that PR merges, the main run's coverage metrics become the new ratchet
-baseline for later PRs. The check still requires the full expected coverage
-artifact set during that reset cycle. Jobs with no reportable covered files
-upload an empty LCOV report, so a missing artifact means the report upload
-itself failed.
+baseline for later PRs, and no run before it is one: the accepted level is what
+later runs are held to, and nothing older can undo it. That floor applies to the
+metrics the acceptance named, or to every coverage metric for the broad reset
+marker. It reaches only the PRs whose base-branch commit already contains the
+acceptance; a PR whose run started earlier is gated against the ancestry it does
+contain, and picks the floor up when a later run of it merges the acceptance. The
+check still requires the full expected coverage artifact set during that reset
+cycle. Jobs with no reportable covered files upload an empty LCOV report, so a
+missing artifact means the report upload itself failed.
 
 Each run writes a per-run baseline artifact recording its coverage-debt metrics
 and its compile cache states. It is named `perf-metrics` for historical reasons
 — it once also carried CI timing metrics for the removed performance gate — and
 keeps that name so the ratchet needs no migration; a run from before the gate
-was removed reads as a valid baseline unchanged. A later PR run reads its ratchet
-baseline from the `perf-metrics` artifact of the `main` run for the base-branch
-commit it merged, or of the nearest ancestor of that commit which has one; there
-is no separate history store. The workflow downloads the current run's
-`coverage-profile-*` artifacts before starting `tasks/coverage-check.ts`.
-`COVERAGE_ARTIFACTS_DIR` points the script at one subdirectory per artifact. The
-download step checks the artifact digests. The script separately checks the
-expected artifact names (`EXPECTED_COVERAGE_ARTIFACT_NAMES`). It also rejects an
-artifact containing no coverage files. A manual run without the environment
-variable uses the GitHub API download path instead.
+was removed reads as a valid baseline unchanged. The file records each metric's
+uncovered-line count under a `durationSeconds` key, for the same reason the
+artifact keeps its name.
+
+A later PR run reads its ratchet baseline from the `perf-metrics` artifact of the
+`main` run for the base-branch commit it merged, or of the nearest ancestor of
+that commit which has one; there is no separate history store. It finds that run
+by ordering the recent `main` runs from the nearest ancestor of that commit
+outwards — leaving out the runs for commits it does not contain — and then
+reading one run at a time, stopping as soon as every metric has a baseline.
+Usually the nearest run measured every metric, and that is the only baseline
+artifact read; reading further back happens when a run uploaded nothing, ran
+cold, or measured a metric no nearer run did. The runs the walk read are the
+ones the "Baseline source runs" log group names.
+
+The workflow downloads the current run's `coverage-profile-*` artifacts before
+starting `tasks/coverage-check.ts`. `COVERAGE_ARTIFACTS_DIR` points the script at
+one subdirectory per artifact. The download step checks the artifact digests. The
+script separately checks the expected artifact names
+(`EXPECTED_COVERAGE_ARTIFACT_NAMES`). It also rejects an artifact containing no
+coverage files. A manual run without the environment variable uses the GitHub API
+download path instead.
 
 ## Compile cache state and cold runs
 
@@ -341,16 +403,22 @@ current. The ratchet skips a cold sample when choosing among the
 base-branch commit and its ancestors, so a cold `main` run cannot lower the
 baseline that warm PRs are held to.
 
-A run without a recorded cache state — an artifact carrying no stamp, or a run
-whose cache-state artifact failed to upload — is retro-classified from the
-compile fingerprint (`tasks/compile-cache-state.ts` mirrors the `cc-*` key globs,
-drift-guarded by a test that parses the workflow): if the fingerprint paths
-changed against the run's predecessor, every family is treated as cold; if
-unchanged, warm. The same fingerprint inference backstops the current run when
-its cache-state artifact is missing. Fingerprint inference cannot see
-non-fingerprint cold causes (cache eviction, cache-service outages): a run cold
-for those reasons and lacking a recorded state stays unknown, so it is treated
-as not-cold and may still be used as a baseline.
+Every run stamps its own `perf-metrics.json`, so a baseline run's coldness is
+read straight off the artifact that run published. Before writing the stamp, a
+run fills in any family whose cache-state artifact did not arrive, using the
+compile fingerprint: `tasks/compile-cache-state.ts` mirrors the `cc-*` key globs
+(drift-guarded by a test that parses the workflow) and compares the run's commit
+against the commit whose cache it would have restored — the pull request's own
+changed files, or the previous `main` run for a push. A family with no recorded
+state is filled cold when those paths changed. Recorded states are ground truth
+and always win. The rate-limit skip path writes the same stamped artifact, so a
+run cut short still tells later runs whether it was cold.
+
+Neither source is complete. Fingerprint inference cannot see non-fingerprint
+cold causes (cache eviction, cache-service outages), and a run whose cache-state
+artifacts and fingerprint comparison both failed publishes no stamp at all. A
+run with no recorded state is treated as not-cold and may still be used as a
+baseline.
 
 ## Which `main` run the ratchet compares against
 

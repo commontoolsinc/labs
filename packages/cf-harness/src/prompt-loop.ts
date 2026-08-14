@@ -77,6 +77,14 @@ import {
   parseSubagentReturnSchema,
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
+import type { HarnessHandleTable } from "./contracts/handle-table.ts";
+import {
+  createHarnessHandleTable,
+  defineOwnEntry,
+  mintAddressHandle,
+  swapLinksForTokens,
+  swapTokensForRefs,
+} from "./handle-table.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 import {
   cwdMarkerForOutput,
@@ -86,6 +94,7 @@ import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
+import { scrubBareFabricIdentifiers } from "./tools/run-pattern.ts";
 import {
   toModelFacingWebFetchOutput,
   type WebFetchToolOutput,
@@ -104,6 +113,7 @@ import type {
   HarnessModelUsage,
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
+import { HarnessControlError } from "./control-errors.ts";
 import { sumHarnessModelUsage } from "./model/usage.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -556,6 +566,33 @@ const summarizeToolInput = async (
           : {}),
       };
     }
+    case "run_pattern": {
+      const sourceTextSummary = typeof input.sourceText === "string"
+        ? await summarizeSensitiveText(input.sourceText)
+        : undefined;
+      const resultSchemaSummary = input.resultSchema !== undefined
+        ? await summarizeSensitiveText(JSON.stringify(input.resultSchema))
+        : undefined;
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(sourceTextSummary !== undefined
+          ? {
+            sourceTextBytes: sourceTextSummary.bytes,
+            sourceTextDigest: sourceTextSummary.digest,
+          }
+          : {}),
+        ...(isObjectRecord(input.inputs)
+          ? { inputCount: Object.keys(input.inputs).length }
+          : {}),
+        ...(resultSchemaSummary !== undefined
+          ? {
+            resultSchemaBytes: resultSchemaSummary.bytes,
+            resultSchemaDigest: resultSchemaSummary.digest,
+          }
+          : {}),
+      };
+    }
   }
   return {
     type: "cf-harness.tool-input-summary",
@@ -816,17 +853,104 @@ const summarizeSubagentRunState = (
   };
 };
 
+/**
+ * Helper for `createStructuredSubagentReturn()`, which tells whether `value`
+ * is a sealed opaque-link object — the single-key `@link` object the
+ * sanitizer substitutes for a position it seals.
+ */
+const isSealedOpaqueLinkObject = (value: unknown): boolean => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const target = record["@link"];
+  return Object.keys(record).length === 1 &&
+    typeof target === "string" &&
+    target.startsWith("opaque:");
+};
+
+/**
+ * Helper for `createStructuredSubagentReturn()`, which walks a sanitized
+ * structured return and the raw value it was sanitized from in tandem,
+ * replacing each sealed opaque-link object whose raw counterpart is a string
+ * naming an entity address with a minted handle token. A sealed position
+ * whose raw counterpart is anything else — free-form prose, a whole record —
+ * keeps its opaque `@link` object. Returns the updated table, the reworked
+ * value, and the number of sealed string positions that became tokens, which
+ * the caller subtracts from the sanitizer's `linkedStringCount`.
+ */
+const swapSealedAddressStringsForTokens = async (
+  table: HarnessHandleTable,
+  sanitized: unknown,
+  raw: unknown,
+): Promise<{ table: HarnessHandleTable; value: unknown; replaced: number }> => {
+  if (isSealedOpaqueLinkObject(sanitized)) {
+    if (typeof raw !== "string") {
+      return { table, value: sanitized, replaced: 0 };
+    }
+    try {
+      const minted = await mintAddressHandle(table, raw);
+      return { table: minted.table, value: minted.token, replaced: 1 };
+    } catch {
+      // Not an entity address — the position stays sealed.
+      return { table, value: sanitized, replaced: 0 };
+    }
+  }
+  if (Array.isArray(sanitized) && Array.isArray(raw)) {
+    let replaced = 0;
+    const items: unknown[] = [];
+    for (let index = 0; index < sanitized.length; index += 1) {
+      const result = await swapSealedAddressStringsForTokens(
+        table,
+        sanitized[index],
+        raw[index],
+      );
+      table = result.table;
+      replaced += result.replaced;
+      items.push(result.value);
+    }
+    return { table, value: items, replaced };
+  }
+  if (
+    typeof sanitized === "object" && sanitized !== null &&
+    !Array.isArray(sanitized) &&
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+  ) {
+    let replaced = 0;
+    const entries: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(sanitized)) {
+      const result = await swapSealedAddressStringsForTokens(
+        table,
+        child,
+        (raw as Record<string, unknown>)[key],
+      );
+      table = result.table;
+      replaced += result.replaced;
+      defineOwnEntry(entries, key, result.value);
+    }
+    return { table, value: entries, replaced };
+  }
+  return { table, value: sanitized, replaced: 0 };
+};
+
 const createStructuredSubagentReturn = async (
   options: {
     childEngine: CfHarnessEngine;
     childRunId: string;
     rawFinalAssistantText: string;
     schema: NonNullable<DelegateTaskToolInput["returnSchema"]>;
+    /**
+     * When present, sealed positions whose raw string is an entity address
+     * become handle tokens minted into this table; the updated table comes
+     * back as `handleTable` when minting added an entry.
+     */
+    handleTable?: HarnessHandleTable;
   },
 ): Promise<{
   structuredReturn: HarnessSubagentStructuredReturn;
   summary: string;
   valid: boolean;
+  handleTable?: HarnessHandleTable;
 }> => {
   const schemaDigest = await digestJsonValue(options.schema);
   const rawOutputId = `${options.childRunId}:subagent_return:1` as ToolOutputId;
@@ -885,6 +1009,23 @@ const createStructuredSubagentReturn = async (
       value: parsedValue,
       validationStatus: "valid",
     });
+    let returnValue = sanitized.value;
+    // `linkedStringCount` counts the positions still sealed as opaque, so a
+    // sealed string that becomes a token leaves the count.
+    let linkedStringCount = sanitized.linkedStringCount;
+    let updatedHandleTable: HarnessHandleTable | undefined;
+    if (options.handleTable !== undefined) {
+      const swapped = await swapSealedAddressStringsForTokens(
+        options.handleTable,
+        sanitized.value,
+        parsedValue,
+      );
+      returnValue = swapped.value;
+      linkedStringCount -= swapped.replaced;
+      if (swapped.table !== options.handleTable) {
+        updatedHandleTable = swapped.table;
+      }
+    }
     return {
       valid: true,
       summary:
@@ -895,9 +1036,12 @@ const createStructuredSubagentReturn = async (
         schemaDigest,
         rawOutputId,
         ...(rawArtifactPath !== undefined ? { rawArtifactPath } : {}),
-        value: sanitized.value,
-        linkedStringCount: sanitized.linkedStringCount,
+        value: returnValue,
+        linkedStringCount,
       },
+      ...(updatedHandleTable !== undefined
+        ? { handleTable: updatedHandleTable }
+        : {}),
     };
   } catch (error) {
     const rawValidationError = error instanceof Error
@@ -1723,8 +1867,17 @@ export class CfHarnessPromptLoop {
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
+    // `run_pattern` joins the tool surface exactly when the run can build a
+    // fabric session; without one the tool is absent rather than
+    // present-but-failing, even when an explicit allowlist names it.
+    const requestedToolIds = options.allowedToolIds ??
+      (this.engine.fabricSessionAvailable
+        ? [...DEFAULT_PROMPT_LOOP_TOOL_IDS, "run_pattern" as const]
+        : DEFAULT_PROMPT_LOOP_TOOL_IDS);
     this.#allowedToolIds = new Set(
-      options.allowedToolIds ?? DEFAULT_PROMPT_LOOP_TOOL_IDS,
+      this.engine.fabricSessionAvailable
+        ? requestedToolIds
+        : requestedToolIds.filter((toolId) => toolId !== "run_pattern"),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -1957,29 +2110,47 @@ export class CfHarnessPromptLoop {
     try {
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;
-        const response = await this.modelClient.complete({
-          model,
-          transcript,
-          tools: BUILTIN_TOOLS.filter((tool) =>
-            this.#allowedToolIds.has(tool.descriptor.toolId)
-          ).map((tool) => tool.descriptor),
-          nativeModelToolIds: this.#nativeModelToolIds,
-          runId: this.engine.getRunState().runId,
-          ...(this.#cacheAffinityKey !== undefined
-            ? { cacheAffinityKey: this.#cacheAffinityKey }
-            : {}),
-          ...(this.#promptCacheMode !== undefined
-            ? { promptCacheMode: this.#promptCacheMode }
-            : {}),
-          ...(this.#reasoningEffort !== undefined
-            ? { reasoningEffort: this.#reasoningEffort }
-            : {}),
-          ...(this.#compactThreshold !== undefined
-            ? { compactThreshold: this.#compactThreshold }
-            : {}),
-          signal: options.signal,
-          onAttempt: recordModelAttempt,
-        });
+        let response;
+        try {
+          response = await this.modelClient.complete({
+            model,
+            transcript,
+            tools: BUILTIN_TOOLS.filter((tool) =>
+              this.#allowedToolIds.has(tool.descriptor.toolId)
+            ).map((tool) => tool.descriptor),
+            nativeModelToolIds: this.#nativeModelToolIds,
+            runId: this.engine.getRunState().runId,
+            ...(this.#cacheAffinityKey !== undefined
+              ? { cacheAffinityKey: this.#cacheAffinityKey }
+              : {}),
+            ...(this.#promptCacheMode !== undefined
+              ? { promptCacheMode: this.#promptCacheMode }
+              : {}),
+            ...(this.#reasoningEffort !== undefined
+              ? { reasoningEffort: this.#reasoningEffort }
+              : {}),
+            ...(this.#compactThreshold !== undefined
+              ? { compactThreshold: this.#compactThreshold }
+              : {}),
+            signal: options.signal,
+            onAttempt: recordModelAttempt,
+          });
+        } catch (error) {
+          const localGateway = this.engine.config.modelProvider ===
+              "openai-compatible-gateway" &&
+            this.engine.config.runManifest?.harnessHomeIdentity !== undefined;
+          if (
+            localGateway && !(error instanceof HarnessControlError) &&
+            options.signal?.aborted !== true &&
+            !(error instanceof DOMException && error.name === "AbortError")
+          ) {
+            throw new HarnessControlError(
+              "provider-unavailable",
+              "The configured cf-harness gateway request failed",
+            );
+          }
+          throw error;
+        }
         if (response.usage !== undefined) {
           modelUsage.push({
             modelTurn: modelTurns,
@@ -2110,6 +2281,40 @@ export class CfHarnessPromptLoop {
     throw turnLimitError;
   }
 
+  /**
+   * Helper for `#invokeToolCall()`, which replaces handle tokens in a parsed
+   * tool input with their canonical address strings. Never applies to
+   * `delegate_task`, whose input reaches the child as the model wrote it.
+   * Returns `input` itself when no substitution applies.
+   */
+  #resolveHandleTokensInToolInput(
+    toolId: string,
+    input: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (toolId === "delegate_task") {
+      return input;
+    }
+    const table = this.engine.handleTable;
+    if (table === undefined || table.entries.length === 0) {
+      return input;
+    }
+    return swapTokensForRefs(table, input) as Record<string, unknown>;
+  }
+
+  /**
+   * Helper for `#invokeToolCall()`, which applies the outbound handle swap
+   * to a model-bound value, recording the table when minting extended it.
+   */
+  async #swapModelBoundValue(value: unknown): Promise<unknown> {
+    const table = this.engine.handleTable ??
+      createHarnessHandleTable(this.engine.getRunState().runId);
+    const swapped = await swapLinksForTokens(table, value);
+    if (swapped.table !== table) {
+      await this.engine.recordHandleTable(swapped.table);
+    }
+    return swapped.value;
+  }
+
   async #invokeToolCall(
     toolCall: HarnessToolCall,
     model: string,
@@ -2220,10 +2425,21 @@ export class CfHarnessPromptLoop {
         },
       };
     }
-    const input = parsedInputForDeniedTool ??
+    const parsedAllowedInput = parsedInputForDeniedTool ??
       stripTrustedOnlyToolInputFields(parseToolArguments(toolCall));
-    const toolInputSummary = deniedToolInputSummary ??
-      await summarizeToolInput(toolCall.function.name, input);
+    // Handle tokens resolve to their referents here, so policy evaluation,
+    // summarization, and the tool itself all see the real addresses. Denial
+    // summaries recorded above keep the tokens the model wrote. A
+    // `delegate_task` input is exempt: tokens in its goal and context reach
+    // the child verbatim as inert text.
+    const input = this.#resolveHandleTokensInToolInput(
+      toolCall.function.name,
+      parsedAllowedInput,
+    );
+    const toolInputSummary = input === parsedAllowedInput
+      ? deniedToolInputSummary ??
+        await summarizeToolInput(toolCall.function.name, input)
+      : await summarizeToolInput(toolCall.function.name, input);
     const decision = evaluateToolPolicy(
       this.engine.getRunState().cfcEnforcementMode,
       tool.descriptor,
@@ -2418,6 +2634,7 @@ export class CfHarnessPromptLoop {
         : await this.#invokeBuiltinTool(
           toolCall.function.name,
           input,
+          signal,
         );
     } catch (error) {
       recordActivity({
@@ -2445,7 +2662,12 @@ export class CfHarnessPromptLoop {
       toolCall.id,
       recordPolicyEvent,
     );
-    const modelOutput = modelOutputResult.output;
+    // The raw output is already persisted by the tool invocation above, so
+    // artifacts keep the raw addresses; only this model-bound rendering
+    // carries tokens.
+    const modelOutput = await this.#swapModelBoundValue(
+      modelOutputResult.output,
+    );
     const policyEvents = this.engine.getRunState().policyEvents;
     let activityPolicyDecision: HarnessToolPolicyDecision = policyDecision;
     for (const index of policyEventIndexes) {
@@ -2473,12 +2695,16 @@ export class CfHarnessPromptLoop {
       resultRef: result.resultRef,
     };
     if (isViewImageToolSuccessOutput(result.output)) {
+      // The raw path may embed an address a token resolved to, so the
+      // followup goes through the same outbound swap as the tool message.
+      const followupContent = await this.#swapModelBoundValue(
+        `Image loaded by view_image from ${result.output.path} (outputId: ${result.output.outputId}).`,
+      ) as string;
       return {
         toolMessage,
         followupMessages: [{
           role: "user",
-          content:
-            `Image loaded by view_image from ${result.output.path} (outputId: ${result.output.outputId}).`,
+          content: followupContent,
           imageAttachments: [result.output.imageAttachment],
         }],
       };
@@ -2586,6 +2812,25 @@ export class CfHarnessPromptLoop {
         output: toModelFacingWebFetchOutput(output as WebFetchToolOutput),
       };
     }
+    if (toolId === "run_pattern" && isObjectRecord(output)) {
+      // The persisted artifact keeps the raw result value and the piece id
+      // — a bare fabric identifier the handle boundary never swaps, and
+      // redundant with `resultRef` since the piece cell is the result cell.
+      // The model sees only `resultRef` and the schema-sanitized `value`.
+      // Free-text diagnostic fields can embed compiler-generated bare
+      // fabric identifiers the handle boundary never swaps, so those fields
+      // are scrubbed here; the artifact keeps the raw text.
+      const { rawValue: _rawValue, pieceId: _pieceId, ...publicOutput } =
+        output;
+      const scrubbed: Record<string, unknown> = { ...publicOutput };
+      for (const field of ["message", "valueError"]) {
+        const text = scrubbed[field];
+        if (typeof text === "string") {
+          scrubbed[field] = scrubBareFabricIdentifiers(text);
+        }
+      }
+      return { output: stripInternalCfcFields(scrubbed) };
+    }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };
     }
@@ -2679,6 +2924,7 @@ export class CfHarnessPromptLoop {
   async #invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<{
     output: Awaited<ReturnType<CfHarnessEngine["invokeBuiltinTool"]>>["output"];
     resultRef: ToolResultRef;
@@ -2686,6 +2932,7 @@ export class CfHarnessPromptLoop {
     const result = await this.engine.invokeBuiltinTool(
       toolId,
       input as unknown as BuiltinToolInputMap[TToolId],
+      signal !== undefined ? { signal } : {},
     );
     return {
       output: result.output,
@@ -2710,6 +2957,7 @@ export class CfHarnessPromptLoop {
       delegateInput.profile,
     );
     const childModel = resolveSubagentModel(options.model, profileConfig);
+    const inheritsParentModel = childModel.source === "parent";
     const maxModelTurns = delegateInput.maxModelTurns ??
       profileConfig.maxModelTurns;
     const parentRunState = this.engine.getRunState();
@@ -2745,7 +2993,16 @@ export class CfHarnessPromptLoop {
           gatewayAuthMode: this.engine.config.gatewayAuthMode,
         }
         : {}),
-      cwd: parentRunState.currentDir,
+      // A host-command child (non-empty hostToolIds, i.e. the browser
+      // profile) resolves every path — including its cwd — against its own
+      // host-backed mounts, which are workspace-only. Inheriting a parent
+      // cwd outside the workspace (Loom capture runs sit at /file-cabinet)
+      // killed every such child at its first host command with "path
+      // escapes host-backed sandbox roots" (CT-1984). Ground host-command
+      // children in the workspace; sandboxed children keep the parent cwd.
+      cwd: profileConfig.hostToolIds.length > 0
+        ? this.engine.workspaceMountPath
+        : parentRunState.currentDir,
       ...(this.engine.config.skillsRoot !== undefined
         ? { skillsRoot: this.engine.config.skillsRoot }
         : {}),
@@ -2778,6 +3035,15 @@ export class CfHarnessPromptLoop {
       depth: 1,
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
       modelProvider,
+      ...(parentRunState.modelAuthSource !== undefined
+        ? { modelAuthSource: parentRunState.modelAuthSource }
+        : {}),
+      ...(parentRunState.credentialOwner !== undefined
+        ? { credentialOwner: structuredClone(parentRunState.credentialOwner) }
+        : {}),
+      ...(parentRunState.harnessHomeIdentity !== undefined
+        ? { harnessHomeIdentity: parentRunState.harnessHomeIdentity }
+        : {}),
       model: childModel.model,
       modelSource: childModel.source,
       allowedToolIds: [...profileConfig.allowedToolIds],
@@ -2816,19 +3082,19 @@ export class CfHarnessPromptLoop {
       engine: childEngine,
       modelClient: this.modelClient,
       cacheAffinityKey: childRunId,
-      // A positive threshold is calibrated to the parent model's input
-      // budget, so it follows only a child that inherits that model; a
-      // profile-overridden child keeps its own model's derived default (and a
-      // chat-routed override like web_search could not honour it at all).
-      // `0` is model-independent — the off-switch stays run-wide.
+      // Provider controls follow only a child that inherits the parent model.
+      // A profile-overridden child keeps its model's own reasoning/cache
+      // defaults, and a chat-routed override like web_search cannot honour the
+      // parent model's controls at all. `compactThreshold: 0` is the exception:
+      // the model-independent off-switch stays run-wide.
       ...(this.#compactThreshold !== undefined &&
-          (this.#compactThreshold === 0 || childModel.source === "parent")
+          (this.#compactThreshold === 0 || inheritsParentModel)
         ? { compactThreshold: this.#compactThreshold }
         : {}),
-      ...(this.#promptCacheMode !== undefined
+      ...(this.#promptCacheMode !== undefined && inheritsParentModel
         ? { promptCacheMode: this.#promptCacheMode }
         : {}),
-      ...(this.#reasoningEffort !== undefined
+      ...(this.#reasoningEffort !== undefined && inheritsParentModel
         ? { reasoningEffort: this.#reasoningEffort }
         : {}),
       maxModelTurns,
@@ -2900,14 +3166,20 @@ export class CfHarnessPromptLoop {
         delegateInput.returnSchema !== undefined &&
         subagentStatus === "completed"
       ) {
+        const handleTable = this.engine.handleTable ??
+          createHarnessHandleTable(parentRunState.runId);
         const structured = await createStructuredSubagentReturn({
           childEngine,
           childRunId,
           rawFinalAssistantText: childResult.finalAssistantText,
           schema: delegateInput.returnSchema,
+          handleTable,
         });
         summary = structured.summary;
         structuredReturn = structured.structuredReturn;
+        if (structured.handleTable !== undefined) {
+          await this.engine.recordHandleTable(structured.handleTable);
+        }
         if (!structured.valid) {
           subagentStatus = "failed";
         }

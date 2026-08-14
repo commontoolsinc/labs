@@ -1,10 +1,24 @@
+/**
+ * The numeric values JSON cannot carry -- negative zero, `NaN`, and the two
+ * infinities -- written as literal strings.
+ *
+ * Round-tripping them is the point, and the sign of zero is what makes that
+ * more than a formality: `-0` has to come back as `-0` rather than as `0`,
+ * which ordinary equality would not notice either way. Every `NaN` bit pattern
+ * encodes to the same literal, the distinctions among them not being ones this
+ * format carries.
+ *
+ * A state that is not a recognized literal decodes to a `ProblematicValue`
+ * rather than throwing.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { SpecialNumberCodec } from "@/codec-json/SpecialNumberCodec.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("SpecialNumberCodec", () => {
   const codec = new SpecialNumberCodec();

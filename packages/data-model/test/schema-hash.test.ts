@@ -1,3 +1,17 @@
+/**
+ * Hashing a schema and interning it, so that an equal schema becomes the same
+ * object and can be named by its hash.
+ *
+ * Interning is what makes a schema comparable by identity afterward, so the
+ * cases cover the several ways one can be asked for -- with and without the
+ * hash alongside it, by lookup, by predicate, and as a tagged string -- rather
+ * than letting one entry point stand in for the rest.
+ *
+ * One group checks the interned form against the `data:` id minted for the
+ * same schema. They are two separate namings of one thing, and worth setting
+ * against each other rather than each being checked alone.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { expect } from "@std/expect";

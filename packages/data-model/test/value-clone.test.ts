@@ -1,3 +1,21 @@
+/**
+ * Writing and removing a value at a path, each copying only the spine that
+ * changed.
+ *
+ * Off-spine subtrees keep their identity, which is the property the whole
+ * shape exists for. The rest is deciding what a path means when the structure
+ * does not already match it: a missing intermediate is created in the shape
+ * the next segment implies, while a present leaf that is not a container is
+ * refused rather than overwritten with structure.
+ *
+ * Removal turns on what counts as absent, and the answers are stricter than a
+ * property read would give. A sparse hole, an out-of-range index, and an
+ * index-like name that is not canonical all count as absent -- and absent
+ * means nothing shifts.
+ *
+ * Neither one descends into a fabric instance on its way through a path.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

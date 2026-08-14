@@ -160,9 +160,12 @@ processes* (deploy overlap, partition) it holds via the lease:
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
   match the live lease. This is one equality check, not admission
-  machinery. (Stage F adds the envelope-session half of the same
-  check — protocol.md §2's derived-envelope defense-in-depth, RULED
-  2026-08-05.)
+  machinery. It binds fresh commits: an exact replay of an already-accepted
+  commit answers from the store first (replay detection precedes
+  current-authority admission), so a network retry of an accepted commit is
+  never re-admitted against current authority. (Stage F adds the
+  envelope-session half of the same check — protocol.md §2's
+  derived-envelope defense-in-depth, RULED 2026-08-05.)
 - Liveness is judged by the MEMORY SERVER's clock: admission compares
   `expiresAt` against its own clock, and an expired row matches NOBODY —
   a derived commit under an expired lease is rejected even before any
@@ -823,8 +826,17 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   commit is an ordinary self-echo and is skipped (§3). A crash between
   completion commit and consumption is covered by recovery: the basis
   index shows the consumers stale against the result doc's head (§6).
-- **In-flight dedupe**: one outstanding effect per key per space; a second
-  miss on the same key attaches to the in-flight effect.
+- **In-flight dedupe**: one outstanding effect per (key, result
+  target) per space; a second miss on the same (key, target)
+  attaches to the in-flight effect. Two DISTINCT result targets
+  carrying byte-identical inputs are two distinct requests, and
+  each egresses (RULED 2026-08-13; the earlier per-key-only
+  wording promised a cross-target sharing that §4's own miss
+  rule — exactly one result-cell address per entry — could not
+  deliver). A response-sharing layer (one egress fanned to N
+  per-target writebacks, restricted to idempotent-marked
+  effects) remains a possible future optimization, not an owed
+  item.
 - Failures commit an error-shaped result (the existing builtin error cell
   conventions) with the key, so retries are input-driven (inputs change →
   new key), never timer-driven loops.

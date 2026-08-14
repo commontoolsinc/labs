@@ -10,6 +10,7 @@ export const TEST_COMMANDS = [
     "--allow-write",
     `--allow-run=${Deno.execPath()},git`,
     "--ignore=favicon-client.browser.test.ts",
+    "--ignore=dashboard-message-client.browser.test.ts",
     "--ignore=theme.browser.test.ts",
     "--ignore=favicon-raster.test.ts",
     "--ignore=regenerate-favicons.test.ts",

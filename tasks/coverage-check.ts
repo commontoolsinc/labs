@@ -20,13 +20,13 @@
  */
 
 import {
-  addSample,
+  acceptsCoverageDebt,
   aggregateCacheStates,
-  API_CONCURRENCY,
-  applyBaselineOverrides,
   type Artifact,
   type BaselineOverrides,
+  type BaselineSample,
   buildCoverageDebtSuggestionComment,
+  buildCoverageDebtUnattributedComment,
   CACHE_STATE_ARTIFACT_PREFIX,
   COMPILE_CACHE_FAMILIES,
   type CompileCacheStates,
@@ -40,6 +40,7 @@ import {
   type CoverageResolvedGroup,
   type CoverageSuggestionFileLines,
   type CoverageSuggestionGroup,
+  type CoverageUnattributedFile,
   downloadAndExtractArtifact,
   downloadAndParseCoverageBaseline,
   fetchArtifactsForRun,
@@ -47,10 +48,6 @@ import {
   fetchPRFiles,
   formatOverrideSuggestion,
   githubGet,
-  isCoverageDebtMetric,
-  latestNonColdSample,
-  mapConcurrent,
-  type MetricTimeline,
   newestArtifactsByName,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
@@ -62,8 +59,6 @@ import {
   readAndParseEvent,
   REPO,
   shouldGateCoverageDebtMetric,
-  type TimingSample,
-  walkFiles,
   WORKFLOW_FILE,
   type WorkflowRun,
   writeCoverageBaselineFile,
@@ -71,11 +66,12 @@ import {
 import {
   fillMissingFamiliesFromFingerprint,
   inferCurrentRunFallbackState,
-  recordUnstampedBaselineRunState,
 } from "./compile-cache-state.ts";
+import { walk } from "@std/fs/walk";
 import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
+  collectRegressedLines,
   collectUncoveredLinesForFiles,
   COVERAGE_PROFILE_ARTIFACT_PREFIX,
   lcovFromCoverageProfile,
@@ -116,10 +112,35 @@ function isGitHubRateLimitError(error: unknown): boolean {
   return /\b(rate limit|rate-limited|ratelimit)\b/i.test(message);
 }
 
+/**
+ * The perf-metrics artifact this run publishes: its coverage metrics, and the
+ * compile cache states that stamp them. A later run reads the stamp to decide
+ * whether this run was cold, so every path that writes the artifact writes
+ * both halves.
+ */
+export interface PerfMetricsArtifact {
+  metrics: Map<string, BaselineSample>;
+  compileCacheStates?: CompileCacheStates;
+}
+
+/** Writes the artifact to {@link PERF_METRICS_FILE}, and says so. */
+async function writePerfMetricsArtifact(
+  artifact: PerfMetricsArtifact,
+): Promise<void> {
+  await writeCoverageBaselineFile(
+    PERF_METRICS_FILE,
+    artifact.metrics,
+    artifact.compileCacheStates,
+  );
+  console.log(
+    `Wrote ${PERF_METRICS_FILE} with ${artifact.metrics.size} metrics.`,
+  );
+}
+
 export async function githubApiOrSkip<T>(
   description: string,
   operation: () => Promise<T>,
-  metricsForArtifact: Map<string, TimingSample>,
+  artifact: PerfMetricsArtifact,
 ): Promise<T> {
   try {
     return await operation();
@@ -129,10 +150,7 @@ export async function githubApiOrSkip<T>(
     console.warn(
       `  Warning: GitHub API rate limit while ${description}: ${error}`,
     );
-    await writeCoverageBaselineFile(PERF_METRICS_FILE, metricsForArtifact);
-    console.log(
-      `Wrote ${PERF_METRICS_FILE} with ${metricsForArtifact.size} metrics.`,
-    );
+    await writePerfMetricsArtifact(artifact);
     console.log(
       "Skipping coverage check because GitHub API rate limits prevent collecting the baseline data.",
     );
@@ -222,60 +240,6 @@ export async function fetchLatestBaselineRunSha(): Promise<string | undefined> {
 
 function pluralize(value: number, unit: string): string {
   return `${value} ${unit}${value === 1 ? "" : "s"}`;
-}
-
-export function formatRelativeDuration(seconds: number): string {
-  if (!Number.isFinite(seconds)) return "unknown";
-
-  let remaining = Math.max(0, Math.floor(seconds));
-  const parts: string[] = [];
-  const units = [
-    { seconds: 24 * 60 * 60, unit: "day" },
-    { seconds: 60 * 60, unit: "hour" },
-    { seconds: 60, unit: "minute" },
-    { seconds: 1, unit: "second" },
-  ];
-
-  for (const unit of units) {
-    const value = Math.floor(remaining / unit.seconds);
-    if (value > 0) {
-      parts.push(pluralize(value, unit.unit));
-      remaining -= value * unit.seconds;
-    }
-    if (parts.length === 2) break;
-  }
-
-  return parts.length > 0 ? parts.join(" ") : "0 seconds";
-}
-
-export function formatRelativeAge(fromIso: string, toIso: string): string {
-  const fromMs = Date.parse(fromIso);
-  const toMs = Date.parse(toIso);
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return "unknown";
-
-  return formatRelativeDuration((toMs - fromMs) / 1_000);
-}
-
-export function formatCommitDistance(commitsBehindMain: number | null): string {
-  return commitsBehindMain === null
-    ? "an unknown number of commits"
-    : pluralize(commitsBehindMain, "commit");
-}
-
-export function formatBaselineSourceRunAge(
-  runCreatedAt: string,
-  currentCreatedAt: string,
-  commitsBehindMain: number | null,
-): string {
-  const age = formatRelativeAge(runCreatedAt, currentCreatedAt);
-  const timePart = age === "unknown" ? "age unknown" : `created ${age} ago`;
-  return `${timePart}; ${
-    formatCommitDistance(commitsBehindMain)
-  } behind current main`;
-}
-
-interface GitHubCompareResponse {
-  ahead_by?: unknown;
 }
 
 export async function readHeadCommitObject(
@@ -370,8 +334,35 @@ export async function fetchAncestorRanks(
   return new Map(commits.map((commit, index) => [commit.sha, index]));
 }
 
+/** One baseline run, as much of it as choosing a baseline needs. */
+export interface BaselineRunReading {
+  /** The run's uncovered-line count per metric, from its baseline artifact. */
+  samples: Map<string, BaselineSample>;
+  /** What the run's merged pull request accepted, when it has one. */
+  overrides: BaselineOverrides | null;
+  /** True when the run compiled patterns from scratch. */
+  cold: boolean;
+}
+
+export interface WalkBaselineRunsOptions {
+  /**
+   * The metrics to find a baseline for. An array rather than any iterable,
+   * because a one-shot iterator would leave a second pass over it empty.
+   */
+  metrics: readonly string[];
+  /** Recent `main` runs, newest first. */
+  runs: WorkflowRun[];
+  /** Reads one run. Called only for the runs the walk reaches. */
+  readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
+  /**
+   * How far back from the base-branch commit this run merged each recent commit
+   * sits, or null when there is no base-branch commit to measure against.
+   */
+  ancestorRank: Map<string, number> | null;
+}
+
 /**
- * Returns the ratchet baseline for one metric: the run for the nearest
+ * Chooses every metric's ratchet baseline: the `main` run for the nearest
  * ancestor of the base-branch commit this run merged.
  *
  * The base-branch commit's own run is the ideal baseline, because it measured
@@ -380,47 +371,91 @@ export async function fetchAncestorRanks(
  * still going or one that failed leaves the nearest ancestor with a usable run
  * standing in for it. Whatever the base branch changed in between is then in
  * this run and not in the baseline, so `isComparableBaseline()` withholds
- * gating from the groups it touched.
+ * gating from the groups it touched. A run for a commit that is not an ancestor
+ * is never a baseline: it landed after this run started, so it measured code
+ * this run does not contain.
  *
- * Prefers a non-cold run: a cold run covers cold-compile-only branches, and its
- * lower debt would hold a warm pull request to an unreachable bar. Takes the
- * nearest ancestor regardless when every ancestor is cold, which keeps the
- * reset semantics of an override-truncated timeline.
+ * A non-cold run wins: a cold run covers cold-compile-only branches, and its
+ * lower debt would hold a warm pull request to an unreachable bar. When every
+ * ancestor is cold the nearest one stands, so a metric never loses its baseline
+ * to coldness alone.
  *
- * Falls back to the latest non-cold run when there is no ancestry to work from
- * — a `main` push run, a checkout that is not a merge, or a commit listing that
- * could not be fetched.
+ * A merged pull request that accepted a metric's debt, with a per-metric
+ * acceptance or the whole-coverage reset marker, sets the floor: its own run is
+ * the oldest baseline the ratchet may reach for that metric, so the accepted
+ * level is what later runs are held to and nothing older undoes it. Only a run
+ * that both carries the acceptance and measured the metric stops the walk —
+ * an acceptance whose run uploaded no baseline artifact leaves the search to
+ * continue past it. An acceptance that merged onto a commit this run does not
+ * contain sets no floor here, for the same reason such a run is no baseline.
+ *
+ * Runs are read one at a time in the order `baselineWalkOrder()` gives, and the
+ * walk stops as soon as every metric has its baseline, so a run that measured
+ * every metric is the only one read.
  */
-export function nearestUsableBaseline(
-  samples: TimingSample[],
-  isRunCold: (runId: number) => boolean,
-  ancestorRank: Map<string, number> | null,
-): TimingSample | undefined {
-  if (ancestorRank === null) return latestNonColdSample(samples, isRunCold);
+export async function walkBaselineRuns(
+  options: WalkBaselineRunsOptions,
+): Promise<Map<string, BaselineSample>> {
+  const pending = new Set(options.metrics);
+  const chosen = new Map<string, BaselineSample>();
+  const coldFallback = new Map<string, BaselineSample>();
 
-  let nearest: TimingSample | undefined;
-  let nearestRank = Infinity;
-  let nearestCold: TimingSample | undefined;
-  let nearestColdRank = Infinity;
+  for (const run of baselineWalkOrder(options.runs, options.ancestorRank)) {
+    if (pending.size === 0) break;
 
-  for (const sample of samples) {
-    const rank = ancestorRank.get(sample.sha);
-    if (rank === undefined) continue;
+    const reading = await options.readRun(run);
 
-    if (isRunCold(sample.runId)) {
-      if (rank < nearestColdRank) {
-        nearestCold = sample;
-        nearestColdRank = rank;
+    for (const metric of [...pending]) {
+      const sample = reading.samples.get(metric);
+      if (sample === undefined) continue;
+
+      if (!reading.cold) {
+        chosen.set(metric, sample);
+        pending.delete(metric);
+        continue;
       }
-      continue;
-    }
-    if (rank < nearestRank) {
-      nearest = sample;
-      nearestRank = rank;
+      if (!coldFallback.has(metric)) coldFallback.set(metric, sample);
+
+      if (reading.overrides && acceptsCoverageDebt(reading.overrides, metric)) {
+        pending.delete(metric);
+      }
     }
   }
 
-  return nearest ?? nearestCold;
+  for (const [metric, sample] of coldFallback) {
+    if (!chosen.has(metric)) chosen.set(metric, sample);
+  }
+  return chosen;
+}
+
+/**
+ * The order the walk reads runs in: the run for the base-branch commit itself
+ * first, then its ancestors from nearest to furthest, and runs whose commit is
+ * not an ancestor left out entirely. Two runs for one commit read oldest first,
+ * matching how a ranked search settles that tie.
+ *
+ * Ranking rather than trusting the order the runs arrive in matters because the
+ * walk takes the first answer it finds and stops. Run creation follows the push
+ * order that ancestry describes, but not through a history rewrite, and not
+ * across two pushes that land in the same second.
+ *
+ * Without an ancestry to rank against — a `main` push run, a checkout that is
+ * not a merge, or a commit listing that could not be fetched — the runs stand
+ * as given, newest first, and the newest usable one wins.
+ */
+function baselineWalkOrder(
+  runs: WorkflowRun[],
+  ancestorRank: Map<string, number> | null,
+): WorkflowRun[] {
+  if (ancestorRank === null) return runs;
+
+  return runs
+    .filter((run) => ancestorRank.has(run.head_sha))
+    .sort((a, b) =>
+      ancestorRank.get(a.head_sha)! - ancestorRank.get(b.head_sha)! ||
+      a.created_at.localeCompare(b.created_at) ||
+      a.id - b.id
+    );
 }
 
 /**
@@ -477,7 +512,7 @@ export async function fetchGroupsChangedOnBase(
  */
 export function isComparableBaseline(
   options: {
-    sample: TimingSample | undefined;
+    sample: BaselineSample | undefined;
     metric: string;
     baseSha: string | null;
     groupsChangedByBaseline: Map<string, Set<string>>;
@@ -495,25 +530,18 @@ export function isComparableBaseline(
 }
 
 export interface MetricBaseline {
-  sample?: TimingSample;
+  sample?: BaselineSample;
   /** Whether the ratchet may fail this metric against that sample. */
   comparable: boolean;
 }
 
-export interface ResolveMetricBaselinesOptions {
-  metrics: Iterable<string>;
-  timelines: Map<string, MetricTimeline>;
-  isRunCold: (runId: number) => boolean;
-  ancestorRank: Map<string, number> | null;
-  groupsChangedByBaseline: Map<string, Set<string>>;
-  baseSha: string | null;
-  isPullRequest: boolean;
-}
-
 export interface SelectBaselinesOptions {
-  metrics: Iterable<string>;
-  timelines: Map<string, MetricTimeline>;
-  isRunCold: (runId: number) => boolean;
+  /** The metrics to gate; an array, as in {@link WalkBaselineRunsOptions}. */
+  metrics: readonly string[];
+  /** Recent `main` runs, newest first. */
+  runs: WorkflowRun[];
+  /** Reads one baseline run; called only for the runs the walk reaches. */
+  readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
   isPullRequest: boolean;
   readBaseSha?: () => Promise<string | null>;
   fetchRanks?: (baseSha: string) => Promise<Map<string, number>>;
@@ -521,7 +549,7 @@ export interface SelectBaselinesOptions {
     baselineSha: string,
     baseSha: string,
   ) => Promise<Set<string>>;
-  /** Wraps each GitHub call so a rate limit skips the check (see main). */
+  /** Wraps the GitHub calls made here so a rate limit skips the check. */
   guard?: <T>(description: string, operation: () => Promise<T>) => Promise<T>;
   log?: (message: string) => void;
   warn?: (message: string) => void;
@@ -531,9 +559,9 @@ export interface SelectBaselinesOptions {
  * Chooses every metric's ratchet baseline against the base-branch commit this
  * run merged, and reports what it chose.
  *
- * Reads the base-branch commit, ranks its ancestry, asks which coverage groups
- * the base branch moved since each baseline the metrics would take, and hands
- * the answers to `resolveMetricBaselines()`.
+ * Reads the base-branch commit, ranks its ancestry, walks the recent `main`
+ * runs for each metric's baseline, and asks which coverage groups the base
+ * branch moved since each baseline the walk picked.
  */
 export async function selectBaselines(
   options: SelectBaselinesOptions,
@@ -565,19 +593,19 @@ export async function selectBaselines(
     () => fetchRanks(baseSha),
   );
 
-  // Which baseline each metric would take, before asking what moved since.
-  const candidateShas = new Set<string>();
-  for (const metric of options.metrics) {
-    const timeline = options.timelines.get(metric);
-    const sample = timeline
-      ? nearestUsableBaseline(timeline.samples, options.isRunCold, ancestorRank)
-      : undefined;
-    if (sample) candidateShas.add(sample.sha);
-  }
+  const baselines = await walkBaselineRuns({
+    metrics: options.metrics,
+    runs: options.runs,
+    readRun: options.readRun,
+    ancestorRank,
+  });
 
   const groupsChangedByBaseline = new Map<string, Set<string>>();
   if (baseSha !== null) {
-    for (const sha of candidateShas) {
+    const baselineShas = new Set(
+      [...baselines.values()].map((sample) => sample.sha),
+    );
+    for (const sha of baselineShas) {
       groupsChangedByBaseline.set(
         sha,
         await guard(
@@ -586,55 +614,26 @@ export async function selectBaselines(
         ),
       );
     }
-    reportBaselineDistance(candidateShas, baseSha, ancestorRank, log);
+    reportBaselineDistance(baselineShas, baseSha, ancestorRank, log);
   }
 
-  return resolveMetricBaselines({
-    metrics: options.metrics,
-    timelines: options.timelines,
-    isRunCold: options.isRunCold,
-    ancestorRank,
-    groupsChangedByBaseline,
-    baseSha,
-    isPullRequest: options.isPullRequest,
-  });
-}
-
-/** Picks each metric's baseline and says whether the ratchet may act on it. */
-export function resolveMetricBaselines(
-  options: ResolveMetricBaselinesOptions,
-): Map<string, MetricBaseline> {
   const resolved = new Map<string, MetricBaseline>();
-
   for (const metric of options.metrics) {
-    const timeline = options.timelines.get(metric);
-    const sample = timeline
-      ? nearestUsableBaseline(
-        timeline.samples,
-        options.isRunCold,
-        options.ancestorRank,
-      )
-      : undefined;
-
+    const sample = baselines.get(metric);
     resolved.set(metric, {
       sample,
       comparable: isComparableBaseline({
         sample,
         metric,
-        baseSha: options.baseSha,
-        groupsChangedByBaseline: options.groupsChangedByBaseline,
+        baseSha,
+        groupsChangedByBaseline,
         isPullRequest: options.isPullRequest,
       }),
     });
   }
-
   return resolved;
 }
 
-/**
- * Reports which commit each baseline was measured at, and how far back from the
- * base-branch commit that sits.
- */
 /** Names the groups no baseline could speak to, and why they are not gated. */
 export function reportUngatedGroups(
   groups: Set<string>,
@@ -650,6 +649,10 @@ export function reportUngatedGroups(
   );
 }
 
+/**
+ * Reports which commit each baseline was measured at, and how far back from the
+ * base-branch commit that sits.
+ */
 export function reportBaselineDistance(
   baselineShas: Set<string>,
   baseSha: string,
@@ -680,30 +683,6 @@ export function reportBaselineDistance(
   }
 }
 
-export async function fetchCommitsBehindMain(
-  baselineSha: string,
-  mainHeadSha: string,
-): Promise<number | null> {
-  if (baselineSha === mainHeadSha) return 0;
-
-  try {
-    const comparison = await githubGet<GitHubCompareResponse>(
-      `/repos/${REPO}/compare/${encodeURIComponent(baselineSha)}...${
-        encodeURIComponent(mainHeadSha)
-      }`,
-    );
-    return typeof comparison.ahead_by === "number" ? comparison.ahead_by : null;
-  } catch (error) {
-    console.warn(
-      `  Warning: could not compare baseline ${baselineSha.slice(0, 8)} ` +
-        `to current main ${mainHeadSha.slice(0, 8)}: ${
-          formatErrorForLog(error)
-        }`,
-    );
-    return null;
-  }
-}
-
 export function selectMergedPRForCommit(prs: PRInfo[]): PRInfo | null {
   return prs.find((pr) => pr.merged_at !== null) ?? prs[0] ?? null;
 }
@@ -718,7 +697,6 @@ export interface BaselineRunContext {
   artifacts: Artifact[];
   pr: PRInfo | null;
   prLookupError: unknown | null;
-  commitsBehindMain: number | null;
 }
 
 export async function fetchPRForCommitWithError(
@@ -748,84 +726,6 @@ export function formatErrorForLog(error: unknown): string {
   return message.split("\n")[0];
 }
 
-export function logBaselineSourceRuns(
-  contexts: BaselineRunContext[],
-  currentRunCreatedAt: string,
-): void {
-  console.log("\n::group::Baseline source runs:\n");
-  for (
-    const { run, artifacts, pr, prLookupError, commitsBehindMain } of contexts
-  ) {
-    const baselineArtifact = newestArtifactNamed(
-      artifacts,
-      PERF_METRICS_ARTIFACT_NAME,
-    );
-    const prLabel = pr
-      ? `PR #${pr.number}`
-      : prLookupError
-      ? "PR lookup failed"
-      : "no PR found";
-    const artifactLabel = baselineArtifact
-      ? `perf-metrics artifact ${baselineArtifact.id}`
-      : "no perf-metrics artifact";
-    const ageLabel = formatBaselineSourceRunAge(
-      run.created_at,
-      currentRunCreatedAt,
-      commitsBehindMain,
-    );
-    console.log(
-      `  ${run.created_at} run ${run.id} ${run.head_sha.slice(0, 8)} ` +
-        `${ageLabel}; ${prLabel}; ${artifactLabel}`,
-    );
-  }
-  console.log("\n::endgroup::\n");
-}
-
-export interface BaselinePRLookupSummary {
-  found: number;
-  noPR: number;
-  failed: number;
-}
-
-export function summarizeBaselinePRLookups(
-  contexts: { pr: PRInfo | null; prLookupError: unknown | null }[],
-): BaselinePRLookupSummary {
-  const failed = contexts.filter((context) => context.prLookupError).length;
-  const found = contexts.filter((context) => context.pr).length;
-  return {
-    found,
-    noPR: contexts.length - found - failed,
-    failed,
-  };
-}
-
-export function reportPRLookupResults(
-  contexts: BaselineRunContext[],
-): number {
-  const summary = summarizeBaselinePRLookups(contexts);
-  const failures = contexts.filter((context) => context.prLookupError);
-
-  console.log(
-    `Baseline PR lookup: found ${summary.found}/${contexts.length}; ` +
-      `${summary.noPR} had no associated PR; ${summary.failed} failed.`,
-  );
-
-  if (summary.failed === 0) return 0;
-
-  console.warn(
-    `  Warning: failed to fetch PR metadata for ${summary.failed} baseline run(s).`,
-  );
-  for (const { run, prLookupError } of failures) {
-    console.warn(
-      `  Warning: run ${run.id} (${
-        run.head_sha.slice(0, 8)
-      }) PR lookup failed: ${formatErrorForLog(prLookupError)}`,
-    );
-  }
-
-  return summary.failed;
-}
-
 export async function fetchArtifactsForRunBestEffort(
   run: WorkflowRun,
   fetchArtifacts: (runId: number) => Promise<Artifact[]> = fetchArtifactsForRun,
@@ -840,7 +740,7 @@ export async function fetchArtifactsForRunBestEffort(
 }
 
 export async function fetchBaselineRunsForCheck(
-  metricsForArtifact: Map<string, TimingSample>,
+  artifact: PerfMetricsArtifact,
   baselineRunCount = BASELINE_RUNS,
   log: (message: string) => void = console.log,
 ): Promise<{ mainHeadSha: string; baselineRuns: WorkflowRun[] }> {
@@ -848,7 +748,7 @@ export async function fetchBaselineRunsForCheck(
   const mainHeadSha = await githubApiOrSkip(
     "fetching current main branch head",
     () => fetchMainHeadSha(),
-    metricsForArtifact,
+    artifact,
   );
   log(`Current main head is ${mainHeadSha}.`);
   log("Fetching recent main-branch runs for baseline...");
@@ -858,7 +758,7 @@ export async function fetchBaselineRunsForCheck(
       githubGet<{ workflow_runs: WorkflowRun[] }>(
         workflowRunsPathForBaseline(baselineRunCount),
       ),
-    metricsForArtifact,
+    artifact,
   );
   return { mainHeadSha, baselineRuns: baselineData.workflow_runs };
 }
@@ -890,59 +790,72 @@ export function reportBaselineRunAvailability(
   return baselineMainHead;
 }
 
-export interface BuildBaselineRunContextsOptions {
-  baselineRuns: WorkflowRun[];
-  mainHeadSha: string;
+export interface BuildBaselineRunContextOptions {
+  run: WorkflowRun;
   fetchArtifactsForRun?: (run: WorkflowRun) => Promise<Artifact[]>;
   fetchPRForCommit?: (sha: string) => Promise<PRLookupResult>;
-  fetchCommitsBehindMain?: (
-    baselineSha: string,
-    mainHeadSha: string,
-  ) => Promise<number | null>;
-  concurrency?: number;
 }
 
-export async function buildBaselineRunContexts(
-  options: BuildBaselineRunContextsOptions,
-): Promise<BaselineRunContext[]> {
+/** Reads everything one baseline run contributes: its artifacts and its PR. */
+export async function buildBaselineRunContext(
+  options: BuildBaselineRunContextOptions,
+): Promise<BaselineRunContext> {
   const fetchArtifacts = options.fetchArtifactsForRun ??
     fetchArtifactsForRunBestEffort;
   const fetchPR = options.fetchPRForCommit ?? fetchPRForCommitWithError;
-  const fetchCommitDistance = options.fetchCommitsBehindMain ??
-    fetchCommitsBehindMain;
 
-  return await mapConcurrent(
-    options.baselineRuns,
-    options.concurrency ?? API_CONCURRENCY,
-    async (run): Promise<BaselineRunContext> => {
-      const [artifacts, prLookup, commitsBehindMain] = await Promise.all([
-        fetchArtifacts(run),
-        fetchPR(run.head_sha),
-        fetchCommitDistance(run.head_sha, options.mainHeadSha),
-      ]);
-      return {
-        run,
-        artifacts,
-        pr: prLookup.pr,
-        prLookupError: prLookup.error,
-        commitsBehindMain,
-      };
-    },
-  );
+  const [artifacts, prLookup] = await Promise.all([
+    fetchArtifacts(options.run),
+    fetchPR(options.run.head_sha),
+  ]);
+  return {
+    run: options.run,
+    artifacts,
+    pr: prLookup.pr,
+    prLookupError: prLookup.error,
+  };
 }
 
+/**
+ * Logs one line per baseline run: when it ran, the commit it measured, the
+ * pull request that merged that commit, and whether it carries a perf-metrics
+ * artifact. Names each run whose pull-request lookup failed a second time
+ * after the group, with the error.
+ */
 export function reportBaselineContextResults(
   contexts: BaselineRunContext[],
-  currentRunCreatedAt: string,
-): number {
-  logBaselineSourceRuns(contexts, currentRunCreatedAt);
-  const prLookupFailures = reportPRLookupResults(contexts);
-  if (prLookupFailures > 0) {
-    console.warn(
-      "  Warning: running the coverage check with incomplete PR metadata. Some merged baseline overrides may be missing.",
+): void {
+  console.log("\n::group::Baseline source runs:\n");
+  for (const { run, artifacts, pr, prLookupError } of contexts) {
+    const baselineArtifact = newestArtifactNamed(
+      artifacts,
+      PERF_METRICS_ARTIFACT_NAME,
+    );
+    const prLabel = pr
+      ? `PR #${pr.number}`
+      : prLookupError
+      ? "PR lookup failed"
+      : "no PR found";
+    const artifactLabel = baselineArtifact
+      ? `perf-metrics artifact ${baselineArtifact.id}`
+      : "no perf-metrics artifact";
+    console.log(
+      `  ${run.created_at} run ${run.id} ${run.head_sha.slice(0, 8)} ` +
+        `${prLabel}; ${artifactLabel}`,
     );
   }
-  return prLookupFailures;
+  console.log("\n::endgroup::\n");
+
+  // The gate reads accepted coverage debt out of the merged pull request body,
+  // so a run whose lookup failed contributes no overrides.
+  for (const { run, prLookupError } of contexts) {
+    if (!prLookupError) continue;
+    console.warn(
+      `  Warning: run ${run.id} (${
+        run.head_sha.slice(0, 8)
+      }) PR lookup failed: ${formatErrorForLog(prLookupError)}`,
+    );
+  }
 }
 
 export async function parseCoverageBaselineFromArtifacts(
@@ -961,29 +874,6 @@ export async function parseCoverageBaselineFromArtifacts(
   return await parseMetrics(artifact.id);
 }
 
-export interface AddCoverageBaselineResult {
-  added: boolean;
-  /** Null when the run has no perf-metrics artifact or an untagged one. */
-  compileCacheStates: CompileCacheStates | null;
-}
-
-export async function addCoverageBaselineFromArtifacts(
-  timelines: Map<string, MetricTimeline>,
-  artifacts: Artifact[],
-  parseMetrics: (
-    artifacts: Artifact[],
-  ) => Promise<CoverageBaselineDetailed | null> =
-    parseCoverageBaselineFromArtifacts,
-): Promise<AddCoverageBaselineResult> {
-  const detailed = await parseMetrics(artifacts);
-  if (!detailed) return { added: false, compileCacheStates: null };
-
-  for (const [name, sample] of detailed.metrics) {
-    addSample(timelines, name, sample);
-  }
-  return { added: true, compileCacheStates: detailed.compileCacheStates };
-}
-
 /**
  * Download the JSON file(s) inside one cache-state artifact. Returns null
  * when the download or extraction fails.
@@ -995,10 +885,10 @@ async function downloadCacheStateFiles(
   if (!tmpDir) return null;
   try {
     const contents: string[] = [];
-    for await (const file of walkFiles(tmpDir)) {
-      if (file.endsWith(".json")) {
-        contents.push(await Deno.readTextFile(file));
-      }
+    for await (
+      const entry of walk(tmpDir, { includeDirs: false, exts: [".json"] })
+    ) {
+      contents.push(await Deno.readTextFile(entry.path));
     }
     return contents;
   } finally {
@@ -1060,29 +950,33 @@ export async function collectCurrentCacheStates(
   }
 }
 
-const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
-  ...[1, 2, 3, 4, 5, 6].map((shard) => `coverage-profile-workspace-${shard}`),
-  ...[1, 2, 3, 4, 5].map((shard) => `coverage-profile-runner-${shard}`),
-  ...[1, 2, 3, 4].map((shard) =>
-    `coverage-profile-generated-patterns-${shard}`
+export const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
+  ...[1, 2, 3, 4, 5, 6, 7, 8].map((shard) =>
+    `coverage-profile-workspace-${shard}`
   ),
+  ...[1, 2, 3, 4, 5, 6, 7, 8].map((shard) =>
+    `coverage-profile-runner-${shard}`
+  ),
+  ...[1, 2, 3].map((shard) => `coverage-profile-generated-patterns-${shard}`),
   "coverage-profile-package-runner",
   "coverage-profile-package-runtime-client",
   "coverage-profile-package-shell",
-  ...[1, 2, 3, 4].map((shard) =>
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((shard) =>
     `coverage-profile-pattern-integration-${shard}`
   ),
   "coverage-profile-pattern-reload",
   ...[1, 2, 3, 4, 5].map((chunk) => `coverage-profile-pattern-unit-${chunk}`),
 ];
 
-function sampleForRun(run: WorkflowRun, value: number): TimingSample {
+function sampleForRun(
+  run: WorkflowRun,
+  uncoveredLines: number,
+): BaselineSample {
   return {
     runId: run.id,
-    runUrl: run.html_url,
     sha: run.head_sha,
     createdAt: run.created_at,
-    durationSeconds: value,
+    uncoveredLines,
   };
 }
 
@@ -1130,17 +1024,20 @@ export async function copyCoverageArtifactFiles(
   let profileFiles = 0;
   let lcovFiles = 0;
   try {
-    for await (const file of walkFiles(sourceDir)) {
-      const isProfile = file.endsWith(".json");
-      const isLcov = file.endsWith(".lcov");
-      if (!isProfile && !isLcov) continue;
+    for await (
+      const entry of walk(sourceDir, {
+        includeDirs: false,
+        exts: [".json", ".lcov"],
+      })
+    ) {
+      const isLcov = entry.path.endsWith(".lcov");
       const count = isLcov ? lcovFiles : profileFiles;
       const destDir = isLcov ? lcovDir : profileDir;
       const dest = path.join(
         destDir,
-        `${artifact.id}-${count}-${path.basename(file)}`,
+        `${artifact.id}-${count}-${path.basename(entry.path)}`,
       );
-      await Deno.copyFile(file, dest);
+      await Deno.copyFile(entry.path, dest);
       if (isLcov) lcovFiles++;
       else profileFiles++;
     }
@@ -1163,9 +1060,10 @@ export async function copyCoverageArtifactFiles(
 
 async function readCombinedLcov(lcovDir: string): Promise<string> {
   const chunks: string[] = [];
-  for await (const file of walkFiles(lcovDir)) {
-    if (!file.endsWith(".lcov")) continue;
-    chunks.push(await Deno.readTextFile(file));
+  for await (
+    const entry of walk(lcovDir, { includeDirs: false, exts: [".lcov"] })
+  ) {
+    chunks.push(await Deno.readTextFile(entry.path));
   }
   return chunks.join("\n");
 }
@@ -1212,9 +1110,9 @@ export function formatMetricValueForTable(
 }
 
 export function formatMetricDelta(row: Row): string {
-  if (row.median === undefined || row.pctIncrease === undefined) return "-";
+  if (row.baseline === undefined || row.pctIncrease === undefined) return "-";
 
-  const delta = row.current - row.median;
+  const delta = row.current - row.baseline;
   const sign = delta >= 0 ? "+" : "-";
   const formattedAbsolute = `${Math.round(Math.abs(delta))}`;
   const pctSign = row.pctIncrease >= 0 ? "+" : "";
@@ -1226,34 +1124,16 @@ export function formatMetricDelta(row: Row): string {
   }%)`;
 }
 
-export function metricDisplayParts(
-  metric: string,
-): { task: string; metric: string } {
-  const colon = metric.indexOf(":");
-  if (colon < 0) return { task: "other", metric };
-
-  const kind = metric.slice(0, colon);
-  const rest = metric.slice(colon + 1).trim();
-
-  if (kind === "coverage-debt") {
-    return {
-      task: kind,
-      metric: coverageMetricGroupName(metric) ?? rest,
-    };
-  }
-
-  return { task: kind, metric: rest };
-}
-
 export interface Row {
   metric: string;
   status: Status;
   current: number;
-  /** Latest non-cold `main` ratchet baseline (uncovered lines). */
-  median?: number;
+  /** Uncovered lines the chosen `main` run measured for this metric. */
+  baseline?: number;
   /** Head SHA of the run that baseline came from. */
   baselineSha?: string;
-  n: number;
+  /** Id of the run that baseline came from. */
+  baselineRunId?: number;
   pctIncrease?: number;
 }
 
@@ -1262,21 +1142,18 @@ export function metricTableRows(
   includeStatus: boolean,
 ): string[][] {
   return rows.map((row) => {
-    const display = metricDisplayParts(row.metric);
     const cells = [
-      formatMetricValueForTable(row.median),
+      formatMetricValueForTable(row.baseline),
       formatMetricValueForTable(row.current),
       formatMetricDelta(row),
-      display.task,
-      display.metric,
+      coverageMetricGroupName(row.metric) ?? row.metric,
     ];
     return includeStatus ? [row.status, ...cells] : cells;
   });
 }
 
 export interface BuildCoverageRowsOptions {
-  currentMetrics: Map<string, TimingSample>;
-  timelines: Map<string, MetricTimeline>;
+  currentMetrics: Map<string, BaselineSample>;
   baselineByMetric: Map<string, MetricBaseline>;
   overrides: BaselineOverrides;
   /** Undefined when the PR's changed files could not be read. */
@@ -1307,11 +1184,10 @@ export function buildCoverageRows(
   const ungatedGroups = new Set<string>();
 
   for (const [metric, currentSample] of options.currentMetrics) {
-    const current = currentSample.durationSeconds;
-    const n = options.timelines.get(metric)?.samples.length ?? 0;
+    const current = currentSample.uncoveredLines;
     const resolvedBaseline = options.baselineByMetric.get(metric);
     const baselineSample = resolvedBaseline?.sample;
-    const latestBaseline = baselineSample?.durationSeconds;
+    const latestBaseline = baselineSample?.uncoveredLines;
     const override = options.overrides.metrics.get(metric);
     const coverageReset = options.overrides.coverageBaselineReset;
     const comparable = resolvedBaseline?.comparable ?? false;
@@ -1326,22 +1202,21 @@ export function buildCoverageRows(
       if (
         coverageReset || (override !== undefined && current <= override)
       ) {
-        rows.push({ metric, status: "ovrd", current, n });
+        rows.push({ metric, status: "ovrd", current });
       } else if (!shouldGateCoverage) {
-        rows.push({ metric, status: "excl", current, n });
+        rows.push({ metric, status: "excl", current });
       } else if (current > 0) {
         const row: Row = {
           metric,
           status: "OVER",
           current,
-          median: 0,
-          n,
+          baseline: 0,
           pctIncrease: 100,
         };
         rows.push(row);
         failures.push(row);
       } else {
-        rows.push({ metric, status: "n/a", current, n });
+        rows.push({ metric, status: "n/a", current });
       }
       continue;
     }
@@ -1350,32 +1225,33 @@ export function buildCoverageRows(
       ? current > 0 ? 100 : 0
       : ((current - latestBaseline) / latestBaseline) * 100;
     const stats = {
-      median: latestBaseline,
+      baseline: latestBaseline,
       baselineSha: baselineSample?.sha,
+      baselineRunId: baselineSample?.runId,
       pctIncrease,
     };
 
     if (coverageReset) {
-      rows.push({ metric, status: "ovrd", current, n, ...stats });
+      rows.push({ metric, status: "ovrd", current, ...stats });
       continue;
     }
 
     if (override !== undefined && current <= override) {
-      rows.push({ metric, status: "ovrd", current, n, ...stats });
+      rows.push({ metric, status: "ovrd", current, ...stats });
       continue;
     }
 
     if (!shouldGateCoverage) {
-      rows.push({ metric, status: "excl", current, n, ...stats });
+      rows.push({ metric, status: "excl", current, ...stats });
       continue;
     }
 
     if (current > latestBaseline) {
-      const row: Row = { metric, status: "OVER", current, n, ...stats };
+      const row: Row = { metric, status: "OVER", current, ...stats };
       rows.push(row);
       failures.push(row);
     } else {
-      rows.push({ metric, status: "OK", current, n, ...stats });
+      rows.push({ metric, status: "OK", current, ...stats });
     }
   }
 
@@ -1384,41 +1260,34 @@ export function buildCoverageRows(
 
 export function printMetricTable(rows: Row[], includeStatus = false): void {
   const headers = includeStatus
-    ? ["Status", "Baseline", "Current", "Change", "Task", "Metric"]
-    : ["Baseline", "Current", "Change", "Task", "Metric"];
+    ? ["Status", "Baseline", "Current", "Change", "Group"]
+    : ["Baseline", "Current", "Change", "Group"];
   const align = includeStatus
-    ? ["left", "right", "right", "right", "left", "left"] as TableAlign[]
-    : ["right", "right", "right", "left", "left"] as TableAlign[];
+    ? ["left", "right", "right", "right", "left"] as TableAlign[]
+    : ["right", "right", "right", "left"] as TableAlign[];
   printTextTable(headers, metricTableRows(rows, includeStatus), align);
 }
 
-async function extractCoverageDebtSamples(
-  run: WorkflowRun,
-  artifacts: Artifact[],
-  coverageArtifactsDir?: string,
-): Promise<{ samples: Map<string, TimingSample>; lcov: string }> {
-  const metrics = new Map<string, TimingSample>();
-  const coverageArtifacts = newestArtifactsByName(artifacts.filter(
+/** The coverage-profile artifacts of one run, one per artifact name. */
+function coverageProfileArtifacts(artifacts: Artifact[]): Artifact[] {
+  return newestArtifactsByName(artifacts.filter(
     (artifact) =>
       artifact.name.startsWith(COVERAGE_PROFILE_ARTIFACT_PREFIX) &&
       !artifact.expired,
   ));
-  const coverageArtifactNames = new Set(
-    coverageArtifacts.map((artifact) => artifact.name),
-  );
-  const missingArtifacts = EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
-    !coverageArtifactNames.has(name)
-  );
+}
 
-  if (missingArtifacts.length > 0) {
-    throw new Error(
-      `Missing coverage profile artifact(s): ${missingArtifacts.join(", ")}`,
-    );
-  }
-
+/**
+ * Join one run's coverage-profile artifacts into a single LCOV report. A job
+ * uploads its own LCOV; the profile-file branch reads the raw V8 profiles a
+ * run predating that upload carries.
+ */
+export async function combinedLcovFromArtifacts(
+  coverageArtifacts: Artifact[],
+  coverageArtifactsDir?: string,
+): Promise<{ lcov: string; sourceDescription: string }> {
   const profileDir = await Deno.makeTempDir({ prefix: "coverage-profiles-" });
   const lcovDir = await Deno.makeTempDir({ prefix: "coverage-lcov-" });
-  let lcov = "";
   try {
     let profileFileCount = 0;
     let lcovFileCount = 0;
@@ -1439,30 +1308,14 @@ async function extractCoverageDebtSamples(
       );
     }
 
-    lcov = lcovFileCount > 0
-      ? await readCombinedLcov(lcovDir)
-      : await lcovFromCoverageProfile(profileDir);
-
-    // Every coverage stream feeds the gate: V8 runtime coverage, unit pattern
-    // coverage (TN:pattern-runtime), and integration pattern coverage
-    // (TN:pattern-runtime-integration) all join here, and a line covered by any
-    // of them counts covered. So a pattern line an end-to-end flow exercises
-    // that the unit suite does not lowers the gated debt.
-    const coverageMetrics = await collectCoverageDebtMetricsFromLcov({
-      rootDir: Deno.cwd(),
-      lcov,
-    });
-    for (const metric of coverageMetrics) {
-      metrics.set(metric.name, sampleForRun(run, metric.uncoveredLines));
-    }
-
-    console.log(
-      `Extracted ${coverageMetrics.length} coverage debt metrics from ${
-        lcovFileCount > 0
-          ? `${lcovFileCount} LCOV report files`
-          : `${profileFileCount} coverage profile files`
-      }.`,
-    );
+    return {
+      lcov: lcovFileCount > 0
+        ? await readCombinedLcov(lcovDir)
+        : await lcovFromCoverageProfile(profileDir),
+      sourceDescription: lcovFileCount > 0
+        ? `${lcovFileCount} LCOV report files`
+        : `${profileFileCount} coverage profile files`,
+    };
   } finally {
     try {
       await Deno.remove(profileDir, { recursive: true });
@@ -1471,8 +1324,78 @@ async function extractCoverageDebtSamples(
       await Deno.remove(lcovDir, { recursive: true });
     } catch { /* ignore cleanup errors */ }
   }
+}
+
+async function extractCoverageDebtSamples(
+  run: WorkflowRun,
+  artifacts: Artifact[],
+  coverageArtifactsDir?: string,
+): Promise<{ samples: Map<string, BaselineSample>; lcov: string }> {
+  const metrics = new Map<string, BaselineSample>();
+  const coverageArtifacts = coverageProfileArtifacts(artifacts);
+  const coverageArtifactNames = new Set(
+    coverageArtifacts.map((artifact) => artifact.name),
+  );
+  const missingArtifacts = EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
+    !coverageArtifactNames.has(name)
+  );
+
+  if (missingArtifacts.length > 0) {
+    throw new Error(
+      `Missing coverage profile artifact(s): ${missingArtifacts.join(", ")}`,
+    );
+  }
+
+  const { lcov, sourceDescription } = await combinedLcovFromArtifacts(
+    coverageArtifacts,
+    coverageArtifactsDir,
+  );
+
+  // Every coverage stream feeds the gate: V8 runtime coverage, unit pattern
+  // coverage (TN:pattern-runtime), and integration pattern coverage
+  // (TN:pattern-runtime-integration) all join here, and a line covered by any
+  // of them counts covered. So a pattern line an end-to-end flow exercises
+  // that the unit suite does not lowers the gated debt.
+  const coverageMetrics = await collectCoverageDebtMetricsFromLcov({
+    rootDir: Deno.cwd(),
+    lcov,
+  });
+  for (const metric of coverageMetrics) {
+    metrics.set(metric.name, sampleForRun(run, metric.uncoveredLines));
+  }
+
+  console.log(
+    `Extracted ${coverageMetrics.length} coverage debt metrics from ${sourceDescription}.`,
+  );
 
   return { samples: metrics, lcov };
+}
+
+/**
+ * Join the coverage-profile artifacts of a `main` run into one LCOV report.
+ * Returns null when the run has none, or when the download fails: the comment
+ * this feeds is best-effort, and a regression is reported either way.
+ */
+export async function baselineLcovForRun(
+  runId: number,
+  fetchArtifacts: (runId: number) => Promise<Artifact[]> = fetchArtifactsForRun,
+): Promise<string | null> {
+  try {
+    const artifacts = coverageProfileArtifacts(await fetchArtifacts(runId));
+    if (artifacts.length === 0) {
+      console.warn(
+        `  Warning: baseline run ${runId} has no coverage profile artifacts.`,
+      );
+      return null;
+    }
+    const { lcov } = await combinedLcovFromArtifacts(artifacts);
+    return lcov;
+  } catch (error) {
+    console.warn(
+      `  Warning: could not read coverage from baseline run ${runId}: ${error}`,
+    );
+    return null;
+  }
 }
 
 /** File the coverage-comment payload is written to; tests override via env. */
@@ -1507,6 +1430,77 @@ export async function writeCoverageComment(
 }
 
 /**
+ * Build the body naming the lines a regression the pull request did not cause
+ * is charged for: lines this run leaves uncovered in files the pull request
+ * never touched, which the baseline run covered.
+ *
+ * Returns null when there is nothing to say — no baseline run to compare
+ * against, its coverage cannot be read, or every affected line is in a file the
+ * pull request changed — and the caller falls back to the ordinary comment.
+ */
+export interface UnattributedRegressionOptions {
+  rootDir: string;
+  groups: CoverageSuggestionGroup[];
+  coverageFailures: Row[];
+  prFiles: PRFile[];
+  /** LCOV from this run. */
+  lcov: string;
+  readBaselineLcov: (runId: number) => Promise<string | null>;
+}
+
+export async function buildUnattributedRegressionBody(
+  options: UnattributedRegressionOptions,
+): Promise<string | null> {
+  // Each metric resolves its own ratchet baseline, so two regressed groups can
+  // be held against two different `main` runs. A group is compared against the
+  // run its own baseline came from and no other: another run measured a
+  // different commit, where the same line may legitimately have been covered.
+  const groupsByBaselineRun = new Map<number, Set<string>>();
+  for (const failure of options.coverageFailures) {
+    const runId = failure.baselineRunId;
+    if (runId === undefined) continue;
+    const group = coverageMetricGroupName(failure.metric);
+    if (group === null) continue;
+    const groups = groupsByBaselineRun.get(runId) ?? new Set<string>();
+    groups.add(group);
+    groupsByBaselineRun.set(runId, groups);
+  }
+  if (groupsByBaselineRun.size === 0) return null;
+
+  const changedFiles = new Set(
+    options.prFiles.map((prFile) => prFile.filename.replaceAll("\\", "/")),
+  );
+
+  const files: CoverageUnattributedFile[] = [];
+  for (const [runId, groups] of groupsByBaselineRun) {
+    const baselineLcov = await options.readBaselineLcov(runId);
+    if (baselineLcov === null) continue;
+    const regressed = await collectRegressedLines({
+      rootDir: options.rootDir,
+      lcov: options.lcov,
+      baselineLcov,
+      groups,
+      changedFiles,
+    });
+    for (const file of regressed) {
+      files.push({ relativePath: file.relativePath, lines: file.lines });
+    }
+  }
+
+  if (files.length === 0) return null;
+
+  const total = files.reduce((sum, file) => sum + file.lines.length, 0);
+  console.log(
+    `Regression not attributable to this PR's added lines: ${total} line(s) ` +
+      `across ${files.length} unchanged file(s) that the baseline run covered.`,
+  );
+  return buildCoverageDebtUnattributedComment({
+    groups: options.groups,
+    files,
+  });
+}
+
+/**
  * Write the coverage-debt regression comment to a file for a later workflow to
  * post. The gate runs on `pull_request`, where fork PRs get a read-only token
  * and cannot comment, so the `coverage-comment` workflow_run job posts this from
@@ -1518,11 +1512,13 @@ export async function writeCoverageDebtSuggestion(
   coverageFailures: Row[],
   prFiles: PRFile[],
   lcov: string,
+  readBaselineLcov: (runId: number) => Promise<string | null> =
+    baselineLcovForRun,
 ): Promise<void> {
   const groups = coverageFailures
     .map((failure) => ({
       group: coverageMetricGroupName(failure.metric),
-      target: Math.round(failure.median ?? 0),
+      target: Math.round(failure.baseline ?? 0),
       current: Math.round(failure.current),
     }))
     .filter((group): group is CoverageSuggestionGroup => group.group !== null);
@@ -1564,7 +1560,21 @@ export async function writeCoverageDebtSuggestion(
   }
 
   try {
-    const body = buildCoverageDebtSuggestionComment({ groups, files });
+    // Nothing the pull request added accounts for the regression, so the lines
+    // it is charged for are somewhere it did not touch. Say which ones by
+    // comparing this run against the baseline run line by line.
+    const unattributed = files.length === 0
+      ? await buildUnattributedRegressionBody({
+        rootDir: Deno.cwd(),
+        groups,
+        coverageFailures,
+        prFiles,
+        lcov,
+        readBaselineLcov,
+      })
+      : null;
+    const body = unattributed ??
+      buildCoverageDebtSuggestionComment({ groups, files });
     const payload: CoverageCommentPayload = {
       prNumber,
       state: "regressed",
@@ -1607,8 +1617,8 @@ export async function writeCoverageResolved(
   prFiles: PRFile[],
 ): Promise<void> {
   const improvedLines = coverageRows.reduce((sum, row) => {
-    if (row.status !== "OK" || row.median === undefined) return sum;
-    return sum + Math.max(0, Math.round(row.median - row.current));
+    if (row.status !== "OK" || row.baseline === undefined) return sum;
+    return sum + Math.max(0, Math.round(row.baseline - row.current));
   }, 0);
 
   // Summarize the source groups this PR changed — the per-group ratchet the
@@ -1620,7 +1630,7 @@ export async function writeCoverageResolved(
   const groups: CoverageResolvedGroup[] = coverageRows
     .map((row) => ({
       group: coverageMetricGroupName(row.metric),
-      baseline: Math.round(row.median ?? 0),
+      baseline: Math.round(row.baseline ?? 0),
       current: Math.round(row.current),
     }))
     .filter((group): group is CoverageResolvedGroup =>
@@ -1721,7 +1731,7 @@ export async function main() {
 
   // 2. Extract the current run's coverage.
   const runIdNum = parseInt(runId);
-  const currentMetrics = new Map<string, TimingSample>();
+  const currentMetrics = new Map<string, BaselineSample>();
 
   // The event payload has the metadata needed for samples, so avoid spending
   // an API request on the current workflow run.
@@ -1789,6 +1799,15 @@ export async function main() {
   });
   fillMissingFamiliesFromFingerprint(currentCacheStates, inferredRunState);
 
+  // Both halves of the artifact travel together from here on: every GitHub
+  // call is wrapped so a rate limit writes this same stamped payload before
+  // skipping the check. `metrics` and `compileCacheStates` are the live
+  // objects, so later additions to either are picked up.
+  const perfArtifact: PerfMetricsArtifact = {
+    metrics: currentMetrics,
+    compileCacheStates: currentCacheStates,
+  };
+
   // Extract coverage debt metrics from coverage profile artifacts.
   let coverageDataError: unknown;
   let coverageLcov = "";
@@ -1814,14 +1833,7 @@ export async function main() {
     );
   }
 
-  await writeCoverageBaselineFile(
-    PERF_METRICS_FILE,
-    currentMetrics,
-    currentCacheStates,
-  );
-  console.log(
-    `Wrote ${PERF_METRICS_FILE} with ${currentMetrics.size} metrics.`,
-  );
+  await writePerfMetricsArtifact(perfArtifact);
 
   if (coverageDataError && !informationalOnly) {
     console.error(
@@ -1843,121 +1855,89 @@ export async function main() {
 
   // 3. Fetch recent main-branch push runs for baseline
   const { mainHeadSha, baselineRuns } = await fetchBaselineRunsForCheck(
-    currentMetrics,
+    perfArtifact,
   );
   reportBaselineRunAvailability(baselineRuns, mainHeadSha);
 
-  console.log(`Using ${baselineRuns.length} main-branch runs as baseline.`);
-
-  // 4. Read each recent main run's coverage metrics and compile cache states
-  // as the ratchet baseline, and pick up any coverage ratchet resets or
-  // per-metric acceptances from the merged PRs.
-  const timelines = new Map<string, MetricTimeline>();
-  const overridesBySha = new Map<string, BaselineOverrides>();
-  const prInfoBySha = new Map<string, PRInfo>();
-  // Compile cache states per baseline run, from tagged perf-metrics
-  // artifacts. Runs with no artifact stay absent (unknown).
-  const cacheStatesByRunId = new Map<number, CompileCacheStates>();
-
-  const baselineContexts = await githubApiOrSkip(
-    "fetching baseline run context",
-    () => buildBaselineRunContexts({ baselineRuns, mainHeadSha }),
-    currentMetrics,
+  console.log(
+    `Scanning up to ${baselineRuns.length} main-branch runs for the baseline.`,
   );
 
-  reportBaselineContextResults(baselineContexts, currentRunInfo.created_at);
-
-  // For each baseline run, its predecessor in the (newest-first) baseline
-  // list — the run whose saved compile cache it would have restored. Fuels
-  // retro-classification of a run whose perf-metrics artifact carries no
-  // recorded cache state.
+  // 4. Read recent main runs, newest first, until every metric has a ratchet
+  // baseline. A run's artifacts, compile cache state and merged-PR acceptances
+  // are fetched only when the walk reaches it, so a run whose newest baseline
+  // serves every metric reads one run rather than all of them.
   const runsNewestFirst = [...baselineRuns].sort((a, b) =>
     b.created_at.localeCompare(a.created_at) || b.id - a.id
   );
-  const predecessorShaByRunId = new Map<number, string>();
-  for (let i = 0; i < runsNewestFirst.length - 1; i++) {
-    predecessorShaByRunId.set(
-      runsNewestFirst[i].id,
-      runsNewestFirst[i + 1].head_sha,
-    );
-  }
 
-  await githubApiOrSkip(
-    "building baseline timelines",
-    () =>
-      mapConcurrent(baselineContexts, API_CONCURRENCY, async (context) => {
-        const { run, artifacts, pr } = context;
-
-        if (pr) {
-          prInfoBySha.set(run.head_sha, pr);
-          const overrides = parseMergedBaselineOverrides(pr);
-          if (
-            overrides &&
-            (overrides.metrics.size > 0 || overrides.coverageBaselineReset)
-          ) {
-            overridesBySha.set(run.head_sha, overrides);
-          }
-        }
-
-        const artifactResult = await addCoverageBaselineFromArtifacts(
-          timelines,
-          artifacts,
-        );
-        if (artifactResult.added && artifactResult.compileCacheStates) {
-          cacheStatesByRunId.set(run.id, artifactResult.compileCacheStates);
-        } else {
-          // A run whose perf-metrics artifact is missing or carries no
-          // recorded cache state: retro-classify it from the compile
-          // fingerprint against its predecessor, so a cold main run is not
-          // picked as the coverage ratchet baseline (see
-          // recordUnstampedBaselineRunState).
-          await recordUnstampedBaselineRunState(
-            cacheStatesByRunId,
-            run,
-            predecessorShaByRunId.get(run.id),
-            pr ? `PR #${pr.number}` : run.head_sha.slice(0, 8),
-          );
-        }
-      }),
-    currentMetrics,
-  );
-
-  // Sort timelines chronologically
-  for (const timeline of timelines.values()) {
-    timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-
+  // Compile cache states per baseline run, from tagged perf-metrics
+  // artifacts. A run whose artifact is missing or carries no stamp stays
+  // absent, which the ratchet reads as not-cold.
+  const cacheStatesByRunId = new Map<number, CompileCacheStates>();
   const isRunCold = (runId: number): boolean => {
     const states = cacheStatesByRunId.get(runId);
     return states !== undefined && Object.values(states).includes("cold");
   };
 
-  const coverageBaselineAvailable = [...timelines.keys()].some(
-    isCoverageDebtMetric,
-  );
+  // What the walk read, for the diagnostics below.
+  const visitedContexts: BaselineRunContext[] = [];
+  let acceptingRuns = 0;
 
-  // Apply baseline overrides from merged PRs
-  if (overridesBySha.size > 0) {
-    console.log(
-      `Found ${overridesBySha.size} coverage baseline override(s) from merged PRs.`,
-    );
-    applyBaselineOverrides(timelines, overridesBySha);
-  }
+  const readBaselineRun = (run: WorkflowRun): Promise<BaselineRunReading> =>
+    githubApiOrSkip("reading a baseline run", async () => {
+      const context = await buildBaselineRunContext({ run });
+      visitedContexts.push(context);
+
+      const baseline = await parseCoverageBaselineFromArtifacts(
+        context.artifacts,
+      );
+      if (baseline?.compileCacheStates) {
+        cacheStatesByRunId.set(run.id, baseline.compileCacheStates);
+      }
+
+      const overrides = context.pr
+        ? parseMergedBaselineOverrides(context.pr)
+        : null;
+      if (
+        overrides &&
+        (overrides.metrics.size > 0 || overrides.coverageBaselineReset)
+      ) {
+        acceptingRuns++;
+      }
+
+      return {
+        samples: baseline?.metrics ?? new Map(),
+        overrides,
+        cold: isRunCold(run.id),
+      };
+    }, perfArtifact);
 
   // 5. Compare the current run's coverage debt against the ratchet baseline.
 
+  // Reported in `finally` so a baseline run that could not be read still says
+  // which runs it got to before it gave up.
   const baselineByMetric = await selectBaselines({
-    metrics: currentMetrics.keys(),
-    timelines,
-    isRunCold,
+    metrics: [...currentMetrics.keys()],
+    runs: runsNewestFirst,
+    readRun: readBaselineRun,
     isPullRequest: prNumber !== null,
     guard: (description, operation) =>
-      githubApiOrSkip(description, operation, currentMetrics),
-  });
+      githubApiOrSkip(description, operation, perfArtifact),
+  }).finally(() => reportBaselineContextResults(visitedContexts));
+
+  if (acceptingRuns > 0) {
+    console.log(
+      `Found ${acceptingRuns} coverage baseline override(s) from merged PRs.`,
+    );
+  }
+
+  const coverageBaselineAvailable = [...baselineByMetric.values()].some(
+    (baseline) => baseline.sample !== undefined,
+  );
 
   const { rows, failures, ungatedGroups } = buildCoverageRows({
     currentMetrics,
-    timelines,
     baselineByMetric,
     overrides: prOverrides,
     changedCoverageGroups,

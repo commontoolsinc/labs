@@ -20,7 +20,7 @@ import type {
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
 import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { MetaField } from "@commonfabric/api";
 import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";
 
@@ -251,13 +251,13 @@ export function summarizeDebugValue(value: unknown): DebugValueSummary {
   if (Array.isArray(value)) {
     return { kind: "array", length: value.length };
   }
-  if (!isRecord(value)) {
+  if (!isObjectOrArray(value)) {
     return { kind: "other", preview: Object.prototype.toString.call(value) };
   }
 
   const topKeys = Object.keys(value).slice(0, 12);
   const looksLike: string[] = [];
-  const internal = isRecord(value.internal) ? value.internal : undefined;
+  const internal = isObjectOrArray(value.internal) ? value.internal : undefined;
   const internalKeys = internal
     ? Object.keys(internal).slice(0, 12)
     : undefined;
@@ -280,7 +280,7 @@ export function summarizeDebugValue(value: unknown): DebugValueSummary {
   if ("$UI" in value) {
     looksLike.push("ui-result");
     const ui = value.$UI;
-    if (isRecord(ui) && Array.isArray(ui.children)) {
+    if (isObjectOrArray(ui) && Array.isArray(ui.children)) {
       summary.uiChildCount = ui.children.length;
     }
   }

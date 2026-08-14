@@ -1,3 +1,19 @@
+/**
+ * The walk that replaces artifacts, and the two single-value questions
+ * underneath it.
+ *
+ * A serializing member may be accessor-backed, so reading it twice can produce
+ * two different answers; several cases here assert a single read rather than a
+ * particular result. Structure is the other recurring subject: what the walk
+ * did not have to rebuild comes back by identity, a shared artifact stays
+ * shared, and a hole in an array is still a hole afterward.
+ *
+ * A cell and the reactive standing for it are the interesting non-artifacts.
+ * They carry the member the walk looks for, so the single-value questions
+ * answer for them, while the walk itself leaves them alone -- they are no
+ * builder's artifact, and what they encode to is the link naming the cell.
+ */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -328,15 +344,67 @@ describe("encodable-form", () => {
       });
     });
 
+    describe("the `isLeaf` hook", () => {
+      // The hook is how a caller names a value the walk must not read into.
+      // In the runtime that is a live query-result view, whose members
+      // resolve through a transaction as they are asked for.
+      const viaLeaf = (value: unknown, isLeaf: (v: object) => boolean) =>
+        replaceArtifacts(value, () => {}, { isLeaf });
+
+      /** A value whose members cost something to read, counting each read. */
+      function watched(record: Record<string, unknown>) {
+        const reads: (string | symbol)[] = [];
+        const marker = Symbol("a leaf to its caller");
+        const value = new Proxy(record, {
+          get(target, prop, receiver) {
+            if (prop === marker) return true;
+            reads.push(prop);
+            return Reflect.get(target, prop, receiver);
+          },
+          ownKeys(target) {
+            reads.push("[[ownKeys]]");
+            return Reflect.ownKeys(target);
+          },
+        });
+        function isLeaf(v: object) {
+          return (v as Record<symbol, unknown>)[marker] === true;
+        }
+        return { value, reads, isLeaf };
+      }
+
+      it("reads no member of a value the hook claims", () => {
+        const { value, reads, isLeaf } = watched({ a: 1, b: { c: 2 } });
+        viaLeaf({ held: value }, isLeaf);
+        expect(reads).toEqual([]);
+      });
+
+      it("leaves an artifact inside a claimed value alone", () => {
+        const { value, isLeaf } = watched({ tool: artifact({ ok: true }) });
+        expect((viaLeaf({ held: value }, isLeaf) as { held: unknown }).held)
+          .toBe(value);
+      });
+
+      it("descends into the same value when no hook is given", () => {
+        const { value, reads } = watched({ tool: artifact({ ok: true }) });
+        const held = (flatten({ held: value }) as { held: { tool: unknown } })
+          .held;
+        expect(held.tool).toEqual({ ok: true });
+        expect(reads).toContain("[[ownKeys]]");
+      });
+    });
+
     describe("the `replaceOther` hook", () => {
       // The hook is how a caller names what _else_ has no fabric
       // representation -- a `Cell`, in the runtime.
-      const viaHook = (value: unknown, replace: (v: object) => unknown) => {
+      const viaHook = (
+        value: unknown,
+        replaceOther: (v: object) => unknown,
+      ) => {
         const seen: { copy: unknown; original: unknown }[] = [];
         const result = replaceArtifacts(
           value,
           (copy, original) => seen.push({ copy, original }),
-          replace,
+          { replaceOther },
         );
         return { result, seen };
       };
@@ -638,6 +706,58 @@ describe("encodable-form", () => {
       const { cell, reactive } = subjects();
       const held = { cell, reactive };
       expect(flatten(held)).toBe(held);
+    });
+  });
+
+  describe("a query result holding a stream marker", () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    it("encodes a stream member as the link naming the cell", () => {
+      // A query result is not uniformly a leaf to the walk. Reading a member
+      // that holds a stream marker yields a `Cell`, which has no fabric
+      // representation of its own and reaches the conversion only as the link
+      // naming it. So a caller that goes on to serialize what it gets back
+      // reads into a query result rather than claiming it with `isLeaf`.
+      //
+      // An immutable cell derives its id from the bytes of what it is given,
+      // so two ids agreeing is the two values encoding the same way.
+      const cell = runtime.getCell<{ handler: unknown; other: number }>(
+        space,
+        "encodable-form-stream-holder",
+        undefined,
+        tx,
+      );
+      cell.set({ handler: { $stream: true }, other: 1 });
+      const view = cell.get() as unknown as {
+        handler: { toSigilLinkOrNull(): unknown };
+      };
+
+      const idOf = (held: unknown) =>
+        runtime.getImmutableCell(space, { held }, undefined, tx)
+          .getAsNormalizedFullLink().id;
+      const link = view.handler.toSigilLinkOrNull();
+
+      expect(idOf(view)).toBe(idOf({ handler: link, other: 1 }));
+      // And the comparison discriminates: the link is what carries the
+      // difference, so a different member in its place is a different id.
+      expect(idOf({ handler: link, other: 2 })).not.toBe(idOf(view));
     });
   });
 });

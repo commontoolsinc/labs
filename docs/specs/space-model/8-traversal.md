@@ -85,6 +85,8 @@ If `includeSource` is set, traversal also loads linked `source` and linked patte
 
 Top-level `$ref` is resolved before traversal decisions. Defaults are applied from the resolved schema.
 
+A `$ref` that does not resolve — it names a definition the schema does not carry — matches nothing. Traversal fails the schema rather than treating it as absent, and so does the entry point that resolves a read's schema before traversal (`resolveSchema` in `schema.ts`). A `$ref` resolving to the boolean `true` or `false` is a resolution, not a failure to resolve, and means what the boolean means.
+
 ### Type and structure rules
 
 - Primitive values validate against schema type

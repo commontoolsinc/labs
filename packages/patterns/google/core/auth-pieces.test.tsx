@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/auth-pieces.test.tsx --root packages/patterns --verbose
  */
-import { assert, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import AirtableAuth, {
   type AirtableAuth as AirtableAuthData,
 } from "../../airtable/core/airtable-auth.tsx";
@@ -121,7 +121,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_google_scopes_include_selected_permissions },
       { assertion: assert_personal_and_work_wrappers_show_account_type },
       { assertion: assert_switcher_prompts_for_classification },

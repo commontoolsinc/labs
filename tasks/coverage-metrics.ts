@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env
 import * as path from "@std/path";
 import { hasExecutableCode } from "./executable-source.ts";
+import { type LcovFileCoverage, parseLcovReports } from "./lcov.ts";
 import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
@@ -57,10 +58,6 @@ interface SourceFile {
   relativePath: string;
   metricGroup: string;
   trackedLineCount: number;
-}
-
-interface LcovFileCoverage {
-  lineHits: Map<number, number>;
 }
 
 export async function collectCoverageDebtMetrics(
@@ -187,6 +184,82 @@ export async function collectUncoveredLinesForFiles(
   return result;
 }
 
+/** One file's lines that this run leaves uncovered and an earlier run covered. */
+export interface RegressedSourceLines {
+  relativePath: string;
+  metricGroup: string;
+  lines: number[];
+}
+
+export interface RegressedLinesOptions {
+  rootDir: string;
+  /** LCOV from the run being gated. */
+  lcov: string;
+  /** LCOV from the `main` run its ratchet baseline came from. */
+  baselineLcov: string;
+  /** Metric groups to inspect; every other group is left alone. */
+  groups: Set<string>;
+  /** Repository-relative POSIX paths the pull request changed. */
+  changedFiles: Set<string>;
+}
+
+/**
+ * Find the lines a run leaves uncovered that its baseline run covered, for
+ * source files the pull request did not touch.
+ *
+ * A group can end up over its baseline without the diff adding a single
+ * uncovered line, because the two counts come from two separate measurements of
+ * the same code. A line reached only on some runs — one whose branch depends on
+ * scheduling, on load, or on how test files were distributed — moves the count
+ * on its own. This says which lines moved, so the flapping line can be given a
+ * test that covers it every time.
+ *
+ * Files the pull request changed are skipped: their line numbers moved between
+ * the two checkouts, so a line number means something different in each report.
+ * An untouched file has identical content in both, since the baseline measures
+ * the base-branch commit this run merged.
+ */
+export async function collectRegressedLines(
+  options: RegressedLinesOptions,
+): Promise<RegressedSourceLines[]> {
+  const sourceFiles = await collectSourceFiles(options.rootDir);
+  const candidates = sourceFiles.filter((source) =>
+    options.groups.has(source.metricGroup) &&
+    !options.changedFiles.has(source.relativePath)
+  );
+  const groupByPath = new Map(
+    candidates.map((source) => [source.relativePath, source.metricGroup]),
+  );
+  const paths = candidates.map((source) => source.relativePath);
+
+  const [now, before] = await Promise.all([
+    collectUncoveredLinesForFiles({
+      rootDir: options.rootDir,
+      lcov: options.lcov,
+      files: paths,
+    }),
+    collectUncoveredLinesForFiles({
+      rootDir: options.rootDir,
+      lcov: options.baselineLcov,
+      files: paths,
+    }),
+  ]);
+
+  const regressed: RegressedSourceLines[] = [];
+  for (const [relativePath, uncoveredNow] of now) {
+    const uncoveredBefore = new Set(before.get(relativePath) ?? []);
+    const lines = uncoveredNow.filter((line) => !uncoveredBefore.has(line));
+    if (lines.length === 0) continue;
+    regressed.push({
+      relativePath,
+      metricGroup: groupByPath.get(relativePath) ??
+        metricGroupFor(relativePath),
+      lines,
+    });
+  }
+  return regressed.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+
 export async function collectSourceFiles(
   rootDir: string,
 ): Promise<SourceFile[]> {
@@ -305,44 +378,17 @@ export function trackedSourceLineNumbers(content: string): number[] {
   return lineNumbers;
 }
 
+/**
+ * Read one `deno coverage --lcov` report, keyed by normalized source path.
+ *
+ * Per-instance suffixes (`?testRun=<uuid>` cache-busting imports) are
+ * normalized away at LCOV GENERATION (write-coverage-lcov.ts,
+ * `normalizeLcovInstancePaths` — CT-1861), so records arriving here already
+ * share one path per physical file; duplicate `SF:` sections accumulate into
+ * the same entry.
+ */
 export function parseLcov(lcov: string): Map<string, LcovFileCoverage> {
-  const files = new Map<string, LcovFileCoverage>();
-  let currentPath: string | undefined;
-
-  for (const line of lcov.split(/\r?\n/)) {
-    if (line.startsWith("SF:")) {
-      // Per-instance suffixes (`?testRun=<uuid>` cache-busting imports) are
-      // normalized away at LCOV GENERATION (write-coverage-lcov.ts,
-      // `normalizeLcovInstancePaths` — CT-1861), so records arriving here
-      // already share one path per physical file; duplicate `SF:` sections
-      // accumulate into the same entry below.
-      currentPath = path.normalize(line.slice(3));
-      if (!files.has(currentPath)) {
-        files.set(currentPath, { lineHits: new Map() });
-      }
-      continue;
-    }
-
-    if (line.startsWith("DA:") && currentPath) {
-      const [lineNumberRaw, hitsRaw] = line.slice(3).split(",");
-      const lineNumber = Number(lineNumberRaw);
-      const hits = Number(hitsRaw);
-      if (Number.isFinite(lineNumber) && Number.isFinite(hits)) {
-        const file = files.get(currentPath)!;
-        file.lineHits.set(
-          lineNumber,
-          (file.lineHits.get(lineNumber) ?? 0) + hits,
-        );
-      }
-      continue;
-    }
-
-    if (line === "end_of_record") {
-      currentPath = undefined;
-    }
-  }
-
-  return files;
+  return parseLcovReports([lcov], { mapPath: path.normalize });
 }
 
 export function countUncoveredProfileLines(coverage: LcovFileCoverage): number {

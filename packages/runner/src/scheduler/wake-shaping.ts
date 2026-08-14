@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,
@@ -308,7 +308,7 @@ const CLOCK_FIELD_NAMES = new Set(["timestamp", "timeStamp"]);
 
 function hasClockFieldDeep(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasClockFieldDeep);
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     for (const [key, child] of Object.entries(value)) {
       if (CLOCK_FIELD_NAMES.has(key)) return true;
       if (hasClockFieldDeep(child)) return true;
@@ -319,7 +319,7 @@ function hasClockFieldDeep(value: unknown): boolean {
 
 function scrubClockFields(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(scrubClockFields);
-  if (isRecord(value)) {
+  if (isObjectOrArray(value)) {
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
       if (CLOCK_FIELD_NAMES.has(key)) continue;
@@ -341,7 +341,7 @@ function scrubClockFields(value: unknown): unknown {
  * Returns the same reference when there is nothing to strip.
  */
 export function stripClockFields(event: unknown): unknown {
-  if (!isRecord(event)) return event;
+  if (!isObjectOrArray(event)) return event;
   if (!hasClockFieldDeep(event)) return event;
   return scrubClockFields(event);
 }

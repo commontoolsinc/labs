@@ -14,7 +14,14 @@
  *
  * Run: deno task cf test packages/patterns/self.test.tsx --verbose
  */
-import { assert, computed, handler, pattern, Writable } from "commonfabric";
+import {
+  assert,
+  computed,
+  handler,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import Self, {
   addValueCardFromForm,
   appendResponse,
@@ -481,7 +488,7 @@ export default pattern(() => {
   // Test Sequence
   // =========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === A1: upsertNeurotype — append to empty ===
       { assertion: assert_append_count },
       { assertion: assert_append_result },

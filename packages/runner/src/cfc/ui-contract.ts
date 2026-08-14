@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { CellScope, FabricValue, JSONSchema } from "../builder/types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -98,12 +98,12 @@ const rendererTrustedEvents = new WeakSet<object>();
 const isTrustedDomProvenance = (
   provenance: unknown,
 ): provenance is TrustedDomProvenance =>
-  isRecord(provenance) &&
+  isObjectOrArray(provenance) &&
   provenance.origin === "dom" &&
   provenance.trusted === true;
 
 export const markRendererTrustedEvent = (event: unknown): void => {
-  if (isRecord(event)) {
+  if (isObjectOrArray(event)) {
     rendererTrustedEvents.add(event);
   }
 };
@@ -113,16 +113,16 @@ export const propagateRendererTrustedEvent = (
   target: unknown,
 ): void => {
   if (
-    isRecord(source) &&
+    isObjectOrArray(source) &&
     rendererTrustedEvents.has(source) &&
-    isRecord(target)
+    isObjectOrArray(target)
   ) {
     rendererTrustedEvents.add(target);
   }
 };
 
 export const isRendererTrustedEvent = (event: unknown): boolean =>
-  isRecord(event) && rendererTrustedEvents.has(event);
+  isObjectOrArray(event) && rendererTrustedEvents.has(event);
 
 const trustRequirementsFromContract = (
   contract: Record<string, unknown>,
@@ -149,7 +149,7 @@ const resolveLocalSchemaRef = (
   root: JSONSchema | undefined,
   seenRefs: Set<string>,
 ): JSONSchema | undefined => {
-  if (!isRecord(schema) || typeof schema.$ref !== "string") {
+  if (!isObjectOrArray(schema) || typeof schema.$ref !== "string") {
     return schema;
   }
   const ref = schema.$ref;
@@ -158,7 +158,7 @@ const resolveLocalSchemaRef = (
   }
   seenRefs.add(ref);
 
-  if (!isRecord(root)) {
+  if (!isObjectOrArray(root)) {
     return schema;
   }
 
@@ -175,8 +175,8 @@ const uiContractFromSchemaInternal = (
     return uiContractFromSchemaInternal(resolvedSchema, root, seenRefs);
   }
   if (
-    !isRecord(resolvedSchema) || !isRecord(resolvedSchema.ifc) ||
-    !isRecord(resolvedSchema.ifc.uiContract)
+    !isObjectOrArray(resolvedSchema) || !isObjectOrArray(resolvedSchema.ifc) ||
+    !isObjectOrArray(resolvedSchema.ifc.uiContract)
   ) {
     return undefined;
   }
@@ -226,11 +226,13 @@ const uiContractsFromSchemaInternal = (
       branchRefs,
     );
   }
-  if (!isRecord(resolvedSchema)) {
+  if (!isObjectOrArray(resolvedSchema)) {
     return [];
   }
 
-  const childRoot = isRecord(resolvedSchema.$defs) ? resolvedSchema : root;
+  const childRoot = isObjectOrArray(resolvedSchema.$defs)
+    ? resolvedSchema
+    : root;
   const entries: UiContractEntry[] = [];
   const contract = uiContractFromSchemaInternal(
     resolvedSchema,
@@ -241,11 +243,11 @@ const uiContractsFromSchemaInternal = (
     entries.push(uiContractEntry([...path], contract, resolvedSchema));
   }
 
-  const hasProperties = isRecord(resolvedSchema.properties);
+  const hasProperties = isObjectOrArray(resolvedSchema.properties);
   const hasCompoundSchemas = Array.isArray(resolvedSchema.anyOf) ||
     Array.isArray(resolvedSchema.oneOf) ||
     Array.isArray(resolvedSchema.allOf);
-  const hasItems = isRecord(resolvedSchema.items) ||
+  const hasItems = isObjectOrArray(resolvedSchema.items) ||
     typeof resolvedSchema.items === "boolean";
   // prefixItems counts as children too (PR #4969 review): an unknown-typed
   // tuple with a contract-bearing $defs entry must not mint that contract
@@ -259,7 +261,7 @@ const uiContractsFromSchemaInternal = (
     !hasItems &&
     !hasPrefixItems &&
     resolvedSchema.type === "unknown" &&
-    isRecord(resolvedSchema.$defs)
+    isObjectOrArray(resolvedSchema.$defs)
   ) {
     const definitionContracts = Object.values(resolvedSchema.$defs)
       .flatMap((definition) =>
@@ -312,7 +314,7 @@ const uiContractsFromSchemaInternal = (
   // precise "past the slots" representation needs a path grammar beyond
   // `*`.
   if (
-    isRecord(resolvedSchema.items) ||
+    isObjectOrArray(resolvedSchema.items) ||
     typeof resolvedSchema.items === "boolean"
   ) {
     entries.push(
@@ -357,7 +359,7 @@ export const trustedEventProvenanceMatchesUiContract = (
     contract.trustedPattern !== undefined ||
     (contract.requiredEventIntegrity?.length ?? 0) > 0
   ) {
-    if (!isRecord(provenance.ui)) {
+    if (!isObjectOrArray(provenance.ui)) {
       return false;
     }
     if (
@@ -393,10 +395,10 @@ export const recordedTrustedEventProvenanceMatchesUiContract = (
   if (!trustedEventProvenanceMatchesUiContract(provenance, contract)) {
     return false;
   }
-  const dataset = isRecord(provenance) && isRecord(provenance.ui)
+  const dataset = isObjectOrArray(provenance) && isObjectOrArray(provenance.ui)
     ? provenance.ui.uiContractDataset
     : undefined;
-  if (!isRecord(dataset)) {
+  if (!isObjectOrArray(dataset)) {
     return false;
   }
 
@@ -417,7 +419,7 @@ export const trustedEventMatchesUiContract = (
   event: unknown,
   contract: UiContract | undefined,
 ): boolean => {
-  if (contract === undefined || !isRecord(event)) {
+  if (contract === undefined || !isObjectOrArray(event)) {
     return false;
   }
   const serializedEvent = event as SerializedTrustedEvent;
@@ -451,13 +453,13 @@ const trustedEventMatchCandidates = (event: unknown): unknown[] => {
 
   for (let index = 0; index < candidates.length; index++) {
     const candidate = candidates[index];
-    if (!isRecord(candidate)) {
+    if (!isObjectOrArray(candidate)) {
       continue;
     }
     if ("$event" in candidate) {
       add(candidate.$event);
     }
-    if (isRecord(candidate.value) && "$event" in candidate.value) {
+    if (isObjectOrArray(candidate.value) && "$event" in candidate.value) {
       add(candidate.value.$event);
     }
   }
@@ -553,7 +555,7 @@ const eventEnvelopePayloads = (
   };
 
   addPayload(event);
-  if (isRecord(event) && "value" in event) {
+  if (isObjectOrArray(event) && "value" in event) {
     addPayload(event.value);
   }
   try {
@@ -598,7 +600,7 @@ const collectContextLinks = (
     }
     return;
   }
-  if (!isRecord(value) && !Array.isArray(value)) {
+  if (!isObjectOrArray(value)) {
     return;
   }
   if (seen.has(value)) {
@@ -634,7 +636,9 @@ const contractCandidatesFromEventContext = (
 ): UiContract[] => {
   const contracts: UiContract[] = [];
   for (const payload of eventEnvelopePayloads(event)) {
-    if (!isRecord(payload.value) || !isRecord(payload.value.$ctx)) {
+    if (
+      !isObjectOrArray(payload.value) || !isObjectOrArray(payload.value.$ctx)
+    ) {
       continue;
     }
     const links: NormalizedFullLink[] = [];

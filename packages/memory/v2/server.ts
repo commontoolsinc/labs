@@ -63,8 +63,10 @@ import {
   type WatchSpec,
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
+import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
 import {
+  aclDocId,
   ANYONE_USER,
   type Capability,
   hasConcreteOwner,
@@ -121,6 +123,7 @@ import {
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
+import { type ArmedTurn, armTurn } from "./turn.ts";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
@@ -231,11 +234,6 @@ type AclState =
   | { kind: "invalid" }
   | { kind: "valid"; acl: Record<string, Capability | undefined> };
 
-/** Engine doc id of a space's ACL document: the doc whose entity id is the
- *  space DID itself, as managed by the runner's `ACLManager` / `cf acl`
- *  (runner `toURI` prefixes bare ids with `of:`). */
-const aclDocId = (space: string): string => `of:${space}`;
-
 const commitTouchesAclDoc = (
   operations: readonly Operation[],
   space: string,
@@ -281,7 +279,6 @@ function missingTableName(error: unknown): string | undefined {
  *  full-Unicode `toLowerCase()` would over-match — SQLite treats e.g. `Ü` and
  *  `ü` as distinct tables, so folding them together here would mask a genuine
  *  "no such table" error as an empty result. */
-
 function isDeclaredTable(
   tables: Record<string, unknown> | undefined,
   name: string,
@@ -913,7 +910,7 @@ export class Server {
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
-  #refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #refreshTurn: ArmedTurn | null = null;
   #refreshing: Promise<void> | null = null;
   // Transactions and fan-out share one publication turn per space. A verdict
   // is sent while its transaction owns the turn, so a sync frame cannot expose
@@ -1272,16 +1269,6 @@ export class Server {
     return null;
   }
 
-  /** After an ACL change, drop live sessions whose principal no longer
-   *  holds READ (enforce mode only): per-message gating alone would still
-   *  let their already-registered subscriptions receive pushes. The owning
-   *  connection gets a session/revoked("unauthorized"), which the client
-   *  treats as a terminal session close (no reopen loop — a reopen attempt
-   *  is denied at session.open). The session that made the triggering ACL
-   *  write (`writerSessionId`) is still dropped from the registry — so it
-   *  receives no further pushes — but is NOT sent the terminal revocation, so
-   *  it gets this transact's response first (a self-removal otherwise reads as
-   *  a failure). Its next message fails closed as an unknown session. */
   // Writer sessions that de-authorized themselves in a commit: their
   // session/revoked is held until after the transact verdict goes out.
   #deferredSelfRevocations = new Map<string, string | null>();
@@ -1302,6 +1289,18 @@ export class Server {
     }
   }
 
+  /**
+   * After an ACL change, drop live sessions whose principal no longer holds
+   * READ (enforce mode only): per-message gating alone would still let their
+   * already-registered subscriptions receive pushes. The owning connection
+   * gets a session/revoked("unauthorized"), which the client treats as a
+   * terminal session close (no reopen loop — a reopen attempt is denied at
+   * session.open). The session that made the triggering ACL write
+   * (`writerSessionId`) is still dropped from the registry — so it receives no
+   * further pushes — but is NOT sent the terminal revocation, so it gets this
+   * transact's response first (a self-removal otherwise reads as a failure).
+   * Its next message fails closed as an unknown session.
+   */
   #revokeDeauthorizedSessions(
     engine: Engine.Engine,
     space: string,
@@ -1405,7 +1404,7 @@ export class Server {
     // flushSessions(), so it drains them rather than returning with
     // pending work — "manual" gates the TIMER, not the explicit calls.
     if (
-      this.#refreshTimer !== null || this.#refreshing !== null ||
+      this.#refreshTurn !== null || this.#refreshing !== null ||
       this.#dirtySpaces.size > 0
     ) {
       await this.flushSessions();
@@ -2405,26 +2404,11 @@ export class Server {
   private async decideTransaction(
     message: TransactRequest,
   ): Promise<TransactDecision> {
-    const session = this.#sessions.get(message.space, message.sessionId);
-    if (session === null) {
-      return {
-        response: respondTypedError<Engine.AppliedCommit>(
-          message.requestId,
-          toError("SessionError", "Unknown session for space"),
-        ),
-      };
-    }
     let postCommit: (() => Promise<void>) | undefined;
     const response = await tracer.startActiveSpan(
       "memory.transact",
       async (span): Promise<ResponseMessage<Engine.AppliedCommit>> => {
         span.setAttribute("space.did", message.space);
-        if (
-          session.principal !== undefined &&
-          session.principal !== ANYONE_USER
-        ) {
-          span.setAttribute("user.did", session.principal);
-        }
         if (message.requestId !== undefined) {
           span.setAttribute("request.id", message.requestId);
         }
@@ -2441,6 +2425,34 @@ export class Server {
         }
         if (message.commit.localSeq !== undefined) {
           span.setAttribute("commit.local_seq", message.commit.localSeq);
+        }
+        // Classify the request before any await or validation so conflicts and
+        // rejected attempts remain visible in the same dashboard breakdowns as
+        // successful transactions. `entity.count` keeps its existing meaning.
+        const commitTelemetry = classifyCommitTelemetry(message.commit);
+        span.setAttribute("commit.kind", commitTelemetry.kind);
+        span.setAttribute("entity.count", commitTelemetry.entityCount);
+        span.setAttribute(
+          "scheduler.observation.count",
+          commitTelemetry.schedulerObservationCount,
+        );
+        span.setAttribute(
+          "sqlite.operation.count",
+          commitTelemetry.sqliteOperationCount,
+        );
+        const session = this.#sessions.get(message.space, message.sessionId);
+        if (session === null) {
+          span.end();
+          return respondTypedError<Engine.AppliedCommit>(
+            message.requestId,
+            toError("SessionError", "Unknown session for space"),
+          );
+        }
+        if (
+          session.principal !== undefined &&
+          session.principal !== ANYONE_USER
+        ) {
+          span.setAttribute("user.did", session.principal);
         }
         try {
           const engine = await this.openEngine(message.space);
@@ -2618,12 +2630,6 @@ export class Server {
             );
           }
           span.setAttribute("commit.seq", commit.seq);
-          span.setAttribute(
-            "entity.count",
-            message.commit.operations.filter((operation) =>
-              operation.op !== "sqlite"
-            ).length,
-          );
           return {
             type: "response",
             requestId: message.requestId,
@@ -4180,13 +4186,13 @@ export class Server {
   private scheduleRefresh(): void {
     if (
       this.options.subscriptionRefreshDelayMs === "manual" ||
-      this.#dirtySpaces.size === 0 || this.#refreshTimer !== null
+      this.#dirtySpaces.size === 0 || this.#refreshTurn !== null
     ) {
       return;
     }
-    this.#refreshTimer = setTimeout(
+    this.#refreshTurn = armTurn(
       () => {
-        this.#refreshTimer = null;
+        this.#refreshTurn = null;
         void this.flushScheduledSessions();
       },
       this.options.subscriptionRefreshDelayMs ?? SUBSCRIPTION_REFRESH_DELAY_MS,
@@ -4239,9 +4245,9 @@ export class Server {
   }
 
   private cancelScheduledRefresh(): void {
-    if (this.#refreshTimer !== null) {
-      clearTimeout(this.#refreshTimer);
-      this.#refreshTimer = null;
+    if (this.#refreshTurn !== null) {
+      this.#refreshTurn.cancel();
+      this.#refreshTurn = null;
     }
     if (this.#connections.size === 0) {
       this.#dirtySpaces.clear();

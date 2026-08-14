@@ -1,18 +1,15 @@
 import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
-import {
-  bigintFromMinimalTwosComplement,
-  bigintToMinimalTwosComplement,
+  bigintFromUnpaddedBase64url,
+  bigintToUnpaddedBase64url,
 } from "@commonfabric/utils/bigint";
 import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import type { ReconstructionContext } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
+import type { JsonCodecValue } from "./interface.ts";
+import type { ReconstructionContext } from "@/codec-interface/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 /**
  * Codec for `bigint`. Encodes to the `BigInt@1` tag with an unpadded base64
@@ -27,7 +24,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * `Constructor` (a "white lie") to seed the class fast-path; `canEncode()`
  * confirms via `typeof`.
  */
-export class BigIntCodec extends BaseFabricCodec {
+export class BigIntCodec extends BaseTerminalCodec<JsonCodecValue> {
   /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.BigInt, BigInt as unknown as Constructor);
@@ -39,14 +36,14 @@ export class BigIntCodec extends BaseFabricCodec {
   }
 
   /** @inheritDoc */
-  encode(value: bigint): FabricValue {
-    return toUnpaddedBase64url(bigintToMinimalTwosComplement(value));
+  encode(value: bigint): JsonCodecValue {
+    return bigintToUnpaddedBase64url(value);
   }
 
   /** @inheritDoc */
   decode(
     typeTag: string,
-    state: FabricValue,
+    state: JsonCodecValue,
     _context: ReconstructionContext,
   ): FabricValue {
     if (typeof state !== "string") {
@@ -57,7 +54,7 @@ export class BigIntCodec extends BaseFabricCodec {
       );
     }
     try {
-      return bigintFromMinimalTwosComplement(fromBase64url(state));
+      return bigintFromUnpaddedBase64url(state);
     } catch {
       return new ProblematicValue(
         typeTag,
