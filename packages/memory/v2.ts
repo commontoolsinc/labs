@@ -2,7 +2,10 @@ import {
   type EntityRef,
   getModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type {
   FabricPlainObject,
@@ -1115,7 +1118,7 @@ export const wireMemoryProtocolFlags = (
  * stops holding.
  */
 export const encodeMemoryBoundary = (value: FabricValue): string =>
-  jsonFromValue(value);
+  jsonFromFabricValue(value);
 
 export const commitPreconditionValueHash = (value: FabricValue): string =>
   hashStringOf(encodeMemoryBoundary(value));
@@ -1123,7 +1126,7 @@ export const commitPreconditionValueHash = (value: FabricValue): string =>
 export const decodeMemoryBoundary = <Value extends FabricValue = FabricValue>(
   source: string,
 ): Value & FabricValue => {
-  const decoded = valueFromJson(
+  const decoded = fabricFromJsonValue(
     source,
     memoryReconstructionContext,
   );

@@ -34,7 +34,7 @@ import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { jsonFromValue, valueFromJson } from "@/codecs.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricLink", () => {
@@ -233,14 +233,16 @@ describe("FabricLink", () => {
 
   // Free functions exercising `FabricLink` rather than members of the class
   // itself, so they live directly under the class `describe()`.
-  describe("round-trip via `jsonFromValue()` / `valueFromJson()`", () => {
+  describe("round-trip via `jsonFromFabricValue()` / `fabricFromJsonValue()`", () => {
     it("round-trips a `FabricLink`, including a nested schema", () => {
       const original = new FabricLink({
         id: "fid1:abc",
         path: ["a", "b"],
         schema: { type: "object", properties: { x: { type: "number" } } },
       });
-      const restored = valueFromJson(jsonFromValue(original)) as FabricLink;
+      const restored = fabricFromJsonValue(
+        jsonFromFabricValue(original),
+      ) as FabricLink;
       expect(restored).toBeInstanceOf(FabricLink);
       expect(restored.payload).toEqual(original.payload);
     });

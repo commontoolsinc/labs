@@ -34,7 +34,7 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "@/native-type-tags.ts";
-import { jsonFromValue, valueFromJson } from "@/codecs.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
@@ -239,10 +239,12 @@ describe("FabricRegExp", () => {
   // The following exercise free functions' handling of `FabricRegExp` /
   // `RegExp` rather than members of the class itself, so they live directly
   // under the class `describe()` (the cross-cutting carve-out).
-  describe("round-trip via `jsonFromValue()` / `valueFromJson()`", () => {
+  describe("round-trip via `jsonFromFabricValue()` / `fabricFromJsonValue()`", () => {
     it("round-trips a `FabricRegExp`", () => {
       const original = new FabricRegExp(/hello\s+world/gim);
-      const restored = valueFromJson(jsonFromValue(original)) as FabricRegExp;
+      const restored = fabricFromJsonValue(
+        jsonFromFabricValue(original),
+      ) as FabricRegExp;
       expect(restored).toBeInstanceOf(FabricRegExp);
       expect(restored.source).toBe(original.source);
       expect(restored.flags).toBe(original.flags);
@@ -253,7 +255,9 @@ describe("FabricRegExp", () => {
       const flagSets = ["", "g", "i", "m", "s", "u", "y", "d", "gi", "gims"];
       for (const flags of flagSets) {
         const original = new FabricRegExp(new RegExp("test", flags));
-        const restored = valueFromJson(jsonFromValue(original)) as FabricRegExp;
+        const restored = fabricFromJsonValue(
+          jsonFromFabricValue(original),
+        ) as FabricRegExp;
         expect(restored.flags).toBe(original.flags);
         expect(restored.flavor).toBe("es2025");
       }
@@ -261,7 +265,9 @@ describe("FabricRegExp", () => {
 
     it("round-trips a non-`es2025` flavor faithfully (source/flags/flavor)", () => {
       const original = new FabricRegExp("pcre2", "ab+c", "g");
-      const restored = valueFromJson(jsonFromValue(original)) as FabricRegExp;
+      const restored = fabricFromJsonValue(
+        jsonFromFabricValue(original),
+      ) as FabricRegExp;
       expect(restored.source).toBe("ab+c");
       expect(restored.flags).toBe("g");
       expect(restored.flavor).toBe("pcre2");

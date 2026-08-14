@@ -201,17 +201,33 @@ The cascade cannot rely on each pending layer reading the layer beneath it:
 zero-read operations (mergeable collection writes) legally interleave into a
 stack without any read edge. A commit that reads through a pending stack
 therefore records its FULL dependency set directly: the read's `localSeq`
-array names every pending layer of the document below the reader, in
-ascending order. Each element imposes a resolution requirement; the highest
-element — the document's top-of-stack layer — is the legacy staleness basis
-when no `basisSeq` is declared (§3.6.3). The
+array names every pending layer of the document that the reader's
+materialized view sat on, in ascending order. Each element imposes a
+resolution requirement; the highest element — the view's top-of-stack layer
+— is the legacy staleness basis when no `basisSeq` is declared (§3.6.3). The
 client mirrors the server cascade at drop time: when a pending commit's
 optimistic writes are dropped, every queued or in-flight commit whose
 recorded dependency set names the dropped `localSeq` is locally rejected
 without waiting for the server's per-commit verdict.
 
-The dependency array MUST include the document's top-of-stack pending layer
-below the reader. For a read that declares no `basisSeq`, the staleness
+Completeness is relative to the VIEW, not to the session's commit history,
+so the array may be non-contiguous in the session's `localSeq` space. A
+layer the client removed from its overlay before the read view was built — a
+rejection verdict honored, the view rebuilt without it — contributed nothing
+to the observed value and is legitimately absent from the array, and the
+server imposes no resolution requirement on a layer that is not named. This
+is what lets a client process a rejection eagerly and still commit later
+work built over the surviving layers, rather than dooming every dependent
+minted after the verdict. The soundness burden sits with the client:
+omitting a layer whose optimistic value DID contribute to the observed view
+fabricates an observation (the CT-1872 1c phantom shape — an INV-1
+violation, `09-invariants.md`), exactly as a fabricated confirmed read
+would. Omission means "my view did not include this layer", never "I would
+rather not mention it".
+
+The dependency array MUST include the view's top-of-stack pending layer
+below the reader — the highest layer surviving in the overlay when the view
+was built. For a read that declares no `basisSeq`, the staleness
 basis is the stack top (implicitly, the array's highest element), and basing
 the scan at a lower layer is unsound, not merely conservative: the session's
 own newer stacked commits then land inside the scan interval, where the

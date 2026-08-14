@@ -378,16 +378,27 @@ number of records returned from a large array remains deferred, blocking
 nothing. It is adjacent CLI work for when board scale demands it, not an ask on
 any workstream in this implementation plan.
 
-**A set of verbs wants to be a structural interface, and the machinery for that
-already exists.** Schemas are the type system, so a verb set is a schema
-fragment and conformance is a subset check the repo already computes
-(`schemaSubsetIssue`). Its variance is already correct for the purpose: an
-implementer must accept at least the declared payload and return at most the
-declared result, which is exactly the argument/result direction pair above.
-Interface conformance and schema evolution are the same rule — evolution is
-conformance to one's past self. So no type machinery needs building, and any
-explicit interface mechanism (nominal declaration, discovery *by* interface) is
-deferred until a concrete need appears.
+**A set of verbs is checkable as a structural interface with the machinery that
+exists.** Schemas are the type system, so a verb set is a schema fragment and
+conformance is a subset check the repo already computes (`schemaSubsetIssue`,
+`packages/piece/src/schema-compatibility.ts`). Its variance is already correct
+for the purpose: an implementer must accept at least the declared payload and
+return at most the declared result, which is exactly the argument/result
+direction pair above. Interface conformance and schema evolution are the same
+rule — evolution is conformance to one's past self.
+
+That covers the structural half and stops there.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for what a verb's interface is and how it changes, and it puts an explicit
+interface mechanism — **named, versioned interfaces**, with nominal
+declaration and discovery by interface — on the road rather than in reserve,
+because a name is a claim about meaning that no structural demand can make.
+It is also the most machinery of anything in that design: an identity, a
+registry, a place in the shape, a member-to-field mapping, and a
+compatibility rule of its own, where what a version bump means and how a
+declared minimum resolves against what a piece provides are both still to be
+designed. So the subset check is the default and the interim, not an argument
+that the named mechanism is unnecessary.
 
 What is **not** yet true is the premise all of that rests on: that a piece's
 verbs can be identified from its schema. Verb-ness has three independent
@@ -616,56 +627,72 @@ pattern to follow rather than in the runtime.
 A verb's result schema declares whether it carries a live piece reference or a
 self-contained snapshot — the pattern knows which is meaningful for that verb.
 
-The result schema is part of the piece's public contract, and the repo already
-checks pattern schema evolution: `assertPatternSchemasBackwardCompatible`
+The repo checks **a pattern's own** schema evolution:
+`assertPatternSchemasBackwardCompatible`
 (`packages/piece/src/schema-compatibility.ts`) runs on every `setsrc` unless
 `--dangerously-allow-incompatible-schema` is passed
-(`packages/piece/src/ops/piece-controller.ts`). It checks arguments
-and results in **opposite directions**:
+(`dangerouslyAllowIncompatibleSchema`,
+`packages/piece/src/ops/piece-controller.ts`). It compares four schemas and no
+others — the previous and candidate `Pattern`'s `argumentSchema` and
+`resultSchema` — and it compares the two roles in **opposite directions**:
 
 - **Arguments**: previous ⊆ candidate. Inputs may widen but not narrow; a new
   required field is incompatible.
 - **Results**: candidate ⊆ previous. Results may narrow freely — but *adding* a
   result field is only compatible if the previous schema was open-world.
 
-That second direction matters here: a declared result is easier to shrink than
-to extend, so the result shape wants to be right early, or deliberately
-open-world. The `Invocation` shape is the first schema this applies to — it
-must be authored open-world so protocol fields such as a payload digest or
-retention metadata can be added later.
+That second direction matters here: a pattern's declared result is easier to
+shrink than to extend, so the result shape wants to be right early, or
+deliberately open-world. The `Invocation` shape is the first schema this
+applies to — it must be authored open-world so protocol fields such as a
+payload digest or retention metadata can be added later.
 
 "Results may narrow freely" governs *values*, not *named fields*. Removing a
 named property is rejected outright in either direction — `objectSubsetIssue`
 returns "existing result field was removed" whenever the comparison is an
 evolution, on the stated principle that "pattern evolution preserves named
 fields as part of the public contract, even when the candidate object is
-otherwise open" (`packages/piece/src/schema-compatibility.ts`). A
-verb's `asCell` marker is pinned the same way: it is a semantic extension key
-compared for exact equality, so a field cannot change
-between data and verb across a deploy. Verb names and their verb-ness are
-therefore already a contract with teeth, before this document adds any rule.
+otherwise open" (`objectSubsetIssue`,
+`packages/piece/src/schema-compatibility.ts`). The removed-field check
+recurses, so a nested removal is rejected on a nested path
+(`result.topic.title: existing result field was removed`) exactly as a flat one
+is. Adding a **required** field is rejected at any depth unless it carries a
+default; adding an **optional** one is allowed at any depth; narrowing a
+*value* type is allowed at any depth. Nesting a pattern's result under a single
+key therefore buys it nothing: "results may narrow freely" is true of values
+and never of names, at every depth.
 
-The practical consequence for verb results: **every name a result publishes is
-permanent regardless of depth, and every later addition must be optional.**
+A verb's `asCell` marker is pinned the same way: it is a semantic extension key
+compared for exact equality (`SEMANTIC_EXTENSION_KEYS`,
+`packages/piece/src/schema-compatibility.ts`), so a field cannot change between
+data and verb across a deploy. Verb names and their verb-ness are therefore
+already a contract with teeth, before this document adds any rule.
 
-An earlier revision of this paragraph advised nesting the value under a single
-key so that "only that key is permanent and everything beneath it is free to
-narrow". Measured against `assertPatternSchemasBackwardCompatible`, that is not
-what the checker does. The removed-field check recurses, so a nested removal is
-rejected on a nested path (`result.topic.title: existing result field was
-removed`) exactly as a flat one is. Adding a **required** field is rejected at
-any depth unless it carries a default; adding an **optional** one is allowed at
-any depth; narrowing a *value* type is allowed at any depth. Nesting changes
-none of it.
+**What a verb hands back sits outside all of it.** A verb's declared result
+travels on `module.resultSchema` — the `CELL_RESULT_TYPE` doc comment
+(`packages/api/index.ts`) states this, and `declaredVerbResults`
+(`packages/cli/lib/piece.ts`) is what reads it back off a piece's compiled
+graph — while the comparison above sees only `Pattern.argumentSchema` and
+`Pattern.resultSchema`. There a verb is a property carrying its
+`asCell: ["stream"]` marker and a reference to its event schema, and nothing
+about its output. So no gate compares a verb's result across a deploy:
+renaming a field of what a verb returns passes every check and breaks its
+callers silently.
 
-"Results may narrow freely" is therefore true of values and never of names,
-which is the distinction the earlier wording blurred. Publish as few names as
-the verb can live with, and make every later addition optional. An envelope
-remains a reasonable readability choice — the llm-dialog tool path returns a
-single-key shape from both of its branches, an `@resultLocation` link, the
-value, and its schema together (both `"@resultLocation"` sites in
-`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts`) — just not for
-the evolution reason previously given.
+The advice stands; its enforcement does not. Publish as few names as the verb
+can live with, and treat **every name a verb's result publishes as permanent
+regardless of depth, with every later addition optional** — a discipline the
+author and review hold, not one the update gate holds for them.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for how a verb's interface changes, and it carries the same rule to its
+conclusion: because nothing checks an output, a change to what a verb hands
+back is treated exactly like a rename and gets a new verb name, until
+Fabric-types records outputs in the shape and a check replaces the convention.
+
+An envelope remains a reasonable readability choice — the llm-dialog tool path
+returns a single-key shape from both of its branches, an `@resultLocation`
+link, the value, and its schema together (both `"@resultLocation"` sites in
+`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts`).
 
 ### Authoring
 

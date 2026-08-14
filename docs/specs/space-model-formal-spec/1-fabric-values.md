@@ -2821,20 +2821,20 @@ recognizer for text in it, live one layer down in
  * JSON-embedded encoding, prefixed with the format-identifying tag
  * `fvj1:`.
  */
-export function jsonFromValue(value: FabricValue): string;
+export function jsonFromFabricValue(value: FabricValue): string;
 
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
  * `context` is omitted, a shared decode-framed empty context is
  * substituted, which throws if any reconstruction is needed.
  */
-export function valueFromJson(
+export function fabricFromJsonValue(
   json: string,
   context?: ReconstructionContext,
 ): FabricValue;
 
 /**
- * Like `valueFromJson()`, except the decoded result is expected to be a
+ * Like `fabricFromJsonValue()`, except the decoded result is expected to be a
  * plain object. Throws if it turns out to be something else.
  */
 export function plainObjectFromJson<T extends object = object>(
@@ -2860,9 +2860,10 @@ time and reuses it for all encode/decode operations.
 The `memory` package wraps these at its serialization boundary
 (`packages/memory/v2.ts`):
 
-- **Write path:** `encodeMemoryBoundary(value)` calls `jsonFromValue(value)`.
+- **Write path:** `encodeMemoryBoundary(value)` calls
+  `jsonFromFabricValue(value)`.
 - **Read path:** `decodeMemoryBoundary(source)` calls
-  `valueFromJson(source, context)` with a memory `ReconstructionContext`.
+  `fabricFromJsonValue(source, context)` with a memory `ReconstructionContext`.
 
 ### 4.9 Fabric Value Conversion
 

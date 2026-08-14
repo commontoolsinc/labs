@@ -25,7 +25,7 @@
  * iteration anyway, which most of these are.
  */
 
-import { jsonFromValue, valueFromJson } from "../src/codecs.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "../src/codecs.ts";
 import type { FabricValue } from "../src/interface.ts";
 import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
@@ -218,12 +218,20 @@ const OBJECTS = SIZES.map((size) => [size, makeObject(size)] as const);
 const OMNIBUSES = [10, 100, 1000].map((n) => [n, makeOmnibus(n)] as const);
 
 /** Encoded forms, for the decode direction. */
-const SINGLES_JSON = SINGLES.map(([n, v]) => [n, jsonFromValue(v)] as const);
-const ARRAYS_JSON = ARRAYS.map(([n, v]) => [n, jsonFromValue(v)] as const);
-const SPARSE_JSON = SPARSE.map(([n, v]) => [n, jsonFromValue(v)] as const);
-const OBJECTS_JSON = OBJECTS.map(([n, v]) => [n, jsonFromValue(v)] as const);
+const SINGLES_JSON = SINGLES.map(([n, v]) =>
+  [n, jsonFromFabricValue(v)] as const
+);
+const ARRAYS_JSON = ARRAYS.map(([n, v]) =>
+  [n, jsonFromFabricValue(v)] as const
+);
+const SPARSE_JSON = SPARSE.map(([n, v]) =>
+  [n, jsonFromFabricValue(v)] as const
+);
+const OBJECTS_JSON = OBJECTS.map(([n, v]) =>
+  [n, jsonFromFabricValue(v)] as const
+);
 const OMNIBUSES_JSON = OMNIBUSES.map(([n, v]) =>
-  [n, jsonFromValue(v)] as const
+  [n, jsonFromFabricValue(v)] as const
 );
 
 /** Zero-pads a size, so that group keys sort by magnitude. */
@@ -236,10 +244,10 @@ function groupKey(prefix: string, size: number): string {
 // since the single-value groups are measured first and are the shortest.
 for (let i = 0; i < 50; i++) {
   for (const [, value] of SINGLES) {
-    valueFromJson(jsonFromValue(value));
+    fabricFromJsonValue(jsonFromFabricValue(value));
   }
-  valueFromJson(jsonFromValue(ARRAYS[2]![1]));
-  valueFromJson(jsonFromValue(OBJECTS[2]![1]));
+  fabricFromJsonValue(jsonFromFabricValue(ARRAYS[2]![1]));
+  fabricFromJsonValue(jsonFromFabricValue(OBJECTS[2]![1]));
 }
 
 //
@@ -252,7 +260,7 @@ for (const [name, value] of SINGLES) {
     group: `single-${name}`,
     baseline: true,
     fn() {
-      jsonFromValue(value);
+      jsonFromFabricValue(value);
     },
   });
 }
@@ -262,7 +270,7 @@ for (const [name, json] of SINGLES_JSON) {
     name: `decode single-${name}`,
     group: `single-${name}`,
     fn() {
-      valueFromJson(json);
+      fabricFromJsonValue(json);
     },
   });
 }
@@ -277,7 +285,7 @@ for (const [size, value] of ARRAYS) {
     group: groupKey("array", size),
     baseline: true,
     fn() {
-      jsonFromValue(value);
+      jsonFromFabricValue(value);
     },
   });
 }
@@ -287,7 +295,7 @@ for (const [size, json] of ARRAYS_JSON) {
     name: `decode ${groupKey("array", size)}`,
     group: groupKey("array", size),
     fn() {
-      valueFromJson(json);
+      fabricFromJsonValue(json);
     },
   });
 }
@@ -302,7 +310,7 @@ for (const [size, value] of SPARSE) {
     group: groupKey("sparse", size),
     baseline: true,
     fn() {
-      jsonFromValue(value);
+      jsonFromFabricValue(value);
     },
   });
 }
@@ -312,7 +320,7 @@ for (const [size, json] of SPARSE_JSON) {
     name: `decode ${groupKey("sparse", size)}`,
     group: groupKey("sparse", size),
     fn() {
-      valueFromJson(json);
+      fabricFromJsonValue(json);
     },
   });
 }
@@ -327,7 +335,7 @@ for (const [size, value] of OBJECTS) {
     group: groupKey("object", size),
     baseline: true,
     fn() {
-      jsonFromValue(value);
+      jsonFromFabricValue(value);
     },
   });
 }
@@ -337,7 +345,7 @@ for (const [size, json] of OBJECTS_JSON) {
     name: `decode ${groupKey("object", size)}`,
     group: groupKey("object", size),
     fn() {
-      valueFromJson(json);
+      fabricFromJsonValue(json);
     },
   });
 }
@@ -352,7 +360,7 @@ for (const [leaves, value] of OMNIBUSES) {
     group: groupKey("omnibus", leaves),
     baseline: true,
     fn() {
-      jsonFromValue(value);
+      jsonFromFabricValue(value);
     },
   });
 }
@@ -362,7 +370,7 @@ for (const [leaves, json] of OMNIBUSES_JSON) {
     name: `decode ${groupKey("omnibus", leaves)}`,
     group: groupKey("omnibus", leaves),
     fn() {
-      valueFromJson(json);
+      fabricFromJsonValue(json);
     },
   });
 }

@@ -107,6 +107,7 @@ import {
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
+import { type ArmedTurn, armTurn } from "./turn.ts";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
@@ -937,7 +938,7 @@ export class Server {
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
-  #refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  #refreshTurn: ArmedTurn | null = null;
   #refreshing: Promise<void> | null = null;
   // Transactions and fan-out share one publication turn per space. A verdict
   // is sent while its transaction owns the turn, so a sync frame cannot expose
@@ -1422,7 +1423,7 @@ export class Server {
     // flushSessions(), so it drains them rather than returning with
     // pending work — "manual" gates the TIMER, not the explicit calls.
     if (
-      this.#refreshTimer !== null || this.#refreshing !== null ||
+      this.#refreshTurn !== null || this.#refreshing !== null ||
       this.#dirtySpaces.size > 0
     ) {
       await this.flushSessions();
@@ -3638,13 +3639,13 @@ export class Server {
   private scheduleRefresh(): void {
     if (
       this.options.subscriptionRefreshDelayMs === "manual" ||
-      this.#dirtySpaces.size === 0 || this.#refreshTimer !== null
+      this.#dirtySpaces.size === 0 || this.#refreshTurn !== null
     ) {
       return;
     }
-    this.#refreshTimer = setTimeout(
+    this.#refreshTurn = armTurn(
       () => {
-        this.#refreshTimer = null;
+        this.#refreshTurn = null;
         void this.flushScheduledSessions();
       },
       this.options.subscriptionRefreshDelayMs ?? SUBSCRIPTION_REFRESH_DELAY_MS,
@@ -3697,9 +3698,9 @@ export class Server {
   }
 
   private cancelScheduledRefresh(): void {
-    if (this.#refreshTimer !== null) {
-      clearTimeout(this.#refreshTimer);
-      this.#refreshTimer = null;
+    if (this.#refreshTurn !== null) {
+      this.#refreshTurn.cancel();
+      this.#refreshTurn = null;
     }
     if (this.#connections.size === 0) {
       this.#dirtySpaces.clear();

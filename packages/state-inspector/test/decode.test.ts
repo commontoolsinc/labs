@@ -10,7 +10,7 @@ import {
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
@@ -44,7 +44,9 @@ Deno.test("decode: a modern encoded link round-trips to a recognized link", () =
   setModernCellRepConfig(true);
   let encoded: string;
   try {
-    encoded = jsonFromValue({ value: { ref: new FabricLink({ id: "of:x" }) } });
+    encoded = jsonFromFabricValue({
+      value: { ref: new FabricLink({ id: "of:x" }) },
+    });
   } finally {
     resetModernCellRepConfig();
   }
