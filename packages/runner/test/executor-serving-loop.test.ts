@@ -798,11 +798,29 @@ describe("stage F serving loop", () => {
       () => host!.spaceServer(space)?.active !== true,
       "space to park after the loop failure",
     );
-    // The lease was RELEASED (not left renewing): a rival acquires
-    // immediately.
+    // The distinguishing observation: the pre-fix loop died with the
+    // space still ACTIVE (the waitUntil above would time out) and the
+    // renew timer alive. whenParked resolves only after this tenure's
+    // park path completed — renew stopped, runtime disposed, lease
+    // released.
+    await spaceServer.whenParked;
+
+    // What follows the failure park is the host's DESIGNED recovery arm:
+    // the still-open client session is live demand, so the host
+    // re-activates — and, with this policy failing every cycle, parks
+    // and recovers again; with #5729's event-loop-turn frame delivery
+    // the re-acquire outruns any released-gap probe. Close the host to
+    // end recovery, then pin the no-zombie contract: nothing is left
+    // renewing, so the lease frees for a rival. (Poll rather than probe
+    // once: close() does not await a self-initiated park already in
+    // flight, so the final tenure's release can land a beat later.)
+    await host.close();
     const engine = await server.engineForSpace(space);
     const rival = executionLeaseHolder("did:key:loop-failure-rival");
-    expect(acquireExecutionLease(engine, { space, holder: rival })).toBe(true);
+    await waitUntil(
+      () => acquireExecutionLease(engine, { space, holder: rival }),
+      "the released lease to become acquirable by a rival",
+    );
     releaseExecutionLease(engine, { space, holder: rival });
   });
 
