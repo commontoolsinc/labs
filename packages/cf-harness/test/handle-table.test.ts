@@ -553,6 +553,45 @@ describe("handle-table", () => {
       );
     });
 
+    it("throws for an entry schema that is not a JSON Schema", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { schema: SUMMARY_SCHEMA },
+      );
+      for (const schema of ["a string", 42, ["an", "array"], null]) {
+        const broken = {
+          ...table,
+          entries: [{ ...table.entries[0], schema }],
+        } as unknown as HarnessHandleTable;
+        expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+          "not a JSON Schema object or boolean",
+        );
+      }
+      // A boolean schema is a JSON Schema, so it passes.
+      expect(() =>
+        assertValidHarnessHandleTable({
+          ...table,
+          entries: [{ ...table.entries[0], schema: false }],
+        } as unknown as HarnessHandleTable)
+      ).not.toThrow();
+    });
+
+    it("throws for an entry schemaSource other than `harness`", async () => {
+      const { table } = await mintAddressHandle(
+        createHarnessHandleTable("run-1"),
+        LINK_A,
+        { schema: SUMMARY_SCHEMA },
+      );
+      const broken = {
+        ...table,
+        entries: [{ ...table.entries[0], schemaSource: "model" }],
+      } as unknown as HarnessHandleTable;
+      expect(() => assertValidHarnessHandleTable(broken)).toThrow(
+        "unknown schemaSource `model`",
+      );
+    });
+
     it("throws for a duplicate token", async () => {
       const first = await mintAddressHandle(
         createHarnessHandleTable("run-1"),

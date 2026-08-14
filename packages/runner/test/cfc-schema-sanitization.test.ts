@@ -1553,6 +1553,45 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       .toBeDefined();
   });
 
+  it("leaves a union open when a branch of a branch is open", () => {
+    // Openness reached through a nested combinator is openness all the same:
+    // the outer branch is a closed object, but its own branch admits
+    // anything, so the surface the outer node reads is open and it stops
+    // policing keys the branches will judge.
+    const nestedOpen = {
+      type: "object",
+      anyOf: [{
+        type: "object",
+        properties: { kind: { type: "string" } },
+        anyOf: [{
+          type: "object",
+          properties: { a: { type: "number" } },
+          additionalProperties: true,
+        }],
+      }],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(nestedOpen, { kind: "a", extra: "x" }))
+      .toBeUndefined();
+
+    // The same shape with the nested branch closed keeps the surface closed,
+    // so the key no branch models is refused.
+    const nestedClosed = {
+      type: "object",
+      anyOf: [{
+        type: "object",
+        properties: { kind: { type: "string" } },
+        anyOf: [{
+          type: "object",
+          properties: { a: { type: "number" } },
+        }],
+      }],
+    } as const satisfies JSONSchema;
+    expect(validateAgainstSchema(nestedClosed, { a: 1, extra: "x" }))
+      .toBeDefined();
+    // A key a nested branch does model is admitted either way.
+    expect(validateAgainstSchema(nestedClosed, { a: 1 })).toBeUndefined();
+  });
+
   it("takes an explicitly closed object at its word over its branches", () => {
     const schema = {
       type: "object",
@@ -1792,6 +1831,115 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       value: {
         evidence: { "@link": "opaque:child-run-1#/raw" },
       },
+      linkedStringCount: 0,
+    });
+  });
+
+  it("keeps a raw string a nested oneOf branch names as a constant", () => {
+    // The outer `oneOf` picks the branch, and the branch is a union of its
+    // own: the string survives only if the walk keeps descending through it.
+    const schema = {
+      type: "object",
+      properties: {
+        label: {
+          oneOf: [
+            { oneOf: [{ const: "one" }, { const: "two" }] },
+            { type: "number" },
+          ],
+        },
+      },
+      required: ["label"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { label: "two" },
+      opaqueHandleId: "run-1",
+    })).toEqual({ value: { label: "two" }, linkedStringCount: 0 });
+
+    // A string no branch names is not inert text, so it goes over as a link.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: {
+        type: "object",
+        properties: { label: { oneOf: [{ type: "string" }] } },
+        required: ["label"],
+        additionalProperties: false,
+      } as const satisfies JSONSchema,
+      value: { label: "three" },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { label: { "@link": "opaque:run-1#/label" } },
+      linkedStringCount: 1,
+    });
+  });
+
+  it("keeps a raw string a nested anyOf branch names as a constant", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        tag: {
+          oneOf: [
+            { anyOf: [{ const: "alpha" }, { const: "beta" }] },
+            { type: "number" },
+          ],
+        },
+      },
+      required: ["tag"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { tag: "beta" },
+      opaqueHandleId: "run-1",
+    })).toEqual({ value: { tag: "beta" }, linkedStringCount: 0 });
+
+    // The number branch of the same union is inert on its own terms.
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { tag: 7 },
+      opaqueHandleId: "run-1",
+    })).toEqual({ value: { tag: 7 }, linkedStringCount: 0 });
+  });
+
+  it("preserves an opaque link an allOf or oneOf branch declares", () => {
+    const opaqueLinkSchema = {
+      type: "object",
+      properties: { "@link": { type: "string" } },
+      required: ["@link"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const allOfSchema = {
+      type: "object",
+      properties: { evidence: { allOf: [opaqueLinkSchema] } },
+      required: ["evidence"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: allOfSchema,
+      value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
+      linkedStringCount: 0,
+    });
+
+    const oneOfSchema = {
+      type: "object",
+      properties: {
+        evidence: { oneOf: [opaqueLinkSchema, { type: "number" }] },
+      },
+      required: ["evidence"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema: oneOfSchema,
+      value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
+      opaqueHandleId: "run-1",
+    })).toEqual({
+      value: { evidence: { "@link": "opaque:child-run-1#/raw" } },
       linkedStringCount: 0,
     });
   });

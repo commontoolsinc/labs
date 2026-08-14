@@ -263,6 +263,43 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(command).not.toContain(HASH_B);
   });
 
+  it("gives a delegation that names no token a child with no handles at all", async () => {
+    const runId = "run-subagent-handles-unseeded";
+    const table = await parentTableOf(runId, [URI_A]);
+    const parentToken = table.entries[0]!.token;
+    const sandbox = new FakeSandboxRuntime();
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: sandbox,
+      runId,
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    });
+    await engine.recordHandleTable(table);
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine,
+      fetchFn: scriptedFetch([
+        // The delegation names no handle, so nothing of the parent's reaches
+        // the child: what a child can resolve is what the delegation handed
+        // it, and here that is nothing.
+        delegateCallTurn("call-delegate", {
+          goal: "Summarize the workspace README.",
+        }),
+        bashCallTurn("call-child", `cf get ${parentToken}`),
+        finalTurn("Child done."),
+        finalTurn("Parent done."),
+      ]),
+    });
+
+    await loop.runPrompt({ prompt: "Delegate the summary." });
+
+    // A token the child guessed at names nothing in the child, so it reaches
+    // the sandbox as the inert text it is rather than as an address.
+    const command = dispatchedCommand(sandbox, "cf get ");
+    expect(command).toContain(parentToken);
+    expect(command).not.toContain(HASH_A);
+  });
+
   it("shows the child the token rather than the reference in its own prompt", async () => {
     const runId = "run-subagent-handles-prompt";
     const table = await parentTableOf(runId, [URI_A]);

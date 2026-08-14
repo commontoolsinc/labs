@@ -107,6 +107,34 @@ describe("describe_handle", () => {
     expect(output.schema).toBeUndefined();
   });
 
+  it("reports no path for an entry whose reference does not parse", async () => {
+    // A table arrives as persisted state, so an entry's `ref` is only as
+    // well-formed as whatever wrote it. Reading the path is parsing, and an
+    // unparseable reference answers with no path rather than a failed call:
+    // the token is still known, and its shape is still reported.
+    const minted = await mintAddressHandle(
+      createHarnessHandleTable("run-describe"),
+      REF_A,
+      { schema: DOUBLED_SCHEMA },
+    );
+    const unparseable: HarnessHandleTable = {
+      ...minted.table,
+      entries: minted.table.entries.map((entry) => ({
+        ...entry,
+        ref: "of:not-an-address",
+      })),
+    };
+
+    const output = await describeHandleTool.invoke(
+      contextWith(unparseable),
+      { token: minted.token },
+    );
+
+    expect(output.known).toBe(true);
+    expect(output.path).toBeUndefined();
+    expect(output.hasSchema).toBe(true);
+  });
+
   it("reports a token it does not know without throwing", async () => {
     const output = await describeHandleTool.invoke(
       contextWith(createHarnessHandleTable("run-describe")),

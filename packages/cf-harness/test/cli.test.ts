@@ -3359,6 +3359,46 @@ Deno.test("formatCfHarnessTranscriptEvent formats assistant tool calls and tool 
     }),
     'assistant -> tools: read_file(path="/workspace/README.md")\n',
   );
+  // A `describe_handle` call is summarized by the token it asks about, which
+  // is what tells a transcript reader which reference the model checked.
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-3",
+          type: "function",
+          function: {
+            name: "describe_handle",
+            arguments: '{"token":"cfh:a:abcde"}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    'assistant -> tools: describe_handle(token="cfh:a:abcde")\n',
+  );
+  // A call whose token is not a string has no summary to show, so the tool
+  // name stands alone rather than a summary of something unread.
+  assertEquals(
+    formatCfHarnessTranscriptEvent({
+      message: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-4",
+          type: "function",
+          function: {
+            name: "describe_handle",
+            arguments: '{"token":42}',
+          },
+        }],
+      },
+      transcript: [],
+    }),
+    "assistant -> tools: describe_handle\n",
+  );
   assertEquals(
     formatCfHarnessTranscriptEvent({
       message: {
