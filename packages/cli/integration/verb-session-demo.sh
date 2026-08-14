@@ -56,9 +56,17 @@ SPACE="${SPACE:-$(mktemp -u demoXXXXXXXX)}"
 
 B=$'\033[1m'; D=$'\033[2m'; C=$'\033[36m'; Y=$'\033[33m'; N=$'\033[0m'
 R=$'\033[31m'
-# An act that is not marked BROKEN claims the command works. Counted so a
-# transcript that hid one cannot exit 0 and read as a clean session.
+# Every act makes a claim: one not marked BROKEN says the command works, one
+# marked BROKEN says a named defect is still there. Both are counted, so a
+# transcript that got either wrong cannot exit 0 and read as a clean session.
 UNEXPECTED=0
+CLOSED=0
+# stderr is read back rather than shown as it arrives, so a failure can be
+# printed under the act it belongs to. mktemp rather than a name built from the
+# pid: this runs in a shared directory, and a predictable path is one an
+# unrelated process can have already made a symlink at.
+ERR=$(mktemp)
+trap 'rm -f "$ERR"' EXIT
 act() { printf '\n%s━━ %s %s\n' "$B" "$1" "$N"; }
 say() { printf '%s   %s%s\n' "$D" "$1" "$N"; }
 
@@ -77,35 +85,54 @@ shown() {
 
 # Print a command and run it. Its output is shown and also kept in $OUT, so an
 # act that needs an address takes it out of the run the reader just watched.
-# stderr is dropped: it carries cf's next-step hints, which are addressed to a
-# person at a prompt rather than to a transcript.
+# stderr is held back rather than dropped: on success it carries only cf's
+# next-step hints, which are addressed to a person at a prompt rather than to a
+# transcript, but a failure here is the demo being wrong about the surface —
+# the thing this script exists to stop — and has to be as visible as the
+# transcript it would otherwise sit inside quietly.
 run() {
   printf '\n%s   $ %s%s\n' "$C" "$(shown "$@")" "$N"
-  # stderr is kept, not dropped. An act that is not marked BROKEN is a claim
-  # that the command works, so a failure here is the demo being wrong about
-  # the surface — the thing this script exists to stop — and it has to be as
-  # visible as the transcript it would otherwise sit inside quietly.
-  OUT=$("$@" 2>/tmp/verb-session-run-err.$$)
+  OUT=$("$@" 2>"$ERR")
   local rc=$?
   printf '%s\n' "$OUT" | sed 's/^/     /'
   if [ "$rc" != "0" ]; then
     printf '%s     UNEXPECTED FAILURE (exit %s) — this act is not marked BROKEN%s\n' \
       "$R" "$rc" "$N"
-    sed 's/^/       /' /tmp/verb-session-run-err.$$
+    sed 's/^/       /' "$ERR"
     UNEXPECTED=$((UNEXPECTED + 1))
   fi
-  rm -f /tmp/verb-session-run-err.$$
 }
 
 # Same, for a command that fails today: stderr is kept, because the error is
 # what the act exists to show. cf's two progress lines are dropped so it stands
 # alone.
+#
+# The BROKEN claim is checked, against the defect's own signature rather than
+# against the exit status — #5633 answers 0 and hands back nulls, so a status
+# check would call this act healthy today. `$2` is a jq test over stdout that
+# holds only while the defect does, and it is the same discriminator
+# verb-session-gaps.sh matches on, so the two cannot disagree about whether the
+# gap is open. An act asserting a defect that has been fixed is wrong in the
+# same way as one hiding a defect that has not.
+#
+# A future act that breaks by failing outright wants its signature written
+# against the exit status, and wants the branch for that written then rather
+# than guessed at now.
 broken() {
-  local why=$1
-  shift
+  local why=$1 signature=$2
+  shift 2
   printf '\n%s   $ %s%s\n' "$Y" "$(shown "$@")" "$N"
   printf '%s     BROKEN — %s%s\n' "$Y" "$why" "$N"
-  "$@" 2>&1 | grep -v '^invocation:\|^session:' | sed 's/^/       /'
+  local out
+  out=$("$@" 2>"$ERR")
+  [ -n "$out" ] && printf '%s\n' "$out" | sed 's/^/       /'
+  grep -v '^invocation:\|^session:' "$ERR" | sed 's/^/       /'
+  if ! printf '%s' "$out" | jq -e "$signature" >/dev/null 2>&1; then
+    printf '%s     GAP CLOSED — the defect this act names no longer answers to%s\n' \
+      "$R" "$N"
+    printf '%s     its own signature%s\n' "$R" "$N"
+    CLOSED=$((CLOSED + 1))
+  fi
 }
 
 # Show what a command will do once the capability it needs is built.
@@ -155,6 +182,7 @@ run cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
 act "6 · Ask the same question twice — BROKEN"
 say "The first thing anyone watching says is 'show me that again'."
 broken "a second read of one (source, schema) pair drops every projected field (#5633, fixed by #5764 in review)" \
+  '[.[]? | .title] | length > 0 and all(. == null)' \
   cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
 say "The addresses survive; the titles do not. The read reports success while"
 say "returning less than it did a moment ago, which is the part worth knowing."
@@ -209,5 +237,14 @@ if [ "$UNEXPECTED" != "0" ]; then
     "$R" "$UNEXPECTED" "$N"
   say "Every act above that is not marked BROKEN is a claim about the surface."
   say "One of them did not hold, so this transcript does not describe cf."
-  exit 1
 fi
+
+if [ "$CLOSED" != "0" ]; then
+  printf '\n%s━━ %d act(s) marked BROKEN no longer match their signature%s\n' \
+    "$R" "$CLOSED" "$N"
+  say "Either the capability arrived, or the signature needs rewriting. Both"
+  say "want this demo and verb-session-gaps.sh changed together — they match on"
+  say "the same evidence so that neither can go stale alone."
+fi
+
+[ "$UNEXPECTED" = "0" ] && [ "$CLOSED" = "0" ]
