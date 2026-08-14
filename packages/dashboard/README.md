@@ -714,7 +714,7 @@ Notes:
   their difference apart, with at least 3 samples supporting each — so noise
   produces no levels, and one stray sample is not a level. The second fit is a
   **straight line** through the median of the pairwise log-slopes, which is the
-  shape a series takes when it drifts, and it answers when its total deviation
+  shape a series takes when it drifts, and it wins when its total deviation
   is at least a tenth smaller. Reporting the difference across the fit rather
   than a slope extended over the window means a shift reads at its true size
   wherever in the window it sits: a shift in the newest samples is the one worth

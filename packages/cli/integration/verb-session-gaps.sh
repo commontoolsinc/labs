@@ -3,9 +3,11 @@
 # not work yet. Its companion `verb-session-demo.sh` shows the session as it is
 # meant to read; this one is the thing that keeps that honest.
 #
-# Three steps assert a GAP rather than a capability. Each fails loudly the day
+# Some steps assert a GAP rather than a capability. Each fails loudly the day
 # the gap closes, so this script is how we find out that a capability arrived
-# rather than discovering it months later in a stale document.
+# rather than discovering it months later in a stale document. How many are
+# open is tallied as they run and printed on the last line, so no prose here
+# can fall out of step with the assertions below.
 #
 # Documented in docs/common/verb-session-walkthrough.md.
 #
@@ -30,6 +32,7 @@ fi
 
 PASS=0
 FAIL=0
+GAPS=0
 step() { printf '\n== %s\n' "$1"; }
 ok() { printf '  PASS %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL + 1)); }
@@ -43,6 +46,7 @@ gap() {
     bad "GAP CLOSED — $2 now works; update this script and the walkthrough"
   else
     ok "gap still open: $2"
+    GAPS=$((GAPS + 1))
   fi
 }
 
@@ -76,6 +80,11 @@ VERBS=$($CF piece verbs --piece board $ARGS --json 2>/dev/null)
 echo "$VERBS" | jq -r '.verbs[]? | "    " + .name + "  (" + .kind + ")"' 2>/dev/null
 echo "$VERBS" | jq -e '[.verbs[]?.name] | index("addItem")' >/dev/null 2>&1 &&
   ok "addItem is listed" || bad "addItem missing from the listing"
+# The other half of a discovery surface, and the half that has no natural
+# witness: what it does NOT name. The board's `items` and `$NAME` are data, and
+# a listing that offers them hands a client operations that do not exist.
+check "addItem" "$(echo "$VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')" \
+  "the listing names the verb and nothing else"
 
 step "3. Ask what a verb wants — flags and prose, both derived"
 HELP=$($CF piece call --piece board $ARGS addItem -- --help 2>/dev/null)
@@ -128,12 +137,31 @@ ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
 check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link") and (.title|length>0)] | all')" \
   "a marker beside a projection returns the address AND the fields"
 KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"].id')
+# The very same read, run a second time. A (source cell, schema) pair is
+# reusable: it answers with what it answered before, which is what a caller
+# reaching for one projection twice depends on. Asserted by equality against
+# the first read rather than against a shape, because the property is that
+# nothing about the answer moved. The check above is what gives it force —
+# were the first read already empty, two empty reads would agree and this
+# would pass saying nothing.
+AGAIN=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
+  --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
+  2>/dev/null)
+check "$ADDR" "$AGAIN" "the same read, run again, answers the same"
 
-step "6. Two mechanisms name the piece, and they do not agree"
+step "6. Two routes hand back an address, and either one addresses the piece"
 # MEASURED, and not what you would guess: the address a call hands back
 # (--show-links) and the address a read projects ($link) are DIFFERENT entity
-# ids for the same piece. Both resolve — each reads back the same title — so
-# either is usable, but a caller cannot compare them for equality.
+# ids for the same piece — one resolves the link chain, the other renders the
+# link as stored. That is the read model working rather than a defect: an
+# address is many-to-one over cells, so a holder of one cannot tell a canonical
+# id from an alias and is never asked to. The property is stated in
+# docs/plans/shaped-reads-and-verb-results.md; #5632 asks whether the two ids
+# should agree and item 11 of docs/plans/verbs-implementation.md rules that
+# they are aliases. So their difference is asserted nowhere here: no day exists
+# on which it "closes", and a gap that can never fire is a gap that reports
+# nothing. What a caller does depend on is asserted instead — either address,
+# fed back to --piece, reads the same piece.
 MADE=$($CF piece call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Rate limiting"}' 2>/dev/null |
   jq -r '.links["/item"].id // empty' | sed 's/^of://')
@@ -149,11 +177,6 @@ else
   R_T=$($CF piece get --quiet --piece "$VIA_READ" title $ARGS 2>/dev/null | tr -d '"')
   check "Rate limiting" "$M_T" "the address the call returned addresses the piece"
   check "Rate limiting" "$R_T" "the address the read returned addresses the piece too"
-  if [ "$MADE" = "$VIA_READ" ]; then
-    bad "GAP CLOSED — the two routes now agree; simplify this step"
-  else
-    ok "gap still open: the two routes give different ids for one piece"
-  fi
 fi
 
 step "7. A verb returns what only the pattern could compute"
@@ -193,8 +216,9 @@ check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witne
 step "10. GAP: an address cannot be a verb argument"
 # blockOn declares `on: Writable<ItemOutput>` — a reference. `send()` already
 # resolves a native sigil (measured), so the pre-dispatch gate is the only
-# thing refusing this. Verbs plan item 11 closes it; see
-# docs/plans/references-as-arguments.md.
+# thing refusing this. docs/plans/references-as-arguments.md closes it — that
+# work carries no step number in the verbs plan, which numbers only the read
+# and result layers.
 OTHER=$($CF piece get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
   jq -r '.[0]["$link"].id // empty')
@@ -235,5 +259,6 @@ AFTER=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null 
 check "$((BEFORE + 1))" "$AFTER" "the write the result describes landed"
 
 ELAPSED=$(($(date +%s) - START))
-printf '\n== %d passed, %d failed — %ds wall clock\n' "$PASS" "$FAIL" "$ELAPSED"
+printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \
+  "$PASS" "$FAIL" "$GAPS" "$ELAPSED"
 [ "$FAIL" -eq 0 ]

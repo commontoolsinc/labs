@@ -100,6 +100,39 @@ do I get" are answerable before the first call rather than by making one:
 A value-less verb carries no `outputSchema` at all, which is how a caller tells
 the two apart without calling.
 
+The listing names verbs the pattern's declared result type does not mention: a
+pattern whose result type is its argument schema reused still returns the
+streams and tools it wired, and those are as callable as any other. Candidate
+names are drawn from the piece's stored surface and from its compiled pattern,
+and each one is listed only when the piece stores a callable behind it — so a
+data field is never offered as callable, whatever the pattern hangs at that
+name.
+
+Every row is real, and says where it lives: a name in the listing is a name
+`cf piece call` resolves, and the row's `on` names the cell the dispatcher
+will reach it on. Result shadows input there exactly as it does in
+`cf piece call`, so a verb stored on both cells is listed — and called — on
+the result cell, carrying that cell's schema. Build a payload from the row and
+it is the payload the verb you reach expects.
+
+The converse is weaker, and worth knowing before treating an empty listing as
+an answer:
+
+- A handler whose stored schema carries no stream marker is **callable but not
+  listed**. Nothing stored distinguishes it from a data field, and the one
+  probe that finds it accepts every name it is given, so listing on that probe
+  would offer the whole piece as callable. Given such a verb's name,
+  `cf piece call` still reaches it.
+- When the compiled pattern cannot be read, a verb the declared result type
+  omits has no other source of its name and is missing. The listing says so
+  rather than passing the short list off as the surface: `incomplete` carries
+  `"pattern-unavailable"` in `--json`, and the human listing prints the same
+  note. The verbs it does name are still callable.
+
+So absence from a listing that reports no `incomplete` means no *listable*
+verb of that name — strong enough to enumerate against, not strong enough to
+prove a named verb does not exist.
+
 One verb at a time, `--help` answers the same question from the callable
 itself:
 

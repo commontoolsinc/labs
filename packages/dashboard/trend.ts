@@ -142,7 +142,7 @@ function medianSlope(logs: number[]): number {
 // Overall change as the fractional difference between the start and the end of
 // a robust fit (+0.2 means the fit ends 20% higher than it starts).
 //
-// Two fits describe the series and the closer one answers. The first is a set
+// Two fits describe the series and the closer one wins. The first is a set
 // of flat levels meeting at change points, which is the shape a series takes
 // when something lands and shifts it. The second is a straight line through the
 // median pairwise slope, which is the shape a series takes when it drifts. Each
