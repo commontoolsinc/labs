@@ -48,7 +48,7 @@ import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
 // The history store falls back to the system temporary directory when no cache
 // directory is named. The package's test runner names a fresh one for each run.
 // Running this file directly gets whatever the last run left behind, which then
-// answers these tests in place of their own fixtures. Name a directory here when
+// feeds these tests in place of their own fixtures. Name a directory here when
 // nothing else has.
 if (Deno.env.get("DASHBOARD_CACHE_DIR") === undefined) {
   Deno.env.set(
@@ -3349,7 +3349,7 @@ Deno.test("benchmark: more samples than the fit reads are grouped, and the rise 
 });
 
 Deno.test("benchmark: a steady climb reads as the whole of its rise", () => {
-  // No step to find, so the straight line describes the series and answers with
+  // No step to find, so the straight line describes the series and reports
   // its rise from the first sample to the last.
   const times: number[] = [], values: number[] = [];
   for (let i = 0; i < 21; i++) {

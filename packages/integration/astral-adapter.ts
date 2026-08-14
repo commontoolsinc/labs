@@ -36,7 +36,7 @@ export type ElementHandle = AstralElementHandle & {
 export interface InteractionObserver {
   // `element` is absent when the click was aimed at a point rather than
   // resolved to a handle, which is how the CFC helpers dispatch: the wait that
-  // settles the control answers with coordinates, and no handle is taken.
+  // settles the control returns coordinates, and no handle is taken.
   beforeClick?(
     element: ElementHandle | undefined,
     point: { x: number; y: number },
