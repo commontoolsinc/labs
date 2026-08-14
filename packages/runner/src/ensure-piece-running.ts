@@ -94,7 +94,13 @@ export type EnsurePieceVerdict = {
      * syncs and re-asks). */
     | "no-pattern-meta"
     /** Meta present but `loadPatternByIdentity` found nothing. */
-    | "pattern-unloadable";
+    | "pattern-unloadable"
+    /** Minted by the serving loop's confirm step (space-server's
+     * `#confirmNoPatternMeta`), never by the traversal here: an
+     * observed-doc pull failed, so the no-meta verdict stays
+     * UNCONFIRMED — no terminal decision; the caller's deferred arm
+     * retries next cycle. */
+    | "confirm-pull-failed";
   /** The owning result doc's id (the chain terminus) where the chain
    * resolved — present for `started`, `no-pattern-meta`, and
    * `pattern-unloadable`. */

@@ -1070,6 +1070,13 @@ export class SpaceServer implements TransactionSealDestination {
         this.#drainedLateWindow.delete(oldest);
       }
       if (!late) this.#inputHead = record.seq;
+      // Skipped BEFORE the re-arm check below, deliberately: a
+      // SELF-holder derived commit touching a terminal root's observed
+      // docs does not re-arm it. Reachable only for a piece created
+      // server-side WITHOUT a local start — no such path exists
+      // (`runner.run` always starts locally), and FOREIGN derived
+      // commits (holder ≠ self) do re-arm. If a start-less server-side
+      // creation path ever appears, move this skip below the re-arm.
       const selfEcho = record.class === "derived" &&
         record.holder === this.#holder;
       if (selfEcho) continue;
@@ -1402,7 +1409,7 @@ export class SpaceServer implements TransactionSealDestination {
         } catch {
           // A failed pull leaves the verdict unconfirmed; the caller's
           // deferred arm retries next cycle.
-          return { ...verdict, reason: "chain-cycle" };
+          return { ...verdict, reason: "confirm-pull-failed" };
         }
       }
     }

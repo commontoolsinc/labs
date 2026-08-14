@@ -840,7 +840,11 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   red-first at the P2 base), `executor-serving-loop.test.ts`
   ("supplies the demanded (user, session) identity … END TO END" —
   registry → auto-stamped run → acting annotations + per-instance
-  basis rows in the engine, red-first). What REMAINS owed — one leg,
+  basis rows in the engine, red-first;
+  `executor-space-server.test.ts` adds the argument-doc demand — the
+  ensure-resolved owning root differs from the demanded id — reaching
+  the same observable through the resolved-root mapping). What
+  REMAINS owed — one leg,
   together: the replica-level per-instance READ keying (one doc, N
   instances read locally — the replica still keys scoped docs by
   scope name, the cardinality-1 collapse the sink-level fold test
@@ -848,7 +852,21 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   dirtiness precision that depends on it (until the replica holds
   distinct instances, per-instance local dirtiness is
   behaviorally unobservable; the node re-runs its current instance
-  set and equality cutoffs/memo hits absorb the siblings). Trigger:
+  set and equality cutoffs/memo hits absorb the siblings — those two
+  are the ONLY absorbers: event ids mint per origin transaction, so
+  sibling instance runs mint DISTINCT ids and a derivation body
+  calling `.send()` would dispatch once per demanded instance, with
+  no eventId-level dedupe absorbing it. Handler dispatch is a
+  separate non-fanned path (C11b), and derivation-emitted events are
+  an anti-pattern today; that surface is unpinned either way — a pin
+  is owed when they become legal). The read collapse has a VALUE
+  half, stated explicitly so Phase 5's trigger is legible: sibling
+  runs read the SAME collapsed local scoped doc, so at
+  cardinality ≥ 2 with genuinely divergent scoped inputs one user's
+  per-instance engine rows hold values derived from the OTHER user's
+  data, stamped acting = the wrong user — a consequence stage P2-F
+  SHARPENS (pre-P2-F, scoped writes never landed in user instances
+  at all). Trigger:
   no later than Phase 5's cross-space serving (foreign scoped
   instances make the local collapse load-bearing); flag-don't-fill
   until then.
