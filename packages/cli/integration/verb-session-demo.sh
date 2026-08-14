@@ -48,7 +48,11 @@ say "space $SPACE · nothing here was written for this pattern"
 
 act "1 · Arrive by name"
 say "A slug is a name in the space. After this, no fid appears again."
-BOARD=$($CF piece new "$FIXTURE" $ARGS 2>&1 | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
+# --quiet makes the piece id stdout's only line; stderr is dropped and the
+# grep anchored so a compile warning carrying a fid1: token cannot be taken
+# for the deploy's id.
+BOARD=$($CF piece new --quiet "$FIXTURE" $ARGS 2>/dev/null |
+  grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
 $CF piece set-slug board "$BOARD" $ARGS >/dev/null 2>&1
 printf '\n%s   $ cf piece new tracker.tsx --slug board%s\n' "$C" "$N"
 printf '     %s\n' "$BOARD"

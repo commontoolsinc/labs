@@ -58,8 +58,11 @@ echo "SPACE=$SPACE"
 START=$(date +%s)
 
 step "1. Arrive by name, not by fid"
-BOARD=$($CF piece new "$FIXTURE" $ARGS 2>&1 |
-  grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
+# --quiet makes the piece id stdout's only line; stderr is dropped and the
+# grep anchored so a compile warning carrying a fid1: token cannot be taken
+# for the deploy's id.
+BOARD=$($CF piece new --quiet "$FIXTURE" $ARGS 2>/dev/null |
+  grep -oE '^fid1:[A-Za-z0-9_-]+' | head -1)
 if [ -n "$BOARD" ]; then ok "deployed $BOARD"; else
   bad "deploy failed"
   exit 1
@@ -94,11 +97,16 @@ EPIC=$(echo "$R" | jq -r '.links["/item"].id // empty' | sed 's/^of://')
 if [ -n "$EPIC" ]; then ok "the result names its document: $EPIC"; else
   bad "no link for /item"
 fi
-# The receiver axis: call the verb ON the thing you were just handed.
+# The receiver axis: call the verb ON the thing you were just handed. The
+# children count below proves the writes landed; each call's exit code is
+# checked too, because the readback runs after the write commits — a readback
+# failure leaves the count intact, and only the exit code shows it.
 $CF piece call --quiet --piece "$EPIC" $ARGS \
-  addChild '{"title":"Session cookies"}' >/dev/null 2>&1
+  addChild '{"title":"Session cookies"}' >/dev/null 2>&1 ||
+  bad "addChild (Session cookies) exited nonzero"
 $CF piece call --quiet --piece "$EPIC" $ARGS \
-  addChild '{"title":"CSRF tokens"}' >/dev/null 2>&1
+  addChild '{"title":"CSRF tokens"}' >/dev/null 2>&1 ||
+  bad "addChild (CSRF tokens) exited nonzero"
 KIDS=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
@@ -150,8 +158,10 @@ AT=$(echo "$N" | jq -r '.result.note.at // 0')
   bad "no pattern-stamped time on the note"
 
 step "8. Finishing reports what the caller could not know"
+# Exit code checked for the same reason as step 4's creates.
 $CF piece call --quiet --piece "$KID" $ARGS \
-  addChild '{"title":"Rotate signing key"}' >/dev/null 2>&1
+  addChild '{"title":"Rotate signing key"}' >/dev/null 2>&1 ||
+  bad "addChild (Rotate signing key) exited nonzero"
 # Unshaped: a PROJECTED read of this path fails once `finish` has run, while
 # the same path unshaped resolves fine. Counting is all this step needs.
 DIRECT=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
