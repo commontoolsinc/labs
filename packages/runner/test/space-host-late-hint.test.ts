@@ -469,7 +469,9 @@ describe("late space host hints", () => {
           "https://hinted-toolshed.test",
         ),
       ).toBe(true);
-      await provider.replaceProvisionalReplica();
+      // registerSpaceHost triggered the replacement itself; settle it
+      // the way the neighboring tests do.
+      await manager.crossSpaceSettled();
       // The REPLACEMENT queue discharges the preserved intent with no
       // fresh fire; the working host's engine holds the entry.
       const delivered = await outcome;
