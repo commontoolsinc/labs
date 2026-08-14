@@ -22,6 +22,7 @@ import {
   type Server as MemoryServer,
 } from "@commonfabric/memory/v2/server";
 import { acquireServerExecutionEnabler } from "@commonfabric/memory/v2";
+import { selectPendingStreamEventDocs } from "@commonfabric/memory/v2/engine";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
@@ -195,16 +196,33 @@ export class ExecutorHost {
 
   /** Chain a fresh activation behind a park in progress. Gated on the
    * ACTIVE criteria again at fire time — the park may have been the
-   * last session leaving. */
+   * last session leaving. BOTH §1 criteria are consulted (verdict
+   * blocker, 2026-08-12): live sessions OR undelivered events. An
+   * event-only admission racing the park (a delegated cross-space
+   * delivery with no client anywhere) chains through here, and a
+   * sessions-only gate declined it — the delivered event sat unserved
+   * until an unrelated trigger. */
   #reactivateAfterPark(parking: SpaceServer, space: MemorySpace): void {
-    void parking.whenParked.then(() => {
+    void parking.whenParked.then(async () => {
       if (this.#closed || this.#spaces.get(space)?.active) return;
       if (
         !this.#options.server.hasLiveSessionsForSpace(space, {
           excludePrincipal: this.#options.serviceIdentity,
         })
       ) {
-        return;
+        try {
+          const engine = await this.#options.server.engineForSpace(space);
+          if (selectPendingStreamEventDocs(engine).length === 0) return;
+        } catch (error) {
+          logger.warn("reactivate-events-check-failed", () => [
+            `space ${space}: undelivered-events check failed after park; ` +
+            "not reactivating on it",
+            error,
+          ]);
+          return;
+        }
+        // The engine read awaited: re-check the activation preconditions.
+        if (this.#closed || this.#spaces.get(space)?.active) return;
       }
       void this.#activate(space, []);
     });

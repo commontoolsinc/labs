@@ -2552,7 +2552,17 @@ class SpaceReplica implements ISpaceReplica {
         space: this.#space,
         transact: async (commit) => {
           const { session } = await this.activeSessionHandle();
-          return await session.transact(commit, () => {});
+          // The route-write marker rides the SAME beforeIssue hook as
+          // ordinary commits (verdict blocker, 2026-08-12): an event
+          // append is a stateful operation against this route, so once
+          // one has issued, canReplaceProvisionalReplica() must answer
+          // false — a late host hint may no longer swap the replica out
+          // underneath the queue and strand its traffic on a closed
+          // route.
+          return await session.transact(
+            commit,
+            () => this.markRouteWriteIssued(),
+          );
         },
         // Allocated at SEND time from the replica's one counter, so the
         // increasing-localSeq send-order discipline (04-protocol §3.9)

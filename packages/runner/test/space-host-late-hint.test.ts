@@ -17,6 +17,11 @@ import {
   testPrincipalSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  resetServerExecutionConfig,
+  setServerExecutionConfig,
+  streamEntriesDocId,
+} from "@commonfabric/memory/v2";
 
 class LoopbackSessionFactory implements SessionFactory {
   constructor(
@@ -350,6 +355,56 @@ describe("late space host hints", () => {
       await writer.close();
       await defaultServer.close();
       await hintedServer.close();
+    }
+  });
+
+  it("refuses replacement after an EVENT APPEND issued on the provisional route (verdict blocker, 2026-08-12): the queue's commits are stateful route operations", async () => {
+    // Pre-fix the event queue's transact passed a no-op beforeIssue
+    // callback, skipping the writeIssuedGeneration marker ordinary
+    // commits set — so a late host hint could still approve
+    // replaceProvisionalReplica() after an event append had already
+    // targeted the original route, closing the old queue's route
+    // underneath its traffic.
+    setServerExecutionConfig(true);
+    const signer = await Identity.fromPassphrase("late-hint-event-append");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-event-append-target",
+    )).did();
+    const defaultServer = makeServer("late-hint-event-append-default");
+    const manager = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory(() => defaultServer),
+    );
+    try {
+      const provider = manager.open(targetSpace);
+      const replica = provider.replica as unknown as {
+        enqueueEventAppend(append: {
+          sidecarId: string;
+          stream: { id: string; path: readonly string[] };
+          eventId: string;
+          payload?: unknown;
+        }): Promise<{ delivered: boolean }>;
+      };
+      const stream = { id: "of:late-hint-stream", path: [] as string[] };
+      const outcome = await replica.enqueueEventAppend({
+        sidecarId: streamEntriesDocId(stream),
+        stream,
+        eventId: "evt-late-hint",
+        payload: { n: 1 },
+      });
+      expect(outcome.delivered).toBe(true);
+      // The issued append marked the route: a late hint to a DIFFERENT
+      // host may no longer replace the provisional replica.
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(false);
+    } finally {
+      resetServerExecutionConfig();
+      await manager.close();
+      await defaultServer.close();
     }
   });
 

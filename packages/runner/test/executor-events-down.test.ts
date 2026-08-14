@@ -741,6 +741,62 @@ describe("Phase 3 events-down (serving side)", () => {
       .toBeGreaterThanOrEqual(1);
   });
 
+  it("an event-only admission RACING a park reactivates the space — the fire-time gate honors the undelivered-events criterion, not just live sessions (verdict blocker, 2026-08-12)", async () => {
+    // Pre-fix, #reactivateAfterPark's fire-time gate required a live
+    // client session: a delegated cross-space delivery (no client
+    // anywhere) that raced a park chained the reactivation, which then
+    // DECLINED — the delivered event sat unserved until some unrelated
+    // trigger. serving-loop.md §1's ACTIVE criterion is sessions OR
+    // undelivered events; the gate must check both.
+    const engine = await server.engineForSpace(space);
+    host = newHost();
+    const parkRaceStream = { id: "of:park-race-piece", path: ["stream"] };
+    const first = await server.commitDelegatedAppend({
+      targetSpace: space,
+      targetStream: streamEntriesDocId(parkRaceStream),
+      targetStreamLink: parkRaceStream,
+      eventId: "evt-park-race-1",
+      payload: {},
+      actingPrincipal: aliceSigner.did(),
+      actingSession: "park-race-session",
+      capabilityRef: "cap-park-race",
+      sessionId: `service:${space}`,
+      localSeq: 990_300,
+    });
+    expect(first.deduped).toBe(false);
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "activation on the first delivered event",
+    );
+    const spaceServer = host!.spaceServer(space)!;
+    // Start the park, then deliver DURING it: the admission hook sees a
+    // registered, no-longer-active server and chains reactivation
+    // behind the park.
+    const parked = spaceServer.park("test-park-race");
+    const second = await server.commitDelegatedAppend({
+      targetSpace: space,
+      targetStream: streamEntriesDocId(parkRaceStream),
+      targetStreamLink: parkRaceStream,
+      eventId: "evt-park-race-2",
+      payload: {},
+      actingPrincipal: aliceSigner.did(),
+      actingSession: "park-race-session",
+      capabilityRef: "cap-park-race",
+      sessionId: `service:${space}`,
+      localSeq: 990_301,
+    });
+    expect(second.deduped).toBe(false);
+    await parked;
+    // The chained reactivation must FIRE despite zero client sessions:
+    // the engine holds undelivered events.
+    expect(Engine.selectPendingStreamEventDocs(engine).length)
+      .toBeGreaterThanOrEqual(1);
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "reactivation on the event-only admission racing the park",
+    );
+  });
+
   it("same-space cascade (LT1): the served handler's send commits a durable wave-carried entry with the INHERITED actor — processed exactly once", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
