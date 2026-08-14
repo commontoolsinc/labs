@@ -268,7 +268,7 @@ describe("cf piece call on a piece that points back at its container", () => {
     });
   });
 
-  it("answers a collection that re-enters with one address per element", async () => {
+  it("returns one address per element for a collection that re-enters", async () => {
     await withTracker("cyclic-returns-container", async ({ call }) => {
       await call("addChildSelf", ["--title", "First"]);
       const result = await call("addChildSelf", ["--title", "Second"]) as any;
@@ -331,7 +331,7 @@ describe("cf piece call on a piece that points back at its container", () => {
     });
   });
 
-  it("answers a `--select` that names the closing position with that position alone", async () => {
+  it("returns that position alone for a `--select` naming the closing position", async () => {
     await withTracker("cyclic-selection-names-cut", async ({ call }) => {
       const result = await call("addChild", ["--title", "Pointed"], {
         selection: { projection: parseSelectProjection("item.parent") },

@@ -276,7 +276,7 @@ describe("main command", () => {
 
   it("shows the supervisor's own help for the direct supervisor entry point", async () => {
     // The subcommand forwards its raw argv to the supervisor's parser, so the
-    // compiled binary and a direct `deno run` of the supervisor answer with the
+    // compiled binary and a direct `deno run` of the supervisor produce the
     // same flags and the same help.
     const { code, stdout } = await cf("fuse-supervisor --help");
 
