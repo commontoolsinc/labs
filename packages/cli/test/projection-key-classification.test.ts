@@ -372,6 +372,119 @@ describe("projection-key-classification", () => {
       ).toEqual({ title: "Visible" });
     });
 
+    it("returns the object without a source-required position the source declares as an array or a string", async () => {
+      const source = await seed("classification-union-type-source", {
+        type: "object",
+        properties: {
+          values: { type: ["array", "string"] },
+          title: { type: "string" },
+        },
+        required: ["values"],
+      }, { values: "not a list", title: "Visible" });
+
+      // The source admits an array here but does not require one, and what is
+      // stored is the other branch. The caller's array projection rejects it,
+      // so a `required` derived from "the source could be an array" voids the
+      // object around a position that simply declined to be read.
+      expect(
+        await read(source, {
+          type: "object",
+          properties: { values: { type: "array", items: true }, title: true },
+        }),
+      ).toEqual({ title: "Visible" });
+    });
+
+    it("returns the object without a source-required position an `anyOf` declares as an array or a string", async () => {
+      const source = await seed("classification-union-anyof-source", {
+        type: "object",
+        properties: {
+          values: {
+            anyOf: [
+              { type: "array", items: { type: "number" } },
+              { type: "string" },
+            ],
+          },
+          title: { type: "string" },
+        },
+        required: ["values"],
+      }, { values: "not a list", title: "Visible" });
+
+      expect(
+        await read(source, {
+          type: "object",
+          properties: { values: { type: "array", items: true }, title: true },
+        }),
+      ).toEqual({ title: "Visible" });
+    });
+
+    it("carries a source-required array into the output schema where the source declares only an array", async () => {
+      const source = await seed("classification-only-array-source", {
+        type: "object",
+        properties: {
+          values: { type: "array", items: { type: "number" } },
+          title: { type: "string" },
+        },
+        required: ["values"],
+      }, { values: [1], title: "Visible" });
+
+      const schema = await outputSchemaOf(source, {
+        type: "object",
+        properties: { values: { type: "array", items: true }, title: true },
+      });
+
+      expect((schema as Record<string, unknown>).required).toEqual(["values"]);
+    });
+
+    it("carries a source-required object into the output schema where the source declares only an object", async () => {
+      const source = await seed("classification-only-object-source", {
+        type: "object",
+        properties: {
+          topic: {
+            type: "object",
+            properties: { title: { type: "string" } },
+          },
+          title: { type: "string" },
+        },
+        required: ["topic"],
+      }, { topic: { title: "Inner" }, title: "Visible" });
+
+      const schema = await outputSchemaOf(source, {
+        type: "object",
+        properties: {
+          topic: { type: "object", properties: { title: true } },
+          title: true,
+        },
+      });
+
+      expect((schema as Record<string, unknown>).required).toEqual(["topic"]);
+    });
+
+    it("derives no `required` for a position whose container the source spells under `allOf`", async () => {
+      const source = await seed("classification-allof-source", {
+        type: "object",
+        properties: {
+          values: {
+            allOf: [
+              { type: "array", items: { type: "number" } },
+              { minItems: 1 },
+            ],
+          },
+          title: { type: "string" },
+        },
+        required: ["values"],
+      }, { values: [1], title: "Visible" });
+
+      const schema = await outputSchemaOf(source, {
+        type: "object",
+        properties: { values: { type: "array", items: true }, title: true },
+      });
+
+      // A conjunction constrains one value from several members at once, which
+      // is not a shape this derivation can state. Declining to require costs a
+      // key that would have survived; requiring wrongly costs the whole read.
+      expect((schema as Record<string, unknown>).required).toBeUndefined();
+    });
+
     it("returns the object without a source-required array whose items the caller narrowed to a mismatched scalar", async () => {
       const source = await seed("classification-item-mismatch-source", {
         type: "object",

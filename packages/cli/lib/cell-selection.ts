@@ -2006,17 +2006,54 @@ export function selectSourceSchema(
 }
 
 /**
- * Whether the container `named` can be read at a position the source declares
- * as `source`. A source that declares no type at all admits either container;
- * one that names a different type has narrowed the position to nothing
- * readable, whichever container the caller stated.
+ * Whether `source` **proves** the position holds the container `named`.
+ *
+ * "Can this be a container" is the wrong question here and "must it be" is the
+ * right one. A position the source declares as `["array","string"]` admits an
+ * array and holds whichever branch was stored; where it holds the string, a
+ * caller's array projection rejects it and the property is omitted. A
+ * `required` retained on the strength of the array branch then voids the
+ * object around a position that simply declined to be read — which is the one
+ * failure this whole survival rule exists to prevent.
+ *
+ * A source declaring no type proves nothing either, so it is not a container
+ * for this purpose: an untyped position can hold a scalar just as a union can.
+ *
+ * The same union has a second spelling that never reaches `schemaTypes`, so
+ * `anyOf` and `oneOf` are proven only where **every** branch proves the same
+ * container. `allOf` is refused outright rather than reasoned through: a
+ * conjunction constrains one value from several members at once, which is not
+ * a shape this derivation can state (#5761), and declining to require costs a
+ * key that would have survived while requiring wrongly costs the whole read.
  */
-function containerReadableInSource(
+function sourceProvesContainer(
   named: "object" | "array",
   source: JSONSchema | undefined,
+  visiting = new Set<object>(),
 ): boolean {
+  if (!isObjectOrArray(source)) return false;
+  if (visiting.has(source)) return false;
   const declared = schemaTypes(source);
-  return declared.length === 0 || declared.includes(named);
+  if (declared.length > 0) {
+    return declared.every((type) => type === named);
+  }
+  if (source.allOf !== undefined) return false;
+  visiting.add(source);
+  try {
+    for (const branches of [source.anyOf, source.oneOf]) {
+      if (
+        Array.isArray(branches) && branches.length > 0 &&
+        branches.every((branch) =>
+          sourceProvesContainer(named, branch, visiting)
+        )
+      ) {
+        return true;
+      }
+    }
+  } finally {
+    visiting.delete(source);
+  }
+  return false;
 }
 
 /**
@@ -2054,6 +2091,13 @@ function containerReadableInSource(
  * - `false`. Drops, as it did before any of this: a rejected position holds
  *   nothing to require.
  *
+ * Both container answers stand on the source proving that container at that
+ * position — {@link sourceProvesContainer}, not "the source admits one". A
+ * position the source declares as either an array or a scalar is a position
+ * the caller may have narrowed away from, and requiring it on the strength of
+ * the branch that matches the projection voids the read the same way every
+ * other case here does.
+ *
  * The rule only ever declines to require. Dropping a key that would have
  * survived costs nothing; keeping one that would not costs the entire read.
  */
@@ -2068,14 +2112,14 @@ function requiredSurvivesProjection(
   // {@link projectionMask}, so a position naming both vocabularies is read as
   // the array the selector built from it reads.
   if (types.includes("array") || projection.items !== undefined) {
-    return containerReadableInSource("array", source) &&
+    return sourceProvesContainer("array", source) &&
       requiredSurvivesProjection(projection.items, schemaAtArrayItem(source));
   }
   if (
     types.includes("object") || projection.properties !== undefined ||
     projection.additionalProperties !== undefined
   ) {
-    return containerReadableInSource("object", source);
+    return sourceProvesContainer("object", source);
   }
   return types.length === 0;
 }

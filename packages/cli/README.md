@@ -305,6 +305,14 @@ caller narrows the same way, because one rejected element rejects the array
 holding it. A narrowed position is then simply omitted from what comes back
 instead of emptying the read around it.
 
+A property the caller projects as a container keeps its derived `required` only
+where the source declares that container and nothing else. `{"type":"array"}`
+qualifies; `{"type":["array","string"]}` does not, nor does an `anyOf` whose
+branches disagree, nor an undeclared position, nor an `allOf` — each of those
+can hold something a container projection rejects, and the whole point of
+deriving the key this way is that a rejected position is omitted rather than
+emptying the object holding it.
+
 #### Asking for an address instead of contents
 
 A projection marks a position to get that position's address rather than what is
