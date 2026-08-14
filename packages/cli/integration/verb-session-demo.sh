@@ -19,10 +19,11 @@
 # Both are deliberately visible — a demo that quietly omits what does not work
 # teaches a surface that does not exist.
 #
-# One constraint on anyone editing this file: while #5633 is open, no two reads
-# may share a (source cell, schema) pair — the second one silently drops every
-# projected field. Act 6 is that failure, on purpose. Every other read here uses
-# a pair no other read uses, which is the only reason they pass.
+# One constraint on anyone editing this file: while #5633 is open — its fix is
+# in review as #5764 — no two reads may share a (source cell, schema) pair; the
+# second one silently drops every projected field. Act 6 is that failure, on
+# purpose. Every other read here uses a pair no other read uses, which is the
+# only reason they pass.
 #
 #   API_URL=http://localhost:8000 packages/cli/integration/verb-session-demo.sh
 set -uo pipefail
@@ -137,7 +138,7 @@ run cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
 
 act "6 · Ask the same question twice — BROKEN"
 say "The first thing anyone watching says is 'show me that again'."
-broken "a second read of one (source, schema) pair drops every projected field (#5633)" \
+broken "a second read of one (source, schema) pair drops every projected field (#5633, fixed by #5764 in review)" \
   cf piece get -s "$SPACE" --piece "$EPIC" children --select @,title
 say "The addresses survive; the titles do not. The read reports success while"
 say "returning less than it did a moment ago, which is the part worth knowing."
@@ -183,6 +184,6 @@ say "call handed back — which is the composition the verb surface exists for,"
 say "and the reason those lines are as long as they are."
 say ""
 say "Acts 9 and 10 are the graph half, and they are sequenced as verbs plan"
-say "item 11. Act 6 is a defect, with #5633 open against it."
+say "item 11. Act 6 is a defect: #5633, with a fix in review as #5764."
 say "verb-session-gaps.sh asserts all three, and fails the day any one of them"
 say "changes — so this demo cannot quietly go stale."

@@ -3,9 +3,11 @@
 # not work yet. Its companion `verb-session-demo.sh` shows the session as it is
 # meant to read; this one is the thing that keeps that honest.
 #
-# Four steps assert a GAP rather than a capability. Each fails loudly the day
+# Some steps assert a GAP rather than a capability. Each fails loudly the day
 # the gap closes, so this script is how we find out that a capability arrived
-# rather than discovering it months later in a stale document.
+# rather than discovering it months later in a stale document. How many are
+# open is tallied as they run and printed on the last line, so no prose here
+# can fall out of step with the assertions below.
 #
 # Documented in docs/common/verb-session-walkthrough.md.
 #
@@ -30,6 +32,7 @@ fi
 
 PASS=0
 FAIL=0
+GAPS=0
 step() { printf '\n== %s\n' "$1"; }
 ok() { printf '  PASS %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL + 1)); }
@@ -43,6 +46,7 @@ gap() {
     bad "GAP CLOSED — $2 now works; update this script and the walkthrough"
   else
     ok "gap still open: $2"
+    GAPS=$((GAPS + 1))
   fi
 }
 
@@ -135,20 +139,42 @@ check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link") and (.title|length>0)]
 KID=$(echo "$ADDR" | jq -r '.[] | select(.title=="Session cookies") | .["$link"].id')
 # GAP: the very same read, run a second time. A (source cell, schema) pair
 # serves exactly once — the second read reports success and returns null for
-# every projected field, while the addresses survive (#5633). The check above
-# is what makes this comparison mean anything: were the first read already
-# empty, the two would agree and this would misreport the gap as closed.
+# every projected field, while the addresses survive (#5633; the fix is in
+# review as #5764, so this is the assertion that will announce it landing).
+# The check above is what makes this comparison mean anything: were the first
+# read already empty, the two would agree and this would misreport the gap as
+# closed. Matched against that SPECIFIC shape rather than against "differs at
+# all": a server hiccup or a renamed field also differs, and a probe that reads
+# any difference as "gap still open" is a probe that cannot fail.
 AGAIN=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   --schema '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
   2>/dev/null)
-[ "$ADDR" = "$AGAIN" ]
-gap "$?" "a second read of one (source, schema) pair returning what the first did"
+SECOND_READ="a second read of one (source, schema) pair returning what the first did"
+ADDR_IDS=$(echo "$ADDR" | jq -c '[.[]? | .["$link"].id]' 2>/dev/null)
+AGAIN_IDS=$(echo "$AGAIN" | jq -c '[.[]? | .["$link"].id]' 2>/dev/null)
+AGAIN_DROPPED=$(echo "$AGAIN" |
+  jq -c '[.[]? | .title] | length > 0 and all(. == null)' 2>/dev/null)
+if [ "$ADDR" = "$AGAIN" ]; then
+  gap 0 "$SECOND_READ"
+elif [ "$AGAIN_IDS" = "$ADDR_IDS" ] && [ "$AGAIN_DROPPED" = "true" ]; then
+  gap 1 "$SECOND_READ (it keeps the addresses and drops every field)"
+else
+  bad "the second read differed in a way that is not the known drop: $AGAIN"
+fi
 
-step "6. Two mechanisms name the piece, and they do not agree"
+step "6. Two routes hand back an address, and either one addresses the piece"
 # MEASURED, and not what you would guess: the address a call hands back
 # (--show-links) and the address a read projects ($link) are DIFFERENT entity
-# ids for the same piece. Both resolve — each reads back the same title — so
-# either is usable, but a caller cannot compare them for equality.
+# ids for the same piece — one resolves the link chain, the other renders the
+# link as stored. That is the read model working rather than a defect: an
+# address is many-to-one over cells, so a holder of one cannot tell a canonical
+# id from an alias and is never asked to. The property is stated in
+# docs/plans/shaped-reads-and-verb-results.md; #5632 asks whether the two ids
+# should agree and item 11 of docs/plans/verbs-implementation.md rules that
+# they are aliases. So their difference is asserted nowhere here: no day exists
+# on which it "closes", and a gap that can never fire is a gap that reports
+# nothing. What a caller does depend on is asserted instead — either address,
+# fed back to --piece, reads the same piece.
 MADE=$($CF piece call --quiet --show-links --piece board $ARGS \
   addItem '{"title":"Rate limiting"}' 2>/dev/null |
   jq -r '.links["/item"].id // empty' | sed 's/^of://')
@@ -164,11 +190,6 @@ else
   R_T=$($CF piece get --quiet --piece "$VIA_READ" title $ARGS 2>/dev/null | tr -d '"')
   check "Rate limiting" "$M_T" "the address the call returned addresses the piece"
   check "Rate limiting" "$R_T" "the address the read returned addresses the piece too"
-  if [ "$MADE" = "$VIA_READ" ]; then
-    bad "GAP CLOSED — the two routes now agree; simplify this step"
-  else
-    ok "gap still open: the two routes give different ids for one piece"
-  fi
 fi
 
 step "7. A verb returns what only the pattern could compute"
@@ -250,5 +271,6 @@ AFTER=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null 
 check "$((BEFORE + 1))" "$AFTER" "the write the result describes landed"
 
 ELAPSED=$(($(date +%s) - START))
-printf '\n== %d passed, %d failed — %ds wall clock\n' "$PASS" "$FAIL" "$ELAPSED"
+printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \
+  "$PASS" "$FAIL" "$GAPS" "$ELAPSED"
 [ "$FAIL" -eq 0 ]
