@@ -6,7 +6,7 @@ import {
   cloneIfNecessary,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isInstance, isObject } from "@commonfabric/utils/types";
+import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
 import { type EntityDocument, isEntityDocument, type PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
@@ -21,7 +21,7 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * `structuredClone()` MUST NOT be used here: it silently demotes class
  * instances to plain objects. A demoted `FabricError` then fails the
  * `value instanceof FabricInstance` check in the wire/persistence codec
- * (`jsonFromValue`/`FabricInstanceHandler`), so it is serialized
+ * (`jsonFromFabricValue()`/`FabricInstanceHandler`), so it is serialized
  * generically and its wrapped native `Error` -- whose `message`/`stack`
  * are non-enumerable -- collapses to `{}`, losing the error entirely.
  *
@@ -35,26 +35,6 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  */
 const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
 
-/**
- * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
- * `remove`, `move`, `splice`) to a document tree, returning a new document
- * tree with the patches applied in order. JSON Pointer paths in the ops are
- * parsed via `parsePointer()` from `./path.ts`.
- *
- * Used during document materialization: `engine.ts` walks the stored patch
- * sequence for a branch and rebuilds the current document by replaying each
- * patch on top of the previous state (`applyPatchDocument` → `applyPatch`).
- * The function is therefore on the hot path for any read that reconstructs
- * a document from its stored patch list.
- *
- * Mutation discipline: each op is applied via a copy-on-write descent. The
- * spine of containers from the root down to the mutated container is thawed to
- * fresh mutable copies (via `cloneForMutation()`), the leaf operation is applied
- * to that mutable container, and subtrees off the spine stay frozen-by-reference
- * (structural sharing). The assembled tree is then fully deep-frozen at the
- * `applyPatch` boundary, so callers can rely on the return value being deeply
- * frozen.
- */
 /**
  * A patch that cannot apply to the given base: a path descending through a
  * non-container, a kind mismatch (append onto a non-array), an invalid
@@ -96,6 +76,26 @@ export const applyPatchToDocument = (
   return patched;
 };
 
+/**
+ * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
+ * `remove`, `move`, `splice`) to a document tree, returning a new document
+ * tree with the patches applied in order. JSON Pointer paths in the ops are
+ * parsed via `parsePointer()` from `./path.ts`.
+ *
+ * Used during document materialization: `engine.ts` walks the stored patch
+ * sequence for a branch and rebuilds the current document by replaying each
+ * patch on top of the previous state (`applyPatchDocument` → `applyPatch`).
+ * The function is therefore on the hot path for any read that reconstructs
+ * a document from its stored patch list.
+ *
+ * Mutation discipline: each op is applied via a copy-on-write descent. The
+ * spine of containers from the root down to the mutated container is thawed to
+ * fresh mutable copies (via `cloneForMutation()`), the leaf operation is applied
+ * to that mutable container, and subtrees off the spine stay frozen-by-reference
+ * (structural sharing). The assembled tree is then fully deep-frozen at the
+ * `applyPatch` boundary, so callers can rely on the return value being deeply
+ * frozen.
+ */
 export const applyPatch = (
   state: FabricValue,
   ops: PatchOp[],
@@ -495,7 +495,7 @@ const isArraySegment = (segment: string): boolean =>
   /^(0|[1-9]\d*)$/.test(segment);
 
 const isPatchObject = (value: FabricValue): value is PatchObject =>
-  isObject(value) && !isInstance(value);
+  isObjectNotArray(value) && !isInstance(value);
 
 const isContainer = (value: FabricValue): value is PatchContainer =>
   Array.isArray(value) || isPatchObject(value);

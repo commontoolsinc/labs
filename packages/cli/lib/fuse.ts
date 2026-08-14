@@ -350,19 +350,21 @@ function openGetfsstat():
 }
 
 /**
- * Reads the darwin kernel mount table via getfsstat(MNT_NOWAIT) and returns the
- * canonical f_mntonname of every mount. Returns null (→ caller reports
- * "unknown") if FFI is unavailable or the call fails — never a partial or empty
- * list masquerading as "no mounts" on error.
+ * The libc getfsstat signature we depend on. Injectable so the error-mapping
+ * path (native failure → null) is testable without a real syscall.
  */
-// The libc getfsstat signature we depend on. Injectable so the error-mapping
-// path (native failure → null) is testable without a real syscall.
 export type GetfsstatFn = (
   buf: Deno.PointerValue,
   bytes: number,
   flags: number,
 ) => number;
 
+/**
+ * Reads the darwin kernel mount table via getfsstat(MNT_NOWAIT) and returns the
+ * canonical f_mntonname of every mount. Returns null (→ caller reports
+ * "unknown") if FFI is unavailable or the call fails — never a partial or empty
+ * list masquerading as "no mounts" on error.
+ */
 export function readDarwinMountpoints(call?: GetfsstatFn): string[] | null {
   let fn = call;
   let close = () => {};

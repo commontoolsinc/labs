@@ -1,13 +1,26 @@
+/**
+ * A day count as a fabric primitive: always frozen, wrapping a `bigint`, and
+ * encoded to a flat base64 string.
+ *
+ * Days before the epoch are the case worth keeping, a negative count being
+ * where an encoding stops round-tripping if it was only ever tried on
+ * positive ones. Conversion leaves an instance alone even when asked for
+ * something mutable, the value being immutable by construction rather than by
+ * request.
+ *
+ * Malformed state decodes to a `ProblematicValue` rather than throwing.
+ */
+
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/fabric-value.ts";
-import { CODEC } from "@/codec-common/interface.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 
 describe("FabricEpochDays", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
@@ -49,8 +62,8 @@ describe("FabricEpochDays", () => {
   });
 
   describe("static members", () => {
-    describe("[CODEC]", () => {
-      const codec = FabricEpochDays[CODEC];
+    describe("`[JSON_CODEC]`", () => {
+      const codec = FabricEpochDays[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.EpochDays;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 

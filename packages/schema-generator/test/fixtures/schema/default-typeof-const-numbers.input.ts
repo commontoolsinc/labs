@@ -1,14 +1,16 @@
-// Tests `Default<T, typeof CONST>` where the constant's initializer holds
-// numbers that are not bare literals: sign-prefixed ones, and the non-finite
-// globals.
-//
-// A literal-type payload is handed over by the checker, but an object or array
-// payload is not -- those values are read off the constant's initializer in the
-// AST. That reader has to recognize a number in every spelling it has, or the
-// value silently does not arrive.
-//
-// Note what this fixture depends on: the golden has to be able to hold `-0`,
-// `NaN` and the infinities to pin any of it.
+/**
+ * Tests `Default<T, typeof CONST>` where the constant's initializer holds
+ * numbers that are not bare literals: sign-prefixed ones, and the non-finite
+ * globals.
+ *
+ * A literal-type payload is handed over by the checker, but an object or array
+ * payload is not -- those values are read off the constant's initializer in the
+ * AST. That reader has to recognize a number in every spelling it has, or the
+ * value silently does not arrive.
+ *
+ * Note what this fixture depends on: the golden has to be able to hold `-0`,
+ * `NaN` and the infinities to pin any of it.
+ */
 
 import { Default } from "commonfabric";
 

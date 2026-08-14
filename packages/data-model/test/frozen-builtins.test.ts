@@ -1,3 +1,16 @@
+/**
+ * Immutable counterparts to `Map` and `Set`, and the key equality they carry
+ * over.
+ *
+ * The cases that matter are the ones where key identity is not obvious:
+ * signed zeros and the non-finite values, where a collection's notion of "the
+ * same key" is not `===` and has to be preserved rather than quietly improved
+ * upon.
+ *
+ * The set additionally carries the algebra -- union, intersection, difference
+ * -- which an immutable receiver can only express by producing a new set.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

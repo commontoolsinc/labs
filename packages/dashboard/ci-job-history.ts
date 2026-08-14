@@ -1,7 +1,10 @@
-// Historical wall-clock duration for every job in the labs and loom CI
-// workflows. The page samples successful main runs, persists each completed
-// attempt's jobs, and uses the same trailing-parenthesis grouping as
-// scripts/ci-gantt.ts.
+/**
+ * Charts the historical wall-clock duration of every job in the labs and loom
+ * CI workflows. The page samples successful main runs, persists each completed
+ * attempt's jobs, and uses the same trailing-parenthesis grouping as
+ * scripts/ci-gantt.ts.
+ */
+
 import {
   type CachedCiGanttJob,
   type CachedCiRun,

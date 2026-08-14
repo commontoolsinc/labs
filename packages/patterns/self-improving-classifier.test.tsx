@@ -11,7 +11,7 @@
  * instead of action() with closures to avoid "reactive reference outside
  * reactive context" errors when accessing proxy objects like subject.submitItem.
  */
-import { assert, Cell, handler, pattern, Stream } from "commonfabric";
+import { assert, Cell, handler, pattern, Stream, TESTS } from "commonfabric";
 import SelfImprovingClassifier, {
   type ClassificationRule,
   type LabeledExample,
@@ -181,7 +181,7 @@ export default pattern(() => {
 
   // Return tests array using discriminated union format
   return {
-    tests: [
+    [TESTS]: [
       // Test 1: Initial state is empty
       { assertion: assert_initial_examples_empty },
       { assertion: assert_initial_rules_empty },

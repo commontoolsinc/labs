@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { action, cell, pattern, Stream } from "commonfabric";
+import { action, cell, handler, pattern, Stream } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -21,8 +21,44 @@ interface AddTopicResult {
 }
 interface Verbs {
     addTopic: Stream<AddTopic, AddTopicResult>;
+    renameTopic: Stream<AddTopic, AddTopicResult>;
     touch: Stream<AddTopic>;
 }
+// The other result-authoring surface: `handler`'s THIRD type argument, bound
+// to its state at the call site rather than by closure capture.
+const renameTopic = handler({
+    type: "object",
+    properties: {
+        title: {
+            type: "string"
+        }
+    },
+    required: ["title"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        count: {
+            type: "number"
+        }
+    },
+    required: ["count"]
+} as const satisfies __cfHelpers.JSONSchema, (event, _state) => {
+    return { topic: { fid: event.title } };
+}, { resultSchema: {
+        type: "object",
+        properties: {
+            topic: {
+                type: "object",
+                properties: {
+                    fid: {
+                        type: "string"
+                    }
+                },
+                required: ["fid"]
+            }
+        },
+        required: ["topic"]
+    } as const satisfies __cfHelpers.JSONSchema });
 const __cfHandler_1 = __cfHelpers.handler({
     type: "object",
     properties: {
@@ -43,7 +79,21 @@ const __cfHandler_1 = __cfHelpers.handler({
 } as const satisfies __cfHelpers.JSONSchema, (event, { count }) => {
     count.set(count.get() + 1);
     return { topic: { fid: event.title } };
-});
+}, { resultSchema: {
+        type: "object",
+        properties: {
+            topic: {
+                type: "object",
+                properties: {
+                    fid: {
+                        type: "string"
+                    }
+                },
+                required: ["fid"]
+            }
+        },
+        required: ["topic"]
+    } as const satisfies __cfHelpers.JSONSchema });
 const __cfHandler_2 = __cfHelpers.handler({
     type: "object",
     properties: {
@@ -84,7 +134,7 @@ export default pattern(() => {
     // task), so if a returning verb ever stops satisfying `Stream<E, R>` this
     // file fails to compile. An earlier revision declared `Verbs` and never
     // returned against it, which asserted nothing.
-    return { addTopic: addTopic.for({ stream: ["__patternResult", "addTopic"] }, true), touch: touch.for({ stream: ["__patternResult", "touch"] }, true) };
+    return { addTopic: addTopic.for({ stream: ["__patternResult", "addTopic"] }, true), renameTopic: renameTopic({ count }).for({ stream: ["__patternResult", "renameTopic"] }, true), touch: touch.for({ stream: ["__patternResult", "touch"] }, true) };
 }, {
     type: "object",
     properties: {},
@@ -96,12 +146,16 @@ export default pattern(() => {
             $ref: "#/$defs/AddTopic",
             asCell: ["stream"]
         },
+        renameTopic: {
+            $ref: "#/$defs/AddTopic",
+            asCell: ["stream"]
+        },
         touch: {
             $ref: "#/$defs/AddTopic",
             asCell: ["stream"]
         }
     },
-    required: ["addTopic", "touch"],
+    required: ["addTopic", "renameTopic", "touch"],
     $defs: {
         AddTopic: {
             type: "object",
@@ -115,13 +169,22 @@ export default pattern(() => {
     }
 } as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: stream-declared-result
-// Verifies: a declared result on Stream's second parameter survives the
-//   transformer and still satisfies the pattern's own Output annotation.
-//   `action` is the sole result-authoring surface — `handler()` produces
-//   HandlerFactory<E, T, void>, so the same shape written with `handler` does
-//   not compile. C2 lowers the returned value; C3 emits the result schema.
-//   Until both land, a returning verb transforms exactly like a value-less
-//   one, and this golden is the baseline they move.
+// Verifies: a declared result on Stream's second parameter reaches the
+//   emitted module, and still satisfies the pattern's own Output annotation.
+//   Both authoring surfaces are covered: `action<Event, Result>`, whose
+//   lowering to `handler` carries the result into handler's third
+//   type-argument slot, and `handler<Event, State, Result>` written
+//   directly. Either way the schema lands in the trailing handler options as
+//   `{ resultSchema: … }`, which is where the runtime reads it
+//   (`builder/module.ts`) to describe a receipt whose result launched a
+//   pattern. The value-less `touch` beside them emits no options object at
+//   all — the declaration is opt-in, and its absence stays absent.
+//
+// The result does NOT reach the pattern's own `resultSchema`: the verbs there
+// keep the bare `asCell: ["stream"]` marker. That boundary is deliberate.
+// `Pattern.resultSchema` is what `assertPatternSchemasBackwardCompatible`
+// compares across versions, so a result landing there would make every
+// declared verb result permanently binding on the next deploy.
 //
 // The explicit type-argument form does NOT cost the input schema: `addTopic`
 // emits `{title: string}` from `action<AddTopic, …>` with an unannotated
@@ -134,6 +197,7 @@ export default pattern(() => {
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
+    renameTopic,
     __cfHandler_1,
     __cfHandler_2
 });

@@ -23,6 +23,7 @@ import {
   equals,
   handler,
   pattern,
+  TESTS,
   Writable,
 } from "commonfabric";
 
@@ -94,7 +95,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assertStartsThree },
       { action: removeMiddle },
       { assertion: assertTwoAfterRemove },

@@ -1,3 +1,15 @@
+/**
+ * `toURI()` and `fromURI()` are not a round trip in both directions: the
+ * scheme carries the entity kind and `fromURI()` strips it, so a bare hash
+ * re-minted through `toURI()` names the `of:` sibling of the `computed:` id it
+ * came from rather than that id itself.
+ *
+ * What `toURI()` accepts also depends on the modern-cell-rep regime. A bare
+ * `{ "/": … }` is a content-id reference in the legacy form and never one in
+ * the modern form, where it is refused rather than mishandled, so the cases
+ * that turn on the distinction set the flag rather than assuming a default.
+ */
+
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";

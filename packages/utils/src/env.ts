@@ -1,6 +1,8 @@
-// Predicates for the JavaScript environment the calling code finds itself in.
-// Each is a feature test, not a build-time constant, so a single bundle can
-// ask at runtime which of its supported hosts it landed in.
+/**
+ * Predicates for the JavaScript environment the calling code finds itself in.
+ * Each is a feature test, not a build-time constant, so a single bundle can
+ * ask at runtime which of its supported hosts it landed in.
+ */
 
 /** Indicates whether the current environment is Deno. */
 export function isDeno(): boolean {

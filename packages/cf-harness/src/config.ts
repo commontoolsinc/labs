@@ -3,7 +3,11 @@ import {
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
 import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
-import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
+import {
+  type HarnessCredentialOwnerRef,
+  harnessCredentialOwnersEqual,
+  type HarnessRunManifest,
+} from "./contracts/run-manifest.ts";
 import type {
   HarnessAllowedSkillScript,
   HarnessSkillScriptExecutionTarget,
@@ -15,14 +19,34 @@ export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
   "enforce-explicit" as const satisfies CfcEnforcementMode;
 export type HarnessGatewayAuthMode = "bearer" | "none";
+
+/**
+ * Connection settings for the trusted Fabric session behind the
+ * `run_pattern` tool: the deployed API URL, a PKCS#8 identity keyfile path
+ * on the host, and the target space (a name or a `did:key`). When present,
+ * the run offers `run_pattern` in the parent tool surface; when absent, the
+ * tool is unavailable.
+ */
+export interface HarnessFabricSessionConfig {
+  apiUrl: string;
+  identityKeyPath: string;
+  space: string;
+}
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"
   | "openai-codex";
-export type HarnessModelAuthSource = "api-key" | "none" | "owner-bound-oauth";
+export type HarnessModelAuthSource =
+  | "api-key"
+  | "none"
+  | "owner-bound-oauth"
+  | "cf-harness-local-store";
 
 interface HarnessCommonConfig {
   cwd?: string;
   model?: string;
+  modelAuthSource?: HarnessModelAuthSource;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  harnessHomeIdentity?: string;
   skillsRoot?: string;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
@@ -30,6 +54,7 @@ interface HarnessCommonConfig {
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
+  fabricSession?: HarnessFabricSessionConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -65,6 +90,9 @@ export type ResolvedHarnessConfig =
 export interface ResolveHarnessConfigOptions {
   modelProvider?: HarnessModelProviderId;
   credentialOwnerKey?: string;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  modelAuthSource?: HarnessModelAuthSource;
+  harnessHomeIdentity?: string;
   gatewayBaseUrl?: string;
   gatewayAuthMode?: HarnessGatewayAuthMode;
   gatewayAuthModeOverride?: string | HarnessGatewayAuthMode;
@@ -78,6 +106,7 @@ export interface ResolveHarnessConfigOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
+  fabricSession?: HarnessFabricSessionConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -180,6 +209,32 @@ export const resolveHarnessConfig = (
 ): ResolvedHarnessConfig => {
   const modelProvider = options.modelProvider ?? "openai-compatible-gateway";
   if (
+    options.credentialOwner !== undefined &&
+    options.runManifest?.credentialOwner !== undefined &&
+    !harnessCredentialOwnersEqual(
+      options.credentialOwner,
+      options.runManifest.credentialOwner,
+    )
+  ) {
+    throw new Error(
+      "configured credential owner does not match run manifest credential owner",
+    );
+  }
+  const credentialOwner = options.credentialOwner ??
+    options.runManifest?.credentialOwner;
+  const harnessHomeIdentity = options.harnessHomeIdentity ??
+    options.runManifest?.harnessHomeIdentity;
+  const modelAuthSource = options.modelAuthSource ??
+    options.runManifest?.modelAuthSource;
+  if (
+    credentialOwner !== undefined && options.credentialOwnerKey !== undefined &&
+    credentialOwner.ownerKey !== options.credentialOwnerKey
+  ) {
+    throw new Error(
+      "credential owner reference does not match configured credential owner key",
+    );
+  }
+  if (
     modelProvider === "openai-codex" &&
     (options.gatewayBaseUrl !== undefined ||
       options.gatewayAuthMode !== undefined ||
@@ -192,6 +247,9 @@ export const resolveHarnessConfig = (
   const common: HarnessCommonConfig = {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
+    ...(modelAuthSource !== undefined ? { modelAuthSource } : {}),
+    ...(credentialOwner !== undefined ? { credentialOwner } : {}),
+    ...(harnessHomeIdentity !== undefined ? { harnessHomeIdentity } : {}),
     ...(options.skillsRoot !== undefined
       ? { skillsRoot: options.skillsRoot }
       : {}),
@@ -214,12 +272,16 @@ export const resolveHarnessConfig = (
       : {}),
     cfcEnforcementMode: resolveCfcEnforcementMode(options),
     cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
+    ...(options.fabricSession !== undefined
+      ? { fabricSession: options.fabricSession }
+      : {}),
   };
   if (modelProvider === "openai-codex") {
     return {
       ...common,
       modelProvider,
-      credentialOwnerKey: options.credentialOwnerKey ?? "local",
+      credentialOwnerKey: options.credentialOwnerKey ??
+        credentialOwner?.ownerKey ?? "local",
       gatewayBaseUrl: normalizeGatewayBaseUrl(DEFAULT_GATEWAY_BASE_URL),
       gatewayAuthMode: "bearer",
     };

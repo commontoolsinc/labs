@@ -1,5 +1,5 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 /**
  * Integrity-atom propagation classes (spec §15 registry, §3.1.6.1):
@@ -58,7 +58,7 @@ const CLASS_BY_TYPE = new Map<string, PropagationClass>([
 ]);
 
 export const atomPropagationClass = (atom: unknown): PropagationClass => {
-  if (isRecord(atom) && typeof atom.type === "string") {
+  if (isObjectOrArray(atom) && typeof atom.type === "string") {
     return CLASS_BY_TYPE.get(atom.type) ?? "value-bound";
   }
   // String atoms and kind-shaped records (authored-by /

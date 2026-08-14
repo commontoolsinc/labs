@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -19,7 +19,7 @@ export function connectInputAndOutputs(node: NodeRef) {
     if (isCell(value)) {
       const exported = value.export();
       if (exported.frame !== node.frame) {
-        const implementation = isRecord(node.module)
+        const implementation = isObjectOrArray(node.module)
           ? node.module.implementation
           : undefined;
         const sourceLocation = typeof implementation === "function"
@@ -49,7 +49,9 @@ export function connectInputAndOutputs(node: NodeRef) {
 
   // We will also apply ifc tags from inputs to outputs, unless the module has
   // precise built-in flow handling for its result.
-  if (!isRecord(node.module) || node.module.propagateInputIfc !== false) {
+  if (
+    !isObjectOrArray(node.module) || node.module.propagateInputIfc !== false
+  ) {
     applyInputIfcToOutput(node.inputs, node.outputs);
   }
 }
@@ -106,9 +108,10 @@ function attachCfcToOutputs(
     // we may have fields in the output schema, so incorporate those
     const joined = new Set<unknown>(lubConfidentiality);
     ContextualFlowControl.joinSchema(joined, outputSchema);
-    const ifc = (isRecord(outputSchema) && outputSchema.ifc !== undefined)
-      ? { ...outputSchema.ifc }
-      : {};
+    const ifc =
+      (isObjectOrArray(outputSchema) && outputSchema.ifc !== undefined)
+        ? { ...outputSchema.ifc }
+        : {};
     ifc.confidentiality = ContextualFlowControl.lub(joined);
     const outpuSchemaObj = (outputSchema === true || outputSchema === undefined)
       ? {}
@@ -126,7 +129,7 @@ function attachCfcToOutputs(
       // set during construction, so we cannot override it here.
     }
     return;
-  } else if (isRecord(outputs)) {
+  } else if (isObjectOrArray(outputs)) {
     // Descend into objects and arrays.
     //
     // A `FabricPrimitive` among them is inert here and correctly so: it has

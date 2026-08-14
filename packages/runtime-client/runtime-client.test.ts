@@ -120,6 +120,40 @@ describe("RuntimeClient.getPieceSource", () => {
   });
 });
 
+describe("RuntimeClient.getPieceSourceRevision", () => {
+  it("asks the worker for one recorded revision's retained source", async () => {
+    const source = {
+      pattern: { identity: "pattern-identity", symbol: "default" },
+      files: [{ name: "/main.tsx", contents: "export default 1;" }],
+    };
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ source });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    const result = await client.getPieceSourceRevision(
+      "of:fid1:piece",
+      "did:key:z6Mk-runtime-client-source" as never,
+      "revision-1",
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceGetSourceRevision,
+      pieceId: "of:fid1:piece",
+      space: "did:key:z6Mk-runtime-client-source",
+      revisionId: "revision-1",
+    }]);
+    expect(result).toBe(source);
+  });
+});
+
 describe("RuntimeClient.updatePieceSource", () => {
   it("sends a discriminated source action to the worker", async () => {
     const source = {
@@ -155,6 +189,137 @@ describe("RuntimeClient.updatePieceSource", () => {
       confirmationToken: "confirmation-1",
     }]);
     expect(response).toEqual({ source });
+  });
+});
+
+describe("RuntimeClient space ACL methods", () => {
+  it("sends read, set, and remove requests to the worker", async () => {
+    const access = {
+      space: "did:key:z6Mk-runtime-client-acl",
+      principal: "did:key:z6Mk-runtime-client-owner",
+      acl: { "did:key:z6Mk-runtime-client-owner": "OWNER" },
+      canEdit: true,
+    };
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ access });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    const space = access.space as never;
+
+    expect(await client.getSpaceAcl(space)).toBe(access);
+    expect(
+      await client.setSpaceAclEntry(
+        space,
+        "did:key:z6Mk-runtime-client-reader",
+        "READ",
+      ),
+    ).toBe(access);
+    expect(
+      await client.removeSpaceAclEntry(
+        space,
+        "did:key:z6Mk-runtime-client-reader",
+      ),
+    ).toBe(access);
+
+    expect(requests).toEqual([
+      { type: RequestType.SpaceGetAcl, space },
+      {
+        type: RequestType.SpaceSetAclEntry,
+        space,
+        user: "did:key:z6Mk-runtime-client-reader",
+        capability: "READ",
+      },
+      {
+        type: RequestType.SpaceRemoveAclEntry,
+        space,
+        user: "did:key:z6Mk-runtime-client-reader",
+      },
+    ]);
+  });
+});
+
+describe("RuntimeClient.clonePiece", () => {
+  it("asks the worker to clone between the named spaces", async () => {
+    const sourceSpace = "did:key:z6Mk-runtime-client-source";
+    const destinationSpace = "did:key:z6Mk-runtime-client-destination";
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({
+          page: {
+            cell: {
+              id: "of:fid1:clone",
+              space: destinationSpace,
+              path: [],
+            },
+          },
+        });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    const clone = await client.clonePiece(
+      "of:fid1:piece",
+      sourceSpace as never,
+      destinationSpace as never,
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceClone,
+      pieceId: "of:fid1:piece",
+      sourceSpace,
+      destinationSpace,
+    }]);
+    expect(clone.id()).toBe("fid1:clone");
+  });
+
+  it("asks the worker to copy the piece's input data", async () => {
+    const sourceSpace = "did:key:z6Mk-runtime-client-source";
+    const destinationSpace = "did:key:z6Mk-runtime-client-destination";
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({
+          page: {
+            cell: {
+              id: "of:fid1:clone",
+              space: destinationSpace,
+              path: [],
+            },
+          },
+        });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    await client.clonePiece(
+      "of:fid1:piece",
+      sourceSpace as never,
+      destinationSpace as never,
+      { copyData: true },
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceClone,
+      pieceId: "of:fid1:piece",
+      sourceSpace,
+      destinationSpace,
+      copyData: true,
+    }]);
   });
 });
 

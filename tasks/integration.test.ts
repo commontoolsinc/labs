@@ -6,7 +6,46 @@ import {
   runFilteredIntegration,
   runPackageIntegration,
   selectIntegrationTestFiles,
+  selectPatternTestFiles,
 } from "./integration.ts";
+
+Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () => {
+  const files = [
+    "packages/patterns/notes/note.test.tsx",
+    "packages/patterns/notes/notebook.test.tsx",
+    "packages/patterns/record.test.tsx",
+    "packages/patterns/record-module-fields.test.tsx",
+    "packages/patterns/lunch-poll/main.test.tsx",
+    "packages/patterns/lunch-poll/multi-user.test.tsx",
+  ];
+
+  const expected = [
+    ["packages/patterns/lunch-poll/multi-user.test.tsx"],
+    [
+      "packages/patterns/lunch-poll/main.test.tsx",
+      "packages/patterns/notes/note.test.tsx",
+    ],
+    ["packages/patterns/record-module-fields.test.tsx"],
+    ["packages/patterns/record.test.tsx"],
+    ["packages/patterns/notes/notebook.test.tsx"],
+  ];
+
+  for (
+    const paths of [
+      files,
+      files.map((file) => file.replaceAll("/", "\\")),
+    ]
+  ) {
+    assertEquals(
+      Array.from(
+        { length: 5 },
+        (_, index) =>
+          selectPatternTestFiles(paths, { index: index + 1, total: 5 }),
+      ),
+      expected,
+    );
+  }
+});
 
 Deno.test("selectIntegrationTestFiles keeps .test.ts files matching the filter", () => {
   const files = [

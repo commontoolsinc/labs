@@ -25,7 +25,9 @@ The missing piece is one generic capability. We already have the trust primitive
 
 ## The shape — what you mint
 
-You mint an **ingest channel**: a bearer-authed inbound HTTP endpoint bound to a target cell you provide (in your own space). This reuses the existing webhook registration/auth machinery verbatim — the registry in the toolshed service space, `wh`-style id + secret generation, SHA-256 hash, timing-safe verify with the dummy-hash timing-oracle guard, and the create/list/delete lifecycle (`webhooks.handlers.ts`, `webhooks.utils.ts`).
+You mint an **ingest channel**: a bearer-authed inbound HTTP endpoint bound to a target cell you provide (in your own space). It reuses the webhook *token* machinery — the registry in the toolshed service space, id + secret generation, SHA-256 hash, timing-safe verify with the dummy-hash timing-oracle guard (`webhooks.handlers.ts`, `webhooks.utils.ts`).
+
+The **lifecycle** is its own, and deliberately not webhooks': `mint`/`list`/`rotate`/`revoke` on the `/api/ingest-channels` prefix, authenticated by a first-party request proof and authorized against the target space's ACL. Revocation is a soft disable rather than webhooks' hard delete, because a registration here records who was authorized to write provenance-marked data into a user's space — that record has to survive. See [self-serve-ingest-channels.md](../features/self-serve-ingest-channels.md).
 
 An ingest channel has a **sink** — where an inbound POST lands.
 
@@ -96,7 +98,7 @@ Provenance at rest is the runtime-minted `ExternalIngest` mark — stronger and 
 
 - **Blast radius is the registered target.** A channel's bearer token can only write within its registered base cell + space (plus a validated leaf under it) — the same blast radius as a webhook today.
 - **The mark cannot be forged.** The payload is written under the ordinary member identity and gated (`gateRuntimeMintedIntegrity` strips any smuggled `ExternalIngest`); the trusted mark comes only from the runtime's builtin mint step. Sandboxed pattern code cannot mint it.
-- **Open gap — confused-deputy on create.** Channel creation is currently unauthed and `createdBy` is self-asserted (inherited from webhooks). Harmless-ish for a `stream` webhook; **not** acceptable for a `journal` sink, which writes *provenance-marked* data into a caller-named user space — anyone reaching create could register a channel targeting *another* user's space and get legitimately-minted marks written there. **v1 must gate `journal`-sink creation on a real authenticated caller principal.**
+- **~~Open gap~~ — confused-deputy on create. CLOSED.** Creation was unauthed with a self-asserted `createdBy`, inherited from webhooks. Harmless-ish for a `stream` webhook; **not** acceptable for a `journal` sink, which writes *provenance-marked* data into a caller-named user space — anyone reaching create could register a channel targeting *another* user's space and get legitimately-minted marks written there. `journal`-sink creation now requires a verified caller principal plus an explicit `OWNER` grant for that DID on the target space's ACL; see decision 2 below and [self-serve-ingest-channels.md](../features/self-serve-ingest-channels.md). The `stream` sink still creates through the webhook route and inherits the old behavior.
 - **Honest limit.** The toolshed runtime is `as: identity` and sees plaintext; the split-mint protects the *mark*, not the *bytes*. Estuary now holds and appends over plaintext record data as an operator-trusted process; a signer-key compromise is a cross-user breach + the ability to write marked fabricated records. Document in the custody/data-flow docs; treat the signer key as high-value.
 
 ## The cross-space commit gate (blocker A) — resolved: buildable now, latent dependency later
@@ -125,8 +127,8 @@ The seam requires these changes on loom's side (Workstream A/D-read):
 
 ## Open decisions
 
-1. **Packaging** — a generically-named `POST /api/ingest` carrying `sink: "stream" | "journal"` (recommended; `/api/webhooks` misdescribes the general capability) vs. extending the webhook route in place. Either way the auth/registry helpers are shared.
-2. **Journal-creation auth** — require a real caller principal for `journal` creation (recommended, given the confused-deputy gap) vs. ship with the inherited soft check documented.
+1. **Packaging** — a generically-named `POST /api/ingest` carrying `sink: "stream" | "journal"` (recommended; `/api/webhooks` misdescribes the general capability) vs. extending the webhook route in place. Either way the auth/registry helpers are shared. *Still open for the `stream` sink.*
+2. ~~**Journal-creation auth**~~ — **RESOLVED.** Creation requires a real caller principal (a first-party request proof) *and* an explicit `OWNER` grant for that DID on the target space's ACL. See [self-serve-ingest-channels.md](../features/self-serve-ingest-channels.md). The control plane is a separate prefix, `/api/ingest-channels`, so the data plane's wildcard CORS never covers it.
 
 ## Acceptance / test plan
 
@@ -134,7 +136,7 @@ The seam requires these changes on loom's side (Workstream A/D-read):
 - **Absent ≠ empty:** a never-written day cell reads back as `undefined` (ABSENT), not `[]`; the create path writes no day cell.
 - **Mark present (hard gate):** after ingest the appended records carry the `ExternalIngest` mark; fail the build if absent.
 - **Payload purity:** records at rest deep-equal the POSTed body with no labs-added fields.
-- **Auth contract:** identical 401 body across missing-token / missing-registration / disabled / wrong-token; storage-error → 502 (not 401); resolve/commit failure → 502.
+- **Auth contract:** identical 401 body across missing-token / missing-registration / wrong-token, so nothing a guesser can reach distinguishes them. A *correct* token (current or the one most recently rotated away from) presented to a disabled, revoked or expired channel is the one deliberate exception: an actionable 403 "re-pair this device", unreachable without proof-of-possession. Storage-error → 502 (not 401); resolve/commit failure → 502.
 - **Hostile leaf:** `../`, empty, malformed → 400, no write.
 - **Concurrency:** concurrent POSTs to the same day cell all land (no lost update); retry-exhaustion returns a loud retryable error, never a silent 200.
 
@@ -152,7 +154,7 @@ The seam requires these changes on loom's side (Workstream A/D-read):
 - Per-record (vs per-POST) provenance attestation — would need `custodyIngest.append` (N marks); a future fork.
 - Retention/GC of old journal partitions (a future generic trail-management concern).
 - **Intra-partition size cap.** `appendToJournal` does `[...current, ...records]` with no per-partition ceiling, and `custodyIngest.update` re-serializes the whole value each write, so sustained appends to one partition are O(N²) and grow unbounded within per-POST limits. Confined to the token holder's own space and bounded in practice by per-day partitioning (one UTC day of genuine traffic); a cheap element-count backstop is a tracked follow-up, not v1.
-- **Extracting the shared bearer-auth crypto + registry.** `verifyIngestSecret`, `randomBase62`, and the service-space registry are copied from `webhooks.utils.ts` (the proven path). A `lib/ingest-registry.ts` extraction shared by both routes is the fast-follow that avoids drift — deferred with the self-serve create work to keep this PR from churning shipped, re-vendored webhook code.
+- **Extracting the shared bearer-auth crypto + registry.** (Still deferred: self-serve create landed without merging the registries, since the two stored-hash encodings must be format-tagged or migrated first — see the fast-follow below.) `verifyIngestSecret`, `randomBase62`, and the service-space registry are copied from `webhooks.utils.ts` (the proven path). A `lib/ingest-registry.ts` extraction shared by both routes is the fast-follow that avoids drift — deferred with the self-serve create work to keep this PR from churning shipped, re-vendored webhook code.
 
 ## Fast-follows (tracked, post-v1)
 
@@ -160,8 +162,8 @@ From the branch critique's P2 list — deliberately NOT in this PR; each has a n
 
 - **Extract shared bearer-secret crypto** into `lib/channel-secret.ts` — *trigger: the next PR touching either route.* Webhooks keep their async hex `sha256`, ingest its sync base64url; the two stored-hash encodings must be format-tagged or migrated before any registry merge. (Same item as the shared-crypto bullet in Out of scope.)
 - **Per-partition element-count backstop** (~50k) inside the `custodyIngest.update` closure, mapped to a loud 413 — *trigger: before any always-on beacon ships.* Never re-partition server-side. (Same item as the intra-partition size cap in Out of scope.)
-- **Revocation** — a `--disable` flag on the provisioning script that flips `enabled: false` — *trigger: before loom's "revoke beacon token" control surface lands.*
+- ~~**Revocation**~~ — **DONE**, and better than the planned `--disable` flag: `POST /api/ingest-channels/revoke` (`cf ingest revoke`) flips `enabled: false` and records `revoked: {at, by}` as an audit record rather than deleting. Rotation is `cf ingest rotate`.
 - **Test gaps** (opportunistic): a `>1 MB` `app.request` asserting the 413 bodyLimit body; a second-append test pinning mark coalescing per (path, origin) (`prepare.ts`); dedup the `ingestMarks` test helper into shared support.
-- **Per-install rate limiting** (429) — loom's `plan.md` Workstream-D step 3 specifies it; the branch has only the body cap + `MAX_BATCH`. *Decision (fine at ~10 users): deferred until self-serve create* — revisit with an in-memory per-channel token bucket in `processIngest` if abuse appears.
+- **Per-install rate limiting** (429) on the *data plane* — loom's `plan.md` Workstream-D step 3 specifies it; ingest still has only the body cap + `MAX_BATCH`. The *control* plane is now rate-limited (`packages/toolshed/lib/rate-limit.ts`, keyed by client address — a DID-keyed bucket is useless since DIDs are free to generate). Still deferred for ingest itself.
 - **Provisioning identity footgun** — the script writes into the service space of whatever identity its `.env` yields; a mismatch provisions into the wrong space and every POST 401s with no diagnostic. Add a usage note: run with the same `.env`/identity as the target toolshed.
 - **Idempotency / replay guidance for generic consumers** (Wilk) — the journal sink does no server-side dedup, so a retried POST re-appends. Document the read-side idempotency contract (dedup on a stable record key — loom's `point_id`) so a generic, non-location consumer knows replay handling is its responsibility.

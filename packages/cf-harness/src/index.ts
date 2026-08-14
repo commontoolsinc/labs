@@ -4,6 +4,7 @@ export * from "./engine.ts";
 export * from "./prompt-loop.ts";
 export * from "./interactive-chat-service.ts";
 export * from "./interactive-chat-stdio.ts";
+export * from "./loom-local-host.ts";
 export * from "./session-store.ts";
 export * from "./structured-result.ts";
 export * from "./subagent-return.ts";
@@ -17,6 +18,8 @@ export * from "./model/openai-codex-responses.ts";
 export * from "./auth/types.ts";
 export * from "./auth/credential-store.ts";
 export * from "./auth/openai-codex.ts";
+export * from "./auth/provider-settings.ts";
+export * from "./control-errors.ts";
 export * from "./contracts/http-fetch.ts";
 export * from "./contracts/image.ts";
 export * from "./contracts/prompt-slot.ts";
@@ -37,6 +40,8 @@ export type {
   HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
 export * from "./contracts/cfc-policy-snapshot.ts";
+export * from "./contracts/handle-table.ts";
+export * from "./handle-table.ts";
 export * from "./contracts/browser-access.ts";
 export * from "./contracts/run-manifest.ts";
 export * from "./contracts/observation.ts";

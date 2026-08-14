@@ -25,6 +25,7 @@ import {
   classifyCallRootPolicy,
   type ExpressionSiteCallRootKind,
   type ExpressionSiteHelperBoundaryKind,
+  isCellReadTerminalCall,
   type SupportedCallRootKind,
   type UnsupportedCallRootKind,
 } from "./call-root-support.ts";
@@ -323,6 +324,61 @@ function isSharedPostClosureCallRootKind(
   kind: ExpressionSiteCallRootKind | undefined,
 ): boolean {
   return kind === "ordinary-call" || kind === "parameterized-inline-call";
+}
+
+/**
+ * True when a call site reads a cell — `count.get()` itself, or a call whose
+ * receiver chain reaches one (`rows.get().toSorted(byDate)`,
+ * `rows.get().items.join(", ")`).
+ *
+ * A cell read yields a plain snapshot, so the site holding it has to become a
+ * lift for the value to stay reactive. `classifyCallRootPolicy` reports the read
+ * as `restricted-get-call` and declines to classify a call over one, leaving
+ * both shapes without a supported call root; the JSX router admits them anyway
+ * (a bare read as an owned `jsx-root` site, a call over one as a shared
+ * post-closure site). This is the same admission for the other container kinds,
+ * so a binding, a return, an argument, or an object property holding a cell read
+ * lowers into the lift its JSX spelling already gets.
+ *
+ * Receivers that are not cells are excluded by {@link isCellReadTerminalCall}:
+ * a `.get()` on an opaque value is a mistake with its own diagnostic, not a
+ * computation to lower.
+ */
+function isCellReadCallRootExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  let current: ts.Expression = unwrapExpression(expression);
+  if (!ts.isCallExpression(current)) {
+    return false;
+  }
+
+  while (true) {
+    if (ts.isCallExpression(current)) {
+      if (isCellReadTerminalCall(current, context)) {
+        return true;
+      }
+      const callee = unwrapExpression(current.expression);
+      if (
+        !ts.isPropertyAccessExpression(callee) &&
+        !ts.isElementAccessExpression(callee)
+      ) {
+        return false;
+      }
+      current = unwrapExpression(callee.expression);
+      continue;
+    }
+
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      current = unwrapExpression(current.expression);
+      continue;
+    }
+
+    return false;
+  }
 }
 
 const STRUCTURAL_NESTED_CONTAINER_KINDS = new Set<ExpressionContainerKind>([
@@ -1189,8 +1245,14 @@ export function classifyExpressionSiteHandling(
     );
     const patternOwnedReceiverMethod = supportedCallRootKind ===
       "pattern-owned-receiver-method";
-    if (!sharedPostClosureCallRoot && !patternOwnedReceiverMethod) {
-      if (!isPostClosureWrapperRewriteExpression(expression, context)) {
+    if (
+      !sharedPostClosureCallRoot &&
+      !patternOwnedReceiverMethod
+    ) {
+      if (
+        !isPostClosureWrapperRewriteExpression(expression, context) &&
+        !isCellReadCallRootExpression(expression, context)
+      ) {
         return { kind: "skip", reason: "not-lowerable" };
       }
 

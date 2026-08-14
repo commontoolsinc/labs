@@ -1,30 +1,45 @@
-// Barrel for the shared codec machinery: the registry, the codec and
-// reconstruction-context base classes, and the tag vocabularies.
-//
-// Everything here is format-agnostic and class-agnostic. Nothing in this
-// directory knows which wire format is in play or which fabric classes exist:
-// the only references to the value domain are `import type`, so there is no
-// runtime dependency on a fabric class at all. A codec that exists because one
-// particular format cannot carry some type belongs with that format instead --
-// `codec-json/` holds the four that JSON needs.
+/**
+ * This directory holds the codec system's active machinery: the registry that
+ * indexes codecs, the lookup that finds a class's codec, the abstract bases
+ * described below, and the two classes a fault produces. It is also the package's
+ * public face for the codec system as a whole, re-exporting the declarations
+ * in `codec-interface/` so that an outside caller has one entry point rather
+ * than two.
+ *
+ * That convenience is for this barrel alone. A module inside the package
+ * imports the file it wants directly -- nothing here imports this barrel --
+ * which is what keeps a module that only needs to name a codec from pulling
+ * the machinery in behind it, and is the point of the two directories.
+ *
+ * Everything here is format-agnostic. Nothing in this directory knows which
+ * wire format is in play, and a codec that exists because one particular
+ * format cannot carry some type belongs with that format instead:
+ * `codec-json/` holds the four that JSON needs.
+ *
+ * Two kinds of abstract base live here, and counting them together is a
+ * mistake: nothing extends one kind and the other. `BaseFabricInstance` and
+ * `BaseFabricPrimitive` are what a VALUE extends in order to participate in a
+ * wire format at all, one per branch of the fabric type hierarchy.
+ * `BaseCodecEngine` is what an ENGINE extends, one per wire format -- the
+ * thing that walks such values and drives their codecs.
+ *
+ * Besides those, the classes here are `UnknownValue` and `ProblematicValue`,
+ * which exist only because a decode found a tag no codec claimed or went
+ * wrong outright. A class a caller models data with belongs in `fabric-instances/`
+ * or `fabric-primitives/` instead.
+ */
 
-export {
-  CODEC,
-  type FabricClassWithCodec,
-  type FabricCodec,
-  type ReconstructionContext,
-  type SerializationContext,
-} from "./interface.ts";
+export * from "@/codec-interface/index.ts";
 
 export { codecOf } from "./codecOf.ts";
-export { CODEC_META_TAGS } from "./codec-meta-tags.ts";
-export { CODEC_TYPE_TAGS } from "./codec-type-tags.ts";
-export { BaseFabricCodec } from "./BaseFabricCodec.ts";
-export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
-export {
-  EMPTY_RECONSTRUCTION_CONTEXT,
-  EmptyReconstructionContext,
-} from "./EmptyReconstructionContext.ts";
-
-// Codec registry.
+export { isCodecTypeTag } from "./isCodecTypeTag.ts";
 export { CodecRegistry } from "./CodecRegistry.ts";
+export { BaseCodecEngine } from "./BaseCodecEngine.ts";
+
+export { BaseFabricInstance } from "./BaseFabricInstance.ts";
+export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+export { ProblematicStateError } from "./ProblematicStateError.ts";
+export { ProblematicValue } from "./ProblematicValue.ts";
+export { toReportableState } from "./toReportableState.ts";
+export { toReportableTag } from "./toReportableTag.ts";
+export { UnknownValue } from "./UnknownValue.ts";

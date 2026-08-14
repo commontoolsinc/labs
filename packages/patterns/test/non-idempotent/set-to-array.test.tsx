@@ -15,7 +15,7 @@
  *
  * Run: deno task cf test packages/patterns/test/non-idempotent/set-to-array.test.tsx --verbose
  */
-import { assert, computed, pattern, Writable } from "commonfabric";
+import { assert, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const items = new Writable([
@@ -41,7 +41,7 @@ export default pattern(() => {
   const hasTags = assert(() => uniqueTags.get().length > 0);
 
   return {
-    tests: [{ assertion: hasTags }],
+    [TESTS]: [{ assertion: hasTags }],
     expectNonIdempotent: true,
   };
 });

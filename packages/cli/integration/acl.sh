@@ -80,18 +80,48 @@ if ! echo "$ACL_OUTPUT" | grep -q "OWNER"; then
 fi
 success "ACL initialized with owner having OWNER capability"
 
-# Test 3: Non-authorized users cannot access space
+# Test 3: Default access posture for an unlisted user
+#
+# This test used to assert that an unlisted user had NO access, because a named
+# space was private by default. That stopped being true in 4eb3026d1 (#4670,
+# 2026-07-10, "re-enable space ACL enforcement" / "default named spaces to
+# public write"): genesis now writes `"*": "WRITE"` alongside the owner entry
+# (see the bootstrapAcl in packages/runner/src/storage/v2.ts), so every
+# authenticated principal legitimately has WRITE on a named space. The old
+# assertion was not flaky, it was structurally unpassable — do not restore it.
+#
+# What still holds, and is what this test now pins, is that enforcement is ON
+# rather than OFF: the wildcard grants WRITE, not OWNER. An unlisted user can
+# read and write, but cannot touch the ACL. The private-by-default case is
+# covered at the end of the script, after the wildcard has been removed.
 echo ""
-echo "Test 3: Access control - unauthorized users"
-if cf piece ls $SPACE_ARGS_USER1 2>/dev/null | grep -q "$PIECE_ID"; then
-  error "USER1 should not have access without ACL entry"
-fi
-success "Unauthorized user cannot access space"
+echo "Test 3: Default access posture (genesis wildcard)"
 
-if cf piece ls $SPACE_ARGS_USER2 2>/dev/null | grep -q "$PIECE_ID"; then
-  error "USER2 should not have access without ACL entry"
+# The wildcard is an explicit part of the contract, so assert it is there
+# rather than inferring it from the access checks below.
+ACL_OUTPUT=$(cf acl ls $SPACE_ARGS_OWNER)
+if ! echo "$ACL_OUTPUT" | grep '\*' | grep -q "WRITE"; then
+  error "Genesis should grant the wildcard '*' WRITE on a named space"
 fi
-success "Multiple unauthorized users correctly denied access"
+success "Genesis ACL contains the '*' => WRITE entry"
+
+if ! cf piece ls $SPACE_ARGS_USER1 | grep -q "$PIECE_ID"; then
+  error "USER1 should inherit read access from the '*' entry"
+fi
+success "Unlisted user can read via the wildcard"
+
+PIECE_ID_WILDCARD=$(cf piece new --main-export customPatternExport $SPACE_ARGS_USER1 $PATTERN_SRC)
+if [ -z "$PIECE_ID_WILDCARD" ]; then
+  error "USER1 should inherit write access from the '*' entry"
+fi
+success "Unlisted user can write via the wildcard"
+
+# The load-bearing assertion: WRITE is not OWNER, so the wildcard does not
+# hand out ACL management. If this ever passes, enforcement is off entirely.
+if cf acl set $DID_USER2 READ $SPACE_ARGS_USER1 2>/dev/null; then
+  error "USER1 with only the wildcard WRITE should not be able to modify the ACL"
+fi
+success "Unlisted user cannot manage the ACL - enforcement is real"
 
 # Test 4: Set READ capability
 echo ""
@@ -192,11 +222,15 @@ if echo "$ACL_OUTPUT" | grep -q "$DID_USER1"; then
 fi
 success "USER1 successfully removed from ACL"
 
-# Verify USER1 no longer has access
-if cf piece ls $SPACE_ARGS_USER1 2>/dev/null | grep -q "$PIECE_ID"; then
-  error "USER1 should not have access after removal from ACL"
+# Removing an entry revokes that entry, not all access: USER1 falls back to the
+# genesis `"*": "WRITE"` wildcard (see the note on Test 3). This assertion used
+# to read "USER1 should not have access after removal" and became unpassable in
+# #4670 for the same reason Test 3 did. Test 14 is where removal actually
+# reduces access to nothing, once the wildcard itself has been removed.
+if ! cf piece ls $SPACE_ARGS_USER1 | grep -q "$PIECE_ID"; then
+  error "USER1 should fall back to the wildcard after removal, not lose all access"
 fi
-success "USER1 access revoked after ACL removal"
+success "USER1 falls back to the wildcard default after ACL removal"
 
 # Test 10: Multiple ACL entries
 echo ""
@@ -271,6 +305,48 @@ if ! echo "$ACL_OUTPUT" | grep "$DID_OWNER" | grep -q "OWNER"; then
   error "Rejected last-owner removal must preserve the ACL"
 fi
 success "Last concrete OWNER is preserved"
+
+# Test 14: Lockdown - removing the wildcard makes the space private
+#
+# This is where the original Test 3 intent now lives. A named space is created
+# world-writable by the genesis `"*": "WRITE"` entry (#4670); removing that
+# entry is the only way to make it private, and it is a post-genesis ACL
+# mutation like any other. Keep this last: every test above depends on the
+# wildcard being present.
+echo ""
+echo "Test 14: Lockdown - remove the wildcard"
+# "ANYONE" is the CLI spelling of "*", so the shell does not glob it.
+cf acl remove ANYONE $SPACE_ARGS_OWNER
+success "Removed the '*' entry from the ACL"
+
+ACL_OUTPUT=$(cf acl ls $SPACE_ARGS_OWNER)
+if echo "$ACL_OUTPUT" | grep -q '\*'; then
+  error "Wildcard should not appear in ACL after removal"
+fi
+success "Wildcard no longer listed in ACL"
+
+# USER1 was removed from the ACL in Test 9 and has no entry of its own, so with
+# the wildcard gone it now has no capability at all.
+if cf piece ls $SPACE_ARGS_USER1 2>/dev/null | grep -q "$PIECE_ID"; then
+  error "USER1 should not be able to read a space with no wildcard and no entry"
+fi
+success "Unlisted user cannot read after lockdown"
+
+if cf piece new --main-export customPatternExport $SPACE_ARGS_USER1 $PATTERN_SRC 2>/dev/null; then
+  error "USER1 should not be able to write a space with no wildcard and no entry"
+fi
+success "Unlisted user cannot write after lockdown"
+
+# Lockdown must not lock the owner out, nor drop the surviving explicit grants.
+if ! cf piece ls $SPACE_ARGS_OWNER | grep -q "$PIECE_ID"; then
+  error "Owner must retain access after lockdown"
+fi
+success "Owner retains access after lockdown"
+
+if ! cf piece ls $SPACE_ARGS_USER2 | grep -q "$PIECE_ID"; then
+  error "USER2's explicit READ grant must survive removal of the wildcard"
+fi
+success "Explicit grants survive lockdown"
 
 # Cleanup
 echo ""

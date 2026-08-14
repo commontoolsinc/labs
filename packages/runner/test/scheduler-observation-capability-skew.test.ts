@@ -23,7 +23,10 @@
  */
 
 import { assertEquals } from "@std/assert";
-import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
@@ -80,7 +83,7 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
 
   send(payload: string): Promise<void> {
     // Decoded wire payload, asserted to the shape this fake expects.
-    const message = valueFromJson(
+    const message = fabricFromJsonValue(
       payload,
       reconstructionContext,
     ) as unknown as {
@@ -197,7 +200,7 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
   }
 
   private respond(message: unknown): void {
-    this.#receiver(jsonFromValue(message as FabricValue));
+    this.#receiver(jsonFromFabricValue(message as FabricValue));
   }
 }
 

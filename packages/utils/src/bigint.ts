@@ -7,6 +7,7 @@
  * except as needed for sign extension.
  */
 
+import { fromBase64url, toUnpaddedBase64url } from "./base64url.ts";
 import {
   bigintFromMtcDirect,
   bigintToMtcDirect,
@@ -45,4 +46,23 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   return useUint8ArrayToFromHex
     ? bigintFromMtcHex(bytes)
     : bigintFromMtcDirect(bytes);
+}
+
+/**
+ * Converts a bigint to the unpadded base64url encoding of its minimal
+ * two's-complement big-endian byte representation. This is the string form the
+ * JSON wire format uses for bigint-valued state.
+ */
+export function bigintToUnpaddedBase64url(value: bigint): string {
+  return toUnpaddedBase64url(bigintToMinimalTwosComplement(value));
+}
+
+/**
+ * Interprets a base64url string as the minimal two's-complement big-endian
+ * byte representation of an integer, and returns the corresponding bigint.
+ * Trailing `=` padding is accepted but not required. Input that isn't valid
+ * base64url, and input that decodes to zero bytes, both throw.
+ */
+export function bigintFromUnpaddedBase64url(encoded: string): bigint {
+  return bigintFromMinimalTwosComplement(fromBase64url(encoded));
 }
