@@ -152,8 +152,8 @@ Six requirements, each load-bearing in the design that follows.
 4. **Put the uncertainty in one place.** Old pieces make uncertainty
    unavoidable, but it can be placed. The livable designs concentrate it at
    the moment a caller first takes hold of a piece — establish what it is
-   holding once, rely on a guarantee from then on. The miserable designs
-   spread it across every call site.
+   holding once, and work against what that established from then on. The
+   miserable designs spread it across every call site.
 
 5. **Hold across authors.** Patterns by one party will depend on contracts
    offered by another's. Those contracts cannot be made unbreakable — an
@@ -236,10 +236,12 @@ An interface here is a named set of field and verb contracts, carrying a
 version, separate from any one pattern: "Notes, version 2" is a
 first-class thing. A pattern declares which interfaces it provides —
 usually several, none of them the whole of its shape — and consumers
-declare the minimum version they accept. Binding checks once; after that
-the caller holds a guarantee. The name is what shape cannot be: a claim
-about meaning. Declaring "Notes v2" says `append` does what Notes means by
-it, which no structural demand can say.
+declare the minimum version they accept. Binding checks once, and the caller
+works against the version it bound to rather than re-checking at every call
+— which places the uncertainty without pretending the provider can never
+move. The name is what shape cannot be: a claim about meaning. Declaring
+"Notes v2" says `append` does what Notes means by it, which no structural
+demand can say.
 
 Who defines one is worth pinning down, because it is the consumer who
 knows what it needs — and that knowledge stays where it is: the structural
@@ -294,7 +296,7 @@ declare const activityLog: { logEvent?: Stream<{ text: string }> };
 // Never this: when the verb is absent, nothing happens and nothing says so.
 activityLog.logEvent?.send({ text: "started" });
 
-// Resolve once, into a guarantee or a failure someone can act on.
+// Resolve once, into something callable or a failure someone can act on.
 const logEvent = activityLog.logEvent;
 if (logEvent === undefined) {
   throw new Error("activity log predates logEvent; Notes v2 required");
