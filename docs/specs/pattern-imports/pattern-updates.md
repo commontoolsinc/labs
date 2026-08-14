@@ -37,7 +37,7 @@ into the same active-origin and revision model.
 
 ## Last Updated
 
-2026-07-22
+2026-08-13
 
 ## Motivation
 
@@ -377,6 +377,17 @@ the two paths cannot drift apart on what "compatible" means.
 - **Every** baseline is checked, never just the newest: a piece rolls forward
   from whatever version it last opened at, and the evolution-policy allowances
   are not guaranteed to compose across steps.
+- One refusal is policy, not shape drift: a baseline that describes a fabric
+  special object structurally — an object schema whose `required` carries the
+  `FabricSpecialObject` brand key, the emission of pre-vocabulary
+  compilations — is not accepted against the fabric-primitive type name
+  (`{ type: "FabricBytes" }` and friends) the same authored field compiles to
+  today, even with the source unchanged. Stored values re-stage verbatim
+  across an update, so a structural inhabitant of the wrong kind would
+  survive it only to fail every prototype-matched read; updating such a piece
+  takes redeployment or `dangerouslyAllowIncompatibleSchema`. The full
+  argument lives with the check (`schemaSubsetIssue`,
+  `packages/piece/src/schema-compatibility.ts`).
 - Baselines are **never pruned**, and `deno task pattern-compat --update` can
   only add one. An author-run command that could remove a baseline could remove
   the one that would have caught the break.
