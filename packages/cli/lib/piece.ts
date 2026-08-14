@@ -2130,22 +2130,56 @@ export async function listPieceCallables(
   // stays dispatchable regardless. Widening the enumeration is safe for the
   // same reason narrowing the classification was necessary: a candidate that
   // stores no stream is dropped here exactly as a data field is.
+  //
+  // PRECEDENCE, mirrored from resolvePieceCallable rather than invented here.
+  // The dispatcher tries three places in a fixed order:
+  //
+  //   resolved = onResultCell ?? onInputCell ?? tryResolvePieceHandler(...)
+  //
+  // and this sweep's two stored signals are the first and third of them.
+  // `tryResolvePieceCallableAt(piece, ..., "result")` classifies
+  // `resultRoot.key(name).asSchemaFromLinks()` against `resultRoot.get()[name]`
+  // — the sweep's FIRST call, argument for argument — so a name that call
+  // accepts is a name the dispatcher resolves on the result cell, ahead of any
+  // input row. The second call is the piece root's sentinel, which stands in
+  // for `tryResolvePieceHandler`, and the dispatcher reaches that only once the
+  // input cell has declined. Hence: a result-cell signal REPLACES a row the
+  // walk placed on the input cell; a piece-root signal does not; neither
+  // disturbs a row already on the result cell. Which source proposed the name
+  // does not enter into it — rank follows the signal that classified it.
+  //
+  // These guards are the SECOND thing in this change to have been written for
+  // a sweep that only supplied fallbacks for names already seen, and left
+  // alone when the sweep became a source of names. `!listings.has(name)` used
+  // to mean "nothing more to learn about this name"; once the graph proposes
+  // names the result walk cannot see, it means "nothing more to learn unless
+  // the graph proposes it, which outranks an input row". The first was the
+  // `catch {}` around `getPattern` above — honest while the pattern supplied
+  // metadata, silent loss once it supplied names. Both are the same mistake:
+  // the sweep's role changed and its guards did not. If a third candidate
+  // source is ever added here, settle its rank against the list above before
+  // adding it, not after.
   const pieceCell = typeof piece.getCell === "function"
     ? piece.getCell()
     : undefined;
   const pieceValue = pieceCell?.get?.();
+  // A row already on the result cell has won rank 1 and has nothing to learn
+  // here; anything else is still open to a result-side classification.
+  const openToResultSide = (name: string) =>
+    listings.get(name)?.on !== "result";
   if (isObjectOrArray(pieceValue)) {
     for (const name of Object.keys(pieceValue)) {
-      if (!listings.has(name)) rejected.add(name);
+      if (openToResultSide(name)) rejected.add(name);
     }
   }
   for (const name of graphNames) {
-    if (!listings.has(name)) rejected.add(name);
+    if (openToResultSide(name)) rejected.add(name);
   }
   const resultRootValue = resultRoot?.get?.();
   if (resultRoot) {
     for (const name of rejected) {
-      if (listings.has(name)) continue;
+      const existing = listings.get(name);
+      if (existing?.on === "result") continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
       // `detectCallableKind`, not an assumed "handler": the walk above uses it,
       // `cf piece call` resolves through it, and a candidate proposed by the
@@ -2161,12 +2195,16 @@ export async function listPieceCallables(
       // `??` would let any non-null value on the result view, ordinary data
       // included, hide a stream sentinel stored at the same name on the piece
       // root.
-      const kind = detectCallableKind(
+      const resultSideKind = detectCallableKind(
         getCallableValue(resultRootValue, name),
         callableCell,
-      ) ??
+      );
+      const kind = resultSideKind ??
         detectCallableKind(getCallableValue(pieceValue, name), callableCell);
       if (!kind) continue;
+      // Rank 3 does not displace rank 2: an input row stands unless the RESULT
+      // cell itself classified the name, whatever the piece root stores at it.
+      if (existing !== undefined && resultSideKind === null) continue;
       const spec = callableCommandSpec(callableCell, kind);
       const outputSchema = spec.outputSchemaSummary ?? handlerResults.get(name);
       // `result`, because that is where the row was reached and where

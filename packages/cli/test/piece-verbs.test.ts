@@ -1,7 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
+import type { PieceCallablesListing } from "../lib/piece.ts";
 import { listPieceCallables, partitionVerbListing } from "../lib/piece.ts";
+import { verbListingJson, verbListingLines } from "../commands/piece.ts";
 
 const TEST_PATTERN_REF = {
   source: {
@@ -79,6 +81,45 @@ function schemaFilteredCell(
   };
 }
 
+/** The same schema-filtered result cell, with an event schema on each hidden
+ * stream's callable cell. That schema is what `callableCommandSpec` publishes
+ * as a handler row's `inputSchema`, so it is what tells a result-side row
+ * apart from a same-named input-side one — a test that only counted rows
+ * could not see the two swap. `noteCount` is the declared result type's whole
+ * content, and answers no to `isStream` like any data field. */
+function resultCellWithHiddenStreams(hidden: Record<string, JSONSchema>): {
+  schema: JSONSchema;
+  get: () => unknown;
+  getRaw: () => unknown;
+  asSchemaFromLinks: () => unknown;
+  key: (name: string) => unknown;
+} {
+  const child = (name: string) => {
+    const self = {
+      schema: hidden[name],
+      get: () => undefined,
+      getRaw: () => undefined,
+      isStream: () => Object.hasOwn(hidden, name),
+      asSchemaFromLinks: () => self,
+      key: () => self,
+    };
+    return self;
+  };
+  const value = { noteCount: 3 };
+  return {
+    schema: {
+      type: "object",
+      properties: { noteCount: { type: "number" } },
+    },
+    get: () => value,
+    getRaw: () => value,
+    asSchemaFromLinks: function () {
+      return this;
+    },
+    key: child,
+  };
+}
+
 const ADD_TOPIC_EVENT: JSONSchema = {
   type: "object",
   properties: {
@@ -87,6 +128,19 @@ const ADD_TOPIC_EVENT: JSONSchema = {
     agentName: { type: "string" },
   },
   required: ["title"],
+};
+
+/** Two event schemas that cannot be mistaken for one another: a row carrying
+ * one names which cell the listing reached the verb on. */
+const RESULT_SIDE_EVENT: JSONSchema = {
+  type: "object",
+  properties: { note: { type: "string" } },
+  required: ["note"],
+};
+
+const INPUT_SIDE_EVENT: JSONSchema = {
+  type: "object",
+  properties: { seed: { type: "number" } },
 };
 
 const SEARCH_ARGUMENTS: JSONSchema = {
@@ -479,6 +533,139 @@ describe("listPieceCallables", () => {
     expect(listing.incomplete).toBe("pattern-unavailable");
   });
 
+  it("gives a result-side callable the row when an input callable shares its name", async () => {
+    // `resolvePieceCallable` tries the result cell first and only reaches the
+    // input cell `if (!onResultCell)`. The listing must draw the same line,
+    // and the case where it is hardest to draw is exactly the one this change
+    // created: the result walk cannot SEE a verb the declared result type
+    // omits, so the input walk gets there first and the graph candidate then
+    // finds the name already listed.
+    //
+    // `notify` is stored on both cells with different event schemas. The
+    // dispatcher sends a payload shaped by RESULT_SIDE_EVENT, so a listing
+    // publishing INPUT_SIDE_EVENT hands a caller the wrong shape for the verb
+    // it will actually reach — a disagreement, not merely a mislabel.
+    const resultRoot = resultCellWithHiddenStreams({
+      notify: RESULT_SIDE_EVENT,
+    });
+    const inputRoot = cell(
+      { notify: { $stream: true } },
+      { type: "object", properties: { notify: INPUT_SIDE_EVENT } },
+    );
+    const pattern = compiledPattern({
+      result: {
+        notify: streamAlias({ stream: "notify" }),
+        noteCount: streamAlias("noteCount", { type: "number" }),
+      },
+      nodes: [
+        {
+          module: { wrapper: "handler", resultSchema: CREATE_NOTE_RESULT },
+          inputs: { $event: streamAlias({ stream: "notify" }) },
+          outputs: {},
+        },
+      ],
+    });
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(inputRoot) },
+      getCell: () => resultRoot,
+      getPattern: () => Promise.resolve(pattern),
+    };
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-794",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+
+    // One row, not two: a name resolves to one callable.
+    expect(listing.verbs.map((verb) => verb.name)).toEqual(["notify"]);
+    // Fails against a sweep whose guards skip a name already listed — the
+    // input row survives and reports `on: "input"`.
+    expect(listing.verbs[0].on).toBe("result");
+    // And the assertion that makes the row's identity load-bearing rather
+    // than its label: a listing left reporting the input row publishes
+    // INPUT_SIDE_EVENT for a verb the dispatcher reaches with
+    // RESULT_SIDE_EVENT.
+    expect(listing.verbs[0].inputSchema).toEqual(RESULT_SIDE_EVENT);
+    // The declared result rides the replacement, as on any result-side row.
+    expect(listing.verbs[0].outputSchema).toEqual(CREATE_NOTE_RESULT);
+  });
+
+  it("keeps an input row when nothing on the result cell classifies the name", async () => {
+    // The other side of the precedence, and what stops "the graph wins" from
+    // passing for a fix. `resolvePieceCallable` reaches the piece root's
+    // forced-stream probe only after the INPUT cell declines, so an input row
+    // outranks a piece-root sentinel and yields only to the result cell.
+    //
+    // `graphOnly` is a graph result property and an input verb, with nothing
+    // stored at it on the result cell. `rootOnly` is a piece-root sentinel and
+    // an input verb, likewise. The dispatcher resolves both on the input cell,
+    // so both must keep reporting `on: "input"` with the input event schema.
+    const resultRoot = resultCellWithHiddenStreams({});
+    const inputRoot = cell(
+      { graphOnly: { $stream: true }, rootOnly: { $stream: true } },
+      {
+        type: "object",
+        properties: {
+          graphOnly: INPUT_SIDE_EVENT,
+          rootOnly: INPUT_SIDE_EVENT,
+        },
+      },
+    );
+    const pattern = compiledPattern({
+      result: {
+        graphOnly: streamAlias({ stream: "graphOnly" }),
+        noteCount: streamAlias("noteCount", { type: "number" }),
+      },
+      nodes: [
+        {
+          module: { wrapper: "handler" },
+          inputs: { $event: streamAlias({ stream: "graphOnly" }) },
+          outputs: {},
+        },
+      ],
+    });
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(inputRoot) },
+      getCell: () => ({ get: () => ({ rootOnly: { $stream: true } }) }),
+      getPattern: () => Promise.resolve(pattern),
+    };
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-795",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+
+    const byName = new Map(listing.verbs.map((verb) => [verb.name, verb]));
+    expect([...byName.keys()].sort()).toEqual(["graphOnly", "rootOnly"]);
+    // `graphOnly` fails against a fix that lets any graph candidate replace an
+    // input row: the graph names it, but the result cell stores nothing there,
+    // so the dispatcher never leaves the input cell.
+    expect(byName.get("graphOnly")?.on).toBe("input");
+    expect(byName.get("graphOnly")?.inputSchema).toEqual(INPUT_SIDE_EVENT);
+    // `rootOnly` fails against a fix that replaces an input row on ANY stored
+    // signal rather than on the result cell's: the piece-root sentinel does
+    // classify, and ranking it above the input row inverts
+    // `onInputCell ?? tryResolvePieceHandler(...)`.
+    expect(byName.get("rootOnly")?.on).toBe("input");
+    expect(byName.get("rootOnly")?.inputSchema).toEqual(INPUT_SIDE_EVENT);
+  });
+
   it("checks the result view and the piece root for a stored signal independently", async () => {
     // Two sources of stored evidence, and neither is allowed to mask the
     // other. `notify` reads as an ordinary number through the declared result
@@ -625,5 +812,133 @@ describe("listPieceCallables", () => {
     expect(partition.shown.map((verb) => verb.name)).toEqual(["addTopic"]);
     expect(partition.wrapper).toBe(1);
     expect(partition.deprecated).toBe(1);
+  });
+});
+
+/** A listing as `listPieceCallables` returns one, built by hand so the
+ * rendering is exercised over shapes the lister reaches only against a live
+ * piece. */
+function listingOf(
+  verbs: PieceCallablesListing["verbs"],
+  extra: Partial<PieceCallablesListing> = {},
+): PieceCallablesListing {
+  return { pattern: null, verbs, ...extra };
+}
+
+/** A pattern ref carrying the two fields `formatPatternIdentity` reads, so
+ * the rendered PATTERN line is a real identity rather than `undefined`. */
+const IDENTIFIED_PATTERN_REF = {
+  identity: "sha256:feed",
+  symbol: "default",
+  source: { ref: "sha256:feed" },
+} as never;
+
+const ADD_TOPIC_ROW: PieceCallablesListing["verbs"][number] = {
+  name: "addTopic",
+  kind: "handler",
+  on: "result",
+  inputSchema: ADD_TOPIC_EVENT,
+};
+
+describe("cf piece verbs rendering", () => {
+  it("prints no incomplete note for a listing that read its pattern", () => {
+    const lines = verbListingLines(listingOf([ADD_TOPIC_ROW]), false);
+
+    // The negative, asserted on the whole output rather than on a flag: this
+    // is what fails against a renderer that prints the note unconditionally,
+    // which an assertion that only looked for the note when it IS expected
+    // would pass.
+    expect(lines.join("\n")).not.toContain("the pattern could not be read");
+    expect(lines.some((line) => line.startsWith("("))).toBe(false);
+    // And the rows really did render, so the absence above is not the absence
+    // of all output.
+    expect(lines.join("\n")).toContain("addTopic");
+  });
+
+  it("prints the incomplete note under the rows when the pattern was unreadable", () => {
+    const lines = verbListingLines(
+      listingOf([ADD_TOPIC_ROW], { incomplete: "pattern-unavailable" }),
+      false,
+    );
+
+    // Order is the assertion: a caller reads the note against the rows above
+    // it, so a note printed before the table would describe nothing.
+    expect(lines[lines.length - 1]).toBe(
+      "(the pattern could not be read, so verbs its result type omits are missing; the verbs listed are still callable)",
+    );
+    expect(lines.slice(0, -1).join("\n")).toContain("addTopic");
+  });
+
+  it("prints the incomplete note when no verbs are listed at all", () => {
+    // The case the note exists for. Without it `<no callable verbs>` is
+    // indistinguishable from a piece that genuinely has none — the failure
+    // this whole change is about, at the surface a person actually reads.
+    const lines = verbListingLines(
+      listingOf([], { incomplete: "pattern-unavailable" }),
+      false,
+    );
+
+    expect(lines).toEqual([
+      "<no callable verbs>",
+      "(the pattern could not be read, so verbs its result type omits are missing; the verbs listed are still callable)",
+    ]);
+  });
+
+  it("keeps the hidden-verb note and the incomplete note apart", () => {
+    // Both ways a listing can be short, at once. The hidden count rides the
+    // placeholder because it explains why the placeholder says "shown"; the
+    // incomplete note is its own line because `--all` cannot recover what it
+    // reports. Fails against a renderer that concatenates them, or that drops
+    // either when the other is present.
+    const lines = verbListingLines(
+      listingOf([{ ...ADD_TOPIC_ROW, tier: "wrapper" }], {
+        incomplete: "pattern-unavailable",
+      }),
+      false,
+    );
+
+    expect(lines).toEqual([
+      "<no callable verbs shown> (1 wrapper, 0 deprecated hidden; --all lists them)",
+      "(the pattern could not be read, so verbs its result type omits are missing; the verbs listed are still callable)",
+    ]);
+  });
+
+  it("shows a wrapper row under --all, with no hidden note and the pattern line", () => {
+    const lines = verbListingLines(
+      listingOf([{ ...ADD_TOPIC_ROW, tier: "wrapper" }], {
+        pattern: IDENTIFIED_PATTERN_REF,
+      }),
+      true,
+    );
+
+    // `--all` recovers the hidden row, so its note must go; the pattern
+    // identity heads the view whenever the listing carries one.
+    expect(lines[0]).toBe("PATTERN cf:module/sha256:feed#default");
+    expect(lines.join("\n")).toContain("addTopic");
+    expect(lines.join("\n")).toContain("wrapper");
+    expect(lines.some((line) => line.startsWith("(1 wrapper"))).toBe(false);
+  });
+
+  it("carries incomplete into the --json payload and omits it otherwise", () => {
+    // A machine reader has no listing text to read the bound off, so the flag
+    // must survive into JSON — and must be absent, not false, when the
+    // listing is whole.
+    const degraded = verbListingJson(
+      listingOf([ADD_TOPIC_ROW], { incomplete: "pattern-unavailable" }),
+      false,
+    );
+    expect(degraded.incomplete).toBe("pattern-unavailable");
+    expect(degraded.verbs).toEqual([ADD_TOPIC_ROW]);
+
+    const whole = verbListingJson(listingOf([ADD_TOPIC_ROW]), false);
+    expect(Object.hasOwn(whole, "incomplete")).toBe(false);
+
+    // The hidden counts keep their own shape beside it.
+    const hidden = verbListingJson(
+      listingOf([{ ...ADD_TOPIC_ROW, deprecated: true }]),
+      false,
+    );
+    expect(hidden.hidden).toEqual({ wrapper: 0, deprecated: 1 });
+    expect(hidden.verbs).toEqual([]);
   });
 });

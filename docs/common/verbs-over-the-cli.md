@@ -108,7 +108,13 @@ and each one is listed only when the piece stores a callable behind it — so a
 data field is never offered as callable, whatever the pattern hangs at that
 name.
 
-Every row is real: a name in the listing is a name `cf piece call` resolves.
+Every row is real, and says where it lives: a name in the listing is a name
+`cf piece call` resolves, and the row's `on` names the cell the dispatcher
+will reach it on. Result shadows input there exactly as it does in
+`cf piece call`, so a verb stored on both cells is listed — and called — on
+the result cell, carrying that cell's schema. Build a payload from the row and
+it is the payload the verb you reach expects.
+
 The converse is weaker, and worth knowing before treating an empty listing as
 an answer:
 
