@@ -50,8 +50,8 @@ Implementation: see `src/schema-generator.ts` (`formatType`) and
   kept as its `asCell` wrapper schema, participates in `required`, and carries
   the property's JSDoc description and lowered tags like any kept property.
 - Method signatures, declared methods, and other properties whose type exposes
-  call signatures are filtered before we decide on `required` membership or
-  emit attribute metadata (docs, default wrappers, etc.).
+  call signatures are filtered before we decide on `required` membership or emit
+  attribute metadata (docs, default wrappers, etc.).
 - This keeps schemas focused on serialisable data: JSON Schema cannot describe
   runtime function values, and downstream tooling expects objects, arrays, and
   primitives only.

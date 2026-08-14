@@ -297,10 +297,9 @@ a field under a linked element names that element's own document rather than a
 slot in the collection above it; a position with no link above it keeps the
 source document's own address. A marked position is never fetched, so a marked
 collection costs one document read rather than one per element; the rendered
-`id` is what `--piece` accepts, scheme included, so an emitted address
-composes into the next command unchanged. Neither spelling composes with
-`--filter`. See `packages/cli/README.md` for the exact syntax and supported
-schema subset.
+`id` is what `--piece` accepts, scheme included, so an emitted address composes
+into the next command unchanged. Neither spelling composes with `--filter`. See
+`packages/cli/README.md` for the exact syntax and supported schema subset.
 
 `piece call` takes the same three flags, before the callable name, with the same
 grammar, the same `--select`/`--schema` conflict, and the same error messages.
@@ -312,19 +311,19 @@ deno task cf piece call --piece ID --select topic.title addTopic '{"title":"Ship
 ```
 
 A selection shapes a result that already exists; it does not narrow what the
-call fetches — the readback materializes the whole receipt before the
-selection runs (a plain result's receipt carries a descriptive schema of what
-it holds; a reactive one carries none). A value-less verb therefore still
-reports no `result` at all rather than `{}` — but a selection that keeps
-nothing from a result that does exist is refused, so the two stay
-distinguishable. A shaped call also waits on the CLI runtime's global idle,
-not just its own handling's commit, so on a piece with heavy derived state
-prefer calling plain (or `--no-wait`) and shaping the collect:
-`cf piece get --piece <receipt id> --select …`.
-`--no-wait` refuses all three flags, since it skips the receipt readback they
-are answered from. `--show-links` composes with a projection — links are
-collected after the selection, so each address names a position in the value you
-were handed — but not with `--filter`, which moves the positions a link names.
+call fetches — the readback materializes the whole receipt before the selection
+runs (a plain result's receipt carries a descriptive schema of what it holds; a
+reactive one carries none). A value-less verb therefore still reports no
+`result` at all rather than `{}` — but a selection that keeps nothing from a
+result that does exist is refused, so the two stay distinguishable. A shaped
+call also waits on the CLI runtime's global idle, not just its own handling's
+commit, so on a piece with heavy derived state prefer calling plain (or
+`--no-wait`) and shaping the collect:
+`cf piece get --piece <receipt id> --select …`. `--no-wait` refuses all three
+flags, since it skips the receipt readback they are answered from.
+`--show-links` composes with a projection — links are collected after the
+selection, so each address names a position in the value you were handed — but
+not with `--filter`, which moves the positions a link names.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The
@@ -437,8 +436,8 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 
 ## References
 
-- `docs/common/verbs-over-the-cli.md` - The verb walkthrough: invocation ids
-  and sessions, receipts, retries, and shaped reads, each step runnable
+- `docs/common/verbs-over-the-cli.md` - The verb walkthrough: invocation ids and
+  sessions, receipts, retries, and shaped reads, each step runnable
 - `packages/patterns/system/default-app.tsx` - System pieces (pieceRegistry
   lives here)
 - `docs/common/workflows/handlers-cli-testing.md` - Handler testing
