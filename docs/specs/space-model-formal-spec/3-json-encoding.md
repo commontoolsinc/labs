@@ -378,9 +378,11 @@ for:
   `codec.tagForValue(value)` on encode, and decode routes each tag to its
   registered codec via the `CodecRegistry`.
 - Re-wrapping unknown types using the per-instance `wireTypeTag` preserved
-  in `UnknownValue` / `ProblematicValue` (read back through their codecs'
-  `tagForValue()`), and constructing `UnknownValue` for tags with no
-  registered codec.
+  in `UnknownValue` (read back through its codec's `tagForValue()`), and
+  constructing `UnknownValue` for tags with no registered codec. A
+  `ProblematicValue` is not re-wrapped this way: it encodes under its own
+  `Problematic@1` and carries the preserved tag as data, that tag being
+  possibly no tag at all.
 - Settling a codec's rejection according to `lenient`: in lenient mode a
   codec's throw becomes a `ProblematicValue`, and in strict mode a
   `ProblematicValue` a codec returns becomes a throw.

@@ -2715,7 +2715,7 @@ needing classes of its own extends what this returns.
 | 〃 | `FabricMap` | `Map@1` | 〃 (implementation currently stubbed; see Section 1.4.3). |
 | 〃 | `FabricSet` | `Set@1` | 〃 (implementation currently stubbed; see Section 1.4.4). |
 | 〃 | `UnknownValue` | _(per-instance)_ | No `recognizedTypeTag`; `tagForValue()` reads the preserved tag (Section 3). |
-| 〃 | `ProblematicValue` | _(per-instance)_ | 〃 |
+| 〃 | `ProblematicValue` | `Problematic@1` | Fixed tag of its own; the preserved tag rides inside the state, since it need not be a tag (Section 3.2). |
 | `registerPrimitive` | `BigIntCodec` (`bigint`) | `BigInt@1` | Encodes as unpadded base64 of minimal two's complement big-endian bytes. Standalone codec in `codec-json/` — no owned class to host a codec getter. |
 | 〃 | `SpecialNumberCodec` (`number`) | `SpecialNumber@1` | Catches `-0` / `NaN` / `±Infinity`; finite numbers fall to self-representation. |
 | 〃 | `SymbolCodec` (`symbol`) | `Symbol@1` | Registry-interned symbols only; an uninterned symbol matches no codec and is correctly unencodable. |
