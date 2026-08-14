@@ -3343,7 +3343,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("persists cfc metadata for nested entity documents created from labelled collection items", async () => {
+  it("persists cfc metadata for nested entity documents created from labeled collection items", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();

@@ -3428,7 +3428,7 @@ class SpaceReplica implements ISpaceReplica {
   /**
    * Mark a commit's outcome as finalized and remove it from the cascade scan
    * set. Idempotent — pushCommit's finally may run after reset() already
-   * signalled a local rejection for the same entry.
+   * signaled a local rejection for the same entry.
    */
   private settleInFlightCommit(localSeq: number): void {
     const entry = this.#inFlightCommits.get(localSeq);

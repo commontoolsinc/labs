@@ -28,7 +28,7 @@ import {
 } from "commonfabric";
 
 /** One note. Deliberately small: this fixture is about what a verb hands back,
- * not about modelling notes. */
+ * not about modeling notes. */
 export interface NoteOutput {
   [NAME]: string;
   title: string;

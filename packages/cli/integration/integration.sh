@@ -615,7 +615,7 @@ run_piece_call_retry() {
   assert_message_count "$RETRY_PIECE_ID" 1 \
     "A fresh-id retry after a pre-dispatch failure should record exactly one message"
 
-  # --- 2. Dispatched, then the caller died before acknowledgement. ----------
+  # --- 2. Dispatched, then the caller died before acknowledgment. ----------
   # The riskiest window: the event is on its way and the caller cannot know
   # whether it committed. The kill is triggered by the CLI's own dispatch
   # announcement, so this lands in the window deterministically rather than
@@ -952,7 +952,7 @@ run_three_topic_fixture() {
 
   # --- 6. Exactly three topics; references, reciprocals, attribution. -------
   # One step so the derived views (topicCount, referencedBy) recompute from
-  # the committed writes: acknowledgement is transaction-local (D2), so the
+  # the committed writes: acknowledgment is transaction-local (D2), so the
   # calls above deliberately never waited for derived recomputation.
   cf piece step $SPACE_ARGS --piece "$TOPIC_PIECE_ID"
 
@@ -987,7 +987,7 @@ run_three_topic_fixture() {
      .references == [$u]' > /dev/null ||
     error "Child B's returned reference should open the dropped create's canonical child, got: $CHILD_B_FINAL"
 
-  # The reciprocal derived references (this fixture's crossrefs analogue):
+  # The reciprocal derived references (this fixture's crossrefs analog):
   # children point up at the umbrella, the revised umbrella points down at
   # both children, derived — never persisted.
   RECIPROCAL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" referencedBy)

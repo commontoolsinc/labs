@@ -190,7 +190,7 @@ describe("CFC label view helpers", () => {
   it("does not treat schema constraints as display labels", () => {
     const cell = {
       getAsNormalizedFullLink: () => ({
-        id: "of:labelled-cell",
+        id: "of:labeled-cell",
         space: "did:key:test",
         type: "application/json",
         path: [],
@@ -209,7 +209,7 @@ describe("CFC label view helpers", () => {
   it("does not ask result metadata for label display", () => {
     const cell = {
       getAsNormalizedFullLink: () => ({
-        id: "of:labelled-result-cell",
+        id: "of:labeled-result-cell",
         space: "did:key:test",
         type: "application/json",
         path: [],
@@ -245,7 +245,7 @@ describe("CFC label view helpers", () => {
         type: "application/json",
         path: [],
       }, {
-        value: "labelled content",
+        value: "labeled content",
         cfc: {
           version: 1,
           schemaHash: "test-schema",
@@ -1294,7 +1294,7 @@ describe("CFC label view helpers", () => {
         type: "application/json",
         path: [],
       }, {
-        value: { body: "labelled content" },
+        value: { body: "labeled content" },
         cfc: {
           version: 1,
           schemaHash: "test-schema",
@@ -1337,7 +1337,7 @@ describe("CFC label view helpers", () => {
   it("reads stored metadata directly from the queried cell", () => {
     const cell = {
       getAsNormalizedFullLink: () => ({
-        id: "of:labelled-cell",
+        id: "of:labeled-cell",
         space: "did:key:test",
         type: "application/json",
         path: [],

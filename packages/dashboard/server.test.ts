@@ -116,7 +116,7 @@ function updateFromEvent(event: string): TestUpdate {
 function tileHtml(label: string, html = page()): string {
   const parts = html.split(`<div class="tile `);
   const hit = parts.filter((p) => p.includes(`</span> ${label}<span class="spacer">`));
-  assertEquals(hit.length, 1, `expected exactly one tile labelled "${label}"`);
+  assertEquals(hit.length, 1, `expected exactly one tile labeled "${label}"`);
   return hit[0];
 }
 

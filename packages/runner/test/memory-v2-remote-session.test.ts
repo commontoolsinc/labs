@@ -448,7 +448,7 @@ describe("StorageManager.registerSpaceHost", () => {
   });
 });
 
-describe("WebSocketTransport failure signalling", () => {
+describe("WebSocketTransport failure signaling", () => {
   // A socket the test opens, closes, and errors by hand. Nothing here waits on
   // a real connection or a timer: the transport reaches its close and error
   // handlers because the test dispatches those events synchronously.

@@ -27,7 +27,7 @@ import {
 } from "commonfabric";
 
 /** One work item. Deliberately small: this fixture is about what a verb hands
- * back and how a caller addresses what it made, not about modelling work. */
+ * back and how a caller addresses what it made, not about modeling work. */
 export interface ItemOutput {
   /** File a new item beneath this one. */
   addChild: Stream<AddChildEvent, AddChildResult>;

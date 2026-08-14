@@ -222,7 +222,7 @@ Deno.test("discord snapshot: an online user with no member record counts as a vi
   assertEquals(snap.teamColor, "#0000ff"); // a decimal Discord color, zero-padded
 });
 
-Deno.test("discord snapshot: a colorless Team role uses the visitor grey", () => {
+Deno.test("discord snapshot: a colorless Team role uses the visitor gray", () => {
   const online = [{ user: { id: "a" }, status: "online" }];
   const members = [{ user: { id: "a" }, roles: ["team"] }];
   // The role exists and is counted, but carries Discord's "no color" sentinel.

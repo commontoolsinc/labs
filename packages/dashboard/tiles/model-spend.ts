@@ -12,7 +12,7 @@
  * projected full-month spend, extrapolated from the recent daily rate and
  * spilling into last month's tail when this month is under two weeks old,
  * summed across every provider we could read. The subtitle is the key, saying
- * which colour is which provider and carrying OpenRouter's total since it has
+ * which color is which provider and carrying OpenRouter's total since it has
  * no line of its own. The combined month-to-date total sits in the header
  * aside, and the span the chart covers goes to the tile's duration slot.
  *

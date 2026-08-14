@@ -217,7 +217,7 @@ describe("spend", () => {
     expect(quiet[0]).toBeGreaterThan(lines[0][19][1]);
   });
 
-  it("marks a day both its neighbours are missing", () => {
+  it("marks a day both its neighbors are missing", () => {
     // On 3 January a 2-day lag reaches 1 January, so the January side of the
     // hole is a single day with nothing to join it to.
     const github = source(

@@ -481,7 +481,7 @@ Deno.test("ACL mutation preserves sibling envelope fields", async () => {
   const ctx = await withGenesisedSpace("runner-acl-mutation-siblings");
   const bob = await Identity.fromPassphrase("runner-acl-mutation-siblings bob");
   try {
-    // Install a sibling out-of-band, as a labelling layer would.
+    // Install a sibling out-of-band, as a labeling layer would.
     const current = await ctx.server.readDocument(
       ctx.space,
       `of:${ctx.space}`,

@@ -271,7 +271,7 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
   assert(!html.includes('class="spinner"'));
   assert(!html.includes("min runs per job"));
   assert(!html.includes("minRuns"));
-  // The runs slider offers only what the image route will honour, so dragging it
+  // The runs slider offers only what the image route will honor, so dragging it
   // to either end can't ask for a limit that comes back silently clamped.
   assertStringIncludes(html, `id="limit" min="1" max="150"`);
   assertEquals((await gantt("?limit=150")).args.indexOf("150") >= 0, true);

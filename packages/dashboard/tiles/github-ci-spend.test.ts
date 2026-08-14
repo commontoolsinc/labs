@@ -311,7 +311,7 @@ Deno.test("ci spend: no Actions budget in GitHub -> the projection stands, uncom
   assertEquals(none.sub, undefined);
   assertStringIncludes(none.extra ?? "", "Budget $???");
   assertEquals(none.status, "good"); // an absent budget never alarms
-  // The org budgets Actions' neighbours but not Actions.
+  // The org budgets Actions' neighbors but not Actions.
   const other = await view("2026-01-20T09:00:00Z", {
     [usagePath(2026, 1)]: usage,
     [budgetsPath()]: {

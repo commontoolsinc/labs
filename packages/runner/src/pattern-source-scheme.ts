@@ -134,7 +134,7 @@ export function systemPatternSourceForModuleName(
  * two things this change does not do. Durable pre-existing provenance has to be
  * migrated, which only happens on a successful check and therefore never on a
  * deployment running with `systemPatternAutoUpdate` off. And
- * `isLegacyPieceRegistryRoot` reads this to recognise a root that tracks the
+ * `isLegacyPieceRegistryRoot` reads this to recognize a root that tracks the
  * official default app, on a path with no flag gate at all.
  */
 export function normalizePatternSource(

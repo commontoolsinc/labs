@@ -90,7 +90,7 @@ describe("piece-render", () => {
           );
           const vdom = await cellHolding(
             runtime,
-            "static-labelled",
+            "static-labeled",
             vnode("div", {}, [label]),
           );
 

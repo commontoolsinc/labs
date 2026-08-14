@@ -138,7 +138,7 @@ function attachCfcToOutputs(
     //
     // A `FabricInstance` is refused. Its codec contents can hold a `Cell`,
     // unreachable by property name, so passing one through leaves that cell
-    // _unlabelled_ while its plain siblings are labelled -- confidentiality
+    // _unlabelled_ while its plain siblings are labeled -- confidentiality
     // silently not applied, which is the unsafe direction, unlike the
     // policy-input walks in `runner.ts` whose equivalent gap fails closed.
     //

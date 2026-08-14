@@ -286,11 +286,11 @@ function requireValue(args: string[], index: number, flag: string): string {
 const HELP_DESCRIPTION_COLUMN = 34;
 
 function helpLine(label: string, help: string): string {
-  const labelled = `  ${label}`;
-  if (labelled.length + 1 > HELP_DESCRIPTION_COLUMN) {
-    return `${labelled}\n${" ".repeat(HELP_DESCRIPTION_COLUMN)}${help}`;
+  const labeled = `  ${label}`;
+  if (labeled.length + 1 > HELP_DESCRIPTION_COLUMN) {
+    return `${labeled}\n${" ".repeat(HELP_DESCRIPTION_COLUMN)}${help}`;
   }
-  return `${labelled.padEnd(HELP_DESCRIPTION_COLUMN)}${help}`;
+  return `${labeled.padEnd(HELP_DESCRIPTION_COLUMN)}${help}`;
 }
 
 export function supervisorHelp(): string {
