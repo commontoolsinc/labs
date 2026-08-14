@@ -10,6 +10,7 @@ interface PingResult {
 
 interface Verbs {
   ping: Stream<Ping, PingResult>;
+  pingNamed: Stream<Ping, PingResult>;
   poke: Stream<Ping>;
 }
 
@@ -33,6 +34,28 @@ const ping = handler<Ping, { count: number }, PingResult>(
   },
 );
 
+// The named-callback spelling of the same form: recognition is
+// identifier-aware, so the call still passes through un-prepended and the
+// declared result still lands in the trailing options. (SES-mode loading
+// additionally demands a direct callback; the emission contract is what this
+// pins — a garbled call would fail far more confusingly than the verifier's
+// own refusal.)
+const echoNamed = (event: Ping, _state: { count: number }): PingResult => ({
+  echoed: event.word,
+});
+const pingNamed = handler<Ping, { count: number }, PingResult>(
+  {
+    type: "object",
+    properties: { word: { type: "string" } },
+    required: ["word"],
+  },
+  {
+    type: "object",
+    properties: { count: { type: "number", asCell: ["cell"] } },
+  },
+  echoNamed,
+);
+
 // The same form without a declared result: passed through untouched — no
 // generated schemas, no options object.
 const poke = handler<Ping, { count: number }>(
@@ -50,7 +73,11 @@ const poke = handler<Ping, { count: number }>(
 
 export default pattern<Record<string, never>, Verbs>(() => {
   const count = cell(0);
-  return { ping: ping({ count }), poke: poke({ count }) };
+  return {
+    ping: ping({ count }),
+    pingNamed: pingNamed({ count }),
+    poke: poke({ count }),
+  };
 });
 
 // FIXTURE: schema-first-declared-result

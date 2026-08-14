@@ -185,8 +185,8 @@ session per run
 pass `--invocation <your-key>` on mutating calls. A retry with the same pair
 settles on the original outcome instead of posting twice — the handler body
 re-runs, but nothing commits twice. The settled envelope also carries `receipt`,
-the address of the outcome, which `cf piece get --piece <receipt id>` reads back
-later without re-invoking.
+the address of the outcome, which `deno task cf piece get --piece <receipt id>`
+reads back later without re-invoking.
 
 The body is the living big-picture document. Replace it in place with the full
 revised body so a reader sees the current state without replaying the thread,

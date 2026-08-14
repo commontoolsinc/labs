@@ -862,10 +862,12 @@ the description is taken after the same inlining. None of this constrains a
 later write: the create-only mark means the value the schema describes is the
 only value that document ever holds. A verb's *declared* result type is a
 separate question: lowered onto `module.resultSchema`, it reaches the runtime —
-a launched result pattern carries it as its result schema, and the CLI serves
-it from the compiled graph (`cf piece verbs`, `cf piece call <verb> --help`) —
-but it never enters the durable schema, and the receipt's descriptive schema
-above is not a contract derived from it.
+a launched result pattern carries it as its result schema, which `setupInternal`
+records as that receipt's stored schema, and the CLI serves it from the
+compiled graph (`cf piece verbs`, `cf piece call <verb> --help`). What it never
+enters is the pattern's own durable schema — the shape the update gate compares
+across versions — and whichever source a receipt's stored schema came from, it
+describes one handling and constrains nothing written later.
 
 For an inline, non-navigation handler result, an `inSpace` child does not move
 that canonical handler-result wrapper into the child space. The result/receipt

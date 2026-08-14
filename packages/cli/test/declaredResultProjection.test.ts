@@ -112,6 +112,48 @@ describe("declaredResultProjection", () => {
     });
   });
 
+  it("does not read a repeated `$ref` spelling in a nested scope as the cycle", () => {
+    // The same "#/$defs/Item" spelling names a DIFFERENT definition inside a
+    // subtree carrying its own `$defs`. Only a reference repeated in its own
+    // scope closes the circle, so the nested leaf derives its contents while
+    // the outer `parent` still cuts — a spelling-keyed cycle set would render
+    // the finite leaf as an address.
+    const declared: JSONSchema = {
+      type: "object",
+      properties: { item: { $ref: "#/$defs/Item" } },
+      $defs: {
+        Item: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            inner: {
+              type: "object",
+              $defs: {
+                Item: {
+                  type: "object",
+                  properties: { note: { type: "string" } },
+                },
+              },
+              properties: { leaf: { $ref: "#/$defs/Item" } },
+            },
+            parent: { $ref: "#/$defs/Item" },
+          },
+        },
+      },
+    };
+    expect(declaredResultProjection(declared)?.schema).toEqual({
+      type: "object",
+      properties: {
+        item: {
+          type: "object",
+          properties: { title: true, inner: true, parent: false },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    });
+  });
+
   it("returns `undefined` where the verb declares no result to bound with", () => {
     expect(declaredResultProjection(undefined)).toBeUndefined();
     expect(declaredResultProjection(true)).toBeUndefined();

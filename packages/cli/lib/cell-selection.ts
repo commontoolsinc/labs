@@ -1054,11 +1054,13 @@ const DERIVED_DROPPED: DerivedPosition = { cut: false };
  * Helper for {@link declaredResultProjection}: one position of the declared
  * result, written as the projection position it derives.
  *
- * `following` holds the references the walk is already inside. A reference it
- * already holds is the cut: the declared type re-enters itself there, so
- * following it once more is what closes the circle. Every other position is
- * left as wide as it was declared — the derivation bounds a recursion and
- * narrows nothing else.
+ * `following` holds the references the walk is already inside, each paired
+ * with the scope root it was followed under: the same spelling in two `$defs`
+ * scopes names two definitions, so only a reference repeated in ITS OWN scope
+ * is the cut — the declared type re-enters itself there, and following it
+ * once more is what closes the circle. Every other position is left as wide
+ * as it was declared — the derivation bounds a recursion and narrows nothing
+ * else.
  *
  * Reference resolution is the canonical resolver's, one hop per recursion —
  * never a private pointer parser, whose recorded divergence class (escaped
@@ -1070,7 +1072,7 @@ const DERIVED_DROPPED: DerivedPosition = { cut: false };
 function derivePosition(
   schema: JSONSchema | undefined,
   root: JSONSchema,
-  following: ReadonlySet<string>,
+  following: ReadonlyArray<{ root: JSONSchema; ref: string }>,
 ): DerivedPosition {
   if (schema === undefined || typeof schema === "boolean") return DERIVED_WHOLE;
   // A subtree carrying its own `$defs` opens a new local-ref scope; every
@@ -1085,13 +1087,15 @@ function derivePosition(
 
   if (typeof schema.$ref === "string") {
     const ref = schema.$ref;
-    if (following.has(ref)) return DERIVED_ADDRESS;
+    if (following.some((f) => f.ref === ref && f.root === root)) {
+      return DERIVED_ADDRESS;
+    }
     const target = resolveCfcSchemaRef(root, ref);
     if (target === undefined) return DERIVED_WHOLE;
     return derivePosition(
       target,
       isEmbeddedCfcSchemaRef(ref) ? target : root,
-      new Set([...following, ref]),
+      [...following, { root, ref }],
     );
   }
 
@@ -1174,7 +1178,7 @@ export function declaredResultProjection(
   declared: JSONSchema | undefined,
 ): SelectionProjection | undefined {
   if (declared === undefined || typeof declared === "boolean") return undefined;
-  const derived = derivePosition(declared, declared, new Set());
+  const derived = derivePosition(declared, declared, []);
   if (!derived.cut || derived.schema === undefined) return undefined;
   return {
     source: DERIVED_PROJECTION_SOURCE,

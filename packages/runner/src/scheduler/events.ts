@@ -1076,6 +1076,10 @@ export async function dispatchQueuedEvent(state: {
   const requeueForNameResolution = () => {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      // The flag rides every requeue with the id it describes: dropping it
+      // would let a later same-origin send select this entry as a collapse
+      // survivor and rewrite the payload its receipt is about to witness.
+      callerSuppliedId: queuedEvent.callerSuppliedId,
       enqueueSeq: queuedEvent.enqueueSeq,
       time: queuedEvent.time,
       originTx: queuedEvent.originTx,
@@ -1107,6 +1111,10 @@ export async function dispatchQueuedEvent(state: {
   ) => {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      // Same as the name-resolution requeue above: the flag travels with the
+      // id, or the collapse-survivor exclusion silently ends at the first
+      // retry.
+      callerSuppliedId: queuedEvent.callerSuppliedId,
       enqueueSeq: queuedEvent.enqueueSeq,
       time: queuedEvent.time,
       originTx: queuedEvent.originTx,

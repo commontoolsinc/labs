@@ -48,6 +48,7 @@ outside the transaction repeat.
 Calling a verb with an id the caller chose, so the outcome stays recoverable:
 
 ```bash
+export CF_INVOCATION_SESSION="$(cf invocation-session new)"
 cf piece call --piece <board> --invocation create-note-7 \
   createNote '{"title":"Notes"}'
 ```

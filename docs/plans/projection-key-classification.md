@@ -217,9 +217,10 @@ object it assembles, and that function's closing required check returns
 `undefined` for the object. A parent reads that as `invalidObject` and voids in
 turn, so the emptying climbs to the root of the read.
 
-That is [#5734]'s failure mode exactly — an unsatisfiable `required` silently
-emptying a whole read, exit 0 — arriving through the design that claims to fix
-it, over a key no caller wrote. **Ceasing to carry the caller's `required` does
+That is [#5734]'s failure mode exactly — an unsatisfiable `required` emptying
+a whole read, surfaced only as the command layer's cause-blind refusal —
+arriving through the design that claims to fix it, over a key no caller
+wrote. **Ceasing to carry the caller's `required` does
 not fix [#5734] by itself; it relocates it.** The two requirements have to be
 settled together or they collide.
 

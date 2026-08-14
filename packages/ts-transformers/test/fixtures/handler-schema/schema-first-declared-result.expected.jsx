@@ -19,6 +19,7 @@ interface PingResult {
 }
 interface Verbs {
     ping: Stream<Ping, PingResult>;
+    pingNamed: Stream<Ping, PingResult>;
     poke: Stream<Ping>;
 }
 // The schema-first authored form: the author supplies the event and state
@@ -44,6 +45,33 @@ const ping = handler({
         },
         required: ["echoed"]
     } as const satisfies __cfHelpers.JSONSchema });
+// The named-callback spelling of the same form: recognition is
+// identifier-aware, so the call still passes through un-prepended and the
+// declared result still lands in the trailing options. (SES-mode loading
+// additionally demands a direct callback; the emission contract is what this
+// pins — a garbled call would fail far more confusingly than the verifier's
+// own refusal.)
+const echoNamed = __cfHardenFn((event: Ping, _state: {
+    count: number;
+}): PingResult => ({
+    echoed: event.word,
+}));
+const pingNamed = handler({
+    type: "object",
+    properties: { word: { type: "string" } },
+    required: ["word"],
+}, {
+    type: "object",
+    properties: { count: { type: "number", asCell: ["cell"] } },
+}, echoNamed, { resultSchema: {
+        type: "object",
+        properties: {
+            echoed: {
+                type: "string"
+            }
+        },
+        required: ["echoed"]
+    } as const satisfies __cfHelpers.JSONSchema });
 // The same form without a declared result: passed through untouched — no
 // generated schemas, no options object.
 const poke = handler({
@@ -58,7 +86,11 @@ export default pattern(() => {
     const count = cell(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("count", true);
-    return { ping: ping({ count }).for({ stream: ["__patternResult", "ping"] }, true), poke: poke({ count }).for({ stream: ["__patternResult", "poke"] }, true) };
+    return {
+        ping: ping({ count }).for({ stream: ["__patternResult", "ping"] }, true),
+        pingNamed: pingNamed({ count }).for({ stream: ["__patternResult", "pingNamed"] }, true),
+        poke: poke({ count }).for({ stream: ["__patternResult", "poke"] }, true)
+    };
 }, {
     type: "object",
     properties: {},
@@ -70,12 +102,16 @@ export default pattern(() => {
             $ref: "#/$defs/Ping",
             asCell: ["stream"]
         },
+        pingNamed: {
+            $ref: "#/$defs/Ping",
+            asCell: ["stream"]
+        },
         poke: {
             $ref: "#/$defs/Ping",
             asCell: ["stream"]
         }
     },
-    required: ["ping", "poke"],
+    required: ["ping", "pingNamed", "poke"],
     $defs: {
         Ping: {
             type: "object",
@@ -102,5 +138,6 @@ function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 __cfReg({
     ping,
+    pingNamed,
     poke
 });

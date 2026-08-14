@@ -29,6 +29,7 @@ import {
   isUnresolvedSchemaType,
   preserveSourceMapRange,
   registerSyntheticCallType,
+  resolveCallbackFunctionExpression,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
   widenLiteralType,
@@ -3063,7 +3064,7 @@ function withDeclaredResultSchema(
   const resultTypeNode = declaredVerbResultTypeNode(node, "handler");
   if (!resultTypeNode) return next;
 
-  const { factory, sourceFile } = context;
+  const { factory } = context;
   const resultSchemaCall = createSchemaCallWithRegistryTransfer(
     context,
     resultTypeNode,
@@ -3080,12 +3081,14 @@ function withDeclaredResultSchema(
   }
 
   // Only an argument the author wrote AFTER the callback is an options object;
-  // the callback itself, and the schemas prepended above, never are.
+  // the callback itself, and the schemas prepended above, never are. The
+  // identifier-aware resolver decides callback-ness, so a NAMED callback in
+  // the trailing slot is never mistaken for options and spread-replaced.
   const authoredTail = node.arguments.length >= 2
     ? node.arguments[node.arguments.length - 1]
     : undefined;
   const authoredOptions = authoredTail !== undefined &&
-      !resolveFunctionLikeExpression(authoredTail, checker, sourceFile)
+      !resolveCallbackFunctionExpression(authoredTail, checker)
     ? authoredTail
     : undefined;
 
@@ -3240,24 +3243,15 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           // displace the callback out of the positions the runtime dispatch
           // and the sandbox verifier accept (argument 0 or 2). What only the
           // transformer can do — lowering a declared result onto the trailing
-          // options object — still applies.
+          // options object — still applies. Recognition uses the
+          // identifier-aware resolver, so a NAMED callback recognizes the
+          // form too — the SES verifier still demands a direct callback at
+          // load, but the emission must not garble the call on the way there.
           if (
             node.arguments.length >= 3 &&
-            !resolveFunctionLikeExpression(
-              node.arguments[0],
-              checker,
-              sourceFile,
-            ) &&
-            !resolveFunctionLikeExpression(
-              node.arguments[1],
-              checker,
-              sourceFile,
-            ) &&
-            resolveFunctionLikeExpression(
-              node.arguments[2],
-              checker,
-              sourceFile,
-            )
+            !resolveCallbackFunctionExpression(node.arguments[0], checker) &&
+            !resolveCallbackFunctionExpression(node.arguments[1], checker) &&
+            resolveCallbackFunctionExpression(node.arguments[2], checker)
           ) {
             const updated = preserveSourceMapRange(
               factory.createCallExpression(
