@@ -1097,6 +1097,17 @@ structurally representable top-level result:
   - prepends event/state schemas
   - unresolved generic helper-definition-site type parameters degrade to
     `{ type: "unknown" }`
+- the schema-first authored form `handler<Event, State[, Result]>(eventSchema,
+  stateSchema, callback[, options])` — recognized when arguments 0 and 1 are
+  not callable and argument 2 is, with callable-ness taken from the checker's
+  call signatures rather than from the expression's spelling, so an arrow, a
+  reference, a function declaration, and a property access all recognize the
+  form — keeps its authored arguments: nothing is prepended, since generated
+  schemas on top would displace the callback out of the positions the runtime
+  dispatch and the sandbox verifier accept (argument 0 or 2). A declared
+  `Result` still lowers onto the trailing options object exactly as below;
+  without one the call passes through unchanged. Fixture:
+  `handler-schema/schema-first-declared-result`.
 - with single function arg:
   - infers event/state schemas from parameters
   - event absent -> `never`; untyped params -> `unknown`
@@ -1516,7 +1527,10 @@ first then module scope) to an applied handler factory that:
    doing its job, not wrapping a UI.
 
 Every hop that does not match leaves the property unmarked — the mark fails
-open. The companion mark `deprecated: true` is produced in the schema
+open. Property names are read statically throughout — identifier and
+string-literal spellings alike, in the inference and the schema mutation both
+— and a computed name is never inferred. The companion mark
+`deprecated: true` is produced in the schema
 generator itself (`@deprecated` JSDoc on a stream-valued property,
 `packages/schema-generator/src/doc-utils.ts`), and both keys are classified
 annotation-class in the piece compat checker so they add and remove freely

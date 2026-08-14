@@ -26,8 +26,10 @@ import {
 import {
   type CfcLabelView,
   cfcLabelViewForCellWithStatus,
+  cfcLabelViewFromSchema,
   getCarriedCfcLabelView,
   type IFCLabel,
+  mergeCfcLabelViews,
   redactCaveatSourcesForDisplay,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
@@ -230,7 +232,16 @@ function cfcLabelViewForCommand(
     const location = path.length === 0 ? "<root>" : path.join("/");
     throw new Error(`Could not read CFC labels at "${location}".`);
   }
-  return view === undefined ? null : redactCaveatSourcesForDisplay(view);
+  const schema = isObjectOrArray(cell)
+    ? cell.schema as JSONSchema | undefined
+    : undefined;
+  const effectiveView = mergeCfcLabelViews([
+    view,
+    cfcLabelViewFromSchema(schema),
+  ]);
+  return effectiveView === undefined
+    ? null
+    : redactCaveatSourcesForDisplay(effectiveView);
 }
 
 /** A `cf piece get` path that lands ON a verb. Reading a verb returns the
@@ -1623,9 +1634,12 @@ async function tryResolvePieceHandler(
     callableKind: "handler",
     cellKey: callableName,
     // The link-derived cell still carries whatever payload schema the piece
-    // does publish, which the forced stream cast does not; keep using it for
-    // the command spec so `--help` and input validation are unaffected.
+    // does publish, which the forced stream cast does not: the command spec
+    // reads it for `--help`, and `inputSchema` hands it to the pre-dispatch
+    // gate — the cast's own schema admits any payload, so gating on it would
+    // dispatch a malformed payload and spend the invocation id.
     commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
+    inputSchema: linkDerivedCell.schema,
     pieces,
     space,
   };
@@ -2880,17 +2894,24 @@ export async function getCellValue(
           options.selection,
         );
       } catch (error) {
+        // The verb refusal wins over every selection error, not only the
+        // "Cannot access path" family: a real `--filter` against a handler
+        // fails inside the selector with a shape error that sends the caller
+        // to their schema, when the answer is `cf piece call`. Classification
+        // fails open, so an uncertain path keeps its original error.
+        const verbRefusal = await verbReadRefusalOrNull(
+          piece,
+          prop,
+          path,
+          resolvedConfig.piece,
+        );
+        if (verbRefusal) throw verbRefusal;
         if (
           !options.input && error instanceof Error &&
           error.message.startsWith("Cannot access path") &&
           await resultProjectionFailedAtPath(piece, path)
         ) {
-          throw await verbReadRefusalOrNull(
-            piece,
-            prop,
-            path,
-            resolvedConfig.piece,
-          ) ?? new PieceResultProjectionError(path, shouldStep);
+          throw new PieceResultProjectionError(path, shouldStep);
         }
         throw error;
       }

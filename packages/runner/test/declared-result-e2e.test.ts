@@ -152,13 +152,18 @@ async function waitForSchedulerCondition(
   condition: () => boolean,
   message: string,
 ): Promise<void> {
-  const deadline = performance.now() + 5_000;
-  while (!condition() && performance.now() < deadline) {
+  // Iteration-bounded, not wall-clock-bounded: zero-delay yields do not
+  // advance the fake clock, so a time deadline could never expire and an
+  // unreachable condition would spin forever — hanging the suite to the CI
+  // job timeout with no test name. Each round drains the scheduler and
+  // yields one real timer turn — transport pumps and the emulated server's
+  // fan-out flush (which resolves awaited commits at marker coverage,
+  // CT-1950) ride zero-delay timers, which are exempt from the fake clock's
+  // test-armed freeze — so a condition the system will ever reach is reached
+  // within a bounded number of rounds, and one it never reaches throws
+  // `message` instead of hanging.
+  for (let round = 0; round < 200 && !condition(); round++) {
     await runtime.idle();
-    // Yield a zero-delay timer turn: an idle() that resolves through
-    // microtasks alone would otherwise starve the timer queue, and the
-    // emulated server's fan-out flush — which resolves awaited commits at
-    // marker coverage (CT-1950) — rides a zero-delay timer.
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {

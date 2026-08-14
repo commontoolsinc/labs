@@ -659,7 +659,15 @@ function isCallbackFunctionExpression(
   return ts.isArrowFunction(expression) || ts.isFunctionExpression(expression);
 }
 
-function resolveCallbackFunctionExpression(
+/**
+ * The function-like expression `expression` resolves to, following wrapper
+ * strips, the hardening helper, and — unlike schema-injection's local
+ * direct-only resolver — an identifier to its variable initializer through
+ * the checker. The resolver a caller wants when "is this argument the
+ * callback?" must answer the same for `handler(es, ss, cb)` and
+ * `handler(es, ss, myCb)`.
+ */
+export function resolveCallbackFunctionExpression(
   expression: ts.Expression,
   checker: ts.TypeChecker,
   seen = new Set<ts.Node>(),

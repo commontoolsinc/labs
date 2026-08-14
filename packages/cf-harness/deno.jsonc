@@ -13,6 +13,8 @@
     "./prompt-loop": "./src/prompt-loop.ts",
     "./interactive-chat-service": "./src/interactive-chat-service.ts",
     "./interactive-chat-stdio": "./src/interactive-chat-stdio.ts",
+    "./loom-local-host": "./src/loom-local-host.ts",
+    "./loom-local-host-main": "./src/loom-local-host-main.ts",
     "./session-store": "./src/session-store.ts",
     "./sqlite-session-store": "./src/sqlite-session-store.ts",
     "./subagent-return": "./src/subagent-return.ts",

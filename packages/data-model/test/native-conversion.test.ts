@@ -1187,7 +1187,7 @@ describe("native-conversion", () => {
         const obj: any = { a: 1 };
         obj.self = obj;
         expect(() => fabricFromNativeValue(obj)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
 
@@ -1195,7 +1195,7 @@ describe("native-conversion", () => {
         const arr: any[] = [1, 2];
         arr.push(arr);
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
 
@@ -1205,7 +1205,7 @@ describe("native-conversion", () => {
         a.b = b;
         b.a = a;
         expect(() => fabricFromNativeValue(a)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
 
@@ -1214,7 +1214,7 @@ describe("native-conversion", () => {
         arr[0] = 1;
         arr[2] = arr; // sparse array with circular reference at index 2
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
 
@@ -1222,7 +1222,7 @@ describe("native-conversion", () => {
         const arr: any[] = [1, undefined, null];
         arr[3] = arr; // array with undefined element + circular reference
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Not representable as a `FabricValue`: circular reference",
+          "Conversion refuses a circular reference",
         );
       });
     });

@@ -342,10 +342,45 @@ of the item's contents.
 dictionary of RFC 6901 pointers naming the document behind each result path, so
 the address is one `jq` hop further away but reachable.
 
+It differs from a marker in one way that matters: it **resolves**. A marker
+renders the link as stored; `--show-links` follows the chain as far as the
+links this replica has already materialized, and names the document it reaches.
+That is not a terminal answer — a hop whose target is not local kicks off a
+fetch nobody awaits, and a one-shot command exits before it lands, so the same
+path can resolve further on a later read. For getting an address to compose
+with, the two are interchangeable and an in-band marker is the shorter road.
+
+**An address is not an identifier to compare.** Addresses are many-to-one over
+cells, and a holder of one cannot tell a canonical id from an alias. Two
+positions holding the same piece can render two different `id`s, and the two
+spellings above can disagree with each other about one piece — a piece created
+inside a handler and pushed into a collection is held through a link that
+redirects to it, and the two routes stop at different points along that
+redirect. Each address reads back the same contents, which is what an address
+is for: something to read next, not a claim about canonical identity.
+
+So compose with an address; do not compare one. Two ids differing does not mean
+two pieces — and comparing contents does not rescue the question, since two
+distinct pieces can hold identical contents and one piece's contents change
+under it. **Asking whether two addresses name the same piece is not something
+the CLI supports today.**
+
 Neither route needs a verb to declare its result. A `$link` marker on a link
 position renders the address and suppresses the fetch without consulting a
 source schema at all. What a declared result would add is that `cf` could
 derive the selection instead of the caller supplying it.
+
+One case already works this way. `addChild` hands back the child it created,
+and the child's `parent` points back at the item that holds it. That loop
+means the result cannot be written out as plain JSON at all. So `cf` falls
+back on the verb's declared result and renders that shape instead: the
+child's fields come through as usual, and `parent` — the position where the
+loop would start again — comes through as an address, the same address a
+`$link` marker would have produced. If the verb declares no result, there is
+nothing to fall back on, and the call fails with a clear message rather than
+a stack trace.
+[A result that points back at its container](verbs-over-the-cli.md#a-result-that-points-back-at-its-container)
+shows the full exchange.
 
 ## 5. Read the tree back, bounded **[today]**
 

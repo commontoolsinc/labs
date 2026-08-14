@@ -14,6 +14,7 @@ import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
+import { HarnessControlError } from "../src/control-errors.ts";
 import type {
   CreateHarnessPromptLoopOptions,
   HarnessPromptLoopResult,
@@ -292,6 +293,169 @@ Deno.test("interactive Codex services require one matching process owner", () =>
     Error,
     "full owner binding",
   );
+});
+
+Deno.test("Loom-local interactive services require an explicit matching provider", () => {
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+  };
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        credentialOwner,
+        basePromptLoopOptions: {
+          modelAuthSource: "cf-harness-local-store",
+          credentialOwner,
+          credentialOwnerKey: credentialOwner.ownerKey,
+          harnessHomeIdentity: "sha256:opaque-home",
+          runManifest: {
+            type: "cf-harness.loom-run-manifest",
+            version: 1,
+            source: "loom",
+            modelProvider: "openai-codex",
+            modelAuthSource: "cf-harness-local-store",
+            credentialOwner,
+            harnessHomeIdentity: "sha256:opaque-home",
+          },
+        },
+      }),
+    Error,
+    "provider does not match",
+  );
+});
+
+Deno.test("Loom-local interactive services reject mismatched binding fields", () => {
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+    tenantKey: "tenant-a",
+  };
+  const manifest = {
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    modelProvider: "openai-compatible-gateway" as const,
+    modelAuthSource: "api-key" as const,
+    credentialOwner,
+    harnessHomeIdentity: "sha256:home-a",
+    model: "gpt-a",
+  };
+  const baseOptions = (
+    overrides: Partial<CreateHarnessPromptLoopOptions>,
+  ): CreateHarnessPromptLoopOptions => ({
+    modelProvider: manifest.modelProvider,
+    modelAuthSource: manifest.modelAuthSource,
+    credentialOwner,
+    credentialOwnerKey: credentialOwner.ownerKey,
+    harnessHomeIdentity: manifest.harnessHomeIdentity,
+    model: manifest.model,
+    runManifest: manifest,
+    ...overrides,
+  });
+  const cases: Array<{
+    overrides: Partial<CreateHarnessPromptLoopOptions>;
+    message: string;
+  }> = [
+    {
+      overrides: { modelAuthSource: "none" },
+      message: "auth source does not match",
+    },
+    {
+      overrides: {
+        credentialOwner: { ...credentialOwner, tenantKey: "tenant-b" },
+      },
+      message: "credential owner does not match",
+    },
+    {
+      overrides: { harnessHomeIdentity: "sha256:home-b" },
+      message: "harness home does not match",
+    },
+    { overrides: { model: "gpt-b" }, message: "model does not match" },
+  ];
+
+  for (const testCase of cases) {
+    assertThrows(
+      () =>
+        new HarnessInteractiveChatService({
+          basePromptLoopOptions: baseOptions(testCase.overrides),
+        }),
+      Error,
+      testCase.message,
+    );
+  }
+});
+
+Deno.test("Loom-local interactive sessions require a matching durable model", async () => {
+  const credentialOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "local",
+  };
+  const binding = {
+    source: "loom" as const,
+    modelProvider: "openai-compatible-gateway" as const,
+    modelAuthSource: "none" as const,
+    credentialOwner,
+    harnessHomeIdentity: "sha256:home-a",
+  };
+  const fixedModelService = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      ...binding,
+      model: "gpt-fixed",
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        ...binding,
+        model: "gpt-fixed",
+      },
+    },
+  });
+  const fixedModel = await fixedModelService.startSession("req-fixed", {
+    sessionId: "session-fixed",
+    workspace: { hostPath: "/workspace" },
+    model: "gpt-requested",
+  });
+  assertEquals(fixedModel.ok, false);
+  assertEquals(
+    fixedModel.ok === false ? fixedModel.error.code : undefined,
+    "provider-mismatch",
+  );
+  assertEquals(fixedModelService.status().sessions, []);
+
+  const missingModelService = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      ...binding,
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        ...binding,
+      },
+    },
+  });
+  for (
+    const testCase of [
+      { requestId: "req-missing" },
+      { requestId: "req-blank", model: "  " },
+    ]
+  ) {
+    const response = await missingModelService.startSession(
+      testCase.requestId,
+      {
+        sessionId: testCase.requestId,
+        workspace: { hostPath: "/workspace" },
+        ...(testCase.model !== undefined ? { model: testCase.model } : {}),
+      },
+    );
+    assertEquals(response.ok, false);
+    assertEquals(
+      response.ok === false ? response.error.code : undefined,
+      "provider-mismatch",
+    );
+  }
+  assertEquals(missingModelService.status().sessions, []);
 });
 
 Deno.test("interactive service forces comment-thread turns to read-only prompt-loop options", async () => {
@@ -1264,4 +1428,40 @@ Deno.test("interactive service terminalizes prompt-loop setup failures", async (
   assertEquals(second.ok, true);
   await service.waitForTurn("session-1", "turn-2");
   assertEquals(service.status("session-1").sessions[0].status, "idle");
+});
+
+Deno.test("interactive service preserves every typed provider blocker", async () => {
+  for (
+    const code of [
+      "provider-configuration-required",
+      "provider-auth-required",
+      "provider-mismatch",
+      "provider-unavailable",
+    ] as const
+  ) {
+    const service = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: () =>
+          Promise.reject(
+            new HarnessControlError(code, `provider blocker: ${code}`),
+          ),
+      }),
+      now: nextIsoNow(),
+    });
+    await service.startSession("req-1", {
+      sessionId: `session-${code}`,
+      workspace: { hostPath: "/workspace" },
+    });
+    await service.startTurn("req-2", {
+      sessionId: `session-${code}`,
+      turnId: `turn-${code}`,
+      input: { text: "Start" },
+    });
+    await service.waitForTurn(`session-${code}`, `turn-${code}`);
+
+    assertEquals(
+      service.listTurns({ sessionId: `session-${code}` }).turns[0].turn.error,
+      { code, message: `provider blocker: ${code}` },
+    );
+  }
 });

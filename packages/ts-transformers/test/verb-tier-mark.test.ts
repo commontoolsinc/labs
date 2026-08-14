@@ -48,6 +48,31 @@ Deno.test("a void-event action over a session cell is wrapper-tier", async () =>
   assertStringIncludes(output, 'tier: "wrapper"');
 });
 
+Deno.test("a quoted wrapper verb name is marked like a bare one", async () => {
+  // Two things at once, both previously untested: the returned property is a
+  // STRING-LITERAL name (the inference and mutation passes must agree on
+  // static names), and the wrapper is a directly-authored `handler(...)`
+  // whose sessionness lives in the APPLICATION binding (signal 2), not in a
+  // lowered action's bound-state schema (signal 1).
+  const output = await emit(`
+    import { handler, pattern, type PerSession, Stream, type Writable } from "commonfabric";
+    interface Out {
+      draft: PerSession<Writable<string>>;
+      "open-composer": Stream<void>;
+    }
+    export default pattern<Record<string, never>, Out>(() => {
+      const draft = new Writable("");
+      const openComposer = handler<void, { draft: Writable<string> }>(
+        (_event, state) => {
+          state.draft.set("");
+        },
+      );
+      return { draft, "open-composer": openComposer({ draft }) };
+    });
+  `);
+  assertEquals(tierMarked(output, '"open-composer"'), true);
+});
+
 Deno.test("a payload-carrying verb touching a session cell stays unmarked", async () => {
   // The addTopic shape: real event payload, incidental session-draft clear.
   const output = await emit(`

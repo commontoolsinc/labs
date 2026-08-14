@@ -18,7 +18,6 @@ import {
 import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { toURI } from "./uri-utils.ts";
-import { arrayEqual } from "./path-utils.ts";
 import {
   CellResultInternals,
   getCellOrThrow,
@@ -32,6 +31,7 @@ import {
 } from "./storage/interface.ts";
 import type { Runtime } from "./runtime.ts";
 import {
+  areNormalizedLinksSame,
   isNormalizedFullLink,
   isNormalizedLink,
   isPrimitiveCellLink,
@@ -186,17 +186,9 @@ export function areMaybeLinkAndNormalizedLinkSame(
   return areNormalizedLinksSame(normalizedLink, normalizedLink2);
 }
 
-/**
- * Compare two normalized links for equality
- */
-export function areNormalizedLinksSame(
-  link1: NormalizedLink,
-  link2: NormalizedLink,
-): boolean {
-  return link1.id === link2.id && link1.space === link2.space &&
-    (link1.scope ?? "space") === (link2.scope ?? "space") &&
-    arrayEqual(link1.path, link2.path);
-}
+// Link identity (`areNormalizedLinksSame` and neighbours) lives in
+// ./link-types.ts — one canonical implementation — and reaches importers of
+// this module through the `export *` above.
 
 /**
  * Creates a sigil reference (link or alias) with shared logic

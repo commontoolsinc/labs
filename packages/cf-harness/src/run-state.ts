@@ -12,7 +12,10 @@ import type {
   HarnessPolicyDecisionRecord,
   HarnessPolicyTrace,
 } from "./contracts/policy-trace.ts";
-import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
+import type {
+  HarnessCredentialOwnerRef,
+  HarnessRunManifest,
+} from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type {
   HarnessSkillActivations,
@@ -63,6 +66,8 @@ export interface HarnessRunState {
   modelProvider?: HarnessModelProviderId;
   modelAuthSource?: HarnessModelAuthSource;
   credentialOwnerKey?: string;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  harnessHomeIdentity?: string;
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -106,6 +111,8 @@ export interface CreateHarnessRunStateOptions {
   modelProvider?: HarnessModelProviderId;
   modelAuthSource?: HarnessModelAuthSource;
   credentialOwnerKey?: string;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  harnessHomeIdentity?: string;
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -161,6 +168,12 @@ export const createHarnessRunState = (
       : {}),
     ...(options.credentialOwnerKey !== undefined
       ? { credentialOwnerKey: options.credentialOwnerKey }
+      : {}),
+    ...(options.credentialOwner !== undefined
+      ? { credentialOwner: structuredClone(options.credentialOwner) }
+      : {}),
+    ...(options.harnessHomeIdentity !== undefined
+      ? { harnessHomeIdentity: options.harnessHomeIdentity }
       : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }

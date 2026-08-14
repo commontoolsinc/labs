@@ -43,6 +43,7 @@ import {
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import { assertValidHarnessHandleTable } from "./handle-table.ts";
+import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import {
   createHarnessPolicyDecisionRecord,
   type HarnessPolicyDecisionRecord,
@@ -363,6 +364,45 @@ export class CfHarnessEngine {
         `resumed openai-codex run model ${options.runState.model} does not match requested model ${options.model}`,
       );
     }
+    const recordedOwner = options.runState?.credentialOwner ??
+      options.runState?.runManifest?.credentialOwner;
+    const requestedOwner = options.credentialOwner ??
+      options.runManifest?.credentialOwner;
+    if (
+      options.runState !== undefined && recordedOwner !== undefined &&
+      requestedOwner !== undefined &&
+      !harnessCredentialOwnersEqual(recordedOwner, requestedOwner)
+    ) {
+      throw new Error(
+        "resumed run credential owner does not match requested credential owner",
+      );
+    }
+    const recordedHomeIdentity = options.runState?.harnessHomeIdentity ??
+      options.runState?.runManifest?.harnessHomeIdentity;
+    const requestedHomeIdentity = options.harnessHomeIdentity ??
+      options.runManifest?.harnessHomeIdentity;
+    if (
+      options.runState !== undefined && recordedHomeIdentity !== undefined &&
+      requestedHomeIdentity !== undefined &&
+      recordedHomeIdentity !== requestedHomeIdentity
+    ) {
+      throw new Error(
+        "resumed run harness home does not match requested harness home",
+      );
+    }
+    const recordedAuthSource = options.runState?.modelAuthSource ??
+      options.runState?.runManifest?.modelAuthSource;
+    const requestedAuthSource = options.modelAuthSource ??
+      options.runManifest?.modelAuthSource;
+    if (
+      options.runState !== undefined && recordedAuthSource !== undefined &&
+      requestedAuthSource !== undefined &&
+      recordedAuthSource !== requestedAuthSource
+    ) {
+      throw new Error(
+        "resumed run model auth source does not match requested model auth source",
+      );
+    }
     if (
       options.runState !== undefined && recordedProvider === "openai-codex" &&
       options.runState.credentialOwnerKey !== undefined &&
@@ -386,6 +426,15 @@ export class CfHarnessEngine {
           credentialOwnerKey: options.runState.credentialOwnerKey ??
             options.credentialOwnerKey,
         }
+        : {}),
+      ...(options.runState !== undefined && recordedOwner !== undefined
+        ? { credentialOwner: recordedOwner }
+        : {}),
+      ...(options.runState !== undefined && recordedHomeIdentity !== undefined
+        ? { harnessHomeIdentity: recordedHomeIdentity }
+        : {}),
+      ...(options.runState !== undefined && recordedAuthSource !== undefined
+        ? { modelAuthSource: recordedAuthSource }
         : {}),
     });
     const runId = options.runState?.runId ?? options.runId ??
@@ -475,12 +524,15 @@ export class CfHarnessEngine {
         currentDir,
         model: this.config.model,
         modelProvider: this.config.modelProvider,
-        modelAuthSource: this.config.modelProvider === "openai-codex"
-          ? "owner-bound-oauth"
-          : this.config.gatewayAuthMode === "none"
-          ? "none"
-          : "api-key",
+        modelAuthSource: this.config.modelAuthSource ??
+          (this.config.modelProvider === "openai-codex"
+            ? "owner-bound-oauth"
+            : this.config.gatewayAuthMode === "none"
+            ? "none"
+            : "api-key"),
         credentialOwnerKey: this.config.credentialOwnerKey,
+        credentialOwner: this.config.credentialOwner,
+        harnessHomeIdentity: this.config.harnessHomeIdentity,
         artifactRoot: this.artifactStore?.runRoot,
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,

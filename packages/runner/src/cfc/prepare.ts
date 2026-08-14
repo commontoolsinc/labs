@@ -27,7 +27,6 @@ import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
-import { forEachSubschema } from "../schema-walk.ts";
 import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
@@ -50,7 +49,6 @@ import {
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { cfcSchemaChildRoot, resolveCfcSchemaRefRoot } from "./schema-refs.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
   canonicalizeCfcMetadata,
@@ -97,6 +95,7 @@ import {
   readConsumesEntry,
   type ReadObservationShape,
 } from "./observation-classes.ts";
+import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
@@ -2096,157 +2095,6 @@ export const gatedSinkRequestExists = (
   );
 };
 
-interface IfcSchemaVisit {
-  root: object;
-  schema: object;
-  parent?: IfcSchemaVisit;
-}
-
-const walkIfcSchema = (
-  schema: JSONSchema,
-  path: readonly string[] = [],
-  entries: Array<
-    {
-      path: readonly string[];
-      label: IFCLabel;
-      schema: JSONSchema;
-      // Document carrying the `$defs` that resolves refs inside `schema`.
-      // `schema` is the bare ifc node (no `$defs` of its own), so value-condition
-      // refs only resolve against this root — thread it to the policy matcher.
-      root: JSONSchema;
-    }
-  > = [],
-  root: JSONSchema = schema,
-  active?: IfcSchemaVisit,
-): typeof entries => {
-  if (typeof schema === "boolean") {
-    return entries;
-  }
-  const schemaRoot = cfcSchemaChildRoot(schema, root);
-  const rootKey = isObjectOrArray(schemaRoot) ? schemaRoot : schema;
-  for (let cursor = active; cursor !== undefined; cursor = cursor.parent) {
-    if (cursor.root === rootKey && cursor.schema === schema) return entries;
-  }
-  const nextActive = { root: rootKey, schema, parent: active };
-
-  {
-    const resolved = typeof schema.$ref === "string"
-      ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot) ?? schema
-      : schema;
-    if (typeof resolved === "boolean") {
-      return entries;
-    }
-
-    const childRoot = cfcSchemaChildRoot(
-      resolved,
-      typeof schema.$ref === "string"
-        ? resolveCfcSchemaRefRoot(schema, schemaRoot)
-        : schemaRoot,
-    );
-    if (resolved.ifc !== undefined) {
-      entries.push({
-        path,
-        label: {
-          integrity: resolved.ifc.integrity
-            ? [...resolved.ifc.integrity]
-            : undefined,
-          confidentiality: resolved.ifc.confidentiality
-            ? [...resolved.ifc.confidentiality]
-            : undefined,
-        },
-        schema: resolved,
-        root: childRoot,
-      });
-    }
-
-    // Keyword descent via the shared walk, so the vocabulary cannot silently
-    // drift from schema-walk's (a missed keyword here fails open:
-    // under-tainting). The visitor owns the path rule per keyword — that
-    // part is this walker's semantics, not the walk's.
-    //
-    // Record-only `additionalProperties` descends as the same `*` segment
-    // arrays get from `items` (template-population §4) — RESTRICTED to
-    // record-only objects (no NAMED property). The restriction is
-    // load-bearing: `isPrefix`'s `*` matches ANY segment, but
-    // `additionalProperties` semantically covers only keys NOT listed under
-    // `properties` (schemaAtPath consults it only on a properties miss), so
-    // an unrestricted `*` entry from a mixed schema would over-taint the
-    // named fields. Mixed fixed-plus-record-tail schemas therefore mint no
-    // `*` entry (expressing them needs exclusion semantics §3.3 forbids).
-    // An EMPTY `properties` object is still record-only — it names no key,
-    // so every key is a properties miss and `additionalProperties` covers
-    // all of them; schema helpers routinely emit that wrapper shape, and
-    // skipping it would silently drop the declared map label (codex/cubic
-    // review on this PR).
-    const recordOnly = resolved.properties === undefined ||
-      Object.keys(resolved.properties).length === 0;
-    // `items` keeps its `*` entry even beside `prefixItems` (PR #4969
-    // review). The `*` matches ANY index — including the tuple slots — so
-    // the mixed tuple-plus-rest shape over-taints the slots with the rest
-    // labels; but the alternative (minting nothing, as additionalProperties
-    // does beside named properties) silently DROPS the tail elements'
-    // declared labels — fail-open, strictly worse than over-taint.
-    // Expressing "every index past the slots" precisely needs a path
-    // grammar beyond `*`; until then the wildcard stays. The record-side
-    // no-mint rule is unchanged: there the `*` entry would misassign
-    // through schemaAtPath's properties-first resolution, a trade that
-    // predates tuple support.
-    forEachSubschema(resolved, (child, keyword, key, index) => {
-      switch (keyword) {
-        case "properties":
-          walkIfcSchema(child, [...path, key!], entries, childRoot, nextActive);
-          break;
-        case "anyOf":
-        case "oneOf":
-        case "allOf":
-          walkIfcSchema(child, path, entries, childRoot, nextActive);
-          break;
-        case "items":
-          walkIfcSchema(child, [...path, "*"], entries, childRoot, nextActive);
-          break;
-        case "prefixItems":
-          // Tuple slots mint at their concrete index — unlike `items`' `*`
-          // entry, a slot label applies to exactly that position.
-          walkIfcSchema(
-            child,
-            [...path, String(index!)],
-            entries,
-            childRoot,
-            nextActive,
-          );
-          break;
-        case "additionalProperties":
-          if (recordOnly) {
-            walkIfcSchema(
-              child,
-              [...path, "*"],
-              entries,
-              childRoot,
-              nextActive,
-            );
-          }
-          break;
-        case "not":
-          // Negation describes what the value must NOT be. Minting
-          // label/policy entries from it would enforce an author's negated
-          // branch as if it labeled real data — deliberately skipped (unlike
-          // joinSchema, where unioning `not` atoms into the LUB is a safe
-          // over-taint).
-          break;
-        default:
-          // A keyword schema-walk knows but this walker has no path rule
-          // for: descend at the parent's own path — labels join at the
-          // position (over-taint, fail-safe) rather than being silently
-          // dropped (under-taint, fail-open). Give new keywords an explicit
-          // case above.
-          walkIfcSchema(child, path, entries, childRoot, nextActive);
-          break;
-      }
-    });
-    return entries;
-  }
-};
-
 const policyOnlySchema = (schema: JSONSchema): JSONSchema => {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) {
     return {};
@@ -2277,7 +2125,7 @@ const storedSchemaClaimsForLinkWrites = (
   const targetPaths = inputs.map((input) =>
     canonicalizeLogicalPath(input.target.path)
   );
-  for (const entry of walkIfcSchema(schema)) {
+  for (const entry of cfcSchemaEntries(schema)) {
     if (
       !targetPaths.some((targetPath) => pathsOverlap(targetPath, entry.path))
     ) {
@@ -2445,7 +2293,7 @@ const projectionClaimSpec = (
 
 // A schema-entry path (a `pathKey` — the canonical pointer encoding) parsed
 // back to segments. Entry paths use "*" for array-item / record-value
-// positions (walkIfcSchema).
+// positions (`cfcSchemaEntries()`).
 const entryPathFromKey = (key: string): readonly string[] =>
   key === "" ? [] : key.slice(1).split("/").map(decodePointerSegment);
 
@@ -3044,8 +2892,9 @@ export const wildcardPolicyMatchesValue = (
   },
   schema: JSONSchema | undefined,
   value: unknown,
-  // Schema document that resolves `$ref`s inside `schema`. walkIfcSchema
-  // captures an ifc node WITHOUT the document's `$defs` (those live on the
+  // Schema document that resolves `$ref`s inside `schema`.
+  // `cfcSchemaEntries()` captures an ifc node without the document's
+  // `$defs` (those live on the
   // outer root), so a value-condition ref like `items: {$ref: "#/$defs/X"}`
   // only resolves when the root carrying `$defs` is threaded in. Without it the
   // ref is spuriously unevaluable and the entry would fail closed on a perfectly
@@ -3098,7 +2947,8 @@ const ifcEntryAppliesToAttemptedWrite = (
   path: readonly string[],
   schema?: JSONSchema,
   // Document root that resolves `$ref`s inside `schema` (see
-  // wildcardPolicyMatchesValue). Threaded from walkIfcSchema entries, whose
+  // `wildcardPolicyMatchesValue()`). Threaded from
+  // `cfcSchemaEntries()` entries, whose
   // captured ifc node lacks the document's `$defs`.
   root?: JSONSchema,
 ): boolean => {
@@ -3625,7 +3475,7 @@ const verifyInputRequirements = (
     provenance.clockLessReads = clockLessReads;
   }
 
-  for (const entry of walkIfcSchema(schema)) {
+  for (const entry of cfcSchemaEntries(schema)) {
     if (
       !ifcEntryAppliesToAttemptedWrite(
         tx,
@@ -3909,7 +3759,7 @@ const verifyExactCopyRequirements = (
   },
   schema: JSONSchema,
 ): string | undefined => {
-  for (const entry of walkIfcSchema(schema)) {
+  for (const entry of cfcSchemaEntries(schema)) {
     const sourcePath = exactCopySourcePath(entry.schema);
     if (sourcePath === undefined) {
       continue;
@@ -3972,7 +3822,7 @@ const verifyProjectionRequirements = (
   },
   schema: JSONSchema,
 ): string | undefined => {
-  for (const entry of walkIfcSchema(schema)) {
+  for (const entry of cfcSchemaEntries(schema)) {
     const claim = projectionClaimSpec(entry.schema);
     if (claim === undefined) {
       continue;
@@ -4319,7 +4169,7 @@ const persistedLabelFromSchemaAtPath = (
   owningSpace: MemorySpace,
 ): IFCLabel | undefined => {
   const logicalPath = canonicalizeLogicalPath(path);
-  const entries = walkIfcSchema(schema);
+  const entries = cfcSchemaEntries(schema);
   let match:
     | { path: readonly string[]; label: IFCLabel; schema: JSONSchema }
     | undefined;
@@ -4379,7 +4229,9 @@ const rootLabelFromSchema = (
   if (schema === undefined) {
     return {};
   }
-  const root = walkIfcSchema(schema).find((entry) => entry.path.length === 0);
+  const root = cfcSchemaEntries(schema).find((entry) =>
+    entry.path.length === 0
+  );
   return root === undefined
     ? {}
     : derivePersistedLabel(tx, root.schema, root.label, undefined, owningSpace);
@@ -5127,7 +4979,7 @@ const verifyWriteFloor = (
   // principal are tx-wide. Concept floors on the written value resolve through
   // it; plain floors ignore it (Epic D5).
   const trust = cfcFloorTrustContext(tx);
-  const entries = walkIfcSchema(schema);
+  const entries = cfcSchemaEntries(schema);
   const entryLabels = new Map<string, IFCLabel>(
     entries.map((entry) => [pathKey(entry.path), entry.label]),
   );
@@ -5667,7 +5519,7 @@ export const prepareBoundaryCommit = (
     }
 
     const schemaAndHash = internSchema(mergedSchema, true);
-    const mergedSchemaEntries = walkIfcSchema(schemaAndHash.schema);
+    const mergedSchemaEntries = cfcSchemaEntries(schemaAndHash.schema);
     const mergedSchemaEntryLabels = new Map<string, IFCLabel>(
       mergedSchemaEntries.map((entry) => [
         pathKey(entry.path),
