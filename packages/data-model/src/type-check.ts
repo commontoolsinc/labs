@@ -117,7 +117,7 @@ export function isFabricValueLayer(
  * *convertible* to fabric form).
  */
 export function isFabricValue(value: unknown): value is FabricValue {
-  // Fast leaf paths first, so a function or a primitive answers without
+  // Fast leaf paths first, so a function or a primitive returns without
   // allocating the cycle-tracking set or the recursion closure below.
   if (typeof value === "function") {
     return false;

@@ -16,7 +16,7 @@ const MAX_RENDERED_LENGTH = 60;
  * What is not a string cannot be kept: a tag is read out of wire data, where a
  * format's tag position can hold anything its transport carries -- a
  * realm-crossing `Map` is keyed by any value at all. `toCompactDebugString()`
- * answers `"<unrenderable debug string>"` for anything it cannot render, so
+ * returns `"<unrenderable debug string>"` for anything it cannot render, so
  * this cannot fail while reporting a failure.
  *
  * The counterpart to {@link toReportableState}, which does the same for the

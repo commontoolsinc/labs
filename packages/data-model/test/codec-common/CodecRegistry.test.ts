@@ -1,5 +1,5 @@
 /**
- * The registry's two jobs -- accepting codecs and answering lookups -- and the
+ * The registry's two jobs -- accepting codecs and serving lookups -- and the
  * line that freezing draws between them.
  *
  * Acceptance is where the refusals live. A codec has to be classifiable, the
@@ -8,14 +8,14 @@
  * than on one of them, since a registration that arrived by a side door is
  * still one the walker will trust.
  *
- * Lookup answers from a value, from a tag, or with the sentinel meaning that
+ * Lookup works from a value, from a tag, or returns the sentinel meaning that
  * no codec is needed. Which symbol a class's codec is read from is settled
  * here too: the format-agnostic binding wins over the format's own when a
  * class has both, and a binding belonging to some other format is not
  * consulted at all.
  *
  * Freezing then separates the two jobs. Every mutator refuses afterward while
- * every lookup still answers, and extending yields a new registry carrying the
+ * every lookup still works, and extending yields a new registry carrying the
  * base's registrations without the base itself gaining anything.
  */
 
@@ -548,7 +548,7 @@ describe("CodecRegistry", () => {
         .toThrow("Cannot modify frozen `CodecRegistry`");
     });
 
-    it("still answers lookups", () => {
+    it("still returns a codec for a registered tag", () => {
       const base = new CodecRegistry(TEST_FORMAT);
       const codec = new TestCodec("readable@1", undefined);
       base.register(codec);

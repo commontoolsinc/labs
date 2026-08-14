@@ -5,7 +5,7 @@
  * contract above it, and the type guard enforces that rather than merely
  * reporting on it: a value that is a `FabricPrimitive` but not a
  * `BaseFabricPrimitive` is a broken subclass, so the guard throws instead of
- * quietly answering `false` and letting the mistake travel.
+ * quietly returning `false` and letting the mistake travel.
  *
  * The placeholder member is here in order to be a member at all -- an instance
  * type with nothing in it would make an ordinary `value is` guard collapse --
