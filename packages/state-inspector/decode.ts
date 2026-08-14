@@ -3,7 +3,7 @@
 // Stored payloads (`revision.data`, `commit.original`, …) come in TWO at-rest
 // formats, BOTH seen in real DBs:
 //   - modern: a `data-model` codec-json envelope, carrying that codec's prefix
-//     (decode via valueFromJson)
+//     (decode via `fabricFromJsonValue()`)
 //   - legacy: plain JSON
 // In both, links/refs/streams appear as plain-data sigils:
 //   link   { "/": { "link@1": { id, space?, path?, scope?, schema? } } }
@@ -15,7 +15,7 @@
 // `/quote`-escaped literals, so a context-less decode is inert.
 
 import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
-import { valueFromJson } from "@commonfabric/data-model/codecs";
+import { fabricFromJsonValue } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -24,7 +24,7 @@ import { isPlainObject } from "@commonfabric/utils/types";
 /** Decode a stored payload string, routing the `data-model` codec envelope. */
 export function decodeStored(data: string): unknown {
   return seemsLikeJsonEncodedFabricValue(data)
-    ? valueFromJson(data)
+    ? fabricFromJsonValue(data)
     : JSON.parse(data);
 }
 
@@ -87,11 +87,12 @@ export function parseSigilLink(v: Json): DecodedLink | null {
 
 /**
  * A link in EITHER at-rest form: the legacy `{ "/": { "link@N": … } }` sigil, or
- * a modern `FabricLink` instance (which `valueFromJson` can restore from a
- * codec envelope). Detected by class — `cell-rep`'s `isLinkRef` is gated on a
- * global modern-mode flag the inspector doesn't set, so we check `FabricLink`
- * directly and read its `.payload`. Without this, a modern link is an opaque
- * instance with no enumerable keys and vanishes from links/lineage/graph.
+ * a modern `FabricLink` instance (which `fabricFromJsonValue()` can restore
+ * from a codec envelope). Detected by class — `cell-rep`'s `isLinkRef` is gated
+ * on a global modern-mode flag the inspector doesn't set, so we check
+ * `FabricLink` directly and read its `.payload`. Without this, a modern link is
+ * an opaque instance with no enumerable keys and vanishes from
+ * links/lineage/graph.
  */
 export function decodedLinkOf(v: Json): DecodedLink | null {
   const sigil = parseSigilLink(v);

@@ -9,7 +9,10 @@ import {
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
-import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
+import {
+  fabricFromJsonValue,
+  jsonFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import {
   FabricPrimitive,
   type FabricValue,
@@ -195,7 +198,7 @@ async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
 function encodeGolden(value: unknown): string {
   const body = JSON.parse(
     JsonCodecEngine.unwrapEncodedValueForTesting(
-      jsonFromValue(value as FabricValue),
+      jsonFromFabricValue(value as FabricValue),
     ),
   );
   return JSON.stringify(body, null, 2) + "\n";
@@ -203,7 +206,7 @@ function encodeGolden(value: unknown): string {
 
 /** Inverse of {@link encodeGolden}. */
 function decodeGolden(text: string): unknown {
-  return valueFromJson(
+  return fabricFromJsonValue(
     JsonCodecEngine.wrapEncodedValueForTesting(text.trim()),
   );
 }

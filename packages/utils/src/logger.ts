@@ -381,6 +381,17 @@ class TimingDataStore {
     };
   }
 
+  /** Resets all timing data. */
+  reset(): void {
+    this.#count = 0;
+    this.#min = Infinity;
+    this.#max = -Infinity;
+    this.#totalTime = 0;
+    this.#lastTime = 0;
+    this.#lastTimestamp = 0;
+    this.#samples = [];
+  }
+
   /**
    * Returns the CDF (cumulative distribution function) of `sorted`, as
    * points where `(x, y)` means that a `y` fraction of the samples are at
@@ -393,17 +404,6 @@ class TimingDataStore {
       x,
       y: (i + 1) / sorted.length,
     }));
-  }
-
-  /** Resets all timing data. */
-  reset(): void {
-    this.#count = 0;
-    this.#min = Infinity;
-    this.#max = -Infinity;
-    this.#totalTime = 0;
-    this.#lastTime = 0;
-    this.#lastTimestamp = 0;
-    this.#samples = [];
   }
 }
 
@@ -655,6 +655,40 @@ export class Logger {
     return result;
   }
 
+  /**
+   * Returns all timing statistics for this logger.
+   * Returns a flat map with "/" joined keys.
+   */
+  get timeStats(): Record<string, TimingStats> {
+    const result: Record<string, TimingStats> = {};
+    for (const [key, store] of this.#timingsByKey) {
+      result[key] = store.getStats();
+    }
+    return result;
+  }
+
+  /**
+   * All active flags, as a record from flag name to a record from id to
+   * metadata. The metadata is whatever was passed to `flag()`, or `null` when
+   * none was. A flag name with no active id is omitted entirely.
+   */
+  get flags(): Record<string, Record<string, Record<string, unknown> | null>> {
+    const result: Record<
+      string,
+      Record<string, Record<string, unknown> | null>
+    > = {};
+    for (const [name, group] of this.#flags) {
+      if (group.size > 0) {
+        const entries: Record<string, Record<string, unknown> | null> = {};
+        for (const [id, value] of group) {
+          entries[id] = value === true ? null : value;
+        }
+        result[name] = entries;
+      }
+    }
+    return result;
+  }
+
   /** Resets all call counts to zero, both the overall and the by-key ones. */
   resetCounts(): void {
     this.#counts.debug = 0;
@@ -663,70 +697,6 @@ export class Logger {
     this.#counts.error = 0;
     this.#countsByKey = {};
     this.#lastLoggedAt = 0;
-  }
-
-  /** Increments the count for a specific message key and log level. */
-  #incrementKeyCount(key: string, level: ActiveLogLevel): void {
-    // Skip reserved key name "total" to prevent corruption of breakdown totals
-    if (key === "total") {
-      console.warn(
-        `[Logger] Message key \`total\` is reserved and cannot be used. ` +
-          `Please use a different key.`,
-      );
-      return;
-    }
-    if (!this.#countsByKey[key]) {
-      this.#countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
-    }
-    this.#countsByKey[key][level]++;
-  }
-
-  /**
-   * Logs the count summary, if incrementing the counter has just carried the
-   * total past another multiple of the configured threshold.
-   */
-  #maybeLogCountSummary(): void {
-    // Skip if disabled or logCountEvery is 0
-    if (this.#logCountEvery === 0) return;
-
-    const total = this.counts.total;
-    const threshold = Math.floor(total / this.#logCountEvery);
-
-    // Check if we've crossed a new threshold
-    if (threshold > this.#lastLoggedAt) {
-      this.#lastLoggedAt = threshold;
-
-      // Only log if debug level is enabled
-      if (shouldLog("debug", this.#level)) {
-        const { prefix, color } = this.#getLogFormat("debug");
-        const moduleName = this.#moduleName || "logger";
-        const message =
-          `${moduleName}: ${total} log calls made (debug: ${this.#counts.debug}, info: ${this.#counts.info}, warn: ${this.#counts.warn}, error: ${this.#counts.error})`;
-        console.debug(prefix, color, message);
-      }
-    }
-  }
-
-  /** Returns the prefix and color for a log level. */
-  #getLogFormat(
-    level: ActiveLogLevel,
-  ): { prefix: string; color: string } {
-    const levelUpper = level.toUpperCase();
-    const timestamp = getTimeStamp();
-
-    if (this.#moduleName) {
-      const prefix = `%c[${levelUpper}][${this.#moduleName}::${timestamp}]`;
-      const color = LOG_COLORS[
-        `tagged${
-          levelUpper.charAt(0) + level.slice(1)
-        }` as keyof typeof LOG_COLORS
-      ];
-      return { prefix, color };
-    } else {
-      const prefix = `%c[${levelUpper}][${timestamp}]`;
-      const color = LOG_COLORS[level];
-      return { prefix, color };
-    }
   }
 
   /** Logs a debug message. */
@@ -892,23 +862,6 @@ export class Logger {
   }
 
   /**
-   * Records timing against the full key path only, with no rollup to the
-   * shorter paths.
-   */
-  #recordTime(elapsed: number, keys: string[]): void {
-    const path = keys.join("/");
-    let store = this.#timingsByKey.get(path);
-    if (!store) {
-      store = new TimingDataStore();
-      if (this.#timingBaselineActive) {
-        store.setBaseline();
-      }
-      this.#timingsByKey.set(path, store);
-    }
-    store.record(elapsed);
-  }
-
-  /**
    * Returns timing statistics for a specific key path.
    * Accepts either separate key segments or a single "/" joined path.
    *
@@ -920,18 +873,6 @@ export class Logger {
     const keyPath = keys.join("/");
     const store = this.#timingsByKey.get(keyPath);
     return store?.getStats();
-  }
-
-  /**
-   * Returns all timing statistics for this logger.
-   * Returns a flat map with "/" joined keys.
-   */
-  get timeStats(): Record<string, TimingStats> {
-    const result: Record<string, TimingStats> = {};
-    for (const [key, store] of this.#timingsByKey) {
-      result[key] = store.getStats();
-    }
-    return result;
   }
 
   /** Resets all timing statistics for this logger. */
@@ -1020,31 +961,94 @@ export class Logger {
     }
   }
 
-  /**
-   * All active flags, as a record from flag name to a record from id to
-   * metadata. The metadata is whatever was passed to `flag()`, or `null` when
-   * none was. A flag name with no active id is omitted entirely.
-   */
-  get flags(): Record<string, Record<string, Record<string, unknown> | null>> {
-    const result: Record<
-      string,
-      Record<string, Record<string, unknown> | null>
-    > = {};
-    for (const [name, group] of this.#flags) {
-      if (group.size > 0) {
-        const entries: Record<string, Record<string, unknown> | null> = {};
-        for (const [id, value] of group) {
-          entries[id] = value === true ? null : value;
-        }
-        result[name] = entries;
-      }
-    }
-    return result;
-  }
-
   /** Resets all flags for this logger. */
   resetFlags(): void {
     this.#flags.clear();
+  }
+
+  //
+  // Private helpers
+  //
+
+  /** Increments the count for a specific message key and log level. */
+  #incrementKeyCount(key: string, level: ActiveLogLevel): void {
+    // Skip reserved key name "total" to prevent corruption of breakdown totals
+    if (key === "total") {
+      console.warn(
+        `[Logger] Message key \`total\` is reserved and cannot be used. ` +
+          `Please use a different key.`,
+      );
+      return;
+    }
+    if (!this.#countsByKey[key]) {
+      this.#countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
+    }
+    this.#countsByKey[key][level]++;
+  }
+
+  /**
+   * Logs the count summary, if incrementing the counter has just carried the
+   * total past another multiple of the configured threshold.
+   */
+  #maybeLogCountSummary(): void {
+    // Skip if disabled or logCountEvery is 0
+    if (this.#logCountEvery === 0) return;
+
+    const total = this.counts.total;
+    const threshold = Math.floor(total / this.#logCountEvery);
+
+    // Check if we've crossed a new threshold
+    if (threshold > this.#lastLoggedAt) {
+      this.#lastLoggedAt = threshold;
+
+      // Only log if debug level is enabled
+      if (shouldLog("debug", this.#level)) {
+        const { prefix, color } = this.#getLogFormat("debug");
+        const moduleName = this.#moduleName || "logger";
+        const message =
+          `${moduleName}: ${total} log calls made (debug: ${this.#counts.debug}, info: ${this.#counts.info}, warn: ${this.#counts.warn}, error: ${this.#counts.error})`;
+        console.debug(prefix, color, message);
+      }
+    }
+  }
+
+  /** Returns the prefix and color for a log level. */
+  #getLogFormat(
+    level: ActiveLogLevel,
+  ): { prefix: string; color: string } {
+    const levelUpper = level.toUpperCase();
+    const timestamp = getTimeStamp();
+
+    if (this.#moduleName) {
+      const prefix = `%c[${levelUpper}][${this.#moduleName}::${timestamp}]`;
+      const color = LOG_COLORS[
+        `tagged${
+          levelUpper.charAt(0) + level.slice(1)
+        }` as keyof typeof LOG_COLORS
+      ];
+      return { prefix, color };
+    } else {
+      const prefix = `%c[${levelUpper}][${timestamp}]`;
+      const color = LOG_COLORS[level];
+      return { prefix, color };
+    }
+  }
+
+  /**
+   * Records timing against the full key path only, with no rollup to the
+   * shorter paths.
+   */
+  #recordTime(elapsed: number, keys: string[]): void {
+    const path = keys.join("/");
+    let store = this.#timingsByKey.get(path);
+    if (!store) {
+      store = new TimingDataStore();
+      if (this.#timingBaselineActive) {
+        store.setBaseline();
+      }
+      this.#timingsByKey.set(path, store);
+    }
+    store.record(elapsed);
   }
 
   /** Returns the total count of all log calls, over all four levels. */

@@ -70,6 +70,9 @@ interface Input { title: string | Default<"Untitled">; }
   answered by naming what you want (`--select 'title,status'`), not by
   narrowing the type; the measurement is in
   [What you are driving](../verb-session-walkthrough.md#what-you-are-driving).
+  Adding a verb to such a type later is refused on update —
+  [designing verbs so they can change](../../plans/verb-evolution.md) has the
+  mechanism, and the holder-side rule that removes the refusal.
 
 ## See Also
 

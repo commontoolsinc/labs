@@ -21,7 +21,7 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * `structuredClone()` MUST NOT be used here: it silently demotes class
  * instances to plain objects. A demoted `FabricError` then fails the
  * `value instanceof FabricInstance` check in the wire/persistence codec
- * (`jsonFromValue`/`FabricInstanceHandler`), so it is serialized
+ * (`jsonFromFabricValue()`/`FabricInstanceHandler`), so it is serialized
  * generically and its wrapped native `Error` -- whose `message`/`stack`
  * are non-enumerable -- collapses to `{}`, losing the error entirely.
  *

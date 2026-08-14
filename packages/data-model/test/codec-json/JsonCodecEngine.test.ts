@@ -77,16 +77,8 @@ class UnregisteredInstance extends BaseFabricInstance {
     return "Unregistered@1";
   }
 
-  protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
-    return new UnregisteredInstance();
-  }
-
   // The encode-side mandate guard fires before any of these are reached, so
   // they are throwing stubs.
-  protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
-    throw new Error("not implemented");
-  }
-
   [DEEP_FREEZE](_subFreeze: (value: FabricValue) => FabricValue): FabricValue {
     throw new Error("not implemented");
   }
@@ -95,6 +87,14 @@ class UnregisteredInstance extends BaseFabricInstance {
     _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
     throw new Error("not implemented");
+  }
+
+  protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
+    throw new Error("not implemented");
+  }
+
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
+    return new UnregisteredInstance();
   }
 }
 
@@ -217,14 +217,6 @@ describe("JsonCodecEngine", () => {
         return PROBE_TAG;
       }
 
-      protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
-        return new ProbeInstance();
-      }
-
-      protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
-        return new ProbeInstance();
-      }
-
       [DEEP_FREEZE](
         _subFreeze: (value: FabricValue) => FabricValue,
       ): FabricValue {
@@ -235,6 +227,14 @@ describe("JsonCodecEngine", () => {
         _subIsDeepFrozen: (value: FabricValue) => boolean,
       ): boolean {
         return true;
+      }
+
+      protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
+        return new ProbeInstance();
+      }
+
+      protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
+        return new ProbeInstance();
       }
     }
 

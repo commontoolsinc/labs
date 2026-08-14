@@ -75,6 +75,18 @@ a record: archive it to `docs/history/plans/` following the procedure in
   already diverged. It carries the measurement, the size, and the gate-by-gate
   evidence that the refusal is drift rather than policy — the dispatch gate
   already accepts link values; the outer gates never got the option.
+- [Designing verbs so they can change](verb-evolution.md) records how verbs are
+  declared so that adding to and changing them later is possible: verbs are
+  promises and their names are stable by default — an owner may break their
+  own pattern deliberately, so what a caller holds is a commitment rather than
+  a guarantee — a holder declares only what it uses, an optional member's
+  maybe is resolved once at binding, and an output change gets a new verb
+  name. It states what the update gate enforces today, what
+  the transformer and authoring tools should carry so a one-off author never
+  has to learn a rule, and the open stream — named versioned interfaces,
+  per-piece upgrade policy, migrations that run code — that everything else
+  stands as the interim for. Written to be followable by anyone on the team,
+  not only by pattern authors.
 - [Verb calls: working notes](verb-result-selection.md) holds the call-specific
   investigation those documents do not carry: what produces a receipt and what
   its existence proves, how a receipt's address is derived, and the error and
@@ -83,6 +95,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   work on verbs across both arcs that produced it: what a verb declares, what a
   caller may ask for, and what comes back. Read it for order; read the designs
   it points at for reasoning.
+- [Projection keys, and the schema a read is handed](projection-key-classification.md)
+  designs the refusal of an unrecognized `--schema` key and the rule it is half
+  of — the projection reader never hands the read boundary a schema it did not
+  construct. Four tiers rather than three, because the keys that decide an
+  untyped position's container change behavior, so a caller's copy of one is
+  consumed rather than carried onward. Carries the measured blast radius, and
+  separates a constraint a caller supplies from the same keyword the reader
+  derives from the source schema.
 - [The CLI surface — implementation plan](cli-surface-implementation.md) builds
   the rest of the command surface: positional addresses, the honest top-level
   names, deprecating the spellings they replace, and merging the commands that

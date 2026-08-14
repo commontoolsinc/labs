@@ -4,7 +4,7 @@
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Database } from "@db/sqlite";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 
 import { openSpace } from "../db.ts";
 import {
@@ -52,7 +52,7 @@ function seed(path: string) {
     "of:A",
     1,
     "set",
-    jsonFromValue({
+    jsonFromFabricValue({
       value: {
         count: 0,
         title: "a",
@@ -69,7 +69,7 @@ function seed(path: string) {
     "of:E",
     1,
     "set",
-    jsonFromValue({ value: { n: 1, m: 1 } }),
+    jsonFromFabricValue({ value: { n: 1, m: 1 } }),
     1,
   );
   // commit 2: create B and encounter an invalid E patch
@@ -112,7 +112,7 @@ function seed(path: string) {
     "of:E",
     4,
     "set",
-    jsonFromValue({ value: { n: 10, m: 10 } }),
+    jsonFromFabricValue({ value: { n: 10, m: 10 } }),
     4,
   );
   // commit 5: a patch after the set can be reconstructed

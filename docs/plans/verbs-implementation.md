@@ -10,6 +10,8 @@ and
 
 **The designs are unchanged and are not restated here.**
 [The pattern verb contract](pattern-verb-contract.md) says what a verb is.
+[Designing verbs so they can change](verb-evolution.md) is the design of record
+for how a verb's interface changes once pieces are deployed against it.
 [Reading Fabric data](fabric-read-model.md) and the two documents it points at
 say how a caller reads. Read those for reasoning; read this for order.
 
@@ -48,7 +50,7 @@ without reconstructing it.
 | 9b. closed-world event emission | **ruled against** (#5589); does not land |
 | 12. `cf` refuses an undeclared field on a call | not started — where the ruling puts this capability |
 | 4. `receipt` as a top-level envelope field | on main (#5694) |
-| 2. an unrecognized projection key is refused | not started |
+| 2. an unrecognized projection key is refused | not started; design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
 | 5. `cf wish` and `cf exec` take the read options | not started |
 | 11. a caller may name a reference | not started; sequenced, gated on one measurement |
@@ -62,6 +64,7 @@ a driver needs to know what is already moving before scheduling anything new.
 | PR | What | State |
 | --- | --- | --- |
 | #5307 | closed-world verb event schemas | **ruled against** on #5589 and in review. Retreating leaves nothing to land — the emission and the goldens and baselines recording it are the whole branch — so this closes rather than merges |
+| #5746 | the `Demand<T>` marker and the foreign-output embedding warning, prototyping the demand substrate in [designing verbs so they can change](verb-evolution.md) | open. It edits `packages/ts-transformers/src/transformers/schema-injection.ts`, which is the file item 11's fourth part edits, so the one-file rule queues the two rather than running them in parallel — a driver picking up item 11 schedules against this branch before starting. It also adds `demand` to `ANNOTATION_KEYS` (`packages/piece/src/schema-compatibility.ts`), the set item 2 derives its tolerated tier from |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
 #5500 are on main. #5458 is closed rather than merged because its rename was
@@ -123,53 +126,100 @@ Unblocked and independent of the decision above. Not all small — items 2 and
 11 are both (M); what these share is that nothing gates them.
 
 **2. An unrecognized projection key is refused.** *(M)* Two denylists are
-consulted and every key in neither is accepted and ignored, so a typo selects
-nothing and says nothing, and any keyword given a meaning later changes
-behavior no error ever warned about. Three tiers replace them: honored,
-tolerated (the annotation and validation keywords, which a lifted source schema
-carries), and refused by name.
+consulted and every key in neither is accepted and carried onward. The design is
+[projection keys, and the schema a read is handed](projection-key-classification.md),
+which carries the tiers, the measured blast radius, and the reasoning; read it
+before picking this up. What follows is what a driver needs to sequence the
+item.
 
 This is the general form of a failure already fixed twice as instances — a
 missing `type` and an untyped `items` root each returned an empty result and
 reported nothing.
 
-*Reservation records a class, not a spelling.* An allowlist that says only
-"allowed" loses why, and a key admitted without its kind has its treatment
-decided by whatever the checker happens to default to — the original trap, one
-level up. So each reservation carries what it is: honored, tolerated because it
-is an annotation, tolerated because it is a validation keyword. A later change
-wanting to honor a tolerated key then knows it was deliberately ignored rather
-than overlooked.
+*A typo widens as readily as it narrows.* Without `type`, a misspelled
+`properties` names no container and the position reads as empty. **With `type`
+stated, the same misspelling sets `additionalProperties: true` and returns the
+whole object** — every field, including the ones the caller deliberately did not
+name. Both exit 0. The second is disclosure-shaped and is the stronger
+motivation for this item.
 
-The same discipline, on a different registry, is what classifies keys for the
-pattern compatibility checker — where the class decides whether adding and
-removing a key are both free, and where getting it wrong is what withdrew the
-July result-schema work. Sibling registries, not one: a projection is supplied
-per read and never compared across versions, so it has no add-and-remove
-semantics to get wrong. What transfers is classify-before-you-accept.
+*The general rule is bigger than the refusal.* **The projection reader must
+never hand the read boundary a schema it did not construct itself.** Refusing
+unknown keys does not reach it: `required` is recognized, legal, never reasoned
+about by the CLI beyond container inference, and acted on by the runner, so
+tolerating it forwards it. #5734 is that failure — an unsatisfiable `required`
+empties the whole read, exit 0 — and it belongs to this item. The rule its fix
+needs already exists one call site over: `selectSourceSchema` derives the
+constructed schema's `required` from the *source*, with a comment giving exactly
+this reason. **Its filter needs the survival test that comment describes**,
+though. As written the filter asks only whether the caller projected the
+position, so a property the caller projected under a type its value fails stays
+required, is then dropped by traversal, and empties the read — #5734 again,
+over a key no caller wrote. Ceasing to carry the caller's `required` without
+that does not fix #5734; it relocates it. The design works the rule out, and
+the two containers do not answer it alike: a rejected object property is
+omitted and the object survives, while a rejected array element voids the
+array, so a caller's element type takes down the whole property and everything
+that required it.
 
-*The two registries meet at lifted schemas, and this item is what couples
-them.* Today a projection ignores every key it does not recognize, so the
-durable dialect can grow freely. Refusing unrecognized keys ends that: a caller
-is told to lift a source schema and prune it, a lifted schema carries every
-keyword the generator emits, and a keyword admitted to the compat dialect
-without also reaching projection tolerance turns a projection over a marked
-schema into a refusal — on exactly the keys made deliberately free elsewhere.
+*Four tiers, not three.* Honored (`type`, `properties`, `items`,
+`additionalProperties`, `$link`); **consulted** (`required`, `minProperties`,
+`maxProperties`, `minItems`, `maxItems`, `uniqueItems` — read for container
+inference, so they change behavior, and the caller's copy goes no further);
+tolerated; refused. Calling the consulted tier "tolerated" would be dishonest
+about what it does. What stops is the caller's constraint, not the keyword: the
+reader keeps deriving `required` from the source schema, and that derivation
+must survive the item intact.
 
-So the tolerated-as-annotation set is **derived from the compat checker's
-annotation keys rather than restating them**. One edit admits a key to both, and
-the vocabulary cannot fork. Where derivation is not possible, the fallback is a
-test asserting every annotation key the checker knows is non-refused by the
-projection reader — which converts a forgotten second list from a silent
-projection failure into a red test naming both registries.
+*Three things the coupling to the compatibility checker has to respect.*
+**Derivation is not one-to-one:** three members of `ANNOTATION_KEYS` —
+`default`, `$defs`, `definitions` — are refused by projection on purpose, so
+the relation is `ANNOTATION_KEYS` minus a stated exception set, whatever that
+set grows to, and a fallback test asserting plain non-refusal of every
+annotation key would be red the day it is written. It asserts the exception
+relation in both directions instead.
+**The validation half must not derive:** the checker's `handled` set is a union
+including `allOf`, `if`/`then`/`else`, `patternProperties`, `asCell`, `ifc` and
+`scope`, every one of which projection refuses deliberately — so derive the
+annotation tier and write the validation tier by hand. **A refusal cannot point
+at a lifted schema:** no CLI surface prints the read-side source schema, so
+there is nothing to lift. That advice is sound one surface over, for item 12,
+where `cf piece verbs --json` carries `inputSchema`. A read-side refusal names
+the key, its position, and the accepted vocabulary.
 
 `tier` and `deprecated` are the newest annotation-class keys and the likeliest
 to be missing from a set drafted out of the standard JSON Schema vocabulary.
 They belong in the tolerated set on day one.
 
+**Deriving the tolerated tier gives you candidates, not a proof that carrying
+one is inert.** That proof is owed per key and is discharged against the
+runner, not against the checker's registry. `$comment` fails it: the runner
+reserves three of its values as control markers, so a caller's `$comment` is
+forgeable control flow reaching the read boundary — a projection setting one
+on a property drops that property, and one on a source-required property
+empties the read the way #5734 does. It is accepted and dropped, alongside `$id`
+and `$schema`.
+
+*Measured: nothing in the tree breaks.* Four JSON Schema keywords appear in
+keyword position across every `--schema` argument in the repository — `type`,
+`properties`, `items`, `$link` — all honored.
+
+*Out of scope:* `--select`, whose grammar is field paths and whose projection
+the CLI already builds itself.
+
 *Exit:* an unrecognized key is refused and the message names it; a tolerated
-keyword is accepted and ignored. A command that ran only because a key was
-silently dropped now fails loudly, which is the point rather than a regression.
+keyword is accepted and ignored; a consulted keyword is read for inference and
+the caller's copy goes no further, while the source-derived `required` the
+reader builds still reaches the read boundary — asserted against the output
+schema itself, which the selector handed to the storage provider is not; a
+projection naming a `required` field it does not project reads the fields it
+does; a caller's scalar `type` still filters the leaf it is written on, at
+depth as well as at an array item; and a source-required array narrowed by a
+caller's item type reads its siblings rather than emptying the object, which
+the scalar cases do not cover because the array's failure escalates from an
+element rather than occurring where the caller wrote it. A command that ran
+only because a key was silently dropped now fails loudly, which is the point
+rather than a regression.
 
 **3. A rejection propagates up through what holds it.** *(S)* The projection
 mask reduces either container whose whole selection rejects — an array whose
@@ -372,7 +422,7 @@ its own track.
 | 9 | A rejection propagates up through what holds it | **on main** (#5701) — item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
 | 10 | Two identical projections stop colliding | #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
 | 11 | One piece, one address | #5632, #5498 | — | Trace where each id is minted; the outcome is a fix or a statement that they are aliases. Must precede step 13, which spreads the address vocabulary to two more commands |
-| 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step and the only one with design surface, since it couples the projection reader to the compatibility checker's annotation keys |
+| 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](projection-key-classification.md) |
 | 12a | `cf` refuses an undeclared field on a call | item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says |
 | 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving |
 
