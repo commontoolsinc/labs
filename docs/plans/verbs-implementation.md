@@ -637,7 +637,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 
 | Issue | What | Attaches at |
 | --- | --- | --- |
-| #5633 | a projected read fails on the SECOND read of the same source and schema; the handler is a red herring | **in review** (#5764) — a list coordinator owes the setup writes a lost commit discarded, its result container's links among them. #5706, which is why it reproduces every time, stands |
+| #5633 | a projected read fails on the SECOND read of the same source and schema; the handler is a red herring | **fixed** by #5764 — a list coordinator owed the setup writes a lost commit discarded, its result container's links among them, and the fix makes those writes a debt rather than a flag. #5706, which is why it reproduced every time, stands |
 | #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | **fixed** by #5683, with #5662 |
 | #5698 | `cf piece verbs` returns nothing for a piece whose declared result type omits its verbs, though they are callable | the other direction of the same surface: 8 verbs invisible to the listing AND to tab-completion |
 | #5706 | a shaped read permanently writes to the user's space — per-element sub-patterns land at space scope | runner-owned, beside #5633 |
