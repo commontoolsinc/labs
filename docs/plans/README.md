@@ -77,9 +77,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   already accepts link values; the outer gates never got the option.
 - [Designing verbs so they can change](verb-evolution.md) records how verbs are
   declared so that adding to and changing them later is possible: verbs are
-  promises and their names are permanent, a holder declares only what it uses,
-  an optional member's maybe is resolved once at binding, and an output change
-  gets a new verb name. It states what the update gate enforces today, what
+  promises and their names are stable by default — an owner may break their
+  own pattern deliberately, so what a caller holds is a commitment rather than
+  a guarantee — a holder declares only what it uses, an optional member's
+  maybe is resolved once at binding, and an output change gets a new verb
+  name. It states what the update gate enforces today, what
   the transformer and authoring tools should carry so a one-off author never
   has to learn a rule, and the open stream — named versioned interfaces,
   per-piece upgrade policy, migrations that run code — that everything else
