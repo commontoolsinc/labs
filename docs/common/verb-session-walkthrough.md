@@ -151,7 +151,9 @@ same content twice, and the copy that goes stale when a parameter changes.
 **One interface, holding both.** An item's fields and its verbs sit together
 because that is what an item *is*: a child in `children` is a full item, and
 declaring it any narrower would be a claim the runtime contradicts — ask that
-child what it can do and it lists all five.
+child what it can do and it lists all five. Act 4 asks it: an address is enough
+to discover a surface, with no schema shipped alongside and nothing looked up
+by type.
 
 **Every field is a reference, not a copy.** `children` holds links to item
 pieces, and so does `blockedOn`. That is the whole reason addresses matter
