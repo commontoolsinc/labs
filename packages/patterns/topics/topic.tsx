@@ -623,12 +623,17 @@ export const submitProfileLink = handler<void, {
  */
 const backlinksOf = lift((
   { table, self }: {
-    table: { topic: unknown; mentionedBy: unknown }[] | Default<[]>;
+    table: { topic: unknown; mentionedBy: unknown[] }[] | Default<[]>;
     self: unknown;
   },
 ): TopicSummary[] =>
-  (table.find((row) => equals(self as object, row.topic as object))
-    ?.mentionedBy ?? []) as TopicSummary[]
+  // `filter` + `flatMap` rather than `find`, so a topic with no row on the
+  // table — no board wired in — yields an empty array from the shape of the
+  // expression instead of from a `?? []` bolted onto a miss. At most one row
+  // matches: rows are keyed by the topic they describe.
+  table
+    .filter((row) => equals(self as object, row.topic as object))
+    .flatMap((row) => row.mentionedBy) as TopicSummary[]
 );
 
 /**
