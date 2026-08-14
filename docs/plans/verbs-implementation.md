@@ -638,7 +638,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | Issue | What | Attaches at |
 | --- | --- | --- |
 | #5633 | a projected read fails on the SECOND read of the same source and schema; the handler is a red herring | **fixed** by #5764 — a list coordinator owed the setup writes a lost commit discarded, its result container's links among them, and the fix makes those writes a debt rather than a flag. #5706, which is why it reproduced every time, stands |
-| #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | **fixed** by #5683, with #5662 |
+| #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | **fixed** by #5683, with #5662 — and the other direction by #5794 |
 | #5698 | `cf piece verbs` returns nothing for a piece whose declared result type omits its verbs, though they are callable | the other direction of the same surface, and **fixed** by #5794: the listing enumerates candidates from the compiled graph as well as the result cell, and classifies each one on the stored signal that closed the first direction |
 | #5706 | a shaped read permanently writes to the user's space — per-element sub-patterns land at space scope | runner-owned, beside #5633 |
 | #5722 | a verb's help shows its usage twice, and shows no way to copy it | found by driving the surface by hand, which no test does |
@@ -651,6 +651,16 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5589 | a click's `detail` and a `cf-select`'s `target.value` reach a handler as types no pattern declares | carried alongside — it belongs to whoever next touches `packages/html`. The ruling that closed item 9b also removed the only thing that ever compared the renderer's output against an author's declared type, so this has no detector left |
 | #5560 | an address a call returns cannot be passed back as a verb argument | item 11, and **row 14** — it had no ordering row until one was added. Not to be confused with ordering step 11, "one piece, one address", which is #5632 and decided |
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
+| #5685 | no CI job runs any verb integration script, and one of them says it does | **unscheduled, and the sharpest of these.** `verbs-over-the-cli.sh` and `verb-session-gaps.sh` are the arc's honesty checks and gate nothing; a claim that one runs is worse than the gap, because it is why nobody looked |
+| #5663 | the compat checker admits a newly required verb event field, breaking every existing caller | **unscheduled.** It sits in `packages/piece/src/schema-compatibility.ts`, the set item 2 derives its tolerated tier from, so a change there meets this |
+| #5689 | `cf piece call` accepts any name into dispatch; a non-verb fails with no diagnostic | unscheduled. The listing now refuses to offer a non-verb (#5683, #5794); the dispatcher still accepts one |
+| #5684 | `cf piece get --select` returns `{}` for a field path that cannot match | unscheduled. Item 2's shape on the concise path, which item 2 puts out of scope — a projection that answers nothing rather than refusing |
+| #5686 | design rule 1 says input schemas are closed-world; after the #5589 ruling the runtime does the opposite | unscheduled and unowned. Not settled by [designing verbs so they can change](verb-evolution.md), which says nothing about closed-world inputs — searched, not assumed |
+| #5756 | `ensureKeylessPatternIdentity`'s doc comment claims a structural-dedup property the code does not have | runner-owned. Measured: two structurally identical patterns get different keyless identities |
+| #5758 | a call's readback traverses the reference graph with no work budget | memory-owned. `maxDepth` and `maxEntities` are in `docs/specs/memory-v2/05-queries.md` and not on the wire |
+| #5759 | `Cell.equals()` is cache-dependent | runner-owned, and **answered**: this is the runtime's eventual consistency, not a defect. Closeable |
+| #5760 | an indirect reference has no contract | runner-owned. Two of its three questions are answered; whether a rendered address should declare itself indirect is deferred and gates nothing |
+| #5761 | the projection derivation cannot express conjunction; `allOf` refuses | filed out of item 2 and **relied on by it**: `sourceProvesContainer` refuses to prove a container through `allOf` for this reason |
 
 **Filed against neighboring subsystems, and not sequenced here.** `{ proxy:
 true }` never reaching `module.writableProxy` for a transformed pattern
