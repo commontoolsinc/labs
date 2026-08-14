@@ -1,4 +1,12 @@
-import { action, assert, pattern, UI, wish, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  pattern,
+  TESTS,
+  UI,
+  wish,
+  Writable,
+} from "commonfabric";
 import { findNode, propsOf } from "../test/vnode-helpers.ts";
 import ChatNote from "./chat-note.tsx";
 
@@ -54,7 +62,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_starts_unlinked },
       { action: action_create_backlink },
       { assertion: assert_backlink_registers_and_mentions_piece },

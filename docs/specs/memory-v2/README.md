@@ -165,7 +165,8 @@ interface ConfirmedRead {
 interface PendingRead {
   id: EntityId;
   path: ReadPath;
-  localSeq: number;
+  localSeq: number | number[];
+  basisSeq?: number;
 }
 
 interface ClientCommit {

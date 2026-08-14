@@ -28,7 +28,7 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
@@ -85,7 +85,7 @@ export function dataUriFromValueWithResolvedLinks(
     value: FabricValue,
     seen: Set<object>,
   ): FabricValue {
-    if (!isRecord(value)) return value;
+    if (!isObjectOrArray(value)) return value;
     if (seen.has(value)) {
       throw new Error(`Cycle detected when creating data URI`);
     }
@@ -110,18 +110,36 @@ export function dataUriFromValueWithResolvedLinks(
         // relative link within it stays relative).
         return value;
       } else if (Array.isArray(value)) {
-        return value.map((item) =>
-          traverseAndAddBaseIdToRelativeLinks(item, seen)
-        );
-      } else { // isObject
-        return Object.fromEntries(
-          Object.entries(value).map((
-            [key, value],
-          ) => [
-            key,
-            traverseAndAddBaseIdToRelativeLinks(value, seen),
-          ]),
-        );
+        // Copy on write, here and in the object branch below: a container
+        // whose members all come back by identity is returned by identity
+        // too, so the encoder that reads the result gets the caller's own
+        // containers. A value carrying no link anywhere within it comes
+        // through this walk without an allocation.
+        let next: FabricValue[] | undefined;
+        for (let index = 0; index < value.length; index++) {
+          if (!(index in value)) continue;
+          const current = value[index];
+          const rewritten = traverseAndAddBaseIdToRelativeLinks(current, seen);
+          if (next) {
+            next[index] = rewritten;
+          } else if (!Object.is(rewritten, current)) {
+            next = value.slice();
+            next[index] = rewritten;
+          }
+        }
+        return next ?? value;
+      } else { // not an array
+        let next: Record<string, FabricValue> | undefined;
+        for (const [key, entry] of Object.entries(value)) {
+          const rewritten = traverseAndAddBaseIdToRelativeLinks(entry, seen);
+          if (next) {
+            next[key] = rewritten;
+          } else if (!Object.is(rewritten, entry)) {
+            next = { ...value };
+            next[key] = rewritten;
+          }
+        }
+        return next ?? value;
       }
     } finally {
       seen.delete(value);
@@ -235,7 +253,7 @@ export function findAndInlineDataUriLinks(value: any): any {
     }
     return next ?? value;
   } else if (value instanceof FabricPrimitive) {
-    // A leaf, and `isRecord`, so it leaves ahead of the record branch below.
+    // A leaf, and `isObjectOrArray`, so it leaves ahead of the record branch below.
     // It holds no link to inline, so returning it whole is the answer rather
     // than an omission.
     return value;
@@ -260,7 +278,7 @@ export function findAndInlineDataUriLinks(value: any): any {
     // at which point this becomes a walk rather than a refusal -- the same gap
     // marked at the sibling walk in `dataUriFromValueWithResolvedLinks()`.
     refuseFabricInstance(value, "when inlining `data:` URI links");
-  } else if (isRecord(value)) {
+  } else if (isObjectOrArray(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
       const inlined = findAndInlineDataUriLinks(entry);

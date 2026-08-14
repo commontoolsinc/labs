@@ -188,6 +188,12 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     reactiveOrigin: true,
   },
   {
+    exportName: "cellFromUrl",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  {
     exportName: "fetchJsonUnchecked",
     category: "call",
     callKind: "runtime-call",

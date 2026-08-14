@@ -17,6 +17,7 @@ import {
   type Default,
   multiUserTest,
   pattern,
+  TESTS,
   type Writable,
 } from "commonfabric";
 import {
@@ -90,7 +91,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const assert_is_admin = computed(() => chat.currentUserIsAdmin === true);
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_set_name },
       { action: chat.saveProfile, trustedUi: profileGesture },
       { assertion: assert_named_alice },
@@ -148,7 +149,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const assert_not_admin = computed(() => chat.currentUserIsAdmin === false);
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-saved" },
       { assertion: assert_draft_empty },
       { assertion: assert_unnamed },

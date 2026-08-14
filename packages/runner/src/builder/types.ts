@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import type { EntityKind } from "../entity-kind.ts";
 import type { PatternBuilder } from "./pattern.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
@@ -16,6 +16,7 @@ import type {
   AsWriteonlyCell,
   ByRefFunction,
   Cell,
+  CellFromUrlFunction,
   CellScope,
   CellTypeConstructor,
   CfDataFunction,
@@ -89,6 +90,9 @@ export const UI = "$UI";
 export const TILE_UI = "$TILE_UI";
 export const CHIP_UI = "$CHIP_UI";
 export const FS = "$FS";
+// The reserved key a test pattern addresses its test steps under; the test
+// runner reads `[TESTS]` off the pattern output.
+export const TESTS = "$TESTS";
 
 // Symbol for accessing self-reference in patterns
 export const SELF: typeof SELFSymbol = Symbol("SELF") as any;
@@ -193,7 +197,7 @@ export type StreamValue = {
 };
 
 export function isStreamValue(value: unknown): value is StreamValue {
-  return isRecord(value) && "$stream" in value && value.$stream === true;
+  return isObjectOrArray(value) && "$stream" in value && value.$stream === true;
 }
 
 declare module "@commonfabric/api" {
@@ -380,6 +384,7 @@ export interface BuilderFunctionsAndConstants {
   generateObject: GenerateObjectFunction;
   generateText: GenerateTextFunction;
   fetchBinary: FetchBinaryFunction;
+  cellFromUrl: CellFromUrlFunction;
   fetchText: FetchTextFunction;
   fetchJson: FetchJsonFunction;
   fetchJsonUnchecked: FetchJsonUncheckedFunction;

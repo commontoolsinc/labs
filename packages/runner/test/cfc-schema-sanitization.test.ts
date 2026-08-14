@@ -21,7 +21,8 @@ import {
 
 const promptRisk = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
-  kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+  kind:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
   source: "of:hostile",
 } as const;
 
@@ -39,8 +40,12 @@ describe("cfc schema sanitization", () => {
     expect(isPrimitiveJsonValue(false)).toBe(true);
     expect(isPrimitiveJsonValue({})).toBe(false);
 
-    expect(isPromptInjectionMaterialRiskAtom("prompt-injection-risk"))
+    expect(
+      isPromptInjectionMaterialRiskAtom("prompt-injection-risk-unscreened"),
+    )
       .toBe(true);
+    expect(isPromptInjectionMaterialRiskAtom("prompt-injection-risk"))
+      .toBe(false);
     expect(isPromptInjectionMaterialRiskAtom({
       type: CFC_ATOM_TYPE.Caveat,
       kind: "prompt-injection-risk-value-screened",
@@ -977,6 +982,23 @@ describe("cfc schema sanitization", () => {
         { items: { type: ["number", "number"] } },
         "items",
       ],
+      // A keyword holding something no schema can be. A stored schema is not
+      // always generator output, and the runner's schema walk defers to this
+      // rule for what a subschema may be.
+      [
+        { properties: { a: null } } as unknown as JSONSchema,
+        "properties.a: schema must be an object or boolean",
+      ],
+      [
+        { additionalProperties: "ab" } as unknown as JSONSchema,
+        "additionalProperties: schema must be an object or boolean",
+      ],
+      // An array is one of those, which is what makes the pre-2019 tuple
+      // spelling of `items` unreadable rather than merely unsupported.
+      [
+        { items: [{ type: "string" }] } as unknown as JSONSchema,
+        "items: schema must be an object or boolean",
+      ],
     ];
     for (const [schema, message] of malformed) {
       expect(validateSchemaDefinition(schema)).toContain(message);
@@ -1312,7 +1334,8 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     // alternative-count path the fuel budget sums over.
     const risk = (i: number) => ({
       type: CFC_ATOM_TYPE.Caveat,
-      kind: "https://commonfabric.org/cfc/concepts/prompt-injection-risk",
+      kind:
+        "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened",
       source: `of:hostile-${i}`,
     });
     const keep = (i: number) => ({
@@ -1339,8 +1362,8 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       [
         ...flatRisks,
         ...orRisks,
-        "prompt-injection-risk",
-        { anyOf: ["prompt-injection-risk", keep(100)] },
+        "prompt-injection-risk-unscreened",
+        { anyOf: ["prompt-injection-risk-unscreened", keep(100)] },
       ],
     ) as any;
 

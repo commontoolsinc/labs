@@ -108,13 +108,29 @@ Language deltas found by adversarial verification of the target-language
 matrix (implementation vs normative spec). Resolution status is recorded on
 each finding:
 
-- **Top-level eager-read carve-out (#3725, 2026-05-28).** Validation accepts
-  computation-feeding top-level `.get()` reads and auto-wraps the containing
-  expression lift-applied; terminal reads still reject. Golden-pinned
-  (`cell-get-binding-autowrap`, `with-reactive`;
-  `test/validation.test.ts:3179`). Matrix row still says Unsupported
-  unconditionally. Decision open: ratify a terminal-vs-computation-feeding
-  split in the matrix, or revert (breaks two goldens + one test).
+- **Top-level eager-read carve-out (#3725, 2026-05-28) — resolved 2026-08-07 by
+  ratifying the has-a-lowerable-site rule.** A `.get()` read on a
+  `Cell`/`Writable`/`Stream` in pattern-owned context is part of the language
+  wherever a lowerable expression site can carry it; that site lowers into a
+  lift, which is what keeps the read live. The line is the site, not the shape
+  of the read: a binding, a return, an object property, an array element, an
+  argument, a computation over the read, and a call whose receiver chain
+  reaches it are all accepted, terminal or not, and parentheses, the
+  computed-key spelling, and the optional spellings do not change the
+  classification. A read with no such site — statement position, a reactive
+  array-method callback, or a plain (non-reactive) array-method callback —
+  remains outside the language, as does a read on a value that is not a cell.
+
+  What settled it: the matrix already blessed the JSX spelling, so the earlier
+  rule was really "no eager reads outside JSX" — which made extracting a JSX
+  expression into a named binding change a program's legality. The rejection's
+  main output was "wrap it in `computed()`" diagnostics that bred wrapper
+  cascades in author code, against a platform direction of needing explicit
+  `computed()` less often. Ratified in the target-language matrix and §5.7;
+  lowering-contract §3.9's eager-read bullet now names the site-less read
+  rather than the top-level read. Golden-pinned (`cell-get-binding-autowrap`,
+  `cell-get-terminal-binding-autowrap`, `with-reactive`;
+  `test/validation.test.ts:3179`).
 - **Optional-call accepted in JSX and compute callbacks — resolved 2026-07-23
   by making optionality orthogonal to call support.** The earlier location
   split was an implementation leak, and the proposed blanket rejection would

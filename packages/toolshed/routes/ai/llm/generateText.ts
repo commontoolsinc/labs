@@ -19,12 +19,13 @@ import {
   LLMUpstreamError,
   upstreamStatusOf,
 } from "./errors.ts";
-import { findModel, type ModelConfig } from "./models.ts";
+import { type ModelConfig, resolveModel } from "./models.ts";
 import { normalizeSchemaForProvider } from "./schema.ts";
 import {
   metadataAttributeValue,
   runtimeContextFromMetadata,
 } from "@/lib/ai-telemetry.ts";
+import { withGatewayOperation } from "@/lib/gateway-provenance.ts";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {
@@ -288,11 +289,23 @@ async function readNativeModelToolResults(
   }));
 }
 
-export async function generateText(
+/**
+ * A gateway-bound request reports the route it came from. The scope reaches
+ * every request made while the call is awaited, which covers the SDK's
+ * tool-calling steps on the non-streaming path. A streaming response is read
+ * by its caller after this returns, so the steps it drives report no route.
+ */
+export function generateText(
+  params: GenerateTextParams,
+): Promise<GenerateTextResult> {
+  return withGatewayOperation("generate-text", () => generateTextCall(params));
+}
+
+async function generateTextCall(
   params: GenerateTextParams,
 ): Promise<GenerateTextResult> {
   // Validate and configure model
-  const modelConfig = findModel(params.model!);
+  const modelConfig = await resolveModel(params.model!);
   if (!modelConfig) {
     console.error("Unsupported model:", params.model);
     throw new LLMRequestError(`Unsupported model: ${params.model}`);

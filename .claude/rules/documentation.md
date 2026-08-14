@@ -20,6 +20,15 @@ in `docs/history/` from the start, with the metadata header defined in
 `docs/history/README.md`. It is not written as a live document and archived
 afterwards.
 
+Every document there is listed in `docs/history/INDEX.md`, and two rules about
+that file are not guessable from looking at it. An entry is a single line
+however long it runs, and the file holds nothing besides its preamble, its
+section headings, and the entries. Git merges it with the `union` driver so
+that branches archiving documents at the same time do not conflict, and both
+rules are what make that driver safe; `docs/history/README.md` gives the
+reasoning. `deno task check-docs-history-index` enforces them, and also names
+any document in the tree that no entry covers.
+
 ## Where a new live document goes
 
 The map in `docs/README.md` says which directory holds what; read it rather

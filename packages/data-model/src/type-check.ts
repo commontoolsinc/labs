@@ -1,3 +1,19 @@
+/**
+ * The predicates deciding whether a value belongs to the `FabricValue` type,
+ * and the narrowings that ask a shape question about one that already does.
+ *
+ * Membership turns on inertness: a fabric value is data, so anything that is
+ * live code is refused -- a function, an accessor-backed property, the
+ * prototype of an `Array` subclass, a symbol that was never registry-interned.
+ * Frozen-ness is a separate question and deliberately not asked here, so a
+ * structurally-valid unfrozen value is a member.
+ *
+ * The narrowings are looser than membership on purpose. They are asked of a
+ * value whose type already claims to be a `FabricValue`, and answer only
+ * whether it may be read by name; where one accepts something membership
+ * refuses, the difference is stated on that narrowing rather than here.
+ */
+
 import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
@@ -8,8 +24,8 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
-import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
+import { BaseFabricInstance } from "./codec-common/BaseFabricInstance.ts";
+import { BaseFabricPrimitive } from "./codec-common/BaseFabricPrimitive.ts";
 
 /**
  * Indicates whether the value is a fabric value, accepting
@@ -181,10 +197,11 @@ export function isFabricValue(value: unknown): value is FabricValue {
  * accepts, minus `null`. The name spells out the array case because "object"
  * alone reads as excluding it.
  *
- * The runtime behavior matches a bare `isRecord()` exactly. The difference is
- * static: `isRecord()` narrows to `Record<string | number | symbol, unknown>`,
- * which discards the fact that the value is a `FabricValue` -- so a guarded
- * value can no longer be handed to a `FabricValue` API. This keeps that half.
+ * The runtime behavior matches a bare `isObjectOrArray()` exactly. The
+ * difference is static: `isObjectOrArray()` narrows to
+ * `Record<string, unknown>`, which discards the fact that the value is a
+ * `FabricValue` -- so a guarded value can no longer be handed to a
+ * `FabricValue` API. This keeps that half.
  *
  * Contrast `isFabricPlainObject()`, which is strictly narrower at RUNTIME: it
  * accepts only plain objects, rejecting arrays and `FabricSpecialObject`s. The
@@ -200,7 +217,8 @@ export function isFabricObjectOrArray(
  * Narrows to the plain-record arm of `FabricValue` (`FabricPlainObject`): an
  * object whose prototype is `Object.prototype` or `null`. This rejects arrays,
  * `FabricSpecialObject`s, and other class instances (`Date`, `Map`, …), none of
- * which are representable as a `FabricPlainObject`. Unlike a bare `isRecord()`
+ * which are representable as a `FabricPlainObject`. Unlike a bare
+ * `isObjectOrArray()`
  * check, it preserves the value type — `FabricPlainObject`'s string index of
  * `FabricValue` keeps an indexed value typed as a `FabricValue`.
  *

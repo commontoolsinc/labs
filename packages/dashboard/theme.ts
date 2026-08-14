@@ -1,3 +1,12 @@
+/**
+ * Carries the wall's dark and light themes and everything that switches
+ * between them: the color each theme binds every variable to, the styles that
+ * bind them, the toggle in the page header, and the script that applies the
+ * stored choice before the page paints. The status colors themselves are
+ * chosen in palette.ts; what happens here is adapting them to a light page,
+ * where a color picked to glow on a dark tile has to hold its contrast.
+ */
+
 import type { Status } from "./types.ts";
 import {
   LIGHT_SPARK_FADE,

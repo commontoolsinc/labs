@@ -1,3 +1,20 @@
+/**
+ * The content hash of a fabric value: the same value hashing the same way
+ * every time, and different values hashing differently.
+ *
+ * Distinctness is the harder half, and is why each type contributes its own
+ * tag to what gets hashed. Without that, values of different types sharing
+ * underlying bytes would collide, so one group's whole job is comparing across
+ * types rather than within one.
+ *
+ * The scalar groups carry the awkward cases, being where a hash most easily
+ * merges values it ought to separate or separates ones it ought to merge.
+ *
+ * One group records types that are not handled yet. They are written as
+ * assertions about the behavior today, so the gap is visible in the suite
+ * rather than merely absent from it.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

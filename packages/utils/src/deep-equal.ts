@@ -1,4 +1,4 @@
-import { isRecord } from "./types.ts";
+import { isObjectOrArray } from "./types.ts";
 
 /**
  * Performs a deep equality comparison between two values.
@@ -26,7 +26,7 @@ import { isRecord } from "./types.ts";
 export function deepEqual(a: any, b: any): boolean {
   if (Object.is(a, b)) return true;
 
-  if (!(isRecord(a) && isRecord(b))) {
+  if (!(isObjectOrArray(a) && isObjectOrArray(b))) {
     return false;
   }
 

@@ -1,7 +1,14 @@
+/**
+ * `load()` is the storage-transaction-side reader of `data:` URI documents,
+ * separate from `data-uri.ts`'s `valueFromDataUri()`. Both route payload
+ * text through `valueFromDataUriPayloadText()`, so the two readers cannot
+ * silently diverge on what a payload means.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JsonCodec } from "@commonfabric/data-model/codec-json";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { load } from "../src/storage/transaction/attestation.ts";
@@ -13,10 +20,6 @@ const uriOf = (payload: string): URI =>
     toUnpaddedBase64url(new TextEncoder().encode(payload))
   }` as URI;
 
-// `load()` is the storage-transaction-side reader of `data:` URI documents,
-// separate from `data-uri.ts`'s `valueFromDataUri()`. Both route payload
-// text through `valueFromDataUriPayloadText()`, so the two readers cannot
-// silently diverge on what a payload means.
 describe("attestation `load()` of `data:` URIs", () => {
   it("errors on a historical bare-JSON payload", () => {
     const { ok, error } = load({ id: uriOf('{"value":{"x":1}}') });
@@ -25,7 +28,7 @@ describe("attestation `load()` of `data:` URIs", () => {
   });
 
   it("synthesizes the document around the decoded value", () => {
-    const { ok, error } = load({ id: uriOf(jsonFromValue({ x: 1 })) });
+    const { ok, error } = load({ id: uriOf(jsonFromFabricValue({ x: 1 })) });
     expect(error).toBeUndefined();
     expect(ok!.value).toEqual({ value: { x: 1 } });
     expect(ok!.address.path).toEqual([]);
@@ -34,14 +37,14 @@ describe("attestation `load()` of `data:` URIs", () => {
 
   it("loads an encoded-`FabricValue` payload", () => {
     const value = { b: 1, a: [true, null, "x"] };
-    const { ok, error } = load({ id: uriOf(jsonFromValue(value)) });
+    const { ok, error } = load({ id: uriOf(jsonFromFabricValue(value)) });
     expect(error).toBeUndefined();
     expect(ok!.value).toEqual({ value });
   });
 
   it("preserves non-finite numbers in an encoded payload", () => {
     const { ok, error } = load({
-      id: uriOf(jsonFromValue([NaN, -0, Infinity])),
+      id: uriOf(jsonFromFabricValue([NaN, -0, Infinity])),
     });
     expect(error).toBeUndefined();
     const items = (ok!.value as { value: number[] }).value;
@@ -59,7 +62,7 @@ describe("attestation `load()` of `data:` URIs", () => {
   it("errors on an undecodable payload past the codec tag", () => {
     const { ok, error } = load({
       id: uriOf(
-        JsonCodec.wrapEncodedValueForTesting("{nope", true),
+        JsonCodecEngine.wrapEncodedValueForTesting("{nope", true),
       ),
     });
     expect(ok).toBeUndefined();
@@ -69,7 +72,9 @@ describe("attestation `load()` of `data:` URIs", () => {
   it("rejects the `application/json` media type", () => {
     const { ok, error } = load({
       id: `data:application/json,${
-        toUnpaddedBase64url(new TextEncoder().encode(jsonFromValue({ a: 1 })))
+        toUnpaddedBase64url(
+          new TextEncoder().encode(jsonFromFabricValue({ a: 1 })),
+        )
       }` as URI,
     });
     expect(ok).toBeUndefined();
@@ -93,7 +98,7 @@ describe("attestation `load()` of `data:` URIs", () => {
   // media type (this format has no parameters).
   it("errors on a parameterized header", () => {
     const payload = toUnpaddedBase64url(
-      new TextEncoder().encode(jsonFromValue({ a: 1 })),
+      new TextEncoder().encode(jsonFromFabricValue({ a: 1 })),
     );
     const { ok, error } = load({
       id: `data:${DATA_URI_MEDIA_TYPE};base64,${payload}` as URI,
@@ -107,7 +112,7 @@ describe("attestation `load()` of `data:` URIs", () => {
   it("errors on a percent-encoded payload", () => {
     const { ok, error } = load({
       id: `data:${DATA_URI_MEDIA_TYPE},${
-        encodeURIComponent(jsonFromValue({ a: 1 }))
+        encodeURIComponent(jsonFromFabricValue({ a: 1 }))
       }` as URI,
     });
     expect(ok).toBeUndefined();

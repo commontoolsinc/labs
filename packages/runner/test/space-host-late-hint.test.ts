@@ -167,6 +167,81 @@ describe("late space host hints", () => {
     }
   });
 
+  it("resolves the default route when a hint reads it, not at construction", async () => {
+    const signer = await Identity.fromPassphrase("deferred-default-route");
+    const targetSpace = (await Identity.fromPassphrase(
+      "deferred-default-route-target",
+    )).did();
+    const targetId = "of:deferred-default-route-target" as URI;
+    const defaultServer = makeServer("deferred-default-route");
+    const memoryHost = new URL("https://default-toolshed.test");
+    let targetSessions = 0;
+    const sessionFactory = new LoopbackSessionFactory(() => {
+      targetSessions++;
+      return defaultServer;
+    });
+
+    // Turning the memory host into the WebSocket storage endpoint an
+    // unseeded, unhinted space opens against parses the host, joins the
+    // storage path onto it, copies the result, and parses that copy again to
+    // swap the scheme. The manager holds the host as text and does none of
+    // that until registerSpaceHost() compares against the route, so a URL
+    // parsed while the constructor runs is that resolution back inside it.
+    // Counting parses is what separates the two shapes: both read the
+    // caller's host object exactly once, one to snapshot it and the other to
+    // resolve it.
+    const RealURL = globalThis.URL;
+    let parsedWhileConstructing = 0;
+    class CountingURL extends RealURL {
+      constructor(url: string | URL, base?: string | URL) {
+        parsedWhileConstructing += 1;
+        super(url, base);
+      }
+    }
+    globalThis.URL = CountingURL as unknown as typeof URL;
+    let manager: TestStorageManager;
+    try {
+      manager = TestStorageManager.create(
+        signer,
+        sessionFactory,
+        memoryHost,
+      );
+    } finally {
+      globalThis.URL = RealURL;
+    }
+
+    try {
+      expect(parsedWhileConstructing).toBe(0);
+
+      const provider = manager.open(targetSpace);
+      const provisionalReplica = provider.replica;
+      const firstRead = await provider.sync(targetId, {
+        path: [],
+        schema: true,
+      });
+      expect(firstRead.error).toBeUndefined();
+      expect(targetSessions).toBe(1);
+
+      // The hint reads the route, so by now the route has to be there. A
+      // route that was never resolved compares unequal to the hint, which
+      // makes the hint a replacement: the replica is rebuilt and a second
+      // session opens.
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://default-toolshed.test",
+        ),
+      ).toBe(true);
+      await manager.crossSpaceSettled();
+
+      expect(provider.replica).toBe(provisionalReplica);
+      expect(targetSessions).toBe(1);
+    } finally {
+      await manager.close();
+      await defaultServer.close();
+    }
+  });
+
   it("replays a read that first opened against the default host", async () => {
     const signer = await Identity.fromPassphrase("late-space-host-hint");
     const targetSpace = (await Identity.fromPassphrase(
@@ -271,6 +346,84 @@ describe("late space host hints", () => {
         }
       ).sync(targetId, { path: [], schema: true });
       expect(staleRead.error?.message).toContain("memory replica closed");
+      expect(targetSessions).toBe(2);
+    } finally {
+      await reader.close();
+      await writer.close();
+      await defaultServer.close();
+      await hintedServer.close();
+    }
+  });
+
+  it("replays every registered document after a late hint", async () => {
+    const signer = await Identity.fromPassphrase("late-hint-many-reads");
+    const targetSpace = (await Identity.fromPassphrase(
+      "late-hint-many-reads-target",
+    )).did();
+    const firstId = "of:late-hint-many-reads-first" as URI;
+    const secondId = "of:late-hint-many-reads-second" as URI;
+    const defaultServer = makeServer("late-hint-many-reads-default");
+    const hintedServer = makeServer("late-hint-many-reads-hinted");
+    const writer = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory(() => hintedServer),
+    );
+    let targetSessions = 0;
+    const reader = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory((space) => {
+        if (space !== targetSpace) return defaultServer;
+        targetSessions++;
+        return targetSessions === 1 ? defaultServer : hintedServer;
+      }),
+    );
+
+    try {
+      const seeded = await (writer.open(targetSpace) as unknown as {
+        send(
+          batch: { uri: URI; value: { value: { name: string } } }[],
+        ): Promise<{ error?: unknown }>;
+      }).send([
+        { uri: firstId, value: { value: { name: "first" } } },
+        { uri: secondId, value: { value: { name: "second" } } },
+      ]);
+      expect(seeded.error).toBeUndefined();
+      await writer.synced();
+
+      const provider = reader.open(targetSpace);
+      const provisionalReplica = provider.replica;
+
+      // Register both documents, and register the first one repeatedly with
+      // freshly built but structurally equal selectors. Every registration
+      // after the first is the same read, so the replay set holds one entry
+      // per document however many times each was asked for.
+      for (let index = 0; index < 64; index++) {
+        expect(
+          (await provider.sync(firstId, {
+            path: ["value", "name"],
+            schema: false,
+          })).error,
+        ).toBeUndefined();
+      }
+      expect((await provider.sync(secondId)).error).toBeUndefined();
+      expect(provider.replica.getDocument(firstId)).toBeUndefined();
+      expect(provider.replica.getDocument(secondId)).toBeUndefined();
+
+      expect(
+        reader.registerSpaceHost(
+          targetSpace,
+          "https://hinted-toolshed.test",
+        ),
+      ).toBe(true);
+      await reader.crossSpaceSettled();
+
+      expect(provider.replica).not.toBe(provisionalReplica);
+      expect(provider.replica.getDocument(firstId)).toEqual({
+        value: { name: "first" },
+      });
+      expect(provider.replica.getDocument(secondId)).toEqual({
+        value: { name: "second" },
+      });
       expect(targetSessions).toBe(2);
     } finally {
       await reader.close();

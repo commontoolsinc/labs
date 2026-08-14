@@ -1145,7 +1145,7 @@ Deno.bench("Cell large - deeply nested object (100x navigation)", async () => {
 });
 
 // Benchmark: Concurrent operations
-Deno.bench("Cell concurrent - multiple cells (100x)", async () => {
+Deno.bench("Cell concurrent - multiple cells (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   // Create multiple cells
@@ -1160,15 +1160,17 @@ Deno.bench("Cell concurrent - multiple cells (100x)", async () => {
   await tx.commit();
 
   // Measure concurrent access
+  b.start();
   for (let i = 0; i < 100; i++) {
     cells.forEach((cell) => cell.get());
   }
+  b.end();
 
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Cell equals comparison
-Deno.bench("Cell equals - comparison operations (100x)", async () => {
+Deno.bench("Cell equals - comparison operations (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   const cell1 = runtime.getCell<number>(space, "bench-equals-1", undefined, tx);
@@ -1185,10 +1187,12 @@ Deno.bench("Cell equals - comparison operations (100x)", async () => {
   await tx.commit();
 
   // Measure equals operations
+  b.start();
   for (let i = 0; i < 100; i++) {
     cell1.equals(cell1Same); // Should be true
     cell1.equals(cell2); // Should be false
   }
+  b.end();
 
   await cleanup(runtime, storageManager, tx);
 });

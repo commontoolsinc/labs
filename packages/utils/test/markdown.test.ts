@@ -1,3 +1,14 @@
+/**
+ * `backtickQuote()` has to produce a span that survives being read back, and
+ * the two rules that achieve it are independent.
+ *
+ * Choosing a delimiter longer than the longest backtick run inside is the
+ * obvious half. The padding rule is the half that is easy to omit: text
+ * beginning or ending with a backtick, or with a space at both ends, needs a
+ * space inserted or the span closes early or loses a character. The cases here
+ * cover both, including the ones where padding must NOT be added.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

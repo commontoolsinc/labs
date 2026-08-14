@@ -11,7 +11,7 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, assert, pattern } from "commonfabric";
+import { action, assert, pattern, TESTS } from "commonfabric";
 import CozyPoll from "./main.tsx";
 
 export default pattern(() => {
@@ -145,7 +145,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       // Admin-gated handlers are no-ops before anyone joins (myName empty).
       // The handler bails on `if (!me || me !== admin) return`. No
       // separate assertion here — downstream assertions (e.g. only

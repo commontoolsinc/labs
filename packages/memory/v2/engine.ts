@@ -533,7 +533,7 @@ FROM "commit"
 `;
 
 const SELECT_EXISTING_COMMIT = `
-SELECT seq, branch, original, resolution
+SELECT seq, branch, original, resolution, class, holder
 FROM "commit"
 WHERE session_id = :session_id
   AND local_seq = :local_seq
@@ -895,6 +895,8 @@ type CommitRow = {
   branch: string;
   original: string;
   resolution: string;
+  class: string;
+  holder: string | null;
 };
 
 type RevisionRow = {
@@ -1447,23 +1449,67 @@ const applyCommitTransaction = (
     holder,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
+  // The derived-class posture gate (protocol.md §1): off the flag NOTHING
+  // may claim the class — retries included — because `derived` names the
+  // single-deriver posture and nothing outside EXPERIMENTAL_SERVER_EXECUTION
+  // may claim it. Only this gate precedes replay detection; the LIVE-lease
+  // equality check sits after it below, on the fresh-commit path.
+  if (commitClass === "derived" && !getServerExecutionConfig()) {
+    throw new ProtocolError(
+      "derived-class commits are unclaimable while " +
+        "EXPERIMENTAL_SERVER_EXECUTION is off (protocol.md §1)",
+    );
+  }
+  const sessionKey = resolveCommitSessionKey(sessionId, principal);
+  // Replay detection FIRST — ahead of every current-authority admission
+  // check, the live-lease equality check included (owner review on #5349,
+  // 2026-08-12): a commit this session already applied returns its stored
+  // result without re-validating preconditions — re-checking entity-absent
+  // against the state the original application created would wrongly reject
+  // the replay — and without consulting the live `execution_lease`: the
+  // lease authorizes NEW derived commits, and a network retry of an
+  // already-ACCEPTED one must keep its stored answer after the producing
+  // lease was released, expired, or succeeded by a new holder. The stored
+  // identity spans the payload bytes (sameStoredOriginal) AND the admission
+  // envelope (class; for derived, the producing holder): a same-key
+  // resubmission differing in either is a DIFFERENT submission and is
+  // refused, never answered.
+  const existing = engine.statements.selectExistingCommit.get({
+    session_id: sessionKey,
+    local_seq: commit.localSeq,
+  }) as CommitRow | undefined;
+  if (existing) {
+    if (!sameStoredOriginal(existing.original, commit)) {
+      throw new ProtocolError(
+        `commit replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
+      );
+    }
+    // Envelope identity, normalized exactly as the insert below persists
+    // it: a holder sticks to derived commits only, so a stray holder that
+    // was inert on the original stays inert on the retry.
+    const incomingHolder = commitClass === "derived" ? holder ?? null : null;
+    if (existing.class !== commitClass || existing.holder !== incomingHolder) {
+      throw new ProtocolError(
+        `commit replay mismatch for session ${sessionId} localSeq ` +
+          `${commit.localSeq}: stored class/holder differ from the resubmission`,
+      );
+    }
+    return {
+      seq: existing.seq,
+      branch: existing.branch,
+      revisions: selectCommitRevisions(engine, existing.seq),
+    };
+  }
+
   // The derived-class admission rule (serving-loop.md §2, protocol.md §2's
   // `derived` row): the producer holds the space's live `execution_lease` —
   // ONE equality check against the row's holder, not admission machinery.
-  // Enforced only under EXPERIMENTAL_SERVER_EXECUTION; off the flag the
-  // class stays unclaimable in this arm too, because `derived` names the
-  // single-deriver posture and nothing outside the flag may claim it
-  // (protocol.md §1). Liveness is judged by THIS process's clock — the
-  // memory server's own, never the holder's: the select excludes expired
-  // rows, so an expired lease matches nobody and a derived commit under one
+  // Fresh commits only: an exact replay already answered from the store
+  // above. Liveness is judged by THIS process's clock — the memory
+  // server's own, never the holder's: the select excludes expired rows, so
+  // an expired lease matches nobody and a fresh derived commit under one
   // is rejected even before any successor acquires.
   if (commitClass === "derived") {
-    if (!getServerExecutionConfig()) {
-      throw new ProtocolError(
-        "derived-class commits are unclaimable while " +
-          "EXPERIMENTAL_SERVER_EXECUTION is off (protocol.md §1)",
-      );
-    }
     const lease = space === undefined
       ? undefined
       : engine.statements.selectLiveExecutionLease.get({
@@ -1479,7 +1525,6 @@ const applyCommitTransaction = (
       );
     }
   }
-  const sessionKey = resolveCommitSessionKey(sessionId, principal);
   const hasPreconditions = (commit.preconditions?.length ?? 0) > 0;
   if (commit.operations.length === 0 && !hasPreconditions) {
     throw new Error("memory v2 commit requires at least one operation");
@@ -1487,27 +1532,6 @@ const applyCommitTransaction = (
 
   const branch = commit.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
-
-  // Replay detection first: a commit this session already applied returns
-  // its stored result without re-validating preconditions — re-checking
-  // entity-absent against the state the original application created would
-  // wrongly reject the replay.
-  const existing = engine.statements.selectExistingCommit.get({
-    session_id: sessionKey,
-    local_seq: commit.localSeq,
-  }) as CommitRow | undefined;
-  if (existing) {
-    if (!sameStoredOriginal(existing.original, commit)) {
-      throw new ProtocolError(
-        `commit replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
-      );
-    }
-    return {
-      seq: existing.seq,
-      branch: existing.branch,
-      revisions: selectCommitRevisions(engine, existing.seq),
-    };
-  }
 
   validateCommitPreconditions(engine, sessionKey, branch, commit, {
     principal,

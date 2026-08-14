@@ -758,6 +758,15 @@ last-owner removal are rejected. These shape and genesis rules are hard
 storage invariants in both `observe` and `enforce`; `observe` relaxes only
 ordinary capability shortfalls on an already valid ACL.
 
+The shape and genesis rules are catalogued as **INV-12** (ACL mutation commit
+shape) and **INV-13** (ACL genesis precedence and authority) in
+[`09-invariants.md`](09-invariants.md#inv-12--acl-mutation-commit-shape) —
+go there for the exact admission predicate, what each rejection message means,
+and what is and is not known about why the whole-document rule exists. A client
+that writes the ACL through an ordinary value-surface `set` emits `op: "patch"`
+and is refused with "ACL mutations must replace the space-scoped ACL document";
+it must address the whole document instead.
+
 Genesis remains an explicit transaction. For a fresh named space, the storage
 manager briefly authenticates as the derived space identity, writes
 `{ [activeUser]: "OWNER", "*": "WRITE" }` against a confirmed absent ACL,

@@ -52,6 +52,20 @@ describe("cf-markdown", () => {
     );
   });
 
+  it("should replace a cross-space LLM-friendly link with cf-cell-link", () => {
+    const el = new CFMarkdown();
+    // What `createLLMFriendlyLink` writes when the destination's space differs
+    // from the reader's: the space leads, prefixed with `@`.
+    const link = "/@did:key:z6MkpXpe/of:bafyabc123/path";
+    const markdown = `Check this [Link](${link})`;
+
+    const rendered = (el as any)._renderMarkdown(markdown);
+
+    expect(rendered).toContain(
+      `<cf-cell-link link="${link}" label="Link"></cf-cell-link>`,
+    );
+  });
+
   it("should wrap code blocks with copy buttons", () => {
     const el = new CFMarkdown();
     const markdown = "```js\nconsole.log('hello');\n```";

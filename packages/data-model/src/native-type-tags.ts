@@ -1,3 +1,18 @@
+/**
+ * Answering what a JS value already is, so that conversion can decide what to
+ * make of it. These tags name the value's own class, and are unrelated to the
+ * tags a wire format writes, which say what it became.
+ *
+ * The question is harder than an `instanceof` because the answer must not be
+ * forgeable, and must still be reachable for a value that did not come from
+ * here. A class is read off the prototype rather than off the value, since an
+ * own `constructor` property is ordinary data that would otherwise let a plain
+ * record present itself as an `Error`. A value from another realm, or one
+ * whose prototype has been severed, has to be recognized regardless, which is
+ * why the constructor switch has fallbacks beneath it rather than standing
+ * alone.
+ */
+
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";

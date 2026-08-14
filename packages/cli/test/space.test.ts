@@ -10,10 +10,16 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
 import { clonePaths } from "@commonfabric/state-inspector";
-import { cf } from "./utils.ts";
+import { cf, stripAnsi } from "./utils.ts";
 
-/** `CliResult` streams are line arrays; join before substring assertions. */
-const text = (lines: string[]): string => lines.join("\n");
+/**
+ * `CliResult` streams are line arrays; join before substring assertions.
+ *
+ * The escapes go too: the CLI colours help and error output whenever the
+ * environment asks for colour, so an assertion on raw text passes or fails by
+ * where the developer ran it.
+ */
+const text = (lines: string[]): string => stripAnsi(lines.join("\n"));
 
 /**
  * Staging directories `--from <url>` may have created, by name.

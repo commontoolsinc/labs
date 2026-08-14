@@ -181,7 +181,7 @@ describe("Cell", () => {
     // `Cell.set` pre-resolves its top-level link, so to exercise
     // `normalizeAndDiff`'s redirect-resolution branch we need the redirect
     // at a nested key — that's the path it actually fires on, during the
-    // per-key recursion in the `isRecord(newValue)` branch.
+    // per-key recursion in the `isObjectOrArray(newValue)` branch.
     const parent = rt.getCell<{ slot: unknown }>(
       space,
       "nested redirect parent",
@@ -1212,28 +1212,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 // end-to-end correctness of the standard result meta link round-trip: the
 // round-trip preserves the result-link object, and a raw `tx.read` of
 // `path: ["result"]` returns it as an object link record (with own-property
-//  `"/"`), never as a string.
-//
-// Historical context: these tests were authored alongside the deletion of
-// two defensive `JSON.parse` blocks that previously existed in
-// the storage transaction read path and `runner/src/cell.ts`
-// (in the old source metadata path). Both blocks guarded a parse with the same shape —
-// `typeof value === "string" && value.startsWith('{"/":')` — and were
-// originally added (PRs #1472, #1562) to handle string-form values
-// returned from a previous shape of the storage layer. PR #2971 in
-// March 2026 wired `valueFromJson` into the storage-boundary read path
-// (`memory/space.ts`): `valueFromJson` unconditionally decodes the `is`
-// column to an object (stripping the codec prefix) before reaching
-// either defensive parse. From that point on, neither guard could fire
-// through the standard public API, and the defensive parses became
-// orphaned — which is what motivated their deletion.
-//
-// The tests below pin the round-trip behavior that, post-deletion, is the
-// observable contract. They serve as a passive regression net for any future
-// change that might re-introduce a non-object value at `path: ["result"]`.
-//
-// See `coordination/docs/2026-04-30-fvj1-parse-site-kickoff.md` (project
-// kickoff doc, session 2026-067) for the full liveness analysis.
+// `"/"`), never as a string.
 describe(`Cell result-meta round-trip`, () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -1277,7 +1256,7 @@ describe(`Cell result-meta round-trip`, () => {
       // Commit, then start a fresh tx. This forces the `path: ["result"]`
       // read to go through the storage layer (rather than the in-tx
       // novelty cache, which short-circuits serialization), so
-      // `valueFromJson` runs as the actual decode step.
+      // `fabricFromJsonValue()` runs as the actual decode step.
       await tx.commit();
       tx = runtime.edit();
 

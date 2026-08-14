@@ -14,7 +14,7 @@
  *
  * Run: deno task cf test packages/patterns/notes/notebook-drop.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
@@ -139,7 +139,7 @@ export default pattern(() => {
   const assert_loose_note_hidden = assert(() => looseNote.isHidden === true);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_initial_order },
 
       { action: action_drop_existing_note_onto_row },

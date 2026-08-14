@@ -21,6 +21,7 @@ import {
   KeepAsCell,
   mergeSchemaDefaults,
   NAME,
+  parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
   type PieceSourceRevision,
@@ -52,13 +53,148 @@ import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
 } from "../schema-compatibility.ts";
-import { resolvePieceOriginSource } from "./piece-origin.ts";
+import {
+  qualifyFabricOrigin,
+  readPieceOrigin,
+  resolvePieceOriginSource,
+} from "./piece-origin.ts";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  cloneInternalManifest,
+  pinCloneSnapshotCells,
+} from "./clone-data-guards.ts";
+import {
+  preloadCloneValue,
+  snapshotCloneValue,
+} from "./clone-data-snapshot.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
   set(value: unknown, path?: CellPath): Promise<void>;
   getCell(): Promise<Cell<unknown>>;
+}
+
+interface CloneInternalSnapshot {
+  partialCause: unknown;
+  kind?: unknown;
+  value: unknown;
+}
+
+/** Read the input and stateful internal cells from one storage version. */
+async function snapshotCloneData(
+  piece: Cell<unknown>,
+  inputCell: Cell<unknown>,
+  expectedSource: PieceSourceSnapshot,
+): Promise<{ input: unknown; internals: CloneInternalSnapshot[] }> {
+  const preloadedCells = new Map<string, Cell<unknown>>();
+  await preloadCloneValue(inputCell, undefined, preloadedCells);
+  const initialManifest = cloneInternalManifest(piece);
+  for (const entry of initialManifest) {
+    if (entry.kind === "computed") continue;
+    const internal = piece.runtime.getCellFromLink(
+      parseLinkOrThrow(entry.link, piece),
+    );
+    if (!isStream(internal)) {
+      await preloadCloneValue(internal, undefined, preloadedCells);
+    }
+  }
+
+  const tx = piece.runtime.edit();
+  let commitStarted = false;
+  try {
+    const txPiece = piece.withTx(tx);
+    const currentSource = getPieceSourceSnapshot(txPiece);
+    if (
+      currentSource === undefined ||
+      !samePieceSourceSnapshot(expectedSource, currentSource)
+    ) {
+      throw new Error("piece source changed while it was being cloned");
+    }
+
+    const snapshotCells = new Map<string, Cell<unknown>>();
+    const txInput = inputCell.withTx(tx);
+    const input = snapshotCloneValue(
+      txInput.get(),
+      txInput,
+      new WeakMap(),
+      snapshotCells,
+      preloadedCells,
+    );
+    const internals: CloneInternalSnapshot[] = [];
+    const manifest = cloneInternalManifest(txPiece);
+    if (!deepEqual(initialManifest, manifest)) {
+      throw new Error("piece data changed while it was being cloned");
+    }
+    for (const entry of manifest) {
+      if (entry.kind === "computed") continue;
+      const link = parseLinkOrThrow(entry.link, txPiece);
+      const internal = piece.runtime.getCellFromLink(link, undefined, tx);
+      if (isStream(internal)) continue;
+      internals.push({
+        partialCause: entry.partialCause,
+        kind: entry.kind,
+        value: snapshotCloneValue(
+          internal.get(),
+          internal,
+          new WeakMap(),
+          snapshotCells,
+          preloadedCells,
+        ),
+      });
+    }
+
+    pinCloneSnapshotCells(tx, snapshotCells.values());
+    piece.runtime.prepareTxForCommit(tx);
+    commitStarted = true;
+    const { error } = await tx.commit();
+    if (error) {
+      if ("reason" in error && error.reason instanceof Error) {
+        throw error.reason;
+      }
+      throw error;
+    }
+    return { input, internals };
+  } catch (error) {
+    if (!commitStarted) tx.abort(error);
+    throw error;
+  }
+}
+
+/** Restore stateful internal-cell snapshots into a newly created piece. */
+async function restoreCloneInternals(
+  piece: Cell<unknown>,
+  snapshots: readonly CloneInternalSnapshot[],
+): Promise<void> {
+  const tx = piece.runtime.edit();
+  let commitStarted = false;
+  try {
+    const txPiece = piece.withTx(tx);
+    const manifest = cloneInternalManifest(txPiece);
+    for (const snapshot of snapshots) {
+      const entry = manifest.find((candidate) =>
+        candidate.kind === snapshot.kind &&
+        deepEqual(candidate.partialCause, snapshot.partialCause)
+      );
+      if (entry === undefined) {
+        throw new Error("cloned piece is missing a source data cell");
+      }
+      const link = parseLinkOrThrow(entry.link, txPiece);
+      piece.runtime.getCellFromLink(link, undefined, tx).set(snapshot.value);
+    }
+    piece.runtime.prepareTxForCommit(tx);
+    commitStarted = true;
+    const { error } = await tx.commit();
+    if (error) {
+      if ("reason" in error && error.reason instanceof Error) {
+        throw error.reason;
+      }
+      throw error;
+    }
+  } catch (error) {
+    if (!commitStarted) tx.abort(error);
+    throw error;
+  }
+  await piece.runtime.idle();
 }
 
 type PiecePropIoType = "result" | "input";
@@ -668,8 +804,9 @@ export function selectCurrentContainerSchema(
  * This is deliberately a current-value proof, not a future-value link proof:
  * every currently matching anyOf branch remains a separate conjunct so an
  * overlapping ordinary alternative cannot erase a restricted Cell capability.
+ *
+ * @internal Exported for focused correlated-write contract tests.
  */
-/** @internal Exported for focused correlated-write contract tests. */
 export function currentValuePathContracts(
   unresolved: PathSchemaContract,
   segment: string | number,
@@ -856,8 +993,11 @@ function outerCellShapesMatch(
   return left.kind === right.kind && left.scope === right.scope;
 }
 
-/** Consume a uniform outer Cell wrapper through refs and compositions. */
-/** @internal Exported for focused Cell-capability contract tests. */
+/**
+ * Consume a uniform outer Cell wrapper through refs and compositions.
+ *
+ * @internal Exported for focused Cell-capability contract tests.
+ */
 export function localizeOuterCellContract(
   unresolved: PathSchemaContract,
   stored: StoredCellTopology | undefined = undefined,
@@ -1236,8 +1376,9 @@ function canFollowSourceScope(
  * Recover a producer contract from durable Piece metadata, ignoring any schema
  * carried by the supplied alias. A caller can narrow a Cell view before
  * serializing it, so the envelope itself is not evidence about future writes.
+ *
+ * @internal Exported for focused producer-topology contract tests.
  */
-/** @internal Exported for focused producer-topology contract tests. */
 export function durableSourceContract(
   linkedCell: Cell<unknown>,
   pieces: PiecesController,
@@ -2839,6 +2980,104 @@ export class PieceController<T = unknown> {
     return this.#cell;
   }
 
+  /**
+   * Create a copy in `destination` that tracks the same source. The copy starts
+   * with default data unless `copyData` requests detached snapshots of the
+   * selected piece's current input and stateful internal cells. A detached
+   * piece becomes the copy's mutable fabric origin. A piece that already tracks
+   * an origin passes that origin through, so both copies point at the same
+   * update source.
+   */
+  async cloneTo(
+    destination: PiecesController,
+    options: { copyData?: boolean } = {},
+  ): Promise<PieceController<T>> {
+    await this.#cell.sync();
+    const snapshot = getPieceSourceSnapshot(this.#cell);
+    if (snapshot === undefined) {
+      throw new Error("piece missing pattern identity");
+    }
+    const sourceSpace = this.#pieces.getSpace();
+    const trackedOrigin = readPieceOrigin(
+      this.#pieces.runtime,
+      this.#cell,
+    )?.url;
+    let origin: string;
+    if (trackedOrigin === undefined) {
+      const sourceRef = parseFabricRef(
+        `cf:${this.#cell.getAsNormalizedFullLink().id}`,
+      );
+      if (sourceRef === undefined || sourceRef.ref.kind !== "uri") {
+        throw new Error("piece has no fabric URI");
+      }
+      origin = formatFabricRef({ ...sourceRef, space: sourceSpace });
+    } else {
+      origin = qualifyFabricOrigin(trackedOrigin, sourceSpace);
+    }
+    const program = await this.#pieces.runtime.patternManager
+      .getPatternSourceProgramByIdentity(
+        snapshot.pattern.identity,
+        sourceSpace,
+        destination.getSpace(),
+      );
+    if (program === undefined) {
+      throw new Error("piece source is not available");
+    }
+    let input: unknown = undefined;
+    let internals: CloneInternalSnapshot[] = [];
+    if (options.copyData) {
+      const inputCell = await this.input.getCell();
+      const data = await snapshotCloneData(this.#cell, inputCell, snapshot);
+      input = data.input;
+      internals = data.internals;
+    }
+    const current = getPieceSourceSnapshot(this.#cell);
+    if (current === undefined || !samePieceSourceSnapshot(snapshot, current)) {
+      throw new Error("piece source changed while it was being cloned");
+    }
+    const clone = await destination.create<T>(
+      { ...program, mainExport: snapshot.pattern.symbol },
+      {
+        origin,
+        ...(options.copyData ? { input: input as object } : {}),
+        start: false,
+      },
+    );
+    try {
+      if (options.copyData) {
+        await restoreCloneInternals(clone.getCell(), internals);
+      }
+      await destination.startPiece(clone.getCell());
+    } catch (error) {
+      const cleanupErrors: unknown[] = [];
+      try {
+        await destination.stopPiece(clone.getCell());
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      try {
+        const removed = await destination.remove(clone.getCell());
+        if (!removed) {
+          const stillRegistered = (await destination.getRegisteredPieces())
+            .some((piece) => piece.id === clone.id);
+          if (stillRegistered) {
+            throw new Error("the incomplete piece remained registered");
+          }
+        }
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          "cloning failed and the incomplete piece could not be removed",
+        );
+      }
+      throw error;
+    }
+    return clone;
+  }
+
   /** Return a stable reference to the pattern currently running this piece. */
   async getPatternRef(): Promise<PiecePatternRef | undefined> {
     const ref = getPatternIdentityRef(this.#cell);
@@ -2975,18 +3214,20 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * The pattern's authored source program (`{ main, mainExport?, files }`),
-   * recovered from the content-addressed `pattern:<identity>` source-doc closure
-   * in the piece's space. Replaces the deleted meta cell's `program`. `main` is
-   * the entry filename; `mainExport` is the pattern pointer's export symbol.
-   * Returns undefined when no verified source closure exists (the source docs
-   * are written by every cold compile).
+   * The pattern's authored source program, recovered from the content-addressed
+   * `pattern:<identity>` source-doc closure in the piece's space. Replaces the
+   * deleted meta cell's `program`. `main` is the executable entry filename;
+   * `mainExport` is the pattern pointer's export symbol; and `sourceRoots` names
+   * retained source entry points such as attached tests. Returns undefined when
+   * no verified source closure exists (the source docs are written by every cold
+   * compile).
    */
   async getPatternSourceProgram(): Promise<
     | {
       main: string;
       mainExport?: string;
       files: { name: string; contents: string }[];
+      sourceRoots?: string[];
     }
     | undefined
   > {

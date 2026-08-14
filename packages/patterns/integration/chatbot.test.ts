@@ -1,6 +1,10 @@
-import { env, waitForCondition } from "@commonfabric/integration";
-import { sleep } from "@commonfabric/utils/sleep";
+import {
+  awaitViewSettled,
+  env,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { waitForDisabled } from "./cfc-browser-helpers.ts";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
@@ -109,8 +113,9 @@ describe("Chat pattern test", () => {
       const testMessage = "Hello, how are you?";
       await inputElement.type(testMessage);
 
-      // Wait a bit for UI to process the input
-      await sleep(100);
+      // The send button stays disabled until the typed value reaches the
+      // prompt's state; wait for it to enable before clicking.
+      await waitForDisabled(page, "#cf-prompt-input-send-button", false);
 
       // Click the send button by ID
       const sendButton = await page.waitForSelector(
@@ -189,8 +194,8 @@ describe("Chat pattern test", () => {
     fn: async () => {
       const page = shell.page();
 
-      // Wait for system to settle
-      await sleep(200);
+      // Wait for the view to settle after the previous turn.
+      await awaitViewSettled(page);
 
       // Ask a second question - need to refocus the input first
       const inputElement = await page.waitForSelector("input", {
@@ -207,8 +212,9 @@ describe("Chat pattern test", () => {
       const secondMessage = "What is the capital of France?";
       await inputElement.type(secondMessage);
 
-      // Wait a bit for UI to process the input
-      await sleep(100);
+      // The send button stays disabled until the typed value reaches the
+      // prompt's state; wait for it to enable before clicking.
+      await waitForDisabled(page, "#cf-prompt-input-send-button", false);
 
       // Click the send button by ID
       const sendButton = await page.waitForSelector(
@@ -219,9 +225,6 @@ describe("Chat pattern test", () => {
       );
       assert(sendButton, "Should find send button");
       await sendButton.click();
-
-      // Wait for UI to update
-      await sleep(200);
 
       // Wait for new assistant response - at least 4 messages total
       await waitForCondition(

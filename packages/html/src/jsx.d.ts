@@ -1453,7 +1453,6 @@ declare namespace CFDOM {
      * presented if they are made.
      */
     "aria-autocomplete"?: "none" | "inline" | "list" | "both" | undefined;
-    /** Indicates an element is being modified and that assistive technologies MAY want to wait until the modifications are complete before exposing them to the user. */
     /**
      * Defines a string value that labels the current element, which is intended to be converted into Braille.
      * @see aria-label.
@@ -1464,6 +1463,7 @@ declare namespace CFDOM {
      * @see aria-roledescription.
      */
     "aria-brailleroledescription"?: string | undefined;
+    /** Indicates an element is being modified and that assistive technologies MAY want to wait until the modifications are complete before exposing them to the user. */
     "aria-busy"?: Booleanish | undefined;
     /**
      * Indicates the current "checked" state of checkboxes, radio buttons, and other widgets.
@@ -4024,6 +4024,10 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "timingDelay"?: number;
   "$mentionable"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
   "$mentioned"?: CellLike<Piece[]> | CellLike<Piece[] | undefined>;
+  "$references"?: CellLike<
+    Record<string, { destination: unknown; modifiedTitle: boolean }>
+  >;
+  "fabricHosts"?: string[];
   "$pattern"?: CellLike<any>;
   "pattern"?: any;
   "wordWrap"?: boolean;
@@ -4042,6 +4046,7 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-error"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
+  "onmention-ref-label-changed"?: any;
 }
 
 interface CFAutostartAttributes<T> extends CFHTMLAttributes<T> {

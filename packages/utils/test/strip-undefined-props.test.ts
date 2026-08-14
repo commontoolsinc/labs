@@ -1,3 +1,14 @@
+/**
+ * `stripUndefinedProps()` removes `undefined`-valued properties, and the cases
+ * that say what it is are the things it leaves alone: a `null` property, an
+ * empty nested object, and an array holding `undefined` elements.
+ *
+ * That last one is the boundary a caller is most likely to assume wrongly.
+ * Dropping an element from an array would renumber the rest, so array contents
+ * pass through untouched however much they look like the properties being
+ * stripped.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";

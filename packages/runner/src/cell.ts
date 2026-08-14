@@ -1,8 +1,9 @@
 import {
   type Immutable,
   isFunction,
+  isObjectNotArray,
+  isObjectOrArray,
   isPlainContainer,
-  isRecord,
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
@@ -88,7 +89,9 @@ import {
   txToReactivityLog,
 } from "./scheduler.ts";
 import {
+  allowMutableTransactionRead,
   internalVerifierRead,
+  markReadAsAttemptedWrite,
   mergeableOpRead,
 } from "./storage/reactivity-log.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
@@ -248,7 +251,7 @@ const storedSchemaForWritePolicyInput = (
   }, {
     meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
   });
-  if (!isRecord(stored) || stored.value === undefined) {
+  if (!isObjectOrArray(stored) || stored.value === undefined) {
     return undefined;
   }
   return ContextualFlowControl.getSchemaAtPath(
@@ -282,7 +285,16 @@ export const recordRelevantSchemaWritePolicyInput = (
  * Internal-only stream-send options.
  *
  * `eventId` is a caller-supplied durable event id (verb contract WS-D): a
- * same-id retry collides on the handling's create-only receipt.
+ * retry naming the same id and session collides on the handling's create-only
+ * receipt.
+ *
+ * `session` names the caller that chose that `eventId`, and is REQUIRED
+ * alongside it — a send naming an id without one is refused. An ingress
+ * caller's id is its own word — an agent picks `add-comment-1` — and two
+ * agents can pick the same word for two different calls on one verb, so the
+ * id alone does not say whose invocation it is; the session does. Both are
+ * inputs to {@link scopeCallerEventId}, so the pair, and not the id, is what
+ * decides where a handling's receipt lands.
  *
  * `runtimeInjectedEventKeys` names payload keys the RUNTIME itself merged
  * into this send's event value (the LLM tool-call path injects a `result`
@@ -293,17 +305,18 @@ export const recordRelevantSchemaWritePolicyInput = (
  * in-process options argument, never the event value, so no remote or CLI
  * caller can express it — payloads are plain data, and the CLI's invocation
  * engine (`executeResolvedCallable`, packages/cli/lib/callable.ts) builds the
- * send options itself and puts only `eventId` in them. In-process callers are
- * gated too: the value must be an
- * array MINTED by {@link markRuntimeInjectedEventKeys} — the stream-send
- * path drops any other value — and the mint lives in runner internals no
- * pattern compartment can import, so sandboxed pattern code holding a real
- * stream cell still cannot smuggle an undeclared key past closed-world by
- * passing a plain array here. Adding any data-expressible way to set it
- * would reopen the accepted-and-ignored hole C5 closes.
+ * send options itself and puts only the caller's id and session in them.
+ * In-process callers are gated too: the value must be an array MINTED by
+ * {@link markRuntimeInjectedEventKeys} — the stream-send path drops any other
+ * value — and the mint lives in runner internals no pattern compartment can
+ * import, so sandboxed pattern code holding a real stream cell still cannot
+ * smuggle an undeclared key past closed-world by passing a plain array here.
+ * Adding any data-expressible way to set it would reopen the
+ * accepted-and-ignored hole C5 closes.
  */
 export type StreamSendOptions = {
   eventId?: string;
+  session?: string;
   runtimeInjectedEventKeys?: readonly string[];
 };
 
@@ -339,7 +352,6 @@ const mintedRuntimeInjectedEventKeys = (
  * Module augmentation for runtime-specific cell methods.
  * These augmentations add implementation details specific to the runner runtime.
  */
-
 declare module "@commonfabric/api" {
   /**
    * Augment Writable to add runtime-specific write methods with onCommit callbacks
@@ -348,18 +360,15 @@ declare module "@commonfabric/api" {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
-      sendOptions?: {
-        eventId?: string;
-        runtimeInjectedEventKeys?: readonly string[];
-      },
+      sendOptions?: StreamSendOptions,
     ): C;
   }
 
   /**
    * Augment Streamable to add onCommit callback and internal send-options
-   * support (see `StreamSendOptions` — `eventId` and the runtime-injected
-   * key marker). Event is optional only when T is void (matching public
-   * API).
+   * support ({@link StreamSendOptions} — the caller's event id and session,
+   * and the runtime-injected key marker). Event is optional only when T is
+   * void (matching public API).
    */
   interface IStreamable<T> {
     send(
@@ -369,7 +378,7 @@ declare module "@commonfabric/api" {
         ] | [
           AnyCellWrapping<T> | T,
           ((tx: IExtendedStorageTransaction) => void) | undefined,
-          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
+          StreamSendOptions,
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
@@ -377,7 +386,7 @@ declare module "@commonfabric/api" {
         ] | [
           AnyCellWrapping<T> | T,
           ((tx: IExtendedStorageTransaction) => void) | undefined,
-          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
+          StreamSendOptions,
         ]
     ): void;
   }
@@ -473,6 +482,11 @@ declare module "@commonfabric/api" {
       onlyIfDifferent?: boolean,
       schemaRole?: "output",
     ): void;
+    /**
+     * Applies this cell's CFC schema to its existing stored value without
+     * rewriting that value.
+     */
+    applyCfcSchemaToExistingValue(): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -621,7 +635,7 @@ export function elementSchemaFor(
   arraySchema: JSONSchema | undefined,
   index?: number,
 ): JSONSchema | undefined {
-  if (!isRecord(arraySchema)) return undefined;
+  if (!isObjectOrArray(arraySchema)) return undefined;
   const prefixItems = Array.isArray(arraySchema.prefixItems)
     ? arraySchema.prefixItems as JSONSchema[]
     : undefined;
@@ -629,7 +643,7 @@ export function elementSchemaFor(
       index < prefixItems.length
     ? prefixItems[index]
     : arraySchema.items;
-  if (!isRecord(covering) || Array.isArray(covering)) {
+  if (!isObjectNotArray(covering)) {
     return covering as JSONSchema | undefined;
   }
   const defs = arraySchema.$defs;
@@ -653,6 +667,20 @@ function parseSqliteInsertColumns(sql: string): string[] | undefined {
 }
 
 /**
+ * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer
+ * (delegating the back-pointer case to query-result-proxy's `getCellOrThrow`).
+ * Shared by the write path (`encodeSqliteParams`) and `cf-link.ts`'s
+ * `encodeCfLinkValue` so `db.exec` and the `sqliteQuery` builtin agree on what
+ * counts as a bound cell. (Lives here because it needs `isCell` /
+ * `instanceof CellImpl`; cf-link.ts already imports from cell.ts.)
+ */
+export function asBoundCell(value: unknown): Cell<unknown> | undefined {
+  if (isCell(value)) return value as Cell<unknown>;
+  if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
+  return undefined;
+}
+
+/**
  * Encode SQLite bind params for the wire: a cell bound to a `_cf_link` column is
  * encoded to an absolute sigil-link string; a cell bound to any other column
  * throws; an `undefined` value throws (the pending-value guard — `null` is
@@ -667,20 +695,6 @@ function parseSqliteInsertColumns(sql: string): string[] | undefined {
  * would corrupt a non-link column). Use an explicit column list or named params
  * (`:col`) to bind a Cell in those statements.
  */
-/**
- * Recover a Cell from a value that is a Cell or carries a `toCell` back-pointer
- * (delegating the back-pointer case to query-result-proxy's `getCellOrThrow`).
- * Shared by the write path (`encodeSqliteParams`) and `cf-link.ts`'s
- * `encodeCfLinkValue` so `db.exec` and the `sqliteQuery` builtin agree on what
- * counts as a bound cell. (Lives here because it needs `isCell` /
- * `instanceof CellImpl`; cf-link.ts already imports from cell.ts.)
- */
-export function asBoundCell(value: unknown): Cell<unknown> | undefined {
-  if (isCell(value)) return value as Cell<unknown>;
-  if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
-  return undefined;
-}
-
 export function encodeSqliteParams(
   sql: string,
   params?: ReadonlyArray<unknown> | Record<string, unknown>,
@@ -1190,16 +1204,14 @@ export class CellImpl<T extends FabricValue>
       ContextualFlowControl.isTrueSchema(schema);
 
     return new Promise((resolve) => {
-      let result: Readonly<T>;
-
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        result = validateAndTransform(this.runtime, tx, this.viewRef);
+        const value = validateAndTransform(this.runtime, tx, this.viewRef);
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
-        if (needsTraversal && result !== undefined && result !== null) {
-          deepTraverse(result);
+        if (needsTraversal && value !== undefined && value !== null) {
+          deepTraverse(value);
         }
       };
       // Name the action for debugging
@@ -1243,7 +1255,18 @@ export class CellImpl<T extends FabricValue>
           ]);
         }
         cancel?.();
-        resolve(result);
+        // The effect above exists to drive the scheduler: it reads inside its
+        // own transaction so the dependencies get registered and the
+        // computations they gate run. That transaction has committed by the
+        // time this resolves, so the value the caller keeps is read here
+        // instead — a schemaless cell materializes as a view, and a view
+        // pinned to a finished transaction refuses every access.
+        //
+        // Read against a fresh transaction rather than this cell's. A caller
+        // holding a long-lived open transaction has snapshots in it from
+        // before the computations this pull just drove, so reading through it
+        // would hand back exactly the stale values pull() exists to avoid.
+        resolve(validateAndTransform(this.runtime, undefined, this.viewRef));
       });
     });
   }
@@ -1408,15 +1431,14 @@ export class CellImpl<T extends FabricValue>
     /**
      * Internal-only stream-send options (see {@link StreamSendOptions}).
      * `eventId` supplies the durable event id (spec §7.5) instead of minting
-     * one: an ingress caller that owns a delivery id passes it through so a
-     * retry of the same id collides on the handling's create-only receipt
-     * (verb contract WS-D,
-     * docs/history/plans/pattern-verb-contract-implementation.md). The receipt
-     * is a COMMIT witness, not an execution witness — the redelivered event
-     * still runs the handler body and then loses the race, so effects outside
-     * the transaction repeat. `runtimeInjectedEventKeys` carries the
-     * runtime-injection provenance the closed-world gate consumes. Ignored on
-     * the plain-cell write path.
+     * one: an ingress caller that owns a delivery id passes it, with the
+     * `session` it chose that id within, so a retry of the same pair collides
+     * on the handling's create-only receipt (the verb contract,
+     * docs/plans/pattern-verb-contract.md). The receipt is a COMMIT witness,
+     * not an execution witness — the redelivered event still runs the handler
+     * body and then loses the race, so effects outside the transaction repeat.
+     * `runtimeInjectedEventKeys` carries the runtime-injection provenance the
+     * closed-world gate consumes. Ignored on the plain-cell write path.
      */
     sendOptions?: StreamSendOptions,
   ): Cell<T> {
@@ -1451,6 +1473,33 @@ export class CellImpl<T extends FabricValue>
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
+      // The caller's key is opaque and unscoped; queueEvent expects a durable
+      // delivery id. Binding it to the session that chose it and to this
+      // stream is what keeps one caller's id from addressing another caller's
+      // receipt, and two verbs that share input bindings from colliding on
+      // one receipt.
+      const callerEventId = sendOptions?.eventId;
+      let deliveryEventId: string | undefined;
+      if (callerEventId !== undefined) {
+        const session = sendOptions?.session;
+        if (session === undefined) {
+          // Refused rather than derived without one: an unscoped address is
+          // reachable by anyone who guesses the id, and the guarantee the id
+          // is passed for — a retry settling on the original outcome — would
+          // then be extended to a caller who made no such call.
+          throw new Error(
+            "A caller-supplied `eventId` requires the `session` it was " +
+              "chosen within: an invocation id is the caller's own word, " +
+              "and the pair is what names one invocation.",
+          );
+        }
+        deliveryEventId = scopeCallerEventId(
+          callerEventId,
+          session,
+          resolvedToValueLink,
+        );
+      }
+
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
@@ -1459,12 +1508,7 @@ export class CellImpl<T extends FabricValue>
         onCommit,
         false,
         {
-          // The caller's key is opaque and unscoped; queueEvent expects a
-          // durable delivery id. Binding it to this stream is what keeps two
-          // verbs that share input bindings from colliding on one receipt.
-          eventId: sendOptions?.eventId === undefined
-            ? undefined
-            : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
+          eventId: deliveryEventId,
           originTx: this.tx ?? undefined,
           // Forward injection provenance only when it carries the mint (see
           // markRuntimeInjectedEventKeys): a plain array here — the shape any
@@ -1581,10 +1625,11 @@ export class CellImpl<T extends FabricValue>
         /**
          * Internal-only stream-send options (see {@link StreamSendOptions}):
          * `eventId` passes a caller-supplied durable event id through to the
-         * scheduler, so a same-id retry collides on the handling's
-         * create-only receipt and cannot commit twice — though the body does
-         * re-run (verb contract WS-D). `runtimeInjectedEventKeys` carries
-         * runtime-injection provenance for the closed-world gate.
+         * scheduler, and `session` the caller that chose it, so a retry of
+         * that pair collides on the handling's create-only receipt and cannot
+         * commit twice — though the body does re-run (verb contract WS-D).
+         * `runtimeInjectedEventKeys` carries runtime-injection provenance for
+         * the closed-world gate.
          */
         StreamSendOptions,
       ]
@@ -1602,7 +1647,7 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers for partial updates, or .set() for non-object values",
       );
     }
-    if (!isRecord(values)) {
+    if (!isObjectOrArray(values)) {
       throw new Error(
         "Cell.update() requires transaction and object value\n" +
           "help: use in handlers for partial updates, or .set() for non-object values",
@@ -1631,7 +1676,7 @@ export class CellImpl<T extends FabricValue>
       // just wants to know whether the value could be an object.
       const allowsObject = resolvedSchema === undefined ||
         ContextualFlowControl.isTrueSchema(resolvedSchema) ||
-        (isRecord(resolvedSchema) &&
+        (isObjectOrArray(resolvedSchema) &&
           (resolvedSchema.type === "object" ||
             (Array.isArray(resolvedSchema.type) &&
               resolvedSchema.type.includes("object")) ||
@@ -1711,7 +1756,7 @@ export class CellImpl<T extends FabricValue>
       // and assigning that back to `currentValue` would discard the narrowing
       // this block exists to establish.
       const created: FabricValue[] =
-        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+        isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
             this.runtime,
             this.tx,
@@ -1792,7 +1837,7 @@ export class CellImpl<T extends FabricValue>
       // Annotated for the same reason as in `push()`: `processDefaultValue()`
       // answers `any`, which would discard the narrowing on assignment.
       const created: FabricValue[] =
-        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+        isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
             this.runtime,
             this.tx,
@@ -2180,7 +2225,7 @@ export class CellImpl<T extends FabricValue>
 
     // Determine the kind based on schema flags
     let kind: CellKind = this._kind;
-    if (isRecord(childSchema)) {
+    if (isObjectOrArray(childSchema)) {
       const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
       // we can override the kind of cell we use for a key
       if (asCellValues.length > 0) {
@@ -2524,6 +2569,33 @@ export class CellImpl<T extends FabricValue>
     this.tx.poisonMergeableOp?.(this.link);
   }
 
+  applyCfcSchemaToExistingValue(): void {
+    if (!this.tx) {
+      throw new Error(
+        "Transaction required for applyCfcSchemaToExistingValue",
+      );
+    }
+    if (!this.synced) this.sync();
+
+    const writeLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "writeRedirect",
+    );
+    const value = this.tx.readValueOrThrow(writeLink, {
+      meta: { ...markReadAsAttemptedWrite, ...allowMutableTransactionRead },
+    });
+    if (value === undefined) {
+      throw new Error("Cannot apply a CFC schema to an absent value");
+    }
+    recordRelevantSchemaWritePolicyInput(
+      this.tx,
+      writeLink,
+      this.schema,
+    );
+  }
+
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
     const metaReadOptions = {
       meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
@@ -2711,10 +2783,6 @@ export class CellImpl<T extends FabricValue>
   }
 
   /**
-   * Map over an array cell, creating a new derived array.
-   * Similar to Array.prototype.map but works with Reactives.
-   */
-  /**
    * SqliteDb reactive read (`db.query<Row>`): builds a `sqliteQuery` node with
    * this DB handle as the `db` input (sugar over the `sqliteQuery` factory,
    * mirroring how `.map` threads `this` as `list`). The `<Row>` result schema is
@@ -2756,6 +2824,10 @@ export class CellImpl<T extends FabricValue>
     >;
   }
 
+  /**
+   * Map over an array cell, creating a new derived array.
+   * Similar to Array.prototype.map but works with Reactives.
+   */
   map<S>(
     _fn: (
       element: T extends Array<infer U> ? Reactive<U> : Reactive<T>,
@@ -3176,7 +3248,7 @@ function maybeConvertArrayPathToDataURILink(
     | undefined;
 
   for (let i = 0; i < link.path.length; i++) {
-    if (!isRecord(current)) {
+    if (!isObjectOrArray(current)) {
       break;
     }
 
@@ -3188,7 +3260,7 @@ function maybeConvertArrayPathToDataURILink(
         break;
       }
       next = (current as unknown as Record<string, FabricValue>)[segment];
-      if (isRecord(next) && !isCellLink(next)) {
+      if (isObjectOrArray(next) && !isCellLink(next)) {
         candidate = {
           value: next,
           path: [...prefix, segment],
@@ -3419,7 +3491,7 @@ export function convertCellsToLinks(
   path: readonly string[] = [],
   ancestors: Map<object, readonly string[]> = new Map(),
 ): FabricValue {
-  if (isRecord(value) && ancestors.has(value)) {
+  if (isObjectOrArray(value) && ancestors.has(value)) {
     return linkRefFrom({ path: ancestors.get(value) });
   }
 
@@ -3428,7 +3500,7 @@ export function convertCellsToLinks(
     return linkToCell(getCellOrThrow(value), options);
   } else if (isCell(value)) {
     return linkToCell(value, options);
-  } else if (!(isRecord(value) || isFunction(value))) {
+  } else if (!(isObjectOrArray(value) || isFunction(value))) {
     return value as FabricValue;
   }
 
@@ -3470,13 +3542,13 @@ export function convertCellsToLinks(
     //
     // TODO(danfuzz): Both container branches below build a fresh container,
     // throwing away the copy just made above. One copy could serve both.
-    if (!isRecord(converted)) {
+    if (!isObjectOrArray(converted)) {
       // `shallowFabricFromNativeValue()` converted this into a primitive value
       // of some sort.
       //
       // `FabricValueLayer` is looser than `FabricValue` -- its containers hold
       // `unknown`, being unconverted until the recursion reaches them -- and
-      // `isRecord()` does not narrow an array out of the union. The cast is
+      // `isObjectOrArray()` does not narrow an array out of the union. The cast is
       // that gap, not a claim about the value.
       return converted as FabricValue;
     } else if (converted instanceof FabricPrimitive) {
@@ -3626,7 +3698,7 @@ function schemaWithDefaultAndScope<T>(
 export function schemaCellScope(
   schema: JSONSchema | undefined,
 ): CellScope | undefined {
-  return isRecord(schema) && isCellScope(schema.scope)
+  return isObjectOrArray(schema) && isCellScope(schema.scope)
     ? schema.scope
     : undefined;
 }

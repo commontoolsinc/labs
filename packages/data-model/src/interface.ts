@@ -1,6 +1,7 @@
 /**
- * Type-only declarations and the `FabricInstance` base class for the fabric
- * data model. This file is intentionally free of runtime imports from other
+ * Type-only declarations, the `FabricInstance` base class, and the protocol
+ * symbols keyed on a fabric class, for the fabric data model. This file is
+ * intentionally free of runtime imports from other
  * data-model modules (only `import type` is used) so that it can be imported
  * by any module without creating circular dependencies.
  *
@@ -104,9 +105,8 @@ export abstract class FabricInstance extends FabricSpecialObject {
  * class instances for type safety and dispatch. Covers temporal types,
  * content IDs, byte sequences, and similar.
  *
- * Analogous to `ExplicitTagValue`, this class enables a single
- * `instanceof` check where code needs to handle any special primitive
- * uniformly.
+ * This class enables a single `instanceof` check where code needs to handle
+ * any special primitive uniformly.
  *
  * Instances are always frozen (like true primitives, they are immutable).
  * Each leaf subclass must call `Object.freeze(this)` at the end of its

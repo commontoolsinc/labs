@@ -2,7 +2,7 @@ import { css, html, PropertyValues } from "lit";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { render } from "@commonfabric/html/client";
+import { getPieceBoundary, render } from "@commonfabric/html/client";
 import {
   type CellHandle,
   CHIP_UI,
@@ -15,7 +15,10 @@ import type { DID } from "@commonfabric/identity";
 import "../cf-loader/index.ts";
 import "../cf-cell-link/index.ts";
 import "../cf-piece-menu/index.ts";
-import { openPieceMenu } from "../cf-piece-menu/cf-piece-menu.ts";
+import {
+  closePieceMenuFor,
+  openPieceMenu,
+} from "../cf-piece-menu/cf-piece-menu.ts";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -132,6 +135,21 @@ export class CFRender extends BaseElement {
       overflow: visible;
     }
 
+    .render-stack {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .render-container,
+    .piece-menu-highlight {
+      grid-area: 1 / 1;
+      min-width: 0;
+      min-height: 0;
+    }
+
     .render-container {
       display: flex;
       flex-direction: column;
@@ -140,11 +158,81 @@ export class CFRender extends BaseElement {
       overflow: auto;
     }
 
+    .piece-menu-highlight {
+      z-index: 1;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    :host([data-cf-piece-menu-open]) .render-stack,
+    :host([data-cf-piece-menu-open]) .render-container {
+      isolation: isolate;
+    }
+
+    :host([data-cf-piece-menu-open]) .piece-menu-highlight {
+      opacity: 1;
+      background-color: rgba(99, 102, 241, 0.14);
+      background-image: linear-gradient(
+        135deg,
+        rgba(255, 255, 255, 0) 26%,
+        rgba(255, 255, 255, 0.64) 48%,
+        rgba(103, 232, 249, 0.36) 54%,
+        rgba(255, 255, 255, 0) 72%
+      );
+      background-position: 200% 0;
+      background-repeat: no-repeat;
+      background-size: 250% 100%;
+      box-shadow: inset 0 0 2.5rem rgba(129, 140, 248, 0.38);
+      animation: cf-piece-menu-shine 1.7s ease-in-out;
+    }
+
+    @keyframes cf-piece-menu-shine {
+      from {
+        background-position: 200% 0;
+      }
+      to {
+        background-position: -200% 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      :host([data-cf-piece-menu-open]) .piece-menu-highlight {
+        animation: none;
+        background-position: 50% 0;
+      }
+    }
+
+    @media (forced-colors: active) {
+      :host([data-cf-piece-menu-open]) .piece-menu-highlight {
+        forced-color-adjust: none;
+        background-color: transparent;
+        background-image: linear-gradient(
+          135deg,
+          transparent 26%,
+          Highlight 48%,
+          transparent 72%
+        );
+        box-shadow: inset 0 0 0 0.25rem Highlight;
+      }
+    }
+
     :host([variant="chip"]) .render-container {
       display: inline-block;
       width: auto;
       height: auto;
       overflow: visible;
+    }
+
+    :host([variant="chip"]) .render-stack {
+      display: inline-grid;
+      width: auto;
+      height: auto;
+      align-items: baseline;
+      vertical-align: baseline;
+    }
+
+    :host([variant="chip"]) .piece-menu-highlight {
+      align-self: stretch;
     }
 
     /* Tile default: a fixed, clickable preview that navigates to the piece.
@@ -233,7 +321,10 @@ export class CFRender extends BaseElement {
           </div>
         `
         : null}
-      <div class="render-container" ${ref(this._containerRef)}></div>
+      <div class="render-stack">
+        <div class="render-container" ${ref(this._containerRef)}></div>
+        <div class="piece-menu-highlight" aria-hidden="true"></div>
+      </div>
     `;
   }
 
@@ -256,6 +347,7 @@ export class CFRender extends BaseElement {
         this._log("cell property changed, should rerender:", shouldRerender);
 
         if (shouldRerender) {
+          closePieceMenuFor(this);
           // Reset render state when cell changes - ensures we'll render the new cell
           this._cleanupLinkTargetSubscription();
           this._hasRendered = false;
@@ -409,9 +501,10 @@ export class CFRender extends BaseElement {
         ) {
           return;
         }
-        observedTarget = validTarget;
         if (this._linkTargetToken !== token) return;
         if (!this.cell?.equals(cell)) return;
+        closePieceMenuFor(this);
+        observedTarget = validTarget;
         this._linkTargetObserved = validTarget;
         this._resolvedCell = undefined;
         if (validTarget === undefined) {
@@ -511,6 +604,27 @@ export class CFRender extends BaseElement {
     }
   }
 
+  /** The deepest nested pattern root in the click path, when there is one. */
+  private _nestedPieceTarget(
+    event: MouseEvent,
+  ): { cell: CellHandle; element: Element } | undefined {
+    const path = event.composedPath();
+    const rendererIndex = path.indexOf(this);
+    if (rendererIndex < 0) return undefined;
+    return getPieceBoundary(path[0], (target) => {
+      const providerIndex = path.indexOf(target.element);
+      if (
+        providerIndex < 0 || providerIndex >= rendererIndex ||
+        !isCellHandle(target.cell)
+      ) return false;
+      try {
+        return target.cell.ref().path.length === 0;
+      } catch {
+        return false;
+      }
+    });
+  }
+
   /**
    * Open the piece's menu on right-click. The innermost rendered piece claims
    * the click, so right-clicking a tile inside a piece addresses the tile.
@@ -525,14 +639,15 @@ export class CFRender extends BaseElement {
    */
   private _onContextMenu = (e: MouseEvent) => {
     if (e.shiftKey || isTextEntry(e.composedPath()[0])) return;
-    const target = this._pieceTarget();
+    const nestedTarget = this._nestedPieceTarget(e);
+    const target = nestedTarget?.cell ?? this._pieceTarget();
     if (!target) return;
     const detail: PieceContextMenuDetail = {
       space: target.space(),
       pieceId: target.id(),
       x: e.clientX,
       y: e.clientY,
-      variant: normalizeVariant(this.variant),
+      variant: nestedTarget ? "full" : normalizeVariant(this.variant),
     };
     const claimed = !this.dispatchEvent(
       new CustomEvent<PieceContextMenuDetail>(PIECE_CONTEXT_MENU_EVENT, {
@@ -551,6 +666,8 @@ export class CFRender extends BaseElement {
       x: e.clientX,
       y: e.clientY,
       themeFrom: this,
+      highlightedPiece: this,
+      highlightTarget: nestedTarget?.element,
     });
   };
 
@@ -608,6 +725,7 @@ export class CFRender extends BaseElement {
 
   override disconnectedCallback() {
     this._log("disconnectedCallback called");
+    closePieceMenuFor(this);
     this.removeEventListener("contextmenu", this._onContextMenu);
     super.disconnectedCallback();
     this._renderGeneration++;
