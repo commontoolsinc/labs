@@ -347,6 +347,16 @@ position renders the address and suppresses the fetch without consulting a
 source schema at all. What a declared result would add is that `cf` could
 derive the selection instead of the caller supplying it.
 
+One case already derives it: a create that returns its piece from inside the
+container holding it — `addChild` under an epic — hands back a value that
+reaches itself, which plain JSON cannot spell. There the readback bounds the
+result with the verb's own declared result and renders the position that
+closes the circle as an address, the same rendering a `$link` marker asks for
+by hand; with no declared result to bound it, the call refuses with a message
+instead of a stack trace.
+[A result that points back at its container](verbs-over-the-cli.md#a-result-that-points-back-at-its-container)
+walks the exchange.
+
 ## 5. Read the tree back, bounded **[today]**
 
 ```bash
