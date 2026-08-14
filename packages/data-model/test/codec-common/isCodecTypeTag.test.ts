@@ -52,9 +52,9 @@ describe("isCodecTypeTag", () => {
     expect(isCodecTypeTag("/Bytes@1")).toBe(false);
   });
 
-  it("returns `false` for a string that only contains a tag", () => {
-    // Anchored at both ends, so neither a prefix nor a suffix sneaks a tag
-    // past a check made on data off a channel.
+  it("returns `false` for a string that contains a tag without being one", () => {
+    // The syntax is anchored at both ends, so neither a prefix nor a suffix
+    // sneaks a tag past a check made on data off a channel.
     expect(isCodecTypeTag(" Bytes@1")).toBe(false);
     expect(isCodecTypeTag("Bytes@1 ")).toBe(false);
     expect(isCodecTypeTag("x\nBytes@1")).toBe(false);
