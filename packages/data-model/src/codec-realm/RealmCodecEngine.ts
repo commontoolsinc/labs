@@ -199,13 +199,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
 
       // Checked on every object, not just the ones that get rebuilt, so that
       // the answer does not depend on whether some sibling happened to change.
-      if (isUnsafeObjectKey(key)) {
-        throw new Error(
-          `Cannot encode an object with a key this runtime reserves: ${
-            backtickQuote(key)
-          }`,
-        );
-      }
+      RealmCodecEngine.assertEncodableKey(key);
 
       const original = value[key]!;
       const encoded = this.encodeValue(original, seen);
@@ -320,11 +314,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       const key = keys[i]!;
 
       if (isUnsafeObjectKey(key)) {
-        return this.reportMalformed(
-          key,
-          data,
-          `object contains a key this runtime reserves: "${key}"`,
-        );
+        return this.reportReservedKey(key, data);
       }
 
       const original = data[key]!;

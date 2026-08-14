@@ -339,6 +339,39 @@ describe("RealmCodecEngine", () => {
       expect((decoded as UnknownValue).wireTypeTag).toBe("nope@1");
     });
 
+    it("refuses a key this runtime reserves", () => {
+      // The rebuild below assigns, and on a host with the standard
+      // `__proto__` accessor that would drop the key and repoint the result's
+      // prototype. The key is computed on purpose: in an object literal a
+      // `__proto__:` sets the prototype rather than creating a property, so a
+      // literal cannot express this shape at all.
+      const data = Object.defineProperty({ a: 1 }, "__proto__", {
+        value: { hostile: true },
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+
+      expect(() => fabricFromRealmValue(data as never)).toThrow(/reserves/);
+    });
+
+    it("returns that refusal as a `ProblematicValue` when lenient", () => {
+      const engine = newDefaultRealmCodecEngine({ lenient: true });
+      const data = Object.defineProperty({ a: 1 }, "constructor", {
+        value: "c",
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      const decoded = engine.decode(
+        data as never,
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      ) as ProblematicValue;
+
+      expect(decoded).toBeInstanceOf(ProblematicValue);
+      expect(decoded.wireTypeTag).toBe("constructor");
+    });
+
     it("returns an object needing no decoding by identity", () => {
       const data = { a: 1, b: { c: "two" }, d: [3, 4] };
 
