@@ -22,7 +22,7 @@ deep config in a few minutes):
 | `PendingStacks_Repaired.cfg` | `fullstack` | `confirmed` (CT-1910 repair — shipped: pending reads declaring `basisSeq`, scanned with own-session exclusion) | `atomic` | **All invariants hold** (14,504,005 distinct states, exhaustive at `MaxTotal = 4`). |
 | `PendingStacks_Filtered.cfg` | `filtered` (proposed CT-1872 refinement) | `confirmed` | `atomic` | **All invariants hold** (same bound and state count). |
 | `PendingStacks_Filtered5.cfg` | `filtered` | `confirmed` | `atomic` | **All invariants hold** at `MaxTotal = 5` with single-path writes (110.7M distinct states, ~5 min) — deep enough for a foreign write to reject a *middle* pending layer beneath a reader, the case where overlap-filtering actually drops a dependency. |
-| `PendingStacks_Channel.cfg` | `fullstack` | `confirmed` | `channel` (delayed verdict delivery) | **All invariants hold**, including `AcceptedVersusDropped` (INV-6), at 39,966,805 distinct states, `MaxTotal = 4`, ~90s. Certifies the decided-but-undelivered window: commits built there name decided-dead layers and are refused by the dead-dependency admission rule; commits built after the delivered drop record sparse arrays (§3.5's view-relative completeness). Negative control: deleting `HasDeadDep` from `Process` violates `CascadeTotality` within a second — the rule is load-bearing, not decorative. |
+| `PendingStacks_Channel.cfg` | `fullstack` | `confirmed` | `channel` (delayed verdict delivery) | **All invariants hold**, including `AcceptedVersusDropped` (INV-6), at 39,966,805 distinct states, `MaxTotal = 4`, ~90s. Certifies the decided-but-unprocessed window: commits built there name decided-dead layers and are refused by the dead-dependency admission rule; commits built after the processed rejection's drop record sparse arrays (§3.5's view-relative completeness). Negative control: deleting `HasDeadDep` from `Process` violates `CascadeTotality` within a second — the rule is load-bearing, not decorative. |
 
 Read the violation together with the catalog: the maxdep counterexample is an
 INV-1 failure through the staleness basis, orthogonal to dependency
@@ -77,9 +77,13 @@ or missed contributor directly.
 - **Actions**: `Build` (client constructs a commit against one snapshot —
   confirmed prefix plus pending stack — recording observations and the
   dependency set the active `DepMode` prescribes), `Process` (server FIFO
-  admission: staleness scan per `BasisMode`, then accept-and-append or
-  reject-and-cascade, with the client's mirrored drop taken atomically),
-  `Integrate` (client advances its confirmed view one log entry).
+  admission: dead-dependency check, then staleness scan per `BasisMode`,
+  then accept-and-append or reject — with the client's mirrored drop fused
+  in under `atomic` delivery, server-side only under `channel`), `Deliver`
+  (channel mode: the client processes the next verdict in submission
+  order — for a rejection, the drop and transitive cascade), and
+  `Integrate` (client advances its confirmed view one log entry; own
+  accepted entries promote here, gated on the processed verdict).
 - **The master invariant** `ReadCoherence` is observational, not mechanical:
   every accepted commit's recorded observation of a path — its confirmed
   contributors plus its pending-layer contributors mapped through resolution
@@ -111,17 +115,23 @@ or missed contributor directly.
   the client's mirrored cascade in one action — the original abstraction,
   kept so the historical configs certify the same state graphs (the
   Repaired/Filtered counts are unchanged to the digit). `channel` is the
-  in-flight-verdict refinement: the server decides, the client learns by an
-  explicit `Deliver` step in submission order (inline transact responses),
-  and the rejection drop-and-cascade runs at DELIVERY. That brings into
+  in-flight-verdict refinement: the server decides, and the client
+  PROCESSES each verdict by an explicit `Deliver` step in submission order
+  — for a rejection, the drop-and-cascade. `Deliver` is the processing
+  point, not the transact response's arrival: the implementation holds a
+  rejection's drop for the covering fan-out frame (the read-repair gate),
+  so the revert and the winning data land as one visible transition and
+  re-run actions read repaired state. That brings into
   scope the decided-but-not-yet-applied window of CT-1927 verdict parking
   (promotion still waits for `Integrate`, now guarded so a covering frame
   cannot precede its verdict — the §4.11 server obligation), INV-6 as the
   checked `AcceptedVersusDropped` invariant, and the sparse dependency
-  arrays of §3.5 (a build after a delivered drop records only survivors).
+  arrays of §3.5 (a build after a processed rejection's drop records only
+  survivors).
   Two collapses keep it tractable, argued in the module header: the
-  read-repair gate's drop-later-than-delivery timing adds no observably
-  distinct dependency arrays, and a locally cascade-dropped commit models
+  response-to-processing window adds no observably distinct dependency
+  arrays (so verdict-time and frame-time drop policies are covered alike),
+  and a locally cascade-dropped commit models
   as never-decided (pre-send refusal) — the server-decides-first ordering
   is a separate reachable interleaving. Still outside scope: connection
   loss and replay (INV-11), which remain covered by reconnect unit tests
