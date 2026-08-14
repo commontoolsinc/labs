@@ -2,6 +2,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { cfcOpaqueLinkForPath } from "./observation.ts";
 import {
+  cfcCombinatorObjectSurface,
   cfcObjectSchemaIsClosed,
   isPrimitiveJsonValue,
   resolveSchemaForValidation,
@@ -235,6 +236,27 @@ const schemaWithoutBranchKeyword = (
   return rest as JSONSchema;
 };
 
+/**
+ * The constraints one value is measured against: the node itself with each
+ * union keyword replaced by the branches this value actually matches. This
+ * picks a schema — which sub-schema governs a key, which constants a string
+ * may be — rather than describing the schema's surface; the names an object
+ * declares are `knownPropertyNames()`'s question, and it asks it of the
+ * unnarrowed schema so that its answer is the validator's.
+ *
+ * Each keyword is narrowed on its own terms:
+ *
+ * - `oneOf` is exactly one, and the validator refuses a value matching two, so
+ *   the first match is the only match.
+ * - `anyOf` is one OR MORE, so every matching branch contributes. Combining
+ *   them with `allOf` is sound because each was selected by validating this
+ *   same value: whatever they all require, it already satisfies. Taking only
+ *   the first would hide the later branches' constraints — a string a second
+ *   branch names as a constant would go over as an opaque link, and a property
+ *   only it declares would be governed by nothing.
+ * - `allOf` is unconditional and needs no narrowing: it stays on the node, and
+ *   every consumer here descends it whether or not a branch matched.
+ */
 const schemaForValue = (
   schema: JSONSchema,
   value: unknown,
@@ -252,10 +274,10 @@ const schemaForValue = (
     base = schemaWithoutBranchKeyword(base as Record<string, unknown>, "oneOf");
     branches.push(oneOf);
   }
-  const anyOf = matchingBranch(resolved.anyOf, value, fullSchema, reserved);
-  if (anyOf !== undefined) {
+  const anyOf = matchingBranches(resolved.anyOf, value, fullSchema, reserved);
+  if (anyOf.length > 0) {
     base = schemaWithoutBranchKeyword(base as Record<string, unknown>, "anyOf");
-    branches.push(anyOf);
+    branches.push(...anyOf);
   }
   return branches.length === 0 ? resolved : combineAllOf([base, ...branches]);
 };
@@ -300,58 +322,25 @@ const childSchemaForKey = (
  * This decides which of a value's keys are unmodeled, and an unmodeled key
  * seals the object — so a name this misses costs the caller the whole object.
  *
- * The walk is a worklist rather than a recursion, and carries the same two
- * guards as the sanitizer's own combinator walk: `activeRefs` is PATH-scoped,
- * so a self-recursive union terminates while two sibling branches naming one
- * `$ref` under different constraints each still contribute their names, and
- * `visited` is walk-wide over resolved nodes, so a shared tail is walked once
- * however many paths reach it. Depth costs heap, not call stack.
+ * The branch walk is the validator's own, so the two read one answer to "what
+ * does this schema declare here?". They must: the validator admits a key any
+ * branch names, and a sanitizer that named fewer would seal an object over a
+ * key validation had just accepted. What the validator does with the answer is
+ * its own business — it consults the names only where nothing left the object
+ * open, while an unmodeled key seals here open or not.
  */
 const knownPropertyNames = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
 ): Set<string> => {
-  const known = new Set<string>();
-  const activeRefs = new Set<string>();
-  const visited = new Set<object>();
-
-  type NameStep =
-    | { kind: "node"; raw: JSONSchema }
-    | { kind: "leave"; ref: string };
-
-  const stack: NameStep[] = [{ kind: "node", raw: schema }];
-  while (stack.length > 0) {
-    const step = stack.pop()!;
-    if (step.kind === "leave") {
-      activeRefs.delete(step.ref);
-      continue;
-    }
-    const raw = step.raw;
-    const ref = isObjectOrArray(raw) && typeof raw.$ref === "string"
-      ? raw.$ref
-      : undefined;
-    if (ref !== undefined && activeRefs.has(ref)) continue;
-    const resolved = resolveSchemaForValidation(raw, fullSchema);
-    if (!isObjectOrArray(resolved) || visited.has(resolved)) continue;
-    visited.add(resolved);
-    if (isObjectOrArray(resolved.properties)) {
-      for (const key of Object.keys(resolved.properties)) {
-        known.add(key);
-      }
-    }
-    if (ref !== undefined) {
-      activeRefs.add(ref);
-      stack.push({ kind: "leave", ref });
-    }
-    for (
-      const branches of [
-        resolved.allOf,
-        resolved.anyOf,
-        resolved.oneOf,
-      ] as const
-    ) {
-      if (!Array.isArray(branches)) continue;
-      for (const branch of branches) stack.push({ kind: "node", raw: branch });
+  const resolved = resolveSchemaForValidation(schema, fullSchema);
+  if (!isObjectOrArray(resolved)) {
+    return new Set<string>();
+  }
+  const { known } = cfcCombinatorObjectSurface(resolved, fullSchema);
+  if (isObjectOrArray(resolved.properties)) {
+    for (const key of Object.keys(resolved.properties)) {
+      known.add(key);
     }
   }
   return known;
@@ -445,7 +434,10 @@ const sanitizeValueWithOpaqueLinks = (
     // itself be data. A RESERVED unmodeled key is the exception — its
     // spelling is the framework's, not the value author's — and it is dropped
     // rather than shown, so nothing about it reaches the reader either way.
-    const knownKeys = knownPropertyNames(effectiveSchema, fullSchema);
+    // Which names are modeled is asked of the schema as written, not of the
+    // narrowing above: the validator admits a name any branch declares, so
+    // measuring against fewer would seal an object over a key it just passed.
+    const knownKeys = knownPropertyNames(schema, fullSchema);
     const unmodeled = Object.keys(value).filter((key) => !knownKeys.has(key));
     if (unmodeled.some((key) => !reserved.has(key))) {
       return {

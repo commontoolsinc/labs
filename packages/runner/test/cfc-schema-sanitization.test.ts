@@ -2154,4 +2154,32 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       linkedStringCount: 0,
     });
   });
+
+  it("keeps a property only a later matching anyOf branch declares", () => {
+    // `anyOf` is "one or more branches match", so a value matching two of them
+    // is described by both. Reading only the first leaves the second branch's
+    // properties unmodeled — validation accepts `note`, and the sanitizer then
+    // seals the whole object over the very key validation just admitted.
+    const schema = {
+      type: "object",
+      anyOf: [
+        {
+          type: "object",
+          properties: { id: { type: "number" } },
+          additionalProperties: true,
+        },
+        {
+          type: "object",
+          properties: { id: { type: "number" }, note: { const: "ok" } },
+          additionalProperties: true,
+        },
+      ],
+    } as unknown as JSONSchema;
+
+    expect(validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { id: 1, note: "ok" },
+      opaqueHandleId: "run-1",
+    })).toEqual({ value: { id: 1, note: "ok" }, linkedStringCount: 0 });
+  });
 });

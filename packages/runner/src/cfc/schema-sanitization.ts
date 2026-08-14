@@ -304,8 +304,16 @@ export const cfcObjectSchemaIsClosed = (
  * unmodeled key is still refused. A cut branch's own property names are
  * collected before the cut, and every branch merges into the one set the
  * caller reads.
+ *
+ * A branch that leaves the object open contributes its names too, and is
+ * descended into like any other. Openness and the name set are separate
+ * answers: the validator reads `known` only where nothing is open, while the
+ * opaque-link sanitizer reads it whether or not anything is open — an
+ * unmodeled key seals there even under an open schema. One walk therefore has
+ * to answer both, or the two disagree about what the schema declares, and that
+ * disagreement is what decides whether a value seals or is released.
  */
-const combinatorObjectSurface = (
+export const cfcCombinatorObjectSurface = (
   schema: Record<string, unknown>,
   schemaRoot: JSONSchema,
 ): { known: Set<string>; open: boolean } => {
@@ -349,7 +357,6 @@ const combinatorObjectSurface = (
     }
     if (!cfcObjectSchemaIsClosed(branch)) {
       open = true;
-      continue;
     }
     for (const key of Object.keys(branch.properties ?? {})) {
       known.add(key);
@@ -1897,7 +1904,7 @@ const validateAgainstSchemaInternal = (
       // false` in so many words is taken at its word.
       const branchSurface = explicitlyClosed
         ? { known: new Set<string>(), open: false }
-        : combinatorObjectSurface(schema, schemaRoot);
+        : cfcCombinatorObjectSurface(schema, schemaRoot);
       if (closesAdditionalProperties && !branchSurface.open) {
         const known = new Set([
           ...Object.keys(schema.properties ?? {}),
