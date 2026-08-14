@@ -402,6 +402,72 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(command).not.toContain(parentTokenC);
   });
 
+  it("returns a reference whose path segment is token-shaped whole", async () => {
+    const runId = "run-subagent-handles-token-shaped-path";
+    // A cell whose path segment reads exactly like a handle token. Nothing
+    // stops an author naming a key that way, and the reference is the only
+    // thing that addresses the cell.
+    const pathed = `${URI_C}/cfh:a:23456`;
+    const sandbox = new FakeSandboxRuntime([
+      { stdout: `child found ${pathed}`, stderr: "", exitCode: 0 },
+      { stdout: "ok", stderr: "", exitCode: 0 },
+    ]);
+    const requestBodies: unknown[] = [];
+    const fetchFn: typeof fetch = (_input, init) => {
+      requestBodies.push(JSON.parse(String(init?.body)));
+      const turn = requestBodies.length;
+      const lastToolContent = (index: number): string => {
+        const messages = chatViewOfRequest(requestBodies[index]).messages;
+        return [...messages].reverse().find((candidate) =>
+          candidate.role === "tool"
+        )?.content ?? "";
+      };
+      const payload = turn === 1
+        ? delegateCallTurn("call-delegate", { goal: "Find the cell." })
+        : turn === 2
+        ? bashCallTurn("call-child", "cat found.txt")
+        : turn === 3
+        ? finalTurn(`The cell is ${firstToken(lastToolContent(2))}.`)
+        : turn === 4
+        ? bashCallTurn(
+          "call-parent",
+          `cf get ${firstToken(lastToolContent(3))}`,
+        )
+        : finalTurn("Parent done.");
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    };
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: sandbox,
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+      }),
+      fetchFn,
+    });
+
+    const result = await loop.runPrompt({ prompt: "Delegate the lookup." });
+
+    // The child's token resolves to its reference in the same scan that
+    // scrubs the unresolvable ones, so the path segment inside that
+    // reference is never re-read as a token of its own.
+    const entry = result.runState.handleTable?.entries[0];
+    expect(entry?.ref).toContain("/cfh:a:23456");
+    const delegateOutput = chatViewOfRequest(requestBodies[3]).messages
+      .filter((message) => message.role === "tool")
+      .at(-1)?.content ?? "";
+    expect(delegateOutput).not.toContain("[handle-token-removed]");
+    // And the parent can still address the cell the child reported.
+    expect(dispatchedCommand(sandbox, "cf get ")).toContain(
+      `cf get ${entry?.ref}`,
+    );
+  });
+
   it("scrubs a token-shaped string a child returns rather than letting the parent resolve it", async () => {
     const runId = "run-subagent-handles-crossing";
     const table = await parentTableOf(runId, [URI_A, URI_B]);

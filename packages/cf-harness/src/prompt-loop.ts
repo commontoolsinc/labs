@@ -835,27 +835,34 @@ const SCRUBBED_CHILD_HANDLE_TOKEN = "[handle-token-removed]";
  * mints to the token the parent already holds, and an address the child
  * discovered for itself becomes a fresh parent token.
  *
- * Whatever still looks like a token after that is scrubbed, irreversibly. The
- * two tables share a token grammar but not a salt, and the parent's table is
- * the larger one: a token the child was never handed resolves to nothing in
- * the child's table, and the parent's outbound pass swaps addresses rather
- * than tokens, so token-shaped text would cross the boundary untouched and
- * then resolve in the PARENT's table — naming an entry the delegation
- * deliberately withheld. Replacing it with inert text closes that, and costs
- * nothing real: a token the child holds legitimately has already become an
- * address by this line.
+ * Whatever still looks like a token is scrubbed instead, irreversibly. The two
+ * tables share a token grammar but not a salt, and the parent's table is the
+ * larger one: a token the child was never handed resolves to nothing in the
+ * child's table, and the parent's outbound pass swaps addresses rather than
+ * tokens, so token-shaped text would cross the boundary untouched and then
+ * resolve in the PARENT's table — naming an entry the delegation deliberately
+ * withheld. Replacing it with inert text closes that, and costs nothing real:
+ * a token the child holds legitimately becomes an address on this same line.
+ *
+ * Resolving and scrubbing are ONE scan of the child's text, and that is what
+ * makes them safe together. Each token-shaped match is decided once — the
+ * child's table either holds it (it becomes that entry's reference) or does
+ * not (it becomes the inert placeholder) — and no text this scan writes is
+ * examined again. Run as two passes, the scrub would read the references the
+ * first pass produced: a reference whose PATH SEGMENT happens to match the
+ * token grammar would be mangled mid-address, leaving the parent unable to
+ * address the very cell the child was reporting.
  */
 const resolveChildHandleTokens = (
   childEngine: CfHarnessEngine,
   text: string,
 ): string => {
   const table = childEngine.handleTable;
-  const resolved = table === undefined
-    ? text
-    : swapTokensForRefs(table, text) as string;
-  return resolved.replace(
+  return text.replace(
     new RegExp(HANDLE_TOKEN_PATTERN.source, "g"),
-    SCRUBBED_CHILD_HANDLE_TOKEN,
+    (token) =>
+      (table === undefined ? undefined : resolveHandleToken(table, token))
+        ?.ref ?? SCRUBBED_CHILD_HANDLE_TOKEN,
   );
 };
 
