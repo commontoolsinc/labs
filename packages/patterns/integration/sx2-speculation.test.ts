@@ -125,11 +125,13 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     // exercised by the counter product gate.
     const echoStart = performance.now();
     let coldViewRetries = 0;
-    let lastDestinationIssue: unknown;
+    // The loop's only exits are the success `break` and a `throw`
+    // (attempt >= 3 or a non-matching error), so no post-loop guard is
+    // needed — a previous `lastDestinationIssue` re-throw here was
+    // unreachable (review thread r3739139546).
     for (let attempt = 0;; attempt++) {
       try {
         await piece.result.set(7, ["value"]);
-        lastDestinationIssue = undefined;
         break;
       } catch (error) {
         if (
@@ -137,14 +139,12 @@ describe("sx2 speculation (Phase 2 gates)", () => {
           String(error).includes("does not match its write destination")
         ) {
           coldViewRetries += 1;
-          lastDestinationIssue = error;
           await new Promise((resolve) => setTimeout(resolve, 500));
           continue;
         }
         throw error;
       }
     }
-    if (lastDestinationIssue !== undefined) throw lastDestinationIssue;
     if (coldViewRetries > 0) {
       // Visible when it engages (never a silent mask): the count and
       // the class it absorbed.

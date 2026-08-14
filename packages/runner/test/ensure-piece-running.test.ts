@@ -799,3 +799,27 @@ describe("queueEvent with auto-start", () => {
     });
   });
 });
+
+describe("ensurePieceRunning error propagation (r3739139521)", () => {
+  it("collapses failures to false by default; propagateErrors rethrows so the serving loop's failure arm is reachable", async () => {
+    // A runtime whose edit() throws stands in for any internal failure
+    // (pattern load, start). The default caller (event recovery) keeps
+    // best-effort false; the serving loop's demand cycle opts into the
+    // rethrow so a real failure counts structureLoadFailures instead of
+    // masquerading as a creation-race deferral retried every cycle.
+    const boom = new Error("pattern load fell over");
+    const runtime = {
+      edit: () => {
+        throw boom;
+      },
+    } as unknown as Runtime;
+    const link = {
+      space: "did:key:z6Mk-ensure-piece-test" as never,
+      id: "of:ensure-piece-test" as never,
+      path: [],
+    } as never;
+    await expect(ensurePieceRunning(runtime, link)).resolves.toBe(false);
+    await expect(ensurePieceRunning(runtime, link, { propagateErrors: true }))
+      .rejects.toThrow("pattern load fell over");
+  });
+});

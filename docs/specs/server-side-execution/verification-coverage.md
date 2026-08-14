@@ -509,7 +509,14 @@ population):
 Delta 2026-08-07 — Phase 2 lands (flag ON: the server derives, the
 client does not; this PR):
 
-- speculation §1/§2/§4/§6's impl-gate rows: → COVERED. The overlay is
+- speculation §1/§2/§4/§6's impl-gated rules: the implementation they
+  gated on LANDED, with the pins cited below. Stated precisely
+  (r3739139527 — the earlier "impl-gate rows → COVERED" overstated
+  against the §1 map, whose speculation row still counts them
+  impl-gate): this delta records the landing evidence; the map's
+  COLUMN moves (impl-gate → instrument-covered where the cited pins
+  bind the rule text) belong to the next full mapping pass, which §4's
+  standing rule already schedules. The overlay is
   the runtime's DEFAULT seal destination under the flag for every
   non-serving runtime (`packages/runner/src/speculation/
   overlay-destination.ts`): stamped derivation-kind runs redirect into
@@ -1047,7 +1054,14 @@ sentence, coverage below):
   kind at the runtime's posture-gated stamping seam
   (`stampServerRun` — a no-op on the OFF arm; under client
   speculation bookkeeping commits exactly as unstamped txs do), for
-  the full audited class: the six list-builtin recovery writes, the
+  the full audited class: the six list-builtin recovery writes
+  (2026-08-13 amendment, review thread r3756175819: the three
+  resume-SETTLE writes are bookkeeping ONLY on the serving posture —
+  on a flag-ON client they write DERIVED content and now stamp
+  `derivation`, diverting to the overlay; the shared decision is
+  `resumeSettleRunKind` in resume-republish.ts, unit-pinned; the
+  three resume-SEEDs stay bookkeeping on both postures as
+  container-materialization, setup-class under the scheduler tell), the
   shared list republisher, the compile-cache writebacks + pattern
   annotation (pattern-manager), the piece
   instantiate/start/repair/run-synced/pointer-roll-forward family
@@ -1055,9 +1069,12 @@ sentence, coverage below):
   interval tick / error-UI / sidecar-run / ready writes, and the
   fetch / fetchProgram / llmDialog teardown claims-release txs.
   NOT stamped, per existing rulings: llm partial-stream writes
-  (partials never become commits — the serving posture now SKIPS
-  the write before minting a tx, the same ruled outcome the
-  refusal produced, keeping the new counter clean),
+  (partials never become commits — the serving posture UNDER THE
+  FLAG now SKIPS the write before minting a tx, the same ruled
+  outcome the refusal produced, keeping the new counter clean; the
+  2026-08-13 round scoped the skip to `serverExecution === true` —
+  posture alone had dropped OFF-arm partials, an unrecorded OFF-arm
+  delta, review thread r3756175835),
   compile-and-run's async writebacks (stage-G deferral, documented
   in-file), and llm-dialog's pin/unpin/updateArgument/invoke
   tool-call writes (ruled completion-/handler-class — Phase-3
@@ -1079,7 +1096,107 @@ sentence, coverage below):
 This closes leg A of the lunch-gate triage arc (the unstamped
 recovery-seed storm). Leg B — the OW19 demand spin
 (`structureLoadDeferred` climbing) — is separately owned; leg C
-(the speculative-pending-basis design fix) awaits an owner ruling.
+(the speculative-pending-basis design fix) is closed by the
+2026-08-13 delta below.
+
+Delta 2026-08-13 — lunch-gate triage leg C: the speculative-basis
+export refusal (RULED 2026-08-13; speculation.md §6's "process-local
+principle and the export refusal" carries the rule and the owner
+blockquote; this PR):
+
+- speculation.md §6's "a commit basis MUST NOT name a speculative
+  layer" (the export refusal): → COVERED, impl-gate, red-first.
+  `packages/runner/test/speculation-overlay.test.ts` ("an authored tx
+  that read a speculative echo is refused LOUDLY at the client")
+  drives a real client-flag-ON runtime to a live echo, commits an
+  unstamped tx that read it, and pins the terminal client-side
+  `SpeculativeBasisError` (isTerminalRejection true), the unchanged
+  engine commit count (nothing exported), the intact overlay entry,
+  and the never-rendered refused write. At the pre-fix tree the same
+  scenario exported the seq and red-failed with the server's
+  `ConflictError: pending dependency not resolved: 4` after a wire
+  round trip.
+- The bounded-and-loud convergence half (the ruling's "fix infinitely
+  stuck things"): → COVERED, red-first. The same file's "a handler
+  that read a speculative echo fails terminal on the FIRST attempt"
+  pins exactly ONE handler run per event (console-channel counting —
+  the sandbox globalThis is isolated); pre-fix the backoff loop
+  re-ran the handler throughout the observation window (17 runs / 5s
+  observed; production shape ~43 attempts / 30.5s to
+  CommitConvergenceError). The push-boundary belt (a ConflictError
+  naming a known-speculative layer upgrades to the terminal refusal)
+  is unreachable-by-construction behind the build-time refusal and
+  carries no separate pin — `speculative-basis-exported` in the log
+  names any future reach.
+- The origin-ack retirement wake (speculation.md §6's closing
+  paragraph; the verdict-lifetime sub-defect): → COVERED, impl-gate,
+  red-first. The same file's "an entry whose origin's accept verdict
+  lands AFTER the covering watermark still retires" scripts the race
+  destination-level (watermark event first, ack after; no further
+  watermark event) and pins retirement on the ack wake alone;
+  pre-fix the entry stayed pending forever (red: the observer was
+  never installed and the sweep never re-ran).
+
+One ATTEMPTED-AND-REVERTED fix rides this round, recorded per
+flag-don't-fill (review thread r3739139506 — stage D's documented
+third bound, the read-only-space seal dependencies): an overlay
+implementation of the sealSpaceReads handoff (per-entry read-only-space
+floors; retirement additionally gated on EACH read-only space's
+watermark; cross-space re-sweeps on watermark/ack/settled events) was
+built red-first and REVERTED the same day. CORRECTED RATIONALE (the
+revert commit's original "bisect-verified gate regression" claim was
+INVALIDATED hours later: the two-browsers Phase-2 gate proved
+BIMODALLY FLAKY on the from-source local harness independent of
+commit — the UNMODIFIED merge base failed the same "Bob sees Alice"
+300s stall twice in a row under clean single-engine fresh-store
+conditions, and a runtime-identical tree to an earlier passing
+configuration also failed — so the gate discriminates nothing
+locally; CI's compiled-binary harness is its arbiter). The revert is
+RETAINED on design-risk grounds identified during the investigation:
+the machinery makes flag-ON client runtimes open watermark
+subscriptions into foreign — possibly unauthorized — spaces reached
+through links (AuthorizationError sync-load noise observed), and its
+conservative blocking can pin entries on never-covered floors
+forever. That risk profile wants an owner-reviewed design, not a
+fix-batch patch. The BOUND THEREFORE STANDS as documented: a
+cross-space speculation can retire on its written space's coverage
+while a read-only input is still uncovered. Owed: the redesign,
+flagged for the owner alongside P2-F's follow-ups.
+
+Two adjacency closures ride the same 2026-08-13 round (stage-G
+round-2 follow-ups):
+
+- `tryClaimMutex` swallows a TERMINAL claim-commit failure (row only;
+  no code change): the claim callback sets `claimed = true`, but the
+  surrounding `editWithRetry`'s outcome is not consulted — a commit
+  that terminally fails after retries still returns
+  `{ claimed: true }`, the builtin proceeds as claim-holder, and the
+  effect can complete locally WITHOUT its claim/completion egress
+  ever becoming durable. Bounded by design: recovery is §6 step 3's
+  re-miss — the next demanded run finds no durable result, re-misses
+  the memo, and re-claims (the completed-request guard reads the
+  durable view, so nothing wedges on the phantom claim). Recorded as
+  a known-swallow with a ruled recovery path; a loud disposition
+  (consulting the editWithRetry outcome) is follow-up material, not
+  Phase-2 gate material.
+- The wave-replay reachability closure (stage-G round-2's flag,
+  checked against the spec-model): `applyWaveCommit` runs the
+  per-doc CAS re-verification BEFORE `applyCommitTransaction`'s
+  replay return, so an exact replay at its ORIGINAL basisSeq can
+  never reach replay service — the first application advanced the
+  heads past that basis and the re-verification throws
+  `WaveCommitConflictError`. Only a re-drive with a RE-DERIVED
+  (current) basis reaches the stored-result return (the FP1
+  insert-skip's test shape). VERIFIED AGREEING with the spec-model's
+  crash-recovery arms: the model's `crash` step nulls the in-memory
+  `pendingWave` (nothing retains an old basis), `recover` recomputes
+  at current state per the ruled §6 no-replay recovery, and no arm
+  re-submits an already-admitted wave — the model never expects
+  original-basis replay service, so the engine's reachability
+  restriction and the model agree by construction. (The
+  admitted-but-unacked re-drive window G's engine test pins sits
+  below the model's step granularity — the wave step is atomic
+  there; noted, accepted.)
 
 Delta 2026-08-11 — the Phase-3 INDEPENDENT review's fix batch (this
 PR; every finding probe- or repro-verified by the reviewer, all

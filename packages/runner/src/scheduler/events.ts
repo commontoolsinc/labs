@@ -1039,10 +1039,17 @@ export async function dispatchQueuedEvent(state: {
   // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
   // choke point — a serving runtime's installed stamper attaches the wave
   // run context (kind event-handler, the durable event id) before the
-  // handler runs. A no-op everywhere else.
+  // handler runs. A no-op everywhere else. The action identity is the
+  // HANDLER's durable id (`handlerId`, computed above): the queued
+  // `action` is a per-event wrapper closure, and stamping IT hands the
+  // basis index a non-durable identity — the wrapper's inferred name
+  // collapses every handler onto one constant id (rows overwrite across
+  // handlers), while the requeue paths' anonymous wrappers split rows
+  // per event; scheduler_basis requires "durable ... restart-stable"
+  // (serving-loop.md §3b).
   const served = queuedEvent.served;
   state.runtime.stampServerRun(tx, {
-    actionId: state.getActionId(action),
+    actionId: handlerId,
     kind: "event-handler",
     eventId: queuedEvent.id,
     // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):

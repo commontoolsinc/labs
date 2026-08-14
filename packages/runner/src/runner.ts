@@ -78,6 +78,7 @@ import {
   useDeferredCancelOwnership,
 } from "./cancel.ts";
 import type { Runtime } from "./runtime.ts";
+import { waveSettlementOf } from "./executor/wave.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
@@ -1251,12 +1252,22 @@ export class Runner {
     `${MemorySpace}/${ScopeKey}/${URI}`,
     Set<DeferredCancelOwnership>
   >();
-  // Map whose key is the result cell's full key, and whose values are a hash
+  // Two-level memo of what each result cell holds: outer key the result
+  // DOC (space/id), inner key the resolved scope INSTANCE, value a hash
   // of the pattern's encodable form -- what `writeJavaScriptActionResult`
-  // compares to decide whether a returned sub-pattern has changed.
+  // compares to decide whether a returned sub-pattern has changed. The
+  // inner key is the SAME per-run resolved ScopeKey that selects the
+  // byScope result cell (review thread r3739139481): a serving runtime
+  // materializes one child per demanded instance, and a doc-level (or
+  // service-identity-resolved) key made the SECOND demanded instance
+  // look "unchanged" and skip its child materialization. The outer
+  // doc key is what change notifications can name (they carry scope by
+  // NAME, which cannot address per-run instances), so eviction drops
+  // the whole doc's entry -- over-eviction across instances is safe:
+  // re-preparing an unchanged pattern is idempotent.
   private resultPatternCache = new Map<
-    `${MemorySpace}/${ScopeKey}/${URI}`,
-    string
+    `${MemorySpace}/${URI}`,
+    Map<ScopeKey, string>
   >();
   // Invalidates asynchronous start/resume continuations when stopAll() begins.
   // A later explicit start captures the new epoch and may proceed normally.
@@ -1294,29 +1305,21 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
-            // Same key construction as getDocKey (site 2's cache): the
-            // notification names the scope by NAME; the runtime's own
-            // identity maps it to the same instance key the cache entry
-            // was stored under. NOTE (stage E, deliberate healing):
-            // pre-re-keying, getDocKey interpolated the scope raw — an
-            // unscoped cell's cache entry carried an "undefined" scope
-            // segment this delete (which normalized) could never name,
-            // so eviction silently missed real unscoped entries. The
+            // The notification names the DOC (scope arrives by NAME,
+            // which cannot address a per-run scope instance on a
+            // serving runtime — r3739139481), so eviction drops the
+            // doc's WHOLE entry: every instance's memo clears, and the
+            // over-eviction is safe — re-preparing an unchanged
+            // pattern commits no differing bytes
+            // (writeJavaScriptActionResult's unchanged path is
+            // idempotent). This also keeps the stage-E healing: no
+            // scope segment in the key means no raw-vs-normalized
+            // mismatch can make eviction silently miss an entry. The
             // eviction-on-notification CONTRACT is what the storage
             // subscription exists for and is pinned by the "clears
-            // cached patterns when storage notifies of changes" test
-            // (with normalized keys); re-keying makes the WRITER
-            // conform to that contract. The extra work on the healed
-            // path — re-preparing an unchanged pattern — commits no
-            // differing bytes (writeJavaScriptActionResult's unchanged
-            // path is idempotent).
+            // cached patterns when storage notifies of changes" test.
             this.resultPatternCache.delete(
-              `${space}/${
-                resolveScopeKey(
-                  change.address.scope,
-                  this.runtime.scopeKeyIdentity,
-                )
-              }/${change.address.id}`,
+              `${space}/${change.address.id}`,
             );
           }
         } else if (notification.type === "reset") {
@@ -2527,37 +2530,117 @@ export class Runner {
         // Server-execution v2 stage F (serving-loop.md §3d): under an
         // installed seal destination every commit path declares its run
         // context; the swap's setup write is runtime-internal
-        // bookkeeping. A no-op everywhere else.
+        // bookkeeping. A no-op everywhere else. The action identity is
+        // per PIECE (the swapped result cell's stable address), not per
+        // {identity, symbol}: two pieces swapping to one pattern must
+        // not share a basis action (their rows would overwrite each
+        // other under §3b's per-(action, instance) replacement), while
+        // consecutive swaps of ONE piece overwrite — bounded, exactly
+        // the S4-friendly shape.
+        const pieceLink = resultCell.getAsNormalizedFullLink();
         this.runtime.stampServerRun(setupTx, {
-          actionId: `pattern-swap/${newRef.identity}#${newRef.symbol}`,
+          actionId: `pattern-swap/${pieceLink.space}/${
+            pieceLink.scope ?? "space"
+          }/${pieceLink.id}`,
           kind: "bookkeeping",
         });
-        try {
-          this.applySetupState(
-            setupTx,
-            pattern,
-            newRef,
-            {
-              sameStoredSetup: false,
-              restageStoredArgument: true,
-              storedSetupMatches: false,
-            },
-            undefined,
-            resultCell,
-          );
-          this.runtime.prepareTxForCommit(setupTx);
-          setupTx.commit();
-        } catch (error) {
-          logger.error(
-            "pattern-swap-setup-error",
-            `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
-            error,
-          );
+        const finishSwap = () => {
+          cancelNodes?.();
+          instantiatePattern(pattern);
+          runningRef = newRef;
+        };
+        if (!this.runtime.sealDestinationInstalled) {
+          // The OFF arm (and ON-arm client speculation): today's
+          // behavior, byte for byte — setup commits to the store and the
+          // swap proceeds synchronously.
+          try {
+            this.applySetupState(
+              setupTx,
+              pattern,
+              newRef,
+              {
+                sameStoredSetup: false,
+                restageStoredArgument: true,
+                storedSetupMatches: false,
+              },
+              undefined,
+              resultCell,
+            );
+            this.runtime.prepareTxForCommit(setupTx);
+            setupTx.commit();
+          } catch (error) {
+            logger.error(
+              "pattern-swap-setup-error",
+              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+              error,
+            );
+            return;
+          }
+          finishSwap();
           return;
         }
-        cancelNodes?.();
-        instantiatePattern(pattern);
-        runningRef = newRef;
+        // ON-arm serving: the setup seals into the wave, and the wave
+        // can still WITHDRAW it at the commit step (a conflict drop, a
+        // lease-lost abort) AFTER commit() resolved — so the running
+        // graph is replaced only once the setup is DURABLY accepted
+        // (waveSettlementOf). On withdrawal the OLD graph stays: v2
+        // running against withdrawn setup is the "Handler used as lift"
+        // failure class, while old-graph-plus-new-pointer is a coherent
+        // not-yet-swapped state a later pointer write (or reactivation)
+        // repairs.
+        void (async () => {
+          try {
+            this.applySetupState(
+              setupTx,
+              pattern,
+              newRef,
+              {
+                sameStoredSetup: false,
+                restageStoredArgument: true,
+                storedSetupMatches: false,
+              },
+              undefined,
+              resultCell,
+            );
+            this.runtime.prepareTxForCommit(setupTx);
+            const committed = await setupTx.commit();
+            if (committed.error !== undefined) {
+              logger.error(
+                "pattern-swap-setup-error",
+                `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was refused at the seal`,
+                committed.error,
+              );
+              return;
+            }
+          } catch (error) {
+            logger.error(
+              "pattern-swap-setup-error",
+              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+              error,
+            );
+            return;
+          }
+          const settlement = waveSettlementOf(setupTx);
+          if (settlement !== undefined) {
+            const settled = await settlement;
+            if (settled.error !== undefined) {
+              logger.warn(
+                "pattern-swap-setup-withdrawn",
+                () => [
+                  `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was withdrawn by the wave; the running pattern is preserved`,
+                  settled.error,
+                ],
+              );
+              return;
+            }
+          }
+          // Liveness + supersession: the piece may have stopped, the
+          // runtime cycled, or a NEWER pointer write swapped past this
+          // one while the settlement was pending.
+          if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
+          if (currentPatternKey !== patternIdentityKey(newRef)) return;
+          finishSwap();
+        })();
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
@@ -5549,12 +5632,25 @@ export class Runner {
     const resultPatternKey = hashStringOf(
       flattenBuilderArtifacts(resultPattern),
     );
-    const cacheKey = this.getDocKey(resultCell);
-    const previousResultPatternKey = this.resultPatternCache.get(cacheKey);
+    // Keyed doc-then-INSTANCE, the instance being the SAME per-run
+    // resolved key that selected the byScope cell above (r3739139481):
+    // a doc-level or service-identity-resolved key made the second
+    // demanded instance's run read the first's memo as "unchanged" and
+    // skip its child materialization.
+    const resultDocLink = resultCell.getAsNormalizedFullLink();
+    const cacheDocKey =
+      `${resultDocLink.space}/${resultDocLink.id}` as `${MemorySpace}/${URI}`;
+    const previousResultPatternKey = this.resultPatternCache.get(cacheDocKey)
+      ?.get(effectiveOutputScopeKey);
     const patternUnchanged = previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      this.resultPatternCache.set(cacheKey, resultPatternKey);
+      let instanceMemos = this.resultPatternCache.get(cacheDocKey);
+      if (instanceMemos === undefined) {
+        instanceMemos = new Map();
+        this.resultPatternCache.set(cacheDocKey, instanceMemos);
+      }
+      instanceMemos.set(effectiveOutputScopeKey, resultPatternKey);
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
@@ -5580,8 +5676,10 @@ export class Runner {
         // A rollback carries a release's authority, not a stop's: it lets go
         // of the registration this materialization installed and is not
         // authoritative over a lifetime or a start it does not own.
-        if (this.resultPatternCache.get(cacheKey) === resultPatternKey) {
-          this.resultPatternCache.delete(cacheKey);
+        const memos = this.resultPatternCache.get(cacheDocKey);
+        if (memos?.get(effectiveOutputScopeKey) === resultPatternKey) {
+          memos.delete(effectiveOutputScopeKey);
+          if (memos.size === 0) this.resultPatternCache.delete(cacheDocKey);
         }
         this.releaseChild(resultCell, undefined);
       });

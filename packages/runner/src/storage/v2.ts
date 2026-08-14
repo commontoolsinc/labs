@@ -2119,12 +2119,21 @@ class SpaceReplica implements ISpaceReplica {
   #appliedWaiters = new Map<number, PromiseWithResolvers<void>>();
   // Foreign novelty whose VISIBILITY is still shadowed by own pending
   // writes (server-execution v2 Phase 2's settle input barrier — see
-  // `unappliedForeignSeqFloor` on ISpaceReplica): docKey -> highest
-  // shadowed inbound seq (a shadowed REMOVE records the sentinel 1 — the
-  // wire carries no seq for removes, so the floor holds W entirely until
-  // the shadow clears). Entries are pruned lazily when the doc's pending
-  // set empties (promotion, drop, rollback); cleared whole on reset.
-  readonly #shadowedForeignSeqs = new Map<string, number>();
+  // `unappliedForeignSeqFloor` on ISpaceReplica): docKey -> the set of
+  // shadowed inbound seqs. A SET, not one extremum (review thread
+  // r3739139487): the floor must be the doc's LOWEST hidden seq —
+  // every derivation in the wave read the view from before the
+  // EARLIEST hidden input, so W may not pass it even when later hidden
+  // updates superseded its value (the previous per-doc max let W skip
+  // the earlier one) — while the own-echo verdict repair must remove
+  // EXACTLY its own mis-recorded seq without disturbing genuine
+  // foreign shadows folded around it (a single min would be deleted
+  // whole, losing them). A shadowed REMOVE records the sentinel 1 —
+  // the wire carries no seq for removes, so the floor holds W entirely
+  // until the shadow clears. Entries are pruned lazily when the doc's
+  // pending set empties (promotion, drop, rollback); cleared whole on
+  // reset.
+  readonly #shadowedForeignSeqs = new Map<string, Set<number>>();
   // The settle input barrier's WAKE (ISpaceReplica.shadowFlipObserver):
   // invoked synchronously whenever a confirmPending promotion touched a
   // doc with a standing shadow (flag ON — the flip checkout's own
@@ -2143,6 +2152,25 @@ class SpaceReplica implements ISpaceReplica {
   // oldest pruned) — the overlay only ever asks about recent origins.
   readonly #ackedSeqsByLocalSeq = new Map<number, number>();
   static readonly #MAX_RETAINED_ACK_SEQS = 4096;
+  // localSeqs of live SPECULATIVE sealed commits (server-execution v2
+  // Phase 2, speculation.md §1/§6): overlay entries exist only in this
+  // process — the client never pushes them — so a PUSHED commit whose
+  // read basis names one can NEVER have that dependency resolve
+  // server-side. commitOperations refuses such an export loudly
+  // (RULED 2026-08-13); membership ends when the speculative commit
+  // settles (retirement/withdrawal drops its pending layers first, so
+  // no stack names a seq after it leaves this set).
+  readonly #speculativeLocalSeqs = new Set<number>();
+  // The overlay destination's retirement WAKE for origin accepts
+  // (ISpaceReplica.speculationAckObserver, speculation.md §4): fired
+  // when a pushed commit's accept records its ack seq. Without it, an
+  // entry whose sweep ran while its origin's verdict was still in
+  // flight (blocked on the unacked layer) — and whose covering
+  // watermark event therefore passed — stayed pending forever on a
+  // then-quiet space: rejected origins cascade into the entry, but
+  // ACCEPTED origins had no client-side wake. Guarded at the call
+  // site — an observer throw must not corrupt accept settlement.
+  speculationAckObserver: (() => void) | undefined;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -2566,13 +2594,18 @@ class SpaceReplica implements ISpaceReplica {
   unappliedForeignSeqFloor(): number | undefined {
     if (this.#shadowedForeignSeqs.size === 0) return undefined;
     let floor: number | undefined;
-    for (const [key, seq] of this.#shadowedForeignSeqs) {
+    for (const [key, seqs] of this.#shadowedForeignSeqs) {
       const record = this.#docs.get(key);
-      if (record === undefined || record.pending.length === 0) {
+      if (
+        record === undefined || record.pending.length === 0 ||
+        seqs.size === 0
+      ) {
         this.#shadowedForeignSeqs.delete(key);
         continue;
       }
-      if (floor === undefined || seq < floor) floor = seq;
+      for (const seq of seqs) {
+        if (floor === undefined || seq < floor) floor = seq;
+      }
     }
     return floor;
   }
@@ -2970,10 +3003,16 @@ class SpaceReplica implements ISpaceReplica {
    * apply pending, notify — with the store half deferred to `verdict`. The
    * wave accumulator resolves the verdict at its commit step: `committed`
    * promotes the pending writes at the wave commit's seq, `withdrawn`
-   * rolls them back through the same rejection path a refused push takes.
-   * The pending overlay this leaves behind is the wave's layered view —
-   * later action runs read the sealed writes through the ordinary read
-   * path until the verdict settles them.
+   * rolls them back through the same rejection path a refused push takes —
+   * EXCEPT the `superseded` variant (speculation.md §4's retirement),
+   * which routes through `finalizeSupersededSpeculation`: a
+   * SUCCESS-shaped drop that skips the rejection machinery, does not
+   * cascade-reject dependants (an authored commit that read the echo is
+   * decided by the store's CAS — and since the leg-C export refusal, a
+   * dependent basis naming the echo never exports at all), and settles
+   * ok. The pending overlay this leaves behind is the wave's layered
+   * view — later action runs read the sealed writes through the
+   * ordinary read path until the verdict settles them.
    */
   sealNative(
     transaction: NativeStorageCommit,
@@ -3122,6 +3161,17 @@ class SpaceReplica implements ISpaceReplica {
       );
       settled.finally(() => {
         this.#commitPromises.delete(settled);
+      });
+    } else {
+      // Track the speculative seq for the export refusal (speculation.md
+      // §6, RULED 2026-08-13): while any pending stack carries this
+      // layer, a pushed commit's read basis naming it is refused in
+      // commitOperations. Settlement (retirement or withdrawal) drops
+      // the pending layers before `settled` resolves, so removal here
+      // never races a stack that still names the seq.
+      this.#speculativeLocalSeqs.add(localSeq);
+      settled.catch(() => {}).finally(() => {
+        this.#speculativeLocalSeqs.delete(localSeq);
       });
     }
     return { localSeq, commit, settled };
@@ -3506,6 +3556,42 @@ class SpaceReplica implements ISpaceReplica {
           : {}),
       }),
     );
+    // The export refusal (server-execution v2 Phase 2, speculation.md
+    // §6; RULED 2026-08-13): a commit basis naming a SPECULATIVE
+    // overlay layer must not reach the wire — the layer exists only in
+    // this process, so the server would reject the dependency as
+    // unresolved on every attempt (pre-fix: the observed
+    // `pending dependency not resolved` convergence-retry loop, ~43
+    // attempts across the 30s window per event). Refused HERE, before
+    // the optimistic apply, with a terminal-classified error: nothing
+    // renders, nothing reverts, nothing retries.
+    const speculativeLayers = this.speculativeLayersOf(commit);
+    if (speculativeLayers.length > 0) {
+      const rejection = this.makeSpeculativeBasisRefusal(
+        commit,
+        speculativeLayers,
+      );
+      logger.error("speculative-basis-refused", () => [
+        "commit refused before export: read basis names speculative " +
+        "overlay layer(s) (speculation.md §6)",
+        {
+          localSeq,
+          speculativeLayers: [...speculativeLayers],
+          reads: commit.reads.pending
+            .filter((read) => {
+              const layers = Array.isArray(read.localSeq)
+                ? read.localSeq
+                : [read.localSeq];
+              return layers.some((layer) => speculativeLayers.includes(layer));
+            })
+            .map((read) => read.id),
+        },
+      ]);
+      if (source !== undefined) {
+        notifyCommitRejected(source, rejection);
+      }
+      return { error: rejection };
+    }
     const touched = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
@@ -3897,9 +3983,34 @@ class SpaceReplica implements ISpaceReplica {
         }
         const schedulerDependencyRejection =
           cause instanceof StorageTransactionRejectionError ? cause : undefined;
-        const rejection = schedulerDependencyRejection !== undefined
+        let rejection = schedulerDependencyRejection !== undefined
           ? schedulerDependencyRejection.rejection
           : toRejectedError(cause, commit, this.#space);
+        // Leg-C belt (speculation.md §6): a ConflictError whose commit
+        // names one of THIS replica's speculative layers can never
+        // converge — the dependency never reaches the wire.
+        // commitOperations refuses the export up front, so reaching
+        // here means a build path slipped through; upgrade to the
+        // terminal refusal rather than letting the caller spin its
+        // retry window against a dependency that is never coming.
+        if (
+          schedulerDependencyRejection === undefined &&
+          rejection.name === "ConflictError"
+        ) {
+          const speculativeLayers = this.speculativeLayersOf(commit);
+          if (speculativeLayers.length > 0) {
+            logger.error("speculative-basis-exported", () => [
+              "a commit naming speculative overlay layer(s) reached the " +
+              "wire (the build-time refusal should have caught this); " +
+              "upgrading the rejection to the terminal refusal",
+              { localSeq, speculativeLayers },
+            ]);
+            rejection = this.makeSpeculativeBasisRefusal(
+              commit,
+              speculativeLayers,
+            );
+          }
+        }
         telemetry?.submit({
           type: "storage.push.error",
           id: pushOpId,
@@ -4373,10 +4484,20 @@ class SpaceReplica implements ISpaceReplica {
           this.#ackedSeqsByLocalSeq.get(entry.localSeq) === upsert.seq
         )
       ) {
-        this.#shadowedForeignSeqs.set(
-          key,
-          Math.max(this.#shadowedForeignSeqs.get(key) ?? 0, upsert.seq),
-        );
+        // Record EVERY hidden seq (review thread r3739139487): the
+        // floor reads the doc's lowest — the wave's derivations read
+        // the materialized view from BEFORE the earliest hidden input,
+        // so W must not advance past it. The previous per-doc
+        // `Math.max` let a second foreign update under the same
+        // pending write raise the floor and pass the first (a
+        // derivedThrough claim over input nothing derived over), and
+        // buried a standing remove sentinel the same way.
+        let seqs = this.#shadowedForeignSeqs.get(key);
+        if (seqs === undefined) {
+          seqs = new Set();
+          this.#shadowedForeignSeqs.set(key, seqs);
+        }
+        seqs.add(upsert.seq);
       }
     }
     for (const remove of sync.removes) {
@@ -4389,7 +4510,12 @@ class SpaceReplica implements ISpaceReplica {
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1
         // holds W entirely until the shadow clears (see the field doc).
-        this.#shadowedForeignSeqs.set(key, 1);
+        let seqs = this.#shadowedForeignSeqs.get(key);
+        if (seqs === undefined) {
+          seqs = new Set();
+          this.#shadowedForeignSeqs.set(key, seqs);
+        }
+        seqs.add(1);
       }
     }
 
@@ -4542,6 +4668,53 @@ class SpaceReplica implements ISpaceReplica {
     );
   }
 
+  /** The SPECULATIVE overlay layers a commit's read basis names, if any
+   * (server-execution v2 Phase 2, speculation.md §6). Non-empty means
+   * the commit must not export: those localSeqs exist only in this
+   * process, so as wire pending-read dependencies they can NEVER
+   * resolve. */
+  private speculativeLayersOf(commit: ClientCommit): number[] {
+    if (this.#speculativeLocalSeqs.size === 0) return [];
+    const named = new Set<number>();
+    for (const read of commit.reads.pending) {
+      const layers = Array.isArray(read.localSeq)
+        ? read.localSeq
+        : [read.localSeq];
+      for (const layer of layers) {
+        if (this.#speculativeLocalSeqs.has(layer)) named.add(layer);
+      }
+    }
+    return [...named].sort((left, right) => left - right);
+  }
+
+  // The loud export refusal (speculation.md §6; RULED 2026-08-13): an
+  // authored/pushed commit whose read basis names a speculative overlay
+  // layer fails OUTRIGHT — terminal, never retried. Only the client can
+  // make this call: it knows which of its layers are speculative, while
+  // the server cannot distinguish a dependency that is never coming
+  // from one that has not arrived yet. Modeled on toRejectedError's
+  // terminal-name arm (RowLabelCommitError): a TransactionError shape
+  // whose name is in TERMINAL_REJECTION_NAMES, so the scheduler's
+  // disposition is `terminal` instead of a doomed backoff window.
+  private makeSpeculativeBasisRefusal(
+    commit: ClientCommit,
+    speculativeLayers: readonly number[],
+  ): StorageTransactionRejected {
+    const message =
+      `authored commit refused: its read basis names speculative overlay ` +
+      `layer(s) ${speculativeLayers.join(", ")} — client speculation ` +
+      `entries exist only in this process and can never resolve as wire ` +
+      `pending-read dependencies (server-execution v2 speculation.md §6). ` +
+      `The write is failed outright instead of retried; re-derivation ` +
+      `after the authoritative value lands is the recovery path.`;
+    return {
+      name: "SpeculativeBasisError",
+      message,
+      cause: { name: "SystemError", message, code: 409 },
+      transaction: commit,
+    } as unknown as StorageTransactionRejected;
+  }
+
   /**
    * CT-1872 1b: when a commit's optimistic writes are dropped, every
    * in-flight commit whose pending reads name that localSeq is provably
@@ -4683,12 +4856,33 @@ class SpaceReplica implements ISpaceReplica {
     // an own-echo upsert may have been mis-recorded as shadowed foreign
     // novelty before the ack above existed. A shadow whose seq IS this
     // accept's seq on a doc this accept wrote is that mis-record — no
-    // foreign commit can share the seq — so lift it, or a quiet serving
-    // loop would clamp W forever against its own echo.
+    // foreign commit can share the seq — so lift EXACTLY that seq (the
+    // set structure keeps genuine foreign shadows recorded around the
+    // echo intact — r3739139487), or a quiet serving loop would clamp
+    // W forever against its own echo.
     for (const operation of operations) {
       const key = docKey(operation.id, operation.scope);
-      if (this.#shadowedForeignSeqs.get(key) === applied.seq) {
+      const seqs = this.#shadowedForeignSeqs.get(key);
+      if (seqs !== undefined && seqs.delete(applied.seq) && seqs.size === 0) {
         this.#shadowedForeignSeqs.delete(key);
+      }
+    }
+    // The retirement wake for origin accepts (speculation.md §4;
+    // leg-C 2026-08-13): a sweep that ran while this verdict was in
+    // flight skipped its entries as blocked (unacked layer below), and
+    // the covering watermark event has already passed — without this
+    // wake a then-quiet space strands them forever. Rejected origins
+    // reach the overlay through the dependency cascade; ACCEPTS need
+    // this explicit signal. Guarded: an observer throw must not abort
+    // accept settlement (same containment posture as notifySinks).
+    if (this.speculationAckObserver !== undefined) {
+      try {
+        this.speculationAckObserver();
+      } catch (error) {
+        logger.error("speculation-ack-observer-error", () => [
+          "speculationAckObserver threw during accept settlement",
+          error,
+        ]);
       }
     }
     // Parking requires a live marker channel: a server that stages
@@ -4883,14 +5077,34 @@ class SpaceReplica implements ISpaceReplica {
     // The wake (see the field doc): fired on the flip regardless of
     // notification subscribers AND regardless of a value diff — an
     // echo-equal flip still lifts `unappliedForeignSeqFloor`, which is
-    // the state the serving loop's clamped wait is parked on.
+    // the state the serving loop's clamped wait is parked on. Guarded:
+    // the observer is externally installed (SpaceServer), and a throw
+    // here would abort the caller's settlement loop over parked
+    // accepts mid-batch — some confirmed, others already deleted from
+    // the parked set with unresolved whenApplied waiters (same
+    // containment posture as notifySinksForIds' per-subscriber guard).
     if (shadowTouched.length > 0) {
-      this.shadowFlipObserver?.();
+      try {
+        this.shadowFlipObserver?.();
+      } catch (error) {
+        logger.error("shadow-flip-observer-error", () => [
+          "shadowFlipObserver threw during promotion",
+          error,
+        ]);
+      }
     }
   }
 
   private dropPending(localSeq: number): void {
-    for (const record of this.#docs.values()) {
+    // A drop can LIFT the shadow floor without a promotion (review
+    // thread r3739416417): a rejected/rolled-back own write emptying a
+    // shadowed doc's pending set makes the foreign value visible and
+    // prunes the floor lazily — but only confirmPending fired the
+    // serving loop's wake, so a quiet clamped space stayed asleep
+    // until the input-wait timeout. Fire the same flag-gated wake when
+    // the drop empties a shadowed doc's pending set.
+    let shadowLifted = false;
+    for (const [key, record] of this.#docs.entries()) {
       const firstPendingIndex = record.pending.findIndex((entry) =>
         entry.localSeq === localSeq
       );
@@ -4901,6 +5115,21 @@ class SpaceReplica implements ISpaceReplica {
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      if (
+        record.pending.length === 0 && this.#shadowedForeignSeqs.has(key)
+      ) {
+        shadowLifted = true;
+      }
+    }
+    if (shadowLifted && getServerExecutionConfig()) {
+      try {
+        this.shadowFlipObserver?.();
+      } catch (error) {
+        logger.error("shadow-flip-observer-error", () => [
+          "shadowFlipObserver threw during a pending drop",
+          error,
+        ]);
+      }
     }
   }
 

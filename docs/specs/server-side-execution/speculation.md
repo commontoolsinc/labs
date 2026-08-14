@@ -98,16 +98,19 @@ speculative one in the same render path — the simplest thing, and
 exactly how conflicts render today (RULED 2026-08-02). No flicker
 suppression beyond what rebasing gives.
 
-Stated honestly (RULED 2026-08-07; owed from the wedge round): the
-overlay retires on watermark coverage of its BASIS, not on value
-ARRIVAL — "the store wins" carries no by-construction guarantee that
-the store HOLDS what won at withdrawal time (W covers DEMANDED
-derivations; nothing about an entry's own output riding the covering
-wave is implied). What makes retirement safe is the serving loop's
-first-round reliability machinery — the demanded-structure loads with
-their counted, retried deferrals (serving-loop.md §1/§3's demand
-cycle and its ensure-retry) — which makes the demanded derivation
-exist and land.
+Stated honestly (RULED 2026-08-07; owed from the wedge round), and
+scoped to step 3's INPUT-origin entries — step 2's intent-origin
+entries retire on their event appearing in `consequenceOf`, which IS
+the authoritative consequence arriving: an input-origin entry retires
+on watermark coverage of its BASIS, not on value ARRIVAL — "the store
+wins" carries no by-construction guarantee that the store HOLDS what
+won at withdrawal time (W covers DEMANDED derivations; nothing about
+an entry's own output riding the covering wave is implied). What makes
+retirement safe is the serving loop's first-round reliability
+machinery — the demanded-structure loads with their counted, retried
+deferrals (serving-loop.md §7's `structureLoadDeferred` /
+`structureLoadFailures` counters over §1/§3's per-cycle load pass) —
+which makes the demanded derivation exist and land.
 
 ## 5. Offline
 
@@ -130,3 +133,49 @@ commit; committing any handler write; executing an effectful builtin;
 persisting the overlay; sending overlay contents to any server; deciding
 "the server is wrong" (there is no client arbitration — the store wins,
 always, by construction).
+
+### The process-local principle and the export refusal (RULED 2026-08-13)
+
+Overlay entries are PROCESS-LOCAL: their localSeqs exist only in the
+client process, so a pushed commit whose read basis names one carries a
+wire pending-read dependency the server can NEVER resolve — and only
+the client can know that (the client knows which of its layers are
+speculative; the server cannot distinguish a dependency that is never
+coming from one that has not arrived yet). "Sending overlay contents to
+any server" above therefore includes the BASIS, not just the values.
+
+The rule: a commit basis MUST NOT name a speculative layer. The export
+path REFUSES to build one — a loud, terminal, client-side failure
+(`SpeculativeBasisError`; never retried — a retry would re-read the
+same live echo and refuse identically) raised BEFORE the optimistic
+apply, so nothing renders, nothing reverts, and nothing reaches the
+wire. Anything that slips through or pre-exists is caught twice more:
+a `ConflictError` whose commit names a known-speculative layer is
+upgraded to the same terminal refusal at the push boundary, so the
+convergence-retry loop is bounded-and-loud instead of infinite for
+dependencies that cannot resolve. Pre-fix, this exported as
+`pending dependency not resolved` and spun the scheduler's whole retry
+window per event (~43 attempts / 30s observed) against an echo that
+was never going to push.
+
+The ruling that fixed the direction (owner, 2026-08-13):
+
+> since only ui components land here and they don't use intermediate
+> values like this, we're not going to hit it. so let's fix infinitely
+> stuck things but otherwise go for what adds the least amount of
+> complexity. e.g. fine to just outright, but loudly, fail those.
+
+Rebase-to-confirmed / CAS-translation machinery for authored writes
+over speculative bases was CONSIDERED AND REJECTED with that ruling:
+UI components do not commit authored writes derived from intermediate
+speculative values, so the added complexity buys nothing shipped.
+
+One retirement wake completes the ruling's "fix infinitely stuck
+things" half (§4's evaluation detail): a sweep that runs while an
+origin's accept verdict is still in flight skips its entries as
+blocked, and on a then-quiet space the covering watermark event has
+already passed — so the replica signals origin ACKS to the overlay
+(`speculationAckObserver`) and the overlay re-sweeps. Rejected origins
+already reached it through the dependency cascade; accepts had no
+client-side wake, and an entry whose origin's verdict landed after the
+covering watermark stayed pending forever.

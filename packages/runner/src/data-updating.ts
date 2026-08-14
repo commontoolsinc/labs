@@ -1419,6 +1419,20 @@ export function normalizeAndDiff(
       });
     }
 
+    // Authoritative container re-assert (round-2 thread 16, the F2
+    // family): an EMPTY (or all-equal-links) array produces no leaf
+    // writes at all — the element walk above has nothing to emit — so
+    // a completion writeback of an equal `[]` against a DOOMED
+    // optimistic overlay would commit only its sibling fields
+    // (pending/requestHash) and the durable result slot stays torn,
+    // exactly the elision the authoritative primitive branch below
+    // exists to prevent. Assert the container itself when the subtree
+    // emitted nothing; identical re-asserts are idempotent at the
+    // store (serving-loop.md §5).
+    if (changes.length === 0 && tx.isAuthoritativeWrites?.() === true) {
+      changes.push({ location: link, value: newValue as FabricValue });
+    }
+
     return changes;
   }
 
@@ -1700,6 +1714,15 @@ export function normalizeAndDiff(
           delete: true,
         });
       }
+    }
+
+    // Authoritative container re-assert — the record-branch twin of the
+    // array branch's (round-2 thread 16): an empty `{}` (or a record of
+    // only unchanged links) emits no per-key writes, so without this a
+    // completion's equal-`{}` result riding a doomed overlay is never
+    // asserted durably. See the array branch for the full rationale.
+    if (changes.length === 0 && tx.isAuthoritativeWrites?.() === true) {
+      changes.push({ location: link, value: newValue as FabricValue });
     }
 
     return changes;

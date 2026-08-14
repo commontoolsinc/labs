@@ -367,8 +367,12 @@ Success criteria (flag OFF — the ON gates are Phase 2's):
       runs in CI from stage A with explicit skip lists, never silent
       filtering (ticked with stage G, the phase's last stage,
       2026-08-06: every stage's PR carried its OFF-arm witness — the
-      full runner + memory suites — and the ON-arm skip list holds
-      ONE entry, the two-browsers Phase 2 gate).
+      full runner + memory suites — and the ON-arm skip list AT THAT
+      POINT held ONE entry, the two-browsers Phase 2 gate. Phase 2
+      then retired that entry — the gate runs, and passes, ON — and
+      listed its own: sx2-serving-loop, the demand-cycle starvation
+      reproducer, at phase-2-followup; see
+      tasks/server-execution-on-skips.ts for the current list).
 - [x] Stage C leaves no `completeSchedulerScopeSummary` or
       `completeActionScopeSummary` reference on
       main, no full-JSON observation payload tables, and no
@@ -457,20 +461,21 @@ W):
       serving-loop.md §7) + the flag-gated shadow-flip notification
       in `confirmPending`, with the own-echo and seq-0 exemptions
       pinned both arms (verification-coverage.md's Phase-2 delta).
-- [x] The pattern-updater CHECK-half bring-up verification (the
+- [ ] The pattern-updater CHECK-half bring-up verification (the
       network source-check the unit fixture cannot serve — the
       stage-F flagged residual in `executor-serving-loop.test.ts`):
       verify it in the integration environment's `sx2-serving-loop`
-      surface, not a unit fixture. The surface is AUTHORED
+      surface, not a unit fixture. PARTIAL — the box stays open
+      (r3739139553): the surface is AUTHORED
       (`packages/patterns/integration/sx2-serving-loop.test.ts`) and
       the machinery observation was made in the live bring-up runs
       (quiescence with the server-side updater posture against
-      toolshed's real routes); stated honestly, that surface is
-      currently ON-skip-listed as the demand-cycle starvation fork's
-      reproducer (verification-coverage.md OW19 — it un-skips with
-      the terminal-state follow-on below), so CI witness rides the
-      serving-loop unit suite until then. A full stale-pointer
-      roll-forward journey stays the named follow-up.
+      toolshed's real routes), but that surface is currently
+      ON-skip-listed as the demand-cycle starvation fork's
+      reproducer (verification-coverage.md OW19), so CI witness
+      rides the serving-loop unit suite. The box ticks when the
+      terminal-state follow-on below un-skips the surface; a full
+      stale-pointer roll-forward journey stays the named follow-up.
 
 **Follow-on stage (APPROVED — owner nod, 2026-08-07; its own PR
 after this phase's, the way stage C's train was cut):**

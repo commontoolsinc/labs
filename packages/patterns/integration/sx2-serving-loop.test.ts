@@ -256,6 +256,20 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     assertEquals(latestValue, 41);
     const after = await fetchServingLoopStats();
     assert(after !== undefined);
+    // Non-vacuity first (review thread r3739139538): the failure-count
+    // equality below proves nothing if the loop did no work in this
+    // window — pin that the serving loop actually consumed the
+    // authored input and derived.
+    assert(
+      after.authoredSeen > stats.authoredSeen,
+      "the serving loop must have consumed the authored input " +
+        `(authoredSeen ${stats.authoredSeen} -> ${after.authoredSeen})`,
+    );
+    assert(
+      after.derivedCommits > stats.derivedCommits,
+      "the serving loop must have derived in this window " +
+        `(derivedCommits ${stats.derivedCommits} -> ${after.derivedCommits})`,
+    );
     assertEquals(
       after.structureLoadFailures,
       stats.structureLoadFailures,

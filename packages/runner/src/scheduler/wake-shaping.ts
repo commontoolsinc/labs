@@ -418,6 +418,17 @@ export function holdShapedEvent(
   // cannot silently strip the closed-world gate's exemption.
   const runtimeInjectedEventKeys = opts.runtimeInjectedEventKeys;
   shaper.hold({
+    // FLAGGED (PR #5439 thread r3731191482, unresolved semantic): the
+    // fallback linkKey resolves the scope instance from the RUNTIME's
+    // identity. On a serving runtime that is the ambient service
+    // identity, so same-id scoped streams from different principals
+    // would share one throttle bucket (cross-principal budget coupling
+    // and a timing channel). The correct partition is the EVENT ACTOR's
+    // identity — which does not exist as data until Phase 3 puts events
+    // on the wire with a server-stamped `firedAt` actor (events.md;
+    // plan Phase 3). Phase 1 has no server-side event producers, so the
+    // coupling has no instances yet; when Phase 3 lands the actor
+    // carriage, thread it here in place of the runtime identity.
     groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink, identity)),
     deliver: () =>
       deliver(eventLink, stripped, retries, onCommit, {

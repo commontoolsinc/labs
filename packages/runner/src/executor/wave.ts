@@ -49,6 +49,7 @@ import type {
   Result,
   SealedCommitVerdict,
   SealedNativeCommit,
+  StorageTransactionRejected,
   TransactionSealDestination,
   Unit,
 } from "../storage/interface.ts";
@@ -171,7 +172,44 @@ export function stampWaveRunContext(
 export function waveRunContextOf(
   tx: IExtendedStorageTransaction,
 ): WaveRunContext | undefined {
-  return waveRunContexts.get(tx);
+  // Walk the wrapper chain (review thread r3739139477): the stamp is
+  // keyed on the ORIGINAL transaction object, but scoped reads through
+  // `Cell.sample()`/`Cell.sink()` arrive on a TransactionWrapper — a
+  // different object — so a direct lookup missed the served run's
+  // demand-supplied identity and the read resolved against the service
+  // session (wrong scope instance, traversal keys recorded under the
+  // service session). Duck-typed to avoid a storage-layer value import.
+  let current: IExtendedStorageTransaction | undefined = tx;
+  while (current !== undefined) {
+    const context = waveRunContexts.get(current);
+    if (context !== undefined) return context;
+    current = (current as {
+      wrappedTransaction?: IExtendedStorageTransaction;
+    }).wrappedTransaction;
+  }
+  return undefined;
+}
+
+// The DURABLE-acceptance settlement of a tx sealed into a wave: the seal
+// resolves the tx's commit() (acceptance into the wave), but the writes
+// become durable only at the wave commit — and a conflict there can
+// WITHDRAW the contribution after its commit() already resolved ok. A
+// caller whose side effects must wait for durability (the pattern swap's
+// teardown + reinstantiation, §3e) awaits this instead. Attached by the
+// accumulator at seal, same side-table mechanism as the run context.
+const waveSettlements = new WeakMap<
+  IExtendedStorageTransaction,
+  Promise<Result<Unit, StorageTransactionRejected>>
+>();
+
+/** The sealed tx's wave settlement: resolves ok when every sealed space
+ * PROMOTED (the wave commit accepted the contribution), error when any
+ * withdrew (conflict drop, requeue, abort, abandon). Undefined for a tx
+ * that did not seal into a wave (the OFF arm) or sealed nothing. */
+export function waveSettlementOf(
+  tx: IExtendedStorageTransaction,
+): Promise<Result<Unit, StorageTransactionRejected>> | undefined {
+  return waveSettlements.get(tx);
 }
 
 /**
@@ -625,6 +663,14 @@ export class WaveAccumulator
         // mutate the sealed contribution through the shared array.
         outboundAppends: [...pendingAppends],
       });
+      waveSettlements.set(
+        tx,
+        Promise.all(
+          assembly.spaces.map((space) => space.sealed.settled),
+        ).then((settled) =>
+          settled.find((outcome) => outcome.error !== undefined) ?? { ok: {} }
+        ),
+      );
       return result;
     } finally {
       this.#assembly = undefined;
@@ -1087,8 +1133,16 @@ export class WaveAccumulator
     // event replays, deterministic destination ids make the
     // re-provisioning a CAS no-op, and the home links land with the
     // replayed consequence.
-    const foreignSeqs = new Map<MemorySpace, number>();
-    for (const batch of this.#buildForeignBatches(requeued, droppedWhole)) {
+    // Accepted seq PER BATCH (space + delegated identity), not per
+    // space: one wave may commit several batches into one foreign space
+    // (one per acting identity), and each contribution must settle with
+    // the seq of the batch ITS ops rode — a space-keyed map would
+    // promote every contribution with the LAST batch's seq, skewing
+    // replica heads and later conflict decisions.
+    const foreignSeqs = new Map<string, number>();
+    for (
+      const { key, batch } of this.#buildForeignBatches(requeued, droppedWhole)
+    ) {
       // Tenure re-check per sink call (defense-in-depth over the entry
       // check): the entry check plus the engine's live-lease row cover
       // today's synchronous sink, but an ASYNC sink would re-open the
@@ -1112,7 +1166,7 @@ export class WaveAccumulator
         outcome.aborted = "foreign-commit-failed";
         return outcome;
       }
-      foreignSeqs.set(batch.space, result.ok.seq);
+      foreignSeqs.set(key, result.ok.seq);
     }
 
     // ---- the home commit, re-resolving on sink-reported races ----
@@ -1646,10 +1700,40 @@ export class WaveAccumulator
     };
   }
 
+  /** The delegated-identity carriage a contribution's foreign batch
+   * carries (protocol.md §2's server-produced authored row): ONE
+   * originating chain actor + ONE grant, or none. */
+  #delegatedFor(context: WaveRunContext): {
+    actingPrincipal: string;
+    actingSession?: string;
+    capabilityRef: string;
+  } | undefined {
+    return context.acting !== undefined && context.capabilityRef !== undefined
+      ? {
+        actingPrincipal: context.acting.user,
+        ...(context.acting.session !== undefined
+          ? { actingSession: context.acting.session }
+          : {}),
+        capabilityRef: context.capabilityRef,
+      }
+      : undefined;
+  }
+
+  /** The foreign-batch grouping key — (space, acting identity, grant).
+   * ONE construction, shared by the batch builder and the verdict
+   * settlement, so a contribution always resolves with the seq of the
+   * batch its ops actually rode. */
+  #foreignBatchKeyFor(space: MemorySpace, context: WaveRunContext): string {
+    const delegated = this.#delegatedFor(context);
+    return `${space}\0${
+      delegated === undefined ? "" : JSON.stringify(delegated)
+    }`;
+  }
+
   #buildForeignBatches(
     requeued: ReadonlySet<number>,
     droppedWhole: ReadonlySet<number>,
-  ): WaveSpaceCommit[] {
+  ): Array<{ key: string; batch: WaveSpaceCommit }> {
     // One batch per (space, acting identity, capability grant): a foreign
     // provisioning commit carries ONE originating chain actor + ONE
     // grant in its metadata (protocol.md §2's server-produced authored
@@ -1659,19 +1743,8 @@ export class WaveAccumulator
     for (const contribution of this.#survivors(requeued, droppedWhole)) {
       for (const sealed of this.#foreignSealed(contribution)) {
         const context = contribution.context;
-        const delegated = context.acting !== undefined &&
-            context.capabilityRef !== undefined
-          ? {
-            actingPrincipal: context.acting.user,
-            ...(context.acting.session !== undefined
-              ? { actingSession: context.acting.session }
-              : {}),
-            capabilityRef: context.capabilityRef,
-          }
-          : undefined;
-        const batchKey = `${sealed.space}\0${
-          delegated === undefined ? "" : JSON.stringify(delegated)
-        }`;
+        const delegated = this.#delegatedFor(context);
+        const batchKey = this.#foreignBatchKeyFor(sealed.space, context);
         let batch = batches.get(batchKey);
         if (batch === undefined) {
           batch = {
@@ -1702,7 +1775,7 @@ export class WaveAccumulator
         batch.preconditions.push(...sealed.sealed.commit.preconditions ?? []);
       }
     }
-    return [...batches.values()];
+    return [...batches.entries()].map(([key, batch]) => ({ key, batch }));
   }
 
   /** Basis rows (§3b) for one surviving contribution: doc-granular
@@ -1756,7 +1829,7 @@ export class WaveAccumulator
       ReadonlyMap<string, { id: string; scope?: CellScope; scopeKey: string }>
     >,
     homeSeq: number,
-    foreignSeqs: ReadonlyMap<MemorySpace, number>,
+    foreignSeqs: ReadonlyMap<string, number>,
   ): void {
     this.#reportRequeuedEvents(outcome, (idx) => requeued.has(idx));
     for (const contribution of this.#contributions) {
@@ -1814,9 +1887,9 @@ export class WaveAccumulator
         outcome.committedEventIds.push(context.eventId);
       }
       for (const space of contribution.spaces) {
-        const seq = space.space === this.#space
-          ? homeSeq
-          : foreignSeqs.get(space.space) ?? homeSeq;
+        const seq = space.space === this.#space ? homeSeq : foreignSeqs.get(
+          this.#foreignBatchKeyFor(space.space, context),
+        ) ?? homeSeq;
         space.resolveVerdict({ committed: { seq } });
       }
     }

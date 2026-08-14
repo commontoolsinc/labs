@@ -36,7 +36,10 @@ import type { CellScope } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
-import { markEffectCompletion } from "../executor/effect-completion.ts";
+import {
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
 import { waveRunContextOf } from "../executor/wave.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
@@ -775,9 +778,14 @@ export function sqliteQuery(
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
+    // Per-target dedupe key (stage-G round-2 headline): the bare
+    // `sqliteQuery:<hash>` collides across DISTINCT nodes issuing the
+    // same query, and the dropped second closure would leave that
+    // node's result cell pending forever.
+    const effectKey = effectTargetKey(`sqliteQuery:${hash}`, result);
     tx.enqueuePostCommitEffect({
       id: `sqliteQuery:${hash}`,
-      idempotencyKey: `sqliteQuery:${hash}`,
+      idempotencyKey: effectKey,
       kind: "sqlite-query",
       async flush() {
         inFlightIssues.add(hash);
@@ -786,7 +794,7 @@ export function sqliteQuery(
           // (different inputs -> different hash) that superseded it mid-flight.
           const failQuery = (error: string) =>
             runtime.editWithRetry((wtx) => {
-              markEffectCompletion(wtx, `sqliteQuery:${hash}`);
+              markEffectCompletion(wtx, effectKey);
               if (result.withTx(wtx).get()?.requestHash !== hash) return;
               result.withTx(wtx).set({
                 pending: false,
@@ -901,7 +909,7 @@ export function sqliteQuery(
               )
               : keptRows) as unknown[];
             const wrote = await runtime.editWithRetry((wtx) => {
-              markEffectCompletion(wtx, `sqliteQuery:${hash}`);
+              markEffectCompletion(wtx, effectKey);
               // Stale-writeback guard: a newer query (different inputs -> different
               // hash) may have superseded this one while the RPC was in flight.
               // Only write back if the result cell still records THIS request.

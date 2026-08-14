@@ -36,22 +36,30 @@ class LoopbackSessionFactory implements SessionFactory {
     const client = await MemoryClient.connect({
       transport: MemoryClient.loopback(this.getServer()),
     });
-    const session = await client.mount(
-      space,
-      mountOptions,
-      (
-        targetSpace: string,
-        descriptor: MemoryClient.MountOptions,
-        context: MemoryClient.SessionOpenAuthContext,
-      ) =>
-        createSignedSessionOpenAuth(
-          signer,
-          targetSpace as MemorySpace,
-          descriptor,
-          context,
-        ),
-    );
-    return { client, session };
+    try {
+      const session = await client.mount(
+        space,
+        mountOptions,
+        (
+          targetSpace: string,
+          descriptor: MemoryClient.MountOptions,
+          context: MemoryClient.SessionOpenAuthContext,
+        ) =>
+          createSignedSessionOpenAuth(
+            signer,
+            targetSpace as MemorySpace,
+            descriptor,
+            context,
+          ),
+      );
+      return { client, session };
+    } catch (error) {
+      // A failed mount must not leak the in-process connection (repeated
+      // auth/transient failures would accumulate server-side sessions) —
+      // the same close-before-rethrow RemoteSessionFactory.create does.
+      await client.close().catch(() => {});
+      throw error;
+    }
   }
 }
 
@@ -75,5 +83,16 @@ export class LoopbackStorageManager extends StorageManager {
       },
       new LoopbackSessionFactory(() => server),
     );
+  }
+
+  /**
+   * Loopback sessions are in-process — there is no per-space host to
+   * resolve, so a site-table host hint can never take effect. Refuse
+   * honestly (as the emulated loopback manager does) rather than accept
+   * a registration that resets the provisional replica while every new
+   * session still uses the co-hosted server.
+   */
+  override registerSpaceHost(): boolean {
+    return false;
   }
 }

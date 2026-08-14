@@ -219,13 +219,20 @@ export class EngineObjectManager implements ObjectStorageManager {
   loadedAddresses(): Array<
     { id: string; type: string; scope: CellScope; scopeKey: ScopeKey }
   > {
-    return [...this.#attestations.keys()].map((key) => {
-      const [scopeKey, id, ...typeParts] = key.split("/");
+    // The cache key is `scopeKey/id/type`, and only the scopeKey prefix
+    // is delimiter-safe (canonical scope keys percent-encode `/`; ids
+    // and MIME types carry raw slashes routinely). Take id and type from
+    // the attestation's own address and parse ONLY the prefix — a
+    // key.split("/") here corrupted slash-bearing ids, so extension
+    // bookkeeping missed the actual tracked document.
+    return [...this.#attestations.entries()].map(([key, attestation]) => {
+      const separator = key.indexOf("/");
+      const scopeKey = key.slice(0, separator) as ScopeKey;
       return {
-        id,
-        type: typeParts.join("/"),
-        scope: scopeOfScopeKey(scopeKey),
-        scopeKey: scopeKey as ScopeKey,
+        id: attestation.address.id,
+        type: attestation.address.type ?? "application/json",
+        scope: attestation.address.scope ?? scopeOfScopeKey(scopeKey),
+        scopeKey,
       };
     });
   }

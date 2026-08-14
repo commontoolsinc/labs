@@ -1282,3 +1282,46 @@ Deno.test("memory v2 queryGraph supports branch-scoped atSeq reads", async () =>
     await Deno.remove(path);
   }
 });
+
+Deno.test("loadedAddresses preserves entity ids containing '/' (the cache key is scopeKey/id/type; only the scopeKey prefix is delimiter-safe)", async () => {
+  const { engine, path } = await createEngine();
+  try {
+    // An id with '/' segments — URI-shaped ids carry them routinely.
+    const id = "data:app/notes/2026";
+    applyCommit(engine, {
+      sessionId: "session:1",
+      space: "did:key:space",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: { value: { n: 1 } },
+        }],
+      },
+      invocation: invocationFor(1),
+      authorization,
+    });
+    const { EngineObjectManager } = await import("../v2/query.ts");
+    const manager = new EngineObjectManager(engine, "");
+    const loaded = manager.load({ id });
+    assertExists(loaded);
+    const addresses = manager.loadedAddresses();
+    assertEquals(addresses.length, 1);
+    assertEquals(
+      addresses[0],
+      {
+        id,
+        type: "application/json",
+        scope: "space",
+        scopeKey: "space",
+      },
+      "a slash-bearing id must round-trip through loadedAddresses " +
+        "unsplit (extension bookkeeping keys off these addresses)",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

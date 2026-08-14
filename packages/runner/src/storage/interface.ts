@@ -178,12 +178,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   synced(): Promise<void>;
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
-   * processing — the serving loop's wave-settle barrier (a sealed
-   * commit settles at the wave commit itself, and update processing can
-   * park behind that same sealed commit, so awaiting either would
-   * deadlock). Novelty still shadowed by a parked own commit is instead
-   * EXCLUDED from the wave's W advance — see
-   * `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2 revisit (a)). */
+   * processing — the serving loop's wave-settle barrier. Both exclusions
+   * are deadlocks by construction there: a sealed commit settles only at
+   * the wave commit the loop performs AFTER settling, and update
+   * PROCESSING can park behind that same sealed commit (promotion
+   * ordering). The residual — an inbound frame whose processing parks
+   * behind a sealed commit settles after the wave commit — is accepted
+   * for Phase 1 (owner, 2026-08-05) and self-heals on the next wave; see
+   * SpaceReplica.inputSynced for the full statement. Novelty still
+   * shadowed by a parked own commit is instead EXCLUDED from the wave's
+   * W advance — see `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2
+   * revisit (a)). */
   inputSynced?(): Promise<void>;
 
   /**
@@ -365,12 +370,17 @@ export interface IStorageProvider {
   synced(): Promise<void>;
   /** INBOUND settlement only (server-execution v2 stage F): outstanding
    * watch refreshes/pulls, EXCLUDING commit settlement AND update
-   * processing — the serving loop's wave-settle barrier (a sealed
-   * commit settles at the wave commit itself, and update processing can
-   * park behind that same sealed commit, so awaiting either would
-   * deadlock). Novelty still shadowed by a parked own commit is instead
-   * EXCLUDED from the wave's W advance — see
-   * `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2 revisit (a)). */
+   * processing — the serving loop's wave-settle barrier. Both exclusions
+   * are deadlocks by construction there: a sealed commit settles only at
+   * the wave commit the loop performs AFTER settling, and update
+   * PROCESSING can park behind that same sealed commit (promotion
+   * ordering). The residual — an inbound frame whose processing parks
+   * behind a sealed commit settles after the wave commit — is accepted
+   * for Phase 1 (owner, 2026-08-05) and self-heals on the next wave; see
+   * SpaceReplica.inputSynced for the full statement. Novelty still
+   * shadowed by a parked own commit is instead EXCLUDED from the wave's
+   * W advance — see `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2
+   * revisit (a)). */
   inputSynced?(): Promise<void>;
 
   /**
@@ -1983,6 +1993,20 @@ export interface ISpaceReplica extends ISpace {
    * the idle timeout.
    */
   shadowFlipObserver?: (() => void) | undefined;
+
+  /**
+   * The overlay's retirement WAKE for origin accepts (server-execution
+   * v2 Phase 2, speculation.md §4; leg-C 2026-08-13): when set, invoked
+   * whenever a pushed commit's accept records its ack seq. The
+   * speculation overlay destination installs it beside its watermark
+   * sink: a sweep evaluated while an origin's verdict was still in
+   * flight skips its entries as blocked (unacked pending layer below),
+   * and if the covering watermark event has already passed, nothing
+   * else re-sweeps on a then-quiet space — a REJECTED origin cascades
+   * into the entry through the dependency machinery, but an ACCEPTED
+   * one had no client-side wake, so the entry stayed pending forever.
+   */
+  speculationAckObserver?: (() => void) | undefined;
 }
 
 /**

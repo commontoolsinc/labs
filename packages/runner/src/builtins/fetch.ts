@@ -28,7 +28,10 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
-import { markEffectCompletion } from "../executor/effect-completion.ts";
+import {
+  effectTargetKey,
+  markEffectCompletion,
+} from "../executor/effect-completion.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 
@@ -322,16 +325,20 @@ function fetchBuiltin(kind: FetchKind) {
       if (!cellsInitialized) return;
 
       const tx = runtime.edit();
-      // Teardown tx on piece stop — no scheduler run stamps it;
-      // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
-      // serving runtime releases the claim instead of refusing the
-      // unstamped seal. No-op off the serving posture.
-      runtime.stampServerRun(tx, {
-        actionId: `${kind.name}/teardown/${parentCell.sourceURI}`,
-        kind: "bookkeeping",
-      });
 
       try {
+        // Teardown tx on piece stop — no scheduler run stamps it;
+        // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+        // serving runtime releases the claim instead of refusing the
+        // unstamped seal. No-op off the serving posture. INSIDE the
+        // try (r3756175831's shape, applied to the sibling site): a
+        // throwing stamper routes through the abort below instead of
+        // leaking the manually-opened tx.
+        runtime.stampServerRun(tx, {
+          actionId: `${kind.name}/teardown/${parentCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
+
         // If the pending request is ours, set pending to false and clear the
         // requestId. A claim another replica has taken over carries its id,
         // not ours, and releasing it would strand the request it is running.
@@ -493,10 +500,17 @@ function fetchBuiltin(kind: FetchKind) {
       if (!hasValidResult && !hasError && !alreadyFetching) {
         // The claim id names this replica, so teardown can tell a claim it
         // still holds from one another replica has taken over. `runtime.id` is
-        // unique per storage manager and so per replica. The outbox id stays
-        // the input hash, which is what makes it an idempotency key for the
-        // same request from anywhere.
+        // unique per storage manager and so per replica. The outbox/dedupe
+        // key is the input hash WIDENED BY THIS NODE's result-cell identity
+        // (effectTargetKey): dedupe collapses re-issues of the SAME node's
+        // request from anywhere, while a DISTINCT node with identical
+        // inputs keeps its own effect — its closure writes its own cells,
+        // which a shared key would have dropped (round-2 headline).
         const newRequestId = `${runtime.id}:${inputHash}`;
+        const effectKey = effectTargetKey(
+          `${kind.name}:${inputHash}`,
+          result,
+        );
         enqueueSinkRequestPostCommitEffect(
           tx,
           kind.name,
@@ -509,7 +523,6 @@ function fetchBuiltin(kind: FetchKind) {
             // runtime.settled() and runtime.settledFor(parentCell) both wait
             // for the fetch and its writeback; idle() does not, so the
             // post-commit handler never blocks on network I/O.
-            const effectKey = `${kind.name}:${inputHash}`;
             const work = tryClaimMutex(
               runtime,
               inputsCell,
@@ -577,11 +590,13 @@ function fetchBuiltin(kind: FetchKind) {
                   error,
                   internal,
                   abortController.signal,
+                  effectKey,
                 );
               },
             );
             runtime.trackAsyncWork(work, parentCell);
           },
+          { idempotencyKey: effectKey },
         );
       }
     };
@@ -633,6 +648,7 @@ async function startFetch(
   error: Cell<any | undefined>,
   internal: Cell<Schema<typeof internalSchema>>,
   abortSignal: AbortSignal,
+  effectKey: string,
 ) {
   const { url, options } = inputsSnapshot;
 
@@ -668,7 +684,7 @@ async function startFetch(
     await runtime.idle();
 
     // Try to write result - any tab can write if inputs match
-    await tryWriteResult(
+    const written = await tryWriteResult(
       runtime,
       internal,
       inputsCell,
@@ -679,8 +695,23 @@ async function startFetch(
         error.withTx(tx).set(undefined);
       },
       snapshotInputs,
-      `${kind.name}:${inputHash}`,
+      effectKey,
     );
+    // A writeback SUPERSEDED by changed inputs is done (the new inputs'
+    // own request owns the cells now). A writeback whose COMMIT failed
+    // is not: the claim (pending=true) is durable and this response is
+    // the only completion it will ever get — swallowing the failure
+    // retires the effect as "completed" while the claim wedges forever
+    // under serving (nothing re-runs the action without input change).
+    // Throw instead: the catch below converts it into an error-shaped
+    // result (retryable, input-driven — §4's failure posture), and if
+    // even that cannot commit, the rethrow makes the tracked work
+    // reject so the outbox counts outbox.failed and logs it loudly.
+    if (written.commitError !== undefined) {
+      throw new Error(
+        `${kind.name} completion write failed: ${written.commitError.message}`,
+      );
+    }
   } catch (err) {
     // Don't write errors if request was aborted
     if (abortSignal.aborted) return;
@@ -688,8 +719,8 @@ async function startFetch(
     await runtime.idle();
 
     // Write error - but only update inputHash if inputs haven't changed
-    await runtime.editWithRetry((tx) => {
-      markEffectCompletion(tx, `${kind.name}:${inputHash}`);
+    const errorWritten = await runtime.editWithRetry((tx) => {
+      markEffectCompletion(tx, effectKey);
       const currentHash = computeInputHashFromValue(
         snapshotInputs(inputsCell.withTx(tx)),
       );
@@ -714,6 +745,18 @@ async function startFetch(
         internal.withTx(tx).update({ inputHash });
       }
     });
+    if (errorWritten.error !== undefined) {
+      // Neither the result nor an error-shaped result could commit: the
+      // claim stays wedged durably. Propagate so the effect's tracked
+      // work REJECTS — outbox.failed counts it and the failure is loud
+      // (recovery is §6's re-miss on the next activation, or an input
+      // change; a silent return here would count "completed").
+      throw new Error(
+        `${kind.name} error writeback failed to commit: ` +
+          `${errorWritten.error.message}`,
+        { cause: err },
+      );
+    }
   }
 }
 

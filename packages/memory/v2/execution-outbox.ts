@@ -78,11 +78,17 @@ export type OutboxAppendRow = {
 };
 
 /** A pending row as read back for delivery: the stored fields plus the
- * rowid handle that `deleteExecutionOutboxRow` retires. */
+ * declared-primary-key handle that `deleteExecutionOutboxRow` retires.
+ * The column is a DECLARED `INTEGER PRIMARY KEY` (not the implicit
+ * rowid): maintenance (VACUUM) may renumber implicit rowids, and a
+ * renumbering between select and delete would let a delivery ack
+ * retire the WRONG row — a lost append. The declared alias is stable
+ * for the row's lifetime. */
 export type PendingOutboxRow = OutboxAppendRow & {
   rowId: number;
   /** The emitting wave's commit seq (FIFO per source wave → target
-   * stream rides rowid order; the seq is recorded for diagnostics). */
+   * stream rides insertion-id order; the seq is recorded for
+   * diagnostics). */
   createdSeq: number;
 };
 
@@ -140,7 +146,7 @@ export const insertExecutionOutboxRows = (
 };
 
 /**
- * Every undelivered row, in insertion (rowid) order — FIFO per
+ * Every undelivered row, in insertion (declared-id) order — FIFO per
  * (source wave → target stream) as serving-loop.md §2b requires. The
  * serving loop reads this at activation (§6 step 5's re-send) and after
  * any wave that carried appends.
@@ -150,12 +156,12 @@ export const selectPendingExecutionOutboxRows = (
   options: { branch: string },
 ): PendingOutboxRow[] => {
   const rows = engine.database.prepare(`
-SELECT rowid AS row_id, target_space, target_stream, target_stream_link,
+SELECT id AS row_id, target_space, target_stream, target_stream_link,
        event_id, payload, acting_principal, acting_session,
        sessionless_space_scope, capability_ref, source_event, created_seq
 FROM execution_outbox
 WHERE branch = :branch
-ORDER BY rowid ASC
+ORDER BY id ASC
 `).all({ branch: options.branch }) as Array<{
     row_id: number;
     target_space: string;
@@ -207,6 +213,6 @@ export const deleteExecutionOutboxRow = (
   engine: Engine,
   rowId: number,
 ): void => {
-  engine.database.prepare(`DELETE FROM execution_outbox WHERE rowid = :rowid`)
-    .run({ rowid: rowId });
+  engine.database.prepare(`DELETE FROM execution_outbox WHERE id = :id`)
+    .run({ id: rowId });
 };
