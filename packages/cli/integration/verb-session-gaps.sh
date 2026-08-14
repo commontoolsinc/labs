@@ -229,8 +229,9 @@ check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witne
 step "10. GAP: an address cannot be a verb argument"
 # blockOn declares `on: Writable<ItemOutput>` — a reference. `send()` already
 # resolves a native sigil (measured), so the pre-dispatch gate is the only
-# thing refusing this. Verbs plan item 11 closes it; see
-# docs/plans/references-as-arguments.md.
+# thing refusing this. docs/plans/references-as-arguments.md closes it — that
+# work carries no step number in the verbs plan, which numbers only the read
+# and result layers.
 OTHER=$($CF piece get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
   jq -r '.[0]["$link"].id // empty')

@@ -440,8 +440,8 @@ position
 `--filter` runs before projection, so `status` decides membership and need not
 appear in the output. A marked collection costs one document read however many
 entries it holds, because the links are stored inline in the document being
-read — subject to the verbs plan's item 3, which is what makes a rejection below
-a link propagate up through the containers holding it.
+read, and a rejection below one of those links propagates up through the
+containers holding it rather than being read past.
 
 The same options work on a call's result, on a wish, and on a direct read: one
 read layer, several arrivals.

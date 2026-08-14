@@ -18,7 +18,7 @@
 #
 # Two acts are marked PENDING. They print the command and the result they will
 # produce, without running it, because the capability is sequenced and not yet
-# built (verbs plan item 11 — docs/plans/references-as-arguments.md). One is
+# built (docs/plans/references-as-arguments.md). One is
 # marked BROKEN: it runs, it fails, and its error is printed as it arrives.
 # Both are deliberately visible — a demo that quietly omits what does not work
 # teaches a surface that does not exist.
@@ -213,7 +213,7 @@ run cf piece get -s "$SPACE" --piece "$KID" status
 act "10 · Relate two items — PENDING"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
 pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address>" \
-  "an address cannot yet be a verb argument (verbs plan item 11)" \
+  "an address cannot yet be a verb argument (references-as-arguments.md)" \
   '{
   "status": "settled",
   "result": {
@@ -238,8 +238,8 @@ say "One name was typed: 'board'. Everything under it was addressed by the id a"
 say "call handed back — which is the composition the verb surface exists for,"
 say "and the reason those lines are as long as they are."
 say ""
-say "Acts 10 and 11 are the graph half, and they are sequenced as verbs plan"
-say "item 11. Act 6 is a defect: #5633, with a fix in review as #5764."
+say "Acts 10 and 11 are the graph half, sequenced as references-as-arguments."
+say "Act 6 is a defect: #5633, with a fix in review as #5764."
 say "verb-session-gaps.sh asserts all three, and fails the day any one of them"
 say "changes — so this demo cannot quietly go stale."
 
