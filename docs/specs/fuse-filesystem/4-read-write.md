@@ -135,6 +135,12 @@ target path parsing rules and examples.
 5. Apply `cell.set()` at the appropriate path using the same commit-confirmed
    acknowledgement contract as scalar writes.
 
+The buffer is written through as it was parsed. A `.json` file whose read form
+abbreviated part of the value — see
+[nesting depth](./3-json-mapping.md#nesting-depth) — carries that abbreviation
+into the cell on write-back, so a change below the depth bound goes to a
+`.json` file closer to the data.
+
 ### `write` to `.handler` File
 
 1. Buffer writes until `flush` or `release`.

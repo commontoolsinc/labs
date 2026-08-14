@@ -29,6 +29,7 @@ import {
   computed,
   NAME,
   pattern,
+  TESTS,
   UI,
   type VNode,
   Writable,
@@ -126,7 +127,7 @@ export default pattern(() => {
   return {
     [NAME]: "ct-1811-mapped-subpattern-derived-output",
     [UI]: ui,
-    tests: [
+    [TESTS]: [
       { assertion: rendered },
     ],
   };

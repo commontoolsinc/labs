@@ -3,7 +3,7 @@
 // Stored payloads (`revision.data`, `commit.original`, …) come in TWO at-rest
 // formats, BOTH seen in real DBs:
 //   - modern: a `data-model` codec-json envelope, carrying that codec's prefix
-//     (decode via valueFromJson)
+//     (decode via `fabricFromJsonValue()`)
 //   - legacy: plain JSON
 // In both, links/refs/streams appear as plain-data sigils:
 //   link   { "/": { "link@1": { id, space?, path?, scope?, schema? } } }
@@ -15,15 +15,16 @@
 // `/quote`-escaped literals, so a context-less decode is inert.
 
 import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
-import { valueFromJson } from "@commonfabric/data-model/codecs";
+import { fabricFromJsonValue } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /** Decode a stored payload string, routing the `data-model` codec envelope. */
 export function decodeStored(data: string): unknown {
   return seemsLikeJsonEncodedFabricValue(data)
-    ? valueFromJson(data)
+    ? fabricFromJsonValue(data)
     : JSON.parse(data);
 }
 
@@ -47,6 +48,15 @@ type Json = unknown;
  */
 function isNameWalkable(v: Json): v is Record<string, Json> {
   return isPlainObject(v);
+}
+
+function setOwn(target: Record<string, Json>, key: string, value: Json): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 function payloadToLink(payload: Record<string, Json>): DecodedLink {
@@ -77,11 +87,12 @@ export function parseSigilLink(v: Json): DecodedLink | null {
 
 /**
  * A link in EITHER at-rest form: the legacy `{ "/": { "link@N": … } }` sigil, or
- * a modern `FabricLink` instance (which `valueFromJson` can restore from a
- * codec envelope). Detected by class — `cell-rep`'s `isLinkRef` is gated on a
- * global modern-mode flag the inspector doesn't set, so we check `FabricLink`
- * directly and read its `.payload`. Without this, a modern link is an opaque
- * instance with no enumerable keys and vanishes from links/lineage/graph.
+ * a modern `FabricLink` instance (which `fabricFromJsonValue()` can restore
+ * from a codec envelope). Detected by class — `cell-rep`'s `isLinkRef` is gated
+ * on a global modern-mode flag the inspector doesn't set, so we check
+ * `FabricLink` directly and read its `.payload`. Without this, a modern link is
+ * an opaque instance with no enumerable keys and vanishes from
+ * links/lineage/graph.
  */
 export function decodedLinkOf(v: Json): DecodedLink | null {
   const sigil = parseSigilLink(v);
@@ -127,63 +138,363 @@ function shortId(id?: string): string | undefined {
   return body.length > 14 ? `${body.slice(0, 8)}…${body.slice(-4)}` : body;
 }
 
+const SAFE_SUMMARY_SEGMENT = /^[A-Za-z0-9_$@.:%+~-]+$/;
+const UNSAFE_TERMINAL_UNICODE =
+  /[\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+
+function escapeUnsafeTerminalUnicode(value: string): string {
+  return value.replace(
+    UNSAFE_TERMINAL_UNICODE,
+    (character) =>
+      `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/** Escape text for safe inclusion within one line of terminal output. */
+export function escapeTerminalText(value: string): string {
+  const quoted = escapeUnsafeTerminalUnicode(JSON.stringify(value));
+  return quoted.slice(1, -1);
+}
+
+function quoteTerminalText(value: string): string {
+  return escapeUnsafeTerminalUnicode(JSON.stringify(value));
+}
+
+function summarizePath(path: readonly string[]): string {
+  if (path.every((segment) => SAFE_SUMMARY_SEGMENT.test(segment))) {
+    return `/${path.join("/")}`;
+  }
+  return escapeUnsafeTerminalUnicode(JSON.stringify(path));
+}
+
+function summarizeKey(key: string): string {
+  return SAFE_SUMMARY_SEGMENT.test(key) ? key : quoteTerminalText(key);
+}
+
 /** One-line, human-readable summary of a link for tables. */
 export function summarizeLink(link: DecodedLink): string {
-  const id = shortId(link.id) ?? "?";
-  const path = link.path && link.path.length ? `/${link.path.join("/")}` : "";
-  const space = link.space ? ` @${shortDid(link.space)}` : "";
+  const id = escapeTerminalText(shortId(link.id) ?? "?");
+  const path = link.path && link.path.length ? summarizePath(link.path) : "";
+  const space = link.space
+    ? ` @${escapeTerminalText(shortDid(link.space) ?? "")}`
+    : "";
   const schema = link.hasSchema ? " +schema" : "";
   return `🔗 ${id}${path}${space}${schema}`;
 }
 
+interface AnnotationVisit {
+  kind: "visit";
+  value: Json;
+  depth: number;
+  target: Record<string, Json>;
+  key: string;
+}
+
+interface AnnotationLeave {
+  kind: "leave";
+  value: object;
+}
+
+type AnnotationFrame = AnnotationVisit | AnnotationLeave;
+
 /**
- * Recursively transform a stored value into an annotated, JSON-printable form:
- * links become `{ $link: … }`, entity refs `{ $ref: … }`, streams `"$stream"`.
- * `maxDepth` guards against deep/cyclic-looking structures.
+ * Transform a stored value into an annotated, JSON-printable form. Links
+ * become `{ $link: … }`, entity refs become `{ $ref: … }`, and streams become
+ * `"$stream"`. `maxDepth` limits how many nested containers are retained.
  */
 export function annotate(v: Json, maxDepth = 8): Json {
-  if (maxDepth < 0) return "…";
+  const root: Record<string, Json> = {};
+  const detectCycles = !Number.isFinite(maxDepth);
+  const ancestors = new WeakSet<object>();
+  const work: AnnotationFrame[] = [{
+    kind: "visit",
+    value: v,
+    depth: maxDepth,
+    target: root,
+    key: "value",
+  }];
 
-  const link = decodedLinkOf(v);
-  if (link) {
-    return {
-      $link: {
-        id: link.id,
-        ...(link.path && link.path.length ? { path: link.path } : {}),
-        ...(link.space ? { space: link.space } : {}),
-        ...(link.scope ? { scope: link.scope } : {}),
-        ...(link.hasSchema ? { schema: true } : {}),
-      },
-    };
-  }
-  if (isStream(v)) return "$stream";
-  const ref = parseEntityRef(v);
-  if (ref !== null) return { $ref: ref };
-
-  // Lower non-JSON-safe Fabric leaves to a stable, printable form so the bundle
-  // (and every JSON.stringify export path that consumes it — HTML, CLI --json)
-  // can't throw on a BigInt, render a Fabric instance as an opaque `{}`, or
-  // SILENTLY DROP a stored `undefined` (which JSON.stringify omits — losing the
-  // present-undefined vs absent-key distinction the data model preserves).
-  if (v === undefined) return { $undefined: true };
-  if (typeof v === "bigint") return { $bigint: v.toString() };
-  if (typeof v === "symbol") return String(v);
-  if (typeof v === "function") return "[function]";
-
-  if (Array.isArray(v)) return v.map((x) => annotate(x, maxDepth - 1));
-  if (isNameWalkable(v)) {
-    const out: Record<string, Json> = {};
-    for (const [k, val] of Object.entries(v)) {
-      out[k] = annotate(val, maxDepth - 1);
+  while (work.length > 0) {
+    const frame = work.pop()!;
+    if (frame.kind === "leave") {
+      ancestors.delete(frame.value);
+      continue;
     }
-    return out;
+
+    const assign = (value: Json) => setOwn(frame.target, frame.key, value);
+    if (frame.depth < 0) {
+      assign("…");
+      continue;
+    }
+
+    const link = decodedLinkOf(frame.value);
+    if (link) {
+      assign({
+        $link: {
+          id: link.id,
+          ...(link.path && link.path.length ? { path: link.path } : {}),
+          ...(link.space ? { space: link.space } : {}),
+          ...(link.scope ? { scope: link.scope } : {}),
+          ...(link.hasSchema ? { schema: true } : {}),
+        },
+      });
+      continue;
+    }
+    if (isStream(frame.value)) {
+      assign("$stream");
+      continue;
+    }
+    const ref = parseEntityRef(frame.value);
+    if (ref !== null) {
+      assign({ $ref: ref });
+      continue;
+    }
+
+    // Lower non-JSON-safe Fabric leaves to a stable, printable form so the
+    // bundle and its JSON output retain every stored value.
+    if (frame.value === undefined) {
+      assign({ $undefined: true });
+      continue;
+    }
+    if (typeof frame.value === "bigint") {
+      assign({ $bigint: frame.value.toString() });
+      continue;
+    }
+    if (typeof frame.value === "symbol") {
+      assign(String(frame.value));
+      continue;
+    }
+    if (typeof frame.value === "function") {
+      assign("[function]");
+      continue;
+    }
+
+    if (Array.isArray(frame.value)) {
+      if (detectCycles && ancestors.has(frame.value)) {
+        assign("…");
+        continue;
+      }
+      if (detectCycles) {
+        ancestors.add(frame.value);
+        work.push({ kind: "leave", value: frame.value });
+      }
+
+      const keys = Object.keys(frame.value);
+      if (
+        keys.length === frame.value.length &&
+        keys.every(isArrayIndexPropertyName)
+      ) {
+        const output = new Array<Json>(frame.value.length);
+        assign(output);
+        const target = output as unknown as Record<string, Json>;
+        for (let index = frame.value.length - 1; index >= 0; index--) {
+          work.push({
+            kind: "visit",
+            value: frame.value[index],
+            depth: frame.depth - 1,
+            target,
+            key: String(index),
+          });
+        }
+        continue;
+      }
+
+      const entries: Record<string, Json> = {};
+      const properties: Record<string, Json> = {};
+      const sparseArray: Record<string, Json> = {};
+      setOwn(sparseArray, "length", frame.value.length);
+      setOwn(sparseArray, "entries", entries);
+      if (keys.some((key) => !isArrayIndexPropertyName(key))) {
+        setOwn(sparseArray, "properties", properties);
+      }
+      assign({ $sparseArray: sparseArray });
+      const source = frame.value as unknown as Record<string, Json>;
+      for (let index = keys.length - 1; index >= 0; index--) {
+        const key = keys[index];
+        work.push({
+          kind: "visit",
+          value: source[key],
+          depth: frame.depth - 1,
+          target: isArrayIndexPropertyName(key) ? entries : properties,
+          key,
+        });
+      }
+      continue;
+    }
+
+    if (isNameWalkable(frame.value)) {
+      if (detectCycles && ancestors.has(frame.value)) {
+        assign("…");
+        continue;
+      }
+      if (detectCycles) {
+        ancestors.add(frame.value);
+        work.push({ kind: "leave", value: frame.value });
+      }
+
+      const output: Record<string, Json> = {};
+      assign(output);
+      const entries = Object.entries(frame.value);
+      for (let index = entries.length - 1; index >= 0; index--) {
+        const [key, value] = entries[index];
+        work.push({
+          kind: "visit",
+          value,
+          depth: frame.depth - 1,
+          target: output,
+          key,
+        });
+      }
+      continue;
+    }
+
+    // A Fabric instance has no enumerable state to walk by property name.
+    if (typeof frame.value === "object" && frame.value !== null) {
+      assign({ $fabric: toCompactDebugString(frame.value) });
+      continue;
+    }
+    assign(frame.value);
   }
-  // A non-plain object (a Fabric instance — bytes/regexp/epoch/hash/…) has no
-  // enumerable own keys; render its canonical debug string instead of `{}`.
-  if (typeof v === "object" && v !== null) {
-    return { $fabric: toCompactDebugString(v) };
+
+  return root.value;
+}
+
+interface JsonValueFrame {
+  kind: "value";
+  value: Json;
+  depth: number;
+}
+
+interface JsonTextFrame {
+  kind: "text";
+  value: string;
+}
+
+interface JsonLeaveFrame {
+  kind: "leave";
+  value: object;
+}
+
+type JsonFrame = JsonValueFrame | JsonTextFrame | JsonLeaveFrame;
+
+const INSPECTOR_JSON_INDENTS = Array.from(
+  { length: 33 },
+  (_, depth) => "  ".repeat(depth),
+);
+
+function inspectorJsonIndent(depth: number): string {
+  return INSPECTOR_JSON_INDENTS[Math.min(depth, 32)];
+}
+
+function omittedJsonObjectValue(value: Json): boolean {
+  return value === undefined || typeof value === "function" ||
+    typeof value === "symbol";
+}
+
+/**
+ * Serialize annotated inspector data without recursive descent. Indentation
+ * stops growing after 32 levels so deeply nested output stays linear in size.
+ */
+export function stringifyInspectorJson(value: Json): string {
+  const output: string[] = [];
+  const ancestors = new WeakSet<object>();
+  const work: JsonFrame[] = [{
+    kind: "value",
+    value,
+    depth: 0,
+  }];
+
+  while (work.length > 0) {
+    const frame = work.pop()!;
+    if (frame.kind === "text") {
+      output.push(frame.value);
+      continue;
+    }
+    if (frame.kind === "leave") {
+      ancestors.delete(frame.value);
+      continue;
+    }
+
+    if (frame.value === null) {
+      output.push("null");
+      continue;
+    }
+    switch (typeof frame.value) {
+      case "string":
+      case "boolean":
+      case "number":
+        output.push(JSON.stringify(frame.value));
+        continue;
+      case "undefined":
+      case "function":
+      case "symbol":
+        output.push("null");
+        continue;
+      case "bigint":
+        throw new TypeError("Inspector JSON contains an unannotated BigInt.");
+    }
+
+    if (ancestors.has(frame.value)) {
+      throw new TypeError("Inspector JSON contains a circular structure.");
+    }
+    ancestors.add(frame.value);
+    work.push({ kind: "leave", value: frame.value });
+
+    if (Array.isArray(frame.value)) {
+      output.push("[");
+      if (frame.value.length === 0) {
+        output.push("]");
+        continue;
+      }
+      work.push({
+        kind: "text",
+        value: `\n${inspectorJsonIndent(frame.depth)}]`,
+      });
+      for (let index = frame.value.length - 1; index >= 0; index--) {
+        work.push({
+          kind: "value",
+          value: frame.value[index],
+          depth: frame.depth + 1,
+        });
+        work.push({
+          kind: "text",
+          value: `${index === 0 ? "\n" : ",\n"}${
+            inspectorJsonIndent(frame.depth + 1)
+          }`,
+        });
+      }
+      continue;
+    }
+
+    const keys = Object.keys(frame.value).filter((key) =>
+      !omittedJsonObjectValue((frame.value as Record<string, Json>)[key])
+    );
+    output.push("{");
+    if (keys.length === 0) {
+      output.push("}");
+      continue;
+    }
+    work.push({
+      kind: "text",
+      value: `\n${inspectorJsonIndent(frame.depth)}}`,
+    });
+    for (let index = keys.length - 1; index >= 0; index--) {
+      const key = keys[index];
+      work.push({
+        kind: "value",
+        value: (frame.value as Record<string, Json>)[key],
+        depth: frame.depth + 1,
+      });
+      work.push({
+        kind: "text",
+        value: `${index === 0 ? "\n" : ",\n"}${
+          inspectorJsonIndent(frame.depth + 1)
+        }${JSON.stringify(key)}: `,
+      });
+    }
   }
-  return v;
+
+  return output.join("");
 }
 
 /** Compact one-line summary of any value, for table cells. */
@@ -192,16 +503,21 @@ export function summarize(v: Json): string {
   if (link) return summarizeLink(link);
   if (isStream(v)) return "⊙ stream";
   const ref = parseEntityRef(v);
-  if (ref !== null) return `#${shortId(ref) ?? ref}`;
+  if (ref !== null) return `#${escapeTerminalText(shortId(ref) ?? ref)}`;
   if (v === null) return "null";
   if (typeof v === "bigint") return `${v}n`;
   if (Array.isArray(v)) return `[${v.length}]`;
-  if (isNameWalkable(v)) return `{${Object.keys(v).join(", ")}}`;
-  if (typeof v === "object") return toCompactDebugString(v);
-  if (typeof v === "string") {
-    return v.length > 40 ? `"${v.slice(0, 37)}…"` : `"${v}"`;
+  if (isNameWalkable(v)) {
+    return `{${Object.keys(v).map(summarizeKey).join(", ")}}`;
   }
-  return String(v);
+  if (typeof v === "object") {
+    return escapeTerminalText(toCompactDebugString(v));
+  }
+  if (typeof v === "string") {
+    const preview = v.length > 40 ? `${v.slice(0, 37)}…` : v;
+    return quoteTerminalText(preview);
+  }
+  return escapeTerminalText(String(v));
 }
 
 /** Collect every link reachable in a value (does not descend into links). */

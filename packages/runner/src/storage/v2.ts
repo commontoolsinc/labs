@@ -13,6 +13,7 @@ import {
   type URI,
 } from "@commonfabric/memory/interface";
 import { assert, unclaimed } from "@commonfabric/memory/fact";
+import { aclDocId } from "@commonfabric/memory/acl";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type CellScope,
@@ -43,7 +44,7 @@ import {
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -130,6 +131,7 @@ import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   compactWatchEntries,
   normalizeSyncEntries,
+  normalizeSyncSelector,
   watchIdForEntry,
 } from "./v2-watch.ts";
 import {
@@ -265,7 +267,7 @@ const activeCommitPreconditions = (
     );
 
 const toExplicitDocument = (value: FabricValue): EntityDocument => {
-  if (!isObject(value)) {
+  if (!isObjectNotArray(value)) {
     throw new Error(
       "memory v2 transactions require explicit full-document roots",
     );
@@ -1033,7 +1035,7 @@ export class StorageManager implements IStorageManager {
       }
 
       const openedServerSeq = normal.session.serverSeq;
-      const aclId = `of:${space}`;
+      const aclId = aclDocId(space);
       const aclResult = await normal.session.queryGraph({
         roots: [{ id: aclId, selector: { path: [], schema: false } }],
       });
@@ -1459,7 +1461,7 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace,
     document: EntityDocument | undefined,
   ): Promise<Error | undefined> {
-    const cfc = isRecord(document?.cfc) ? document.cfc : undefined;
+    const cfc = isObjectOrArray(document?.cfc) ? document.cfc : undefined;
     const schemaHash = cfc?.schemaHash;
     if (typeof schemaHash !== "string" || schemaHash.length === 0) {
       return undefined;
@@ -1549,7 +1551,7 @@ export class StorageManager implements IStorageManager {
   ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
-      if (!isRecord(value) && !Array.isArray(value)) {
+      if (!isObjectOrArray(value)) {
         return;
       }
       value = (value as Record<string, unknown>)[segment];
@@ -1627,12 +1629,12 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
-    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose
+    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
     // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
     // reconstructed from the data URI is never found here and its target
     // document is never synced — the later read finds it absent. (A
     // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
-    if (isRecord(value)) {
+    if (isObjectOrArray(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
         if (
@@ -1702,7 +1704,15 @@ type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
 class Provider implements IStorageProvider {
   replica: SpaceReplica;
-  #syncRequests = new Map<string, ProviderSyncRequest>();
+  // Registered reads to replay when a provisional replica is replaced, keyed
+  // by document and then by the normalized selector. A normalized selector is
+  // either the shared rejecting selector or an interned canonical instance,
+  // and the entry holds it, so structurally equal selectors are the same
+  // object here and identity separates them exactly.
+  #syncRequests = new Map<
+    string,
+    Map<SchemaPathSelector, ProviderSyncRequest>
+  >();
   #destroyed = false;
   #routeAbort = new AbortController();
 
@@ -1737,14 +1747,18 @@ class Provider implements IStorageProvider {
     selector?: SchemaPathSelector,
     scope?: CellScope,
   ): Promise<Result<Unit, Error>> {
-    const [[address, normalizedSelector]] = normalizeSyncEntries([[
-      { id: uri, type: DOCUMENT_MIME, scope },
-      selector,
-    ]]);
-    this.#syncRequests.set(
-      watchIdForEntry(address, normalizedSelector),
-      { uri, selector: normalizedSelector, scope },
-    );
+    const normalizedSelector = normalizeSyncSelector(selector);
+    const key = docKey(uri, scope);
+    let requests = this.#syncRequests.get(key);
+    if (requests === undefined) {
+      requests = new Map();
+      this.#syncRequests.set(key, requests);
+    }
+    requests.set(normalizedSelector, {
+      uri,
+      selector: normalizedSelector,
+      scope,
+    });
     return this.replica.sync(uri, normalizedSelector, scope) as Promise<
       Result<Unit, Error>
     >;
@@ -1806,7 +1820,8 @@ class Provider implements IStorageProvider {
     );
     previous.reset();
     previous.closeNow();
-    const requests = [...this.#syncRequests.values()];
+    const requests = [...this.#syncRequests.values()]
+      .flatMap((bySelector) => [...bySelector.values()]);
     await Promise.all(
       requests.map(({ uri, selector, scope }) =>
         this.replaySync(replacement, uri, selector, scope)
@@ -4785,16 +4800,58 @@ const toRejectedError = (
     return rejected;
   }
 
-  // A terminal commit rejection (a deterministic server-side refusal of the
-  // committed data — today `RowLabelCommitError`, storage/rejection.ts
-  // `isTerminalRejection`): preserve the wire name so the scheduler classifies
-  // it as non-retryable instead of collapsing it into a generic, bounded-retry
-  // TransactionError. Re-running the identical handler recomputes the identical
-  // refused write, so the doomed re-runs would only starve sibling commits.
-  if (name === "RowLabelCommitError") {
+  // Preserve the wire name the server chose instead of collapsing it into a
+  // generic TransactionError. Every classifier downstream — the scheduler's
+  // `classifyCommitDisposition`, `Runtime.editWithRetry`'s retry allow-list
+  // (storage/rejection.ts) — keys off `error.name`, so flattening here destroys
+  // the only evidence they have. The names:
+  //
+  //  - `RowLabelCommitError`: a deterministic commit-time row-label refusal
+  //    (memory/v2/sqlite/commit-eval.ts), classified terminal by
+  //    `isTerminalRejection`. Re-running recomputes the identical refused
+  //    write, so the doomed re-runs would only starve sibling commits.
+  //  - `ProtocolError`: the server refused the commit rather than losing it.
+  //    `#validateAclCommit` (memory/v2/server.ts) raises it both for the SHAPE
+  //    of an ACL commit (not a whole-document `set`; more than one operation)
+  //    and for its VALUE (malformed, or retaining no concrete OWNER). Neither
+  //    changes when the identical function is re-run. The name is broader than
+  //    those two, though: the engine also raises it for conditions that are a
+  //    function of server log state — a pending read whose basis is ahead of
+  //    the log, a commit-replay mismatch — and those CAN converge. Treating the
+  //    whole name as terminal is a deliberate over-approximation, open on
+  //    #5259 pending a decision on marking retriability at the throw site.
+  //  - `AuthorizationError`: the server evaluated the request and denied it.
+  //    The server's own `retriable` marker (a session-open anti-replay race a
+  //    fresh handshake heals) rides along, as it already does on the pull path
+  //    (`toPullError` above) — it is what distinguishes the one denial that can
+  //    clear from the ones that cannot.
+  //  - `SessionError`: the commit was routed to a session the server no longer
+  //    knows. Classified TERMINAL by the retry allow-list — not because the
+  //    commit was evaluated (it was not), but because nothing on the retry path
+  //    remounts the session: `sessionHandle()` memoizes the mount and clears it
+  //    only on close. The name still has to survive normalization here, or the
+  //    caller sees a generic TransactionError instead of the real cause.
+  //  - `InvalidMessageError`: a frame off the wire would not decode, and the
+  //    client's `rejectPending` sweep (memory/v2/client.ts `onMessage`) rejected
+  //    every in-flight request with it — including this commit, which may never
+  //    have been evaluated. That makes it a liveness failure, classified
+  //    retryable by `isTransientCommitRejection`; the name has to survive here
+  //    or that classification can never fire. It is raised client-side, so
+  //    unlike the names above it is not part of the server's wire contract.
+  //
+  // The memory server MUST keep emitting the server-side names unchanged
+  // (server.ts `transact` catch, and the ACL validation errors it returns
+  // directly).
+  if (
+    name === "RowLabelCommitError" || name === "ProtocolError" ||
+    name === "AuthorizationError" || name === "SessionError" ||
+    name === "InvalidMessageError"
+  ) {
+    const retriable = (error as { retriable?: unknown })?.retriable === true;
     return {
       name,
       message,
+      ...(retriable ? { retriable: true } : {}),
       cause: { name: "SystemError", message, code: 500 },
       transaction: commit,
     } as unknown as TransactionError;

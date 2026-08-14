@@ -16,6 +16,14 @@ export type AppViewModeRef = {
   mode?: AppViewMode;
 };
 
+export type AppOpenPathRef = {
+  /** One-shot deep link: a target the piece should open on load, captured
+   * from `?path=` at boot. Consumed by the shell after the piece loads and
+   * never re-emitted into a URL (`appViewToUrlPath` ignores it), so
+   * reloads and internal navigation stay clean. */
+  openPath?: string;
+};
+
 export type AppView =
   | {
     builtin: AppBuiltInView;
@@ -26,6 +34,7 @@ export type AppView =
     }
     & PieceViewRef
     & AppViewModeRef
+    & AppOpenPathRef
   )
   | (
     & {
@@ -33,6 +42,7 @@ export type AppView =
     }
     & PieceViewRef
     & AppViewModeRef
+    & AppOpenPathRef
   );
 
 export function isAppBuiltInView(view: unknown): view is AppBuiltInView {
@@ -126,19 +136,24 @@ export function urlToAppView(url: URL): AppView {
   if (mode) segments.shift();
   const [first, pieceId] = [segments[0], segments[1]];
   const modeRef: AppViewModeRef = mode ? { mode } : {};
+  // `?path=` is the piece deep link (e.g. a cabinet page Mobile Loom should
+  // open). Captured here — the only place the query survives boot — and
+  // delivered once by the shell after the piece loads.
+  const openPath = url.searchParams.get("path") || undefined;
+  const openRef: AppOpenPathRef = openPath ? { openPath } : {};
 
   if (!first) {
     return { builtin: "home" };
   }
   if (isDID(first)) {
-    if (!pieceId) return { spaceDid: first, ...modeRef };
+    if (!pieceId) return { spaceDid: first, ...modeRef, ...openRef };
     return isSlugAddress(pieceId)
-      ? { spaceDid: first, pieceSlug: pieceId, ...modeRef }
-      : { spaceDid: first, pieceId, ...modeRef };
+      ? { spaceDid: first, pieceSlug: pieceId, ...modeRef, ...openRef }
+      : { spaceDid: first, pieceId, ...modeRef, ...openRef };
   } else {
-    if (!pieceId) return { spaceName: first, ...modeRef };
+    if (!pieceId) return { spaceName: first, ...modeRef, ...openRef };
     return isSlugAddress(pieceId)
-      ? { spaceName: first, pieceSlug: pieceId, ...modeRef }
-      : { spaceName: first, pieceId, ...modeRef };
+      ? { spaceName: first, pieceSlug: pieceId, ...modeRef, ...openRef }
+      : { spaceName: first, pieceId, ...modeRef, ...openRef };
   }
 }

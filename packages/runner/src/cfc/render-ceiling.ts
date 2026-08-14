@@ -1,6 +1,6 @@
 import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
 import type { CfcConfClause } from "./clause.ts";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
@@ -151,7 +151,7 @@ export const spaceAtomIdsInConfidentiality = (
   for (const clause of confidentiality) {
     for (const alternative of clauseAlternatives(clause as CfcConfClause)) {
       if (
-        isRecord(alternative) &&
+        isObjectOrArray(alternative) &&
         (alternative as { type?: unknown }).type === CFC_ATOM_TYPE.Space &&
         typeof (alternative as { id?: unknown }).id === "string"
       ) {

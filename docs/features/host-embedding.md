@@ -143,21 +143,40 @@ untested here by design — it lands and is tested with CT-1830.
 **Contract.** A right-click on a piece rendered by `cf-render` opens
 `cf-piece-menu` for that piece. **View source** shows the piece's retained
 authored files. **Origin and history** shows its active origin and recorded
-source revisions. A piece with an active origin also has **Stop following
-source**. That action keeps the exact current source and clears the active
-origin.
+source revisions. **Clone fresh piece into new space** creates a copy with
+default input data in a unique named space owned by the current user, then
+navigates to it. **Clone piece and copy data into new space** takes detached
+snapshots of the selected piece's current input and stateful internal data.
+Computed values are recomputed in the new space. Data linked from another space
+is rejected because it cannot be captured atomically. Both actions move clone
+progress and failures from the context menu into a dialog. The copy follows
+the selected piece when that piece is detached. When the selected piece already
+follows an origin, the copy follows that same origin. A piece with an active
+origin also has **Stop following source**. That action keeps the exact current
+source and clears the active origin.
 
 Historical entries can restore an exact retained source version or resume
-following an earlier web or fabric origin. An incompatible pattern contract or
-retained link is shown before mutation and requires a second explicit
-confirmation. The runtime binds that confirmation to the exact reviewed code
-and source-state snapshot. If the piece's actual retained input does not satisfy
-the candidate's argument schema, the runtime rejects the transition instead.
-The input must be repaired before that source can be selected. Nothing is
-required of the host to get these controls. Importing `cf-render` registers the
-menu. The menu reads and changes the piece through
-`RuntimeClient.getPieceSource()` and `RuntimeClient.updatePieceSource()` on the
-runtime the piece already runs in.
+following an earlier web or fabric origin. Each entry can show its exact
+retained source. A mutable Fabric piece origin links to that piece in its own
+space, and the space fact links to the space's default piece. An incompatible
+pattern contract or retained link is shown before mutation and requires a
+second explicit confirmation. The runtime binds that confirmation to the exact
+reviewed code and source-state snapshot. If the piece's actual retained input
+does not satisfy the candidate's argument schema, the runtime rejects the
+transition instead. The input must be repaired before that source can be
+selected. Nothing is required of the host to get these controls. Importing
+`cf-render` registers the menu. The menu reads, clones, and changes the piece
+through `RuntimeClient.getPieceSource()`,
+`RuntimeClient.getPieceSourceRevision()`, `RuntimeClient.clonePiece()`, and
+`RuntimeClient.updatePieceSource()` on the runtime the piece already runs in.
+
+After the piece-specific entries, a divider separates **Space access rights...**.
+The dialog reads the target space's ACL through `RuntimeClient.getSpaceAcl()`.
+Every principal that can read the space sees the entries. A principal whose
+effective ACL capability is `OWNER` also gets controls backed by
+`RuntimeClient.setSpaceAclEntry()` and `RuntimeClient.removeSpaceAclEntry()`.
+The runtime uses `ACLManager` for these mutations, so the memory server remains
+the authority that accepts owner changes and preserves a concrete owner.
 
 Calling `RuntimeClient.createPage()` with an HTTP or HTTPS `URL` creates a
 followed piece. The runtime records the canonical URL and retained initial
@@ -176,6 +195,17 @@ The menu mounts itself on `document.body`, not inside the piece, because a piece
 own `overflow: hidden` would clip it and the tile variant's
 `transform: scale(0.5)` would shrink it; it copies the `--cf-theme-*` tokens
 across from the element that opened it, so it follows the host's theme.
+While the built-in menu or one of its panels is open, the originating
+`cf-render` shows an animated light sweep and color glow. This visual layer does
+not receive pointer events or affect layout. Closing the menu removes it, and
+opening the shared menu for another piece moves it to that piece. The menu also
+closes if its originating renderer disconnects or begins showing another piece.
+When patterns render other patterns directly, their output shares the outer
+`cf-render` instead of adding a wrapper. The renderer retains each nested
+pattern's result cell on its existing root element through the same standard
+element context protocol used for producing-space inheritance. A right-click
+selects the deepest such root in the click path, and the portalled visual layer
+clips its shine to that root. No element is inserted into the pattern's layout.
 
 Before the menu opens, `cf-render` announces the click. The event is
 **cancellable, and cancelling it takes the click**: the built-in menu does not
@@ -185,9 +215,9 @@ BUBBLES from the DOM (`bubbles`, `composed`), so a host may listen on its mount
 container or on `globalThis`.
 
 Every `cf-render` variant resolves a link-valued cell to the piece it displays
-before it chooses the menu target. This includes nested pieces rendered with the
-full variant. The renderer observes the link itself and resolves again when its
-target changes.
+before it chooses the menu target. A directly rendered nested pattern is a full
+variant, even when its containing renderer uses another variant. The renderer
+observes the link itself and resolves again when its target changes.
 
 ```ts
 import type { DID } from "@commonfabric/identity";

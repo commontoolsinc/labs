@@ -16,7 +16,7 @@
  * the sub-pattern level in generated-art.test.tsx.
  */
 
-import { action, computed, pattern, UI } from "commonfabric";
+import { action, computed, pattern, TESTS, UI } from "commonfabric";
 import {
   findElement,
   findNodeByProp,
@@ -85,7 +85,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join_as_host },
       { action: action_add_sushi },
       { assertion: assert_option_added },

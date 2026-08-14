@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/gmail-label-manager.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
 import {
   findElementByExactText,
   findElementByText,
@@ -80,7 +80,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_waiting_message_is_rendered },
       { assertion: assert_refresh_control_is_hidden },
       { assertion: assert_apply_button_disabled_without_auth },

@@ -318,8 +318,94 @@ open or close marker is _not_ on its own line, e.g. don't do this:
  */
 ```
 
+### Where one goes
+
+A doc comment binds to whatever follows it. Nothing comes between one and the
+declaration it documents: no blank line, no `//` comment, no second doc
+comment, and above all no other declaration. Tooling associates the two by
+adjacency, and so does a reader.
+
+Three shapes break this, each of which looks harmless while being written:
+
+- **A `//` note about the whole declaration, where the declaration has a body
+  to hold it.** The doc comment reads as a description of the note, and the
+  contract is visually detached from the thing it is a contract for. Open the
+  body with the note instead — a `TODO` about a function goes inside the
+  function.
+- **A new definition placed directly under an existing doc comment.** The doc
+  comment now documents the new definition, and the declaration it was written
+  for is left with none. Adding a definition means placing it after the whole
+  of the declaration above it, doc comment included.
+- **Two doc comments in a row.** TypeScript keeps only the one nearest the
+  declaration, so the other is invisible wherever documentation is rendered.
+  Merge them if both say something worth keeping.
+
+Three things are exceptions. A tool directive — `// deno-lint-ignore`,
+`// deno-fmt-ignore`, `// @ts-types` — has to sit on the line immediately
+before the code it governs, and so has nowhere else to go.
+
+The second is mechanics with no body to go in. A type, an interface property,
+or an overload list has no inside, so a `//` note about how that declaration
+is put together stays beside it. Do not fold it into the doc comment to get it
+out of the way: the split this document opens with holds here too, and a
+caller reading the rendered documentation is owed the contract and nothing
+else. What folds in is a note that turns out to be contract after all — what
+the type admits, what a caller may pass.
+
+Such a note goes below the doc comment rather than above it. A doc comment is
+a header, so a `//` sitting on top of one reads as a remark about the header
+instead of about the code underneath.
+
+The third is narrower than it first sounds. One doc comment covers a whole
+overload set, and `//` labels say which signature is which. Every label but
+one follows a declaration, so the rule never reached them; the exception is
+for the first label alone, which has nowhere to sit but between the doc
+comment and the first signature:
+
+```ts
+// Shown at module scope.
+
+/**
+ * Reads a topping off a donut, by one key or by two.
+ *
+ * One signature per depth, so that type evaluation cannot recurse without
+ * bound.
+ */
+// One key.
+export function topping<T, K1 extends keyof T>(donut: T, k1: K1): T[K1];
+// Two keys.
+export function topping<T, K1 extends keyof T, K2 extends keyof T[K1]>(
+  donut: T,
+  k1: K1,
+  k2: K2,
+): T[K1][K2];
+// deno-lint-ignore no-explicit-any
+export function topping(donut: any, ...keys: PropertyKey[]): any {
+  return keys.reduce((value, key) => value[key], donut);
+}
+```
+
+A label earns that place by saying which member this is, in a list where the
+signatures are hard to tell apart at a glance. One that only restates the
+signature beneath it is not doing that work, and goes — even if it leaves the
+rest of a numbered series behind, because the numbering was never the point.
+
+A remark about the list itself — why it is written as five signatures rather
+than one recursive type, or that a second copy of it elsewhere has to be kept
+in step — stays with the list too. It is not a label, but it is mechanics, and
+what a caller needs is the only thing the doc comment owes them.
+
+A doc comment with no declaration under it at all is the same defect from the
+other direction, with one exception: the file header documents the file rather
+than any declaration in it, and is written as a doc comment for that reason;
+see [File headers](#file-headers) below. Everything else in that shape is the
+defect. To title a region of a file or a class, use a section marker, which is
+a `//` block; see [Section markers](#section-markers) above.
+
 ### What gets one
 
+- Every file, as a header, except for the kinds listed under
+  [File headers](#file-headers) below.
 - Every exported symbol: variable, function, class, type.
 - Every class and every public member of one, including the constructor,
   whether or not the class is exported.
@@ -403,6 +489,103 @@ phrase: `Writes the donut preferences to stable storage.` Special cases:
 article: `Special designation category of the donut.` Use "the" for something
 singleton-ish: `The cache of all known donut manufacturers.`
 
+### File headers
+
+A file gets a doc comment of its own, and it goes at the very top: above the
+first `import`, above the first `export`, above every declaration, with nothing
+between it and them but a blank line. Only a shebang or a file-scoped pragma
+such as `deno-lint-ignore-file` precedes it.
+
+It is the one doc comment whose subject is the file rather than the code
+beneath it, which is why [Where one goes](#where-one-goes) excepts it and
+nothing else. The blank line is load-bearing for that same reason: it is what
+keeps the header from being read as the doc comment of the first declaration
+under it.
+
+Every file gets one, except for the three kinds below.
+
+**A file that defines a single thing.** Where the whole content of a file is
+one declaration — one class, one function, one type — along with the imports
+and the private helpers serving it, that declaration's own doc comment is the
+file's documentation, and a header above it can only duplicate it or drift
+from it.
+
+What would otherwise have felt file-scoped goes into that doc comment, so long
+as it is contract: why the thing exists at all, what a caller has to know that
+the signature does not carry. Keeping it there is what puts it in front of a
+reader who arrives at the declaration, and in front of one reading rendered
+documentation, which never shows a file header at all — the same reason two
+doc comments in a row lose one of themselves.
+
+The fold is bounded by [Where one goes](#where-one-goes), which is not relaxed
+here. Mechanics still do not belong in a contract, and a single-declaration
+file always has a body to put them in.
+
+Comparison against a neighboring module is bounded too. A header could get
+away with "unlike the other one, this buffers", because a header answers to
+nobody; a doc comment saying it is making a claim about a file that can change
+without anyone coming back here, which is what
+[the rule against surveying][survey] the rest of the system exists to stop.
+State the difference as a property of this declaration instead, in
+the `Like <baseline>, except <difference>.` form that
+[How one starts](#how-one-starts) gives.
+
+Where the single declaration is a type that reaches the schema generator, the
+fold does not happen at all: that doc comment is program output, as
+[When one is also data](#when-one-is-also-data) explains, and module rationale
+shipped as a schema `description` is worse than a file header. Such a file
+keeps its header.
+
+The exception ends where the file does. A second exported declaration, or
+module-level machinery that is not simply in service of the one, and the file
+has something to say about itself again.
+
+**A re-export barrel**, and **a test fixture whose content is the point**, are
+the other two.
+
+Two placements look close enough to pass and are not. A `//` block is not an
+alternative form of a header: it reads as a note about the line beneath it,
+which is what makes it right for local mechanics and wrong for a statement
+about the whole file. And a header below the import block fails twice over — it
+is separated from what it describes by the longest stretch of unrelated text in
+the file, and it sits exactly where a reader expects the doc comment of the
+first declaration.
+
+A file header takes the same three things as any other doc comment: what the
+file is, why it exists, and the bound on anything it claims. Two shapes waste
+the slot:
+
+- **A title.** `Shopping List Pattern` above `shopping-list.tsx` restates the
+  filename, and a doc comment that restates the name has added nothing. Open
+  with a claim, in a full sentence.
+- **Tag scaffolding.** No `@fileoverview` and no `@module`. Which file the
+  comment heads is not in doubt, and the tags crowd out the sentence that would
+  have carried the content.
+
+```ts
+// Shown for illustration only.
+
+// Wrong: below the imports, in the `//` form, and titled rather than stated.
+
+import { FryerCat } from "./fryer-cat.ts";
+
+// Fryer Scheduling
+```
+
+```ts
+// Shown for illustration only.
+
+// Right.
+
+/**
+ * Assigns donuts to fryers. The order is not first-come: a fritter leaves the
+ * oil unusable for anything else in the same shift, so fritters are batched
+ * last. Scheduling only — nothing here starts a fryer.
+ */
+
+import { FryerCat } from "./fryer-cat.ts";
+```
+
 ## Error and log messages
 
 The text of a thrown error or a log message follows the same markup rules as a
@@ -418,3 +601,5 @@ export function checkFlavor(flavor: string): void {
   }
 }
 ```
+
+[survey]: #not-a-survey-of-the-rest-of-the-system

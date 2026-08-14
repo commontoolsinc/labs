@@ -11,6 +11,9 @@ export interface WeightedShardItem {
 /**
  * Assigns weighted items to shards using longest-processing-time scheduling.
  *
+ * Initial loads represent work already fixed to each shard. Placement adds
+ * items to the lightest resulting load without modifying the supplied array.
+ *
  * Items in the same group occupy distinct shards when the group fits. This
  * keeps slices of one package in separate workspace jobs when enough shards
  * are available; larger groups fall back to ordinary weighted placement.
@@ -18,11 +21,24 @@ export interface WeightedShardItem {
 export function assignWeightedShards(
   items: WeightedShardItem[],
   total: number,
+  initialLoads?: readonly number[],
 ): Map<string, number> {
   if (!Number.isSafeInteger(total) || total < 1) {
     throw new Error(
       `Shard count must be a positive safe integer, got ${total}.`,
     );
+  }
+  if (initialLoads && initialLoads.length !== total) {
+    throw new Error(
+      `Initial shard load count ${initialLoads.length} does not match shard count ${total}.`,
+    );
+  }
+
+  const loads = initialLoads ? [...initialLoads] : Array(total).fill(0);
+  for (const load of loads) {
+    if (!Number.isFinite(load) || load < 0) {
+      throw new Error("Initial shard loads must be non-negative and finite.");
+    }
   }
 
   const groupCounts = new Map<string, number>();
@@ -41,7 +57,6 @@ export function assignWeightedShards(
     groupCounts.set(item.group, (groupCounts.get(item.group) ?? 0) + 1);
   }
 
-  const loads = Array.from({ length: total }, () => 0);
   const groupsByShard = Array.from(
     { length: total },
     () => new Set<string>(),
@@ -80,9 +95,10 @@ export function assignWeightedShards(
 export function weightedShardLoads(
   items: WeightedShardItem[],
   total: number,
+  initialLoads?: readonly number[],
 ): number[] {
-  const assignments = assignWeightedShards(items, total);
-  const loads = Array.from({ length: total }, () => 0);
+  const assignments = assignWeightedShards(items, total, initialLoads);
+  const loads = initialLoads ? [...initialLoads] : Array(total).fill(0);
   for (const item of items) {
     const shard = assignments.get(item.name);
     if (shard === undefined) throw new Error(`No assignment for ${item.name}.`);

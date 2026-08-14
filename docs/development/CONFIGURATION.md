@@ -59,7 +59,7 @@ for the registration logic.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CFTS_AI_GATEWAY_URL` | `https://llm.stage.commontools.dev` | OpenAI-compatible `/v1/models` endpoint. Toolshed probes it at startup; reachable models are registered and `gateway:claude-sonnet-4-6` becomes the default when present. **The default URL is Tailscale-only — external users will not be able to reach it.** That fallback path is supported: an unreachable gateway logs a warning, the startup probe times out in ~3s, and the direct-provider models continue to work. Set to `""` to opt out and skip the probe entirely. |
+| `CFTS_AI_GATEWAY_URL` | `https://llm.stage.commontools.dev` | OpenAI-compatible `/v1/models` endpoint. Toolshed probes it as it starts up, alongside binding its port rather than ahead of it; reachable models are registered and `gateway:claude-sonnet-4-6` becomes the default when present. **The default URL is Tailscale-only — external users will not be able to reach it.** That fallback path is supported: an unreachable gateway logs a warning and the direct-provider models continue to work. A request naming a direct-provider model such as `anthropic:claude-sonnet-4-6` is served while the probe is still out, because that model was registered as toolshed loaded. What waits for the probe is a request naming a model that is not registered yet — a `gateway:` one, the `default` alias, or a name that is no model at all — and `GET /models`, which answers for the whole list. Off Tailscale that wait is however long the connection takes to fail, so set to `""` to skip the probe entirely. |
 
 **Default model resolution order** (defined in `models.ts` as
 `DEFAULT_MODEL_CANDIDATES`):
@@ -109,13 +109,6 @@ All blank by default. Each integration is gated on its `_CLIENT_ID` /
 | `PLAID_REDIRECT_URI` | _(unset)_ | Optional. |
 | `PLAID_SYNC_ALL_TRANSACTIONS` | `false` | Sync full history vs. incremental. |
 
-### Notification webhooks
-
-| Var | Purpose |
-|---|---|
-| `LLM_HEALTH_DISCORD_WEBHOOK` | LLM health monitor alerts. |
-| `HOSTNAME` | Included in alerts so multi-host deploys are distinguishable. |
-
 ---
 
 ## Identity & auth
@@ -156,6 +149,7 @@ The toolshed-embedded memory service has two modes:
 | `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database holding every space, instead of a file per space. Takes precedence over `MEMORY_DIR`. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
+| `RATE_LIMIT_TRUST_FORWARDED_FOR` | `false` | Set to `true` ONLY when a trusted reverse proxy that overwrites `X-Forwarded-For` sits in front of toolshed. Control-plane rate limiting keys on the real TCP peer by default. Enabling it without such a proxy makes the header client-controlled and the limiter a no-op; leaving it off behind a proxy collapses every caller onto one bucket. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
 
 With ACL policy active, a fresh space is read-only until its space identity or a
@@ -166,6 +160,12 @@ Retracted, malformed, and ownerless ACLs fail closed.
 Normal fresh named-space bootstrap currently creates
 `{ [activeUser]: "OWNER", "*": "WRITE" }` so new non-home spaces are public
 read/write until ACL management has a UI. Home bootstrap remains owner-only.
+The wildcard is a default, not a fixture: the space's owner can narrow it today
+with `cf acl remove ANYONE` (see
+[tutorial chapter 10](../tutorial/10-identity-and-security.md#reading-and-changing-a-spaces-acl)).
+Whatever writes the ACL must send it as a single whole-document replacement —
+the server's admission rules for ACL commits are INV-12 and INV-13 in
+[`docs/specs/memory-v2/09-invariants.md`](../specs/memory-v2/09-invariants.md).
 
 ---
 
@@ -301,6 +301,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 |---|---|---|
 | `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for `piece`, `acl`, `exec` against a remote toolshed. |
 | `CF_API_URL` | _(none)_ | Toolshed URL. Required for the same commands as above. |
+| `CF_INVOCATION_SESSION` | _(none)_ | Invocation session `cf piece call` scopes an invocation id to. Mint one per agent run with `cf invocation-session new`. Carried here rather than as `--invocation-session <id>` because the session is what makes a call's outcome unguessable, and an argument is readable in a process listing. |
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
 | `CF_CLI_TRACE_TIMINGS` | `0` | Set to `1` for detailed timing traces. |

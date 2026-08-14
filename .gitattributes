@@ -1,3 +1,9 @@
-
 # Use bd merge for beads JSONL files
 .beads/beads.jsonl merge=beads
+
+# The historical-documentation index is appended to by many branches at once.
+# The union driver keeps both sides' additions instead of raising a conflict.
+# It works a line at a time, so the file is restricted to one-line entries and
+# carries no editable prose; docs/history/README.md explains the rules and
+# `deno task check-docs-history-index` enforces them.
+docs/history/INDEX.md merge=union

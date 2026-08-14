@@ -1,3 +1,13 @@
+/**
+ * The two questions a byte holder has to answer before it can promise
+ * anything about the bytes it was handed: whether the buffer underneath has
+ * been detached, and how to obtain an array it is allowed to rely on.
+ *
+ * `toOwnedUint8Array()` is where the promise is actually made, so its cases
+ * are about what a caller may still do to the source afterwards. A holder
+ * that skips it is holding a view someone else can mutate or transfer away.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -51,6 +61,29 @@ describe("buffers", () => {
       expect(toOwnedUint8Array(source, true)).toEqual(
         new Uint8Array([1, 2, 3]),
       );
+    });
+
+    it("returns an exact-sized buffer, whichever path it takes", () => {
+      // Load-bearing beyond sole ownership: a caller reaching past the view
+      // to the buffer -- to transfer it, say -- must get exactly these bytes.
+      // Both a window onto a larger buffer (copied) and a whole-buffer source
+      // (taken over) have to come back exact-sized.
+      const window = new Uint8Array(new ArrayBuffer(16), 4, 3);
+      window.set([1, 2, 3]);
+
+      for (
+        const [label, source, transfer] of [
+          ["window, copied", window, false],
+          ["window, transfer requested", window, true],
+          ["whole buffer, copied", new Uint8Array([1, 2, 3]), false],
+          ["whole buffer, taken over", new Uint8Array([1, 2, 3]), true],
+        ] as [string, Uint8Array, boolean][]
+      ) {
+        const result = toOwnedUint8Array(source, transfer);
+
+        expect(`${label}: ${result.byteOffset}`).toBe(`${label}: 0`);
+        expect(`${label}: ${result.buffer.byteLength}`).toBe(`${label}: 3`);
+      }
     });
 
     it("returns an empty array for an empty source", () => {

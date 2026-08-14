@@ -140,6 +140,7 @@ Deno.test("live candidates: path-shaped slots defer to the shell", async () => {
   const cases: Array<[string, string]> = [
     ["cf piece ls -i ", "files"],
     ["cf piece new --root ", "dirs"],
+    ["cf piece new --test ", "files"],
     ["cf check ", "files"],
     ["cf space verify ", "dirs"],
     ["cf space clone --to ", "dirs"],
@@ -158,6 +159,8 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
       const text of [
         "cf piece call --piece x ",
         "cf piece get --piece x ",
+        "cf piece get-label --piece x ",
+        "cf piece set-label --piece x ",
         "cf piece link ",
         "cf piece ls --piece ",
       ]

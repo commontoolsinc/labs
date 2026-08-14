@@ -58,6 +58,11 @@ export interface ModuleIdentityOptions {
    * identity. Defaults to the empty string.
    */
   runtimeFingerprint?: string;
+  /** Internal dependency edges that participate in identity without executing. */
+  additionalInternalDeps?: ReadonlyMap<
+    string,
+    readonly { specifier: string; target: string }[]
+  >;
 }
 
 interface ModuleNode {
@@ -128,10 +133,21 @@ export function computeModuleHashes(
 
   for (const file of program.files) {
     const { internalDeps, externalDeps } = edges.get(file.name)!;
+    const additionalInternalDeps = options.additionalInternalDeps?.get(
+      file.name,
+    ) ?? [];
+    for (const dependency of additionalInternalDeps) {
+      if (!edges.has(dependency.target)) {
+        throw new Error(
+          `Additional identity dependency from '${file.name}' targets missing ` +
+            `module '${dependency.target}'.`,
+        );
+      }
+    }
     nodes.set(file.name, {
       path: file.name,
       src: normalizeSource(file.contents),
-      internalDeps,
+      internalDeps: [...internalDeps, ...additionalInternalDeps],
       externalDeps,
     });
   }

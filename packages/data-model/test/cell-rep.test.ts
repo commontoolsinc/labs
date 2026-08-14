@@ -1,3 +1,21 @@
+/**
+ * How an entity id and a link are represented in each of the two regimes the
+ * flag selects, and the storage-tree probe that finds one.
+ *
+ * The property that matters is not that each regime produces its own form but
+ * that each refuses the other's. A reader in one regime, handed the other's
+ * representation, throws rather than accepting it -- which is what stops a
+ * value written under one setting from being quietly misread under the other.
+ *
+ * The probe differs structurally between them rather than only in shape. The
+ * legacy form is a sub-tree to descend into, while the modern one sits at the
+ * position itself, so a storage walk takes a different path in each.
+ *
+ * The wire form is a separate matter again: tagged, and validated on the way
+ * back in -- including a refusal of prototype-polluting keys, that text having
+ * arrived from outside.
+ */
+
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

@@ -78,9 +78,15 @@ not see it, you are pointed at something else — stop and check before writing.
 deno task cf space verify $CLONE
 deno task cf inspect churn $DB --bucket 60 --until "$(date -u '+%Y-%m-%d %H:%M:%S')"
 
-# 4. Run the update against the CLONE's api-url. Children first, board last,
-#    serially — the parent's result recomputation is what storms.
-deno task cf piece setsrc … --api-url http://localhost:8010 …
+# 4. Run every authored test locally. Then update against the CLONE's api-url
+#    once, with one --test flag per entry. Children first, board last, serially
+#    — the parent's result recomputation is what storms.
+deno task cf test <pattern.test.tsx>
+deno task cf test <pattern.integration.test.tsx>
+deno task cf piece setsrc <pattern.tsx> \
+  --test <pattern.test.tsx> \
+  --test <pattern.integration.test.tsx> \
+  --api-url http://localhost:8010 …
 
 # 5. Judge it. --expect-migration gates on removal, not on change.
 deno task cf space verify $CLONE --expect-migration
@@ -91,6 +97,10 @@ deno task cf inspect churn $DB --bucket 60 \
 ./scripts/stop-local-dev.sh --port-offset 10
 deno task cf space reset $CLONE
 ```
+
+Add one `cf test` command and one `--test` flag for every authored test entry.
+Run `setsrc` once per piece with the complete flag set. Deployment packages and
+type-checks the tests but does not run them.
 
 ### Stop the server before resetting
 

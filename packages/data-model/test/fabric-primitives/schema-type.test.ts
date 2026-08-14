@@ -1,3 +1,15 @@
+/**
+ * The schema type name for each primitive class, and the agreement among the
+ * hand-maintained lists that name them.
+ *
+ * The mapping under test, the roster of classes that travel over the wire, and
+ * the vocabulary the api package publishes all have to hold the same set, and
+ * nothing derives any of them from another. So the check is exact membership
+ * in both directions against a table this file writes out for itself, which is
+ * what turns "a class was added and only one list was updated" into a failure
+ * rather than a silent gap.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -7,8 +19,8 @@ import {
 } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@/interface.ts";
+import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import {
-  BaseFabricPrimitive,
   codecClasses,
   FabricBytes,
   FabricEpochDays,

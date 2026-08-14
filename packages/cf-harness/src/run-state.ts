@@ -6,12 +6,16 @@ import {
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
+import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
   HarnessPolicyDecisionRecord,
   HarnessPolicyTrace,
 } from "./contracts/policy-trace.ts";
-import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
+import type {
+  HarnessCredentialOwnerRef,
+  HarnessRunManifest,
+} from "./contracts/run-manifest.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type {
   HarnessSkillActivations,
@@ -62,6 +66,8 @@ export interface HarnessRunState {
   modelProvider?: HarnessModelProviderId;
   modelAuthSource?: HarnessModelAuthSource;
   credentialOwnerKey?: string;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  harnessHomeIdentity?: string;
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -83,6 +89,7 @@ export interface HarnessRunState {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+  handleTable?: HarnessHandleTable;
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
@@ -104,6 +111,8 @@ export interface CreateHarnessRunStateOptions {
   modelProvider?: HarnessModelProviderId;
   modelAuthSource?: HarnessModelAuthSource;
   credentialOwnerKey?: string;
+  credentialOwner?: HarnessCredentialOwnerRef;
+  harnessHomeIdentity?: string;
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -125,6 +134,7 @@ export interface CreateHarnessRunStateOptions {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+  handleTable?: HarnessHandleTable;
   policyDecisions?: HarnessPolicyDecisionRecord[];
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
@@ -158,6 +168,12 @@ export const createHarnessRunState = (
       : {}),
     ...(options.credentialOwnerKey !== undefined
       ? { credentialOwnerKey: options.credentialOwnerKey }
+      : {}),
+    ...(options.credentialOwner !== undefined
+      ? { credentialOwner: structuredClone(options.credentialOwner) }
+      : {}),
+    ...(options.harnessHomeIdentity !== undefined
+      ? { harnessHomeIdentity: options.harnessHomeIdentity }
       : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
@@ -221,6 +237,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
+      : {}),
+    ...(options.handleTable !== undefined
+      ? { handleTable: structuredClone(options.handleTable) }
       : {}),
     ...(options.lineage !== undefined
       ? { lineage: structuredClone(options.lineage) }

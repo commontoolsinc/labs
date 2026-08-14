@@ -84,7 +84,7 @@ export default pattern(() => {
   const assertAfterAction = assert(() => instance.someField === newValue);
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assertInitialState },
       { action: actionDoSomething },
       { assertion: assertAfterAction },
@@ -161,7 +161,7 @@ explicit render step after the action that creates that state:
 const subject = Pattern({});
 
 return {
-  tests: [
+  [TESTS]: [
     { action: actionReachLateState },
     { render: subject[UI] },
     { assertion: assertLateState },
@@ -189,7 +189,7 @@ the subject's UI from its own descriptor:
 // Shown for illustration only.
 return {
   [UI]: subject[UI],
-  tests: [
+  [TESTS]: [
     { action: actionReachLateState },
     { assertion: assertLateState },
   ],
@@ -229,7 +229,7 @@ returned descriptor — each flag covers only its own level:
 ```tsx
 // Shown inside a pattern body.
 return {
-  tests: [/* ... */],
+  [TESTS]: [/* ... */],
   allowConsoleErrors: true, // expected console/logger errors don't fail
   allowConsoleWarnings: true, // expected console/logger warnings don't fail
 };
@@ -268,7 +268,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const save = action(() => setup.chat.saveProfile.send());
   const sees_bob = computed(() => /* ... */);
   return {
-    tests: [
+    [TESTS]: [
       { action: save },
       { label: "alice-saved" }, //  announce a marker
       { await: "bob-saved" }, //    park until bob announces

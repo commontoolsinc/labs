@@ -33,6 +33,7 @@ import { BROWSER_SUBAGENT_PROFILE } from "./contracts/subagent.ts";
 import {
   type HarnessCredentialOwnerRef,
   harnessCredentialOwnersEqual,
+  type LoomLocalHostBinding,
 } from "./contracts/run-manifest.ts";
 import type {
   HarnessAssistantTranscriptMessage,
@@ -40,6 +41,7 @@ import type {
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import type { HarnessChatSessionStore } from "./session-store.ts";
+import { HarnessControlError } from "./control-errors.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -157,6 +159,107 @@ const sessionClosedError = (
     message: `chat session is closed: ${sessionId}`,
   });
 
+const providerMismatchError = (
+  requestId: string,
+  message: string,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "provider-mismatch",
+    message,
+  });
+
+const isLoomLocalHostBinding = (
+  value: unknown,
+): value is LoomLocalHostBinding => {
+  if (!isRecord(value) || value.source !== "loom") {
+    return false;
+  }
+  if (
+    value.modelProvider !== "openai-compatible-gateway" &&
+    value.modelProvider !== "openai-codex"
+  ) {
+    return false;
+  }
+  if (
+    value.modelAuthSource !== "api-key" &&
+    value.modelAuthSource !== "none" &&
+    value.modelAuthSource !== "cf-harness-local-store"
+  ) {
+    return false;
+  }
+  const owner = value.credentialOwner;
+  return isRecord(owner) &&
+    owner.type === "cf-harness.credential-owner-ref" && owner.version === 1 &&
+    typeof owner.ownerKey === "string" && owner.ownerKey.length > 0 &&
+    (owner.tenantKey === undefined || typeof owner.tenantKey === "string") &&
+    typeof value.harnessHomeIdentity === "string" &&
+    value.harnessHomeIdentity.length > 0;
+};
+
+const loomLocalHostBindingFromPromptLoopOptions = (
+  options: CreateHarnessPromptLoopOptions,
+): LoomLocalHostBinding | undefined => {
+  const manifest = options.runManifest;
+  if (!isLoomLocalHostBinding(manifest)) {
+    return undefined;
+  }
+  const binding: LoomLocalHostBinding = {
+    source: "loom",
+    modelProvider: manifest.modelProvider,
+    modelAuthSource: manifest.modelAuthSource,
+    credentialOwner: structuredClone(manifest.credentialOwner),
+    harnessHomeIdentity: manifest.harnessHomeIdentity,
+  };
+  if (
+    options.modelProvider !== binding.modelProvider
+  ) {
+    throw new Error(
+      "interactive service provider does not match its Loom-local run manifest",
+    );
+  }
+  if (
+    options.modelAuthSource !== undefined &&
+    options.modelAuthSource !== binding.modelAuthSource
+  ) {
+    throw new Error(
+      "interactive service auth source does not match its Loom-local run manifest",
+    );
+  }
+  if (
+    options.credentialOwner !== undefined &&
+    !harnessCredentialOwnersEqual(
+      options.credentialOwner,
+      binding.credentialOwner,
+    )
+  ) {
+    throw new Error(
+      "interactive service credential owner does not match its Loom-local run manifest",
+    );
+  }
+  if (
+    options.harnessHomeIdentity !== undefined &&
+    options.harnessHomeIdentity !== binding.harnessHomeIdentity
+  ) {
+    throw new Error(
+      "interactive service harness home does not match its Loom-local run manifest",
+    );
+  }
+  return binding;
+};
+
+const loomLocalHostBindingsEqual = (
+  expected: LoomLocalHostBinding,
+  actual: unknown,
+): boolean =>
+  isLoomLocalHostBinding(actual) &&
+  expected.source === actual.source &&
+  expected.modelProvider === actual.modelProvider &&
+  expected.modelAuthSource === actual.modelAuthSource &&
+  harnessCredentialOwnersEqual(
+    expected.credentialOwner,
+    actual.credentialOwner,
+  ) && expected.harnessHomeIdentity === actual.harnessHomeIdentity;
+
 const browserAccessRequiredError = (
   requestId: string,
 ): HarnessChatErrorResponse =>
@@ -193,6 +296,22 @@ const interruptedTurnError = (
     priorStatus,
   },
 });
+
+const chatTurnError = (error: unknown): HarnessChatError => {
+  if (
+    error instanceof HarnessControlError &&
+    (error.code === "provider-configuration-required" ||
+      error.code === "provider-auth-required" ||
+      error.code === "provider-mismatch" ||
+      error.code === "provider-unavailable")
+  ) {
+    return { code: error.code, message: error.message };
+  }
+  return {
+    code: "internal_error",
+    message: error instanceof Error ? error.message : String(error),
+  };
+};
 
 const isTerminalTurnStatus = (
   status: HarnessChatTurnStatus["status"],
@@ -298,6 +417,8 @@ const fileChangeFromToolMessage = (
 
 export class HarnessInteractiveChatService {
   readonly #basePromptLoopOptions: CreateHarnessPromptLoopOptions;
+  readonly #loomLocalHostBinding?: LoomLocalHostBinding;
+  readonly #loomLocalHostModel?: string;
   readonly #createPromptLoop: HarnessInteractivePromptLoopFactory;
   readonly #now: () => string;
   readonly #randomUUID: () => string;
@@ -311,6 +432,23 @@ export class HarnessInteractiveChatService {
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
     this.#basePromptLoopOptions = options.basePromptLoopOptions ?? {};
+    this.#loomLocalHostBinding = loomLocalHostBindingFromPromptLoopOptions(
+      this.#basePromptLoopOptions,
+    );
+    const manifestModel = this.#basePromptLoopOptions.runManifest?.model;
+    if (
+      this.#loomLocalHostBinding !== undefined &&
+      this.#basePromptLoopOptions.model !== undefined &&
+      manifestModel !== undefined &&
+      this.#basePromptLoopOptions.model !== manifestModel
+    ) {
+      throw new Error(
+        "interactive service model does not match its Loom-local run manifest",
+      );
+    }
+    this.#loomLocalHostModel = this.#loomLocalHostBinding === undefined
+      ? undefined
+      : this.#basePromptLoopOptions.model ?? manifestModel;
     const codexConfigured =
       this.#basePromptLoopOptions.modelProvider === "openai-codex" ||
       this.#basePromptLoopOptions.modelClient?.providerId === "openai-codex";
@@ -637,12 +775,32 @@ export class HarnessInteractiveChatService {
     if (this.#sessions.has(sessionId)) {
       return sessionExistsError(requestId, sessionId);
     }
+    if (
+      this.#loomLocalHostModel !== undefined && params.model !== undefined &&
+      params.model !== this.#loomLocalHostModel
+    ) {
+      return providerMismatchError(
+        requestId,
+        "chat session model does not match the local Loom host binding",
+      );
+    }
+    const model = this.#loomLocalHostModel ?? params.model;
+    if (
+      this.#loomLocalHostBinding !== undefined &&
+      (model === undefined || model.trim() === "")
+    ) {
+      return providerMismatchError(
+        requestId,
+        "local Loom chat sessions require a durable model binding",
+      );
+    }
     const session = createHarnessChatSessionStatus({
       sessionId,
       createdAt: this.#now(),
       workspace: params.workspace,
       context: params.context,
-      model: params.model,
+      model,
+      loomLocalHostBinding: this.#loomLocalHostBinding,
       artifactRoot: params.artifactRoot,
       capabilities: params.capabilities,
       policy: resolveHarnessChatPolicy(params.policy, params.context),
@@ -674,6 +832,36 @@ export class HarnessInteractiveChatService {
     const record = this.#sessions.get(params.sessionId);
     if (record === undefined) {
       return sessionNotFoundError(requestId, params.sessionId);
+    }
+    if (this.#loomLocalHostBinding !== undefined) {
+      if (
+        !loomLocalHostBindingsEqual(
+          this.#loomLocalHostBinding,
+          record.status.loomLocalHostBinding,
+        )
+      ) {
+        return providerMismatchError(
+          requestId,
+          "durable chat session does not match the local Loom host binding",
+        );
+      }
+      if (
+        record.status.model === undefined || record.status.model.trim() === ""
+      ) {
+        return providerMismatchError(
+          requestId,
+          "durable chat session is missing its model binding",
+        );
+      }
+      if (
+        this.#loomLocalHostModel !== undefined &&
+        record.status.model !== this.#loomLocalHostModel
+      ) {
+        return providerMismatchError(
+          requestId,
+          "durable chat session model does not match the local Loom host binding",
+        );
+      }
     }
     if (record.status.status === "closed") {
       return sessionClosedError(requestId, params.sessionId);
@@ -926,10 +1114,7 @@ export class HarnessInteractiveChatService {
       await this.#emit(session.sessionId, turnId, {
         kind: "turn_failed",
         turnId,
-        error: {
-          code: "internal_error",
-          message: error instanceof Error ? error.message : String(error),
-        },
+        error: chatTurnError(error),
       });
     }
   }
@@ -948,6 +1133,15 @@ export class HarnessInteractiveChatService {
         ? { cwd: session.workspace.cwd }
         : {}),
       ...(session.model !== undefined ? { model: session.model } : {}),
+      ...(this.#loomLocalHostBinding !== undefined &&
+          session.model !== undefined
+        ? {
+          runManifest: {
+            ...this.#basePromptLoopOptions.runManifest!,
+            model: session.model,
+          },
+        }
+        : {}),
       ...(session.artifactRoot !== undefined
         ? { artifactRoot: session.artifactRoot }
         : {}),

@@ -2,7 +2,7 @@ import {
   type CfcEnforcementMode,
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
-import { isRecord } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   normalizePromptSlotBinding,
   type PromptSlotBinding,
@@ -49,7 +49,14 @@ export interface LoomRunManifest {
   capabilityProfile?: string;
   model?: string;
   modelProvider?: "openai-compatible-gateway" | "openai-codex";
+  modelAuthSource?:
+    | "api-key"
+    | "none"
+    | "owner-bound-oauth"
+    | "cf-harness-local-store";
   credentialOwner?: HarnessCredentialOwnerRef;
+  /** Opaque digest identifying the canonical host-owned credential home. */
+  harnessHomeIdentity?: string;
   workspace?: LoomRunManifestWorkspace;
   promptSlot?: PromptSlotBinding;
   cfc?: LoomRunManifestCfc;
@@ -58,8 +65,73 @@ export interface LoomRunManifest {
 
 export type HarnessRunManifest = LoomRunManifest;
 
+export interface LoomLocalHostBinding {
+  source: "loom";
+  modelProvider: "openai-compatible-gateway" | "openai-codex";
+  modelAuthSource:
+    | "api-key"
+    | "none"
+    | "cf-harness-local-store";
+  credentialOwner: HarnessCredentialOwnerRef;
+  harnessHomeIdentity: string;
+}
+
+const assertOptionalBindingField = <T>(
+  label: string,
+  current: T | undefined,
+  expected: T,
+  equal: (left: T, right: T) => boolean = Object.is,
+): void => {
+  if (current !== undefined && !equal(current, expected)) {
+    throw new Error(`Loom-local ${label} does not match the host binding`);
+  }
+};
+
+/** Adds the trusted local host binding without overwriting caller metadata. */
+export const bindLoomLocalRunManifest = (
+  input: HarnessRunManifest | undefined,
+  binding: LoomLocalHostBinding,
+  model?: string,
+): HarnessRunManifest => {
+  assertOptionalBindingField(
+    "provider",
+    input?.modelProvider,
+    binding.modelProvider,
+  );
+  assertOptionalBindingField(
+    "auth source",
+    input?.modelAuthSource,
+    binding.modelAuthSource,
+  );
+  assertOptionalBindingField(
+    "credential owner",
+    input?.credentialOwner,
+    binding.credentialOwner,
+    harnessCredentialOwnersEqual,
+  );
+  assertOptionalBindingField(
+    "harness home",
+    input?.harnessHomeIdentity,
+    binding.harnessHomeIdentity,
+  );
+  if (model !== undefined) {
+    assertOptionalBindingField("model", input?.model, model);
+  }
+  return {
+    ...(input ?? {}),
+    type: LOOM_RUN_MANIFEST_TYPE,
+    version: 1,
+    source: "loom",
+    modelProvider: binding.modelProvider,
+    modelAuthSource: binding.modelAuthSource,
+    credentialOwner: structuredClone(binding.credentialOwner),
+    harnessHomeIdentity: binding.harnessHomeIdentity,
+    ...(model !== undefined ? { model } : {}),
+  };
+};
+
 const isJsonObject = (input: unknown): input is Record<string, unknown> =>
-  isRecord(input) && !Array.isArray(input);
+  isObjectNotArray(input);
 
 const isLoomRunManifestType = (input: unknown): boolean =>
   input === undefined || input === LOOM_RUN_MANIFEST_TYPE;
@@ -142,6 +214,11 @@ export const normalizeLoomRunManifest = (
       `unsupported run manifest version: ${String(input.version)}`,
     );
   }
+  if (input.source !== undefined && input.source !== "loom") {
+    throw new Error(
+      `unsupported run manifest source: ${String(input.source)}`,
+    );
+  }
   const promptSlot = input.promptSlot === undefined
     ? undefined
     : normalizePromptSlotBinding(input.promptSlot);
@@ -154,6 +231,25 @@ export const normalizeLoomRunManifest = (
     throw new Error(
       `unsupported run manifest modelProvider: ${String(input.modelProvider)}`,
     );
+  }
+  if (
+    input.modelAuthSource !== undefined &&
+    input.modelAuthSource !== "api-key" && input.modelAuthSource !== "none" &&
+    input.modelAuthSource !== "owner-bound-oauth" &&
+    input.modelAuthSource !== "cf-harness-local-store"
+  ) {
+    throw new Error(
+      `unsupported run manifest modelAuthSource: ${
+        String(input.modelAuthSource)
+      }`,
+    );
+  }
+  if (
+    input.harnessHomeIdentity !== undefined &&
+    (typeof input.harnessHomeIdentity !== "string" ||
+      !/^sha256:[A-Za-z0-9._-]+$/.test(input.harnessHomeIdentity))
+  ) {
+    throw new Error("invalid run manifest harnessHomeIdentity");
   }
   const credentialOwner = normalizeCredentialOwnerRef(input.credentialOwner);
   return {

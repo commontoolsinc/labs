@@ -1,4 +1,4 @@
-import { assert, pattern } from "commonfabric";
+import { assert, pattern, TESTS } from "commonfabric";
 import DirectRelease from "./direct-release.tsx";
 
 export default pattern(() => {
@@ -13,7 +13,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_default_message },
       { assertion: assert_custom_message },
     ],
