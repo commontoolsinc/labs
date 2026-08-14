@@ -1,7 +1,6 @@
 import {
   action,
   cellFromUrl,
-  type ComparableCell,
   computed,
   Default,
   entityRefToString,
@@ -12,6 +11,7 @@ import {
   pattern,
   type PerSession,
   type PerUser,
+  type ReadonlyCell,
   SELF,
   Stream,
   UI,
@@ -218,20 +218,21 @@ export type TopicMentionRefMap = Record<string, TopicMentionRef>;
  * What the board's pivot reads from one topic: what it points at, and nothing
  * else. This is the entire cost of deriving the whole graph.
  *
- * The mentions are cells because they are only ever compared. Declared as
- * values they would resolve the piece behind each one, turning a scan of the
- * board's shape into a read of its contents.
+ * The mentions are `unknown` because they are only ever compared. A wider
+ * declaration would resolve the piece behind each one, turning a scan of the
+ * board's shape into a read of its contents — `object` most of all, which
+ * retrieves everything.
  */
 export interface TopicMentionSource {
-  mentions: (object | undefined)[] | Default<[]> | undefined;
+  mentions: unknown[] | Default<[]>;
 }
 
 export interface TopicCrossrefRow {
-  /** The topic this row is about. `object` rather than a cell type because it
-   * is written as a reference and only ever compared: `equals` takes the raw
-   * link, and declaring a cell wrapper on a field nested inside an array does
-   * not survive the read. */
-  topic: object | undefined;
+  /** The topic this row is about. `unknown` because it is written as a
+   * reference and only ever compared — `equals` takes the raw link. Anything
+   * wider retrieves the piece instead of pointing at it: declared `object`,
+   * this field reads back as the whole expanded topic, `$UI` tree included. */
+  topic: unknown;
   mentionedBy: unknown[];
 }
 
@@ -286,15 +287,14 @@ export interface TopicPiece extends TopicSummary {
    * comparing them never reads what is behind them. Declared as cells, because
    * that is what a consumer has to read them as to compare them at all.
    *
-   * `undefined` is declared alongside the default for the reason `commentCount`
-   * declares it: a topic deployed before this path existed materializes it as a
-   * present undefined through a retained list link, and the projection has to
-   * accept that rather than fail argument validation. */
-  mentions: ComparableCell<unknown>[] | Default<[]> | undefined;
+   * The default stands alone: a declared default and `| undefined` collide,
+   * and the default is what a topic deployed before this path existed
+   * materializes against. */
+  mentions: unknown[] | Default<[]>;
   /** Where this topic's `[Label][key]` mentions point. Durable content, like
    * `links` — the editor writes it, and it is what `mentions` is derived from. */
   // deno-lint-ignore ban-types
-  references: TopicMentionRefMap | Default<{}> | undefined;
+  references: TopicMentionRefMap | Default<{}>;
   /** The topics that mention this one, read out of the board's pivot.
    *
    * Declared through `TopicSummary` rather than `TopicPiece`, and that is
@@ -614,23 +614,22 @@ export const submitProfileLink = handler<void, {
  * consumer receives while the narrow parameter bounds what this reads.
  */
 const backlinksOf = lift((
-  { siblings, table, self }: {
-    siblings: Writable<(object | undefined)[] | Default<[]>>;
-    table: Writable<{ mentionedBy: unknown[] }[] | Default<[]>>;
-    self: object | undefined;
+  { table, self }: {
+    table: { topic: unknown; mentionedBy: unknown }[] | Default<[]>;
+    self: unknown;
   },
 ): TopicSummary[] => {
-  // Found among the SIBLINGS rather than in the table, and the difference is
-  // not cosmetic. A link survives being read as an element of an array the
-  // parameter declares at its top level, and does not survive being read as a
-  // field nested inside one: the nested read resolves it to a plain object,
-  // leaving `equals` nothing to follow. So identity is compared where identity
-  // still exists, and the row is taken by position — sound because the pivot
-  // maps over this same list, so row `i` is topic `i` by construction.
-  const at = siblings.get().findIndex((sibling) => equals(self, sibling));
-  return (at === -1
-    ? []
-    : table.get()[at]?.mentionedBy ?? []) as TopicSummary[];
+  // Written as a loop rather than `table.find(...)` because the schema the
+  // transformer generates from this parameter only carries the properties read
+  // in the OUTER expression: with the comparison inside a `.find()` callback,
+  // both `self` and each row's `topic` were dropped from the generated schema
+  // and arrived undefined, so `equals` could never match.
+  for (const row of table) {
+    if (equals(self as object, row.topic as object)) {
+      return (row.mentionedBy ?? []) as TopicSummary[];
+    }
+  }
+  return [];
 });
 
 /**
@@ -647,22 +646,15 @@ const backlinksOf = lift((
  */
 const mentionsOf = lift((
   { references, linkTargets }: {
-    references: Writable<
-      | Record<string, { destination: ComparableCell<unknown> }>
-      | Default<Record<never, never>>
-    >;
+    // deno-lint-ignore ban-types
+    references: Record<string, { destination: unknown }> | Default<{}>;
     linkTargets: { cell?: unknown; pending?: boolean }[] | Default<[]>;
   },
-): ComparableCell<unknown>[] =>
+): unknown[] =>
   [
-    ...Object.values(references.get() ?? {}).map((ref) => ref?.destination),
-    ...(linkTargets ?? []).map((resolution) => resolution?.cell),
-    // HACK, as elsewhere here: what goes in is a reference and what a consumer
-    // needs is something it can compare. Both are the same link; the assertion
-    // states how the board has to read it.
-  ].filter((destination) =>
-    destination !== undefined && destination !== null
-  ) as ComparableCell<unknown>[]
+    ...Object.values(references).map((ref) => ref?.destination),
+    ...linkTargets.map((resolution) => resolution?.cell),
+  ].filter((destination) => destination !== undefined && destination !== null)
 );
 
 /** Max of creation, the newest comment, the newest link, and the last body
@@ -939,7 +931,6 @@ export default pattern<TopicInput, TopicOutput>(
     // Inbound: who points at this topic, looked up in the board's pivot rather
     // than derived a second time.
     const referencedBy = backlinksOf({
-      siblings: mentionable,
       table: boardCrossrefs,
       self,
     });

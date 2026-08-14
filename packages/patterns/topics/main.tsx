@@ -1,6 +1,5 @@
 import {
   action,
-  type ComparableCell,
   Default,
   entityRefToString,
   equals,
@@ -10,6 +9,7 @@ import {
   pattern,
   type PerSession,
   type PerUser,
+  type ReadonlyCell,
   Stream,
   UI,
   type VNode,
@@ -246,45 +246,52 @@ const boardRows = lift(
  */
 const crossrefTable = lift(
   (
-    { identities, sources }: {
-      // Read AS CELLS, not as values. A cell always writes as a link, so the
-      // rows below are deterministic; an element read as a value writes a link
-      // only while it still carries provenance and an inline copy once it does
-      // not, which makes the same inputs produce two different documents and
-      // fails the idempotency recheck.
-      identities: Writable<ComparableCell<unknown>[] | Default<[]>>;
-      sources: Writable<TopicMentionSource[] | Default<[]>>;
+    { sources }: {
+      // An array of CELLS, which is what lets ONE declaration answer both of
+      // the pivot's questions: the cell is the topic's identity, and its value
+      // is the short list of what that topic points at. A cell always writes as
+      // a link, so the rows below are deterministic; an element read as a value
+      // writes a link only while it still carries provenance and an inline copy
+      // once it does not, which makes the same inputs produce two different
+      // documents and fails the idempotency recheck.
+      sources: ReadonlyCell<TopicMentionSource>[] | Default<[]>;
     },
   ): TopicCrossrefRow[] => {
-    // The SAME array, declared twice, because the pivot asks two questions of
-    // it and each has its own minimal answer: which piece is this, and what
-    // does it point at. A topic IS its cell, so `identities[i]` is the identity
-    // of topic `i` — no id is minted, and no position is mistaken for one.
-    const topics = identities.get();
-    const mentionsPerTopic = sources.get();
     const rows: unknown[] = [];
-    topics.forEach((topic, index) => {
+    // Plain loops rather than forEach/filter/some, and that is load-bearing
+    // rather than a style choice: the schema generated from this parameter
+    // carries only the properties read in the OUTER body, so `mentions` read
+    // inside a callback is dropped from it and arrives undefined.
+    for (let index = 0; index < sources.length; index++) {
+      const topic = sources[index];
       // An entry with nothing behind it yet (mid-sync) has no identity to
       // address a row by, and `Writable.for(undefined)` is not a cause. It gets
       // no row rather than a junk one — the lookup is by identity, not by
       // position, so a shorter table costs nothing.
-      if (!topic) return;
+      if (!topic) continue;
       // A linear scan, deliberately. A cell reference is the identity, so there
       // is no id to key a map by — and nothing to mint, keep in step, or
       // migrate when a piece moves. At board scale this is a few hundred
       // comparisons of already-resolved links.
-      const mentionedBy = topics.filter((_other, from) =>
+      const mentionedBy: unknown[] = [];
+      for (let from = 0; from < sources.length; from++) {
         // A topic mentioning itself is not an edge, the rule a self-link has
         // always had here.
-        from !== index &&
-        // `equals` resolves BOTH sides before comparing, so it answers "do
-        // these name the same document" whether each side arrived as a cell or
-        // as the raw link a read left behind. A method call on the value would
-        // depend on which of those it happens to be.
-        (mentionsPerTopic[from]?.mentions ?? []).some((mention) =>
-          equals(mention, topic)
-        )
-      );
+        if (from === index) continue;
+        const other = sources[from];
+        if (!other) continue;
+        const mentions = other.get().mentions;
+        for (let at = 0; at < mentions.length; at++) {
+          // `equals` resolves BOTH sides before comparing, so it answers "do
+          // these name the same document" whether each side arrived as a cell
+          // or as the raw link a read left behind. A method call on the value
+          // would depend on which of those it happens to be.
+          if (equals(mentions[at] as object, topic)) {
+            mentionedBy.push(other);
+            break;
+          }
+        }
+      }
       // Addressed by the topic it describes, so a row keeps its identity
       // wherever it sits and however the board is reordered. That is what lets
       // every topic's lookup re-run freely on any board change and still write
@@ -293,7 +300,7 @@ const crossrefTable = lift(
       rows.push(
         Writable.for<TopicCrossrefRow>(topic).set({ topic, mentionedBy }),
       );
-    });
+    }
     return rows as TopicCrossrefRow[];
   },
 );
@@ -427,7 +434,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const rows = boardRows(topics);
   const cards = cardsByActivity(rows);
   // Derived once for the whole board; every topic reads its own row out of it.
-  const crossrefs = crossrefTable({ identities: topics, sources: topics });
+  const crossrefs = crossrefTable({ sources: topics });
   const hasNoTopics = rows.length === 0;
 
   // Browser authorship comes from the current viewer's canonical Profile.
