@@ -1998,12 +1998,12 @@ export function wish(
     resultCell: Cell<any>,
     pattern: Pattern,
     inputForTx: (tx: IExtendedStorageTransaction) => unknown,
-  ): void {
+  ): Promise<void> {
     try {
       const runTx = runtime.edit();
       runtime.run(runTx, pattern, inputForTx(runTx), resultCell.withTx(runTx));
       runtime.prepareTxForCommit(runTx);
-      runTx.commit().then(({ error }) => {
+      return runTx.commit().then(({ error }) => {
         if (error) {
           commitPatternErrorUI(resultCell, toCompactDebugString(error));
         }
@@ -2012,6 +2012,7 @@ export function wish(
       });
     } catch (error) {
       commitPatternErrorUI(resultCell, errorMessage(error));
+      return Promise.resolve();
     }
   }
 
@@ -2081,18 +2082,21 @@ export function wish(
       }).then((pattern) => {
         if (cancelled || !profileCreatePatternResultCell) return;
         if (pattern) {
-          runSidecarInOwnTx(
+          return runSidecarInOwnTx(
             profileCreatePatternResultCell,
             pattern,
             profileCreateInputForTx,
           );
-        } else {
-          // Fetch/compile failed, or a later fetch for a changed apiUrl
-          // superseded this one (createSidecarPatternCache swallows the error
-          // and resolves to undefined in both cases). The create surface is the
-          // only way a user with no profile gets one, and nothing re-triggers
-          // this launch, so a silent undefined leaves that surface blank for the
-          // life of the piece. Say so in the cell the surface renders from.
+        }
+        // Fetch/compile failed, or a later fetch for a changed apiUrl
+        // superseded this one (createSidecarPatternCache swallows the error and
+        // resolves to undefined in both cases). The create surface is the only
+        // way a user with no profile gets one, and nothing re-triggers this
+        // launch, so a silent undefined leaves that surface blank for the life
+        // of the piece. Say so in the cell the surface renders from — unless a
+        // later fetch has since landed a pattern, whose surface is in that same
+        // cell and is the better answer than this launch's failure.
+        if (!profileCreatePatternCache.cached()) {
           commitPatternErrorUI(
             profileCreatePatternResultCell,
             `Can't load profile-create.tsx`,
@@ -2192,7 +2196,7 @@ export function wish(
         (pattern) => {
           if (cancelled || !profilePickerPatternResultCell) return;
           if (pattern) {
-            runSidecarInOwnTx(
+            return runSidecarInOwnTx(
               profilePickerPatternResultCell,
               pattern,
               pickerInputForTx,

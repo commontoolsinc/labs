@@ -1209,7 +1209,7 @@ export class Scheduler {
   /**
    * Count `work` as outstanding scheduler work until it settles: `idle()` waits
    * for it and then re-checks every quiescence condition from scratch, so work
-   * that schedules actions or issues commits as it lands is covered as well.
+   * that schedules actions, and the commits it issues, are covered as well.
    *
    * This is for work the runtime has already undertaken and whose result the
    * reactive graph is waiting on — a system pattern being fetched so the
@@ -1271,14 +1271,24 @@ export class Scheduler {
       // on settles.
       const recheck = () =>
         this.waitForQuiescence(awaitPendingCommits).then(resolve);
-      // A parked waiter (idlePromises) resolves when the scheduler drains, but
-      // a commit can still be in flight then, so the commit-aware variant
-      // re-checks instead of resolving. The re-check is deferred to a microtask
-      // so it does not re-enter waitForQuiescence synchronously while
-      // resolveIdlePromises is iterating idlePromises.
-      const park = awaitPendingCommits
-        ? () => queueMicrotask(recheck)
-        : resolve;
+      // A parked waiter (idlePromises) is released when the scheduler drains,
+      // and draining settles only the conditions the execute loop owns. Two
+      // things can still be outstanding at that moment: a commit in flight,
+      // which is why the commit-aware variant re-checks rather than resolving,
+      // and a background task registered after this waiter parked, which is
+      // what a builtin starting one from inside a pass produces. A re-check is
+      // deferred to a microtask so it does not re-enter waitForQuiescence
+      // synchronously while resolveIdlePromises is iterating idlePromises.
+      //
+      // Plain idle re-checks only when there is tracked work to re-check for.
+      // Re-checking unconditionally costs a fresh promise chain per drain, and
+      // a graph that never converges drains without end — which turns that cost
+      // into unbounded growth rather than a slow path (measured: the
+      // non-converging cycle in scheduler-convergence.test.ts exhausts the heap).
+      const park = awaitPendingCommits ? () => queueMicrotask(recheck) : () => {
+        if (this.backgroundTasks.size === 0) resolve();
+        else queueMicrotask(recheck);
+      };
       if (this.runningPromise) {
         // Something is currently running - wait for it then check again
         this.runningPromise.then(recheck);
