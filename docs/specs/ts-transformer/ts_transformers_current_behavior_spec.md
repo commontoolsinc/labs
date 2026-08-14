@@ -1211,6 +1211,15 @@ adjustments:
 - array-like roots whose observed paths only touch non-item properties
   (`length`, `get`, `set`, `key`, `update`) keep array shape but shrink their
   item type to `unknown`
+- reads inside an inline array-method callback count as reads of the enclosing
+  builder's parameter: the element parameter is bound to the receiver's item
+  path, so `table.find((row) => equals(self, row.topic))` records
+  `table[].topic` and, through the capture, `self`. This holds wherever the
+  call sits in the body, the left operand of a `??` / `||` fallback included —
+  resolving that operand to a single read stands in for walking it, so an
+  operand whose member/call spine passes through a call is walked as well
+  (`memberSpineContainsCall` in `policy/capability-analysis.ts`;
+  `test/policy/capability-analysis-array-callbacks.test.ts`)
 - node-driven shrinking can still shrink the inner type of cell-like wrappers
   when `.get()` contributes an empty path but coexists with more specific
   non-empty paths
