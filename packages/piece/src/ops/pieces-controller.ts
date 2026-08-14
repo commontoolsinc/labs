@@ -13,6 +13,7 @@ import {
   applyPieceSourceTransition,
   type Cell,
   Console as RuntimeConsole,
+  deepEqual,
   EntityId,
   entityIdFrom,
   type EntityIdListOptions,
@@ -106,6 +107,18 @@ const spacePieceCfcSchema = (
   internSchema(
     addRootConfidentiality(resultSchema, [cfcAtom.space(space)]),
   );
+
+const hasSpacePieceCfcLabel = (
+  schema: JSONSchema | undefined,
+  space: MemorySpace,
+): boolean => {
+  if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) {
+    return false;
+  }
+  const confidentiality = schema.ifc.confidentiality;
+  return Array.isArray(confidentiality) &&
+    confidentiality.some((atom) => deepEqual(atom, cfcAtom.space(space)));
+};
 
 // Default roots have a stronger update policy than ordinary pieces: an
 // existing root is reconciled before start, while a new root is compiled from
@@ -213,6 +226,10 @@ export interface CreatePieceOptions {
  * the space's default root pattern. One instance serves one space.
  */
 export class PiecesController<T = unknown> {
+  private readonly spacePieceCfcLabelPreparations = new Map<
+    string,
+    Promise<void>
+  >();
   private space: MemorySpace;
 
   private spaceCell: Cell<SpaceCellContents>;
@@ -257,6 +274,75 @@ export class PiecesController<T = unknown> {
       this.runtime.cfcFlowLabels,
       this.space,
     );
+  }
+
+  private async ensureSpacePieceCfcLabel(piece: Cell<unknown>): Promise<void> {
+    const confidentiality = this.cfcRootConfidentiality();
+    if (confidentiality === undefined) {
+      return;
+    }
+    const currentSchema = piece.getMetaRaw("schema") as
+      | JSONSchema
+      | undefined;
+    if (hasSpacePieceCfcLabel(currentSchema, piece.space)) {
+      return;
+    }
+    const key = `${piece.space}\u0000${entityRefToString(piece.entityId)}`;
+    const existing = this.spacePieceCfcLabelPreparations.get(key);
+    if (existing !== undefined) {
+      await existing;
+      return;
+    }
+    const preparation = this.persistSpacePieceCfcLabel(piece);
+    this.spacePieceCfcLabelPreparations.set(key, preparation);
+    try {
+      await preparation;
+    } finally {
+      if (this.spacePieceCfcLabelPreparations.get(key) === preparation) {
+        this.spacePieceCfcLabelPreparations.delete(key);
+      }
+    }
+  }
+
+  private async persistSpacePieceCfcLabel(
+    piece: Cell<unknown>,
+  ): Promise<void> {
+    const tx = this.runtime.edit();
+    let commitStarted = false;
+    try {
+      const root = piece.withTx(tx);
+      const storedSchema = root.getMetaRaw("schema") as
+        | JSONSchema
+        | undefined;
+      if (hasSpacePieceCfcLabel(storedSchema, piece.space)) {
+        tx.abort();
+        return;
+      }
+      const schema = spacePieceCfcSchema(piece.space, storedSchema);
+      root.setMetaRaw("schema", schema);
+      if (root.get() !== undefined) {
+        root.asSchema(schema).applyCfcSchemaToExistingValue();
+      }
+      commitStarted = true;
+      const result = await tx.commit();
+      if (result.error !== undefined) {
+        await piece.sync();
+        const winningSchema = piece.getMetaRaw("schema") as
+          | JSONSchema
+          | undefined;
+        if (hasSpacePieceCfcLabel(winningSchema, piece.space)) {
+          return;
+        }
+        throw new Error(
+          `Failed to persist the space label on piece ${piece.entityId}: ` +
+            result.error.message,
+          { cause: result.error },
+        );
+      }
+    } catch (error) {
+      if (!commitStarted) tx.abort(error);
+      throw error;
+    }
   }
 
   static async initialize(
@@ -662,7 +748,7 @@ export class PiecesController<T = unknown> {
       // effect if already running.
       await timePiecePhase(
         "get.runtime.start",
-        () => this.runtime.start(piece),
+        () => this.startPreparedPiece(piece),
       );
     }
 
@@ -1281,13 +1367,21 @@ export class PiecesController<T = unknown> {
     if (!piece) throw new Error("Piece not found");
     await timePiecePhase(
       "startPiece.runtime.start",
-      () => this.runtime.start(piece, options),
+      () => this.startPreparedPiece(piece, options),
     );
     await timePiecePhase(
       "startPiece.result.pull",
       () => this.getResult(piece).pull(),
     );
     await timePiecePhase("startPiece.synced", () => this.synced());
+  }
+
+  private async startPreparedPiece<T>(
+    piece: Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<void> {
+    await this.ensureSpacePieceCfcLabel(piece);
+    await this.runtime.start(piece, options);
   }
 
   /** Stop a running piece (no-op if not running). */

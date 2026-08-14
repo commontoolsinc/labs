@@ -2063,6 +2063,225 @@ describe("space piece CFC labels", () => {
     );
   });
 
+  it("backfills the label when an unlabeled persisted root starts", async () => {
+    const space = controller.getSpace();
+    await runtime.dispose();
+    runtime = new Runtime(runtimePresets.unitTest({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
+    }));
+    controller = new PiecesController(
+      await createSession({ identity: signer, spaceDid: space }),
+      runtime,
+    );
+    await controller.synced();
+    const legacyRoot = await controller.ensureDefaultPattern();
+    const legacySchema = legacyRoot.getCell().getMetaRaw("schema") as
+      | JSONSchemaObj
+      | undefined;
+    expect(legacySchema?.ifc?.confidentiality ?? []).not.toContainEqual(
+      cfcAtom.space(space),
+    );
+
+    await runtime.dispose();
+    runtime = new Runtime(runtimePresets.unitTest({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    }));
+    controller = new PiecesController(
+      await createSession({ identity: signer, spaceDid: space }),
+      runtime,
+    );
+    await controller.synced();
+
+    const root = await controller.ensureDefaultPattern();
+    expectSpaceRootLabel(root.getCell(), space);
+    expectPersistedSpaceRootLabel(storageManager, root.getCell(), space);
+  });
+
+  it("backfills the label when an unlabeled ordinary piece starts", async () => {
+    const space = controller.getSpace();
+    await runtime.dispose();
+    runtime = new Runtime(runtimePresets.unitTest({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
+    }));
+    controller = new PiecesController(
+      await createSession({ identity: signer, spaceDid: space }),
+      runtime,
+    );
+    await controller.synced();
+    const piece = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: DEFAULT_APP_SOURCE }],
+    }, { input: { items: ["legacy"] } });
+    const pieceCell = piece.getCell();
+    const pieceId = entityRefToString(pieceCell.entityId);
+    await controller.stopPiece(pieceCell);
+    const legacySchema = pieceCell.getMetaRaw("schema") as JSONSchemaObj;
+    expect(legacySchema.ifc?.confidentiality ?? []).not.toContainEqual(
+      cfcAtom.space(space),
+    );
+
+    Object.assign(runtime as unknown as Record<string, unknown>, {
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    });
+
+    const repairedPiece = await controller.getPieceCell(pieceId, true);
+    expectSpaceRootLabel(repairedPiece, space);
+    expectPersistedSpaceRootLabel(storageManager, repairedPiece, space);
+  });
+
+  it("coordinates concurrent label backfills by piece identity", async () => {
+    const space = controller.getSpace();
+    await runtime.dispose();
+    runtime = new Runtime(runtimePresets.unitTest({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
+    }));
+    controller = new PiecesController(
+      await createSession({ identity: signer, spaceDid: space }),
+      runtime,
+    );
+    await controller.synced();
+    const piece = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: DEFAULT_APP_SOURCE }],
+    }, { input: { items: ["legacy"] } });
+    const pieceCell = piece.getCell();
+    await controller.stopPiece(pieceCell);
+    const distinctPieces = await Promise.all(
+      ["second", "third"].map((item) =>
+        controller.create({
+          main: "/main.tsx",
+          files: [{ name: "/main.tsx", contents: DEFAULT_APP_SOURCE }],
+        }, { input: { items: [item] } })
+      ),
+    );
+    for (const distinctPiece of distinctPieces) {
+      await controller.stopPiece(distinctPiece.getCell());
+    }
+
+    Object.assign(runtime as unknown as Record<string, unknown>, {
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    });
+    const preparationEntered = Promise.withResolvers<void>();
+    const releasePreparation = Promise.withResolvers<void>();
+    const internals = controller as unknown as {
+      persistSpacePieceCfcLabel(piece: Cell<unknown>): Promise<void>;
+      startPreparedPiece(piece: Cell<unknown>): Promise<void>;
+    };
+    const originalPreparation = internals.persistSpacePieceCfcLabel.bind(
+      controller,
+    );
+    let preparationCount = 0;
+    internals.persistSpacePieceCfcLabel = async (candidate) => {
+      preparationCount++;
+      preparationEntered.resolve();
+      await releasePreparation.promise;
+      await originalPreparation(candidate);
+    };
+
+    try {
+      const firstStart = internals.startPreparedPiece(pieceCell);
+      await preparationEntered.promise;
+      const secondStart = internals.startPreparedPiece(pieceCell);
+      expect(preparationCount).toBe(1);
+      releasePreparation.resolve();
+      await Promise.all([firstStart, secondStart]);
+      expectSpaceRootLabel(pieceCell, space);
+
+      await Promise.all(
+        distinctPieces.map((distinctPiece) =>
+          internals.startPreparedPiece(distinctPiece.getCell())
+        ),
+      );
+      expect(preparationCount).toBe(3);
+      for (const distinctPiece of distinctPieces) {
+        expectSpaceRootLabel(distinctPiece.getCell(), space);
+      }
+    } finally {
+      releasePreparation.resolve();
+      internals.persistSpacePieceCfcLabel = originalPreparation;
+    }
+  });
+
+  it("accepts a label backfill won by another controller", async () => {
+    const space = controller.getSpace();
+    await runtime.dispose();
+    runtime = new Runtime(runtimePresets.unitTest({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "off",
+    }));
+    controller = new PiecesController(
+      await createSession({ identity: signer, spaceDid: space }),
+      runtime,
+    );
+    const otherController = new PiecesController(
+      await createSession({ identity: signer, spaceDid: space }),
+      runtime,
+    );
+    await Promise.all([controller.synced(), otherController.synced()]);
+    const piece = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: DEFAULT_APP_SOURCE }],
+    }, { input: { items: ["legacy"] } });
+    const pieceCell = piece.getCell();
+    await controller.stopPiece(pieceCell);
+    Object.assign(runtime as unknown as Record<string, unknown>, {
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    });
+
+    const mutableRuntime = runtime as unknown as {
+      edit: Runtime["edit"];
+    };
+    const originalEdit = runtime.edit.bind(runtime);
+    const bothCommitsEntered = Promise.withResolvers<void>();
+    let commitsEntered = 0;
+    mutableRuntime.edit = ((...args: Parameters<Runtime["edit"]>) => {
+      const tx = originalEdit(...args);
+      const mutableTx = tx as unknown as {
+        commit: typeof tx.commit;
+      };
+      const originalCommit = tx.commit.bind(tx);
+      mutableTx.commit = async (...commitArgs) => {
+        commitsEntered++;
+        if (commitsEntered === 2) bothCommitsEntered.resolve();
+        await bothCommitsEntered.promise;
+        return await originalCommit(...commitArgs);
+      };
+      return tx;
+    }) as Runtime["edit"];
+
+    const first = controller as unknown as {
+      persistSpacePieceCfcLabel(piece: Cell<unknown>): Promise<void>;
+    };
+    const second = otherController as unknown as {
+      persistSpacePieceCfcLabel(piece: Cell<unknown>): Promise<void>;
+    };
+    try {
+      await Promise.all([
+        first.persistSpacePieceCfcLabel(pieceCell),
+        second.persistSpacePieceCfcLabel(pieceCell),
+      ]);
+    } finally {
+      mutableRuntime.edit = originalEdit;
+    }
+    expectSpaceRootLabel(pieceCell, space);
+    expectPersistedSpaceRootLabel(storageManager, pieceCell, space);
+  });
+
   it("labels a recreated space root for its space", async () => {
     const root = await controller.recreateDefaultPattern();
 
