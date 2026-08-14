@@ -347,15 +347,17 @@ position renders the address and suppresses the fetch without consulting a
 source schema at all. What a declared result would add is that `cf` could
 derive the selection instead of the caller supplying it.
 
-One case already derives it: a create that returns its piece from inside the
-container holding it — `addChild` under an epic — hands back a value that
-reaches itself, which plain JSON cannot spell. There the readback bounds the
-result with the verb's own declared result and renders the position that
-closes the circle as an address, the same rendering a `$link` marker asks for
-by hand; with no declared result to bound it, the call refuses with a message
-instead of a stack trace.
+One case already works this way. `addChild` hands back the child it created,
+and the child's `parent` points back at the item that holds it. That loop
+means the result cannot be written out as plain JSON at all. So `cf` falls
+back on the verb's declared result and renders that shape instead: the
+child's fields come through as usual, and `parent` — the position where the
+loop would start again — comes through as an address, the same address a
+`$link` marker would have produced. If the verb declares no result, there is
+nothing to fall back on, and the call fails with a clear message rather than
+a stack trace.
 [A result that points back at its container](verbs-over-the-cli.md#a-result-that-points-back-at-its-container)
-walks the exchange.
+shows the full exchange.
 
 ## 5. Read the tree back, bounded **[today]**
 
