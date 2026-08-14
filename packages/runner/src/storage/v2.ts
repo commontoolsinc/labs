@@ -2095,12 +2095,21 @@ class SpaceReplica implements ISpaceReplica {
   #appliedWaiters = new Map<number, PromiseWithResolvers<void>>();
   // Foreign novelty whose VISIBILITY is still shadowed by own pending
   // writes (server-execution v2 Phase 2's settle input barrier — see
-  // `unappliedForeignSeqFloor` on ISpaceReplica): docKey -> highest
-  // shadowed inbound seq (a shadowed REMOVE records the sentinel 1 — the
-  // wire carries no seq for removes, so the floor holds W entirely until
-  // the shadow clears). Entries are pruned lazily when the doc's pending
-  // set empties (promotion, drop, rollback); cleared whole on reset.
-  readonly #shadowedForeignSeqs = new Map<string, number>();
+  // `unappliedForeignSeqFloor` on ISpaceReplica): docKey -> the set of
+  // shadowed inbound seqs. A SET, not one extremum (review thread
+  // r3739139487): the floor must be the doc's LOWEST hidden seq —
+  // every derivation in the wave read the view from before the
+  // EARLIEST hidden input, so W may not pass it even when later hidden
+  // updates superseded its value (the previous per-doc max let W skip
+  // the earlier one) — while the own-echo verdict repair must remove
+  // EXACTLY its own mis-recorded seq without disturbing genuine
+  // foreign shadows folded around it (a single min would be deleted
+  // whole, losing them). A shadowed REMOVE records the sentinel 1 —
+  // the wire carries no seq for removes, so the floor holds W entirely
+  // until the shadow clears. Entries are pruned lazily when the doc's
+  // pending set empties (promotion, drop, rollback); cleared whole on
+  // reset.
+  readonly #shadowedForeignSeqs = new Map<string, Set<number>>();
   // The settle input barrier's WAKE (ISpaceReplica.shadowFlipObserver):
   // invoked synchronously whenever a confirmPending promotion touched a
   // doc with a standing shadow (flag ON — the flip checkout's own
@@ -2521,13 +2530,18 @@ class SpaceReplica implements ISpaceReplica {
   unappliedForeignSeqFloor(): number | undefined {
     if (this.#shadowedForeignSeqs.size === 0) return undefined;
     let floor: number | undefined;
-    for (const [key, seq] of this.#shadowedForeignSeqs) {
+    for (const [key, seqs] of this.#shadowedForeignSeqs) {
       const record = this.#docs.get(key);
-      if (record === undefined || record.pending.length === 0) {
+      if (
+        record === undefined || record.pending.length === 0 ||
+        seqs.size === 0
+      ) {
         this.#shadowedForeignSeqs.delete(key);
         continue;
       }
-      if (floor === undefined || seq < floor) floor = seq;
+      for (const seq of seqs) {
+        if (floor === undefined || seq < floor) floor = seq;
+      }
     }
     return floor;
   }
@@ -4398,10 +4412,20 @@ class SpaceReplica implements ISpaceReplica {
           this.#ackedSeqsByLocalSeq.get(entry.localSeq) === upsert.seq
         )
       ) {
-        this.#shadowedForeignSeqs.set(
-          key,
-          Math.max(this.#shadowedForeignSeqs.get(key) ?? 0, upsert.seq),
-        );
+        // Record EVERY hidden seq (review thread r3739139487): the
+        // floor reads the doc's lowest — the wave's derivations read
+        // the materialized view from BEFORE the earliest hidden input,
+        // so W must not advance past it. The previous per-doc
+        // `Math.max` let a second foreign update under the same
+        // pending write raise the floor and pass the first (a
+        // derivedThrough claim over input nothing derived over), and
+        // buried a standing remove sentinel the same way.
+        let seqs = this.#shadowedForeignSeqs.get(key);
+        if (seqs === undefined) {
+          seqs = new Set();
+          this.#shadowedForeignSeqs.set(key, seqs);
+        }
+        seqs.add(upsert.seq);
       }
     }
     for (const remove of sync.removes) {
@@ -4414,7 +4438,12 @@ class SpaceReplica implements ISpaceReplica {
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1
         // holds W entirely until the shadow clears (see the field doc).
-        this.#shadowedForeignSeqs.set(key, 1);
+        let seqs = this.#shadowedForeignSeqs.get(key);
+        if (seqs === undefined) {
+          seqs = new Set();
+          this.#shadowedForeignSeqs.set(key, seqs);
+        }
+        seqs.add(1);
       }
     }
 
@@ -4755,11 +4784,14 @@ class SpaceReplica implements ISpaceReplica {
     // an own-echo upsert may have been mis-recorded as shadowed foreign
     // novelty before the ack above existed. A shadow whose seq IS this
     // accept's seq on a doc this accept wrote is that mis-record — no
-    // foreign commit can share the seq — so lift it, or a quiet serving
-    // loop would clamp W forever against its own echo.
+    // foreign commit can share the seq — so lift EXACTLY that seq (the
+    // set structure keeps genuine foreign shadows recorded around the
+    // echo intact — r3739139487), or a quiet serving loop would clamp
+    // W forever against its own echo.
     for (const operation of operations) {
       const key = docKey(operation.id, operation.scope);
-      if (this.#shadowedForeignSeqs.get(key) === applied.seq) {
+      const seqs = this.#shadowedForeignSeqs.get(key);
+      if (seqs !== undefined && seqs.delete(applied.seq) && seqs.size === 0) {
         this.#shadowedForeignSeqs.delete(key);
       }
     }

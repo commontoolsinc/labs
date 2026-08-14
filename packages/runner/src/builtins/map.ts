@@ -46,6 +46,7 @@ import {
   machineryRead,
 } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
+import { resumeSettleRunKind } from "./resume-republish.ts";
 import {
   type ElementRun,
   trackListSetupRollback,
@@ -130,11 +131,13 @@ export function map(
         .then(() =>
           !active ? undefined : runtime.editWithRetry((settleTx) => {
             if (!active || !result) return;
-            // Out-of-band recovery write — stamped bookkeeping for the
-            // same §3d reason as the resume-seed below.
+            // Out-of-band recovery write; the kind decision (bookkeeping
+            // on the serving posture, derivation on clients — the settle
+            // writes DERIVED content) is shared across map/filter/flatMap
+            // in resumeSettleRunKind (r3756175819).
             runtime.stampServerRun(settleTx, {
               actionId: `map/resume-settle/${parentCell.sourceURI}`,
-              kind: "bookkeeping",
+              kind: resumeSettleRunKind(runtime),
             });
             const raw = inputsCell.key("list").withTx(settleTx).resolveAsCell()
               .withTx(settleTx).getRaw();

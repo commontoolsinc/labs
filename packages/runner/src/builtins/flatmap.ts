@@ -48,6 +48,7 @@ import {
 import {
   createResumeRepublisher,
   type ElementContribution,
+  resumeSettleRunKind,
 } from "./resume-republish.ts";
 import {
   linkResolutionProbe,
@@ -167,11 +168,13 @@ export function flatMap(
         .then(() =>
           !active ? undefined : runtime.editWithRetry((settleTx) => {
             if (!active || !result) return;
-            // Out-of-band recovery write — stamped bookkeeping for the
-            // same §3d reason as the resume-seed below.
+            // Out-of-band recovery write; the kind decision (bookkeeping
+            // on the serving posture, derivation on clients — the settle
+            // writes DERIVED content) is shared across map/filter/flatMap
+            // in resumeSettleRunKind (r3756175819).
             runtime.stampServerRun(settleTx, {
               actionId: `flatMap/resume-settle/${parentCell.sourceURI}`,
-              kind: "bookkeeping",
+              kind: resumeSettleRunKind(runtime),
             });
             const { list } = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA)
               .withTx(settleTx).get();

@@ -2508,6 +2508,156 @@ Deno.test("memory v2 stacked commits: a REMOVE shadowed by a parked own write re
   }
 });
 
+Deno.test("memory v2 stacked commits: the shadow floor holds at the EARLIEST hidden seq — a later foreign update must not raise it, nor bury a remove sentinel, nor ride out on the own-echo repair (r3739139487)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // An accepted-and-PARKED own write masks the doc.
+    harness.model.setOutcome(2, { kind: "accept" });
+    const own = beginSet(harness, DOCS.A, valueFor("own"));
+    await assertResultOk(own.promise);
+
+    // TWO foreign updates integrate under it: seq 3 then seq 5. Every
+    // derivation of the next wave read the view from BEFORE seq 3, so
+    // the floor must stay 3 — the pre-fix per-doc max recorded 5 and
+    // let W advance to 4, a derivedThrough claim over an input nothing
+    // derived over.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 3, value: valueFor("foreign-3") }],
+    });
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 5, value: valueFor("foreign-5") }],
+    });
+    await clock.tick(10);
+    assertEquals(
+      shadowFloorOf(harness),
+      3,
+      "the floor must hold at the earliest hidden seq",
+    );
+
+    // Promote; the floor clears whole.
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "parked promotion at the marker",
+    );
+    assertEquals(shadowFloorOf(harness), undefined);
+
+    // The sentinel half: a shadowed REMOVE (sentinel 1) followed by a
+    // foreign upsert. Pre-fix the max buried the sentinel under the
+    // upsert's seq; the floor must stay 1 until the shadow clears.
+    harness.model.setOutcome(3, { kind: "accept" });
+    const own2 = beginSet(harness, DOCS.A, valueFor("own-2"));
+    await assertResultOk(own2.promise);
+    harness.pushSync({ removes: [{ id: DOCS.A }] });
+    await waitForCondition(
+      () => shadowFloorOf(harness) === 1,
+      "the shadowed remove's sentinel floor",
+    );
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 8, value: valueFor("foreign-8") }],
+    });
+    await clock.tick(10);
+    assertEquals(
+      shadowFloorOf(harness),
+      1,
+      "a later foreign upsert must not bury the remove sentinel",
+    );
+    harness.pushSync({ caughtUpLocalSeq: 3 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "second parked promotion at the marker",
+    );
+    assertEquals(shadowFloorOf(harness), undefined);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: the own-echo verdict repair lifts EXACTLY its seq — a genuine foreign shadow recorded beside the mis-record survives (r3739139487's set structure)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // Hold the verdict so the echo deterministically outruns it (the
+    // own-echo race test's setup), then land GENUINE foreign novelty
+    // beside the mis-record before the verdict resolves.
+    const gate = Promise.withResolvers<void>();
+    let received = false;
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: gate.promise,
+      onReceipt: () => {
+        received = true;
+      },
+    });
+    const own = beginSet(harness, DOCS.A, valueFor("own"));
+    await waitForCondition(() => received, "the commit to reach the wire");
+    // The mis-recorded own echo (seq 2) …
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 2, value: valueFor("own") }],
+    });
+    await waitForCondition(
+      () => shadowFloorOf(harness) === 2,
+      "the mis-recorded shadow (the race's setup)",
+    );
+    // … and genuine foreign novelty (seq 3) on the same doc, still
+    // under the pending own write.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 3, value: valueFor("foreign") }],
+    });
+    await clock.tick(10);
+    assertEquals(shadowFloorOf(harness), 2);
+
+    // The verdict lands: the repair removes EXACTLY seq 2. A scalar
+    // record folded 2 and 3 into one number and the repair either
+    // deleted both (losing the genuine shadow — W passes hidden
+    // foreign input) or neither (clamping forever on the echo).
+    gate.resolve();
+    await assertResultOk(own.promise);
+    assertEquals(
+      shadowFloorOf(harness),
+      3,
+      "the genuine foreign shadow must survive the own-echo repair",
+    );
+
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "parked promotion at the marker",
+    );
+    assertEquals(shadowFloorOf(harness), undefined);
+    expectVisible(harness, { A: valueFor("foreign") });
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: rejection round trip — verdict, repair frame, regenerate against the repaired base (CT-1927)", async () => {
   const harness = await markerHarness();
   try {

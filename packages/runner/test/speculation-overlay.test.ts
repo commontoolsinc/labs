@@ -690,6 +690,234 @@ describe("Phase 2 speculation overlay", () => {
     destination.close();
   });
 
+  it("a close() racing the seal neither resurrects entries nor enacts navigateTo; a REJECTED sealInto withdraws collected entries (threads r3739139501, r3739139536)", async () => {
+    // Destination-level, scripted: hold sealInto mid-flight, close()
+    // the overlay, then let the seal complete. Pre-fix the continuation
+    // registered the entry after close() had swept (a resurrected entry
+    // nothing would ever withdraw) and deferSealedEffects still flushed
+    // the allowlisted navigateTo of the never-accepted commit.
+    const verdicts: unknown[] = [];
+    const replica = {
+      sealNative: (
+        _native: unknown,
+        _source: unknown,
+        verdict: Promise<unknown>,
+      ) => {
+        verdict.then((value) => verdicts.push(value), () => {});
+        return {
+          localSeq: 7,
+          commit: {
+            localSeq: 7,
+            reads: { confirmed: [], pending: [] },
+            operations: [],
+          },
+          settled: verdict.then(() => undefined, () => undefined),
+        };
+      },
+      speculationRetirementView: () => ({
+        confirmedSeq: 0,
+        pendingLocalSeqs: [7],
+      }),
+      ackedSeqOf: () => undefined,
+      speculationAckObserver: undefined as (() => void) | undefined,
+    };
+    const runtime = {
+      storageManager: { open: () => ({ replica }) },
+      getCellFromLink: () => ({ sink: () => () => {} }),
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+
+    const gate = Promise.withResolvers<void>();
+    const sealTx = {
+      tx: {
+        sealInto: async (collector: {
+          sealSpaceCommit: (
+            space: MemorySpace,
+            native: unknown,
+            source: unknown,
+          ) => Promise<unknown>;
+        }) => {
+          await collector.sealSpaceCommit(space, {
+            operations: [],
+            preconditions: [],
+          }, undefined);
+          await gate.promise;
+          return { ok: {} };
+        },
+      },
+    } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(sealTx, {
+      actionId: "close-race",
+      kind: "derivation",
+    });
+    const sealResult = destination.seal(sealTx);
+    // close() lands while sealInto is parked on the gate.
+    destination.close();
+    gate.resolve();
+    expect((await sealResult).ok).toBeDefined();
+    // NOT resurrected — and the entry's verdict was resolved (a
+    // rollback withdrawal), not left dangling.
+    expect(destination.entryCount(space)).toBe(0);
+    expect(verdicts.length).toBe(1);
+    expect(
+      (verdicts[0] as { withdrawn?: unknown }).withdrawn,
+    ).toBeDefined();
+
+    // The effect half: a navigateTo of a derivation on the CLOSED
+    // overlay is owned AND dropped.
+    let flushed = 0;
+    const effectTx = {} as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(effectTx, {
+      actionId: "close-race-effect",
+      kind: "derivation",
+    });
+    const owned = destination.deferSealedEffects(effectTx, [{
+      id: "navigateTo:1",
+      kind: "navigateTo",
+      flush: () => {
+        flushed += 1;
+      },
+    }]);
+    expect(owned).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(flushed).toBe(0);
+
+    // The rejection half (r3739139536), on a fresh destination: a
+    // sealInto that REJECTS after collecting a space withdraws the
+    // collected entry and surfaces a CommitError.
+    const rejecting = new SpeculationOverlayDestination(runtime);
+    const verdictsBefore = verdicts.length;
+    const rejectTx = {
+      tx: {
+        sealInto: async (collector: {
+          sealSpaceCommit: (
+            space: MemorySpace,
+            native: unknown,
+            source: unknown,
+          ) => Promise<unknown>;
+        }) => {
+          await collector.sealSpaceCommit(space, {
+            operations: [],
+            preconditions: [],
+          }, undefined);
+          throw new Error("transport fell over mid-seal");
+        },
+      },
+    } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(rejectTx, {
+      actionId: "seal-reject",
+      kind: "derivation",
+    });
+    const rejected = await rejecting.seal(rejectTx);
+    expect(rejected.error).toBeDefined();
+    expect(rejected.error!.message).toContain("transport fell over");
+    expect(rejecting.entryCount(space)).toBe(0);
+    expect(verdicts.length).toBe(verdictsBefore + 1);
+    expect(
+      (verdicts[verdictsBefore] as { withdrawn?: unknown }).withdrawn,
+    ).toBeDefined();
+    rejecting.close();
+  });
+
+  it("a cross-space entry retires only when the READ-ONLY space's watermark also covers its reads there (thread r3739139506; stage-D's third bound)", async () => {
+    // Written space A, read-only space B: pre-fix the entry retired the
+    // moment A's watermark covered it, with B's input still uncovered.
+    const spaceB = "did:key:z6Mk-read-only-space-b" as MemorySpace;
+    const docB = "of:ro-input" as never;
+    const replicaFor = (confirmedSeq: number) => ({
+      sealNative: (
+        _native: unknown,
+        _source: unknown,
+        verdict: Promise<unknown>,
+      ) => ({
+        localSeq: 11,
+        commit: {
+          localSeq: 11,
+          reads: { confirmed: [], pending: [] },
+          operations: [],
+        },
+        settled: verdict.then(() => undefined, () => undefined),
+      }),
+      speculationRetirementView: () => ({
+        confirmedSeq,
+        pendingLocalSeqs: [] as number[],
+      }),
+      ackedSeqOf: () => undefined,
+      speculationAckObserver: undefined as (() => void) | undefined,
+    });
+    const replicaA = replicaFor(0);
+    // B's read doc sat at confirmed seq 6 when the run read it.
+    const replicaB = replicaFor(6);
+    const watermarkCallbacks = new Map<
+      MemorySpace,
+      (value: unknown) => void
+    >();
+    const runtime = {
+      storageManager: {
+        open: (which: MemorySpace) => ({
+          replica: which === spaceB ? replicaB : replicaA,
+        }),
+      },
+      getCellFromLink: (link: { space: MemorySpace }) => ({
+        sink: (callback: (value: unknown) => void) => {
+          watermarkCallbacks.set(link.space, callback);
+          return () => {};
+        },
+      }),
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+
+    const sealTx = {
+      tx: {
+        sealInto: async (collector: {
+          sealSpaceCommit: (
+            space: MemorySpace,
+            native: unknown,
+            source: unknown,
+          ) => Promise<unknown>;
+          sealSpaceReads?: (
+            space: MemorySpace,
+            reads: readonly { id: unknown; path: string[] }[],
+          ) => void;
+        }) => {
+          // The read-only handoff arrives BEFORE the written-space
+          // commit (v2-transaction.ts's order).
+          collector.sealSpaceReads?.(spaceB, [{ id: docB, path: [] }]);
+          await collector.sealSpaceCommit(space, {
+            operations: [],
+            preconditions: [],
+          }, undefined);
+          return { ok: {} };
+        },
+      },
+    } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(sealTx, {
+      actionId: "cross-space",
+      kind: "derivation",
+    });
+    expect((await destination.seal(sealTx)).ok).toBeDefined();
+    expect(destination.entryCount(space)).toBe(1);
+    // Both spaces got watermark sinks.
+    expect(watermarkCallbacks.has(space)).toBe(true);
+    expect(watermarkCallbacks.has(spaceB)).toBe(true);
+
+    // A's watermark covers the entry — but B's is still 0 < 6: the
+    // entry must NOT retire (pre-fix it did, exactly here).
+    watermarkCallbacks.get(space)!({ seq: 50 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(destination.entryCount(space)).toBe(1);
+
+    // B's watermark covers the read basis: NOW it retires (via the
+    // cross-space re-sweep — B's event re-evaluates A's entries).
+    watermarkCallbacks.get(spaceB)!({ seq: 6 });
+    await waitUntil(
+      () => destination.entryCount(space) === 0,
+      "the cross-space entry to retire once B covers",
+      5_000,
+    );
+    destination.close();
+  });
+
   it("an effectful builtin reached by client speculation never fires egress: pending renders, zero client fetch calls (README §3.5's never-execute rule)", async () => {
     // Client-only bring-up posture (no serving host): the flag is set
     // explicitly, and the client's fetch stub must never be called.

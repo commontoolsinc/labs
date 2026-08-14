@@ -1252,12 +1252,22 @@ export class Runner {
     `${MemorySpace}/${ScopeKey}/${URI}`,
     Set<DeferredCancelOwnership>
   >();
-  // Map whose key is the result cell's full key, and whose values are a hash
+  // Two-level memo of what each result cell holds: outer key the result
+  // DOC (space/id), inner key the resolved scope INSTANCE, value a hash
   // of the pattern's encodable form -- what `writeJavaScriptActionResult`
-  // compares to decide whether a returned sub-pattern has changed.
+  // compares to decide whether a returned sub-pattern has changed. The
+  // inner key is the SAME per-run resolved ScopeKey that selects the
+  // byScope result cell (review thread r3739139481): a serving runtime
+  // materializes one child per demanded instance, and a doc-level (or
+  // service-identity-resolved) key made the SECOND demanded instance
+  // look "unchanged" and skip its child materialization. The outer
+  // doc key is what change notifications can name (they carry scope by
+  // NAME, which cannot address per-run instances), so eviction drops
+  // the whole doc's entry -- over-eviction across instances is safe:
+  // re-preparing an unchanged pattern is idempotent.
   private resultPatternCache = new Map<
-    `${MemorySpace}/${ScopeKey}/${URI}`,
-    string
+    `${MemorySpace}/${URI}`,
+    Map<ScopeKey, string>
   >();
   // Invalidates asynchronous start/resume continuations when stopAll() begins.
   // A later explicit start captures the new epoch and may proceed normally.
@@ -1295,29 +1305,21 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
-            // Same key construction as getDocKey (site 2's cache): the
-            // notification names the scope by NAME; the runtime's own
-            // identity maps it to the same instance key the cache entry
-            // was stored under. NOTE (stage E, deliberate healing):
-            // pre-re-keying, getDocKey interpolated the scope raw — an
-            // unscoped cell's cache entry carried an "undefined" scope
-            // segment this delete (which normalized) could never name,
-            // so eviction silently missed real unscoped entries. The
+            // The notification names the DOC (scope arrives by NAME,
+            // which cannot address a per-run scope instance on a
+            // serving runtime — r3739139481), so eviction drops the
+            // doc's WHOLE entry: every instance's memo clears, and the
+            // over-eviction is safe — re-preparing an unchanged
+            // pattern commits no differing bytes
+            // (writeJavaScriptActionResult's unchanged path is
+            // idempotent). This also keeps the stage-E healing: no
+            // scope segment in the key means no raw-vs-normalized
+            // mismatch can make eviction silently miss an entry. The
             // eviction-on-notification CONTRACT is what the storage
             // subscription exists for and is pinned by the "clears
-            // cached patterns when storage notifies of changes" test
-            // (with normalized keys); re-keying makes the WRITER
-            // conform to that contract. The extra work on the healed
-            // path — re-preparing an unchanged pattern — commits no
-            // differing bytes (writeJavaScriptActionResult's unchanged
-            // path is idempotent).
+            // cached patterns when storage notifies of changes" test.
             this.resultPatternCache.delete(
-              `${space}/${
-                resolveScopeKey(
-                  change.address.scope,
-                  this.runtime.scopeKeyIdentity,
-                )
-              }/${change.address.id}`,
+              `${space}/${change.address.id}`,
             );
           }
         } else if (notification.type === "reset") {
@@ -5623,12 +5625,25 @@ export class Runner {
     const resultPatternKey = hashStringOf(
       flattenBuilderArtifacts(resultPattern),
     );
-    const cacheKey = this.getDocKey(resultCell);
-    const previousResultPatternKey = this.resultPatternCache.get(cacheKey);
+    // Keyed doc-then-INSTANCE, the instance being the SAME per-run
+    // resolved key that selected the byScope cell above (r3739139481):
+    // a doc-level or service-identity-resolved key made the second
+    // demanded instance's run read the first's memo as "unchanged" and
+    // skip its child materialization.
+    const resultDocLink = resultCell.getAsNormalizedFullLink();
+    const cacheDocKey =
+      `${resultDocLink.space}/${resultDocLink.id}` as `${MemorySpace}/${URI}`;
+    const previousResultPatternKey = this.resultPatternCache.get(cacheDocKey)
+      ?.get(effectiveOutputScopeKey);
     const patternUnchanged = previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      this.resultPatternCache.set(cacheKey, resultPatternKey);
+      let instanceMemos = this.resultPatternCache.get(cacheDocKey);
+      if (instanceMemos === undefined) {
+        instanceMemos = new Map();
+        this.resultPatternCache.set(cacheDocKey, instanceMemos);
+      }
+      instanceMemos.set(effectiveOutputScopeKey, resultPatternKey);
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
@@ -5654,8 +5669,10 @@ export class Runner {
         // A rollback carries a release's authority, not a stop's: it lets go
         // of the registration this materialization installed and is not
         // authoritative over a lifetime or a start it does not own.
-        if (this.resultPatternCache.get(cacheKey) === resultPatternKey) {
-          this.resultPatternCache.delete(cacheKey);
+        const memos = this.resultPatternCache.get(cacheDocKey);
+        if (memos?.get(effectiveOutputScopeKey) === resultPatternKey) {
+          memos.delete(effectiveOutputScopeKey);
+          if (memos.size === 0) this.resultPatternCache.delete(cacheDocKey);
         }
         this.releaseChild(resultCell, undefined);
       });

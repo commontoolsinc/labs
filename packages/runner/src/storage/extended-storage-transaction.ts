@@ -2215,6 +2215,18 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.options.childCellTx ?? this.wrapped;
   }
 
+  /**
+   * The wrapped transaction, for side-table lookups keyed on tx object
+   * identity (review thread r3739139477): the wave run context is a
+   * WeakMap keyed on the ORIGINAL transaction, so a scoped read through
+   * a `sample()`/`sink()` wrapper missed the served run's
+   * demand-supplied identity and resolved against the service session.
+   * `waveRunContextOf` walks this chain.
+   */
+  get wrappedTransaction(): IExtendedStorageTransaction {
+    return this.wrapped;
+  }
+
   get tx(): IStorageTransaction {
     return this.wrapped.tx;
   }

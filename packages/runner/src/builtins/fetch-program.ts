@@ -176,16 +176,20 @@ export function fetchProgram(
     if (!cellsInitialized || inFlight.size === 0) return;
 
     const tx = runtime.edit();
-    // Teardown tx on piece stop — no scheduler run stamps it;
-    // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
-    // serving runtime releases this replica's claims instead of
-    // refusing the unstamped seal. No-op off the serving posture.
-    runtime.stampServerRun(tx, {
-      actionId: `fetchProgram/teardown/${parentCell.sourceURI}`,
-      kind: "bookkeeping",
-    });
 
     try {
+      // Teardown tx on piece stop — no scheduler run stamps it;
+      // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+      // serving runtime releases this replica's claims instead of
+      // refusing the unstamped seal. No-op off the serving posture.
+      // INSIDE the try (review thread r3756175831): a throwing stamper
+      // must route through the abort path below like any other failure
+      // here, not leak the manually-opened tx and skip claim release.
+      runtime.stampServerRun(tx, {
+        actionId: `fetchProgram/teardown/${parentCell.sourceURI}`,
+        kind: "bookkeeping",
+      });
+
       // If we were fetching, transition back to idle
       const currentCache = cache.withTx(tx).get();
       const updates: Record<string, FetchCacheEntry> = {};

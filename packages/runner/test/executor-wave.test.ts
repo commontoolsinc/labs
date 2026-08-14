@@ -58,8 +58,14 @@ import {
   WaveAccumulator,
   type WaveCommitRejection,
   type WaveCommitSink,
+  waveRunContextOf,
   waveSettlementOf,
 } from "../src/executor/wave.ts";
+import {
+  createChildCellTransaction,
+  createDuplicateWorkTransaction,
+  createNonReactiveTransaction,
+} from "../src/storage/extended-storage-transaction.ts";
 import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
 import {
   effectCompletionKeyOf,
@@ -2003,6 +2009,47 @@ describe("stage D seal-into-wave", () => {
       actionScopeKey: "space",
     });
     expect(misKeyed).toEqual([]);
+  });
+
+  it("stage F: M1 — the run context survives sample()/sink() transaction wrappers (r3739139477: the stamp is on the ORIGINAL tx; a wrapped scoped read must not fall back to the service identity)", async () => {
+    const tx = runtime.edit();
+    const context = {
+      actionId: "wrapped-read",
+      kind: "derivation" as const,
+      scopeKeyIdentity: {
+        principal: "did:key:wrap-alice",
+        sessionId: "alice-s1",
+      },
+      actionScopeKey: resolveScopeKey("user", {
+        principal: "did:key:wrap-alice",
+        sessionId: "alice-s1",
+      }),
+    };
+    stampWaveRunContext(tx, context);
+    // The three wrapper shapes Cell.sample()/Cell.sink() and the
+    // duplicate-work comparator mint. Pre-fix, waveRunContextOf keyed
+    // strictly on object identity and returned undefined for all of
+    // them — schema.ts's traversal context then resolved scoped reads
+    // against runtime.scopeKeyIdentity (the SERVICE session on a
+    // serving runtime): wrong scope instance, tracker keys recorded
+    // under the service session.
+    expect(waveRunContextOf(createNonReactiveTransaction(tx)))
+      .toBe(context);
+    expect(waveRunContextOf(createDuplicateWorkTransaction(tx)))
+      .toBe(context);
+    expect(waveRunContextOf(createChildCellTransaction(tx, runtime.edit())))
+      .toBe(context);
+    // Nested wrapping (sample() inside a sink() callback) unwraps too.
+    expect(
+      waveRunContextOf(
+        createNonReactiveTransaction(createDuplicateWorkTransaction(tx)),
+      ),
+    ).toBe(context);
+    // An UNSTAMPED tx stays undefined through a wrapper — the walk
+    // must not invent a context.
+    expect(waveRunContextOf(createNonReactiveTransaction(runtime.edit())))
+      .toBeUndefined();
+    await tx.abort();
   });
 
   it("stage F: a bookkeeping PATCH racing a DISJOINT authored patch REBASES and commits (the live rebase arm)", async () => {

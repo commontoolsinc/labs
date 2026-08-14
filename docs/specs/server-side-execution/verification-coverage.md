@@ -927,7 +927,14 @@ sentence, coverage below):
   kind at the runtime's posture-gated stamping seam
   (`stampServerRun` — a no-op on the OFF arm; under client
   speculation bookkeeping commits exactly as unstamped txs do), for
-  the full audited class: the six list-builtin recovery writes, the
+  the full audited class: the six list-builtin recovery writes
+  (2026-08-13 amendment, review thread r3756175819: the three
+  resume-SETTLE writes are bookkeeping ONLY on the serving posture —
+  on a flag-ON client they write DERIVED content and now stamp
+  `derivation`, diverting to the overlay; the shared decision is
+  `resumeSettleRunKind` in resume-republish.ts, unit-pinned; the
+  three resume-SEEDs stay bookkeeping on both postures as
+  container-materialization, setup-class under the scheduler tell), the
   shared list republisher, the compile-cache writebacks + pattern
   annotation (pattern-manager), the piece
   instantiate/start/repair/run-synced/pointer-roll-forward family
@@ -935,9 +942,12 @@ sentence, coverage below):
   interval tick / error-UI / sidecar-run / ready writes, and the
   fetch / fetchProgram / llmDialog teardown claims-release txs.
   NOT stamped, per existing rulings: llm partial-stream writes
-  (partials never become commits — the serving posture now SKIPS
-  the write before minting a tx, the same ruled outcome the
-  refusal produced, keeping the new counter clean),
+  (partials never become commits — the serving posture UNDER THE
+  FLAG now SKIPS the write before minting a tx, the same ruled
+  outcome the refusal produced, keeping the new counter clean; the
+  2026-08-13 round scoped the skip to `serverExecution === true` —
+  posture alone had dropped OFF-arm partials, an unrecorded OFF-arm
+  delta, review thread r3756175835),
   compile-and-run's async writebacks (stage-G deferral, documented
   in-file), and llm-dialog's pin/unpin/updateArgument/invoke
   tool-call writes (ruled completion-/handler-class — Phase-3

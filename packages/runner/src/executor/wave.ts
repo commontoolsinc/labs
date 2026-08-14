@@ -165,7 +165,22 @@ export function stampWaveRunContext(
 export function waveRunContextOf(
   tx: IExtendedStorageTransaction,
 ): WaveRunContext | undefined {
-  return waveRunContexts.get(tx);
+  // Walk the wrapper chain (review thread r3739139477): the stamp is
+  // keyed on the ORIGINAL transaction object, but scoped reads through
+  // `Cell.sample()`/`Cell.sink()` arrive on a TransactionWrapper — a
+  // different object — so a direct lookup missed the served run's
+  // demand-supplied identity and the read resolved against the service
+  // session (wrong scope instance, traversal keys recorded under the
+  // service session). Duck-typed to avoid a storage-layer value import.
+  let current: IExtendedStorageTransaction | undefined = tx;
+  while (current !== undefined) {
+    const context = waveRunContexts.get(current);
+    if (context !== undefined) return context;
+    current = (current as {
+      wrappedTransaction?: IExtendedStorageTransaction;
+    }).wrappedTransaction;
+  }
+  return undefined;
 }
 
 // The DURABLE-acceptance settlement of a tx sealed into a wave: the seal
