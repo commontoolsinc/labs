@@ -808,29 +808,20 @@ export default pattern<TopicInput, TopicOutput>(
      */
     const mention = action<MentionEvent>(({ topic }) => {
       if (!topic) rejectMutation("mention", "topic must be a reference");
-      // A mergeable append, like every other list this pattern writes:
-      // concurrent mentions from different people all land. Nothing is minted
-      // and nothing is deduplicated — two entries naming one piece are one edge
-      // to the board's pivot, which asks whether ANY mention names a topic.
-      mentioned.push(topic);
+      // A set-add, not an append: referencing the same piece twice is one
+      // reference. Mergeable, so concurrent mentions of distinct pieces all
+      // land and a repeated one is a no-op against durable state.
+      mentioned.addUnique(topic);
     });
 
-    /**
-     * Stop referencing a piece — every entry naming it, since a caller means
-     * "not that one" rather than "not that one particular append".
-     *
-     * Each slot is cleared where it sits. Rebuilding the list and setting it
-     * back would carry every survivor through a read, and a read of a
-     * reference resolves it to a plain object — flattening the links that make
-     * the remaining mentions edges at all.
-     */
+    /** Stop referencing a piece — every entry naming it. */
     const unmention = action<UnmentionEvent>(({ topic }) => {
       if (!topic) rejectMutation("unmention", "topic must be a reference");
-      const count = mentioned.get().length;
-      for (let at = 0; at < count; at++) {
-        const slot = mentioned.key(at);
-        if (equals(topic, slot)) slot.set(undefined);
-      }
+      // `removeByValue`, not `remove` or `removeAll`: those two rebuild the
+      // array and set it back, which is both a clobbering write and the shape
+      // that flattens surviving references. This one resolves against durable
+      // state, so concurrent removals of distinct entries merge.
+      mentioned.removeByValue(topic);
     });
 
     // --- UI-side actions (close over session drafts) ---
