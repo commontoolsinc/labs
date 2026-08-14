@@ -161,14 +161,26 @@ try {
       activeEntry?: unknown;
       loadedPiece?: unknown;
       idle?: () => Promise<void>;
+      commitError?: Error;
     } = {},
   ) => {
     const sends: unknown[] = [];
+    const tx = {
+      abort: () => sends.push("abort"),
+      commit: () => {
+        sends.push("commit");
+        return Promise.resolve(
+          overrides.commitError === undefined ? {} : {
+            error: {
+              reason: overrides.commitError,
+            },
+          },
+        );
+      },
+    };
     const updater = {
       runtime: {
-        edit: () => ({
-          commit: () => sends.push("commit"),
-        }),
+        edit: () => tx,
       },
       withTx: (tx: unknown) => ({
         send: (value: unknown) => sends.push({ tx, value }),
@@ -215,6 +227,14 @@ try {
   await runPiece({ pieceId: PIECE_ID });
   assertEquals(state.getCalls(), 1);
   assertEquals(state.sends.length, 4);
+
+  state = setRunState({ commitError: new Error("commit rejected") });
+  await assertRejects(
+    () => runPiece({ pieceId: PIECE_ID }),
+    Error,
+    "commit rejected",
+  );
+  assertEquals(state.sends.length, 2);
 
   setWorkerStateForTesting({
     pieces: {} as never,

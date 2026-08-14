@@ -317,8 +317,21 @@ export async function runPiece(data: RunData): Promise<void> {
 
     // Execute the background updater
     const tx = updater.runtime.edit();
-    updater.withTx(tx).send({});
-    tx.commit(); // No retry, since events already do that
+    let commitStarted = false;
+    try {
+      updater.withTx(tx).send({});
+      commitStarted = true;
+      const { error } = await tx.commit();
+      if (error) {
+        if ("reason" in error && error.reason instanceof Error) {
+          throw error.reason;
+        }
+        throw error;
+      }
+    } catch (error) {
+      if (!commitStarted) tx.abort(error);
+      throw error;
+    }
 
     // Wait for any pending operations to complete
     if (runtime) {

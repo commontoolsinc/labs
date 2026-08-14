@@ -2002,7 +2002,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (readOnly) {
       this.tx.clearReadOnly?.();
     }
-    if (!readOnly) {
+    const status = this.tx.status?.().status;
+    if (!readOnly && (status === undefined || status === "ready")) {
       // Flow-label relevance is computed, not caller-marked: a tx that
       // observed or wrote a labeled doc derives labels even when nothing
       // called markCfcRelevant (S16 — value-copy laundering happens in
@@ -2041,7 +2042,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       if (
         this.#cfcState.relevant &&
-        this.#cfcState.enforcementMode === "observe" &&
+        this.#cfcState.enforcementMode !== "disabled" &&
         this.#cfcState.prepare.status === "unprepared"
       ) {
         this.prepareCfc();

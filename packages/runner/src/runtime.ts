@@ -1789,6 +1789,9 @@ export class Runtime {
   }
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
+    if (tx.status().status !== "ready") {
+      return;
+    }
     const state = tx.getCfcState();
     if (state.enforcementMode === "disabled") {
       // A vouched ingest still needs its provenance mark minted even where CFC

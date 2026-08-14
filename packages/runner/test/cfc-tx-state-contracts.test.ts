@@ -5,6 +5,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { readOnlyCfcView } from "../src/storage/extended-storage-transaction.ts";
+import { startReactiveActionCommit } from "../src/scheduler/run.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-tx-state-contracts");
 
@@ -22,6 +23,8 @@ describe("CFC tx state contracts", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
+      cfcFlowLabels: "off",
+      cfcWriteFloor: "off",
     });
     try {
       await fn(runtime, runtime.edit() as ExtendedStorageTransaction);
@@ -45,6 +48,27 @@ describe("CFC tx state contracts", () => {
       expect(tx.getCfcState().flowLabelsMode).toBe("persist");
       await tx.commit();
     });
+  });
+
+  it("repeated commits delegate without reading completed CFC state", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+    try {
+      const tx = runtime.edit() as ExtendedStorageTransaction;
+      runtime.getCell(signer.did(), "tx-contracts-repeat-commit", undefined, tx)
+        .set({ value: 1 });
+      const first = await tx.commit();
+      expect(first.error).toBeUndefined();
+      expect((await tx.commit()).error?.name).toBe(
+        "StorageTransactionCompleteError",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 
   it("the sink confidentiality ceiling is write-once (a later call is ignored)", async () => {
@@ -170,6 +194,24 @@ describe("CFC tx state contracts", () => {
         (prepare as { status: string; reasons: readonly string[] }).reasons,
       ).toContainEqual("write-after-prepare");
       await tx.commit();
+    });
+  });
+
+  it("prepares a reactive action after its commit bookkeeping", async () => {
+    await withTx(async (runtime, tx) => {
+      const result = await startReactiveActionCommit({ runtime, tx }, {
+        beforeCommit: () => {
+          tx.markCfcRelevant("reactive-commit-bookkeeping");
+          runtime.getCell(
+            signer.did(),
+            "tx-contracts-reactive-commit",
+            undefined,
+            tx,
+          ).set({ v: 1 });
+        },
+      });
+      expect(result.error).toBeUndefined();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
     });
   });
 

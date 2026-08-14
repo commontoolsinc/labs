@@ -99,8 +99,8 @@ export function startReactiveActionCommit(state: {
   readonly beforeCommit?: () => void;
 } = {}): ReturnType<IExtendedStorageTransaction["commit"]> {
   logger.timeStart("scheduler", "run", "commit");
-  state.runtime.prepareTxForCommit(state.tx);
   options.beforeCommit?.();
+  state.runtime.prepareTxForCommit(state.tx);
   const commitPromise = state.tx.commit();
   logger.timeEnd("scheduler", "run", "commit");
   return commitPromise;
@@ -127,7 +127,6 @@ export function watchReactiveActionCommit(state: {
       state.offBudgetRetries.delete(state.action);
       return;
     }
-
     logger.info(
       "schedule-run-error",
       "Error committing transaction",

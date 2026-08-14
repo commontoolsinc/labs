@@ -900,7 +900,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects relevant unprepared commits in enforcing modes", async () => {
+  it("automatically prepares relevant commits", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
@@ -914,9 +914,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }, { ok: true });
 
       const result = await tx.commit();
-      expect(result.error?.message).toContain(
-        "relevant transaction was not prepared",
-      );
+      expect(result.ok).toBeDefined();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -1015,22 +1014,31 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("rejects relevant unprepared commits in enforce-strict mode", async () => {
+  it("automatically enforces policy on relevant commits", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-strict");
-      tx.markCfcRelevant("test");
-      tx.writeValueOrThrow({
-        space: signer.did(),
-        scope: "space",
-        id: "of:cfc-enforce-strict",
-        path: [],
-      }, { ok: true });
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-enforce-strict",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: { requiredIntegrity: ["trusted"] },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "untrusted" });
 
       const result = await tx.commit();
       expect(result.error?.message).toContain(
-        "relevant transaction was not prepared",
+        "write floor failed",
       );
     } finally {
       await runtime.dispose();
