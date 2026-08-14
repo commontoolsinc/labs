@@ -1255,6 +1255,43 @@ describe("executePieceCallable", () => {
     expect(result.invocation?.result).toBe(bytes);
   });
 
+  it("keeps a result whose stored form is non-empty when it materializes keyless", async () => {
+    // The stored-vs-materialized divergence the presence check exists for: a
+    // FabricInstance materializes as a query-result proxy over an empty
+    // ordinary stub — plain-looking, keyless — while its STORED form is the
+    // non-empty codec shape. Presence reads the stored form, so the result
+    // survives. (The live suite pins the same seam through a real runtime;
+    // this is the harness-level mirror, and what `receiptRaw` models.)
+    const proxyLikeStub = {};
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "exportLink",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: proxyLikeStub,
+      receiptRaw: { "link@1": { id: "of:fid1:target", path: [] } },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "exportLink",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocation: { id: "inv-stored-form", session: callerSession },
+      },
+    );
+
+    expect(result.invocation?.status).toBe("settled");
+    expect(result.invocation?.result).toBe(proxyLikeStub);
+  });
+
   it("sends without options and returns no invocation when no id is supplied", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",

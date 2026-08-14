@@ -17,6 +17,8 @@ export function echoImported(
 ): PingResult {
   return { echoed: event.word };
 }
+// deno-lint-ignore no-explicit-any
+export const echoAny: any = (event: Ping) => ({ echoed: event.word });
 `;
 
 const MAIN = `import { cell, handler, pattern, Stream } from "commonfabric";
@@ -64,6 +66,31 @@ describe("schema-first-imported-callback", () => {
     expect(call).toBeDefined();
     expect(call.arguments.length).toBe(4);
     expect(call.arguments[2].getText(module)).toBe("echoImported");
+    expect(call.arguments[3].getText(module)).toContain("resultSchema");
+  });
+
+  it("recognizes an imported callback whose type degraded to `any`", async () => {
+    // `any` reports no call signatures and the syntactic resolver cannot
+    // cross modules, so neither semantic nor local recognition sees this
+    // callback — the declaration fallback does: the aliased symbol's
+    // initializer is function-like. Without it the injection prepends
+    // schemas and displaces the callback.
+    const main = MAIN.replace(
+      "import { echoImported, type Ping, type PingResult }",
+      "import { echoAny, echoImported, type Ping, type PingResult }",
+    ).replace(
+      "  echoImported,\n);",
+      "  echoAny,\n);",
+    );
+    const output = await transformFiles({
+      "/main.tsx": main,
+      "/helpers.ts": HELPERS,
+    }, { types: COMMONFABRIC_TYPES });
+    const module = parseModule(output["/main.tsx"]);
+    const [call] = callsNamed(module, "handler");
+    expect(call).toBeDefined();
+    expect(call.arguments.length).toBe(4);
+    expect(call.arguments[2].getText(module)).toBe("echoAny");
     expect(call.arguments[3].getText(module)).toContain("resultSchema");
   });
 });

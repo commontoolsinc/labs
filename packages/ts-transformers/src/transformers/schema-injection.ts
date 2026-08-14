@@ -2534,9 +2534,11 @@ function resolveLiftAppliedInputAndCallback(
  * previous round's syntax list missed (inline arrow, const reference,
  * function declaration, property access); asking the type ends the family,
  * because a schema is never callable and a callback always is, however it
- * is written. The syntactic resolver stays as a fast path and as the
- * backstop for a callback whose type degraded to `any`, which reports no
- * call signatures.
+ * is written. Two backstops cover the type information going missing
+ * rather than a spelling: the syntactic resolver catches a local
+ * `any`-typed callback (no call signatures to ask), and the declaration
+ * fallback catches an IMPORTED one — the resolver cannot cross modules,
+ * but the aliased symbol's declaration still says what the value is.
  */
 function isCallbackReference(
   expression: ts.Expression | undefined,
@@ -2544,8 +2546,21 @@ function isCallbackReference(
 ): boolean {
   if (!expression) return false;
   if (resolveCallbackFunctionExpression(expression, checker)) return true;
-  const type = checker.getTypeAtLocation(unwrapExpression(expression));
-  return type.getCallSignatures().length > 0;
+  const unwrapped = unwrapExpression(expression);
+  const type = checker.getTypeAtLocation(unwrapped);
+  if (type.getCallSignatures().length > 0) return true;
+  if (!ts.isIdentifier(unwrapped)) return false;
+  let symbol = checker.getSymbolAtLocation(unwrapped);
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration === undefined) return false;
+  if (ts.isFunctionDeclaration(declaration)) return true;
+  return ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    (ts.isArrowFunction(declaration.initializer) ||
+      ts.isFunctionExpression(declaration.initializer));
 }
 
 function resolveFunctionLikeExpression(
