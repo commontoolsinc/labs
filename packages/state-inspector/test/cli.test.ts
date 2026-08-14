@@ -6,7 +6,7 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
-import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import { main } from "../cli.ts";
@@ -53,7 +53,7 @@ function seed(path: string) {
     "of:a",
     1,
     "set",
-    jsonFromValue({
+    jsonFromFabricValue({
       value: {
         n: 1,
         deep,

@@ -11,7 +11,7 @@ import {
   toUnpaddedBase64urlFromText,
 } from "@commonfabric/utils/base64url";
 import { EmptyReconstructionContext } from "./codec-common/index.ts";
-import { jsonFromValue, valueFromJson } from "./codecs.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "./codecs.ts";
 import type { FabricValue } from "./fabric-value.ts";
 
 /**
@@ -65,7 +65,7 @@ export function isFabricDataUri(id: string): boolean {
  * other preparation of `value`; callers hand it a ready `FabricValue`.
  */
 export function dataUriFromValue(value: FabricValue): UriString {
-  const payload = toUnpaddedBase64urlFromText(jsonFromValue(value));
+  const payload = toUnpaddedBase64urlFromText(jsonFromFabricValue(value));
   return `data:${DATA_URI_MEDIA_TYPE},${payload}` as UriString;
 }
 
@@ -150,7 +150,7 @@ export function extractDataUriPayloadText(
  *   it is empty or is bare JSON.
  */
 export function valueFromDataUriPayloadText(text: string): FabricValue {
-  return valueFromJson(text, dataUriReconstructionContext);
+  return fabricFromJsonValue(text, dataUriReconstructionContext);
 }
 
 /**

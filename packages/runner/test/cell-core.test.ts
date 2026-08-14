@@ -1256,7 +1256,7 @@ describe(`Cell result-meta round-trip`, () => {
       // Commit, then start a fresh tx. This forces the `path: ["result"]`
       // read to go through the storage layer (rather than the in-tx
       // novelty cache, which short-circuits serialization), so
-      // `valueFromJson` runs as the actual decode step.
+      // `fabricFromJsonValue()` runs as the actual decode step.
       await tx.commit();
       tx = runtime.edit();
 
