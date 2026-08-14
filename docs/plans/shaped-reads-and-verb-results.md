@@ -96,7 +96,7 @@ than each item.
 
 There are two kinds of thing a reader's schema may **not** contain, for two
 different reasons (`FORBIDDEN_PROJECTION_KEYS` and
-`UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/piece-get-transform.ts`). Both
+`UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/cell-selection.ts`). Both
 are checked when a full schema is parsed — the inline and `@file` forms. The
 concise form reaches neither check; what keeps it from expressing them is its
 identifier grammar, which has no way to write a keyword at all. So the two
@@ -353,25 +353,25 @@ second one.
 
 ### Receipts carry a descriptive schema
 
-A receipt is an ordinary cell, and like any other it should say what it holds.
-Today it does not: receipts are created with no schema argument
-(`handleJavaScriptHandlerResult`, `packages/runner/src/runner.ts`), so the
-stored document carries an empty `schema` field. Two consequences follow, and
-both are the read layer's mechanisms failing to engage rather than anything
-special about receipts:
+A receipt is an ordinary cell, and like any other it says what it holds — for
+a plain result. `handleJavaScriptHandlerResult`
+(`packages/runner/src/runner.ts`) derives a structural description from the
+value it has just written and stores it in the durable schema metadata —
+`setMetaRaw("schema", …)`, the field `piece get` reads back through
+`asSchema`, not the schema argument to `getCell`, which seeds the link scope
+and the in-memory cell only. The receipt is minted before the handler runs,
+so there is no shape at that moment; the schema is written at result-write
+time, in the same create-only transaction, from the value the runtime is
+already holding. A verb returning anything reactive gets no schema at all —
+deriving a shape needs a settled value, and a launched result has none when
+the receipt is written — so for exactly those receipts the read layer's
+mechanisms still fail to engage:
 
 - The fetch narrowing above cannot engage, so a shape is applied after
   everything has been loaded.
 - A caller's shape is matched against the runtime value rather than against a
-  declaration — field names that happen to coincide, rather than a subtree of a
-  declared structure.
-
-Giving the receipt cell a schema addresses both. It goes in the durable schema
-metadata — `setMetaRaw("schema", …)`, the field `piece get` reads back through
-`asSchema` — not the schema argument to `getCell`, which seeds the link scope
-and the in-memory cell only. The receipt is minted before the handler runs, so
-there is no shape at that moment; it is written at result-write time, in the
-same create-only transaction, from the value the runtime is already holding.
+  declaration — field names that happen to coincide, rather than a subtree of
+  a declared structure.
 
 What is recorded is **descriptive**: what this receipt holds, never a contract
 constraining anything later. That is a safe thing for a write-once document,

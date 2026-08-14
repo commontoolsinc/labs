@@ -29,17 +29,19 @@ pattern, piece, verb, receipt, schema, and shape. Four more terms appear here:
 | Term | What it is |
 | --- | --- |
 | **Handler** (or `action`) | The function body that runs when a verb is invoked. |
-| **Invocation** | One call to one verb. Its id is the idempotency key: replaying a settled id returns the original outcome instead of executing again. |
+| **Invocation** | One call to one verb. Its id is the idempotency key: replaying a settled id returns the original outcome without committing again — the handler body re-runs and loses the create-only receipt race, so effects outside the transaction can repeat. |
 | **`of:`** | The URI scheme on an entity id (`of:fid1:<hash>`). From the memory protocol's fact record — `the` (type) / `of` (entity) / `is` (value) — so an entity id names the subject a fact is *of*. The unkinded default. |
 | **`computed:`** | The same slot, marking an entity whose contents are re-derivable. Reduced to a bare hash it aliases its `of:` sibling, which is a different entity — the reason `--piece` must refuse it rather than strip it. |
 
 ## The call-specific problem
 
-**There is no durable readback.** A verb's result exists in the invocation
-receipt, but the only way to re-read it is to re-invoke with the same id — which
-returns the original outcome, yet re-runs the handler body, so effects outside
-the transaction repeat. A caller that dispatched detached, or that lost the
-response, holds no address at all, and nothing in the receipt is enumerable.
+**Durable readback exists; a lost address does not recover.** Every call
+envelope — the detached `--no-wait` exit included — publishes the receipt's
+address, and re-reading the outcome is an ordinary cell read against it. What
+remains unsolved is the caller who no longer holds that address: nothing in
+the receipt is enumerable, and the only fallback is a same-id replay — which
+returns the original outcome, yet re-runs the handler body, so effects
+outside the transaction repeat.
 
 ## What it looks like
 
@@ -183,13 +185,13 @@ reader **subscribes and wakes when it appears**; it must not poll
 bounds a caller's own patience, as on `cf piece call`.
 
 `tx.handlingReceiptLink` is set during handling — before the commit, and only
-when receipts are enabled — so `--no-wait` *can* return `receipt`; that is what
-migration step 2 adds. Today its exit returns
-`{invocation, status: "committed", deduplicated?}` and no receipt field. It also
-returns the invocation id — minted or supplied — both on stdout and, once, on
-stderr at the dispatch phase. So collect-later does **not** require supplying an
-id. Supplying one buys something narrower: it is known *before* the call, so it
-survives
+when receipts are enabled — which is what lets `--no-wait` return `receipt`:
+its exit is `{invocation, status: "committed", deduplicated?, receipt}`, the
+address published before the outcome was read (migration step 2, landed as
+#5694). It also returns the invocation id — minted or supplied — both on
+stdout and, once, on stderr at the dispatch phase, with the session announced
+beside it. So collect-later does **not** require supplying an id. Supplying
+one buys something narrower: it is known *before* the call, so it survives
 losing the process's output entirely.
 
 ### Retry versus readback
@@ -257,54 +259,36 @@ not be materialized should still yield its address rather than an error, so a
 caller retains the part it can act on. Whether that degradation is uniform, and
 what is named on stderr, is the read layer's call.
 
-## Teaching `--piece` the entity URI
+## `--piece` and the entity URI
 
-`--piece` gains the entity-URI form, so an address emitted by one command is
-accepted by the next without reshaping. This is the one change here that reaches
-beyond the CLI, and it is a bug fix rather than a new capability.
+`--piece` accepts the entity-URI form (migration step 1, landed as #5459), so
+an address emitted by one command is accepted by the next without reshaping.
 
 `isSlugAddress` is `!value.includes(":")`, so the input forms are unambiguous:
 
-| Form | Example | `--piece` today | After | Denotes |
-| --- | --- | --- | --- | --- |
-| Slug | `my-board` | accepted | unchanged | a **stable name** that redirects; reassignable |
-| Bare hash | `fid1:…` | accepted | unchanged | a hash — **not a complete identity** |
-| Entity URI | `of:fid1:…` | **throws** | **accepted** | this entity, in its stored spelling |
-| Kinded URI | `computed:fid1:…` | throws | **refused, by name** | a *different* entity from the `of:` one over the same hash |
+| Form | Example | `--piece` | Denotes |
+| --- | --- | --- | --- |
+| Slug | `my-board` | accepted | a **stable name** that redirects; reassignable |
+| Bare hash | `fid1:…` | accepted | a hash — **not a complete identity** |
+| Entity URI | `of:fid1:…` | accepted | this entity, in its stored spelling |
+| Kinded URI | `computed:fid1:…` | **refused, by name** | a *different* entity from the `of:` one over the same hash |
 
-**Why the prefixed form throws today.** `--piece` reaches `entityIdFrom` and
-thence `FabricHash.fromString`, which splits on the first colon and
-base64-decodes the rest — so `of:fid1:<b64>` parses as tag `of` with hash
-`fid1:<b64>`, and the colon is not valid base64url. It surfaces as a decode
-error, which is why it has never been reported as a missing feature.
+**Where the scheme is understood.** `entityIdFrom`
+(`packages/runner/src/create-ref.ts`) is the entity-specific intake seam: it
+accepts the `of:` scheme and **refuses `computed:` rather than stripping it**,
+because stripping would rename an id to its `of:` sibling, a different
+entity. Not one layer lower: `FabricHash.fromString` has non-entity users
+(`packages/memory/fact.ts` parses a cause with it), and `of:` is a URI
+scheme, not a hash tag — the schemed form is not a parseable tagged hash.
 
-**The change.** Accept an `of:` scheme at `entityIdFrom`
-(`packages/runner/src/create-ref.ts`) and **refuse `computed:` rather than strip
-it** — stripping would rename an id to its `of:` sibling, a different entity.
-`pageIdForRouting` (`packages/runtime-client/backends/runtime-processor.ts`)
-already implements exactly that shape; lift it rather than write a third copy.
-
-Not one layer lower: `FabricHash.fromString` has non-entity users
-(`packages/memory/fact.ts` parses a cause with it), and `of:` is a URI scheme,
-not a hash tag. `entityIdFrom` is the entity-specific wrapper and the right seam.
-
-**One fix reaches most callers.** The address-string paths that matter here go
-through `entityIdFrom`: the CLI, the shell (`runtime-processor`, four call
-sites), the background piece service, and slug resolution. That breadth is a
-reason to make the change carefully, not a reason to avoid it — the alternative
-is the CLI hand-stripping on its own, which is the eleventh copy of a conversion
-that already exists ten times.
-
-**Safety.** Additive: strings that threw now resolve, and nothing that already
-worked changes spelling or meaning. Three things to verify rather than assume:
-
-1. **`computed:` throws, not strips** — coercing renames an id to a different
-   entity.
-2. **String-keyed lookups get audited.** Once two spellings resolve, anything
-   keying on the *raw input* has two keys per entity. The cell layer keys on the
-   normalized URI and is fine; CLI-level raw-string comparisons are where to look.
-3. **The existing workarounds stay correct**, since stripping `of:` from an
-   already-bare id is a no-op.
+**One seam reaches most callers.** The address-string paths that matter go
+through `entityIdFrom`: the CLI, the shell (`runtime-processor`), the
+background piece service, and slug resolution. Two residual cautions carry
+forward: anything keying on the *raw input string* has two keys per entity
+now that two spellings resolve (the cell layer keys on the normalized URI and
+is fine; CLI-level raw-string comparisons are where to look), and the old
+hand-stripping workarounds remain correct, since stripping `of:` from an
+already-bare id is a no-op.
 
 **What stays out of scope.** Ten hand-rolled prefix conversions exist across
 eleven files in five packages — `lib-shell`, `patterns` (three files, two in
@@ -320,92 +304,68 @@ its scheme. An entity's kind lives only there and the hash preimage is kind-free
 to `fid1:<h>` discards the distinction and re-resolving silently defaults to the
 `of:` sibling.
 
-## Open questions
+## Resolved questions
 
-### Is the invocation id namespace per-user? — owner: Berni
+### Is the invocation id namespace per-user? — resolved: per-session (#5610)
 
-**The finding: nothing in a receipt's address identifies the caller.** `inputs`
-is graph structure, identical for every caller; scope is a symbolic tag, not a
-user identifier; and the payload is excluded by design — which is what lets a
-same-id retry replay instead of execute.
+**The finding that opened it: nothing in a receipt's address identified the
+caller.** `inputs` is graph structure, identical for every caller; scope is a
+symbolic tag, not a user identifier; and the payload is excluded by design —
+which is what lets a same-id retry replay instead of execute. An unscoped id
+was therefore a read key shared per (space, verb binding): two callers picking
+the same word computed one address and read one receipt, and a guessed id
+computed an address from public inputs alone. The human-friendly convention
+the walkthrough teaches (`add-comment-1`, `add-1`) is exactly what two agents
+following it would derive systematically.
 
-`$event` *is* namespaced, but not by principal: `scopeCallerEventId` hashes the
-supplied id together with the stream link, so the same id sent to two different
-verbs yields two receipts. What the hash does not contain is any identity — no
-DID, no session — so two callers passing the same id to the same verb still
-compute one address, and a guessed id still computes it from public inputs.
+**The resolution: the session is in the hash.** `scopeCallerEventId` binds the
+caller's id to the session it was chosen within and to the whole stream link
+(see "How addresses are derived" above), so the same id under two sessions
+names two invocations, and an address is computable only by a caller holding
+the session — minted, unguessable, and explicit. The scope is a **session**,
+not a principal, on purpose: agents work under their human user's key rather
+than mint their own, so the collision that happens in practice is two agents
+under one key, which a DID would not separate — and a DID is public, so
+identity scoping would have left addresses computable from a piece, a verb,
+and a conventional id.
 
-So an invocation id is a **read key shared per (space, verb binding)**, and it is
-the read, not the write, that this breaks.
+The mechanism is the explicit invocation session: `cf invocation-session new`
+mints one, `CF_INVOCATION_SESSION` or `--invocation-session` carries it, and
+`--invocation` without a session is refused rather than scoped to something
+implicit — a session minted per request would make the id mean a different
+receipt next time, silently breaking the replay the id exists for.
 
-**Consequence 1: two callers sharing an id read one receipt.** Both resolve the
-same address, both get the same bytes, and one is reading an answer to the
-other's request. Nothing in the response says so, because the receipt records
-what happened *under an id*, not *to a request*. It bites four ways: no caller
-can verify a result is its own; the confusion propagates, since a caller holding
-someone else's child address operates on that piece next; async reads strip the
-last signal, because `deduplicated` belongs to an attempt and is not in the
-receipt, so **a reader of receipts cannot diagnose it**; and retrying
-replays the same outcome forever. Concurrency adds a secondary effect — both
-handler bodies run, so effects outside the transaction happen twice.
-
-**Consequence 2: a guessed id reads someone else's result.** Reconstruction turns
-piece + verb + id into an address, bounded only by CFC labels and cell scope,
-never by authorship.
-
-The scope is a **session**, not a principal. A DID separates nothing: agents
-work under their human user's key rather than mint their own, so the collision
-that happens in practice is two agents under one key. A session distinguishes
-them, and because it is minted rather than derived it is also unguessable —
-which a DID is not, so identity scoping would have left an address computable
-from a piece, a verb, and a conventional id.
-
-Deliberate sharing then moves to passing the address rather than two callers
-deriving one id from a convention. That is unambiguous, and it removes the only
-thing the shared key was good for.
-
-What is unresolved is the mechanism, not the direction. Neither session
-identifier already in the tree serves: the storage session is minted per process
-and re-minted on close, so scoping by it would break the same-id replay the id
-exists for; `cf-harness`'s is durable but is harness state, and not every caller
-is that harness. A new caller-supplied session identity is wanted — minted
-explicitly, so a caller always knows which session an outcome belongs to —
-along with a decision about what an absent one means.
-
-Pre-existing (WS-D), but reading receipts deliberately makes it reachable. The exposure is entirely
-in caller-chosen ids — and the human-friendly convention
-[Verbs over the CLI](../common/verbs-over-the-cli.md) teaches (`add-comment-1`,
-`add-1`) is what two agents following it derive *systematically*.
+Deliberate sharing moves to passing the address rather than two callers
+deriving one id from a convention. That is unambiguous, and it removes the
+only thing the shared key was good for.
 
 ## Migration
 
-**`result` changes shape** when the read layer lands, since a reference stops
-arriving as its expanded value. Known consumers are
-`packages/cli/integration/verbs-over-the-cli.sh` and the CLI tests, which assert
-on expanded fields today and are updated in the same change. `--show-links`
-becomes redundant once references render in band — it exists to annotate
-identity back onto a payload that destroyed it — but retiring it is the read
+**The read layer is on main**, and a selection can render a reference as its
+address (`$link`) instead of its expanded value. `--show-links` remains for
+the unshaped case — it annotates identity back onto a payload that destroyed
+it — and whether it retires once marked selections are the habit is the read
 layer's call, not this half's.
 
-**The call-specific steps, each separately reviewable:**
+**The call-specific steps, all landed:**
 
-1. **`--piece` accepts the entity URI** — the `entityIdFrom` change, refusing
-   `computed:`. Independently testable: the same id works with and without its
-   scheme. Everything that composes an emitted address into a following command
-   waits on this.
-2. **`receipt` as a top-level envelope field**, published from
+1. **`--piece` accepts the entity URI** (#5459) — the `entityIdFrom` change,
+   refusing `computed:`. The same id works with and without its scheme, and
+   an emitted address composes into a following command.
+2. **`receipt` as a top-level envelope field** (#5694), published from
    `tx.handlingReceiptLink` so a detached caller holds an address before the
    receipt exists.
-3. **Receipt cells created with a schema**, so a shape over a receipt matches a
-   declaration and can be pushed into the read.
-4. **`piece call` gains the read options** — `--select`, `--schema`, `--filter`
-   — by reusing the shared read implementation rather than growing a second
-   output path.
+3. **Receipt cells created with a schema** (#5468) — descriptive, plain
+   results only; see
+   [Shaped reads and verb results](shaped-reads-and-verb-results.md) for the
+   split and the open declared-sourced question.
+4. **`piece call` gains the read options** — `--select`, `--schema`,
+   `--filter` — through the shared read implementation (#5505, re-landed as
+   #5610) rather than a second output path.
 
 Reading a receipt directly needs no step of its own: it is an ordinary cell
-read, reachable once step 1 lands. Step 4 depends on the read layer having a
-factored implementation to reuse; steps 1–3 do not. Recovering an outcome whose
-address was lost is deliberately absent — see below.
+read. Recovering an outcome whose address was lost is deliberately absent —
+see below.
 
 ## Recovering a lost outcome — deferred
 
@@ -417,10 +377,9 @@ so without the address it is unreachable.
 **Why this is narrower than it sounds.** Three ways to want an outcome you do
 not have, and only the third is unserved:
 
-- *Dispatched detached.* `--no-wait` returns the invocation id on stderr before
-  any network work, and once migration step 2 lands it returns the receipt
-  address too. Keeping that address is the answer — but this bullet is
-  conditional on step 2, not on today's behavior.
+- *Dispatched detached.* `--no-wait` returns the invocation id on stderr
+  before any network work, and its exit carries the receipt address. Keeping
+  that address is the answer.
 - *Lost the response, verb has no effects outside its transaction.* Replaying
   with the same invocation id returns the original outcome. The body re-runs and
   loses the create-only race, so the commit is refused and nothing is duplicated.
@@ -455,8 +414,9 @@ first condition arrives on its own.
 ## Documentation owed
 
 - [Verbs over the CLI](../common/verbs-over-the-cli.md) documents the
-  `--show-links` shape, and its examples teach hand-written invocation ids —
-  which the namespace question may make actively harmful advice.
+  `--show-links` shape, and its examples teach hand-written invocation ids
+  beside the session that scopes them — safe now that an id names an
+  invocation only within its session.
 - `packages/cli/README.md` §"Output Conventions" is the source these notes
   inherit their stdout/stderr rules from. It also carries the projection and
   filter contract the read layer extends.
