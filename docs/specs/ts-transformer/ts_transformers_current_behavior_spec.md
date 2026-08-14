@@ -1098,13 +1098,15 @@ structurally representable top-level result:
   - unresolved generic helper-definition-site type parameters degrade to
     `{ type: "unknown" }`
 - the schema-first authored form `handler<Event, State[, Result]>(eventSchema,
-  stateSchema, callback[, options])` — recognized when arguments 0 and 1 do
-  not resolve as function-like and argument 2 does — keeps its authored
-  arguments: nothing is prepended, since generated schemas on top would
-  displace the callback out of the positions the runtime dispatch and the
-  sandbox verifier accept (argument 0 or 2). A declared `Result` still lowers
-  onto the trailing options object exactly as below; without one the call
-  passes through unchanged. Fixture:
+  stateSchema, callback[, options])` — recognized when arguments 0 and 1 are
+  not callable and argument 2 is, with callable-ness taken from the checker's
+  call signatures rather than from the expression's spelling, so an arrow, a
+  reference, a function declaration, and a property access all recognize the
+  form — keeps its authored arguments: nothing is prepended, since generated
+  schemas on top would displace the callback out of the positions the runtime
+  dispatch and the sandbox verifier accept (argument 0 or 2). A declared
+  `Result` still lowers onto the trailing options object exactly as below;
+  without one the call passes through unchanged. Fixture:
   `handler-schema/schema-first-declared-result`.
 - with single function arg:
   - infers event/state schemas from parameters

@@ -2525,12 +2525,18 @@ function resolveLiftAppliedInputAndCallback(
 }
 
 /**
- * Whether `expression` names a callback: a function-like expression under the
- * identifier-aware resolution, or a reference to a function DECLARATION —
- * which no expression resolver can return, but which is just as much a
- * callback for recognizing the schema-first `handler` form and for keeping
- * the trailing-options check from spread-replacing it with the injected
- * result options.
+ * Whether `expression` names a callback, for recognizing the schema-first
+ * `handler` form and for keeping the trailing-options check from
+ * spread-replacing a callback with the injected result options.
+ *
+ * Callback-ness is SEMANTIC — the checker's call signatures — never a
+ * whitelist of spellings. Four review rounds each found the spelling the
+ * previous round's syntax list missed (inline arrow, const reference,
+ * function declaration, property access); asking the type ends the family,
+ * because a schema is never callable and a callback always is, however it
+ * is written. The syntactic resolver stays as a fast path and as the
+ * backstop for a callback whose type degraded to `any`, which reports no
+ * call signatures.
  */
 function isCallbackReference(
   expression: ts.Expression | undefined,
@@ -2538,23 +2544,8 @@ function isCallbackReference(
 ): boolean {
   if (!expression) return false;
   if (resolveCallbackFunctionExpression(expression, checker)) return true;
-  const unwrapped = unwrapExpression(expression);
-  if (!ts.isIdentifier(unwrapped)) return false;
-  let symbol = checker.getSymbolAtLocation(unwrapped);
-  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
-    // An imported callback reaches here as its import alias; the declaration
-    // that says what it IS sits behind the alias.
-    symbol = checker.getAliasedSymbol(symbol);
-  }
-  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-  if (declaration === undefined) return false;
-  if (ts.isFunctionDeclaration(declaration)) return true;
-  // An imported const whose initializer is function-like: the initializer
-  // resolver above cannot cross modules, but the checker's declaration can.
-  return ts.isVariableDeclaration(declaration) &&
-    declaration.initializer !== undefined &&
-    (ts.isArrowFunction(declaration.initializer) ||
-      ts.isFunctionExpression(declaration.initializer));
+  const type = checker.getTypeAtLocation(unwrapExpression(expression));
+  return type.getCallSignatures().length > 0;
 }
 
 function resolveFunctionLikeExpression(
