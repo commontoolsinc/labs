@@ -14,10 +14,10 @@
 #
 # Two acts are marked PENDING. They print the command and the result they will
 # produce, without running it, because the capability is sequenced and not yet
-# built (verbs plan item 11 — docs/plans/references-as-arguments.md). Three are
-# marked BROKEN: they run, they fail, and their errors are printed as they
-# arrive. Both are deliberately visible — a demo that quietly omits what does
-# not work teaches a surface that does not exist.
+# built (verbs plan item 11 — docs/plans/references-as-arguments.md). One is
+# marked BROKEN: it runs, it fails, and its error is printed as it arrives.
+# Both are deliberately visible — a demo that quietly omits what does not work
+# teaches a surface that does not exist.
 #
 # One constraint on anyone editing this file: while #5633 is open, no two reads
 # may share a (source cell, schema) pair — the second one silently drops every
@@ -124,12 +124,12 @@ run cf piece call -s "$SPACE" --piece board --select item@ addItem -- --title "L
 # from a second one: `run` leaves the output it displayed in $OUT.
 EPIC=$(printf '%s' "$OUT" | jq -r '.result.item."$link".id' | sed 's/^of://')
 say "That id is what --piece takes from here on."
-broken "the item it hands back points at its parent, and rendering a cycle fails (#5577)" \
-  cf piece call -s "$SPACE" --piece "$EPIC" addChild -- --title "Session cookies"
-broken "the same failure, and it is deterministic" \
-  cf piece call -s "$SPACE" --piece "$EPIC" addChild -- --title "CSRF tokens"
-say "Both writes landed regardless — the failure is the readback, not the mutation."
-run cf piece get -s "$SPACE" --piece "$EPIC" children --select title
+run cf piece call -s "$SPACE" --piece "$EPIC" addChild -- --title "Session cookies"
+say "The item it hands back can be reached from inside itself: its parent holds"
+say "it, and it holds its parent. The position where the author's own type"
+say "re-enters answers with an address, so the whole result is still one value."
+run cf piece call -s "$SPACE" --piece "$EPIC" --select item.title addChild -- --title "CSRF tokens"
+say "And a caller who names one field is given one field, circle or no circle."
 
 act "5 · Read addresses instead of contents"
 say "An unshaped read follows every link. A bare @ stops at the address."
@@ -148,11 +148,10 @@ run cf piece call -s "$SPACE" --piece "$EPIC" recordNote -- --body "blocked on t
 
 act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
-say "A grandchild is filed first, by the same verb that failed its readback in act 4."
+say "A grandchild is filed first, so there is a subtree to walk."
 KID=$(cf piece get -s "$SPACE" --piece "$EPIC" children --select @ 2>/dev/null |
   jq -r '.[0]."$link".id' | sed 's/^of://')
-broken "as in act 4 (#5577)" \
-  cf piece call -s "$SPACE" --piece "$KID" addChild -- --title "Rotate signing key"
+run cf piece call -s "$SPACE" --piece "$KID" --select item.title addChild -- --title "Rotate signing key"
 run cf piece call -s "$SPACE" --piece "$EPIC" finish -- --body "shipping behind a flag"
 
 act "9 · Relate two items — PENDING"
@@ -184,6 +183,6 @@ say "call handed back — which is the composition the verb surface exists for,"
 say "and the reason those lines are as long as they are."
 say ""
 say "Acts 9 and 10 are the graph half, and they are sequenced as verbs plan"
-say "item 11. Acts 4, 6 and 8 show two defects with issues open against them,"
-say "#5577 and #5633. verb-session-gaps.sh asserts both, and fails the day"
-say "either changes — so this demo cannot quietly go stale."
+say "item 11. Act 6 is a defect, with #5633 open against it."
+say "verb-session-gaps.sh asserts all three, and fails the day any one of them"
+say "changes — so this demo cannot quietly go stale."
