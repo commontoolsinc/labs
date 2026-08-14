@@ -84,9 +84,17 @@ echo "$HELP" | grep -q -- "--title" &&
   bad "no --title flag in the generated help"
 # The author's JSDoc reaches the COMPILED pattern but not the schema this help
 # page reads, so the prose is stripped before a caller can see it. Asserted as
-# a gap so the day it flows, this fails and tells us.
-echo "$HELP" | grep -qi "one line naming the work"
-gap "$?" "JSDoc on an event field reaching its flag description"
+# a gap so the day it flows, this fails and tells us. The needle is read out
+# of the fixture rather than hard-coded, so rewording the doc comment moves
+# the probe with it instead of silently "re-opening" the gap.
+NEEDLE=$(sed -n '/interface AddItemEvent {/,/^}/p' "$FIXTURE" |
+  sed -n 's/.*\/\*\* *\(.*[^ ]\) *\*\/.*/\1/p' | head -1)
+if [ -z "$NEEDLE" ]; then
+  bad "no JSDoc on AddItemEvent's field in the fixture — the probe has no needle"
+else
+  echo "$HELP" | grep -qiF "$NEEDLE"
+  gap "$?" "JSDoc on an event field reaching its flag description"
+fi
 
 step "4. A create hands back the piece, and the address chains"
 R=$($CF piece call --quiet --show-links --piece board $ARGS \
@@ -189,10 +197,24 @@ step "10. GAP: an address cannot be a verb argument"
 # docs/plans/references-as-arguments.md.
 OTHER=$($CF piece get --quiet --piece board items $ARGS \
   --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
-  jq -r '.[0]["$link"].id')
-$CF piece call --quiet --piece "$KID" $ARGS \
-  blockOn "{\"on\":\"$OTHER\"}" >/dev/null 2>&1
-gap "$?" "blockOn with a bare address"
+  jq -r '.[0]["$link"].id // empty')
+# Guarded, and matched against the SPECIFIC refusal: an empty address, a
+# renamed verb, or a server hiccup would also exit nonzero, and a probe that
+# reads any failure as "gap still open" is a probe that cannot fail.
+if [ -z "$OTHER" ] || [ -z "${KID:-}" ]; then
+  bad "no address to probe blockOn with (item=$OTHER target=${KID:-})"
+else
+  BLOCK_ERR=$($CF piece call --quiet --piece "$KID" $ARGS \
+    blockOn "{\"on\":\"$OTHER\"}" 2>&1 >/dev/null)
+  BLOCK_RC=$?
+  if [ "$BLOCK_RC" = "0" ]; then
+    gap 0 "blockOn with a bare address"
+  elif printf '%s' "$BLOCK_ERR" | grep -q "does not match type object"; then
+    gap 1 "blockOn with a bare address (the pre-dispatch gate refuses it)"
+  else
+    bad "blockOn failed for a reason that is not the known refusal: $BLOCK_ERR"
+  fi
+fi
 
 step "11. a verb returning a child piece renders the circle as an address"
 # The returned item carries `parent`, which points back at its container. The
