@@ -156,10 +156,13 @@ Six requirements, each load-bearing in the design that follows.
    spread it across every call site.
 
 5. **Hold across authors.** Patterns by one party will depend on contracts
-   offered by another's, and those contracts must be clear, reliable, and
-   enforceable. If a stranger can break the shape your mechanism depends on,
-   the rational move is to fork — forfeiting exactly the composition the
-   substrate exists for.
+   offered by another's. Those contracts cannot be made unbreakable — an
+   owner may break their own pattern — so what the substrate owes a consumer
+   is the means to judge instead: contracts stated clearly, breakage made
+   visible, and both attributable to whoever is responsible. If a stranger
+   can break the shape your mechanism depends on *and* you could neither see
+   it coming nor tell whose doing it was, the rational move is to fork —
+   forfeiting exactly the composition the substrate exists for.
 
 6. **Reach what is already deployed.** The pieces and holders that exist
    today are the ones with real data. A design reachable only by patterns
@@ -167,24 +170,35 @@ Six requirements, each load-bearing in the design that follows.
 
 ## The design
 
-### Verbs are promises, and names are permanent
+### Verbs are promises, and names are stable
 
 A verb is declared as something a piece definitely has, not something it may
-have. Code that holds a piece and calls a verb holds a guarantee, and does
-not check first.
+have. Code that holds a piece and calls a verb writes no check: the
+declaration says the verb is there, and the compiler agrees.
 
-Names never change: a verb is never removed and never renamed. That refusal
-is the one rule in today's gate genuinely protecting callers, and it stays.
-Retiring a verb means adding its replacement and marking the old one
-`@deprecated`, which hides it from listings while keeping it callable. A
-verb whose contract must change incompatibly gets a new name, spelled
-`append_v2`, introduced when the second generation actually appears.
+Names are stable by default. The gate refuses a shape that removes or renames
+a verb — the one rule in today's gate genuinely protecting callers, and it
+stays — so a verb does not vanish by accident. The ordinary way to retire one
+is to add its replacement and mark the old one `@deprecated`, which hides it
+from listings while keeping it callable. A verb whose contract must change
+incompatibly gets a new name, spelled `append_v2`, introduced when the second
+generation actually appears.
 
-Retirement currently ends there — a deprecated verb stays callable forever,
-implementation and all. Actually removing one is a deliberate break, taken
-when usage data says nobody calls it, and needs the scoped acknowledgment
-and call counting described under tooling. Until both exist, accumulation is
-the price of permanence.
+What this is not is an invariant. A pattern's owner may deliberately break
+their own pattern — retire a verb for real, change what one means — and the
+design permits it. Requiring permanent compatibility would tax every author
+forever to serve the cases that never arise, and it would not survive contact
+with an author who has good reason to move on. So a break is made deliberate,
+visible, and attributable rather than impossible, which is what the tooling
+below is for. Removing a deprecated verb outright is a break of exactly this
+kind, taken when call counting says nobody calls it — which makes
+accumulation a choice rather than a sentence.
+
+What a caller holds is therefore a commitment rather than a guarantee, and
+its strength is a property of whoever wrote the pattern. Reputation is the
+discipline, as it is for anyone else running a service other people build on,
+and it is why the tooling below aims at making breakage legible rather than
+at preventing it.
 
 This is the floor. Everything below stands on it.
 
@@ -198,7 +212,8 @@ not mention `append`.
 The refusal that motivated this document then disappears at its root. Adding
 `append` to notes no longer changes the board's shape, because the board
 never demanded `append`. Nobody's promise weakens: a holder that *does* call
-a verb declares it, and holds a guarantee for exactly what it declared.
+a verb declares it, and holds a checked contract for exactly what it
+declared.
 
 The principle is old — declare what you need, not what they are — and it is
 how Go interfaces work: declared by the consumer, satisfied by shape, best
@@ -354,7 +369,9 @@ they bind late and survive every row.
 
 "Holder refused" means the gate stops the *holder's* next update: nothing
 breaks at runtime, but the holder is stuck. "Breaks at call" means every
-gate passes and the failure arrives when someone calls the verb.
+gate passes and the failure arrives when someone calls the verb. "Provider
+refused" means the gate stops the provider by default — an owner may
+deliberately override it, forfeiting what the row protects.
 
 Four things fall out of it.
 
@@ -487,6 +504,12 @@ acknowledgeable by name — this field, this verb, this consumer. That
 incompatible" needs underneath it, what the demand migration above rides on,
 and what eventually lets a dead verb be removed rather than hidden.
 
+Because a break is permitted rather than prevented, this is also where one
+becomes a record. The acknowledgment is the moment what broke is known
+precisely, and the only place that information exists before it is lost.
+Whether making that record is obligatory — and what an obligation would mean
+in practice — is for whoever builds it to settle.
+
 ### Verb calls are counted
 
 Retirement policy is guesswork without usage data; deprecation windows work
@@ -534,12 +557,13 @@ upcasters are all this mechanism; systems with many small stateful things
 mostly chose lazy over eager — the fork the migration-in-place path
 inherits.
 
-Two of the rules above were derived by measurement against our own runtime
-and turned out to be classical results: "a published interface only grows"
-is COM's frozen interfaces and protobuf's permanent field numbers, and "a
-newly required input breaks callers" is so well established that proto3
-removed `required` from the language. The rest of this map is worth reading
-before we draw more of it ourselves.
+Two of the rules the gate enforces were derived by measurement against our
+own runtime and turned out to be classical results: "a published interface
+only grows" is COM's frozen interfaces and protobuf's permanent field
+numbers — here it is a default an owner may leave rather than a law, but the
+shape is theirs — and "a newly required input breaks callers" is so well
+established that proto3 removed `required` from the language. The rest of
+this map is worth reading before we draw more of it ourselves.
 
 ## Considered and set aside
 
@@ -583,12 +607,23 @@ person, a recipe for a tool. Where it lives matters most: askable of the
 piece itself, so an agent watching a holding piece's errors can ask the
 held piece for upgrade instructions and decide whether to apply them. The
 channel exists — the shape already lifts deprecation out of JSDoc into
-listings — and the classical anchor is the deprecation that ships its own
-rewrite: Kotlin's `ReplaceWith`, a library's codemods, applied by tooling
-the consumer chooses to run. Scoped acknowledgment is the natural place to
-demand it: a deliberate break proceeds when it says what those it breaks
-should do instead. A break stays a break, but no holder is left out in the
-cold.
+listings. Scoped acknowledgment is the natural place to ask for it: a
+deliberate break proceeds when it says what those it breaks should do
+instead.
+
+The anchors are the systems that permit breakage and manage it rather than
+forbid it. Kubernetes deprecates an API, keeps serving it for a published
+number of releases, then removes it. Chrome measures how much of the web
+uses a feature, announces an intent to remove, publishes the migration path,
+and removes it anyway — usage data and the ecosystem's reaction are the
+check, not a rule against removing. Both leave anyone who ignored the notice
+broken, and both are judged on how well they gave it.
+
+This is a partial answer, and worth saying so. Instructions help a holder
+that is watched, maintained, or agent-tended, and do nothing for one whose
+author has moved on. They are the difference between a break that can be
+recovered from and one that cannot, which is worth a great deal and is not
+the same thing as safety.
 
 Five smaller calls belong to whoever does the work:
 
