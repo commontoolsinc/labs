@@ -96,9 +96,14 @@ export function gatewayProvenanceHeaders(
  * left `init` silent about them. Silent means absent: an `init` naming
  * something that is no header list, `null` among them, reaches `Headers` and
  * is refused there, which is what `fetch` does with it too.
+ *
+ * The parameter types are written out because `typeof fetch` is not stable
+ * here: with `@types/node`'s globals in the type graph, its `init` becomes a
+ * union of two `RequestInit` declarations, and `headers` cannot be read from
+ * that union.
  */
 export function withGatewayProvenance(inner: typeof fetch): typeof fetch {
-  return (input, init) => {
+  return (input: RequestInfo | URL, init?: RequestInit) => {
     const headers = new Headers(
       init?.headers !== undefined
         ? init.headers
