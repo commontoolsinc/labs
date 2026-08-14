@@ -1,5 +1,6 @@
 import {
   action,
+  type ComparableCell,
   Default,
   entityRefToString,
   equals,
@@ -246,7 +247,12 @@ const boardRows = lift(
 const crossrefTable = lift(
   (
     { identities, sources }: {
-      identities: Writable<(object | undefined)[] | Default<[]>>;
+      // Read AS CELLS, not as values. A cell always writes as a link, so the
+      // rows below are deterministic; an element read as a value writes a link
+      // only while it still carries provenance and an inline copy once it does
+      // not, which makes the same inputs produce two different documents and
+      // fails the idempotency recheck.
+      identities: Writable<ComparableCell<unknown>[] | Default<[]>>;
       sources: Writable<TopicMentionSource[] | Default<[]>>;
     },
   ): TopicCrossrefRow[] => {
@@ -256,7 +262,13 @@ const crossrefTable = lift(
     // of topic `i` — no id is minted, and no position is mistaken for one.
     const topics = identities.get();
     const mentionsPerTopic = sources.get();
-    return topics.map((topic, index) => {
+    const rows: unknown[] = [];
+    topics.forEach((topic, index) => {
+      // An entry with nothing behind it yet (mid-sync) has no identity to
+      // address a row by, and `Writable.for(undefined)` is not a cause. It gets
+      // no row rather than a junk one — the lookup is by identity, not by
+      // position, so a shorter table costs nothing.
+      if (!topic) return;
       // A linear scan, deliberately. A cell reference is the identity, so there
       // is no id to key a map by — and nothing to mint, keep in step, or
       // migrate when a piece moves. At board scale this is a few hundred
@@ -278,8 +290,11 @@ const crossrefTable = lift(
       // every topic's lookup re-run freely on any board change and still write
       // nothing: an unchanged row recomputes to the same links at the same
       // address.
-      return Writable.for<TopicCrossrefRow>(topic).set({ topic, mentionedBy });
-    }) as unknown[] as TopicCrossrefRow[];
+      rows.push(
+        Writable.for<TopicCrossrefRow>(topic).set({ topic, mentionedBy }),
+      );
+    });
+    return rows as TopicCrossrefRow[];
   },
 );
 

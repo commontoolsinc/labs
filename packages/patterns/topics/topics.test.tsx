@@ -31,8 +31,8 @@ import Topic, {
   fidPayload,
   isSafeLinkUrl,
   type MentionEvent,
+  mentionKeyFor,
   type MentionResult,
-  mintMentionKey,
   saveProfileBody,
   type SetBodyResult,
   snippet,
@@ -640,11 +640,12 @@ export default pattern(() => {
   const action_add_graph_topics = action(() => {
     graphBoard.addTopic.send({ title: "Graph target", agentName: "Sol" });
     graphBoard.addTopic.send({ title: "Graph source", agentName: "Sol" });
+    graphBoard.addTopic.send({ title: "Graph third", agentName: "Sol" });
   });
 
   // No mentions yet: a row exists per topic and claims no edges.
   const assert_graph_baseline = assert(() =>
-    (graphBoard.crossrefs ?? []).length === 2 &&
+    (graphBoard.crossrefs ?? []).length === 3 &&
     (graphBoard.topics?.[0]?.referencedBy ?? []).length === 0 &&
     (graphBoard.topics?.[0]?.mentions ?? []).length === 0
   );
@@ -688,15 +689,42 @@ export default pattern(() => {
     (directTopic.referencedBy ?? []).length === 0
   );
 
-  // The key minting the verb uses: six characters over [0-9a-z], skipping what
-  // the map already holds, and counting rather than guessing so the same call
-  // against the same map writes the same document.
+  // The key a destination gets, derived from the destination rather than
+  // allocated: the same piece always yields the same key — so two writers
+  // referencing it merge instead of clobbering — and the result stays inside
+  // the `[0-9a-z]{6,10}` shape the editor parses.
+  const P = "A".repeat(43);
   const assert_mention_keys = assert(() =>
-    mintMentionKey([]) === "000000" &&
-    mintMentionKey(["000000"]) === "000001" &&
-    mintMentionKey(["000000", "000001"]) === "000002" &&
-    mintMentionKey(["000001"]) === "000000" &&
-    /^[0-9a-z]{6}$/.test(mintMentionKey([]))
+    mentionKeyFor(P) === "aaaaaaaa" &&
+    mentionKeyFor(P) === mentionKeyFor(P) &&
+    mentionKeyFor("B".repeat(43)) !== mentionKeyFor(P) &&
+    // base64url carries two characters base36 does not; they drop out rather
+    // than producing a key the editor's parser would refuse.
+    /^[0-9a-z]{8}$/.test(mentionKeyFor("-_aB3-_9zQ_-xY")) &&
+    mentionKeyFor("") === ""
+  );
+
+  // The case that makes per-key writes matter: two mentions, one retracted.
+  // Rebuilding the map from a read would carry the survivor through a resolve
+  // and flatten its destination, silently retracting it too.
+  const action_source_mentions_both = action(() => {
+    graphBoard.topics?.[1]?.mention?.send({ topic: graphBoard.topics?.[0] });
+    graphBoard.topics?.[1]?.mention?.send({ topic: graphBoard.topics?.[2] });
+  });
+  const assert_two_mentions = assert(() =>
+    (graphBoard.topics?.[1]?.mentions ?? []).length === 2 &&
+    (graphBoard.topics?.[0]?.referencedBy ?? []).length === 1 &&
+    (graphBoard.topics?.[2]?.referencedBy ?? []).length === 1
+  );
+  const action_retract_one_of_two = action(() => {
+    graphBoard.topics?.[1]?.unmention?.send({ topic: graphBoard.topics?.[0] });
+  });
+  const assert_survivor_still_an_edge = assert(() =>
+    (graphBoard.topics?.[1]?.mentions ?? []).length === 1 &&
+    (graphBoard.topics?.[0]?.referencedBy ?? []).length === 0 &&
+    // The one that was NOT retracted is still a reference, not a flattened
+    // copy of the piece it names.
+    (graphBoard.topics?.[2]?.referencedBy ?? []).length === 1
   );
 
   const assert_fid_payload = assert(() =>
@@ -790,6 +818,10 @@ export default pattern(() => {
       { assertion: assert_reference_retracted },
       { assertion: assert_boardless_topic_has_no_backlinks },
       { assertion: assert_mention_keys },
+      { action: action_source_mentions_both },
+      { assertion: assert_two_mentions },
+      { action: action_retract_one_of_two },
+      { assertion: assert_survivor_still_an_edge },
     ],
   };
 });
