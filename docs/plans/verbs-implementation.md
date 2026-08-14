@@ -163,11 +163,12 @@ reader keeps deriving `required` from the source schema, and that derivation
 must survive the item intact.
 
 *Three things the coupling to the compatibility checker has to respect.*
-**Derivation is not one-to-one:** 3 of `ANNOTATION_KEYS`' 12 members —
-`default`, `$defs`, `definitions` — are refused by projection on purpose, so the
-relation is `ANNOTATION_KEYS` minus a stated exception set, and a fallback test
-asserting plain non-refusal of every annotation key would be red the day it is
-written. It asserts the exception relation in both directions instead.
+**Derivation is not one-to-one:** three members of `ANNOTATION_KEYS` —
+`default`, `$defs`, `definitions` — are refused by projection on purpose, so
+the relation is `ANNOTATION_KEYS` minus a stated exception set, whatever that
+set grows to, and a fallback test asserting plain non-refusal of every
+annotation key would be red the day it is written. It asserts the exception
+relation in both directions instead.
 **The validation half must not derive:** the checker's `handled` set is a union
 including `allOf`, `if`/`then`/`else`, `patternProperties`, `asCell`, `ifc` and
 `scope`, every one of which projection refuses deliberately — so derive the
