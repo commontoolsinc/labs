@@ -542,7 +542,10 @@ Deno.test("discipline (C7b): without the in-process check the same-process stale
 // succeeded by a new holder. Fresh (new-localSeq) derived commits keep the
 // full admission check in every one of those states, and a same-key
 // resubmission that differs — in bytes OR in its class/holder envelope —
-// is still refused as a replay mismatch.
+// is still refused as a replay mismatch. The mints below commit with
+// `sessionId === holder` (no principal): stage F's envelope-session rule
+// (protocol.md §2, RULED 2026-08-05) admits a fresh derived commit only
+// from the lease holder's own service session.
 
 Deno.test("replay: a byte-identical retry answers from the store after the lease is RELEASED — fresh commits stay rejected", async () => {
   const { engine } = await createEngine();
@@ -555,7 +558,7 @@ Deno.test("replay: a byte-identical retry answers from the store after the lease
       now: LIVE_NOW(),
     }));
     const first = applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -568,7 +571,7 @@ Deno.test("replay: a byte-identical retry answers from the store after the lease
     // The reviewer's repro: the retry of the accepted commit must not be
     // re-admitted against the (now absent) live lease.
     const replay = applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -602,7 +605,7 @@ Deno.test("replay: a byte-identical retry answers from the store after the lease
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(2, "of:doc-2"),
           commitClass: "derived",
@@ -628,7 +631,7 @@ Deno.test("replay: a byte-identical retry answers from the store after the lease
       now: LIVE_NOW(),
     }));
     const first = applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -645,7 +648,7 @@ Deno.test("replay: a byte-identical retry answers from the store after the lease
     }));
 
     const replay = applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -662,7 +665,7 @@ Deno.test("replay: a byte-identical retry answers from the store after the lease
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(2, "of:doc-2"),
           commitClass: "derived",
@@ -689,7 +692,7 @@ Deno.test("replay: after SUCCESSION the old holder's accepted commit still repla
       now: LIVE_NOW(),
     }));
     const first = applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: p0,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -712,7 +715,7 @@ Deno.test("replay: after SUCCESSION the old holder's accepted commit still repla
     // The byte-identical retry of p0's ACCEPTED commit answers from the
     // store — the successor owning the lease is irrelevant to it.
     const replay = applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: p0,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -725,7 +728,7 @@ Deno.test("replay: after SUCCESSION the old holder's accepted commit still repla
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: p0,
           space: SPACE,
           commit: setCommit(2, "of:doc-2"),
           commitClass: "derived",
@@ -737,7 +740,7 @@ Deno.test("replay: after SUCCESSION the old holder's accepted commit still repla
 
     // …and the successor's fresh derived commit is admitted.
     applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: p1,
       space: SPACE,
       commit: setCommit(2, "of:doc-2"),
       commitClass: "derived",
@@ -764,7 +767,7 @@ Deno.test("replay: a same-key DIFFERENT-bytes resubmission is refused as a repla
       now: LIVE_NOW(),
     }));
     applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -777,7 +780,7 @@ Deno.test("replay: a same-key DIFFERENT-bytes resubmission is refused as a repla
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(1, "of:doc-CHANGED"),
           commitClass: "derived",
@@ -804,7 +807,7 @@ Deno.test("replay: the stored class + holder are part of the replay identity —
       now: LIVE_NOW(),
     }));
     applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -817,7 +820,7 @@ Deno.test("replay: the stored class + holder are part of the replay identity —
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(1, "of:doc-1"),
           commitClass: "derived",
@@ -832,7 +835,7 @@ Deno.test("replay: the stored class + holder are part of the replay identity —
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(1, "of:doc-1"),
           commitClass: "system",
@@ -897,14 +900,14 @@ Deno.test("replay: a retry while the lease is STILL LIVE keeps answering from th
       now: LIVE_NOW(),
     }));
     const first = applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
       holder,
     });
     const replay = applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
