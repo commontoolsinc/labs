@@ -771,7 +771,7 @@ const READBACK_FLAGS: ReadonlyArray<
  * of the default (flag parity, so a script can state its intent), which makes
  * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
  * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
- * names the patience. A non-positive bound is refused: it would spell
+ * names the patience. A non-positive bound is refused: it would mean
  * "don't wait" while claiming to be a wait.
  *
  * `--no-wait` also refuses every flag that shapes or annotates the outcome —

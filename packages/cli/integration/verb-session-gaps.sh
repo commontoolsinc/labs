@@ -229,7 +229,7 @@ RC=$?
 check "0" "$RC" "addChild readback on a doubly-linked tree"
 BACKREF=$(printf '%s' "$CALLED" | jq -r '.result.item.parent["$link"].id // ""')
 check "of:" "${BACKREF:0:3}" \
-  "the position that closes the circle answers an address"
+  "the position that closes the circle returns an address"
 AFTER=$($CF piece get --quiet --piece "$EPIC" children $ARGS --step 2>/dev/null |
   jq -r 'length')
 check "$((BEFORE + 1))" "$AFTER" "the write the result describes landed"
