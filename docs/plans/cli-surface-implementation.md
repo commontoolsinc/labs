@@ -53,16 +53,20 @@ Four decisions it explicitly declines to make are inherited as constraints:
 
 ## The accounting
 
-`cf piece` has twenty subcommands today:
+`cf piece` has twenty-two subcommands today:
 
 ```
 ls  search  new  set-slug  step  apply  getsrc  setsrc  inspect  view
 render  link  get  set  map  call  verbs  rm  recreate-root  set-home
+get-label  set-label
 ```
 
 The target surface keeps eight — `new`, `setsrc`, `getsrc`, `rm`, `ls`,
 `search`, `verbs`, `set-slug` — plus `step` and `link`, which are settled above.
-The rest move:
+`get-label` and `set-label` (#5673) postdate the shape document's accounting;
+whether they stay piece-scoped or join a label surface is a step-7-class
+decision that document has not made, so they are queued with the merges rather
+than silently kept or moved. The rest move:
 
 | Today | Becomes | Step |
 | --- | --- | --- |

@@ -372,6 +372,11 @@ the option was explicitly turned off — the verb still performed its write.
 **Treat an absent result as "not enabled here", never as "the mutation did not
 land."**
 
+One boundary of that channel: the empty record is the value-less witness, so a
+verb that deliberately returns `{}` settles with no `result` key and is
+indistinguishable from one that returned nothing. Declare at least one field
+where that distinction matters.
+
 One more caveat worth carrying: a verb's result shape is not part of the piece's
 stored schema, so nothing validates it and nothing protects it across a pattern
 update. Read the pattern's own documentation for what a verb returns, and check
@@ -415,6 +420,7 @@ Each step demonstrates one use case:
 | 11 | Reading a verb redirects to `cf piece call` |
 | 12 | Timings on stderr, Invocation JSON still clean on stdout |
 | 13 | An invocation id without a session is refused, and the refusal says how to mint one |
+| 14 | A detached (`--no-wait`) call's `receipt` address reads back the outcome, and a settled call's receipt reads back exactly its `result` |
 
 ## Addressing a piece you were handed
 
@@ -437,10 +443,11 @@ cf piece call --show-links --piece <board> createNote '{"title":"Notes"}'
 }
 ```
 
-`/note` is the created piece's own document, so it addresses directly:
+`/note` is the created piece's own document, so it addresses directly —
+`--piece` takes the id exactly as emitted, `of:` prefix included:
 
 ```bash
-cf piece call --piece <the id from /note, without the of: prefix> \
+cf piece call --piece <the id from /note> \
   append '{"text":"second line"}'
 ```
 
@@ -542,5 +549,5 @@ or below it: a position that asks for nothing but addresses is not read either,
 so `notes.title@` reads what holds the collection and none of the notes. Where
 the marker is the whole selection, nothing behind it is read at all.
 
-The address a marked read returns is one `cf piece call` accepts, minus the
-`of:` prefix, which is the reason to ask for it.
+The address a marked read returns is one `cf piece call` accepts exactly as
+emitted, `of:` prefix included — which is the reason to ask for it.

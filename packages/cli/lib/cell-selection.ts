@@ -19,6 +19,11 @@ import {
   type Runtime,
   sanitizeSchemaForLinks,
 } from "@commonfabric/runner";
+import {
+  cfcSchemaChildRoot,
+  isEmbeddedCfcSchemaRef,
+  resolveCfcSchemaRef,
+} from "@commonfabric/runner/cfc/schema-refs";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
 
@@ -1046,45 +1051,33 @@ const DERIVED_ADDRESS: DerivedPosition = {
 const DERIVED_DROPPED: DerivedPosition = { cut: false };
 
 /**
- * The schema a local JSON pointer names inside `root`. Only the local form is
- * resolved, which is the only form a lowered declared result carries; anything
- * else reads as an unresolvable reference and leaves the position unbounded.
- */
-function schemaAtLocalRef(
-  root: JSONSchema,
-  ref: string,
-): JSONSchema | undefined {
-  if (!ref.startsWith("#")) return undefined;
-  const pointer = ref.slice(1);
-  if (pointer !== "" && !pointer.startsWith("/")) return undefined;
-  let current: unknown = root;
-  for (const segment of pointer.split("/").slice(1)) {
-    if (!isObjectOrArray(current)) return undefined;
-    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
-    current = (current as Record<string, unknown>)[key];
-  }
-  return current === undefined || typeof current === "boolean" ||
-      isObjectOrArray(current)
-    ? current as JSONSchema | undefined
-    : undefined;
-}
-
-/**
  * Helper for {@link declaredResultProjection}: one position of the declared
  * result, written as the projection position it derives.
  *
- * `following` holds the references the walk is already inside. A reference it
- * already holds is the cut: the declared type re-enters itself there, so
- * following it once more is what closes the circle. Every other position is
- * left as wide as it was declared — the derivation bounds a recursion and
- * narrows nothing else.
+ * `following` holds the references the walk is already inside, each paired
+ * with the scope root it was followed under: the same spelling in two `$defs`
+ * scopes names two definitions, so only a reference repeated in ITS OWN scope
+ * is the cut — the declared type re-enters itself there, and following it
+ * once more is what closes the circle. Every other position is left as wide
+ * as it was declared — the derivation bounds a recursion and narrows nothing
+ * else.
+ *
+ * Reference resolution is the canonical resolver's, one hop per recursion —
+ * never a private pointer parser, whose recorded divergence class (escaped
+ * names, nested `$defs` scopes) is exactly what `localRefTarget`'s history
+ * warns about. A reference the resolver does not resolve leaves the position
+ * unbounded, and a readback that still closes a circle then refuses with the
+ * legible message rather than corrupting.
  */
 function derivePosition(
   schema: JSONSchema | undefined,
   root: JSONSchema,
-  following: ReadonlySet<string>,
+  following: ReadonlyArray<{ root: JSONSchema; ref: string }>,
 ): DerivedPosition {
   if (schema === undefined || typeof schema === "boolean") return DERIVED_WHOLE;
+  // A subtree carrying its own `$defs` opens a new local-ref scope; every
+  // descent below threads the scope this node establishes.
+  root = cfcSchemaChildRoot(schema, root);
   // A stream carries no value: it renders as the empty object and reading it
   // says nothing. `asCell` otherwise says how a position is held rather than
   // what shape it has, and the shape beside it is what decides the cut.
@@ -1093,13 +1086,16 @@ function derivePosition(
   }
 
   if (typeof schema.$ref === "string") {
-    if (following.has(schema.$ref)) return DERIVED_ADDRESS;
-    const target = schemaAtLocalRef(root, schema.$ref);
+    const ref = schema.$ref;
+    if (following.some((f) => f.ref === ref && f.root === root)) {
+      return DERIVED_ADDRESS;
+    }
+    const target = resolveCfcSchemaRef(root, ref);
     if (target === undefined) return DERIVED_WHOLE;
     return derivePosition(
       target,
-      root,
-      new Set([...following, schema.$ref]),
+      isEmbeddedCfcSchemaRef(ref) ? target : root,
+      [...following, { root, ref }],
     );
   }
 
@@ -1182,7 +1178,7 @@ export function declaredResultProjection(
   declared: JSONSchema | undefined,
 ): SelectionProjection | undefined {
   if (declared === undefined || typeof declared === "boolean") return undefined;
-  const derived = derivePosition(declared, declared, new Set());
+  const derived = derivePosition(declared, declared, []);
   if (!derived.cut || derived.schema === undefined) return undefined;
   return {
     source: DERIVED_PROJECTION_SOURCE,
@@ -2502,6 +2498,17 @@ export async function deriveSelectedValue(
         `Could not apply piece get transform: ${committed.error}`,
       );
     }
+    // This wait is GLOBAL: idle() drains the whole reactive graph and
+    // synced() the whole storage manager, not just this transform. On a
+    // plain `piece get` that is benign — nothing else runs in the CLI's
+    // runtime — but a shaped `piece call` readback arrives here right after
+    // its handler ran, so the selection waits on whatever derived
+    // recomputation that handler triggered elsewhere, a coupling the plain
+    // call's transaction-local acknowledgement deliberately avoids.
+    // Documented as a known cost of shaping at the call (decided
+    // 2026-08-14; packages/cli/README.md names the shape-the-collect
+    // alternative); scoping this wait to the transform's own computation is
+    // the named follow-up.
     await outputCell.pull();
     await runtime.idle();
     await runtime.storageManager.synced();

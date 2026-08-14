@@ -114,9 +114,10 @@ many hops away they sit.
 **What format should a verb's result use?** The one a read already uses. Inside
 the result, it *is* a read, on a different cell.
 
-**What makes a receipt special?** Nothing. It is an ordinary cell, distinguished
-only by being created without a schema — which is a defect rather than a
-property.
+**What makes a receipt special?** Nothing. It is an ordinary cell. One
+carrying a plain result declares a descriptive schema like any other cell; one
+carrying a reactive result declares none yet, and closing that gap is an open
+question of the read layer, not a property of receipts.
 
 ## The three concerns
 

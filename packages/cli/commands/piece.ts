@@ -321,9 +321,13 @@ export function reportVerbInputErrorOrRethrow(
  * rethrows Cliffy validation errors so usage failures still render the usage
  * screen — with their span closed first — and reports everything else as the
  * failure message plus the invocation id beside the furthest observed phase,
- * the retry key, before exiting 1. A named export rather than catch-block
- * prose because the action body only runs under Cliffy and is unreachable
- * from a unit test; the seams let a test observe the exact exit contract.
+ * the retry key, before exiting 1. A wait-bound expiry additionally writes
+ * the Invocation JSON with that phase as its `status` to stdout — the same
+ * machine surface as a settled call, so a script parses one shape either
+ * way. A named export rather than catch-block prose because the action body
+ * only runs under Cliffy and is unreachable from a unit test; the seams let
+ * a test observe the exact exit contract, and the action's catch calls THIS
+ * function, so what the tests observe is what a user gets.
  */
 export function exitPieceCallFailure(
   observer: { finish: (end?: "settled" | "failed") => void },
@@ -332,6 +336,7 @@ export function exitPieceCallFailure(
   phase: InvocationPhase,
   deps?: {
     printError?: (message: string) => void;
+    render?: (text: string) => void;
     exit?: (code: number) => never;
   },
 ): never {
@@ -349,6 +354,19 @@ export function exitPieceCallFailure(
   // commits twice but effects outside the transaction repeat. A fresh id
   // loses nothing and commits a second time.
   printError(`invocation: ${invocationId} phase: ${phase}`);
+  if (error instanceof WaitBoundExpired) {
+    // The caller's patience expired. The handler runs in this process, so
+    // the invocation may not have executed or committed — the recovery is a
+    // same-id re-invoke, which the stderr message names. stdout still
+    // carries the Invocation JSON with the furthest observed phase.
+    (deps?.render ?? render)(
+      JSON.stringify(
+        invocationJson({ id: invocationId, status: phase }),
+        null,
+        2,
+      ),
+    );
+  }
   return exit(1);
 }
 
@@ -634,8 +652,18 @@ export function renderPieceCallOutcome(
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
     // The address the envelope published, when the runtime wrote a receipt.
     // It leads the detached next steps because it collects the outcome
-    // without running the verb again.
-    const receiptId = result.invocation.receipt?.id;
+    // without running the verb again. The scope is part of the address —
+    // reopening a user- or session-scoped cell without it resolves the
+    // space-scoped instance, a different cell (CallableResultRef) — so the
+    // hint spells the non-default scopes in the `id@scope` form
+    // `parseScopedId` accepts, and only those: the bare form already means
+    // space.
+    const receipt = result.invocation.receipt;
+    const receiptId = receipt === undefined
+      ? undefined
+      : receipt.scope === "space"
+      ? receipt.id
+      : `${receipt.id}@${receipt.scope}`;
     hintOut(
       opts.detached
         ? cliText(
@@ -1997,36 +2025,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
         { detached: waitControl.mode === "commit", invocation: identity },
       );
     } catch (error) {
-      if (error instanceof ValidationError) {
-        observer.finish("failed");
-        throw error;
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(message);
-      observer.finish("failed");
-      // Where the invocation stopped decides retry semantics: anything at or
-      // past "dispatched" retries SAFELY ONLY with this same id. At-most-once
-      // is per COMMIT, not per execution: a same-id retry runs the handler
-      // body again and then loses the race for the receipt, so nothing
-      // commits twice but effects outside the transaction repeat. A fresh id
-      // loses nothing and commits a second time.
-      console.error(`invocation: ${invocationId} phase: ${phase}`);
-      if (error instanceof WaitBoundExpired) {
-        // The caller's patience expired. The handler runs in this process,
-        // so the invocation may not have executed or committed — the
-        // recovery is a same-id re-invoke, which the stderr message names.
-        // stdout still carries the Invocation JSON with the furthest
-        // observed phase — the same machine surface as a settled call, so a
-        // script parses one shape either way.
-        render(
-          JSON.stringify(
-            invocationJson({ id: invocationId, status: phase }),
-            null,
-            2,
-          ),
-        );
-      }
-      Deno.exit(1);
+      exitPieceCallFailure(observer, error, invocationId, phase);
     }
   })
   /* piece verbs */

@@ -29,6 +29,7 @@ import {
   isUnresolvedSchemaType,
   preserveSourceMapRange,
   registerSyntheticCallType,
+  resolveCallbackFunctionExpression,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
   widenLiteralType,
@@ -2523,6 +2524,49 @@ function resolveLiftAppliedInputAndCallback(
   return { input, callback };
 }
 
+/**
+ * Whether `expression` names a callback, for recognizing the schema-first
+ * `handler` form and for keeping the trailing-options check from
+ * spread-replacing a callback with the injected result options.
+ *
+ * Callback-ness is SEMANTIC — the checker's call signatures — never a
+ * whitelist of spellings. Four review rounds each found the spelling the
+ * previous round's syntax list missed (inline arrow, const reference,
+ * function declaration, property access); asking the type ends the family,
+ * because a schema is never callable and a callback always is, however it
+ * is written. Two backstops cover the type information going missing
+ * rather than a spelling: the syntactic resolver catches a local
+ * `any`-typed callback (no call signatures to ask), and the declaration
+ * fallback catches an IMPORTED one — the resolver cannot cross modules,
+ * but the aliased symbol's declaration still says what the value is.
+ */
+function isCallbackReference(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!expression) return false;
+  if (resolveCallbackFunctionExpression(expression, checker)) return true;
+  const unwrapped = unwrapExpression(expression);
+  const type = checker.getTypeAtLocation(unwrapped);
+  if (type.getCallSignatures().length > 0) return true;
+  if (!ts.isIdentifier(unwrapped)) return false;
+  let symbol = checker.getSymbolAtLocation(unwrapped);
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration === undefined) return false;
+  if (ts.isFunctionDeclaration(declaration)) return true;
+  // The initializer goes through the wrapper-stripping resolver rather than
+  // a node-kind test: an assertion (`as any`), parentheses, or the hardening
+  // helper around the function must not hide it. The resolver works on a
+  // foreign file's node — the checker is program-wide.
+  return ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    resolveCallbackFunctionExpression(declaration.initializer, checker) !==
+      undefined;
+}
+
 function resolveFunctionLikeExpression(
   expression: ts.Expression | undefined,
   checker: ts.TypeChecker,
@@ -3063,7 +3107,7 @@ function withDeclaredResultSchema(
   const resultTypeNode = declaredVerbResultTypeNode(node, "handler");
   if (!resultTypeNode) return next;
 
-  const { factory, sourceFile } = context;
+  const { factory } = context;
   const resultSchemaCall = createSchemaCallWithRegistryTransfer(
     context,
     resultTypeNode,
@@ -3080,12 +3124,14 @@ function withDeclaredResultSchema(
   }
 
   // Only an argument the author wrote AFTER the callback is an options object;
-  // the callback itself, and the schemas prepended above, never are.
+  // the callback itself, and the schemas prepended above, never are. The
+  // identifier-aware resolver decides callback-ness, so a NAMED callback in
+  // the trailing slot is never mistaken for options and spread-replaced.
   const authoredTail = node.arguments.length >= 2
     ? node.arguments[node.arguments.length - 1]
     : undefined;
   const authoredOptions = authoredTail !== undefined &&
-      !resolveFunctionLikeExpression(authoredTail, checker, sourceFile)
+      !isCallbackReference(authoredTail, checker)
     ? authoredTail
     : undefined;
 
@@ -3232,6 +3278,40 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           const stateType = node.typeArguments[1];
           if (!eventType || !stateType) {
             return ts.visitEachChild(node, visit, transformation);
+          }
+
+          // The schema-first authored form — handler<E, T[, R]>(eventSchema,
+          // stateSchema, callback[, options]) — already carries its schemas,
+          // so nothing is prepended: injecting generated ones on top would
+          // displace the callback out of the positions the runtime dispatch
+          // and the sandbox verifier accept (argument 0 or 2). What only the
+          // transformer can do — lowering a declared result onto the trailing
+          // options object — still applies. Recognition uses the
+          // identifier-aware resolver, so a NAMED callback recognizes the
+          // form too — the SES verifier still demands a direct callback at
+          // load, but the emission must not garble the call on the way there.
+          if (
+            node.arguments.length >= 3 &&
+            !isCallbackReference(node.arguments[0], checker) &&
+            !isCallbackReference(node.arguments[1], checker) &&
+            isCallbackReference(node.arguments[2], checker)
+          ) {
+            const updated = preserveSourceMapRange(
+              factory.createCallExpression(
+                node.expression,
+                undefined,
+                withDeclaredResultSchema(
+                  [...node.arguments],
+                  node,
+                  context,
+                  checker,
+                  typeRegistry,
+                ),
+              ),
+              node,
+            );
+            context.markSchemaInjected(updated);
+            return ts.visitEachChild(updated, visit, transformation);
           }
 
           let eventTypeNode: ts.TypeNode = eventType;

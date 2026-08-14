@@ -7,6 +7,7 @@ import type {
   Frame,
   Handler,
   HandlerFactory,
+  HandlerState,
   JSONSchema,
   Module,
   ModuleFactory,
@@ -526,32 +527,35 @@ export function handler<
 export function handler<E, T>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
-  handler: (event: E, props: T) => any,
+  handler: (event: E, props: HandlerState<T>) => any,
 ): HandlerFactory<E, T>;
 export function handler<E, T>(
   handler: (Event: E, props: T) => any,
   options: { proxy: true },
 ): HandlerFactory<E, T>;
 export function handler<E, T>(
-  handler: (event: E, props: T) => any,
+  handler: (event: E, props: HandlerState<T>) => any,
 ): HandlerFactory<E, T>;
 // Declared results, reached only by naming all three type arguments — the
 // same explicit-only rule as `action`'s result overload, mirrored here and in
 // api's `HandlerFunction` (both halves are hand-maintained; an overload
 // present in only one of them is unreachable from patterns while the other's
 // tests stay green). The `=> any` overloads above absorb every inferred call
-// first, so an incidental return never declares a result.
+// first, so an incidental return never declares a result. Props typing
+// mirrors api too: non-proxy callbacks see `HandlerState<T>` (non-handle
+// members readonly), and only the `{ proxy: true }` forms keep bare `T` —
+// a writable proxy is the one contract whose props are theirs to mutate.
 export function handler<E, T, R>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
-  handler: (event: E, props: T) => R,
+  handler: (event: E, props: HandlerState<T>) => R,
 ): HandlerFactory<E, T, R>;
 export function handler<E, T, R>(
   handler: (event: E, props: T) => R,
   options: { proxy: true },
 ): HandlerFactory<E, T, R>;
 export function handler<E, T, R>(
-  handler: (event: E, props: T) => R,
+  handler: (event: E, props: HandlerState<T>) => R,
 ): HandlerFactory<E, T, R>;
 // The trailing options slot is not part of the authored surface: a pattern
 // declares its result with the type argument above, and the schema-injection

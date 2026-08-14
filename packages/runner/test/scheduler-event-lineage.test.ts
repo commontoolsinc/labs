@@ -167,21 +167,21 @@ async function waitForSchedulerCondition(
   }
 }
 
+/**
+ * Await a signal the test itself resolves — a gate's deferred, a commit
+ * callback. Deliberately no deadline: the package clock preload freezes
+ * test-armed positive-delay timers, so a `setTimeout(reject, …)` race here
+ * could never fire and would backstop nothing
+ * (`docs/development/waiting-in-tests.md`). A signal that never arrives lets
+ * the event loop quiesce, and Deno fails the pending wait at once, naming
+ * the test; the label keeps the call site readable for whoever reads that
+ * failure.
+ */
 async function waitForSignal(
   signal: Promise<void>,
-  message: string,
+  _label: string,
 ): Promise<void> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      signal,
-      new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), 1_000);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+  await signal;
 }
 
 async function expectIdlePending(

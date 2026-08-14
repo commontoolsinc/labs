@@ -55,6 +55,16 @@ export interface CallableResolution {
    * to consult — which says this resolution cannot describe a result rather
    * than promising there is none. */
   declaredResult?: () => Promise<JSONSchema | undefined>;
+  /** The verb's published event schema, when the resolution knows a richer
+   * one than the dispatch cell carries.
+   *
+   * The forced-stream fallback dispatches through a cast cell whose schema is
+   * only `{asCell: ["stream"]}` — a shape every payload satisfies — while the
+   * link-derived cell still carries whatever payload schema the piece
+   * publishes. The pre-dispatch gate validates against this when present, so
+   * a malformed payload on that path is refused before the invocation id is
+   * spent, exactly as on the ordinary paths. */
+  inputSchema?: JSONSchema;
 }
 
 /** The phases a handler invocation passes through, reported on early exit so
@@ -125,9 +135,15 @@ export interface CallableExecutionDeps {
    *
    * It shapes a result that exists rather than deciding what is fetched: the
    * readback has already materialized the whole receipt by the time this
-   * applies, and a receipt declares no schema for a selector to narrow
-   * against. A verb that returns nothing keeps returning nothing — there is
-   * no value for a selection to be about. */
+   * applies. (A plain result's receipt does carry a descriptive schema of
+   * what it holds — a reactive result's carries none — but either way the
+   * fetch has happened first.) The shared step also awaits the runtime's
+   * global idle plus storage sync, so a shaped call result can wait on
+   * derived recomputation the plain call's transaction-local acknowledgement
+   * does not — a documented cost of shaping at the call
+   * (`deriveSelectedValue`, cell-selection.ts). A verb that returns nothing
+   * keeps returning nothing — there is no value for a selection to be
+   * about. */
   selection?: CellSelection;
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
   deriveSelectedValue?: typeof deriveSelectedValue;
@@ -235,6 +251,16 @@ export function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
 }
 
 function errorMessage(error: unknown): string {
+  if (
+    typeof error === "object" && error !== null && "reason" in error &&
+    (error as { reason?: unknown }).reason != null
+  ) {
+    // A StorageTransactionAborted carries the abort's cause as `reason`, and
+    // its own message is the generic "Transaction was aborted". Prefer the
+    // cause: for a pre-dispatch drop — a send refused at the backlog cap, a
+    // piece that failed to load — the reason is the whole signal.
+    return errorMessage((error as { reason: unknown }).reason);
+  }
   if (error instanceof Error) {
     return error.message;
   }
@@ -834,11 +860,13 @@ export async function executeResolvedCallable(
     // Before anything is dispatched, and so before the invocation id can be
     // spent on a handling that would run with no event. An absent payload
     // is normalized to `{}` against an object schema (D5), so what goes out
-    // is what the gate judged.
+    // is what the gate judged. A resolution carrying a richer published
+    // schema than its dispatch cell (the forced-stream fallback) is judged
+    // against that one.
     const dispatchInput = assertVerbInputSatisfiesSchema(
       resolved.cellKey,
       input,
-      resolved.callableCell.schema,
+      resolved.inputSchema ?? resolved.callableCell.schema,
     );
     const runtimeErrors = runtimeErrorLog(resolved.pieces.runtime);
     const errorCountBefore = runtimeErrors.length;
@@ -931,10 +959,19 @@ export async function executeResolvedCallable(
       const receipt = resolved.pieces.runtime.getCellFromLink<any>(link);
       const value = await receipt.pull();
       // A value-less verb's receipt is an empty record — existence-only.
-      if (
-        value !== undefined &&
-        !(isRecord(value) && Object.keys(value).length === 0)
-      ) {
+      // Presence is decided on the receipt's STORED value, never on the
+      // materialized one: a `FabricInstance` crossing the cell read arrives
+      // as a query-result proxy over an empty ordinary stub (the
+      // `getPrototypeOf` note in packages/runner/src/query-result-proxy.ts),
+      // so prototype and key enumeration on `value` cannot tell a real
+      // instance result from the witness. The witness is stored as exactly
+      // the plain empty record; every other stored shape — plain JSON, the
+      // link a launched or chained-cell result converts to, an instance's
+      // codec form, a keyless raw primitive — is a result.
+      const raw = receipt.getRaw();
+      const valueLess = isRecord(raw) && !isInstance(raw) &&
+        Object.keys(raw).length === 0;
+      if (value !== undefined && !valueLess) {
         result = value;
       }
       if (result !== undefined) {

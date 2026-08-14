@@ -111,10 +111,8 @@ function markPatternResultSchema(
     if (ts.isShorthandPropertyAssignment(property)) {
       name = property.name.text;
       value = property.name;
-    } else if (
-      ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
-    ) {
-      name = property.name.text;
+    } else if (ts.isPropertyAssignment(property)) {
+      name = staticPropertyName(property.name);
       value = property.initializer;
     }
     if (!name || !value) continue;
@@ -150,6 +148,20 @@ function markPatternResultSchema(
     node.typeArguments,
     args,
   );
+}
+
+/**
+ * The compile-time name of a property written as an identifier or a string
+ * literal — the two static spellings an authored object literal uses. Both
+ * passes of this transformer read names through this one helper so they
+ * cannot disagree: a quoted verb name (`{ "open-composer": openComposer }`)
+ * is as inferable as a bare one. A computed name returns `undefined` — the
+ * inference names a verb or it names nothing.
+ */
+function staticPropertyName(name: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(name)) return name.text;
+  if (ts.isStringLiteral(name)) return name.text;
+  return undefined;
 }
 
 /** Strip parentheses and `as const` / `satisfies` wrappers. */
@@ -193,20 +205,14 @@ function collectSessionScopedPropertyNames(
 ): void {
   if (!ts.isObjectLiteralExpression(schema)) return;
   const propertiesEntry = schema.properties.find((p) =>
-    ts.isPropertyAssignment(p) &&
-    ((ts.isIdentifier(p.name) && p.name.text === "properties") ||
-      (ts.isStringLiteral(p.name) && p.name.text === "properties"))
+    ts.isPropertyAssignment(p) && staticPropertyName(p.name) === "properties"
   ) as ts.PropertyAssignment | undefined;
   if (!propertiesEntry) return;
   const props = unwrapExpr(propertiesEntry.initializer);
   if (!ts.isObjectLiteralExpression(props)) return;
   for (const property of props.properties) {
     if (!ts.isPropertyAssignment(property)) continue;
-    const name = ts.isIdentifier(property.name)
-      ? property.name.text
-      : ts.isStringLiteral(property.name)
-      ? property.name.text
-      : undefined;
+    const name = staticPropertyName(property.name);
     if (name && containsSessionScope(property.initializer)) into.add(name);
   }
 }
@@ -291,8 +297,7 @@ function resolvesToSessionBoundHandler(
 function containsSessionScope(node: ts.Node): boolean {
   if (
     ts.isPropertyAssignment(node) &&
-    ((ts.isIdentifier(node.name) && node.name.text === "scope") ||
-      (ts.isStringLiteral(node.name) && node.name.text === "scope")) &&
+    staticPropertyName(node.name) === "scope" &&
     ts.isStringLiteral(node.initializer) &&
     node.initializer.text === "session"
   ) {
@@ -316,9 +321,7 @@ function addTierToStreamProperties(
   let changed = false;
 
   const propertiesEntry = schemaLiteral.properties.find((p) =>
-    ts.isPropertyAssignment(p) &&
-    ((ts.isIdentifier(p.name) && p.name.text === "properties") ||
-      (ts.isStringLiteral(p.name) && p.name.text === "properties"))
+    ts.isPropertyAssignment(p) && staticPropertyName(p.name) === "properties"
   ) as ts.PropertyAssignment | undefined;
   if (!propertiesEntry) return undefined;
   const propsLiteral = unwrapExpr(propertiesEntry.initializer);
@@ -326,11 +329,7 @@ function addTierToStreamProperties(
 
   const updatedProps = propsLiteral.properties.map((property) => {
     if (!ts.isPropertyAssignment(property)) return property;
-    const propName = ts.isIdentifier(property.name)
-      ? property.name.text
-      : ts.isStringLiteral(property.name)
-      ? property.name.text
-      : undefined;
+    const propName = staticPropertyName(property.name);
     if (!propName || !names.has(propName)) return property;
     const schema = unwrapExpr(property.initializer);
     if (!ts.isObjectLiteralExpression(schema)) return property;
@@ -373,7 +372,7 @@ function isStreamMarkedLiteral(schema: ts.ObjectLiteralExpression): boolean {
   for (const property of schema.properties) {
     if (
       ts.isPropertyAssignment(property) &&
-      ts.isIdentifier(property.name) && property.name.text === "asCell" &&
+      staticPropertyName(property.name) === "asCell" &&
       ts.isArrayLiteralExpression(property.initializer)
     ) {
       return property.initializer.elements.some((el) =>
@@ -389,8 +388,7 @@ function hasProperty(
   name: string,
 ): boolean {
   return schema.properties.some((p) =>
-    ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) &&
-    p.name.text === name
+    ts.isPropertyAssignment(p) && staticPropertyName(p.name) === name
   );
 }
 
@@ -431,15 +429,14 @@ function eventSchemaIsVoid(schema: ts.Expression): boolean {
   if (!ts.isObjectLiteralExpression(schema)) return false;
   if (
     schema.properties.some((p) =>
-      ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) &&
-      p.name.text === "properties"
+      ts.isPropertyAssignment(p) && staticPropertyName(p.name) === "properties"
     )
   ) {
     return false;
   }
   return schema.properties.some((p) =>
-    ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) &&
-    p.name.text === "asCell" &&
+    ts.isPropertyAssignment(p) &&
+    staticPropertyName(p.name) === "asCell" &&
     ts.isArrayLiteralExpression(p.initializer) &&
     p.initializer.elements.some((el) =>
       ts.isStringLiteral(el) && el.text === "opaque"

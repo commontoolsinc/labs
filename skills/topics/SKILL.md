@@ -179,6 +179,15 @@ above. That result rides `plainResultReceipts`, on by default; only an explicit
 way, so treat an absent result as "not enabled here", never as "the mutation did
 not land".
 
+Name mutations so an interrupted run can retry them safely: mint one invocation
+session per run
+(`export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"`) and
+pass `--invocation <your-key>` on mutating calls. A retry with the same pair
+settles on the original outcome instead of posting twice — the handler body
+re-runs, but nothing commits twice. The settled envelope also carries `receipt`,
+the address of the outcome, which `deno task cf piece get --piece <receipt id>`
+reads back later without re-invoking.
+
 The body is the living big-picture document. Replace it in place with the full
 revised body so a reader sees the current state without replaying the thread,
 while retaining the Topic's meaningful narrative and decisions. A compact
@@ -217,6 +226,10 @@ verification succeeded.
 - If initial CLI synchronization times out, no piece read or mutation ran.
   Report the blocker; rerun only after Tailnet/API reachability or identity
   authorization has been re-established.
+- If a mutation fails or times out after `invocation:` was announced on stderr,
+  the write may still have committed. Do not re-send it blind: re-invoke with
+  the same `--invocation` id under the same session — it deduplicates against a
+  committed outcome and executes fresh only if nothing landed.
 - If `topics --input` is non-empty while `crossrefs --step` is empty or fails,
   do not call the board empty. Preserve the input evidence and report the
   result-materialization failure.
