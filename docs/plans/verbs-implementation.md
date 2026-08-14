@@ -150,8 +150,17 @@ about by the CLI beyond container inference, and acted on by the runner, so
 tolerating it forwards it. #5734 is that failure — an unsatisfiable `required`
 empties the whole read, exit 0 — and it belongs to this item. The rule its fix
 needs already exists one call site over: `selectSourceSchema` derives the
-constructed schema's `required` from the *source*, filtered to the properties
-that survived selection, with a comment giving exactly this reason.
+constructed schema's `required` from the *source*, with a comment giving exactly
+this reason. **Its filter needs the survival test that comment describes**,
+though. As written the filter asks only whether the caller projected the
+position, so a property the caller projected under a type its value fails stays
+required, is then dropped by traversal, and empties the read — #5734 again,
+over a key no caller wrote. Ceasing to carry the caller's `required` without
+that does not fix #5734; it relocates it. The design works the rule out, and
+the two containers do not answer it alike: a rejected object property is
+omitted and the object survives, while a rejected array element voids the
+array, so a caller's element type takes down the whole property and everything
+that required it.
 
 *Four tiers, not three.* Honored (`type`, `properties`, `items`,
 `additionalProperties`, `$link`); **consulted** (`required`, `minProperties`,
@@ -182,6 +191,15 @@ the key, its position, and the accepted vocabulary.
 to be missing from a set drafted out of the standard JSON Schema vocabulary.
 They belong in the tolerated set on day one.
 
+**Deriving the tolerated tier gives you candidates, not a proof that carrying
+one is inert.** That proof is owed per key and is discharged against the
+runner, not against the checker's registry. `$comment` fails it: the runner
+reserves three of its values as control markers, so a caller's `$comment` is
+forgeable control flow reaching the read boundary — a projection setting one
+on a property drops that property, and one on a source-required property
+empties the read the way #5734 does. It is accepted and dropped, alongside `$id`
+and `$schema`.
+
 *Measured: nothing in the tree breaks.* Four JSON Schema keywords appear in
 keyword position across every `--schema` argument in the repository — `type`,
 `properties`, `items`, `$link` — all honored.
@@ -195,9 +213,13 @@ the caller's copy goes no further, while the source-derived `required` the
 reader builds still reaches the read boundary — asserted against the output
 schema itself, which the selector handed to the storage provider is not; a
 projection naming a `required` field it does not project reads the fields it
-does; and a caller's scalar `type` still filters the leaf it is written on, at
-depth as well as at an array item. A command that ran only because a key was
-silently dropped now fails loudly, which is the point rather than a regression.
+does; a caller's scalar `type` still filters the leaf it is written on, at
+depth as well as at an array item; and a source-required array narrowed by a
+caller's item type reads its siblings rather than emptying the object, which
+the scalar cases do not cover because the array's failure escalates from an
+element rather than occurring where the caller wrote it. A command that ran
+only because a key was silently dropped now fails loudly, which is the point
+rather than a regression.
 
 **3. A rejection propagates up through what holds it.** *(S)* The projection
 mask reduces either container whose whole selection rejects — an array whose
