@@ -426,36 +426,28 @@ cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
 ```
 
 ```json
-[{
-  "$link": {
-    "id": "of:fid1:…",
-    "space": "did:key:…",
-    "scope": "space",
-    "path": []
-  }
-}]
+[{ "$link": "/of:fid1:…" }]
 ```
 
-All four fields are always present, so a caller indexes them without branching:
-`id` keeps its scheme, `space` and `scope` are filled in even when they match
-the reader's own, and `path` is `[]` at a document's root. No schema is inlined
-and no write-redirect flag rides along. The rendered `id` is what
-`cf piece call --piece` and `cf piece get --piece` accept, scheme included, and
-`space` is what their `--space` takes. Both travel together or neither does: the
-`id` alone names a cell in whichever space the reading command already has
-configured, which is the emitting one only by coincidence.
+The address is one string in the fabric's canonical reference syntax —
+`/[@did/]<id>[@scope][/path]` — which is exactly what `cf piece call --piece`
+and `cf piece get --piece` accept, scheme included, so an address emitted by one
+command composes into the next unchanged, without being reassembled. The space
+rides in front as `@did:key:…` only when it differs from the space the command
+targeted, the scope follows the id as `@user`/`@session` only when it is not the
+default, and the path follows as ordinary segments. No schema is inlined and no
+write-redirect flag rides along.
 
 The address names the deepest stored link crossed on the way to the marked
 position, plus the segments that remain below that link. Marking `title` under
 each element of a `notes` array whose entries are links returns the note's own
-`id` with `path` `["title"]`, not the board's `id` with `path`
-`["notes","0","title"]`: a link is a durable identity, while a position in a
-containing document is a slot, and reordering the collection above it leaves the
-same path naming a different value. Where the stored link carries a path of its
-own, that path comes first and the segments below it follow — a link to
-`{"path":["content"]}` marked at `title` renders `["content","title"]`. Where
-nothing is linked on the way, the value lives in the source document itself and
-the address is its position there.
+id followed by `/title`, not the board's id followed by `/notes/0/title`: a link
+is a durable identity, while a position in a containing document is a slot, and
+reordering the collection above it leaves the same path naming a different
+value. Where the stored link carries a path of its own, that path comes first
+and the segments below it follow — a link to `{"path":["content"]}` marked at
+`title` renders `/content/title`. Where nothing is linked on the way, the value
+lives in the source document itself and the address is its position there.
 
 The marker sits beside a projection when both are wanted —
 `{"$link":true,"type":"object","properties":{"title":true}}` returns the address
@@ -471,7 +463,7 @@ cf piece get --piece ID --select 'topic@,topic.title'
 ```
 
 ```json
-{ "topic": { "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" } }
+{ "topic": { "$link": "/of:fid1:…", "title": "First note" } }
 ```
 
 The two paths union into the one position, and `topic@.title` says the same
@@ -490,15 +482,15 @@ cf piece get --piece ID --select 'notes@'
 ```
 
 ```json
-{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }] }
+{ "notes": [{ "$link": "/of:fid1:…" }] }
 ```
 
 Those element documents are what a caller cannot work out for themselves; the
 array position's own address is only the source address plus the path they just
 typed. Where the marked position holds anything else, `topic@` among them, the
 address is that position's own. Marking below an array — `notes.title@` — is
-element-wise for the same reason, and answers with each note's own `id` and
-`path` `["title"]`.
+element-wise for the same reason, and answers with each note's own id followed
+by `/title`.
 
 A path that is only `@` names the position the read is already at, which no
 field path reaches because it sits above every field:
@@ -508,7 +500,7 @@ cf piece get --piece ID topic --select '@,title'
 ```
 
 ```json
-{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }
+{ "$link": "/of:fid1:…", "title": "First note" }
 ```
 
 It composes exactly as a suffix one level down does: `@` alone replaces the
@@ -585,7 +577,7 @@ position renders its address and everything else reads as it always did.
     "title": "Rotate signing key",
     "status": "open",
     "children": [],
-    "parent": { "$link": { "id": "of:fid1:…", "…": "…" } }
+    "parent": { "$link": "/of:fid1:…/parent" }
   }
 }
 ```

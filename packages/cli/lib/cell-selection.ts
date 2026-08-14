@@ -25,6 +25,7 @@ import {
   resolveCfcSchemaRef,
 } from "@commonfabric/runner/cfc/schema-refs";
 import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
+import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
 import { nearestName } from "./refusal.ts";
@@ -72,10 +73,10 @@ const LINK_MARKER_KEY = "$link";
 const CONCISE_ADDRESS_SUFFIX = "@";
 
 /**
- * The address a marked position renders, and the key it renders under. Every
- * field is present so a caller indexes it without branching: `id` keeps its
- * scheme, because the scheme is the kind and dropping it retargets the
- * address silently; `path` is `[]` at a document's root.
+ * The address a marked position accumulates as the walk descends, which is
+ * serialized into the LLM-friendly reference it renders as. `id` keeps its
+ * scheme, because the scheme is the kind and dropping it retargets the address
+ * silently; `path` is `[]` at a document's root.
  *
  * The address names the deepest stored link crossed on the way to the marked
  * position, plus the segments below that link. A link is a durable identity
@@ -2390,6 +2391,13 @@ function resolveProjection(
 interface WalkedPosition {
   cell: Cell<unknown>;
   address: RenderedLinkAddress;
+  /**
+   * The space the rendered reference is written relative to: an address in
+   * another space carries a `@did` prefix, one in this space does not. It is
+   * the space the READER is working in rather than the source cell's, since a
+   * path that crosses a link can land the source elsewhere.
+   */
+  contextSpace: MemorySpace | undefined;
   stored?: { value: unknown };
 }
 
@@ -2415,14 +2423,18 @@ function renderedLinkAddress(link: NormalizedFullLink): RenderedLinkAddress {
 function walkedPosition(
   cell: Cell<unknown>,
   address: RenderedLinkAddress,
+  contextSpace: MemorySpace | undefined,
   stored: { value: unknown } | undefined,
 ): WalkedPosition {
   const link = stored === undefined
     ? undefined
     : parseLink(stored.value, address);
-  return link === undefined
-    ? { cell, address, stored }
-    : { cell, address: renderedLinkAddress(link), stored: undefined };
+  return link === undefined ? { cell, address, contextSpace, stored } : {
+    cell,
+    address: renderedLinkAddress(link),
+    contextSpace,
+    stored: undefined,
+  };
 }
 
 /**
@@ -2441,6 +2453,7 @@ function positionBelow(
   return walkedPosition(
     position.cell.key(key),
     { ...position.address, path: [...position.address.path, key] },
+    position.contextSpace,
     isObjectOrArray(container) ? { value: container[key] } : undefined,
   );
 }
@@ -2450,11 +2463,18 @@ function positionBelow(
  * from, which is the cell the selection read. `lastNode: "top"` stops at a
  * link stored at that cell rather than following it, so a source that holds
  * one is addressed by it, exactly as any position below is.
+ *
+ * `contextSpace` is the space the addresses this walk renders are written
+ * relative to; see {@link WalkedPosition.contextSpace}.
  */
-function sourcePosition(cell: Cell<unknown>): WalkedPosition {
+function sourcePosition(
+  cell: Cell<unknown>,
+  contextSpace: MemorySpace | undefined,
+): WalkedPosition {
   return walkedPosition(
     cell,
     renderedLinkAddress(cell.getAsNormalizedFullLink()),
+    contextSpace,
     { value: cell.getRaw({ lastNode: "top" }) },
   );
 }
@@ -2506,10 +2526,13 @@ async function composeElementAddresses(
  * Composes the addresses a selection's markers asked for into `projected`, the
  * value its projection produced.
  *
- * A marked position renders `{"$link": <address>}`. Where the same position
- * also projected contents, the address joins them in one object, because both
- * were asked for. Where those contents are not an object there is nothing to
- * join them to, and the address is the whole answer.
+ * A marked position renders `{"$link": "/of:fid1:…/path"}` — the fabric's
+ * canonical reference syntax, one string carrying id, space, scope and path,
+ * so the address a read hands back is the address a later command takes in.
+ * Where the same position also projected contents, the address joins them in
+ * one object, because both were asked for. Where those contents are not an
+ * object there is nothing to join them to, and the address is the whole
+ * answer.
  *
  * `implicitArrayTraversal` states that the markers came from a concise field
  * list, which names a field wherever the value holds one rather than at a
@@ -2571,10 +2594,10 @@ async function composeLinkAddresses(
   }
   if (markers.marked !== true) return composed;
   const address = {
-    [LINK_MARKER_KEY]: {
-      ...position.address,
-      path: [...position.address.path],
-    },
+    [LINK_MARKER_KEY]: createLLMFriendlyLink(
+      position.address,
+      position.contextSpace,
+    ),
   };
   return isObjectNotArray(composed) ? { ...address, ...composed } : address;
 }
@@ -2731,7 +2754,7 @@ export async function deriveSelectedValue(
     // the cell's schema.
     const walked = sourceValueCell.asSchema(false);
     await walked.pull();
-    const position = sourcePosition(walked);
+    const position = sourcePosition(walked, space);
     // The graph path refuses a projection over array items that meets a value
     // which is not an array, and the answer to a marked one is the same
     // refusal: a walk over a non-array simply finds no elements to address,
@@ -3026,7 +3049,7 @@ export async function deriveSelectedValue(
     }
     deps.onOutputCell?.(outputCell);
     return markers === undefined ? outputValue : await composeLinkAddresses(
-      sourcePosition(sourceValueCell),
+      sourcePosition(sourceValueCell, space),
       markers,
       outputValue,
       implicitArrayTraversal,
@@ -3102,11 +3125,15 @@ function markersHeldBy(
  * fields they did not name. Working off the value in hand also runs no pattern
  * graph and commits no transaction; what remains is the address walk itself,
  * which is the same one a hand-written `$link` is composed through.
+ *
+ * `contextSpace` is the space the reader is working in, which decides whether
+ * a composed address carries a `@did` prefix.
  */
 export async function boundReadValue(
   sourceCell: Cell<unknown>,
   declared: JSONSchema | undefined,
   value: unknown,
+  contextSpace: MemorySpace,
 ): Promise<unknown> {
   const projection = declaredResultProjection(declared);
   if (projection === undefined) return undefined;
@@ -3119,7 +3146,7 @@ export async function boundReadValue(
     ? undefined
     : markersHeldBy(projection.markers, [value]);
   return markers === undefined ? projected : await composeLinkAddresses(
-    sourcePosition(sourceCell),
+    sourcePosition(sourceCell, contextSpace),
     markers,
     projected,
   );

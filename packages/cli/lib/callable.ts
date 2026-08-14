@@ -9,6 +9,7 @@ import {
   type NormalizedFullLink,
 } from "@commonfabric/runner";
 import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
+import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   localRefTarget,
   relaxDefaultedRequired,
@@ -153,13 +154,13 @@ export interface CallableExecutionDeps {
   deriveSelectedValue?: typeof deriveSelectedValue;
 }
 
-/** A backing-cell address in an Invocation's `links` dictionary: the same
- * serialized shape as `CallableResultRef` (the CLI's existing cell-address
- * form), plus the path inside the backing document when the link points
- * below its root. */
-export interface InvocationResultLink extends CallableResultRef {
-  path?: (string | number)[];
-}
+/** A backing-cell address published in an Invocation, written in the
+ * fabric's canonical reference syntax — `/[@did/]<id>[@scope][/path]`
+ * (`packages/cli/lib/llm-friendly-ref.ts`). One string carries the id, the
+ * space when it differs from the one the call targeted, the scope, and the
+ * path inside the backing document, so the address a call hands back is
+ * exactly what a later command takes in as `--piece`. */
+export type InvocationResultLink = string;
 
 /** The outcome of a handler invocation made with a caller-supplied id. */
 export interface InvocationOutcome {
@@ -176,8 +177,9 @@ export interface InvocationOutcome {
    * callback carries, so the address is known BEFORE the outcome is read.
    * That is what makes it available under `--no-wait`: a caller that chose
    * not to wait still holds the address to collect from, and reads it back
-   * with `cf piece get --piece <id>` rather than re-invoking the verb. The
-   * receipt is a COMMIT witness, not an execution witness — a same-id replay
+   * with `cf piece get --piece <receipt>` rather than re-invoking the verb.
+   * The receipt is a COMMIT witness, not an execution witness — a same-id
+   * replay
    * runs the handler body again and then loses the race, so effects outside
    * the transaction repeat.
    *
@@ -200,7 +202,8 @@ export interface InvocationOutcome {
    * did not commit again, and `result` is the ORIGINAL outcome. */
   deduplicated?: boolean;
   /** Under `--show-links` only: result paths mapped to their backing cell
-   * addresses, provenance beside the value. The root `"/"` entry is the
+   * addresses in canonical reference syntax, provenance beside the value the
+   * caller can pass straight back to `--piece`. The root `"/"` entry is the
    * result value's own backing document — the receipt, unless the result is
    * itself a reference, in which case the receipt address rides the
    * reserved bare `"receipt"` key; other entries appear only where a path's
@@ -948,18 +951,14 @@ export function callableCommandSpec(
   };
 }
 
-/** Normalize a receipt/backing link into the `links` dictionary's value
- * shape. The path rides along only when the link points below the backing
- * document's root. */
+/** Serialize a receipt/backing link into the canonical reference syntax.
+ * `contextSpace` is the space the call targeted: an address in another space
+ * carries its `@did` prefix, one in that space does not. */
 function toInvocationResultLink(
   link: NormalizedFullLink,
+  contextSpace: MemorySpace,
 ): InvocationResultLink {
-  return {
-    space: link.space,
-    id: link.id,
-    scope: link.scope,
-    ...(link.path.length > 0 ? { path: [...link.path] } : {}),
-  };
+  return createLLMFriendlyLink(link, contextSpace);
 }
 
 /** Two normalized links address the same backing document iff id, space,
@@ -1011,14 +1010,15 @@ export function collectInvocationResultLinks(
   receiptLink: NormalizedFullLink,
   receiptCell: Cell<any>,
   value: unknown,
+  contextSpace: MemorySpace,
 ): Record<string, InvocationResultLink> {
   const resolvedRoot = receiptCell.resolveAsCell();
   const rootBacking = resolvedRoot.getAsNormalizedFullLink();
   const links: Record<string, InvocationResultLink> = {
-    "/": toInvocationResultLink(rootBacking),
+    "/": toInvocationResultLink(rootBacking, contextSpace),
   };
   if (!sameBackingDocument(rootBacking, receiptLink)) {
-    links["receipt"] = toInvocationResultLink(receiptLink);
+    links["receipt"] = toInvocationResultLink(receiptLink, contextSpace);
   }
 
   const walk = (
@@ -1051,6 +1051,7 @@ export function collectInvocationResultLinks(
       if (!sameBackingDocument(childLink, base)) {
         links[encodeJsonPointer(["", ...segments])] = toInvocationResultLink(
           childLink,
+          contextSpace,
         );
         walk(resolved, childValue, segments, childLink);
       } else {
@@ -1233,7 +1234,12 @@ async function boundCyclicResult(
       "the addresses a bound is written in cannot be composed beside it.";
   } else {
     const declared = await resolved.declaredResult?.();
-    const bounded = await boundReadValue(receiptCell, declared, value);
+    const bounded = await boundReadValue(
+      receiptCell,
+      declared,
+      value,
+      resolved.space,
+    );
     // The bound is only as good as the declaration: a position the declaration
     // left wide can still expand into the circle, and answering with a value
     // that cannot be written would move the same failure one step later.
@@ -1339,7 +1345,7 @@ export async function executeResolvedCallable(
     const link = tx.handlingReceiptLink;
     const receiptAddress = link === undefined
       ? undefined
-      : toInvocationResultLink(link);
+      : toInvocationResultLink(link, resolved.space);
 
     if (deps.skipReadback) {
       // --no-wait's exit point: the commit is acknowledged, so the
@@ -1413,7 +1419,7 @@ export async function executeResolvedCallable(
             receipt,
             result,
             cycle,
-            receiptAddress?.id,
+            link.id,
             deps,
           );
         }
@@ -1425,7 +1431,12 @@ export async function executeResolvedCallable(
         // so each address still names the position it annotates; a `--filter`
         // does not, which is why the command refuses that pair rather than
         // handing back addresses for elements the predicate moved.
-        links = collectInvocationResultLinks(link, receipt, result);
+        links = collectInvocationResultLinks(
+          link,
+          receipt,
+          result,
+          resolved.space,
+        );
       }
     }
 

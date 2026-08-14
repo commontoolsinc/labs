@@ -432,10 +432,11 @@ first condition arrives on its own.
   the ad-hoc and exploratory cases an index does not anticipate.
 - **Collection windowing.** Carried by the read layer; see
   [Shaped reads and verb results](shaped-reads-and-verb-results.md).
-- **A canonical locator** carrying host, space, id, scope and path in one string.
-  This absorbs the question of whether `--piece` should accept a rendered
-  address directly: a path-bearing one does not name a piece, so the locator is
-  where that belongs rather than the `--piece` parser.
+- **A host in the canonical locator.** The fabric's canonical reference syntax
+  — `/[@did/]<id>[@scope][/path]`, what a rendered address is written in and
+  what `--piece` reads back — carries space, id, scope and path, so a
+  path-bearing address already travels as one string. The host does not, so a
+  reference still means "wherever this command is pointed".
 - **A local receipt cache.** `markCreateOnly` makes a receipt **write-once** and
   its address deterministic, so the *document* is safely cacheable. Its rendered
   value is not: the receipt holds links into live cells, so a materialized copy
