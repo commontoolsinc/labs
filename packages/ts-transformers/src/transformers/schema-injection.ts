@@ -2540,9 +2540,21 @@ function isCallbackReference(
   if (resolveCallbackFunctionExpression(expression, checker)) return true;
   const unwrapped = unwrapExpression(expression);
   if (!ts.isIdentifier(unwrapped)) return false;
-  const symbol = checker.getSymbolAtLocation(unwrapped);
+  let symbol = checker.getSymbolAtLocation(unwrapped);
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    // An imported callback reaches here as its import alias; the declaration
+    // that says what it IS sits behind the alias.
+    symbol = checker.getAliasedSymbol(symbol);
+  }
   const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
-  return declaration !== undefined && ts.isFunctionDeclaration(declaration);
+  if (declaration === undefined) return false;
+  if (ts.isFunctionDeclaration(declaration)) return true;
+  // An imported const whose initializer is function-like: the initializer
+  // resolver above cannot cross modules, but the checker's declaration can.
+  return ts.isVariableDeclaration(declaration) &&
+    declaration.initializer !== undefined &&
+    (ts.isArrowFunction(declaration.initializer) ||
+      ts.isFunctionExpression(declaration.initializer));
 }
 
 function resolveFunctionLikeExpression(
