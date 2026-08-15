@@ -62,6 +62,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## Shipped or superseded designs and decision records
 
 - [action-id-per-instance-decision.md](specs/action-id-per-instance-decision.md) — per-instance action identity.
+- [projection-key-classification.md](plans/projection-key-classification.md) — the four-tier classification of `--schema` projection keywords, the rule that the projection reader never hands the read boundary a schema it did not construct, and the survival rule for a source-derived `required`, August 2026.
 - [declared-verb-results-case.md](plans/declared-verb-results-case.md) — the case for carrying a verb's declared result on `module.resultSchema` in the interim rather than waiting for the Fabric-types stream; decided yes, conditionally, August 2026.
 - [cfc-render-membership-lookup.md](specs/cfc-render-membership-lookup.md) — render-time space-membership lookup.
 - [cfc-s16-default-transition-design.md](specs/cfc-s16-default-transition-design.md) — S16 default-label transition.
