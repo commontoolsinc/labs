@@ -284,6 +284,31 @@ gate opens by itself once the closure lands; caches that memoize derived
 results by schema identity populate only for schemas whose external
 closure is complete.
 
+### Space boundaries
+
+A schema document's value is space-free: content addressing makes the
+bytes identical wherever they are stored, so the realm-wide registry
+shares one verified object across spaces. Access is not space-free. Every
+fetch happens in the space where the reference was encountered — the
+traversal loader reads in the referring document's space, the
+arrival-time dependency chase syncs within its own replica's space, the
+cold-miss kick targets the space whose read failed — because that space
+is where the reader's authorization lives and where the writer installed
+the closure (the per-space install invariant above). For the same reason,
+the server-side selector resolution of Phase 2 resolves against the
+requesting space's own store, never against the server realm's shared
+registry, which is fed by every space's traversals.
+
+One consequence of realm-wide value sharing: resolution can succeed for a
+reference whose document the encountering space does not hold, when
+another session in the realm fetched the same content elsewhere. That gap
+does not heal silently — the per-space read still runs and fails, the
+document stays out of that space's query results and watch sets, and the
+missing-target kick still reports it — and a realm without the shared
+entry fails closed. The writer invariant is what keeps the case
+exceptional rather than structural: a reference is only ever written to a
+space in the same transaction as its closure.
+
 ### Traversal and sync
 
 The server's shared traversal already follows the `cfc.schemaHash` seam by
