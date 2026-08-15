@@ -1,14 +1,17 @@
+import { basename, dirname, join, relative, resolve } from "@std/path";
+
 import {
   PieceController,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
 import type { Cell } from "@commonfabric/runner";
-import { basename, dirname, join, relative, resolve } from "@std/path";
+
 import {
   type MountedCallablePath,
   parseMountedCallablePath,
 } from "../../fuse/callable-path.ts";
+import { executeCallableCommand } from "./callable-command.ts";
 import {
   callableCommandSpec,
   type CallableExecutionDeps,
@@ -18,9 +21,7 @@ import {
   type InvocationOutcome,
   type InvocationPhase,
 } from "./callable.ts";
-import { executeCallableCommand } from "./callable-command.ts";
 import type { CellSelection } from "./cell-selection.ts";
-import { newSessionId } from "./session.ts";
 import {
   type ExecCommandSpec,
   type ParsedExecArgs,
@@ -33,6 +34,7 @@ import {
   type MountStateEntry,
 } from "./fuse.ts";
 import { loadPieces, type SpaceConfig } from "./piece.ts";
+import { newSessionId } from "./session.ts";
 
 export interface MountedPieceMeta {
   id: string;

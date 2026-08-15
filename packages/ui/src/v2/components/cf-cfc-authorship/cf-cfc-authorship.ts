@@ -1,7 +1,8 @@
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import { css, html } from "lit";
+
 import { BaseElement } from "../../core/base-element.ts";
 import { initialsForName } from "../cf-avatar/index.ts";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 export type CfcAuthorshipState = "verified" | "unverified" | "unknown";
 

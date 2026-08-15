@@ -1,6 +1,7 @@
-import { css, html } from "lit";
-import { BaseElement } from "../../core/base-element.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
+import { css, html } from "lit";
+
+import { BaseElement } from "../../core/base-element.ts";
 import { CFPiece } from "../cf-piece/index.ts";
 
 export interface OAuthData {

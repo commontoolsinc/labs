@@ -1,19 +1,21 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
-import type { CfcLabelMetadataProtectionMode } from "../src/cfc/mod.ts";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
 import {
   commitCfcFieldValue,
   containsCfcFieldCommitment,
 } from "../src/cfc/label-representation.ts";
-import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
-import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { CfcLabelMetadataProtectionMode } from "../src/cfc/mod.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-label-metadata-protection",

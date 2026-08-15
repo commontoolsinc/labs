@@ -16,6 +16,22 @@
  * the info card navigate the same patterns/builders/schemas the source view
  * would show, scoped to what the diff touches.
  */
+
+import { dirname, isAbsolute, join, relative } from "@std/path";
+
+import { spawnSync } from "@node/child_process";
+
+import { cpLen } from "./ansi.ts";
+import { type DiffFile, type DiffHunk, type DiffModel } from "./diff.ts";
+import type { Language } from "./languages/language.ts";
+import {
+  canRenderDiffLines,
+  decodeLanguageInput,
+  languageForFile,
+  readOnlyReasonFor,
+  renderedLinesFor,
+} from "./languages/language.ts";
+import { computeLineStarts, lineIndexOf } from "./lines.ts";
 import type {
   Definition,
   Document,
@@ -25,19 +41,6 @@ import type {
   ViewMode,
 } from "./model.ts";
 import { flattenStructure } from "./model.ts";
-import { type DiffFile, type DiffHunk, type DiffModel } from "./diff.ts";
-import { computeLineStarts, lineIndexOf } from "./lines.ts";
-import type { Language } from "./languages/language.ts";
-import {
-  canRenderDiffLines,
-  decodeLanguageInput,
-  languageForFile,
-  readOnlyReasonFor,
-  renderedLinesFor,
-} from "./languages/language.ts";
-import { cpLen } from "./ansi.ts";
-import { dirname, isAbsolute, join, relative } from "@std/path";
-import { spawnSync } from "@node/child_process";
 
 /** How the diff document reaches the workspace. Injectable for tests. */
 export interface DiffWorkspace {

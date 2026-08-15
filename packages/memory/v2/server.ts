@@ -1,7 +1,17 @@
-import type { FabricPlainObject } from "@commonfabric/api";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import { resolveSpaceStoreUrl } from "./storage-path.ts";
+
+import type { FabricPlainObject } from "@commonfabric/api";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+
+import {
+  aclDocId,
+  ANYONE_USER,
+  type Capability,
+  hasConcreteOwner,
+  isACL,
+  isCapable,
+} from "../acl.ts";
 import {
   type CellScope,
   type ClientCommit,
@@ -56,29 +66,7 @@ import {
 } from "../v2.ts";
 import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
-import {
-  aclDocId,
-  ANYONE_USER,
-  type Capability,
-  hasConcreteOwner,
-  isACL,
-  isCapable,
-} from "../acl.ts";
-import {
-  aliasForDbId,
-  attachDatabase,
-  detachDatabase,
-  ensureTables,
-} from "./sqlite/exec.ts";
-import { assertReadOnly } from "./sqlite/guard.ts";
-import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
-import type { TableSchema } from "./sqlite/schema.ts";
-import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
-import { ReadConnectionPool } from "./sqlite/read-pool.ts";
-import {
-  columnOriginUnavailableReason,
-  ensureColumnOriginAvailable,
-} from "./sqlite/column-origin.ts";
+import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -90,8 +78,6 @@ import {
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
-import { respondToHello } from "./handshake.ts";
-import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
   buildDiffSync,
   buildFullSync,
@@ -105,10 +91,26 @@ import {
   toCacheEntry,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
-import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
+import { SessionRegistry, type SessionState } from "./session-registry.ts";
+import {
+  columnOriginUnavailableReason,
+  ensureColumnOriginAvailable,
+} from "./sqlite/column-origin.ts";
+import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
+import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
+import {
+  aliasForDbId,
+  attachDatabase,
+  detachDatabase,
+  ensureTables,
+} from "./sqlite/exec.ts";
+import { assertReadOnly } from "./sqlite/guard.ts";
+import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import type { TableSchema } from "./sqlite/schema.ts";
+import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
 

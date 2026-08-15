@@ -7,13 +7,14 @@ import {
   type MemorySpace,
   type NormalizedFullLink,
 } from "@commonfabric/runner";
-import { isInstance } from "@commonfabric/utils/types";
+import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
 import {
   localRefTarget,
   relaxDefaultedRequired,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc/schema-sanitization";
-import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
+import { isInstance } from "@commonfabric/utils/types";
+
 import {
   type CallableKind,
   classifyCallableEntry,
@@ -24,6 +25,7 @@ import {
   CellSelectionError,
   deriveSelectedValue,
 } from "./cell-selection.ts";
+import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -381,75 +383,12 @@ export function schemaIsObjectShaped(
   return false;
 }
 
-/**
- * The root of a payload, as a refusal names it. Positions below it are spelled
- * the way the read boundary spells its own (`normalizeProjectionSchema`,
- * cell-selection.ts): a property is `.name`, an array element is `[index]`. A
- * caller meets both refusals through the same command, so they name a position
- * the same way.
- */
-const EVENT_ROOT_POSITION = "<event>";
-
 /** A field a payload carries at a position whose schema does not declare it,
  * with what that position does declare. */
 interface UndeclaredEventField {
   key: string;
   position: string;
   declared: string[];
-}
-
-/**
- * The edit distance between `left` and `right`, for the near-miss below.
- * Adjacent transposition counts as one edit rather than two, because it is the
- * typo the refusal exists for: `titel` is one slip from `title` however many
- * substitutions it takes to spell as substitutions.
- */
-function fieldEditDistance(left: string, right: string): number {
-  const rows: number[][] = [
-    Array.from({ length: right.length + 1 }, (_, j) => j),
-  ];
-  for (let i = 1; i <= left.length; i++) {
-    const current = [i];
-    for (let j = 1; j <= right.length; j++) {
-      const previous = rows[i - 1];
-      current[j] = left[i - 1] === right[j - 1]
-        ? previous[j - 1]
-        : 1 + Math.min(previous[j - 1], previous[j], current[j - 1]);
-      if (
-        i > 1 && j > 1 && left[i - 1] === right[j - 2] &&
-        left[i - 2] === right[j - 1]
-      ) {
-        current[j] = Math.min(current[j], rows[i - 2][j - 2] + 1);
-      }
-    }
-    rows.push(current);
-  }
-  return rows[left.length][right.length];
-}
-
-/**
- * The declared field `key` was most likely meant to be, or `undefined` where
- * nothing is close enough to name. A call site prints no schema, so for a
- * misspelled field the declared vocabulary is the whole remediation, and the
- * one name a caller transposed two letters of is the useful half of it.
- */
-function nearestDeclaredField(
-  key: string,
-  declared: readonly string[],
-): string | undefined {
-  const lowered = key.toLowerCase();
-  let best: string | undefined;
-  let bestDistance = Infinity;
-  for (const candidate of declared) {
-    const distance = fieldEditDistance(lowered, candidate.toLowerCase());
-    if (distance < bestDistance) {
-      best = candidate;
-      bestDistance = distance;
-    }
-  }
-  return bestDistance <= Math.max(1, Math.floor(key.length / 4))
-    ? best
-    : undefined;
 }
 
 /** One property map an object-shaped position reaches, with the local-ref
@@ -675,6 +614,35 @@ function firstUndeclaredEventField(
 }
 
 /**
+ * Whether this event schema judges the fields a payload names at its root.
+ *
+ * It does when it names fields somewhere — directly or through a conjunction —
+ * and does not also say extra ones are welcome. A schema naming none judges
+ * none, so every field passes; one carrying `additionalProperties` has said
+ * undeclared fields are fine.
+ *
+ * Exported for the flag door, which needs the same answer about the same
+ * schema and must not derive it a second way. It asks whether the SCHEMA
+ * judges, not whether a given NAME is declared — those differ, and conflating
+ * them makes a declared field spelled the wrong way look undeclared-and-open
+ * rather than misspelled, which is the difference between a near miss and a
+ * silent alias.
+ */
+export function eventSchemaJudgesRootFields(
+  schema: JSONSchema | undefined,
+): boolean {
+  if (!isSchemaObject(schema)) return false;
+  const scopeRoot = cfcSchemaChildRoot(schema, schema);
+  const target = localRefTarget(schema, scopeRoot);
+  if (!isSchemaObject(target)) return false;
+  if (target.anyOf !== undefined || target.oneOf !== undefined) return false;
+  const targetRoot = cfcSchemaChildRoot(target, scopeRoot);
+  if (!schemaIsObjectShaped(target, targetRoot)) return false;
+  const declared = declaredFieldsAt(target, targetRoot);
+  return declared.sources.length > 0 && !declared.honorsUndeclared;
+}
+
+/**
  * Refuse a payload carrying a field the verb does not declare, naming the
  * field, the position it sat at, the vocabulary that position takes, and the
  * declared name it is one edit from.
@@ -729,7 +697,7 @@ export function undeclaredVerbFieldError(
     true,
   );
   if (found === undefined) return undefined;
-  const nearest = nearestDeclaredField(found.key, found.declared);
+  const nearest = nearestName(found.key, found.declared);
   return `"${found.key}" at ${found.position} is not a field this verb ` +
     "declares. " +
     (nearest === undefined ? "" : `Did you mean "${nearest}"? `) +

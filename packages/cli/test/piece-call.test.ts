@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { ValidationError } from "@cliffy/command";
 import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
@@ -11,24 +13,7 @@ import {
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  type CallableResolution,
-  CF_RUNTIME_ERROR_LOG,
-  collectInvocationResultLinks,
-  executeResolvedCallable,
-  normalizeAbsentVerbPayload,
-  runtimeErrorLog,
-  schemaIsObjectShaped,
-  verbInputSchemaError,
-  VerbInputValidationError,
-} from "../lib/callable.ts";
-import {
-  executePieceCallable,
-  PieceResultProjectionError,
-  PieceVerbReadError,
-} from "../lib/piece.ts";
-import type { ExecutedPieceCallable } from "../lib/piece.ts";
-import { ValidationError } from "@cliffy/command";
+
 import {
   boundedSettlement,
   exitPieceCallFailure,
@@ -49,13 +34,30 @@ import {
   verbInputErrorReport,
   WaitBoundExpired,
 } from "../commands/piece.ts";
-import { LinkValidationError } from "../lib/piece.ts";
+import {
+  type CallableResolution,
+  CF_RUNTIME_ERROR_LOG,
+  collectInvocationResultLinks,
+  executeResolvedCallable,
+  normalizeAbsentVerbPayload,
+  runtimeErrorLog,
+  schemaIsObjectShaped,
+  verbInputSchemaError,
+  VerbInputValidationError,
+} from "../lib/callable.ts";
 import {
   type CellSelection,
   CellSelectionError,
   type deriveSelectedValue,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
+import {
+  executePieceCallable,
+  LinkValidationError,
+  PieceResultProjectionError,
+  PieceVerbReadError,
+} from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import { cf, stripAnsi } from "./utils.ts";
 
 /**

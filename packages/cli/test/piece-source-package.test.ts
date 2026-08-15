@@ -1,14 +1,16 @@
 import { expect } from "@std/expect";
+import { dirname, join } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
 import type {
   Program,
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
-import { dirname, join } from "@std/path";
-import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { getProgramFromFile } from "../lib/piece.ts";
 
 describe("piece source package", () => {

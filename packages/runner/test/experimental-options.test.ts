@@ -4,21 +4,23 @@
  * flags whose consumers are ambient.
  */
 
-import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
 import {
   getModernCellRepConfig,
   resetModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import { Identity } from "@commonfabric/identity";
 import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("test experimental");
 

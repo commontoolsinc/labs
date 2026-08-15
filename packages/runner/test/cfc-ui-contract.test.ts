@@ -1,11 +1,10 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import type { EventHandler } from "../src/scheduler.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
 import {
   markRendererTrustedEvent,
   recordTrustedEventPolicyInputs,
@@ -13,7 +12,10 @@ import {
   uiContractFromSchema,
   uiContractsFromSchema,
 } from "../src/cfc/ui-contract.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { EventHandler } from "../src/scheduler.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-ui-contract");
 const space = signer.did();

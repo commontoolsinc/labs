@@ -1,17 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { isOrClause } from "../src/cfc/clause.ts";
-import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import {
   CFC_LABEL_READ_FAILED_ATOM,
   cfcObservationFitsCeiling,
 } from "../src/cfc/observation.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-clause-authoring");
 

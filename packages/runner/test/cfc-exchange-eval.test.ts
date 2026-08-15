@@ -1,15 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
-import {
-  DEFAULT_EXCHANGE_FUEL,
-  evaluateExchangeRules,
-} from "../src/cfc/exchange-eval.ts";
-import {
-  buildCfcPolicySnapshot,
-  type ExchangeRule,
-} from "../src/cfc/policy.ts";
-import { buildCfcTrustConfig, createTrustResolver } from "../src/cfc/trust.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+
 import {
   type CfcConfClause,
   type CfcOrClause,
@@ -17,8 +11,16 @@ import {
   clausesEqual,
   normalizeClause,
 } from "../src/cfc/clause.ts";
+import {
+  DEFAULT_EXCHANGE_FUEL,
+  evaluateExchangeRules,
+} from "../src/cfc/exchange-eval.ts";
 import type { IFCLabel } from "../src/cfc/label-view-core.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import {
+  buildCfcPolicySnapshot,
+  type ExchangeRule,
+} from "../src/cfc/policy.ts";
+import { buildCfcTrustConfig, createTrustResolver } from "../src/cfc/trust.ts";
 
 // Epic B4 (docs/history/plans/cfc-future-work-implementation.md §3): the guarded
 // rewrite + fueled fixpoint (spec §4.4.5). Property tests (i)-(vi) from the

@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FakeTime } from "@std/testing/time";
 import { basename, join, resolve, toFileUrl } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { FakeTime } from "@std/testing/time";
+
+import { writeFailedSupervisorStartupStatus } from "../../fuse/mod.ts";
 import {
   awaitBackgroundMountStartup,
   awaitForegroundMountExit,
@@ -14,6 +16,16 @@ import {
   mountStatusHeader,
   runUnmount,
 } from "../commands/fuse.ts";
+import {
+  parseSupervisorArgs,
+  supervisorHelp,
+} from "../lib/fuse-mount-flags.ts";
+import {
+  buildFuseChildCommand,
+  cleanupFuseChild,
+  recordFuseMountState,
+  runFuseSupervisor,
+} from "../lib/fuse-supervisor.ts";
 import {
   buildBackgroundSupervisorDenoArgs,
   buildFuseBinaryArgs,
@@ -34,17 +46,6 @@ import {
   STATFS_SIZE,
   writeMountState,
 } from "../lib/fuse.ts";
-import {
-  buildFuseChildCommand,
-  cleanupFuseChild,
-  recordFuseMountState,
-  runFuseSupervisor,
-} from "../lib/fuse-supervisor.ts";
-import {
-  parseSupervisorArgs,
-  supervisorHelp,
-} from "../lib/fuse-mount-flags.ts";
-import { writeFailedSupervisorStartupStatus } from "../../fuse/mod.ts";
 import { withEnv } from "./utils.ts";
 
 const CHILD_PID = 321;

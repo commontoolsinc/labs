@@ -1,10 +1,12 @@
-import { css, html, nothing } from "lit";
-import { property, state } from "lit/decorators.js";
-import { BaseElement } from "../../core/base-element.ts";
+import { stringSchema } from "@commonfabric/runner/schemas";
 import type { CellHandle } from "@commonfabric/runtime-client";
 import { isCellHandle } from "@commonfabric/runtime-client";
+import { css, html, nothing } from "lit";
+import { property, state } from "lit/decorators.js";
+
+import { BaseElement } from "../../core/base-element.ts";
 import { fabAnimations } from "./styles.ts";
-import { stringSchema } from "@commonfabric/runner/schemas";
+
 // Side-effect import to ensure cf-message-beads is registered
 import "../cf-message-beads/index.ts";
 

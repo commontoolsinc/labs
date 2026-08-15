@@ -1,9 +1,10 @@
-import { css, html } from "lit";
-import { BaseElement } from "../../core/base-element.ts";
 import {
   CommonIframeSandboxElement as _,
   IPC,
 } from "@commonfabric/iframe-sandbox";
+import { css, html } from "lit";
+
+import { BaseElement } from "../../core/base-element.ts";
 
 /**
  * CFIframe - An iframe to execute arbitrary scripts

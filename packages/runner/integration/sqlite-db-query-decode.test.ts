@@ -8,8 +8,10 @@
  * exercises the imperative `db.exec` write folded into a handler commit against
  * the real server.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
+
+import app from "../../toolshed/app.ts";
 import { Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 

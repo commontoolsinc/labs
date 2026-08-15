@@ -1,22 +1,24 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  clearMockResponses,
-  loadConversationFixture,
-} from "@commonfabric/llm/client";
+import { describe, it } from "@std/testing/bdd";
+
 import type {
   BuiltInLLMMessage,
   BuiltInLLMTool,
   JSONSchema,
 } from "@commonfabric/api";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import { Identity } from "@commonfabric/identity";
+import {
+  clearMockResponses,
+  loadConversationFixture,
+} from "@commonfabric/llm/client";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { createLLMFriendlyLink } from "../src/link-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { waitForLlmMessages } from "./support/llm-result.ts";
-import { createLLMFriendlyLink } from "../src/link-types.ts";
-import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
   "cfc agent prompt injection demo drive",

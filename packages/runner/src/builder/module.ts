@@ -1,3 +1,22 @@
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
+import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
+import { generateHandlerSchema } from "../schema.ts";
+import { assertNotInActionExecution } from "./action-context.ts";
+import { toJSONMethod } from "./json-member.ts";
+import {
+  applyArgumentIfcToResult,
+  connectInputAndOutputs,
+} from "./node-utils.ts";
+import {
+  brandTrustedBuilderArtifact,
+  getArtifactEntryRef,
+} from "./pattern-metadata.ts";
+import { getTopFrame } from "./pattern.ts";
+import { reactive, stream } from "./reactive.ts";
+import { moduleToEncodableForm } from "./to-encodable-form.ts";
 import type {
   AssertPart,
   AssertRawPart,
@@ -21,24 +40,6 @@ import type {
   toEncodableForm,
   toJSON,
 } from "./types.ts";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { reactive, stream } from "./reactive.ts";
-import {
-  applyArgumentIfcToResult,
-  connectInputAndOutputs,
-} from "./node-utils.ts";
-import { assertNotInActionExecution } from "./action-context.ts";
-import { moduleToEncodableForm } from "./to-encodable-form.ts";
-import { toJSONMethod } from "./json-member.ts";
-import {
-  brandTrustedBuilderArtifact,
-  getArtifactEntryRef,
-} from "./pattern-metadata.ts";
-import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
-import { getTopFrame } from "./pattern.ts";
-import { generateHandlerSchema } from "../schema.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 
 const sourceLocationLogger = getLogger("builder.source-location", {
   enabled: false,

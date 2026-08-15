@@ -6,15 +6,17 @@
 // root) rather than a hand-simplified path.
 
 import { assertEquals } from "@std/assert";
-import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
-import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
+
+import { Database } from "@db/sqlite";
+
 import type { MemorySpace } from "../interface.ts";
 import {
   listSpaceStores,
   snapshotSpaceStore,
   spaceStorePath,
 } from "../v2/dump.ts";
+import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 
 const SPACE_A = "did:key:z6MkDumpHelperSpaceAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const SPACE_B = "did:key:z6MkDumpHelperSpaceBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";

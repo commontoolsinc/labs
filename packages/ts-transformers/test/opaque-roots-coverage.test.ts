@@ -12,8 +12,10 @@
  * - `addBindingTargetSymbols` — collects the declared symbols of a binding name,
  *   descending into array/object binding patterns and skipping holes.
  */
-import ts from "typescript";
+
 import { assert, assertEquals, assertFalse } from "@std/assert";
+
+import ts from "typescript";
 
 import type { TransformationContext } from "../src/core/mod.ts";
 import {

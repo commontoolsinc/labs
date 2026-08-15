@@ -1,5 +1,5 @@
-import { afterAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterAll, describe, it } from "@std/testing/bdd";
 
 import {
   decodeMemoryBoundary,
@@ -7,11 +7,12 @@ import {
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
 } from "@commonfabric/memory/v2";
+
 import {
   attachMemorySocketPipeline,
   bufferTextMessagesUntilNegotiated,
 } from "./memory.handlers.ts";
-import { memoryServer } from "../memory.ts";
+import { memoryServer } from "@/routes/storage/memory.ts";
 
 const HELLO = encodeMemoryBoundary({
   type: "hello",

@@ -1,8 +1,10 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
+
+import ts from "typescript";
+
 import { CommonFabricTransformerPipeline } from "../src/mod.ts";
-import { batchTypeCheckFixtures } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { batchTypeCheckFixtures } from "./utils.ts";
 
 /**
  * CT-1868 lineage regression — the hermetic, tracked form of the transform-time

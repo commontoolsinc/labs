@@ -1,12 +1,13 @@
-import { LitElement } from "lit";
 import type { Identity } from "@commonfabric/identity";
+import { DebugController } from "@commonfabric/ui";
+import { LitElement } from "lit";
+
 import {
   AppStateConfigKey,
   AppView,
   createAppState,
   urlToAppView,
 } from "../../shared/mod.ts";
-import { DebugController } from "@commonfabric/ui";
 import { API_URL } from "../lib/env.ts";
 
 // Set to `true` to render outlines everytime a

@@ -16,13 +16,14 @@
  * rounding them to fixed levels.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
-import { resolveSchema, schemaHasIfc } from "../src/schema.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { describe, it } from "@std/testing/bdd";
+
 import type { JSONSchemaObj } from "@commonfabric/api";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
 import {
   findCfcSchemaRefs,
   pruneCfcSchemaDefinitions,
@@ -31,6 +32,7 @@ import {
   selectReferencedCfcSchemaDefs,
 } from "../src/cfc/schema-refs.ts";
 import { validateSchemaValue } from "../src/cfc/schema-sanitization.ts";
+import { resolveSchema, schemaHasIfc } from "../src/schema.ts";
 
 describe("ContextualFlowControl.schemaAtPath", () => {
   it("rejects leading-zero array index like '01'", () => {

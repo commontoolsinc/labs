@@ -1,17 +1,7 @@
 import type { FabricValue } from "@commonfabric/api";
-import {
-  createSchedulerTestRuntime as createBaseSchedulerTestRuntime,
-  describe,
-  disposeSchedulerTestRuntime,
-  expect,
-  it,
-  space,
-  toMemorySpaceAddress,
-} from "./scheduler-test-utils.ts";
-import type {
-  IMemorySpaceAddress,
-  TransactionReactivityLog,
-} from "../src/storage/interface.ts";
+import type { SchedulerActionSnapshotResult } from "@commonfabric/memory/v2";
+
+import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
   buildSchedulerActionObservation,
   isSchedulerActionObservation,
@@ -22,15 +12,26 @@ import {
   schedulerImplementationFingerprint,
   schedulerRuntimeFingerprint,
 } from "../src/scheduler/run.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
+import type {
+  IMemorySpaceAddress,
+  TransactionReactivityLog,
+} from "../src/storage/interface.ts";
+import {
+  createSchedulerTestRuntime as createBaseSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  it,
+  space,
+  toMemorySpaceAddress,
+} from "./scheduler-test-utils.ts";
 import type {
   Action,
   Cell,
   IExtendedStorageTransaction,
   Runtime,
 } from "./scheduler-test-utils.ts";
-import type { SchedulerActionSnapshotResult } from "@commonfabric/memory/v2";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 // Source-backed `value -> doubled` pattern for the clean-restart resume test. A
 // fresh runtime resuming from storage must resolve the piece's pattern by its

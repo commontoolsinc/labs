@@ -1,15 +1,17 @@
 import { assert, assertEquals } from "@std/assert";
+
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
 } from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
 import type { SessionFactory } from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,

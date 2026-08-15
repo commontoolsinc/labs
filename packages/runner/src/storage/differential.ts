@@ -1,11 +1,12 @@
-import { unclaimed } from "@commonfabric/memory/fact";
-import type { FabricPlainObject } from "@commonfabric/api";
-import { isFabricObjectOrArray } from "@commonfabric/data-model/fabric-value";
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   FabricSpecialObject,
+  isFabricObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { unclaimed } from "@commonfabric/memory/fact";
+
+import { normalizeCellScope } from "../scope.ts";
 import type {
   IMemoryAddress,
   IMemoryChange,
@@ -13,7 +14,6 @@ import type {
   State,
 } from "./interface.ts";
 import * as Address from "./transaction/address.ts";
-import { normalizeCellScope } from "../scope.ts";
 
 export const create = () => new Changes();
 

@@ -1,9 +1,13 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { getLogger } from "@commonfabric/utils/logger";
-import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+
+import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 import {
   forEachSubschema,
   isSubschema,
@@ -17,9 +21,6 @@ import {
 // everywhere in this module. (`$defs` bodies stay dormant — reached through the
 // definition-scope logic, not this flag.)
 const ALL_SUBSCHEMAS: SchemaWalkOptions = { includeUnused: true };
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
-import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 
 const logger = getLogger("cfc");
 

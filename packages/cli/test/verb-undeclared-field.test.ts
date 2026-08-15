@@ -16,6 +16,7 @@ import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
+  eventSchemaJudgesRootFields,
   executeResolvedCallable,
   undeclaredVerbFieldError,
   verbInputSchemaError,
@@ -652,6 +653,83 @@ describe("verb-undeclared-field", () => {
   // Positions the walk cannot judge, each asserted as the call GOING OUT
   // rather than as no refusal coming back. The two are different facts, and
   // only the first one states that a caller can still make the call.
+
+  describe("eventSchemaJudgesRootFields()", () => {
+    // The predicate `cf exec`'s flag door reads to decide whether an
+    // unrecognized flag is a misspelling to refuse or a field the schema
+    // never undertook to judge. Asserted here rather than through the flag
+    // door, because each guard below answers for a schema shape no flag
+    // parser can construct on its own.
+    it("judges a schema that names fields and admits no others", () => {
+      expect(eventSchemaJudgesRootFields({
+        type: "object",
+        properties: { title: { type: "string" } },
+      })).toBe(true);
+    });
+
+    it("judges fields a conjunction contributes", () => {
+      expect(eventSchemaJudgesRootFields({
+        type: "object",
+        allOf: [{ type: "object", properties: { count: { type: "number" } } }],
+      })).toBe(true);
+    });
+
+    it("does not judge a schema naming no fields", () => {
+      expect(eventSchemaJudgesRootFields({ type: "object" })).toBe(false);
+    });
+
+    it("does not judge a schema welcoming undeclared fields", () => {
+      expect(eventSchemaJudgesRootFields({
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: true,
+      })).toBe(false);
+    });
+
+    it("does not judge a disjunction", () => {
+      // A payload need satisfy only one branch, so no single vocabulary
+      // describes the position and refusing against one would refuse what
+      // another branch declares. The payload door passes these over too.
+      expect(eventSchemaJudgesRootFields({
+        anyOf: [
+          { type: "object", properties: { a: { type: "string" } } },
+          { type: "object", properties: { b: { type: "string" } } },
+        ],
+      })).toBe(false);
+      expect(eventSchemaJudgesRootFields({
+        oneOf: [{ type: "object", properties: { a: { type: "string" } } }],
+      })).toBe(false);
+    });
+
+    it("does not judge a position that is not object-shaped", () => {
+      expect(eventSchemaJudgesRootFields({ type: "string" })).toBe(false);
+    });
+
+    it("does not judge a schema that is not an object at all", () => {
+      // `true` admits everything and `undefined` says nothing was published;
+      // neither names a field, so neither can call one undeclared.
+      expect(eventSchemaJudgesRootFields(true)).toBe(false);
+      expect(eventSchemaJudgesRootFields(undefined)).toBe(false);
+    });
+
+    it("does not judge a reference that resolves to nothing", () => {
+      // A `$ref` naming a definition the document does not carry resolves to
+      // no schema, which is not a shape that can judge anything.
+      expect(eventSchemaJudgesRootFields({ $ref: "#/$defs/Absent" }))
+        .toBe(false);
+    });
+
+    it("does not judge a reference resolving to something that is not an object", () => {
+      // `true` admits any value, so the definition names no fields; the walk
+      // has to read what the reference RESOLVES to rather than the reference,
+      // which carries no `properties` of its own either way.
+      expect(eventSchemaJudgesRootFields({
+        $ref: "#/$defs/Anything",
+        $defs: { Anything: true },
+      })).toBe(false);
+    });
+  });
+
   describe("a position the walk cannot judge", () => {
     it("dispatches an array whose elements all carry declared fields", async () => {
       const schema: JSONSchema = {

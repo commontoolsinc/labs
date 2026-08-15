@@ -7,6 +7,11 @@
  * Pure: produces model {@link Line}s (the same shape the renderer already draws)
  * with token classes chosen so the existing theme colors everything coherently.
  */
+
+import { basename } from "@std/path";
+
+import { cpLen } from "./ansi.ts";
+import type { Semantics } from "./languages/language.ts";
 import type {
   Document,
   Line,
@@ -24,9 +29,6 @@ import {
   findReferences,
   type IdentUse,
 } from "./references.ts";
-import { basename } from "@std/path";
-import { cpLen } from "./ansi.ts";
-import type { Semantics } from "./languages/language.ts";
 
 /** A selectable cross-reference line that jumps the main view when invoked. */
 export interface CardTarget {

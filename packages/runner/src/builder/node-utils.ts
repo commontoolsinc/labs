@@ -1,17 +1,18 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import type { CfcConfClause } from "../cfc/clause.ts";
-import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
-import { ContextualFlowControl } from "../cfc.ts";
 import { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isCell } from "../cell.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
-import { traverseValue } from "./traverse-utils.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
-import { isCell } from "../cell.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { resolveLocationFromFunctionSource } from "./module.ts";
+import { traverseValue } from "./traverse-utils.ts";
+import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {

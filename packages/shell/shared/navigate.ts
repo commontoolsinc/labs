@@ -1,3 +1,5 @@
+import { getLogger } from "@commonfabric/utils/logger";
+
 import {
   AppView,
   appViewToUrlPath,
@@ -5,7 +7,6 @@ import {
   ShellApp,
   urlToAppView,
 } from "./app/mod.ts";
-import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("shell.navigation", {
   enabled: false,

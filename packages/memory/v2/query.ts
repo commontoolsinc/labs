@@ -1,3 +1,5 @@
+import type { FabricValue } from "@commonfabric/api";
+import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   CompoundCycleTracker,
   createSchemaMemo,
@@ -14,12 +16,11 @@ import {
   schemaTrackerCoversSelector,
   type TraversalContext,
 } from "@commonfabric/runner/traverse";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
-import { isObjectNotArray } from "@commonfabric/utils/types";
-import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
-import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   type CellScope,
   type EntitySnapshot,

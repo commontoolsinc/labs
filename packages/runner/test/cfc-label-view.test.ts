@@ -1,26 +1,28 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { describe, it } from "@std/testing/bdd";
+
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { toCell } from "../src/back-to-cell.ts";
+import { type FactoryInput, UI } from "../src/builder/types.ts";
 import {
   cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
 } from "../src/cfc/label-view.ts";
-import { cfcLabelViewFromSchema } from "../src/cfc/schema-label-view.ts";
 import {
   redactSigilCfcLabelViewsForDisplay,
   stripSigilCfcLabelViews,
 } from "../src/cfc/link-label-view.ts";
+import { cfcLabelViewFromSchema } from "../src/cfc/schema-label-view.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { toCell } from "../src/back-to-cell.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type FactoryInput, UI } from "../src/builder/types.ts";
+import { Runtime } from "../src/runtime.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 describe("CFC label view helpers", () => {
   it("collects labels that apply to a logical value path", () => {

@@ -1,13 +1,14 @@
+import type { Logger } from "@commonfabric/utils/logger";
+
+import type { JSONSchema } from "../builder/types.ts";
 import type { Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
-import type { Logger } from "@commonfabric/utils/logger";
-import type { JSONSchema } from "../builder/types.ts";
-import type { ElementRun } from "./list-element-rollback.ts";
-import { cellIdentityKey } from "./scope-policy.ts";
 import {
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
+import type { ElementRun } from "./list-element-rollback.ts";
+import { cellIdentityKey } from "./scope-policy.ts";
 
 type ElementRuns = Map<string, ElementRun>;
 

@@ -1,6 +1,4 @@
-import { CFScrollArea } from "./cf-scroll-area.ts";
-
-import { ScrollOrientation } from "./cf-scroll-area.ts";
+import { CFScrollArea, ScrollOrientation } from "./cf-scroll-area.ts";
 
 if (!customElements.get("cf-scroll-area")) {
   customElements.define("cf-scroll-area", CFScrollArea);

@@ -1,5 +1,9 @@
 // Scheduler debounce and throttle tests.
 
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
+
+import { getActionStats, recordActionTime } from "../src/scheduler/timing.ts";
+import type { ActionStats } from "../src/telemetry.ts";
 import {
   afterEach,
   beforeEach,
@@ -17,9 +21,6 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
-import { BoundedKeyMap } from "@commonfabric/utils/cache";
-import type { ActionStats } from "../src/telemetry.ts";
-import { getActionStats, recordActionTime } from "../src/scheduler/timing.ts";
 
 describe("action timing stats", () => {
   // Each action instance gets its own id, so a pattern that keeps creating

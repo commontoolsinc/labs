@@ -1,26 +1,8 @@
-import type { Immutable } from "@commonfabric/utils/types";
 import type {
   CellScope,
   FabricValue,
   SchemaPathSelector,
 } from "@commonfabric/api";
-import type {
-  CommitPrecondition,
-  EntityDocument,
-  EntityIdListOptions,
-  EntityIdListResult,
-  PatchOp,
-  SchedulerActionSnapshotQuery,
-  SchedulerExecutionContextKey,
-  SchedulerSnapshotListResult,
-  SqliteDbRef,
-  SqliteOperation,
-  SqliteParamsWire,
-  SqliteQueryResult,
-  SqliteRegisterDiskSourceResult,
-} from "@commonfabric/memory/v2";
-import type { EntityId } from "../create-ref.ts";
-import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
@@ -37,7 +19,24 @@ import {
   type URI,
   type Variant,
 } from "@commonfabric/memory/interface";
+import type {
+  CommitPrecondition,
+  EntityDocument,
+  EntityIdListOptions,
+  EntityIdListResult,
+  PatchOp,
+  SchedulerActionSnapshotQuery,
+  SchedulerExecutionContextKey,
+  SchedulerSnapshotListResult,
+  SqliteDbRef,
+  SqliteOperation,
+  SqliteParamsWire,
+  SqliteQueryResult,
+  SqliteRegisterDiskSourceResult,
+} from "@commonfabric/memory/v2";
 import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
+import type { Immutable } from "@commonfabric/utils/types";
+
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
@@ -60,7 +59,9 @@ import type {
   TrustSnapshot,
   WritePolicyInput,
 } from "../cfc/mod.ts";
+import type { EntityId } from "../create-ref.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
+import type { MergeableOpDelta } from "./mergeable-ops.ts";
 
 export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;

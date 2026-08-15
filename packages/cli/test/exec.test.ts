@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
+import { undeclaredVerbFieldError } from "../lib/callable.ts";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
@@ -416,8 +417,29 @@ describe("parseExecArgs", () => {
     );
     expect(() => parseExecArgs(spec, ["--query", "tea", "--mode", "invalid"]))
       .toThrow(/Invalid value for --mode/i);
+    // The five elements the payload door gives for the same mistake: the
+    // name, the position, the refusal, and the accepted vocabulary. A caller
+    // who mistypes a flag and one who mistypes a payload key made one
+    // mistake, and the flag spelling is the one the walkthrough teaches.
     expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
-      .toThrow(/Unknown flag --unknown/i);
+      .toThrow(
+        /"--unknown" at <event> is not a field this verb declares\./,
+      );
+    expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
+      .toThrow(/<event> takes "--mode", "--query"/);
+
+    // The fifth element, on a name close enough to have been meant.
+    expect(() => parseExecArgs(spec, ["--quer", "tea"]))
+      .toThrow(/Did you mean "--query"\?/);
+    // And withheld where nothing is close: a wrong guess is worse than none.
+    expect(() => parseExecArgs(spec, ["--zzzzzzzz", "tea"]))
+      .not.toThrow(/Did you mean/);
+
+    // A verb declaring nothing says so rather than trailing an empty list,
+    // which is the same sentence the payload door gives for that case.
+    const bare = makeSpec("handler", { type: "object", properties: {} });
+    expect(() => parseExecArgs(bare, ["invoke", "--titel", "x"]))
+      .toThrow(/<event> declares no fields at all/);
   });
 });
 
@@ -496,10 +518,92 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(spec, ["--no-enabled"]).input).toEqual({
       enabled: false,
     });
+    // The field exists; the negation is what does not apply. Listing the
+    // vocabulary here would send the caller looking for a name they already
+    // found, so this refusal names only the field it is about.
     expect(() => parseExecArgs(spec, ["--no-query"])).toThrow(
-      /Unknown flag/,
+      /"--no-query" negates "--query", which is not a boolean field/,
+    );
+    expect(() => parseExecArgs(spec, ["--no-query"])).not.toThrow(
+      /declared fields are/,
     );
     expect(() => parseExecArgs(spec, ["--query"])).toThrow(/Missing value/);
+  });
+
+  it("accepts an undeclared flag exactly where the payload door accepts the field", () => {
+    // The two doors are one gate asked in two spellings, so what they let
+    // through must not depend on which the caller reached for. Both
+    // permissive cases are schemas the RUNTIME will not judge either: one
+    // naming no fields at all, and one saying extra fields are welcome.
+    const shapes: Record<string, JSONSchema> = {
+      "no properties key": { type: "object" },
+      "empty properties": { type: "object", properties: {} },
+      "additionalProperties": {
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: true,
+      },
+      "closed": { type: "object", properties: { title: { type: "string" } } },
+    };
+
+    const verdicts: Record<string, { flag: string; payload: string }> = {};
+    for (const [label, inputSchema] of Object.entries(shapes)) {
+      const spec = makeSpec("handler", inputSchema);
+      let flag: string;
+      try {
+        parseExecArgs(spec, ["invoke", "--titel", "x"]);
+        flag = "accept";
+      } catch {
+        flag = "refuse";
+      }
+      verdicts[label] = {
+        flag,
+        payload: undeclaredVerbFieldError({ titel: "x" }, inputSchema) ===
+            undefined
+          ? "accept"
+          : "refuse",
+      };
+    }
+
+    // Asserted as one object so a disagreement names WHICH shape drifted,
+    // and so a change making both doors uniformly wrong still fails.
+    expect(verdicts).toEqual({
+      "no properties key": { flag: "accept", payload: "accept" },
+      "empty properties": { flag: "refuse", payload: "refuse" },
+      "additionalProperties": { flag: "accept", payload: "accept" },
+      "closed": { flag: "refuse", payload: "refuse" },
+    });
+
+    // An accepted flag lands as the string the caller typed: the schema
+    // declared no type to read it as, and this door does not invent one.
+    expect(
+      parseExecArgs(makeSpec("handler", shapes["no properties key"]), [
+        "invoke",
+        "--titel",
+        "x",
+      ]).input,
+    ).toEqual({ titel: "x" });
+  });
+
+  it("refuses a declared field typed in its schema spelling, not aliases it", () => {
+    // The permissive path turns on whether the SCHEMA judges its fields, not
+    // on whether a NAME is declared. Asking the second would read `--fooBar`
+    // as an undeclared field against an open schema and accept it — a silent
+    // alias for `--foo-bar` that no help page teaches and that arrives
+    // untyped, because the synthesized descriptor carries no schema.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { fooBar: { type: "number" } },
+    });
+
+    expect(() => parseExecArgs(spec, ["invoke", "--fooBar", "5"]))
+      .toThrow(/"--fooBar" at <event> is not a field this verb declares\./);
+    expect(() => parseExecArgs(spec, ["invoke", "--fooBar", "5"]))
+      .toThrow(/Did you mean "--foo-bar"\?/);
+
+    // And the spelling it names parses to the DECLARED type, not a string.
+    expect(parseExecArgs(spec, ["invoke", "--foo-bar", "5"]).input)
+      .toEqual({ fooBar: 5 });
   });
 
   it("handles each non-object input mode and its errors", () => {
@@ -509,9 +613,19 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(booleanSpec, ["--value", "true"]).input).toBe(true);
     expect(() => parseExecArgs(stringSpec, ["--value", "one", "extra"]))
       .toThrow(/Unexpected argument extra/);
+    // A verb taking a single value has no fields to name, so the vocabulary
+    // is the fixed four rather than schema-derived — but a fixed vocabulary
+    // is still a vocabulary, so the near miss is owed here too.
     expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
-      /Unknown flag/,
+      /"--other" is not a flag this verb takes\./,
     );
+    expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
+      /"--value", "--value-file", "--json", "--json-file"/,
+    );
+    expect(() => parseExecArgs(stringSpec, ["--valu", "x"]))
+      .toThrow(/Did you mean "--value"\?/);
+    expect(() => parseExecArgs(stringSpec, ["--zzzzzzzz", "x"]))
+      .not.toThrow(/Did you mean/);
     expect(() => parseExecArgs(stringSpec, ["--json", "--other"])).toThrow(
       /cannot be combined/,
     );
@@ -530,8 +644,11 @@ describe("parseExecArgs edge cases", () => {
     const spec = makeSpec("tool", { type: "object", properties: {} });
 
     expect(() => parseExecArgs(spec, ["invoke"])).toThrow(/Invalid verb/);
+    // `--help` is not unknown — alone it prints the help page. What it does
+    // not do is take an argument, and only a verb declaring a `help` field
+    // gives it one to fill.
     expect(() => parseExecArgs(spec, ["--help", "extra"])).toThrow(
-      /Unknown flag --help/,
+      /--help takes no arguments/,
     );
     expect(parseExecArgs(spec, ["run", "--help"])).toMatchObject({
       verb: "run",
@@ -541,7 +658,7 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(spec, ["run", "--help", "--json"]))
       .toMatchObject({ showHelp: true, showHelpJson: true });
     expect(() => parseExecArgs(spec, ["run", "--help", "extra"])).toThrow(
-      /Unknown flag --help/,
+      /--help takes no arguments/,
     );
   });
 });

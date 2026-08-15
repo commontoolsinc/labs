@@ -1,20 +1,22 @@
-import type { FabricValue } from "@commonfabric/api";
 import { expect } from "@std/expect";
+
+import type { FabricValue } from "@commonfabric/api";
 import type {
   SchedulerActionSnapshotCursor,
   SchedulerSnapshotListResult,
 } from "@commonfabric/memory/v2";
+
+import type { Cell } from "../src/cell.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import {
+  isSchedulerActionObservation,
+  type SchedulerActionObservation,
+} from "../src/scheduler/persistent-observation.ts";
 import {
   createSchedulerTestRuntime,
   disposeSchedulerTestRuntime,
   space,
 } from "./scheduler-test-utils.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
-import type { Cell } from "../src/cell.ts";
-import {
-  isSchedulerActionObservation,
-  type SchedulerActionObservation,
-} from "../src/scheduler/persistent-observation.ts";
 
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",

@@ -1,11 +1,12 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import type { CfcConfClause } from "./clause.ts";
 import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { clauseAlternatives } from "./clause.ts";
 import {
   cfcEntryHasDerivedContainment,

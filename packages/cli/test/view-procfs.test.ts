@@ -1,8 +1,10 @@
 import { assert } from "@std/assert";
-import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { expect } from "@std/expect";
-import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
+
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
+
 import { realFileGateway } from "../lib/view/filegateway.ts";
 import { loadViewInput } from "../lib/view/loadinput.ts";
 

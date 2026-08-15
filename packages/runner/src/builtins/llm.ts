@@ -1,5 +1,14 @@
-import { getLogger } from "@commonfabric/utils/logger";
-import type { CfcConfClause } from "../cfc/clause.ts";
+import {
+  BuiltInGenerateObjectParams,
+  BuiltInGenerateTextParams,
+  BuiltInLLMMessage,
+  BuiltInLLMParams,
+} from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import type { Schema } from "@commonfabric/api/schema";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
@@ -11,34 +20,29 @@ import {
   LLMRequest,
   LLMResponse,
 } from "@commonfabric/llm";
-import {
-  BuiltInGenerateObjectParams,
-  BuiltInGenerateTextParams,
-  BuiltInLLMMessage,
-  BuiltInLLMParams,
-} from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
-import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
-import { mapSubschemas } from "../schema-walk.ts";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { toDeepFrozenSchema } from "@commonfabric/data-model/schema-utils";
-import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import type { CellScope, JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { type Cell, isCell } from "../cell.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { cfcLabelViewForCellFailClosed } from "../cfc/label-view.ts";
+import { uniqueCfcAtoms } from "../cfc/observation.ts";
+import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
 } from "../cfc/schema-sanitization.ts";
-import { uniqueCfcAtoms } from "../cfc/observation.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { type Cell, isCell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import {
+  getCellOrThrow,
+  isCellResultForDereferencing,
+} from "../query-result-proxy.ts";
 import type { Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { CellScope } from "../builder/types.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
-import { scopedCell } from "./scope-policy.ts";
 import {
   GenerateObjectParamsSchema,
   GenerateObjectResultSchema,
@@ -49,11 +53,7 @@ import {
   LLMResultSchema,
   LLMToolSchema,
 } from "./llm-schemas.ts";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "../query-result-proxy.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 const logger = getLogger("llm", {
   enabled: true,

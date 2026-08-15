@@ -1,10 +1,13 @@
+import { expect } from "@std/expect";
+import { join, resolve } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
+
 import { env, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
-import { expect } from "@std/expect";
-import { describe, it } from "@std/testing/bdd";
-import { join, resolve } from "@std/path";
+
 import "../src/globals.ts";
+
 import { clickPierce } from "./shadow-dom.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;

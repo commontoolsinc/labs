@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -8,6 +8,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("scheduler cold replica");
 const space = signer.did();

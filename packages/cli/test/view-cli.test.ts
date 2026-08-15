@@ -5,13 +5,16 @@
  * these exercise the command wiring, argument handling, input reading and the
  * print path without a terminal.
  */
+
 import { assert, assertEquals } from "@std/assert";
-import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
-import { cf } from "./utils.ts";
+
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
+
 import { MAX_BINARY_VIEW_BYTES } from "../lib/view/languages/binary/binary.ts";
+import { cf } from "./utils.ts";
 
 const SRC = "export const x = pattern(() => ({ value: 1 }));\nconst y = x;\n";
 const CLI_PACKAGE_DIR = join(import.meta.dirname!, "..");

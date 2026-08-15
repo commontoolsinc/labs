@@ -1,21 +1,23 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { Identity } from "@commonfabric/identity";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { preparedDigestFor } from "../src/cfc/canonical.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import type { CfcPolicyRecordInput, ExchangeRule } from "../src/cfc/policy.ts";
+import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import type { PreparedDigestInput } from "../src/cfc/types.ts";
+import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   ExtendedStorageTransaction,
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
-import { Runtime } from "../src/runtime.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
-import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
-import type { CfcPolicyRecordInput, ExchangeRule } from "../src/cfc/policy.ts";
-import { preparedDigestFor } from "../src/cfc/canonical.ts";
-import type { PreparedDigestInput } from "../src/cfc/types.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-policy-boundary");
 

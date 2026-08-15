@@ -10,11 +10,13 @@
  * rule-bearing table fails closed, and a declared output ceiling with
  * onExceed:"skip" returns exactly the fitting rows.
  */
-import app from "../../toolshed/app.ts";
+
 import { Identity } from "@commonfabric/identity";
+
+import app from "../../toolshed/app.ts";
+import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 import { Runtime } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { cfcLabelViewForDereferenceTraces } from "../src/cfc/label-view.ts";
 
 async function runTest(base: URL) {
   const account = await Identity.fromPassphrase(

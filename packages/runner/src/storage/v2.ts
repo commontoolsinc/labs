@@ -1,7 +1,13 @@
-import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import {
+  hasDataUriScheme,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { aclDocId } from "@commonfabric/memory/acl";
+import { assert, unclaimed } from "@commonfabric/memory/fact";
 import type { Entity } from "@commonfabric/memory/interface";
-import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import {
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
@@ -12,9 +18,6 @@ import {
   type TransactionError,
   type URI,
 } from "@commonfabric/memory/interface";
-import { assert, unclaimed } from "@commonfabric/memory/fact";
-import { aclDocId } from "@commonfabric/memory/acl";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type CellScope,
   type ClientCommit,
@@ -37,26 +40,29 @@ import {
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
-import {
-  applyPatchToDocument,
-  PatchApplyError,
-} from "../../../memory/v2/patch.ts";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import type { Cell } from "../cell.ts";
+
+import {
+  applyPatchToDocument,
+  PatchApplyError,
+} from "../../../memory/v2/patch.ts";
 import type { JSONSchema } from "../builder/types.ts";
+import type { Cancel } from "../cancel.ts";
+import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
   parseLinkPrimitive,
 } from "../link-types.ts";
-import type { Cancel } from "../cancel.ts";
+import { sortAndCompactPaths } from "../reactive-dependencies.ts";
+import { normalizeCellScope } from "../scope.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
+import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
@@ -82,12 +88,6 @@ import type {
   TransactionCommitOptions,
   Unit,
 } from "./interface.ts";
-import { SelectorTracker } from "./selector-tracker.ts";
-import * as SubscriptionManager from "./subscription.ts";
-import {
-  getDirectTransactionMergeableOpAddresses,
-  getDirectTransactionReadActivities,
-} from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
   isMergeableOpRead,
@@ -97,6 +97,27 @@ import {
   notifyCommitRejected,
   recordCoverageWait,
 } from "./reactivity-log.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
+import * as SubscriptionManager from "./subscription.ts";
+import {
+  getDirectTransactionMergeableOpAddresses,
+  getDirectTransactionReadActivities,
+} from "./transaction-inspection.ts";
+import { toTransactionDocumentValue } from "./v2-document.ts";
+import {
+  createStorageAddressResolver,
+  RemoteSessionFactory,
+  type SessionFactory,
+  storageAddressForHost,
+  toWebSocketAddress,
+} from "./v2-remote-session.ts";
+import * as V2Transaction from "./v2-transaction.ts";
+import {
+  compactWatchEntries,
+  normalizeSyncEntries,
+  normalizeSyncSelector,
+  watchIdForEntry,
+} from "./v2-watch.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
 // part of the write; that read is dropped from its conflict set.
@@ -127,24 +148,6 @@ const isArrayLengthChildPath = (
   path.length === arrayPath.length + 1 &&
   path[arrayPath.length] === "length" &&
   arrayPath.every((segment, index) => path[index] === segment);
-import { toTransactionDocumentValue } from "./v2-document.ts";
-import {
-  compactWatchEntries,
-  normalizeSyncEntries,
-  normalizeSyncSelector,
-  watchIdForEntry,
-} from "./v2-watch.ts";
-import {
-  createStorageAddressResolver,
-  RemoteSessionFactory,
-  type SessionFactory,
-  storageAddressForHost,
-  toWebSocketAddress,
-} from "./v2-remote-session.ts";
-import * as V2Transaction from "./v2-transaction.ts";
-import { normalizeCellScope } from "../scope.ts";
-import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 
 export { watchIdForEntry } from "./v2-watch.ts";
 export type { SessionFactory } from "./v2-remote-session.ts";

@@ -1,24 +1,26 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import {
-  buildCfcPolicyArtifactManifest,
-  cfcPolicyManifestDocId,
-} from "../src/cfc/policy.ts";
-import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
-import type { Engine } from "../src/harness/engine.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import {
   createTxCfcModulePolicyResolver,
   evaluateExchangeRules,
 } from "../src/cfc/mod.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import {
+  buildCfcPolicyArtifactManifest,
+  cfcPolicyManifestDocId,
+} from "../src/cfc/policy.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import type { Engine } from "../src/harness/engine.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("cfc PolicyOf label test");
 const space = signer.did();

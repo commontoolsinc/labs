@@ -27,6 +27,7 @@ import {
 import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
+import { nearestName } from "./refusal.ts";
 
 type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
 
@@ -731,54 +732,13 @@ const HONORED_PROJECTION_VOCABULARY = [...HONORED_PROJECTION_KEYS]
   .join(", ");
 
 /**
- * The edit distance between `left` and `right`, for the near-miss below.
- * Adjacent transposition counts as one edit rather than two, because it is the
- * typo the refusal exists for: `itmes` is one slip from `items` however many
- * substitutions it takes to spell as substitutions.
- */
-function keyEditDistance(left: string, right: string): number {
-  const rows: number[][] = [
-    Array.from({ length: right.length + 1 }, (_, j) => j),
-  ];
-  for (let i = 1; i <= left.length; i++) {
-    const current = [i];
-    for (let j = 1; j <= right.length; j++) {
-      const previous = rows[i - 1];
-      current[j] = left[i - 1] === right[j - 1]
-        ? previous[j - 1]
-        : 1 + Math.min(previous[j - 1], previous[j], current[j - 1]);
-      if (
-        i > 1 && j > 1 && left[i - 1] === right[j - 2] &&
-        left[i - 2] === right[j - 1]
-      ) {
-        current[j] = Math.min(current[j], rows[i - 2][j - 2] + 1);
-      }
-    }
-    rows.push(current);
-  }
-  return rows[left.length][right.length];
-}
-
-/**
  * The keyword `key` was most likely meant to be, or `undefined` where nothing
  * is close enough to name. No read-side surface prints the source schema, so
  * for a misspelled key the accepted vocabulary is the entire remediation, and
  * the one keyword a caller transposed two letters of is the useful half of it.
  */
 function nearestProjectionKey(key: string): string | undefined {
-  const lowered = key.toLowerCase();
-  let best: string | undefined;
-  let bestDistance = Infinity;
-  for (const candidate of HONORED_PROJECTION_KEYS) {
-    const distance = keyEditDistance(lowered, candidate.toLowerCase());
-    if (distance < bestDistance) {
-      best = candidate;
-      bestDistance = distance;
-    }
-  }
-  return bestDistance <= Math.max(1, Math.floor(key.length / 4))
-    ? best
-    : undefined;
+  return nearestName(key, HONORED_PROJECTION_KEYS);
 }
 
 /**

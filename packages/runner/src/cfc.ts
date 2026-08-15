@@ -1,16 +1,16 @@
 import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
-import type { CfcConfClause } from "./cfc/clause.ts";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type {
   AsCellEntry,
   CellKind,
   JSONSchema,
   SchemaScope,
 } from "./builder/types.ts";
-import { isSchemaScope, narrowerScopeCap } from "./scope.ts";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import type { CfcConfClause } from "./cfc/clause.ts";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
   cfcSchemaChildRoot,
@@ -26,6 +26,7 @@ import {
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import { isSchemaScope, narrowerScopeCap } from "./scope.ts";
 export {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,

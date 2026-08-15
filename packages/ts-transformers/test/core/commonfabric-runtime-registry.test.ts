@@ -1,6 +1,7 @@
-import ts from "typescript";
-import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
+import ts from "typescript";
 
 import { COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME } from "../../src/core/commonfabric-runtime-registry.ts";
 

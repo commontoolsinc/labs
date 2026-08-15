@@ -7,29 +7,31 @@
  * in their schema by making the property optional or accepting `undefined`.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  getLogger,
-  getLoggerCountsBreakdown,
-} from "@commonfabric/utils/logger";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import type { SchemaPathSelector } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import type {
   Entity,
   Revision,
   State,
   URI,
 } from "@commonfabric/memory/interface";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  getLogger,
+  getLoggerCountsBreakdown,
+} from "@commonfabric/utils/logger";
+
+import type { JSONSchema } from "../src/builder/types.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   ManagedStorageTransaction,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
-import { StoreObjectManager } from "../src/storage/query.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const TYPE = "application/json" as const;
 const SPACE = "did:null:null";

@@ -1,5 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
+
+import ts from "typescript";
+
 import { unwrapExpression } from "../../src/utils/expression.ts";
 
 Deno.test("unwrapExpression unwraps a partially emitted expression", () => {

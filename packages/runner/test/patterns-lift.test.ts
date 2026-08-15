@@ -1,20 +1,21 @@
 // Lifted functions: pure transformations via lift(), error and recovery behavior,
 // cell creation inside lifts, reactivity control (sample), and evaluation timing.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import { getPatternIdentityRef } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Cell, type JSONSchema } from "../src/builder/types.ts";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type ErrorWithContext } from "../src/scheduler.ts";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type ErrorWithContext } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getPatternIdentityRef } from "@commonfabric/runner";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

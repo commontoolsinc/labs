@@ -1,9 +1,9 @@
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   isLinkRef,
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 import { isPlainObject } from "@commonfabric/utils/types";
 

@@ -2,6 +2,10 @@ import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { schemaToTypeString } from "@commonfabric/runner";
 import { cliCommand } from "./cli-name.ts";
+// A value import back to callable.ts, whose own import of this module is
+// type-only and therefore erased — so this creates no runtime cycle.
+import { eventSchemaJudgesRootFields } from "./callable.ts";
+import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
 export interface ExecCommandSpec {
   callableKind: "handler" | "tool";
@@ -220,6 +224,71 @@ function parseValueForSchema(
   return rawValue;
 }
 
+/**
+ * The flags a verb taking a single non-object value accepts. Fixed rather
+ * than schema-derived, because such a verb declares no fields for a flag to
+ * name — the value is the whole payload.
+ */
+const SCALAR_INPUT_FLAGS = [
+  "value",
+  "value-file",
+  "json",
+  "json-file",
+] as const;
+
+/**
+ * `--help` was given an argument by a verb that declares no `help` field.
+ *
+ * Written once and used at both arrival points, which parse their arguments
+ * separately: two copies of one sentence drift, and this one is long enough
+ * that a drift would not be obvious in a diff.
+ *
+ * `--help` is not unknown — alone it prints the help page. It takes an
+ * argument only where the verb declares a `help` field for it to fill.
+ */
+const HELP_TAKES_NO_ARGUMENTS =
+  "--help takes no arguments — it prints the help page, and this verb " +
+  "declares no help field for it to fill";
+
+/**
+ * The refusal a flag naming no declared field earns.
+ *
+ * The same five elements `undeclaredVerbFieldError` gives the payload door:
+ * the name, the position, the refusal, a near miss, and the accepted
+ * vocabulary. A caller who types `--titel` and a caller who sends
+ * `{"titel": …}` have made one mistake, and the flag spelling is the one the
+ * verb-session walkthrough teaches — so it is the spelling most likely to be
+ * mistyped and was the one answering with the least.
+ *
+ * Two honest differences from the payload door, both forced:
+ *
+ * - The position is always `<event>`, because a flag can only name a root
+ *   field. A payload can nest, so its refusal has a path to report.
+ * - Names are written as flags, because that is what the caller typed and
+ *   what they must retype. `flagNameForKey` is what maps a declared field to
+ *   it, so the vocabulary here is the same event schema the payload door
+ *   validates against, spelled for this door.
+ *
+ * Declaration order, not sorted: it is the order the help page lists the
+ * flags in and the order the payload door names them in, so a caller reading
+ * two of the three sees one vocabulary rather than two arrangements of it.
+ */
+function undeclaredFlagError(
+  rawFlag: string,
+  descriptors: Map<string, FlagDescriptor>,
+): string {
+  const declared = [...descriptors.keys()];
+  const nearest = nearestName(rawFlag, declared);
+  return `"--${rawFlag}" at ${EVENT_ROOT_POSITION} is not a field this verb ` +
+    "declares. " +
+    (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
+    (declared.length === 0
+      ? `${EVENT_ROOT_POSITION} declares no fields at all`
+      : `${EVENT_ROOT_POSITION} takes ${
+        declared.map((name) => `"--${name}"`).join(", ")
+      }`);
+}
+
 function parseObjectInput(
   schema: JSONSchema,
   args: string[],
@@ -305,14 +374,32 @@ function parseObjectInput(
       negated = descriptor !== undefined;
     }
     if (!descriptor) {
-      throw new Error(`Unknown flag --${rawFlag}`);
+      // The question is whether the SCHEMA judges its fields, not whether
+      // this particular name is declared. Asking the second lets a declared
+      // field typed in its schema spelling — `--fooBar` where the flag is
+      // `--foo-bar` — read as undeclared-against-an-open-schema and be
+      // accepted as a silent alias, when what the caller needs is the near
+      // miss naming the spelling that works.
+      if (eventSchemaJudgesRootFields(schema)) {
+        throw new Error(undeclaredFlagError(rawFlag, descriptors));
+      }
+      // A schema judging nothing says nothing about the value either, so the
+      // flag is taken as the string the caller typed: there is no declared
+      // type to read it as, and inventing one would be this door deciding
+      // something the schema deliberately left open.
+      descriptor = { key: rawFlag, flagName: rawFlag, schema: true };
     }
 
     const flagName = `--${descriptor.flagName}`;
     const type = schemaType(descriptor.schema);
     if (negated) {
       if (type !== "boolean") {
-        throw new Error(`Unknown flag --${rawFlag}`);
+        // The field exists, so naming the vocabulary would send the caller
+        // looking for a name they already found. What is wrong is the
+        // negation, and only its own field can say so.
+        throw new Error(
+          `"--${rawFlag}" negates "${flagName}", which is not a boolean field`,
+        );
       }
       input[descriptor.key] = false;
       usedGeneratedFlags = true;
@@ -402,7 +489,18 @@ function parseNonObjectInput(
     flag !== "--value" && flag !== "--json" && flag !== "--value-file" &&
     flag !== "--json-file"
   ) {
-    throw new Error(`Unknown flag ${flag}`);
+    // A verb taking a single non-object value has no fields, so its
+    // vocabulary is this fixed four rather than anything schema-derived, and
+    // there is no position to name — the value IS the payload. The near miss
+    // is owed all the same: a fixed vocabulary is still a vocabulary, and
+    // `--valu` is the same slip here as `--titel` is at the field door.
+    const nearest = nearestName(flag.replace(/^--/, ""), SCALAR_INPUT_FLAGS);
+    throw new Error(
+      `"${flag}" is not a flag this verb takes. ` +
+        (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
+        "This verb takes a single value, so its flags are " +
+        SCALAR_INPUT_FLAGS.map((name) => `"--${name}"`).join(", "),
+    );
   }
   if (flag === "--json" && rawValue === undefined) {
     return {
@@ -969,7 +1067,7 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      throw new Error("Unknown flag --help");
+      throw new Error(HELP_TAKES_NO_ARGUMENTS);
     }
   }
 
@@ -1009,7 +1107,7 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      throw new Error("Unknown flag --help");
+      throw new Error(HELP_TAKES_NO_ARGUMENTS);
     }
   }
 

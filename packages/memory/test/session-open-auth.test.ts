@@ -1,13 +1,15 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { alice, bob, mallory, space } from "./principal.ts";
-import { MEMORY_PROTOCOL } from "../v2.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+
+import { MEMORY_PROTOCOL } from "../v2.ts";
 import {
   verifySessionOpenAuthorization,
   wireAuthorizationOf,
 } from "../v2/session-open-auth.ts";
+import { alice, bob, mallory, space } from "./principal.ts";
 
 const now = 1_000_000;
 const audience = bob.did();
