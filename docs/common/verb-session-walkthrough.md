@@ -57,7 +57,7 @@ verbs, and they differ in nothing but what the new item is filed under:
 | `recordNote` | returns what only the pattern could compute: the clock is a handler capability, so the stamp cannot come from the caller | act 7 |
 | `finish` | returns a derived fact — `openBelow` takes a walk of the whole subtree, which a caller would pay N reads for | act 8 |
 | `archive` | declares no result: the invocation settles carrying no `result` at all, and what it changed is a separate read | act 9 |
-| `blockOn` | takes an address as an **argument** rather than as the receiver | act 10, **[blocked]** |
+| `blockOn` | takes an address as an **argument** rather than as the receiver | act 12, **[blocked]** |
 
 Those act numbers are `packages/cli/integration/verb-session-demo.sh`, which
 drives the session and prints each command before running it — the transcript is
@@ -448,6 +448,9 @@ containers holding it rather than being read past.
 
 The same options work on a call's result, on a wish, and on a direct read: one
 read layer, several arrivals.
+
+The demo's act 10 is this step run against the session's own tree: the whole
+board first, then only what is open, then the refusal.
 
 ## 6. Relate two items **[blocked]**
 
