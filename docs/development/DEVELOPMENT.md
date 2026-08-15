@@ -27,9 +27,7 @@ about one aspect of the runtime, are indexed in
 ### Imports
 
 - Group imports by source: standard library, external, then internal, with a
-  blank line between the groups. Add the blank lines when writing a file, or
-  when reordering its imports for some other reason; a file whose imports are
-  otherwise correct is not worth touching for them alone.
+  blank line between the groups.
 - Prefer named exports over default exports.
 - Use package names for internal imports.
 - Destructure when importing multiple names from the same module.
