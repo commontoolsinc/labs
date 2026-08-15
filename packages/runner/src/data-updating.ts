@@ -814,10 +814,9 @@ export function normalizeAndDiff(
 
   // Unwrap proxies and handle special types
   if (isCellResultForDereferencing(newValue)) {
-    const carriedCfcLabelView = getCarriedCfcLabelView(
-      getCellOrThrow(newValue),
-    );
-    const parsedLink = parseLink(newValue);
+    const resultCell = getCellOrThrow(newValue);
+    const carriedCfcLabelView = getCarriedCfcLabelView(resultCell);
+    const parsedLink = resultCell.getAsNormalizedFullLink();
     const sigilLink = attachCfcLabelViewToSigilLink(
       createSigilLinkFromParsedLink(parsedLink),
       carriedCfcLabelView,
@@ -932,8 +931,9 @@ export function normalizeAndDiff(
         }
       }
     }
+    const sourceLink = newValue.getAsNormalizedFullLink();
     newValue = attachCfcLabelViewToSigilLink(
-      createSigilLinkFromParsedLink(newValue.getAsNormalizedFullLink(), {
+      createSigilLinkFromParsedLink(sourceLink, {
         base: link,
         includeSchema: true,
       }),

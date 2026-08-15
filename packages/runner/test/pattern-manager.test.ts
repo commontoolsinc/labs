@@ -39,6 +39,54 @@ describe("PatternManager cross-space source policy", () => {
     )).toBe(true);
   });
 
+  it("allows only the source space's ambient confidentiality", () => {
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      metadata(["code"], {
+        confidentiality: [{
+          type: "https://commonfabric.org/cfc/atom/Space",
+          id: space,
+        }],
+      }),
+      space,
+    )).toBe(false);
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      metadata(["code"], {
+        confidentiality: [{
+          type: "https://commonfabric.org/cfc/atom/Space",
+          id: "did:key:z6MkAnotherSpace",
+        }],
+      }),
+      space,
+    )).toBe(true);
+  });
+
+  it("allows source links that will be rebuilt in the destination", () => {
+    const linkMetadata = {
+      version: 1,
+      labelMap: {
+        entries: [{
+          path: ["imports", "0"],
+          origin: "link",
+          label: {
+            confidentiality: [{
+              type: "https://commonfabric.org/cfc/atom/Space",
+              id: space,
+            }],
+            integrity: [{
+              type: "https://commonfabric.org/cfc/atom/LinkReference",
+              source: { space, id: "source", path: [] },
+              target: { space, id: "target", path: ["imports", "0"] },
+            }],
+          },
+        }],
+      },
+    } as never;
+    expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
+      linkMetadata,
+      space,
+    )).toBe(false);
+  });
+
   it("allows only the compiler's delegation attestation", () => {
     expect(sourceCfcMetadataProhibitsCrossSpaceCopy(
       metadata(
@@ -61,6 +109,49 @@ describe("PatternManager cross-space source policy", () => {
         integrity: [COMPILED_INTEGRITY_ATOM, "additional-attestation"],
       }),
     )).toBe(true);
+  });
+});
+
+describe("PatternManager compile-cache CFC policy", () => {
+  it("rewrites shared compile-cache documents under strict ambient labeling", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
+    });
+    try {
+      const program = (value: string): RuntimeProgram => ({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            `export default pattern(() => ({ value: "${value}" }));`,
+          ].join("\n"),
+        }],
+      });
+
+      await runtime.patternManager.compilePattern(program("first"), { space });
+      await runtime.patternManager.flushCompileCacheWrites();
+      const second = await runtime.patternManager.compilePattern(
+        program("second"),
+        { space },
+      );
+      await runtime.patternManager.flushCompileCacheWrites();
+
+      const entry = runtime.patternManager.getArtifactEntryRef(second);
+      expect(entry).toBeDefined();
+      const recovered = await runtime.patternManager
+        .getPatternSourceProgramByIdentity(entry!.identity, space);
+      expect(
+        recovered?.files.find((file) => file.name === "/main.tsx")?.contents,
+      ).toContain('value: "second"');
+    } finally {
+      await runtime.dispose({ closeStorage: false });
+      await storageManager.close();
+    }
   });
 });
 

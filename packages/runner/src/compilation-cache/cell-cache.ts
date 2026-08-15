@@ -1,6 +1,6 @@
 import { normalize } from "@std/path/posix";
 
-import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
+import { CFC_COMPILED_BY_ATOM, type CfcAtom } from "@commonfabric/api/cfc";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
@@ -9,6 +9,7 @@ import type { JSONSchema } from "../builder/types.ts";
 import { type Cell, isCell } from "../cell.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
 import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
+import { spaceRootConfidentiality } from "../cfc/space-root-policy.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import type { CacheableModule } from "../harness/types.ts";
@@ -725,7 +726,9 @@ export const SOURCE_DOC_SCHEMA = {
  * self-verifying through their content identity, while annotations remain
  * independently mutable.
  */
-function sourceDocWriteSchema(): JSONSchema {
+function sourceDocWriteSchema(
+  confidentiality?: readonly CfcAtom[],
+): JSONSchema {
   return {
     type: "object",
     properties: {
@@ -750,6 +753,9 @@ function sourceDocWriteSchema(): JSONSchema {
       },
       annotations: { type: "object" },
     },
+    ...(confidentiality === undefined
+      ? {}
+      : { ifc: { confidentiality: [...confidentiality] } }),
   };
 }
 
@@ -856,12 +862,15 @@ export function writeSourceDocs(
       const delegatedModuleIdentities = [
         ...(doc.delegatedModuleIdentities ?? []),
       ];
-      // A source document without delegation metadata remains an ordinary,
-      // self-verifying cache write. Attaching an addIntegrity schema even when
-      // the field is absent would make every legacy/direct source-cache write
-      // CFC-relevant and require an otherwise-unnecessary prepare step.
-      const cell = delegatedModuleIdentities.length > 0
-        ? baseCell.asSchema(sourceDocWriteSchema())
+      const cfcState = tx.getCfcState();
+      const ambientConfidentiality = spaceRootConfidentiality(
+        cfcState.enforcementMode,
+        cfcState.flowLabelsMode,
+        space,
+      );
+      const cell = delegatedModuleIdentities.length > 0 ||
+          ambientConfidentiality !== undefined
+        ? baseCell.asSchema(sourceDocWriteSchema(ambientConfidentiality))
         : baseCell;
       cell.set({
         kind: "source",
@@ -1175,11 +1184,18 @@ export const COMPILED_DOC_SCHEMA = {
  * Write schema: stamps the compiler integrity atom on the stored value. Flat
  * (no recursive `$ref`) — writing a single document does not transitively load.
  */
-export function compiledDocWriteSchema(): JSONSchema {
+export function compiledDocWriteSchema(
+  confidentiality?: readonly CfcAtom[],
+): JSONSchema {
   return {
     type: "object",
     properties: compiledDocProperties,
-    ifc: { addIntegrity: [COMPILED_INTEGRITY_ATOM] },
+    ifc: {
+      addIntegrity: [COMPILED_INTEGRITY_ATOM],
+      ...(confidentiality === undefined
+        ? {}
+        : { confidentiality: [...confidentiality] }),
+    },
   };
 }
 
@@ -1375,7 +1391,12 @@ export function writeCompiledDocs(
   );
   const extraRoots = opts.extraRoots ??
     unreachedRoots(modules, entryIdentity);
-  const schema = compiledDocWriteSchema();
+  const cfcState = tx.getCfcState();
+  const schema = compiledDocWriteSchema(spaceRootConfidentiality(
+    cfcState.enforcementMode,
+    cfcState.flowLabelsMode,
+    space,
+  ));
   withCompileCacheBuiltin(tx, () => {
     for (const module of modules) {
       const cell = runtime.getCell(

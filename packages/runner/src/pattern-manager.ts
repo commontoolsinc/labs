@@ -1,4 +1,6 @@
 import type { Source } from "@commonfabric/js-compiler";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -75,12 +77,28 @@ const PATTERN_COVERAGE_CACHE_VARIANT = "pattern-coverage";
 /** Whether copying source bytes would discard a meaningful stored CFC label. */
 export function sourceCfcMetadataProhibitsCrossSpaceCopy(
   metadata: CfcMetadata | undefined,
+  sourceSpace?: MemorySpace,
 ): boolean {
   return metadata?.labelMap.entries.some((entry) => {
     const confidentiality = entry.label.confidentiality ?? [];
     const integrity = entry.label.integrity ?? [];
-    if (confidentiality.length > 0) return true;
+    if (
+      confidentiality.some((atom) =>
+        sourceSpace === undefined ||
+        !deepEqual(atom, cfcAtom.space(sourceSpace))
+      )
+    ) {
+      return true;
+    }
     if (integrity.length === 0) return false;
+    if (
+      entry.origin === "link" &&
+      integrity.every((atom) =>
+        isObjectOrArray(atom) && atom.type === CFC_ATOM_TYPE.LinkReference
+      )
+    ) {
+      return false;
+    }
     return entry.path.length !== 1 ||
       entry.path[0] !== "delegatedModuleIdentities" ||
       integrity.some((atom) => atom !== COMPILED_INTEGRITY_ATOM);
@@ -2199,6 +2217,7 @@ export class PatternManager {
           });
           const prohibited = sourceCfcMetadataProhibitsCrossSpaceCopy(
             metadata,
+            space,
           );
           if (prohibited) {
             throw new Error(
