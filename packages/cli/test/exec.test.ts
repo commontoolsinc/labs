@@ -433,6 +433,12 @@ describe("parseExecArgs", () => {
     // And withheld where nothing is close: a wrong guess is worse than none.
     expect(() => parseExecArgs(spec, ["--zzzzzzzz", "tea"]))
       .not.toThrow(/Did you mean/);
+
+    // A verb declaring nothing says so rather than trailing an empty list,
+    // which is the same sentence the payload door gives for that case.
+    const bare = makeSpec("handler", { type: "object", properties: {} });
+    expect(() => parseExecArgs(bare, ["invoke", "--titel", "x"]))
+      .toThrow(/<event> declares no fields at all/);
   });
 });
 

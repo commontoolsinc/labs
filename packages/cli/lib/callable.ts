@@ -382,33 +382,12 @@ export function schemaIsObjectShaped(
   return false;
 }
 
-/**
- * The root of a payload, as a refusal names it. Positions below it are spelled
- * the way the read boundary spells its own (`normalizeProjectionSchema`,
- * cell-selection.ts): a property is `.name`, an array element is `[index]`. A
- * caller meets both refusals through the same command, so they name a position
- * the same way.
- */
-
 /** A field a payload carries at a position whose schema does not declare it,
  * with what that position does declare. */
 interface UndeclaredEventField {
   key: string;
   position: string;
   declared: string[];
-}
-
-/**
- * The declared field `key` was most likely meant to be, or `undefined` where
- * nothing is close enough to name. A call site prints no schema, so for a
- * misspelled field the declared vocabulary is the whole remediation, and the
- * one name a caller transposed two letters of is the useful half of it.
- */
-function nearestDeclaredField(
-  key: string,
-  declared: readonly string[],
-): string | undefined {
-  return nearestName(key, declared);
 }
 
 /** One property map an object-shaped position reaches, with the local-ref
@@ -688,7 +667,7 @@ export function undeclaredVerbFieldError(
     true,
   );
   if (found === undefined) return undefined;
-  const nearest = nearestDeclaredField(found.key, found.declared);
+  const nearest = nearestName(found.key, found.declared);
   return `"${found.key}" at ${found.position} is not a field this verb ` +
     "declares. " +
     (nearest === undefined ? "" : `Did you mean "${nearest}"? `) +
