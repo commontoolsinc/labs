@@ -144,9 +144,9 @@ interface ItemOutput {
 **A verb says what it does; its parameters describe themselves.** The comment
 on `addItem` does not restate what it takes or returns, because
 `AddItemEvent.title` and `AddItemResult.item` already say so where they are
-declared — which is where `--help` sources its `Output:` line today, and where
-it would source a flag's prose. Restating it in the verb comment would be the
-same content twice, and the copy that goes stale when a parameter changes.
+declared — which is where `--help` sources both its `Output:` line and a flag's
+prose. Restating it in the verb comment would be the same content twice, and
+the copy that goes stale when a parameter changes.
 
 **One interface, holding both.** An item's fields and its verbs sit together
 because that is what an item *is*: a child in `children` is a full item, and
@@ -176,10 +176,10 @@ verb's result, because
 [a result is a read on a different cell](../plans/fabric-read-model.md) — 1743
 bytes unshaped, 140 with `--select 'item.title'`.
 
-**The prose above does not reach a caller.** Each verb carries a doc comment
-saying what it is for, which is where that documentation belongs — and it is
-emitted correctly and then lost, so `cf piece verbs` can list a verb and never
-say what it does. Step 2 has the measurement.
+**The prose above reaches a caller.** Each verb carries a doc comment saying
+what it is for, which is where that documentation belongs, and `cf` serves it:
+as a row's `description` under `cf piece verbs --json`, and as the summary line
+of the verb's own help page. Step 2 has the measurement.
 
 
 ## 1. Arrive with a slug **[today]**
@@ -208,6 +208,13 @@ Slug resolution sits on the shared path (`resolvePieceConfigWithPieces`,
 The listing carries the deployed pattern's source identity, which is how a
 client tells it is talking to a newer pattern than it was written against.
 
+**The table is names; `--json` is the description.** The columns are a grid to
+scan, so each row stays one line and a verb's prose — which runs to a sentence
+or several — travels on the machine-readable spelling instead, as the row's
+`description`, alongside the input and output schemas the table has no room for
+either. A person asking what one verb is for reads its help page, where the
+same words are the summary line.
+
 ## 2. Ask what a verb wants **[today]**
 
 ```bash
@@ -220,27 +227,28 @@ Usage:
   cf piece call --piece board addItem <json>
   cf piece call --piece board addItem -- --title <string>
 
+File a new root item on the board.
+
 JSON input:
   Pass inline JSON as one positional argument or after `--json`.
   { title: string }
 
 Flags after `--`:
-  --title <string>    Required.
+  --title <string>    Required. One line naming the work.
 
 Output:
   The invocation's `result`:
     item <json>
 ```
 
-**Structure is published; prose is not.** The flags and the result fields are
-the whole of what `cf` can currently say about a verb. The split is worth
-holding onto:
+**Structure and prose are both published, and they come from different
+documents.** The split is worth holding onto, because only one half is free:
 
-| | Where it comes from | Survives? |
+| | Where it comes from | Reaches `cf`? |
 | --- | --- | --- |
 | flag name, placeholder, required-ness | the event's **type** — `{ title: string }` | **yes** |
 | result field name and placeholder | the result's **type** — `AddItemResult` | **yes** |
-| what `title` means, what the verb is for | the author's **doc comments** | **no** |
+| what `title` means, what the verb is for | the author's **doc comments** | **yes**, read from the pattern |
 
 The `Output:` section names the position a caller collects the value from —
 the settled Invocation JSON's `result` — because that is where a handler's
@@ -253,96 +261,97 @@ The structural half needs nothing authored per pattern:
 `--title <string> Required.`
 falls out of the type. That is why the page exists at all.
 
-The prose half is **emitted and then lost**, which is worth stating precisely
-because the obvious guess sends the fix to the wrong place:
+**The prose half is not on the wire with it**, and knowing why is what keeps a
+reader from looking for it in the wrong place. A verb dispatches through a
+callable cell, and that cell takes its schema from the link chain it resolves
+through (`cell.ts:asSchemaFromLinks`). For a verb that link is the handler
+node's `$event` input, and that schema is not the author's event type at all —
+it is the handler's **read** of the event, narrowed to the fields its
+implementation touches. A declared field the body never mentions is absent from
+it whether or not the type marks it optional. So the served schema is not the
+declared one with the prose taken out; it is a query, generated from usage,
+which never carried an author's words in the first place.
 
-| An author writes… | In the compiled pattern | Served to `cf` |
-| --- | --- | --- |
-| a comment on an **event field** (what `title` means) | **yes** — `$defs.<Event>.properties.title.description` | no |
-| a comment on the **verb itself**, as in the model above | **yes** — beside the `$ref` | no |
-| a comment on the **event interface** (what the verb is for) | no | no |
+So the prose is read from the **pattern**, which is the only place it survives
+compilation:
 
-So the generator handles two of the three correctly — one pattern here carries
-descriptions on 36 `Stream` properties. What the CLI is served is the
-*resolved* form of the event schema, with no `$defs` and no `$ref`, and the
-descriptions are not in it. The loss is in that resolution, not in emission
-([#5637](https://github.com/commontoolsinc/labs/issues/5637)).
+| An author writes… | Where the compiled pattern keeps it |
+| --- | --- |
+| a comment on the **verb itself**, as in the model above | `resultSchema.properties.<verb>.description`, a sibling of the `$ref` naming its event |
+| a comment on an **event field** (what `title` means) | `$defs.<Event>.properties.<field>.description` |
+| a comment on the **event interface** | nowhere — this one does not compile ([#5559](https://github.com/commontoolsinc/labs/issues/5559)) |
 
-The renderer is ready for two of the three: `specificFlagLines` reads a
-`description` through `schemaDescription` and would print one the moment it
-were given one, and a listing row would carry one as soon as it were supplied.
-The verb's *purpose* needs a second change on top, because
-`renderPieceCallHelp` has nowhere to put it — the page runs Usage, JSON input,
-Flags, Output, with no summary line.
+`cf piece verbs` and `cf piece call <verb> --help` already load that pattern to
+report what a verb hands back, so both read the prose from the same load. The
+verb's own comment becomes the listing row's `description` and the help page's
+summary line. The event fields' comments are folded into the input schema the
+page renders flags from, at the positions that schema already has.
 
-So the help page names `--title <string>  Required.` and `item <json>`, and
-says nothing about what either means.
+**Which means walking two documents that agree about almost nothing
+structurally.** The same field can be a `$ref` in one and an inline object in
+the other, and a union the declared side spells as `anyOf` can arrive as one
+merged object — which of these happens depends on what the handler body reads.
+So a walk that steps through `properties` key-for-key finds a bare `$ref` on one
+side with no `properties` under it, or a field whose prose is inside an arm that
+no longer exists on the other side, and stops short of the words in both cases.
 
-### What the page becomes **[blocked]**
+Both sides' references are followed for that reason, and a declared combinator
+is read through to its members. A served reference is followed *without* being
+inlined, and a served combinator is never flattened: a caller's tooling reads
+that shape, and a definition several positions share is not one position's to
+rewrite. A field's own prose is therefore written where the field is, never into
+the definition it points at — which would attribute one position's sentence to
+every other holder of the same type. The precise list of positions the fold
+walks is on `withDeclaredFieldProse` (`packages/cli/lib/piece.ts`), enumerated
+rather than summarized, along with the keywords it leaves alone.
 
-Every line below already exists as a doc comment in `tracker.tsx`. Nothing here
-is invented for the illustration — this is that file's own prose, reaching a
-caller. The structure around it is what the page renders today; the prose is
-what it does not:
+**Folded in, never substituted.** The two documents disagree about shape, by
+construction: the declared type is what a caller may send, the read schema is
+what the implementation looks at. Only `description` annotations cross between
+them, so the served schema stays the authority on shape and takes only the
+words. Substituting the declared type instead would offer a caller flags for
+fields the running handler does not read — a page describing the source rather
+than the piece being talked to.
+
+Which leaves a real question this does not settle: a field an author declares
+and the body never reads is a field a caller cannot discover. Whether the two
+schemas should be reconciled, and in which direction, is open.
+
+### What the page still owes **[blocked]**
+
+Every line of prose on the page above already exists as a doc comment in
+`tracker.tsx`. Nothing is invented for the illustration — it is that file's own
+words, reaching a caller. One line is still missing, and it is the last one:
 
 ```text
-Usage:
-  cf piece call --piece board addItem -- --title <string>
-
-File a new root item on the board.
-
-JSON input:
-  { title: string }
-
-Flags after `--`:
-  --title <string>    Required. One line naming the work.
-
 Output:
   The invocation's `result`:
     item <json>       The root item this call created.
 ```
 
-**Three levels of documentation, three different fates.** An author writes each
-one where the thing it describes is declared — the verb says what it does, and
+**Three levels of documentation, and one of them stops short.** An author writes
+each where the thing it describes is declared — the verb says what it does, and
 each parameter describes itself:
 
 | Level | Written on | Compiled? | Reaches `cf`? |
 | --- | --- | --- | --- |
-| the verb — *what it does* | the `Stream` property | **yes**, beside the `$ref` | no |
-| an **input** parameter | a field of the event interface | **yes**, in `$defs.<Event>.properties` | no |
-| an **output** parameter | a field of the result interface | **yes**, on the declared result | **yes**, under `--help --json` |
+| the verb — *what it does* | the `Stream` property | **yes**, beside the `$ref` | **yes**, as the summary line |
+| an **input** parameter | a field of the event interface | **yes**, in `$defs.<Event>.properties` | **yes**, beside its flag |
+| an **output** parameter | a field of the result interface | **yes**, on the declared result | **yes**, under `--help --json` — but not on the text page |
 
-The first two are the same loss: emitted, then absent from the resolved schema
-the CLI is served, so they come back together
-([#5637](https://github.com/commontoolsinc/labs/issues/5637)).
+The output parameter's is the one still short of the page, and it is short by a
+single step. A verb's declared result reaches `cf` **unresolved** — `--help
+--json` on `addItem` serves `properties.item` as a `$ref` into `$defs.ItemOutput`
+carrying `"description": "The root item this call created."`, the author's own
+comment, verbatim. What drops it is the rendering: the text page writes each
+result property as `name <placeholder>` and never reads the `description` beside
+it. So the prose is on the wire and one line of rendering away.
 
-The third travels furthest, and it is the one worth understanding. A verb's
-declared result reaches `cf` **unresolved** — `--help --json` on `addItem`
-serves `properties.item` as a `$ref` into `$defs.ItemOutput` carrying
-`"description": "The root item this call created."`, the author's own comment,
-verbatim. Nothing strips it, because nothing resolves it. Where the input side
-loses its prose to `$ref` resolution, the output side keeps it.
-
-What drops it is the last step: the text page renders each result property as
-`name <placeholder>` and never reads the `description` beside it. So the prose
-is on the wire and one line of rendering away, which is a different problem
-from the two above and a much smaller one.
-
-The summary is worth one more note. An event *interface's* comment would be the
-other candidate for that line, and it is the one thing here that genuinely
-never compiles — so sourcing the summary from the verb's own comment, which is
-already emitted, is both the smaller change and the better place for an author
-to write it.
-
-Two things are missing from that page, and they are the same thing twice.
-
-**A flag's prose never arrives**, per the measurement above — the renderer is
-ready for it and the resolution does not carry it.
-
-**The verb's purpose is absent** for the same reason, not a different one: its
-comment is emitted and lost in the same step, and the page has no summary line
-to print it on even once it survives. `cf` can say what `addItem` takes and
-hands back, and not what either is for.
+The summary line is worth one more note, because an event *interface's* comment
+would be the other candidate for it. That is the one level here that does not
+compile at all ([#5559](https://github.com/commontoolsinc/labs/issues/5559)) —
+so the verb's own comment is both the shorter road and the better place for an
+author to write it, since it sits beside the type it describes.
 
 ## 3. Complete against the live piece **[today]**
 
@@ -494,15 +503,14 @@ Declared results make an **output** self-describing; this is about what an
 
 | Gap | Needs |
 | --- | --- |
-| A flag's prose absent from its help page | Same loss as the row below — emitted into the `$def`, absent from the resolved schema the CLI is served |
-| A verb's purpose absent from its help page | A genuine emission gap, then a renderer one — an event interface's comment never compiles, and the page has no summary line |
-| A verb's own doc comment absent everywhere | Not emission — it is emitted and lost when the event `$ref` is resolved for the CLI |
 | A result field's prose absent from the text page | Only the renderer — the description is already served under `--help --json`, beside the field it documents |
+| An event interface's own comment absent everywhere | The one prose level that does not compile ([#5559](https://github.com/commontoolsinc/labs/issues/5559)). Nothing downstream can serve what was never emitted |
+| A declared event field the handler body never reads is absent from the served input schema | A decision, not a patch: the served schema is the handler's read and the declared type is the contract, and which one a caller is owed is open |
 | `--select` completion, and refusal before the call | A provider reading the declared result the help page already resolves |
 | An address accepted as an argument | The round-trip property above |
 
-Six rows, five distinct gaps: the three prose rows above the fourth are one
-problem seen from three sides — an author writes about a verb on its event
-interface, on an event field, or on the verb itself, and none of it reaches a
-caller. The fourth is not that problem: an output field's prose does reach the
-CLI, and only the text renderer drops it.
+Five rows and five distinct gaps, and the first three are worth reading
+together because they look like one. They are not: the first is a renderer that
+does not print what it is handed, the second is a comment nothing emits, and the
+third is a *field* — not prose at all — and an open question rather than a
+defect. Only the second is an author's words going missing.
