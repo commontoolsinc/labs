@@ -105,11 +105,23 @@ export type ServingLoopStats = {
    * not as fast as admissions arrive). */
   reactivationBackoffs: number;
   /** Foreign-space writes refused at wave ACCUMULATION (serving-loop.md
-   * §3d, RULED 2026-08-14 (c)): action-scoped — the writing action
-   * fails, the wave and the loop keep serving. Nonzero names a pattern
-   * materializing home-space state under serving (cross-space serving
-   * is Phase 5). */
+   * §3d, RULED 2026-08-14 (c); Phase 5 keeps the counter for the
+   * accept gate's refusals): action-scoped — the writing action fails,
+   * the wave and the loop keep serving. Nonzero names either a
+   * carriage-less foreign write (a pattern materializing ambient
+   * service-identity state — the lunch-wall class) or an UNGRANTED one
+   * (an acting identity reaching for a space it holds no structural
+   * grant on — protocol.md §2b's authorization predicate). */
   foreignWriteRefusals: number;
+  /** Foreign co-hosted ENGINE resolutions that FAILED at the wave's
+   * commit step (Phase 5, the F1b isolation): the failing space's
+   * contributions withdraw action-scoped (events requeue, derivations
+   * drop) and the wave commits the rest — the home space never parks
+   * for one unresolvable foreign target. Counted per failed space per
+   * wave; a growing count names a foreign store that persistently
+   * cannot open (disk trouble, or a provisioning target with an
+   * unusable path). */
+  foreignEngineFailures: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
   events: {
@@ -141,6 +153,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   parkDisposeTimeouts: 0,
   reactivationBackoffs: 0,
   foreignWriteRefusals: 0,
+  foreignEngineFailures: 0,
   watermarkLag: 0,
   events: {
     appended: 0,

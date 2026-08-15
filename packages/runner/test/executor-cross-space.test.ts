@@ -316,6 +316,179 @@ describe("Phase 5 cross-space serving", () => {
     }
   });
 
+  it("a foreign space whose engine cannot resolve fails ONLY its contributions — the home space keeps serving instead of parking (protocol.md §2b; the F1b fix)", async () => {
+    // Pre-fix, #resolveForeignEngines was awaited un-caught in the
+    // commit step: ONE unresolvable foreign target threw out of the
+    // cycle — loop-failed → park + backoff for the whole HOME space,
+    // the exact outage class the RULED accumulation refusal exists to
+    // prevent. The failure must be action-scoped: the crossing's own
+    // contribution withdraws (counted), everything else commits.
+    const badSigner = await Identity.fromPassphrase("x-space bad engine");
+    const badSpace = badSigner.did() as MemorySpace;
+    const proxiedServer = new Proxy(server, {
+      get(target, prop, receiver) {
+        if (prop === "engineForSpace") {
+          return (s: string) =>
+            s === badSpace
+              ? Promise.reject(new Error("engine open failed (test)"))
+              : target.engineForSpace(s);
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as MemoryV2Server.Server;
+
+    host = new ExecutorHost({
+      server: proxiedServer,
+      serviceIdentity: serviceSigner.did(),
+      createRuntime: async (space) => {
+        const manager = SharedServerStorageManager.connectTo(server, {
+          as: serviceSigner,
+          servingHomeSpace: space,
+        });
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: manager,
+          servingPosture: true,
+          experimental: { serverExecution: true },
+        });
+        servingRuntime = runtime;
+        await onServingRuntime?.(runtime);
+        return {
+          runtime,
+          dispose: async () => {
+            await runtime.dispose();
+            await manager.close();
+          },
+        };
+      },
+      policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+    });
+
+    // A served home derivation whose input the client can move — the
+    // "everything else" that must keep committing.
+    onServingRuntime = async (runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            "  ({ n }) => ({ total: computed(() => n + 500) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space: homeSpace });
+      const argument = runtime.getCell<{ n: number }>(
+        homeSpace,
+        "f1b-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ total: number }>(
+        homeSpace,
+        "f1b-result",
+        compiled.resultSchema,
+      );
+      for (let attempt = 0;; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, compiled, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    clientManager = SharedServerStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+    });
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.getCell<{ n: number }>(homeSpace, "f1b-arg", undefined, tx)
+        .set({ n: 1 });
+      const committed = await tx.commit();
+      expect(committed.error).toBeUndefined();
+    }
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      homeSpace,
+      "f1b-result",
+      undefined,
+    );
+    let observed: number | undefined;
+    const cancel = clientResult.sink((value) => {
+      observed = value?.total;
+    });
+    try {
+      await waitUntil(
+        () => observed === 501,
+        `first derivation (saw ${observed})`,
+      );
+      expect(host.spaceServer(homeSpace)?.active).toBe(true);
+
+      // The misdirected crossing: full §2b carriage, owner-by-identity
+      // grant (acting user IS the target space DID, so the accept gate
+      // admits without touching the engine) — and the target's engine
+      // cannot open.
+      const serving = servingRuntime!;
+      const badTx = serving.edit();
+      stampWaveRunContext(badTx, {
+        actionId: "provision-into-bad-space",
+        kind: "event-handler",
+        eventId: "e-bad-space",
+        acting: { user: badSpace, session: "sess-bad" },
+        capabilityRef: "cap:test-grant",
+      });
+      serving.getCell<{ value: number }>(
+        badSpace,
+        "f1b-bad-doc",
+        undefined,
+        badTx,
+      ).set({ value: 1 });
+      const badCommit = await badTx.commit();
+      // Accepted into the wave (the gate admits it) — the failure is
+      // decided at the commit step's engine resolution.
+      expect(badCommit.error).toBeUndefined();
+
+      // The home space must KEEP SERVING: the client moves the input
+      // and the served derivation lands in a wave that also had to
+      // resolve (and isolate) the bad foreign target.
+      {
+        const tx = clientRuntime.edit();
+        clientRuntime.getCell<{ n: number }>(
+          homeSpace,
+          "f1b-arg",
+          undefined,
+          tx,
+        ).set({ n: 2 });
+        const committed = await tx.commit();
+        expect(committed.error).toBeUndefined();
+      }
+      await waitUntil(
+        () => observed === 502,
+        `re-derivation after the isolated foreign failure (saw ${observed})`,
+      );
+      expect(host.spaceServer(homeSpace)?.active).toBe(true);
+      await waitUntil(
+        () => host!.stats().foreignEngineFailures >= 1,
+        "the isolated failure to be counted",
+      );
+    } finally {
+      cancel();
+    }
+  });
+
   it("foreignWriteAuthorityFor: the structural grant supply — owner-by-identity, fresh-store creation (non-creating probe), the target's own ACL, fail-closed otherwise (protocol.md §2b; the F1 fix)", async () => {
     const aliceDid = aliceSigner.did();
     const bobDid = bobSigner.did();

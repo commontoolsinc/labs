@@ -691,14 +691,37 @@ export class SpaceServer implements TransactionSealDestination {
 
   /** Resolve the co-hosted engines for a closing wave's foreign spaces
    * (Phase 5): same host, same process — store sequencing, not a
-   * network await (protocol.md §2b). */
+   * network await (protocol.md §2b). Failure is isolated PER SPACE
+   * (the F1b fix): a space whose engine cannot resolve fails exactly
+   * the contributions targeting it (wave.failForeignSpace — requeue
+   * for events, drop for derivations; counted) and the wave commits
+   * the rest. Before this isolation the un-caught await threw out of
+   * the cycle — loop-failed → park + backoff for the HOME space, the
+   * exact "space outage from one misdirected materialization" class
+   * the RULED 2026-08-14 (c) accumulation refusal was built to
+   * prevent, re-opened at the commit step. */
   async #resolveForeignEngines(wave: WaveAccumulator): Promise<void> {
     for (const space of wave.foreignSpaces) {
       if (this.#foreignEngines.has(space)) continue;
-      this.#foreignEngines.set(
-        space,
-        await this.#options.server.engineForSpace(space),
-      );
+      try {
+        this.#foreignEngines.set(
+          space,
+          await this.#options.server.engineForSpace(space),
+        );
+      } catch (error) {
+        this.#options.stats.foreignEngineFailures += 1;
+        logger.warn("foreign-engine-resolution-failed", () => [
+          `co-hosted engine for foreign space ${space} failed to ` +
+          "resolve; failing its contributions action-scoped and " +
+          "committing the rest of the wave (protocol.md §2b; " +
+          "serving-loop.md §3d's failure isolation)",
+          error,
+        ]);
+        wave.failForeignSpace(
+          space,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
   }
 

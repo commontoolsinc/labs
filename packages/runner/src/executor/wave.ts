@@ -508,6 +508,18 @@ export class WaveAccumulator
    * for the re-drain. Store-owned idempotency (the engine's nonce
    * dedupe) absorbs the re-run's re-issue. */
   readonly #sealFailedEventIds = new Set<string>();
+  /** Foreign spaces whose co-hosted ENGINE failed to resolve for this
+   * wave's commit step (Phase 5, the F1b fix): commitWave withdraws
+   * exactly the contributions that sealed into these spaces (requeue
+   * for events, drop for derivations — the standard per-kind
+   * withdrawal semantics) and commits the rest, instead of the
+   * resolution failure throwing out of the cycle and PARKING the home
+   * space — the "space outage from one misdirected materialization"
+   * class the RULED 2026-08-14 (c) accumulation refusal exists to
+   * prevent, re-opened at the commit step for carriage-bearing writes
+   * until this isolation. Marked by the serving loop's
+   * per-space-caught foreign-engine resolution (failForeignSpace). */
+  readonly #failedForeignSpaces = new Map<MemorySpace, string>();
   /** Outbound appends staged per transaction before its seal
    * (enqueueOutboundAppend); folded (by copy) into the contribution at
    * seal so only surviving contributions' appends ride the wave (FP1).
@@ -801,6 +813,31 @@ export class WaveAccumulator
       return;
     }
     this.#sealFailedEventIds.add(context.eventId);
+  }
+
+  /**
+   * Mark a FOREIGN space's co-hosted engine as unresolvable for this
+   * wave (Phase 5, the F1b fix): called by the serving loop when
+   * `engineForSpace` fails during the pre-commit foreign resolution.
+   * commitWave withdraws the contributions that sealed into the space
+   * (requeue for events — the entry stays pending and replays; drop
+   * for derivations — recompute-on-demand covers them), commits the
+   * rest, and never builds a batch the sink would need the missing
+   * engine for. Action-scoped, mirroring the accumulation refusal's
+   * posture — the alternative was the resolution failure throwing out
+   * of the cycle: loop-failed → park + backoff for the HOME space, a
+   * whole-space outage from one misdirected crossing.
+   */
+  failForeignSpace(space: MemorySpace, reason: string): void {
+    if (this.#closed) return;
+    if (space === this.#space) {
+      throw new Error(
+        "failForeignSpace on the wave's OWN home space: the home engine " +
+          "is the loop's engine — its failure is a loop failure, not a " +
+          "foreign-resolution one",
+      );
+    }
+    this.#failedForeignSpaces.set(space, reason);
   }
 
   /**
@@ -1354,6 +1391,36 @@ export class WaveAccumulator
           this.#sealFailedEventIds.has(contribution.context.eventId)
         ) {
           requeued.add(contribution.index);
+        }
+      }
+    }
+
+    // Seed withdrawals for contributions that sealed into a foreign
+    // space whose co-hosted engine failed to resolve (failForeignSpace
+    // — the F1b fix): action-scoped, per the standard kind semantics
+    // (an event requeues and its entry replays; a derivation drops and
+    // recompute-on-demand covers it). resolveConflicts' closures fold
+    // in readers and same-event siblings; #buildForeignBatches only
+    // iterates survivors, so no batch targeting the failed space ever
+    // reaches the sink's engine lookup.
+    if (this.#failedForeignSpaces.size > 0) {
+      for (const contribution of this.#contributions) {
+        if (
+          requeued.has(contribution.index) ||
+          droppedWhole.has(contribution.index)
+        ) {
+          continue;
+        }
+        const failed = contribution.spaces.some((sealed) =>
+          sealed.space !== this.#space &&
+          this.#failedForeignSpaces.has(sealed.space)
+        );
+        if (!failed) continue;
+        if (contribution.context.kind === "event-handler") {
+          requeued.add(contribution.index);
+        } else {
+          droppedWhole.add(contribution.index);
+          outcome.dependencyDroppedWrites += this.#homeOpCount(contribution);
         }
       }
     }
