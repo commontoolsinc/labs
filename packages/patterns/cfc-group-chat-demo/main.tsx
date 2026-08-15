@@ -26,12 +26,13 @@ import {
   currentProfileCell,
   currentUserCanManageAdmins,
   currentUserIsAdmin as currentProfileIsAdmin,
+  type ImportedMessagesCell,
+  type ImportedMessagesValue,
   messagesValue,
   type MyProfileCell,
   participantClaimsValue,
   type RoomDraftCell,
   roomsValue,
-  type SharedChatMessage,
   type SharedMessagesCell,
   type SharedMessagesValue,
   type SharedProfilesCell,
@@ -65,6 +66,7 @@ const writeDraftText = handler<string, { value: DraftCell }>(
 interface SharedTranscriptInput {
   myProfile: MyProfileCell;
   messages: SharedMessagesCell;
+  importedMessages: ImportedMessagesCell;
   id: string;
 }
 
@@ -72,12 +74,14 @@ const SharedTranscript = pattern<
   SharedTranscriptInput,
   { [NAME]: string; [UI]: any }
 >((
-  { myProfile, messages, id }: SharedTranscriptInput,
+  { myProfile, messages, importedMessages, id }: SharedTranscriptInput,
 ): { [NAME]: string; [UI]: any } => {
   const messageCountLabel = computed(() =>
-    messageCountText(messagesValue(messages).length)
+    messageCountText(messagesValue(messages, importedMessages).length)
   );
-  const transcriptRows = messages.map((messageCell) => {
+  const transcriptRows = computed(() =>
+    sortDisplayMessages(messagesValue(messages, importedMessages))
+  ).map((messageCell) => {
     const authorProfile = messageCell.authorProfile;
     const isMine = computed(() =>
       equals(currentProfileCell(myProfile), authorProfile)
@@ -210,6 +214,7 @@ export interface GroupChatDemoInput {
   myProfile?: PerUser<MyProfileCell>;
   profiles?: PerSpace<SharedProfilesCell>;
   messages?: PerSpace<SharedMessagesCell>;
+  importedMessages?: PerSpace<ImportedMessagesCell>;
   rooms?: PerSpace<SharedRoomsCell>;
   adminRegistry?: PerSpace<ChatAdminRegistryCell>;
   profileDraft?: PerUser<DraftCell>;
@@ -224,6 +229,7 @@ export interface GroupChatDemoOutput {
   myProfile: PerUser<MyProfileCell>;
   profiles: PerSpace<SharedProfilesCell>;
   messages: PerSpace<SharedMessagesCell>;
+  importedMessages: PerSpace<ImportedMessagesCell>;
   rooms: PerSpace<SharedRoomsCell>;
   adminRegistry: PerSpace<ChatAdminRegistryCell>;
   profileDraft: PerUser<DraftCell>;
@@ -252,6 +258,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     myProfile,
     profiles,
     messages,
+    importedMessages,
     rooms,
     adminRegistry,
     profileDraft,
@@ -263,6 +270,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   const myProfileCell: MyProfileCell = myProfile!;
   const profilesCell: SharedProfilesCell = profiles!;
   const messagesCell: SharedMessagesCell = messages!;
+  const importedMessagesCell: ImportedMessagesCell = importedMessages!;
   const roomsCell: SharedRoomsCell = rooms!;
   const adminRegistryCell: ChatAdminRegistryCell = adminRegistry!;
   const profileDraftCell: DraftCell = profileDraft!;
@@ -302,8 +310,12 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   const setHostMessageDraft = writeDraftText({ value: hostMessageDraftCell });
   const setRoomDraft = writeDraftText({ value: roomDraftCell });
   const participantCountLabel = computed(() => {
-    const count =
-      participantClaimsValue(profilesCell, myProfileCell, messagesCell).length;
+    const count = participantClaimsValue(
+      profilesCell,
+      myProfileCell,
+      messagesCell,
+      importedMessagesCell,
+    ).length;
     return `${count} participant${count === 1 ? "" : "s"}`;
   });
   const roomCountLabel = computed(() =>
@@ -313,19 +325,26 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     draftText(hostMessageDraftCell).trim().length === 0
   );
   const addRandomMessagesDisabled = computed(() =>
-    participantClaimsValue(profilesCell, myProfileCell, messagesCell).length ===
-      0 ||
-    messagesValue(messagesCell).length === 0
+    participantClaimsValue(
+        profilesCell,
+        myProfileCell,
+        messagesCell,
+        importedMessagesCell,
+      ).length === 0 ||
+    messagesValue(messagesCell, importedMessagesCell).length === 0
   );
   const addRandomMessages = action(() => {
     const nextMessages = createRandomImportedClaimedMessages(
-      sortDisplayMessages(messagesValue(messagesCell)),
-      participantClaimsValue(profilesCell, myProfileCell, messagesCell),
+      sortDisplayMessages(messagesValue(messagesCell, importedMessagesCell)),
+      participantClaimsValue(
+        profilesCell,
+        myProfileCell,
+        messagesCell,
+        importedMessagesCell,
+      ),
       seededRandom(0xdecafbad),
     );
-    nextMessages.forEach((message) =>
-      messagesCell.push(message as SharedChatMessage)
-    );
+    nextMessages.forEach((message) => importedMessagesCell.push(message));
   });
 
   return {
@@ -356,7 +375,10 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
                   />
                   <cf-chip
                     label={computed(() =>
-                      messageCountText(messagesValue(messagesCell).length)
+                      messageCountText(
+                        messagesValue(messagesCell, importedMessagesCell)
+                          .length,
+                      )
                     )}
                   />
                   <cf-chip
@@ -413,6 +435,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
               {SharedTranscript({
                 myProfile: myProfileCell,
                 messages: messagesCell,
+                importedMessages: importedMessagesCell,
                 id: "trusted-conversation-preview",
               } as SharedTranscriptInputArg)}
               {trustedSend}
@@ -457,6 +480,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     myProfile: myProfileCell as PerUser<MyProfileCell>,
     profiles: profilesCell as PerSpace<SharedProfilesCell>,
     messages: messagesCell as PerSpace<SharedMessagesCell>,
+    importedMessages: importedMessagesCell as PerSpace<ImportedMessagesCell>,
     rooms: roomsCell as PerSpace<SharedRoomsCell>,
     adminRegistry: adminRegistryCell as PerSpace<ChatAdminRegistryCell>,
     profileDraft: profileDraftCell as PerUser<DraftCell>,
@@ -489,6 +513,7 @@ export default GroupChatDemo;
 
 export type {
   ChatAdminRegistryValue,
+  ImportedMessagesValue,
   SharedMessagesValue,
   SharedProfilesValue,
   SharedRoomsValue,

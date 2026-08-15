@@ -99,6 +99,8 @@ export type SharedChatMessage =
 
 export type SharedMessagesValue = SharedChatMessage[] | Default<[]>;
 export type SharedMessagesCell = Writable<SharedMessagesValue>;
+export type ImportedMessagesValue = ImportedClaimedChatMessage[] | Default<[]>;
+export type ImportedMessagesCell = Writable<ImportedMessagesValue>;
 
 export interface SharedProfileEntry {
   readonly profile: ProfileCell;
@@ -107,7 +109,10 @@ export interface SharedProfileEntry {
 export type SharedProfilesValue = SharedProfileEntry[] | Default<[]>;
 export type SharedProfilesCell = Writable<SharedProfilesValue>;
 
-export type TrustedChatRoom = ChatRoom<SharedChatMessage>;
+export type TrustedChatRoom = AddIntegrity<
+  ChatRoom<SharedChatMessage>,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
 
 export type ChatAdminList = RequiresIntegrity<
   TrustedActionWrite<
@@ -157,6 +162,16 @@ export type ChatAdminRegistryCell = Writable<ChatAdminRegistryValue>;
 
 export type SharedRoomList = RequiresIntegrity<
   TrustedActionWrite<
+    ChatRoom<SharedChatMessage>[],
+    typeof commitTrustedRoomAdd,
+    typeof TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION,
+    typeof TRUSTED_GROUP_CHAT_ROOM_SURFACE
+  >,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
+
+type TrustedSharedRoomList = RequiresIntegrity<
+  TrustedActionWrite<
     TrustedChatRoom[],
     typeof commitTrustedRoomAdd,
     typeof TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION,
@@ -174,6 +189,13 @@ export type SharedRoomsValue =
   | SharedRoomsStoredValue
   | Default<EmptySharedRoomsValue>;
 export type SharedRoomsCell = Writable<SharedRoomsValue>;
+interface TrustedSharedRoomsStoredValue {
+  readonly list?: TrustedSharedRoomList;
+}
+type TrustedSharedRoomsValue =
+  | TrustedSharedRoomsStoredValue
+  | Default<EmptySharedRoomsValue>;
+type TrustedSharedRoomsCell = Writable<TrustedSharedRoomsValue>;
 export type RoomDraftCell = Writable<string | Default<"">>;
 
 const draftText = (draft: Writable<string | Default<"">>): string =>
@@ -186,8 +208,15 @@ const nonEmptyEventName = (value: string | undefined): string | undefined => {
 
 export const messagesValue = (
   messages: SharedMessagesCell,
-): SharedChatMessage[] =>
-  Array.from((messages.get() as SharedChatMessage[] | undefined) ?? []);
+  importedMessages?: ImportedMessagesCell,
+): SharedChatMessage[] => [
+  ...Array.from((messages.get() as SharedChatMessage[] | undefined) ?? []),
+  ...Array.from(
+    (importedMessages?.get() as
+      | ImportedClaimedChatMessage[]
+      | undefined) ?? [],
+  ),
+];
 
 export const profilesValue = (
   profiles: SharedProfilesCell,
@@ -203,9 +232,13 @@ export const profilesValue = (
     );
 
 export const roomsValue = (
-  rooms: SharedRoomsCell,
+  rooms: SharedRoomsCell | TrustedSharedRoomsCell,
 ): TrustedChatRoom[] =>
-  Array.from((rooms.get() as SharedRoomsStoredValue | undefined)?.list ?? []);
+  Array.from(
+    (rooms.get() as
+      | SharedRoomsStoredValue
+      | undefined)?.list ?? [],
+  ) as TrustedChatRoom[];
 
 export const myProfileValue = (
   myProfile: MyProfileCell,
@@ -292,6 +325,7 @@ export const participantClaimsValue = (
   profiles: SharedProfilesCell,
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
+  importedMessages?: ImportedMessagesCell,
 ): ParticipantClaim<AuthorProfileCell>[] => {
   const participants: ParticipantClaim<AuthorProfileCell>[] = [];
   const addParticipant = (
@@ -327,7 +361,7 @@ export const participantClaimsValue = (
     currentProfileCell(myProfile),
   );
 
-  messagesValue(messages).forEach((message) => {
+  messagesValue(messages, importedMessages).forEach((message) => {
     const profile = message.authorProfile;
     const profileValue = profile?.get();
     addParticipant(
@@ -752,7 +786,7 @@ export const commitTrustedRoomAdd = handler<
     myProfile: MyProfileCell;
     adminRegistry: ChatAdminRegistryCell;
     roomDraft: RoomDraftCell;
-    rooms: SharedRoomsCell;
+    rooms: TrustedSharedRoomsCell;
   }
 >((_, { myProfile, adminRegistry, roomDraft, rooms }) => {
   const { trimmedName, room } = prepareTrustedRoomAdd(
@@ -764,7 +798,7 @@ export const commitTrustedRoomAdd = handler<
   }
 
   const nextRooms = [...roomsValue(rooms), room];
-  rooms.set({ list: nextRooms as SharedRoomList });
+  rooms.set({ list: nextRooms as TrustedSharedRoomList });
   roomDraft.set("");
 });
 type TrustedRoomAddInput = Parameters<typeof commitTrustedRoomAdd>[0];
@@ -1137,11 +1171,12 @@ export const TrustedRoomAddSurface = pattern<
     rooms,
   }: TrustedRoomAddSurfaceInput,
 ): TrustedRoomAddSurfaceOutput => {
+  const trustedRooms: TrustedSharedRoomsCell = rooms;
   const addRoom = commitTrustedRoomAdd({
     myProfile,
     adminRegistry,
     roomDraft,
-    rooms,
+    rooms: trustedRooms,
   } as TrustedRoomAddInput);
   const addDisabled = computed(() =>
     !currentUserIsAdmin(myProfile, adminRegistry) ||

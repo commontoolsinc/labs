@@ -22,11 +22,12 @@ import {
   type ChatAdminRegistryValue,
   chatAdminRolesValue,
   type EmptyMyProfileValue,
+  type ImportedMessagesValue,
+  messagesValue,
   type MyProfileCellValue,
   type MyProfileValue,
   participantClaimsValue,
   roomsValue,
-  type SharedChatMessage,
   type SharedMessagesValue,
   type SharedProfilesValue,
   type SharedRoomsValue,
@@ -71,6 +72,9 @@ export default pattern(() => {
   const messages = Writable.of<SharedMessagesValue>(
     [] as SharedMessagesValue,
   );
+  const importedMessages = Writable.of<ImportedMessagesValue>(
+    [] as ImportedMessagesValue,
+  );
   const profiles = Writable.of<SharedProfilesValue>(
     [] as SharedProfilesValue,
   );
@@ -88,6 +92,7 @@ export default pattern(() => {
     myProfile,
     profiles,
     messages,
+    importedMessages,
     rooms,
     adminRegistry,
     profileDraft,
@@ -106,6 +111,7 @@ export default pattern(() => {
     myProfile: bobProfile,
     profiles,
     messages,
+    importedMessages,
     rooms,
     adminRegistry,
     profileDraft: bobProfileDraft,
@@ -144,22 +150,20 @@ export default pattern(() => {
   const action_add_deterministic_imported = action(() => {
     const random = seededRandom(0xdecafbad);
     const nextMessages = createRandomImportedClaimedMessages(
-      sortDisplayMessages(messages.get() as SharedChatMessage[]),
-      participantClaimsValue(profiles, myProfile, messages),
+      sortDisplayMessages(messagesValue(messages, importedMessages)),
+      participantClaimsValue(profiles, myProfile, messages, importedMessages),
       random,
     );
-    nextMessages.forEach((message) =>
-      messages.push(message as SharedChatMessage)
-    );
+    nextMessages.forEach((message) => importedMessages.push(message));
   });
   const action_add_same_name_unverified_imports = action(() => {
-    messages.push({
+    importedMessages.push({
       origin: "imported",
       authorName: "Sam",
       body: "first Sam",
       timestamp: 10_000,
     });
-    messages.push({
+    importedMessages.push({
       origin: "imported",
       authorName: "Sam",
       body: "second Sam",
@@ -169,7 +173,8 @@ export default pattern(() => {
 
   const assert_initially_empty = assert(() =>
     (myProfile.get() as MyProfileValue | undefined)?.profile === undefined &&
-    (messages.get()?.length ?? 0) === 0
+    (messages.get()?.length ?? 0) === 0 &&
+    (importedMessages.get()?.length ?? 0) === 0
   );
   const assert_admin_view_waits_for_profile = assert(() => {
     const managerChip = findNodeById(chat[UI], "group-chat-manager-chip");
@@ -297,38 +302,50 @@ export default pattern(() => {
     messages.get()[1]?.body === "After rename"
   );
   const assert_imported_messages_injected = assert(() => {
-    const messageList = Array.from(messages.get() as SharedChatMessage[]);
-    const importedMessages = messageList.filter((message) =>
+    const messageList = messagesValue(messages, importedMessages);
+    const importedRows = messageList.filter((message) =>
       message.origin === "imported"
     );
     return messageList.length === 4 &&
-      importedMessages.length === 2 &&
-      importedMessages.every((message) =>
+      importedRows.length === 2 &&
+      importedRows.every((message) =>
         message.authorName.length > 0 &&
         message.body.length > 0 &&
         message.authorProfile !== undefined
       );
   });
   const assert_thread_order_sortable = assert(() => {
-    const ordered = sortDisplayMessages(messages.get() as SharedChatMessage[]);
+    const ordered = sortDisplayMessages(
+      messagesValue(messages, importedMessages),
+    );
     return ordered.length === 4 &&
       ordered.every((message, index) =>
         index === 0 || ordered[index - 1]!.timestamp <= message.timestamp
       );
   });
   const assert_verified_imports_do_not_duplicate_participants = assert(() =>
-    participantClaimsValue(profiles, myProfile, messages).filter((
+    participantClaimsValue(
+      profiles,
+      myProfile,
+      messages,
+      importedMessages,
+    ).filter((
       participant,
     ) => participant.name === "Alice Renamed").length === 1
   );
   const assert_same_name_unverified_imports_are_distinct = assert(() => {
-    const participants = participantClaimsValue(profiles, myProfile, messages);
+    const participants = participantClaimsValue(
+      profiles,
+      myProfile,
+      messages,
+      importedMessages,
+    );
     return participants.filter((participant) =>
       participant.name === "Sam" && participant.profile === undefined
     ).length === 2;
   });
   const assert_messages_and_rooms_do_not_store_ids = assert(() =>
-    (messages.get() as SharedChatMessage[]).every((message) =>
+    messagesValue(messages, importedMessages).every((message) =>
       !("id" in message)
     ) &&
     roomsValue(rooms).every((room) => !("id" in room))
