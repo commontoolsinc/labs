@@ -234,13 +234,28 @@ run cf piece call -s "$SPACE" --piece "$KID" --select item.title addChild -- --t
 run cf piece call -s "$SPACE" --piece "$EPIC" finish -- --body "shipping behind a flag"
 
 act "9 · A verb that declares no result"
-say "archive is Stream<void>: there is nothing for it to hand back, and the"
-say "invocation says so by settling with no result at all."
-run cf piece call -s "$SPACE" --piece "$KID" archive -- invoke
+say "archive is Stream<void>: nothing to supply, nothing handed back. The call"
+say "is the verb's name alone, and the invocation settles carrying no result"
+say "at all."
+run cf piece call -s "$SPACE" --piece "$KID" archive
 say "What it changed is a read away, on the one field the caller never sets."
 run cf piece get -s "$SPACE" --piece "$KID" status
 
-act "10 · Ask for something that is not there"
+act "10 · Step back and read the board"
+say "Every change so far was seen one call at a time. One read from the name"
+say "the session started with shows the tree they add up to."
+run cf piece get -s "$SPACE" --piece board items --select title,status,children@
+say "Act 8 paid one verb call for depth — openBelow walked the subtree. Breadth"
+say "is a read: a filter decides membership before projection, so status picks"
+say "the elements and only title comes back."
+run cf piece get -s "$SPACE" --piece "$EPIC" children --select title --filter '.status == "open"'
+# The two halves of that question do not combine, and the refusal's own message
+# carries the reason, so nothing restates it here.
+refused "an address suffix under a filter" \
+  cf piece get -s "$SPACE" --piece "$EPIC" children \
+  --select @,title --filter '.status == "open"'
+
+act "11 · Ask for something that is not there"
 say "Every act so far named something the pattern declares. Getting it wrong is"
 say "the other half of a surface knowing its own vocabulary."
 # The payload carries `title` as well as the typo, so what is being refused is
@@ -258,7 +273,7 @@ say "One shape of answer from both ends: what was wrong, the position it sat at,
 say "what that position accepts, and the nearest thing you probably meant. The"
 say "call was turned down before an invocation was spent."
 
-act "11 · Relate two items — PENDING"
+act "12 · Relate two items — PENDING"
 say "The tracker is a graph, not just a tree: an item can wait on any other."
 pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address>" \
   "an address cannot yet be a verb argument (references-as-arguments.md)" \
@@ -271,11 +286,11 @@ pending "cf piece call -s $SPACE --piece <cookies> blockOn -- --on <csrf-address
   }
 }'
 
-act "12 · One item, two paths, one address — PENDING"
+act "13 · One item, two paths, one address — PENDING"
 say "This is what addresses are for: the same item under a parent AND as a blocker,"
 say "and a caller can tell it is one item rather than two copies."
 pending "cf piece get -s $SPACE --piece board items --select title,children@,blockedOn@" \
-  "needs the edge from act 11" \
+  "needs the edge from act 12" \
   'the same of:fid1:… appears under one item'"'"'s children and another'"'"'s blockedOn'
 
 printf '\n%s━━ %s %s\n' "$B" "What just happened" "$N"
@@ -286,7 +301,7 @@ say "One name was typed: 'board'. Everything under it was addressed by the id a"
 say "call handed back — which is the composition the verb surface exists for,"
 say "and the reason those lines are as long as they are."
 say ""
-say "Acts 11 and 12 are the graph half, sequenced as references-as-arguments."
+say "Acts 12 and 13 are the graph half, sequenced as references-as-arguments."
 say "verb-session-gaps.sh asserts both, and fails the day either one starts"
 say "working — so this demo cannot quietly go stale."
 
