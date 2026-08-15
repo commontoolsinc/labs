@@ -1808,11 +1808,16 @@ delta):
   untouched). The producer half is
   `runner/test/executor-cross-space.test.ts`'s provider refusal (a
   serving manager's FOREIGN provider refuses scoped reads; space-scope
-  and home and non-serving managers unaffected). The unnamed-path
-  check is fully synchronous (the resolved-engine index), preserving
-  the ACL revocation-race invariant; its per-query cost is one
-  prepared-statement lease probe per open co-hosted engine, only for
-  flag-ON scoped reads by principal-bearing sessions.
+  and home and non-serving managers unaffected), refused ENTRY-scoped
+  at `pull()` — per caller, before the coalesced watch-refresh batch —
+  so one scoped offender cannot poison innocent space-scope foreign
+  reads sharing the batch's single pending promise (the review's F3;
+  the concurrent scoped+plain coalescing arm is pinned red-first, and
+  the batch-level check survives as a loud bypass backstop). The
+  unnamed-path check is fully synchronous (the resolved-engine index),
+  preserving the ACL revocation-race invariant; its per-query cost is
+  one prepared-statement lease probe per open co-hosted engine, only
+  for flag-ON scoped reads by principal-bearing sessions.
 - protocol §2's read-row Phase-1 recorded acceptance (the
   service-identity-only equality): RETIRED — the sharpened check
   compares the full DR1 holder minted by the co-hosted process
@@ -1827,43 +1832,92 @@ delta):
   the already-landed chain — foreign session frames → the scheduler's
   autonomous storage-notification runs → the seal's loop wake — so
   the spec sentence is satisfied by construction, not by new
-  machinery. Activation's foreign basis re-mark (§6 step 2's Phase-5
-  sentence) rides `selectForeignBasisRows` + per-space head
-  resolution, fail-degrading to surfacing (accounting parity with
-  the home scan; recovery correctness rides recompute-on-demand).
-- serving-loop §3d's accumulation gate (CHANGED sentence — the
-  Phase-5 accept-with-carriage posture): → COVERED.
-  `executor-wave.test.ts`: full carriage admitted with the foreign
-  scoped row keyed from the CARRIED identity (the stage-F delegated
-  test, now under the live gate); partial carriage (no grant) refused
-  at ACCUMULATION action-scoped with the wave surviving vacuous; the
-  sink's scoped-op-without-carriage refusal re-pinned DIRECTLY as the
+  machinery. The seal wake is LATCHED when no input waiter is armed
+  (the review's F4: a seal chained in a cycle's last microtasks was
+  invisible to the idle check and fell back to the idle timeout —
+  latency-only, closed with the same level-conversion shape as the
+  shadow-flip wake; not a guard, so no mutation probe attaches).
+  Activation's foreign basis re-mark (§6 step 2's Phase-5 sentence)
+  rides `selectForeignBasisRows` + per-space head resolution,
+  fail-degrading to surfacing (accounting parity with the home scan;
+  recovery correctness rides recompute-on-demand) — and because that
+  catch makes breakage invisible by design, the DECISION is
+  unit-pinned (the review's F5): `selectForeignStaleInstances` in
+  `executor-cross-space.test.ts` — foreign rows only, at-head rows
+  never re-mark (the `>=` mutation is red), behind-head rows do, a
+  foreign-head move flips an at-head row stale, home-scan findings
+  are not double-added.
+- serving-loop §3d's accumulation gate (CHANGED — the Phase-5 accept
+  posture as an AUTHORIZATION boundary, per the review's F1: carriage
+  is minted for every acting run, so an admitted-iff-carriage gate
+  authorized nothing): → COVERED. The gate admits iff carriage AND
+  the acting identity holds a structural write grant for the TARGET
+  space (`Server.foreignWriteAuthorityFor`: owner-by-identity /
+  fresh-store creation, DID-shape-checked and probed WITHOUT
+  materializing a store (F1c) / the target's own ACL grant,
+  mode-independent — no service-DID blanket, no populated-legacy
+  compat; fail-closed otherwise), and `foreignWrites: "accept"`
+  REFUSES construction without the probe — the vacuous configuration
+  is unrepresentable. `executor-wave.test.ts`: full carriage admitted
+  with the foreign scoped row keyed from the CARRIED identity (the
+  stage-F delegated test, now under the live gate, allow-all probe);
+  the UNGRANTED crossing (full carriage, existing no-ACL target)
+  refused action-scoped and counted with the actor's OWN home space
+  admitted beside it (red under the grant-check-neutralized
+  mutation — the pre-fix shape); partial carriage refused at
+  ACCUMULATION with the wave surviving vacuous (red under the
+  carriage-arm mutation); the probe's own arms (owner / creation /
+  non-creating second probe / garbage name / no-ACL fail-closed /
+  ACL WRITE grant / no-row refusal) pinned in
+  `executor-cross-space.test.ts`; the sink's
+  scoped-op-without-carriage refusal re-pinned DIRECTLY as the
   backstop ("Phase 5 backstop" test). The serving loop passes
-  "accept" (space-server.ts) and resolves foreign co-hosted engines
-  ahead of the commit step; a carriage-less foreign write stays
-  counted in §7's `foreignWriteRefusals`.
+  "accept" + the memory server's probe (space-server.ts) and resolves
+  foreign co-hosted engines ahead of the commit step with PER-SPACE
+  failure isolation (the review's F1b: pre-fix an unresolvable
+  foreign engine threw out of the cycle — loop-failed → park for the
+  HOME space; now the failing space's contributions withdraw
+  action-scoped — events requeue, derivations drop — the wave commits
+  the rest, counted in §7's `foreignEngineFailures`; the E2E is red
+  under the catch-reverted mutation, reproducing park(loop-failed)
+  verbatim). Carriage-less and ungranted foreign writes stay counted
+  in §7's `foreignWriteRefusals`. Residual recorded (F1c): a
+  well-formed FRESH space DID still provisions a store at commit —
+  §2b's sanctioned minting (deterministic per-user-per-event ids;
+  quota attribution the standing residual, README §3.8).
 - builtins §5's wish row (CHANGED — the RULED 2026-08-14
   per-demanding-identity lift): → COVERED, impl-gate.
   `executor-cross-space.test.ts`'s home-space resolution test: a
   stamped derivation resolves the DEMANDING principal's home space, a
-  stamped handler resolves the ACTOR's, an identity-less serving run
-  refuses (never the service DID), and a client runtime is
-  byte-identical to before. The wish builtin's guards ride
-  `homeSpacePrincipalFor`; the sidecar compile-cache context is the
-  SERVED space on serving runtimes; sidecar result cells key by the
-  home-space user (two demanders never collide on the service DID).
-  The lunch-ON gate's profile leg is the E2E witness (the phase PR's
+  stamped handler resolves the ACTOR's, MIXED carriage (instance
+  owner's scopeKeyIdentity + a different acting pair) resolves the
+  INSTANCE OWNER (the review's F6 — red under the precedence-swap
+  mutation), an identity-less serving run refuses (never the service
+  DID), and a client runtime is byte-identical to before. The wish
+  builtin's guards ride `homeSpacePrincipalFor`; the sidecar
+  compile-cache context is the SERVED space on serving runtimes;
+  sidecar result cells AND the builtin's per-node closure caches key
+  by the home-space user — PINNED by the two-demander test (the
+  review's F2: the closure caches were per-node singles, so demander
+  #2 reused demander #1's create surface and clobbered the shared
+  pending input; the reviewer's M6 mutation — both keyings reverted
+  to the service DID — now fails the test, where pre-fix it survived
+  every suite; the suggestion sidecar gains the same per-user keying
+  on SERVING runtimes only, client cause byte-identical). The
+  lunch-ON gate's profile leg is the E2E witness (the phase PR's
   gates table carries its status).
 - OW13 — the delegated-grant RESOLUTION row's Phase-5 PRECONDITION is
   DISCHARGED (the design + fail-closed refusals above, one stack with
   the producers). The row's original obligation — grant RESOLUTION
   against a per-doc grant store, with negative tests — STAYS OWED on
   its original trigger (the store landing); Phase 5's write-side
-  carriage stays presence+completeness (`capabilityRef` minted
+  carriage is presence+completeness (`capabilityRef` minted
   structurally at #stampRun: `event-consequence:<eventId>` /
   `demanded-run:<principal>`, the FP1 `stream-append:<sidecarId>`
   precedent — a below-spec-granularity surface FLAGGED in the
-  Phase-5 PR).
+  Phase-5 PR) PLUS the accept gate's per-TARGET-SPACE structural
+  grant check above — space-granular authorization now, doc-granular
+  resolution still owed.
 - OW22 — DISCHARGED (evidence recorded on this delta; the row's
   trigger was Phase 5's grant-scoped read hardening): the exemption
   re-verifies on CURRENT holdership at every push-path use

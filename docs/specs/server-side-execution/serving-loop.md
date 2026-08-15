@@ -341,10 +341,14 @@ executing:
   for it — survival-tested: the foreign read's loopback session IS
   the registration; a foreign commit's frames arrive on that session,
   the scheduler runs autonomously off storage notifications, and the
-  re-run's SEAL wakes the loop. The foreign commit is never home
-  input — W and the input batch stay per home space. Foreign SCOPED
-  reads are the exception: fail-closed refused until the grant-scoped
-  read design's resolution lands — protocol.md §2.)*
+  re-run's SEAL wakes the loop — a wake the loop LATCHES when no
+  input waiter is armed (a seal chained in a cycle's last microtasks
+  is not yet visible to the idle check; the latch keeps the wake
+  deterministic instead of falling back to the idle timeout, which
+  the removed fan-out had covered incidentally). The foreign commit
+  is never home input — W and the input batch stay per home space.
+  Foreign SCOPED reads are the exception: fail-closed refused until
+  the grant-scoped read design's resolution lands — protocol.md §2.)*
 - **Scope discovery is part of read discovery**: a run's scope is the
   narrowest scope of anything it read, so it too is discovered by
   running. A narrowing discovery writes the broad-slot redirect AND
@@ -793,24 +797,56 @@ split completes or fails as a unit (same-host store sequencing, not a
 network await).
 
 Phase 5 SANCTIONED the crossing, and the accumulation gate (RULED
-2026-08-14 (c)) survives as its shape check: a serving wave ADMITS a
-foreign-space write at ACCUMULATION iff the sealing run's context
-carries the §2b delegated carriage — acting identity AND
-`capabilityRef`, the provisioning shape protocol.md §2's
-server-produced authored row requires on EVERY foreign commit. A
-carriage-less foreign write — the lunch-wall class: a run resolving
-against the SERVICE identity's ambient state — still refuses at the
-seal sink, action-scoped (that action's tx fails loudly and is
-counted into §7's `foreignWriteRefusals`; its already-sealed spaces
-withdraw per this section's failure isolation) while the wave commits
-everything else; the commit-step foreign-engine resolution (the
-serving loop resolves the wave's foreign co-hosted engines ahead of
-the commit step) keeps the sink's delegated validation as backstop.
-The producers this admits: `.inSpace` provisioning handlers (the
-event's acting principal + grant), and per-demanding-identity wish
-resolution — a demanded run acting as its demander (scopes.md §5)
-whose home-space bootstrap writes ride the same crossing (builtins.md
-§5 carries the register row; RULED 2026-08-14).
+2026-08-14 (c)) survives as its AUTHORIZATION seat: a serving wave
+ADMITS a foreign-space write at ACCUMULATION iff BOTH hold —
+
+- the sealing run's context carries the §2b delegated carriage
+  (acting identity AND `capabilityRef`, the provisioning shape
+  protocol.md §2's server-produced authored row requires on EVERY
+  foreign commit); and
+- the ACTING identity holds a **structural write grant for the
+  TARGET space**, probed against the co-hosted memory server
+  (`foreignWriteAuthorityFor`; the wave REFUSES the accept posture
+  at construction without an authority probe, so the gate cannot be
+  configured vacuous — carriage alone is minted for every acting
+  run and authorizes nothing). The structural grants:
+  **owner-by-identity** (the target space IS the actor's own DID —
+  their home space, the wish bootstrap's target),
+  **fresh-store creation** (the target store does not exist — §2b's
+  sanctioned provisioning, where the creating commit makes the
+  space the actor's; the probe checks the space NAME is a
+  well-formed DID and never materializes a store itself, so a
+  carriage-bearing write to a garbage space string cannot silently
+  provision one — the recorded residual is that a well-formed FRESH
+  DID still provisions at commit, §2b's sanctioned minting with
+  quota attribution the standing residual, README §3.8), or an
+  **explicit ACL grant** (the target's own ACL document grants the
+  actor WRITE — checked mode-independently: this is the serving
+  plane's normative fail-closed interim, not the client ACL
+  rollout, so neither the service-DID blanket nor the
+  missing-ACL-populated-legacy compat arm applies). Per-DOC grant
+  RESOLUTION stays the OW13 owed hardening.
+
+A carriage-less foreign write — the lunch-wall class: a run resolving
+against the SERVICE identity's ambient state — and an UNGRANTED one —
+an actor reaching for a space it holds no authority over — both
+refuse at the seal sink, action-scoped (that action's tx fails loudly
+and is counted into §7's `foreignWriteRefusals`; its already-sealed
+spaces withdraw per this section's failure isolation) while the wave
+commits everything else. The commit-step foreign-engine resolution
+(the serving loop resolves the wave's foreign co-hosted engines ahead
+of the commit step) keeps the sink's delegated validation as
+backstop, and is itself failure-ISOLATED per space: a foreign engine
+that cannot resolve fails exactly the contributions targeting it
+(events requeue and replay; derivations drop to recompute-on-demand;
+counted into §7's `foreignEngineFailures`) while the wave commits the
+rest — never a loop failure, so one misdirected crossing can never
+park the HOME space. The producers the gate admits: `.inSpace`
+provisioning handlers (the event's acting principal + grant), and
+per-demanding-identity wish resolution — a demanded run acting as its
+demander (scopes.md §5) whose home-space bootstrap writes ride the
+same crossing (builtins.md §5 carries the register row; RULED
+2026-08-14).
 
 ## 3e. Pattern updates
 
@@ -1012,7 +1048,8 @@ block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
 structureLoadFailures, structureLoadDeferred, structureLoadTerminal,
 structureLoadRearmed, watermarkClamped,
-unstampedSealRefusals, watermarkLag, events:
+unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
+watermarkLag, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed}, lease:
 {held, lost} }` (`structureLoadFailures`/`structureLoadDeferred`
@@ -1037,7 +1074,12 @@ transactions refused at the seal by §3d's unstamped refusal —
 structurally ZERO when every server-side commit path declares its
 run context, so any non-zero count names an undeclared commit path,
 the class that wedged the resumed list builtins' recovery seeds
-until they stamped `bookkeeping`) (`effectAcks` counts
+until they stamped `bookkeeping`; `foreignWriteRefusals` counts §3d's
+accept-gate refusals — carriage-less AND ungranted foreign writes,
+both action-scoped; `foreignEngineFailures` counts commit-step
+foreign-engine resolutions that failed and were isolated per space —
+a growing count names a foreign store that persistently cannot open,
+never a home-space outage) (`effectAcks` counts
 effect-channel ack writes, so the
 §3 amplification metric is computable from counters alone). Every
 Phase gate in the plan reads these counters; tests MUST assert on

@@ -149,14 +149,22 @@ stream is passed to other spaces, which then append intents to it.
   resolution backstop). Its home-space bootstrap writes ride
   protocol.md §2b's `.inSpace` sanctioned crossing — authored-class,
   foreign-first, under the demanding principal's acting identity +
-  grant (the wave's accept-with-carriage gate, serving-loop.md §3d).
-  A carriage-less foreign write — the lunch-wall class — still
-  refuses at accumulation, action-scoped and counted
-  (`foreignWriteRefusals`). The serving side's sidecar compile-cache
-  context is the SERVED space, never the service identity's own
-  (the same class of ambient-identity leak, closed with the same
-  lift). Client wishes are byte-identical to before (cardinality 1:
-  the runtime's own user).
+  grant, ADMITTED at the wave's accept gate because the target IS the
+  demander's own home space (the gate's owner-by-identity structural
+  grant, serving-loop.md §3d — carriage alone admits nothing). A
+  carriage-less or UNGRANTED foreign write — the lunch-wall class,
+  and an actor reaching beyond its authority — still refuses at
+  accumulation, action-scoped and counted (`foreignWriteRefusals`).
+  The serving side's sidecar compile-cache context is the SERVED
+  space, never the service identity's own (the same class of
+  ambient-identity leak, closed with the same lift), and the sidecar
+  SURFACES key per demanding identity — the result/ready cells AND
+  the builtin's per-node closure caches alike (one wish node serves
+  every demander; a shared cache slot would hand demander #2
+  demander #1's create surface and clobber the pending input).
+  Client wishes are byte-identical to before (cardinality 1: the
+  runtime's own user; the client suggestion-cell cause carries no
+  user key, exactly as before).
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 

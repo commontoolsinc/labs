@@ -652,11 +652,16 @@ Tasks:
       authority; foreign commits wake the home runtime (server-internal
       subscription). LANDED 2026-08-14: foreign SPACE-scope reads flow
       on the serving runtime's ordinary storage plane (per-space
-      loopback sessions), and the host fans a foreign admission to
-      every active SpaceServer whose runtime holds sessions into that
-      space (the §3b server-internal wake — never home input; W stays
-      per home space); activation's basis re-mark judges foreign rows
-      against their own co-hosted engines (serving-loop.md §6 step 2).
+      loopback sessions), and the wake needed NO host machinery — a
+      fan-out built for it was mutation-probed redundant and REMOVED
+      (survival test): the foreign commit's frames arrive on the home
+      runtime's own foreign loopback session, the scheduler re-runs
+      autonomously off storage notifications, and the re-run's seal
+      wakes the loop (the §3b server-internal wake — never home
+      input; W stays per home space); activation's basis re-mark
+      judges foreign rows against their own co-hosted engines
+      (serving-loop.md §6 step 2, pinned at the helper —
+      `selectForeignStaleInstances`).
       Foreign SCOPED reads are FAIL-CLOSED refused at both ends — the
       RULED 2026-08-13 delegated-scoped-read precondition: the
       grant-scoped read design landed in protocol.md §2 (carried actor
@@ -676,17 +681,25 @@ Tasks:
 - [x] `.inSpace()` provisioning server-side: foreign-first split at the
       wave commit step, event-derived deterministic DIDs (CT-1650),
       replay-idempotent (protocol.md §2b). LANDED 2026-08-14: the
-      serving loop runs the wave's accept-with-carriage posture — a
-      foreign write is admitted at accumulation iff the run carries
-      the §2b delegated carriage (acting + capabilityRef; #stampRun
-      supplies the grant for served runs acting as a principal), a
-      carriage-less foreign write keeps the ruled action-scoped
-      refusal — and resolves foreign co-hosted engines ahead of the
-      commit step (stage G's foreign-first sequencing + FP1 rows were
-      already live). The RULED wish line item rides the same crossing:
-      per-demanding-identity wish resolution (builtins.md §5 —
-      `homeSpacePrincipalFor`; the serving wish resolves the
-      demanding user's home space, never the service identity's).
+      serving loop runs the wave's accept posture as an AUTHORIZATION
+      boundary — a foreign write is admitted at accumulation iff the
+      run carries the §2b delegated carriage (acting + capabilityRef)
+      AND the acting identity holds a structural write grant for the
+      TARGET space (the memory server's `foreignWriteAuthorityFor`:
+      owner-by-identity, fresh-store creation with a DID-shape check,
+      or the target's own ACL grant — fail-closed otherwise; the
+      accept posture cannot be configured without the probe). A
+      carriage-less or ungranted foreign write keeps the ruled
+      action-scoped refusal. Foreign co-hosted engines resolve ahead
+      of the commit step with per-space failure ISOLATION (an
+      unresolvable target fails only its own contributions, counted —
+      never a home-space park). The RULED wish line item rides the
+      same crossing: per-demanding-identity wish resolution
+      (builtins.md §5 — `homeSpacePrincipalFor`; the serving wish
+      resolves the demanding user's home space, never the service
+      identity's; sidecar surfaces AND their closure caches key per
+      demanding identity, so two demanders never share a create
+      surface).
 
 Success criteria:
 

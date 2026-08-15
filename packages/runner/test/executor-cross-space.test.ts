@@ -290,6 +290,24 @@ describe("Phase 5 cross-space serving", () => {
       expect(serving.homeSpacePrincipalFor(handler)).toBe(bobSigner.did());
       handler.abort(new Error("test-only"));
 
+      // MIXED carriage (the F6 pin): a handler run on user B's
+      // INSTANCE fired by actor A carries both — the instance owner's
+      // scopeKeyIdentity wins over the acting pair (builtins.md §5:
+      // the run resolves the instance it runs AS, scopes.md §5).
+      const mixed = serving.edit();
+      stampWaveRunContext(mixed, {
+        actionId: "handler/mixed",
+        kind: "event-handler",
+        eventId: "e-2",
+        scopeKeyIdentity: {
+          principal: bobSigner.did(),
+          sessionId: "sess-b",
+        },
+        acting: { user: aliceSigner.did(), session: "sess-a" },
+      });
+      expect(serving.homeSpacePrincipalFor(mixed)).toBe(bobSigner.did());
+      mixed.abort(new Error("test-only"));
+
       // NO demanding identity: undefined, and the cell resolution
       // REFUSES — never the service DID (the lunch-wall trap).
       const unstamped = serving.edit();
