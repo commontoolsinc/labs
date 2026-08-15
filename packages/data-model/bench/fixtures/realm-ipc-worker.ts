@@ -10,8 +10,8 @@
 // of the decoded value would put a second clone of it on the return leg and
 // bury exactly that.
 
-import { fabricFromRealmValue } from "../../src/codecs.ts";
-import type { RealmCodecValue } from "../../src/codec-realm/interface.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
+import { fabricFromRealmValue } from "@/codecs.ts";
 
 /** What a benchmark asks the far side to do with what it sent. */
 export type IpcRequest = {

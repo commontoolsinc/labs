@@ -1,4 +1,3 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import type {
   FabricHash as ApiFabricHash,
   FabricHashConstructor as ApiFabricHashConstructor,
@@ -8,13 +7,14 @@ import {
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import type { RealmCodecValue } from "@/codec-realm/interface.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
   JSON_CODEC,
   type NonterminalCodec,
@@ -22,8 +22,8 @@ import {
   type ReconstructionContext,
   type TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
+import type { FabricValue } from "@/interface.ts";
 
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.

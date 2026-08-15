@@ -26,12 +26,53 @@ about one aspect of the runtime, are indexed in
 
 ### Imports
 
-- Group imports by source: standard library, external, then internal.
+- Group imports by source: standard library, external, then internal, with a
+  blank line between the groups.
 - Prefer named exports over default exports.
 - Use package names for internal imports.
 - Destructure when importing multiple names from the same module.
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
+- Collate a package's imports. Every specifier naming the same top-level
+  package, or the same namespace-and-package pair, sits in one contiguous run:
+  `@commonfabric/utils/base64url` next to `@commonfabric/utils/types`,
+  `@std/testing/bdd` next to `@std/testing/time`. A package that appears in two
+  places in the list reads as two dependencies, and the second appearance hides
+  from anyone scanning for what the file rests on.
+- Alpha-sorting each run is strongly suggested. Sorting is what makes a list
+  scannable rather than merely grouped, and it answers by rule the question of
+  where a new import goes. Sort on the specifier, comparing without regard to
+  case, so that `codec-type-tags.ts` precedes `EmptyReconstructionContext.ts`
+  the way a reader expects. Where sorting and the grouping above disagree, the
+  grouping wins: sort within the standard-library, external, and internal
+  blocks, not across them.
+- Import a given module in exactly one or two statements. Two shapes are
+  allowed:
+  - One unified statement, marking any type-only names inline:
+    `import { type Foo, bar } from "x";`.
+  - One statement of each kind, kept adjacent:
+    `import type { Foo } from "x";` above `import { bar } from "x";`.
+
+  A file uses whichever reads better; neither is preferred. What neither shape
+  allows is a second statement of the same kind — two value imports from one
+  module, or two `import type`s from it. Those represent one dependency as
+  though it were two, and the second is easy to miss when the first is being
+  edited or removed, so merge their specifier lists. A bare `import "x";` counts
+  toward the total, and adds nothing to a file that already imports `x` by name:
+  the named import evaluates the module, side effects included, so the bare form
+  documents an effect it is not needed to produce. Put that in a comment on the
+  surviving statement.
+- Within a package that defines the `@/` import alias, address the aliased tree
+  as `@/...` rather than by a `../` path that climbs out of the current
+  directory to reach it. The alias exists so that a module's address does not
+  depend on where the importing file sits, and a `../` path spends that. The
+  rule is about `../` and nothing else: a `./` path addresses the importing
+  file's own directory or something under it, and so never states how two
+  directories sit relative to each other. `./` and `@/` are both fine, and a
+  file may use each where it reads better. A `../` path whose target lies
+  outside the aliased tree has no `@/` form at all, and stays as it is — a
+  `bench/` or `test/` file reaching a fixture in its own tree, in a package
+  whose alias covers `src/`.
 
 ### Classes
 

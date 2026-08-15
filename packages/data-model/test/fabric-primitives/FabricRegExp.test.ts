@@ -15,26 +15,26 @@
  * as well -- two values differing only in it hash differently.
  */
 
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
-import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { isConvertibleNativeInstance } from "@/native-conversion.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import {
   isFabricCompatible,
   shallowFabricFromNativeValue,
 } from "@/fabric-value.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import { isConvertibleNativeInstance } from "@/native-conversion.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
 } from "@/native-type-tags.ts";
-import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {

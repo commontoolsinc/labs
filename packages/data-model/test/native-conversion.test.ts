@@ -21,22 +21,37 @@
  * own properties across.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
+
+import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
 import {
-  FabricInstance,
-  type FabricOrConvertibleNativeValue,
-  type FabricValue,
-} from "@/interface.ts";
-import { CODEC } from "@/codec-interface/interface.ts";
+  BaseFabricInstance,
+  DEEP_CLONE_CORE,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "@/codec-common/BaseFabricInstance.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { UnknownValue } from "@/codec-common/UnknownValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
+import { CODEC } from "@/codec-interface/interface.ts";
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
+import {
+  FabricInstance,
+  type FabricOrConvertibleNativeValue,
+  type FabricValue,
+} from "@/interface.ts";
 import {
   fabricFromNativeValue,
   isConvertibleNativeInstance,
@@ -46,20 +61,6 @@ import {
   shallowCleanPlainObject,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-import { isInertPlainObject } from "@commonfabric/utils/objects";
-import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
-import { UnknownValue } from "@/codec-common/UnknownValue.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import {
-  BaseFabricInstance,
-  DEEP_CLONE_CORE,
-  DEEP_FREEZE,
-  IS_DEEP_FROZEN,
-  SHALLOW_UNFROZEN_CLONE,
-} from "@/codec-common/BaseFabricInstance.ts";
-import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
-import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via

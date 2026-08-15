@@ -34,8 +34,8 @@
  *   reported as a decode that is really an encode and a decode.
  */
 
-import { fabricFromRealmValue, realmFromFabricValue } from "../src/codecs.ts";
-import type { FabricValue } from "../src/interface.ts";
+import { fabricFromRealmValue, realmFromFabricValue } from "@/codecs.ts";
+import type { FabricValue } from "@/interface.ts";
 import {
   ARRAYS,
   groupKey,

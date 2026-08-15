@@ -30,9 +30,9 @@
  * that is exactly the distinction `decode()`'s contract turns on.
  */
 
-import { realmFromFabricValue } from "../src/codecs.ts";
-import type { FabricValue } from "../src/interface.ts";
-import type { RealmCodecValue } from "../src/codec-realm/interface.ts";
+import type { RealmCodecValue } from "@/codec-realm/interface.ts";
+import { realmFromFabricValue } from "@/codecs.ts";
+import type { FabricValue } from "@/interface.ts";
 import {
   JSON_PASS_THROUGH_OMNIBUSES,
   makeOmnibus,
