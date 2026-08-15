@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
+import { undeclaredVerbFieldError } from "../lib/callable.ts";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
@@ -527,6 +528,61 @@ describe("parseExecArgs edge cases", () => {
       /declared fields are/,
     );
     expect(() => parseExecArgs(spec, ["--query"])).toThrow(/Missing value/);
+  });
+
+  it("accepts an undeclared flag exactly where the payload door accepts the field", () => {
+    // The two doors are one gate asked in two spellings, so what they let
+    // through must not depend on which the caller reached for. Both
+    // permissive cases are schemas the RUNTIME will not judge either: one
+    // naming no fields at all, and one saying extra fields are welcome.
+    const shapes: Record<string, JSONSchema> = {
+      "no properties key": { type: "object" },
+      "empty properties": { type: "object", properties: {} },
+      "additionalProperties": {
+        type: "object",
+        properties: { title: { type: "string" } },
+        additionalProperties: true,
+      },
+      "closed": { type: "object", properties: { title: { type: "string" } } },
+    };
+
+    const verdicts: Record<string, { flag: string; payload: string }> = {};
+    for (const [label, inputSchema] of Object.entries(shapes)) {
+      const spec = makeSpec("handler", inputSchema);
+      let flag: string;
+      try {
+        parseExecArgs(spec, ["invoke", "--titel", "x"]);
+        flag = "accept";
+      } catch {
+        flag = "refuse";
+      }
+      verdicts[label] = {
+        flag,
+        payload: undeclaredVerbFieldError({ titel: "x" }, inputSchema) ===
+            undefined
+          ? "accept"
+          : "refuse",
+      };
+    }
+
+    // Asserted as one object so a disagreement names WHICH shape drifted,
+    // and so a change making both doors uniformly wrong still fails.
+    expect(verdicts).toEqual({
+      "no properties key": { flag: "accept", payload: "accept" },
+      "empty properties": { flag: "refuse", payload: "refuse" },
+      "additionalProperties": { flag: "accept", payload: "accept" },
+      "closed": { flag: "refuse", payload: "refuse" },
+    });
+
+    // An accepted flag lands as the string the caller typed: the schema
+    // declared no type to read it as, and this door does not invent one.
+    expect(
+      parseExecArgs(makeSpec("handler", shapes["no properties key"]), [
+        "invoke",
+        "--titel",
+        "x",
+      ]).input,
+    ).toEqual({ titel: "x" });
   });
 
   it("handles each non-object input mode and its errors", () => {

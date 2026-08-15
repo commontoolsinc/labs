@@ -220,6 +220,12 @@ $ cf exec /tmp/cf/home/pieces/notes/result/addItem.handler invoke --titel Milk
 "--title"? <event> takes "--title", "--done"
 ```
 
+What the two doors LET THROUGH matches as well, which is the half worth relying
+on: a flag naming an undeclared field is accepted exactly where the same field
+would be accepted in a payload, and refused exactly where it would be refused.
+Both doors read that from one place, so neither can drift into its own opinion
+of what a schema permits.
+
 Every position that names its fields is judged, whether it states
 `type: "object"`, carries a `properties` map with no type beside it, states a
 type union admitting an object, or reaches its map through a conjunction, whose
