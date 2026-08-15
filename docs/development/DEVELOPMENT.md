@@ -33,6 +33,19 @@ about one aspect of the runtime, are indexed in
 - Destructure when importing multiple names from the same module.
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
+- Collate a package's imports. Every specifier naming the same top-level
+  package, or the same namespace-and-package pair, sits in one contiguous run:
+  `@commonfabric/utils/base64url` next to `@commonfabric/utils/types`,
+  `@std/testing/bdd` next to `@std/testing/time`. A package that appears in two
+  places in the list reads as two dependencies, and the second appearance hides
+  from anyone scanning for what the file rests on.
+- Alpha-sorting each run is strongly suggested. Sorting is what makes a list
+  scannable rather than merely grouped, and it answers by rule the question of
+  where a new import goes. Sort on the specifier, comparing without regard to
+  case, so that `codec-type-tags.ts` precedes `EmptyReconstructionContext.ts`
+  the way a reader expects. Where sorting and the grouping above disagree, the
+  grouping wins: sort within the standard-library, external, and internal
+  blocks, not across them.
 - Import a given module in exactly one or two statements. Two shapes are
   allowed:
   - One unified statement, marking any type-only names inline:
@@ -59,19 +72,6 @@ about one aspect of the runtime, are indexed in
   where it reads better. A `../` path whose target lies outside the aliased tree
   has no `@/` form at all, and stays as it is — a `bench/` or `test/` file
   reaching a fixture in its own tree, in a package whose alias covers `src/`.
-- Collate a package's imports. Every specifier naming the same top-level
-  package, or the same namespace-and-package pair, sits in one contiguous run:
-  `@commonfabric/utils/base64url` next to `@commonfabric/utils/types`,
-  `@std/testing/bdd` next to `@std/testing/time`. A package that appears in two
-  places in the list reads as two dependencies, and the second appearance hides
-  from anyone scanning for what the file rests on.
-- Alpha-sorting each run is strongly suggested. Sorting is what makes a list
-  scannable rather than merely grouped, and it answers by rule the question of
-  where a new import goes. Sort on the specifier, comparing without regard to
-  case, so that `codec-type-tags.ts` precedes `EmptyReconstructionContext.ts`
-  the way a reader expects. Where sorting and the grouping above disagree, the
-  grouping wins: sort within the standard-library, external, and internal
-  blocks, not across them.
 
 ### Classes
 
