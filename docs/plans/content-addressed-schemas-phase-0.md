@@ -139,9 +139,12 @@ touch shared traversal code imported by the memory server — run both
 
 Phase 0 is done when a reference-bearing link and a reference-bearing
 selector, constructed by tests against hand-persisted schema documents,
-read correctly on both the client and the server traversal paths, and every
-stage's checkbox above is checked. That unblocks Phase 1 (flag-gated
-writers) in the spec.
+read correctly through the shared traversal module (which both the client
+and the memory server execute), and every stage's checkbox above is
+checked. Protocol-level selector references — a client SENDING
+`{ "$ref": "cid:…" }` in a watch spec, and the server resolving it from
+storage at the protocol boundary — are the spec's Phase 2, not part of
+this exit. Phase 0 unblocks Phase 1 (flag-gated writers) in the spec.
 
 ## Open items
 
@@ -149,6 +152,13 @@ writers) in the spec.
   runner, because `resolveCfcSchemaRef` has no storage handle and verified
   content-addressed entries are safe to share realm-wide. Stage 4's sync
   registration writes into the same module-level registry.
+- Registry lifetime and disposal — deferred (review finding, decision
+  pending): the module-level registry retains entries for the realm's
+  lifetime with no disposal hook, while the spec's Resolution section
+  speaks of session lifetime. Either the registry gains an owner with a
+  lifecycle (natural candidate: Stage 4's `StorageManager` registration
+  seam) or the spec's retention story is revised to realm lifetime with an
+  explicit bound. To be settled no later than Stage 4.
 - Whether a fragment ref may point into a singleton document
   (`cid:<hash>#/$defs/<name>` where the document is not a cyclic group) is
   disallowed until something needs it: singleton documents are referenced

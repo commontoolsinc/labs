@@ -369,16 +369,101 @@ describe("schema-decompose", () => {
       ).toThrow(SchemaNotDecomposableError);
     });
 
-    it("passes a pre-existing external ref through untouched", () => {
-      const schema: JSONSchemaObj = {
+    it("throws for a pre-existing external ref with no document resolver", () => {
+      expect(() =>
+        decomposeSchema({
+          type: "object",
+          properties: { x: { $ref: "cid:fid1:abc" } },
+        })
+      ).toThrow(SchemaNotDecomposableError);
+    });
+
+    it("includes the resolved closure behind a pre-existing external ref", () => {
+      const inner = decomposeSchema({
         type: "object",
-        properties: { x: { $ref: "cid:fid1:abc" } },
+        properties: { closureLeaf: { $ref: "#/$defs/ClosureLeaf" } },
+        $defs: { ClosureLeaf: { type: "string" } },
+      });
+      const outer: JSONSchemaObj = {
+        type: "object",
+        properties: { nested: { $ref: inner.rootRef } },
       };
-      const { rootRef, documents } = decomposeSchema(schema);
+      const { rootRef, documents } = decomposeSchema(outer, {
+        resolveDocument: (hash) => inner.documents.get(hash),
+      });
+      // The outer root document keeps the ref untouched, and the referenced
+      // closure travels with the result.
       const rootDoc = documents.get(
         parseExternalSchemaRef(rootRef)!.taggedHash,
       );
-      expect(rootDoc).toEqual(schema);
+      expect(rootDoc).toEqual(outer);
+      for (const hash of inner.documents.keys()) {
+        expect(documents.has(hash)).toBe(true);
+      }
+    });
+
+    it("throws when the resolver supplies a document that does not match its id", () => {
+      const target = internSchemaAsTaggedHashString({
+        type: "object",
+        properties: { mismatchedSupply: { type: "string" } },
+      });
+      expect(() =>
+        decomposeSchema({
+          type: "object",
+          properties: { x: { $ref: `cid:${target}` } },
+        }, { resolveDocument: () => ({ type: "number" }) })
+      ).toThrow(SchemaNotDecomposableError);
+    });
+
+    it("binds a pure-ref definition straight to its target instead of minting an alias document", () => {
+      const aliased: JSONSchemaObj = {
+        type: "object",
+        properties: {
+          direct: { $ref: "#/$defs/AliasTarget" },
+          via: { $ref: "#/$defs/Alias" },
+        },
+        $defs: {
+          Alias: { $ref: "#/$defs/AliasTarget" },
+          AliasTarget: {
+            type: "object",
+            properties: { aliasLeaf: { type: "string" } },
+          },
+        },
+      };
+      const direct: JSONSchemaObj = {
+        type: "object",
+        properties: {
+          direct: { $ref: "#/$defs/AliasTarget" },
+          via: { $ref: "#/$defs/AliasTarget" },
+        },
+        $defs: {
+          AliasTarget: {
+            type: "object",
+            properties: { aliasLeaf: { type: "string" } },
+          },
+        },
+      };
+      expectSameDecomposition(
+        decomposeSchema(direct),
+        decomposeSchema(aliased),
+      );
+    });
+
+    it("throws for `$id` and the anchor keywords", () => {
+      expect(() =>
+        decomposeSchema({
+          type: "object",
+          properties: {
+            x: { $id: "https://example.invalid/x", type: "string" },
+          },
+        } as JSONSchemaObj)
+      ).toThrow(SchemaNotDecomposableError);
+      expect(() =>
+        decomposeSchema({
+          type: "object",
+          properties: { x: { $anchor: "x", type: "string" } },
+        } as JSONSchemaObj)
+      ).toThrow(SchemaNotDecomposableError);
     });
   });
 
@@ -453,7 +538,10 @@ describe("schema-decompose", () => {
           strings: { $ref: strings.rootRef },
         },
       };
-      const decomposed = decomposeSchema(root);
+      const decomposed = decomposeSchema(root, {
+        resolveDocument: (hash) =>
+          numbers.documents.get(hash) ?? strings.documents.get(hash),
+      });
       const documents = new Map([
         ...numbers.documents,
         ...strings.documents,
@@ -527,6 +615,30 @@ describe("schema-decompose", () => {
           B: { type: "object", properties: { d: { $ref: "#/$defs/D" } } },
           C: { type: "array", items: { $ref: "#/$defs/D" } },
           D: { type: "number" },
+        },
+      },
+      "pure-ref alias chain": {
+        type: "object",
+        properties: { via: { $ref: "#/$defs/ChainAlias" } },
+        $defs: {
+          ChainAlias: { $ref: "#/$defs/ChainTarget" },
+          ChainTarget: {
+            type: "object",
+            properties: { chainLeaf: { type: "string" } },
+          },
+        },
+      },
+      "cyclic member named __proto__": {
+        type: "object",
+        properties: { protoHead: { $ref: "#/$defs/__proto__" } },
+        $defs: {
+          ["__proto__"]: {
+            type: "object",
+            properties: {
+              protoLabel: { type: "string" },
+              next: { $ref: "#/$defs/__proto__" },
+            },
+          },
         },
       },
       "cycle referencing an acyclic definition": {

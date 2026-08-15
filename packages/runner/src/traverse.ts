@@ -673,7 +673,10 @@ export function traverseDiagnosticsEnabled(): boolean {
  * and re-walks. Only memoizes memoizable (interned or deep-frozen, hence
  * identity-stable) inputs; the un-memoized fallback is byte-identical to
  * the direct call.
- * `null` records a failed resolution (`undefined` result).
+ * `null` records a failed resolution (`undefined` result) — except when the
+ * input contains an external `cid:` ref, whose failure is deliberately not
+ * memoized: the referenced schema document can arrive after the first
+ * failed lookup, and a pinned `null` would outlive the arrival.
  */
 const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
 

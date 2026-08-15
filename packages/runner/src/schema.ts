@@ -28,6 +28,7 @@ import {
 import { createCell, isCell } from "./cell.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import { isExternalClosureComplete } from "./schema-registry.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import {
   readMaybeLink,
@@ -559,9 +560,13 @@ export function schemaHasIfc(
     context.seenByRoot.set(rootKey, initialSeen);
   }
   const result = _schemaHasIfcUncached(schema, fullSchema, context);
-  // Populate only under a deep-frozen guard. See the invariant comment
-  // above `_hasIfcCache`.
-  if (isTopLevel && isDeepFrozen(schema)) {
+  // Populate only under a deep-frozen guard (see the invariant comment
+  // above `_hasIfcCache`), and only when every external ref's document
+  // closure is at hand — a verdict computed over an absent schema document
+  // must not outlive the document's arrival.
+  if (
+    isTopLevel && isDeepFrozen(schema) && isExternalClosureComplete(schema)
+  ) {
     _hasIfcCache.set(schema, result);
   }
   return result;

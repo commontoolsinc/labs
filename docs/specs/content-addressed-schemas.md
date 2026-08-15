@@ -9,7 +9,9 @@ document's hash is well-founded.
 
 ## Status
 
-Design, not yet implemented. The unmerged branch
+Design; the readers-first resolution infrastructure (Phase 0 of
+[the implementation plan](../plans/content-addressed-schemas-phase-0.md))
+is landing, and nothing writes references yet. The unmerged branch
 `memory/connection-scoped-schema-cas` (`syncSchemaCasV1`) addresses the
 transport half of the same problem — it scopes the sync schema table to the
 connection instead of the frame. This design subsumes that branch's benefit
@@ -118,8 +120,17 @@ whose cross-references form a DAG:
    via the schema generator, which are stable across patterns that share
    types), because the internal `#/$defs/<name>` refs need them.
 5. The **root** — the original schema minus its externalized `$defs` — is
-   itself a schema document, and its id is what the link or selector
-   carries.
+   itself a schema document, and a reference to it is what the link or
+   selector carries. A root or a definition that reduces to a single
+   external reference and nothing else gets no document of its own: the
+   reference binds straight to the target, so a chain of pure-ref aliases
+   decomposes to the same closure as a direct reference, and decomposition
+   stays canonical under recomposition.
+6. External refs the input already carries — the normal case once narrowed
+   schemas round-trip through storage — are resolved against the documents
+   at hand (hash-verified) and included, transitively, in the returned
+   closure, so "every document in the closure" holds for the writer that
+   persists it.
 
 Cyclic groups must stay together because a cycle split across documents
 would make each document's content hash depend on the other's — content
@@ -132,8 +143,11 @@ every document reachable from it.
 
 Decomposition refuses input it cannot represent faithfully — a `$ref`
 outside the `#/$defs/<name>` and external vocabularies, a dangling local
-ref, a nested `$defs` scope, the deprecated `definitions` keyword — and a
-writer falls back to carrying such a schema inline, as today.
+ref, a nested `$defs` scope, the deprecated `definitions` keyword, the
+resource-scope keywords (`$id`, `$anchor`, `$dynamicAnchor`,
+`$dynamicRef`, whose scoping the rewrite cannot preserve), and an external
+ref whose document is not at hand — and a writer falls back to carrying
+such a schema inline, as today.
 
 An external ref is a `$ref` whose value is a `cid:` URI:
 
@@ -253,6 +267,16 @@ re-hashed and must match its id (the `loadSchemaDocument` precedent);
 a mismatched document is rejected and never enters the registry. Because
 external refs are hash-covered content, verifying each document
 individually verifies the whole closure against the root reference.
+
+Resolution demands the whole closure: a registered document whose
+transitive closure is not fully registered resolves as a miss, exactly
+like an unregistered document. Resolving it partially would let derived
+results — an IFC scan, a path narrowing — be memoized over the hole,
+keyed by the root's stable identity, and the missing child's later
+arrival would never invalidate them. Completeness is monotonic, so the
+gate opens by itself once the closure lands; caches that memoize derived
+results by schema identity populate only for schemas whose external
+closure is complete.
 
 ### Traversal and sync
 

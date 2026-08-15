@@ -15,8 +15,9 @@ import {
   containsExternalSchemaRef,
   type DecomposedSchema,
   decomposeSchema,
+  parseExternalSchemaRef,
 } from "../src/schema-decompose.ts";
-import { resolveSchema } from "../src/schema.ts";
+import { resolveSchema, schemaHasIfc } from "../src/schema.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import { resolveSchemaRefsCanonical } from "../src/traverse.ts";
 
@@ -189,6 +190,48 @@ describe("schema-registry", () => {
         })
       }`;
       expect(resolveSchema({ $ref: orphanRef })).toBe(false);
+    });
+
+    it("treats a registered document with an unregistered child as a miss until the closure completes", () => {
+      const schema: JSONSchemaObj = {
+        type: "object",
+        properties: { gated: { $ref: "#/$defs/GatedSecret" } },
+        $defs: {
+          GatedSecret: {
+            type: "string",
+            ifc: { confidentiality: ["secret"] },
+          },
+        },
+      };
+      const decomposed = decomposeSchema(schema);
+      const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+      registerSchemaDocument(rootHash, decomposed.documents.get(rootHash)!);
+
+      const refSchema = internSchema({
+        $ref: decomposed.rootRef,
+      }) as JSONSchemaObj;
+      // The root document alone must not resolve: a derived result (the IFC
+      // scan below) computed over the closure's hole would be memoized by
+      // the root's stable identity and never invalidated.
+      expect(resolveSchema(refSchema)).toBe(false);
+      expect(schemaHasIfc(refSchema)).toBe(false);
+
+      registerAll(decomposed);
+
+      // The same frozen schema now resolves, and the IFC scan sees the
+      // child's label — a memoized pre-arrival verdict would return `false`
+      // here forever.
+      expect(resolveSchema(refSchema)).not.toBe(false);
+      expect(schemaHasIfc(refSchema)).toBe(true);
+    });
+
+    it("returns `false` for a fragment ref into a document whose `$defs` is an array", () => {
+      const document = {
+        $defs: [{ type: "string" }],
+      } as unknown as JSONSchema;
+      const hash = internSchemaAsTaggedHashString(document);
+      registerSchemaDocument(hash, document);
+      expect(resolveSchema({ $ref: `cid:${hash}#/$defs/0` })).toBe(false);
     });
 
     it("resolves after the document arrives, through the same frozen ref schema", () => {

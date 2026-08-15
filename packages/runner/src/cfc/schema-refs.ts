@@ -1,5 +1,5 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
@@ -26,7 +26,10 @@ import {
   isExternalSchemaRef,
   parseExternalSchemaRef,
 } from "../schema-decompose.ts";
-import { lookupSchemaDocument } from "../schema-registry.ts";
+import {
+  isSchemaDocumentClosureComplete,
+  lookupSchemaDocument,
+} from "../schema-registry.ts";
 
 const logger = getLogger("cfc");
 
@@ -451,8 +454,23 @@ const resolveExternalCfcSchemaRef = (
     ]);
     return undefined;
   }
+  // An incomplete closure is a miss, exactly like an unregistered root:
+  // resolving the root while a child is absent would let derived caches
+  // (IFC scans, standardized forms) memoize a result computed over a hole,
+  // keyed by the root's stable identity — and the child's later arrival
+  // would never invalidate them. Completeness is monotonic, so this gate
+  // opens by itself once the closure lands.
+  if (!isSchemaDocumentClosureComplete(parsed.taggedHash)) {
+    logger.debug("cfc", () => [
+      "Schema document closure not (yet) complete: ",
+      parsed.taggedHash,
+    ]);
+    return undefined;
+  }
   if (parsed.defName === undefined) return document;
-  if (!isObjectOrArray(document) || !isObjectOrArray(document.$defs)) {
+  // A definition map is a non-array record; an array here would resolve
+  // indices as member names.
+  if (!isObjectNotArray(document) || !isObjectNotArray(document.$defs)) {
     logger.warn("cfc", () => [
       "Fragment ref into a schema document without `$defs`: ",
       parsed.taggedHash,

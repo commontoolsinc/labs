@@ -26,6 +26,7 @@ import {
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import { isExternalClosureComplete } from "./schema-registry.ts";
 export {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,
@@ -515,10 +516,14 @@ export class ContextualFlowControl {
     const defs = isObjectOrArray(schema) && schema.$defs
       ? schema.$defs
       : undefined;
+    // The external-closure check keeps a derivation computed while a
+    // referenced schema document was absent out of the cache: the document
+    // can arrive later, and a memoized derivation would not see it.
     const cacheable = extraConfidentiality === undefined &&
       typeof defaultEmptyProperties === "boolean" &&
       typeof defaultMissingProperty === "boolean" &&
-      isObjectOrArray(schema) && isDeepFrozen(schema);
+      isObjectOrArray(schema) && isDeepFrozen(schema) &&
+      isExternalClosureComplete(schema);
     if (!cacheable) {
       return ContextualFlowControl.schemaAtPathInternal(
         schema,

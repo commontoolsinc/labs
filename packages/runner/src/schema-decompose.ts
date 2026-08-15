@@ -45,6 +45,15 @@ import { decodeJsonPointer, encodeJsonPointer } from "./link-types.ts";
 // itself.
 const ALL_SUBSCHEMAS: SchemaWalkOptions = { includeUnused: true };
 
+// Keywords that start or address a JSON Schema resource scope. Decomposition
+// refuses them (see scanFragment).
+const RESOURCE_SCOPE_KEYWORDS = [
+  "$id",
+  "$anchor",
+  "$dynamicAnchor",
+  "$dynamicRef",
+] as const;
+
 /** The URI scheme prefix of a content-addressed schema document reference. */
 export const SCHEMA_DOCUMENT_REF_PREFIX = "cid:";
 
@@ -218,6 +227,17 @@ function scanFragment(
       "the deprecated `definitions` keyword is present",
     );
   }
+  // A `$id` starts a new JSON Schema resource scope, and the anchor and
+  // dynamic-ref keywords address into one; rewriting `#/$defs/<name>` refs
+  // across such a boundary would silently change their meaning. The schema
+  // generator emits none of them.
+  for (const keyword of RESOURCE_SCOPE_KEYWORDS) {
+    if ((fragment as Record<string, unknown>)[keyword] !== undefined) {
+      throw new SchemaNotDecomposableError(
+        `the \`${keyword}\` keyword is present`,
+      );
+    }
+  }
   if (typeof fragment.$ref === "string") {
     const name = localDefName(fragment.$ref);
     if (name !== undefined) {
@@ -312,9 +332,23 @@ function definitionComponents(
   return components;
 }
 
+/** Options for {@link decomposeSchema}. */
+export type DecomposeSchemaOptions = {
+  /**
+   * Supplies the document behind an external ref the input already carries,
+   * so the returned closure can include it (the schema-document registry's
+   * lookup is the expected implementation). Without it, an input carrying
+   * an external ref is refused: returning a closure with a hole would let a
+   * writer persist a durably dangling reference.
+   */
+  readonly resolveDocument?: (taggedHash: string) => JSONSchema | undefined;
+};
+
 // Memo for decompositions of interned inputs. `decomposeSchema` interns its
 // input, so in steady state every call after the first for a given schema is
-// one `WeakMap` probe.
+// one `WeakMap` probe. A memoized success is resolver-independent: supplied
+// documents are hash-verified, so any resolver that succeeds supplies the
+// same closure. A refusal (throw) is never memoized.
 const decompositionCache = new WeakMap<JSONSchemaObj, DecomposedSchema>();
 
 /**
@@ -327,14 +361,23 @@ const decompositionCache = new WeakMap<JSONSchemaObj, DecomposedSchema>();
  *
  * Definitions unreachable from the root body are dropped: they are inert for
  * matching, and carrying them would make two schemas that match identically
- * decompose differently. A root body that reduces to a single external
- * reference and nothing else does not get a document of its own; `rootRef`
- * points directly at the target.
+ * decompose differently. A root body — or a definition — that reduces to a
+ * single external reference and nothing else does not get a document of its
+ * own; the reference points directly at the target, so a chain of pure-ref
+ * aliases decomposes to the same closure as a direct reference.
+ *
+ * External refs the input already carries are resolved through
+ * `options.resolveDocument` and their documents (transitively) included in
+ * the returned closure, keeping the "every document in the closure"
+ * contract; an external ref that cannot be resolved is refused.
  *
  * Throws {@link SchemaNotDecomposableError} for input it cannot represent;
  * the caller keeps such a schema inline.
  */
-export function decomposeSchema(schema: JSONSchemaObj): DecomposedSchema {
+export function decomposeSchema(
+  schema: JSONSchemaObj,
+  options: DecomposeSchemaOptions = {},
+): DecomposedSchema {
   const interned = internSchema(schema);
   const cached = decompositionCache.get(interned);
   if (cached !== undefined) return cached;
@@ -393,6 +436,31 @@ export function decomposeSchema(schema: JSONSchemaObj): DecomposedSchema {
     return sah.taggedHashString;
   };
 
+  // Pre-existing external refs: resolve their documents (hash-verified) and
+  // include the transitive closure, dependencies before dependents.
+  const includeExternalClosure = (fromFragment: JSONSchema): void => {
+    for (const hash of collectExternalSchemaRefHashes(fromFragment)) {
+      if (documents.has(hash)) continue;
+      const supplied = options.resolveDocument?.(hash);
+      if (supplied === undefined) {
+        throw new SchemaNotDecomposableError(
+          `references a schema document that is not at hand: \`${hash}\``,
+        );
+      }
+      const sah = internSchema(supplied, true);
+      if (sah.taggedHashString !== hash) {
+        throw new SchemaNotDecomposableError(
+          `resolved schema document does not match its id: \`${hash}\``,
+        );
+      }
+      const document = sah.schemaOrUndefined as JSONSchema;
+      includeExternalClosure(document);
+      documents.set(hash, document);
+    }
+  };
+  includeExternalClosure(rootBody);
+  for (const name of reachable) includeExternalClosure(defs[name]!);
+
   for (const component of components) {
     const cyclic = component.length > 1 ||
       refsByName.get(component[0]!)!.has(component[0]!);
@@ -410,8 +478,25 @@ export function decomposeSchema(schema: JSONSchemaObj): DecomposedSchema {
       }
     } else {
       const name = component[0]!;
-      const hash = addDocument(rewriteRefs(defs[name]!, refFor, NO_LOCALS));
-      externalRefByName.set(name, formatExternalSchemaRef(hash));
+      const rewritten = rewriteRefs(defs[name]!, refFor, NO_LOCALS);
+      // A definition that is nothing but a reference is an alias: minting a
+      // wrapper document for it would not survive a recompose/decompose
+      // round trip (the alias inlines away), so the name binds straight to
+      // the target and the closure stays canonical across alias chains.
+      const aliasKeys = isObjectOrArray(rewritten)
+        ? Object.keys(rewritten)
+        : [];
+      if (
+        aliasKeys.length === 1 && aliasKeys[0] === "$ref" &&
+        isExternalSchemaRef((rewritten as JSONSchemaObj).$ref!)
+      ) {
+        externalRefByName.set(name, (rewritten as JSONSchemaObj).$ref!);
+      } else {
+        externalRefByName.set(
+          name,
+          formatExternalSchemaRef(addDocument(rewritten)),
+        );
+      }
     }
   }
 
@@ -463,7 +548,10 @@ export function recomposeSchema(
 
   const usedNames = new Set<string>();
   const nameByRef = new Map<string, string>();
-  const combined: Record<string, JSONSchema> = {};
+  // Accumulated as a Map and converted with Object.fromEntries at the end:
+  // a plain-object assignment under a member named `__proto__` would hit
+  // the prototype setter instead of creating a definition.
+  const combined = new Map<string, JSONSchema>();
   const pending: string[] = [];
 
   const assignName = (ref: string, preferred: string): string => {
@@ -577,21 +665,27 @@ export function recomposeSchema(
     const document = getDocument(parsed.taggedHash);
     if (parsed.defName !== undefined) {
       const members = membersOf(parsed.taggedHash, document);
-      const body = (document as JSONSchemaObj).$defs?.[parsed.defName];
+      // Object.hasOwn before the read: a member named `__proto__` must be
+      // read as an own property, never through the prototype accessor.
+      const groupDefs = (document as JSONSchemaObj).$defs;
+      const body = groupDefs !== undefined &&
+          Object.hasOwn(groupDefs, parsed.defName)
+        ? groupDefs[parsed.defName]
+        : undefined;
       if (body === undefined) {
         throw new Error(
           `Schema document has no member \`${parsed.defName}\``,
         );
       }
-      combined[members.get(parsed.defName)!] = localize(body, members);
+      combined.set(members.get(parsed.defName)!, localize(body, members));
     } else {
-      combined[nameByRef.get(ref)!] = localize(document, new Map());
+      combined.set(nameByRef.get(ref)!, localize(document, new Map()));
     }
   }
 
-  if (Object.keys(combined).length === 0) return internSchema(rootBody);
+  if (combined.size === 0) return internSchema(rootBody);
   if (!isObjectOrArray(rootBody)) {
     throw new Error("A boolean root cannot carry a `$defs` scope");
   }
-  return internSchema({ ...rootBody, $defs: combined });
+  return internSchema({ ...rootBody, $defs: Object.fromEntries(combined) });
 }
