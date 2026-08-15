@@ -521,6 +521,38 @@ describe("RealmCodecEngine", () => {
       expect(Object.isFrozen(inner)).toBe(true);
       expect(Object.isFrozen(innerArray)).toBe(true);
     });
+
+    it("decodes a tree carrying bytes exactly once", () => {
+      // Taking the buffer over detaches it, which is what ceding buys and what
+      // it costs. A control sits beside it: a tree with no byte-carrying value
+      // decodes as often as it likes, so what the first case pins is the
+      // buffer and not decoding in general.
+      const withBytes = realmFromFabricValue(
+        { blob: new FabricBytes(new Uint8Array([1, 2, 250])) },
+      );
+
+      expect(fabricFromRealmValue(withBytes)).toBeDefined();
+      expect(() => fabricFromRealmValue(withBytes)).toThrow(/detached/);
+
+      const withoutBytes = realmFromFabricValue({
+        when: new FabricEpochNsec(7n),
+      });
+
+      expect(fabricFromRealmValue(withoutBytes)).toBeDefined();
+      expect(fabricFromRealmValue(withoutBytes)).toBeDefined();
+    });
+
+    it("decodes a tree carrying a `FabricHash` exactly once", () => {
+      // The same property, and the reason to state it of both: a `FabricHash`
+      // reaches the take-over through a record rather than as a bare buffer,
+      // so a change that spared one could miss the other.
+      const encoded = realmFromFabricValue(
+        { digest: new FabricHash(new Uint8Array(32).fill(7), "sha256") },
+      );
+
+      expect(fabricFromRealmValue(encoded)).toBeDefined();
+      expect(() => fabricFromRealmValue(encoded)).toThrow(/detached/);
+    });
   });
 
   describe("across a real realm boundary", () => {

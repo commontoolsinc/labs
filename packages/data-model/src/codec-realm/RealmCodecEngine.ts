@@ -55,6 +55,22 @@ import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
  * needs encoding rather than to the size of the value. `JsonCodecEngine` never
  * faces the choice, having to reach text.
  *
+ * **`decode()` cedes its input.** The engine retains what it likes of the tree
+ * and freezes whatever it retains, and two retentions are deliberate: a
+ * subtree needing no decoding comes back by identity, and a byte-carrying
+ * value takes over the `ArrayBuffer` it arrived in rather than copying it. An
+ * `ArrayBuffer` cannot be frozen, which is what makes ceding it a requirement
+ * rather than a courtesy.
+ *
+ * Taking a buffer over detaches it, so **a tree carrying bytes decodes exactly
+ * once**: a second `decode()` of the same tree throws where the first
+ * succeeded. `FabricBytes` and `FabricHash` are the classes that reach that
+ * path, directly or nested anywhere beneath. On the boundary this format
+ * exists for the restriction costs nothing -- the tree is the receiver's own
+ * clone of a value it will not be handed again, which is the whole reason the
+ * copy can be elided -- but a caller wanting two readings of one payload keeps
+ * the value it decoded, not the tree it decoded from.
+ *
  * **Cycles are refused by both walks**, and **a shared reference survives
  * exactly where nothing beneath it needed encoding**, per Section 1.6 of the
  * formal spec, which requires an engine to say which of these it does. Neither
@@ -114,7 +130,9 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * than rebuilt, and a `FabricBytes` takes over the buffer it arrived in.
    * Everything retained that can be frozen is frozen before it is returned;
    * the byte buffer cannot be, which is what makes ceding it a requirement
-   * rather than a courtesy.
+   * rather than a courtesy. Taking a buffer over detaches it, so a tree
+   * carrying bytes decodes exactly once and a second call on the same tree
+   * throws.
    *
    * Across the boundary that costs a caller nothing, the tree being the
    * receiver's own clone of a sender's value. Same-realm it is visible:
