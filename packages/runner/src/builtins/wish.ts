@@ -1840,44 +1840,66 @@ export function wish(
     cancelRegistered: false,
   };
 
-  // Per-instance suggestion pattern result cell
-  let suggestionPatternInput:
-    | {
+  // Per-instance sidecar state, keyed by the HOME-SPACE user (the F2
+  // fix, builtins.md §5's per-demanding-identity wish resolution): the
+  // scheduler drives ONE singular wish node once per demanded instance
+  // (same Action closure, per-instance stamped txs), so on a serving
+  // runtime two demanders reach these caches through one closure. A
+  // single cached cell/input made demander #2 reuse demander #1's
+  // sidecar result cell and clobber the shared pending input —
+  // cross-user mixing in both directions. Each demanding identity gets
+  // its own slot; the slot key is the SAME expression the sidecar cell
+  // causes key on (`homeSpaceUserDID(ctx) ?? runtime.userIdentityDID`),
+  // so cells and closure state can never disagree. Clients stay
+  // cardinality 1 (one slot: the runtime's own user).
+  interface SuggestionSidecarSlot {
+    input?: {
       situation: string;
       context: Record<string, any>;
       initialResults?: unknown;
-    }
-    | undefined;
-  let suggestionPatternResultCell: Cell<WishState<any>> | undefined;
-  let profileCreatePatternInput:
-    | {
+    };
+    resultCell?: Cell<WishState<any>>;
+  }
+  interface ProfileCreateSidecarSlot {
+    input?: {
       profiles: unknown;
       inputId: string;
       buttonId: string;
-    }
-    | undefined;
-  let profileCreatePatternResultCell: Cell<any> | undefined;
-  let profileCreatePatternReadyCell: Cell<boolean> | undefined;
-  let profilePickerPatternInput:
-    | {
+    };
+    resultCell?: Cell<any>;
+    readyCell?: Cell<boolean>;
+  }
+  interface ProfilePickerSidecarSlot {
+    input?: {
       profiles: unknown;
       defaultProfile: unknown;
       mru: unknown;
+    };
+    resultCell?: Cell<any>;
+  }
+  const suggestionSidecars = new Map<string, SuggestionSidecarSlot>();
+  const profileCreateSidecars = new Map<string, ProfileCreateSidecarSlot>();
+  const profilePickerSidecars = new Map<string, ProfilePickerSidecarSlot>();
+  const slotFor = <T>(map: Map<string, T>, user: string, empty: () => T): T => {
+    let slot = map.get(user);
+    if (slot === undefined) {
+      slot = empty();
+      map.set(user, slot);
     }
-    | undefined;
-  let profilePickerPatternResultCell: Cell<any> | undefined;
+    return slot;
+  };
 
   addCancel(() => {
     cancelled = true;
     releaseCurrentSharedHashtagResolver();
-    if (suggestionPatternResultCell) {
-      runtime.runner.stop(suggestionPatternResultCell);
+    for (const slot of suggestionSidecars.values()) {
+      if (slot.resultCell) runtime.runner.stop(slot.resultCell);
     }
-    if (profileCreatePatternResultCell) {
-      runtime.runner.stop(profileCreatePatternResultCell);
+    for (const slot of profileCreateSidecars.values()) {
+      if (slot.resultCell) runtime.runner.stop(slot.resultCell);
     }
-    if (profilePickerPatternResultCell) {
-      runtime.runner.stop(profilePickerPatternResultCell);
+    for (const slot of profilePickerSidecars.values()) {
+      if (slot.resultCell) runtime.runner.stop(slot.resultCell);
     }
   });
 
@@ -1936,6 +1958,7 @@ export function wish(
   }
 
   function launchSuggestionPattern(
+    ctx: WishContext,
     input: {
       situation: string;
       context: Record<string, any>;
@@ -1943,13 +1966,32 @@ export function wish(
     },
     providedTx?: IExtendedStorageTransaction,
   ) {
-    suggestionPatternInput = input;
+    // Per-demanding-identity slot (the F2 fix; see the slot map above).
+    const sidecarUser = homeSpaceUserDID(ctx) ?? runtime.userIdentityDID;
+    const slot = slotFor(
+      suggestionSidecars,
+      sidecarUser,
+      (): SuggestionSidecarSlot => ({}),
+    );
+    slot.input = input;
     const tx = providedTx || runtime.edit();
 
-    if (!suggestionPatternResultCell) {
-      suggestionPatternResultCell = runtime.getCell(
+    if (!slot.resultCell) {
+      slot.resultCell = runtime.getCell(
         parentCell.space,
-        { wish: { suggestionPattern: cause, situation: input.situation } },
+        {
+          wish: {
+            suggestionPattern: cause,
+            situation: input.situation,
+            // The F2 fix's suggestion half (pre-existing gap: this cause
+            // carried NO user key): on a SERVING runtime the cell keys
+            // by the demanding identity, so two demanders never share a
+            // suggestion cell. Clients keep the pre-existing cause
+            // byte-identical (cardinality 1 — re-keying would orphan
+            // every persisted client suggestion cell for no gain).
+            ...(runtime.servingPosture ? { user: sidecarUser } : {}),
+          },
+        },
         undefined,
         tx,
       );
@@ -1964,23 +2006,23 @@ export function wish(
         runtime.servingPosture ? parentCell.space : undefined,
       ).then(
         (pattern) => {
-          if (!cancelled && pattern && suggestionPatternResultCell) {
+          if (!cancelled && pattern && slot.resultCell) {
             runtime.run(
               undefined,
               pattern,
-              suggestionPatternInput,
-              suggestionPatternResultCell!,
+              slot.input,
+              slot.resultCell,
             );
           }
         },
       );
     } else {
-      if (!cancelled && suggestionPatternResultCell) {
+      if (!cancelled && slot.resultCell) {
         runtime.run(
           tx,
           cachedSuggestionPattern,
-          suggestionPatternInput,
-          suggestionPatternResultCell,
+          slot.input,
+          slot.resultCell,
         );
       }
     }
@@ -1990,7 +2032,7 @@ export function wish(
       tx.commit();
     }
 
-    return suggestionPatternResultCell;
+    return slot.resultCell;
   }
 
   // Renders an error message into a pattern result cell in its own committed
@@ -2047,9 +2089,22 @@ export function wish(
     ctx: WishContext,
     providedTx?: IExtendedStorageTransaction,
   ): Cell<any> {
+    // Phase 5: the sidecar cells key by the HOME-SPACE user — the
+    // demanding identity on a serving runtime (two users' create
+    // surfaces must not collide on the service DID), the runtime's own
+    // user on a client (unchanged). The CLOSURE state keys by the SAME
+    // expression (the F2 fix): the singular wish node runs once per
+    // demanded instance, and a shared cached cell/input made demander
+    // #2 reuse demander #1's surface and clobber the pending input.
+    const sidecarUser = homeSpaceUserDID(ctx) ?? runtime.userIdentityDID;
+    const slot = slotFor(
+      profileCreateSidecars,
+      sidecarUser,
+      (): ProfileCreateSidecarSlot => ({}),
+    );
     const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
       .resolveAsCell();
-    profileCreatePatternInput = {
+    slot.input = {
       profiles: createSigilLinkFromParsedLink(
         homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
       ),
@@ -2058,13 +2113,8 @@ export function wish(
     };
     const tx = providedTx || runtime.edit();
 
-    // Phase 5: the sidecar cells key by the HOME-SPACE user — the
-    // demanding identity on a serving runtime (two users' create
-    // surfaces must not collide on the service DID), the runtime's own
-    // user on a client (unchanged).
-    const sidecarUser = homeSpaceUserDID(ctx) ?? runtime.userIdentityDID;
-    if (!profileCreatePatternResultCell) {
-      profileCreatePatternResultCell = runtime.getCell(
+    if (!slot.resultCell) {
+      slot.resultCell = runtime.getCell(
         parentCell.space,
         {
           wish: {
@@ -2076,8 +2126,8 @@ export function wish(
         tx,
       );
     }
-    if (!profileCreatePatternReadyCell) {
-      profileCreatePatternReadyCell = runtime.getCell<boolean>(
+    if (!slot.readyCell) {
+      slot.readyCell = runtime.getCell<boolean>(
         parentCell.space,
         {
           wish: {
@@ -2089,52 +2139,62 @@ export function wish(
         tx,
       );
     }
-    profileCreatePatternReadyCell.get();
+    slot.readyCell.get();
 
     const profileCreateInputForTx = (tx: IExtendedStorageTransaction) => {
       const bindInputCell = (cell: unknown) =>
         cell && typeof (cell as { withTx?: unknown }).withTx === "function"
           ? (cell as Cell<unknown>).withTx(tx)
           : cell;
-      return profileCreatePatternInput && {
-        ...profileCreatePatternInput,
-        profiles: bindInputCell(profileCreatePatternInput.profiles),
+      return slot.input && {
+        ...slot.input,
+        profiles: bindInputCell(slot.input.profiles),
       };
     };
 
     const cachedProfileCreatePattern = profileCreatePatternCache.cached();
     if (!cachedProfileCreatePattern) {
       void profileCreatePatternCache.fetch(runtime, () => {
-        if (profileCreatePatternReadyCell) {
+        // The pattern arrived: re-arm EVERY demander's create surface —
+        // the fetch is node-shared (memoized), so the ready signal must
+        // reach every slot registered while it was in flight, not only
+        // the demander whose launch started it (the F2 fix).
+        const readySlots = [...profileCreateSidecars.values()].filter(
+          (readySlot) => readySlot.readyCell !== undefined,
+        );
+        if (readySlots.length > 0) {
           const readyTx = runtime.edit();
           // Cache-fetch onLoaded continuation — no scheduler run stamps
           // it; bookkeeping per serving-loop.md §3d.
           runtime.stampServerRun(readyTx, {
-            actionId:
-              `wish/profile-create-ready/${profileCreatePatternReadyCell.sourceURI}`,
+            actionId: `wish/profile-create-ready/${
+              readySlots[0].readyCell!.sourceURI
+            }`,
             kind: "bookkeeping",
           });
-          profileCreatePatternReadyCell.withTx(readyTx).set(true);
+          for (const readySlot of readySlots) {
+            readySlot.readyCell!.withTx(readyTx).set(true);
+          }
           runtime.prepareTxForCommit(readyTx);
           readyTx.commit();
         }
       }, runtime.servingPosture ? parentCell.space : undefined).then(
         (pattern) => {
-          if (!cancelled && pattern && profileCreatePatternResultCell) {
+          if (!cancelled && pattern && slot.resultCell) {
             runSidecarInOwnTx(
-              profileCreatePatternResultCell,
+              slot.resultCell,
               pattern,
               profileCreateInputForTx,
             );
           }
         },
       );
-    } else if (!cancelled && profileCreatePatternResultCell) {
+    } else if (!cancelled && slot.resultCell) {
       runtime.run(
         tx,
         cachedProfileCreatePattern,
         profileCreateInputForTx(tx),
-        profileCreatePatternResultCell.withTx(tx),
+        slot.resultCell.withTx(tx),
       );
     }
 
@@ -2143,7 +2203,7 @@ export function wish(
       tx.commit();
     }
 
-    return profileCreatePatternResultCell;
+    return slot.resultCell;
   }
 
   function profileCreateUI(ctx: WishContext): VNode {
@@ -2174,9 +2234,18 @@ export function wish(
     ctx: WishContext,
     providedTx?: IExtendedStorageTransaction,
   ): Cell<any> {
+    // Per-demanding-identity slot (the F2 fix) — the slot key is the
+    // same expression the cell cause keys on; see
+    // launchProfileCreatePattern.
+    const sidecarUser = homeSpaceUserDID(ctx) ?? runtime.userIdentityDID;
+    const slot = slotFor(
+      profilePickerSidecars,
+      sidecarUser,
+      (): ProfilePickerSidecarSlot => ({}),
+    );
     const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
       .resolveAsCell();
-    profilePickerPatternInput = {
+    slot.input = {
       profiles: createSigilLinkFromParsedLink(
         homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
       ),
@@ -2189,15 +2258,15 @@ export function wish(
     };
     const tx = providedTx || runtime.edit();
 
-    if (!profilePickerPatternResultCell) {
-      profilePickerPatternResultCell = runtime.getCell(
+    if (!slot.resultCell) {
+      slot.resultCell = runtime.getCell(
         parentCell.space,
         {
           wish: {
             profilePickerPattern: cause,
             // Phase 5: keyed by the home-space user (the demanding
             // identity on serving) — see launchProfileCreatePattern.
-            user: homeSpaceUserDID(ctx) ?? runtime.userIdentityDID,
+            user: sidecarUser,
           },
         },
         undefined,
@@ -2210,10 +2279,10 @@ export function wish(
         cell && typeof (cell as { withTx?: unknown }).withTx === "function"
           ? (cell as Cell<unknown>).withTx(tx)
           : cell;
-      return profilePickerPatternInput && {
-        profiles: bindInputCell(profilePickerPatternInput.profiles),
-        defaultProfile: bindInputCell(profilePickerPatternInput.defaultProfile),
-        mru: bindInputCell(profilePickerPatternInput.mru),
+      return slot.input && {
+        profiles: bindInputCell(slot.input.profiles),
+        defaultProfile: bindInputCell(slot.input.defaultProfile),
+        mru: bindInputCell(slot.input.mru),
       };
     };
 
@@ -2225,10 +2294,10 @@ export function wish(
         runtime.servingPosture ? parentCell.space : undefined,
       ).then(
         (pattern) => {
-          if (cancelled || !profilePickerPatternResultCell) return;
+          if (cancelled || !slot.resultCell) return;
           if (pattern) {
             runSidecarInOwnTx(
-              profilePickerPatternResultCell,
+              slot.resultCell,
               pattern,
               pickerInputForTx,
             );
@@ -2240,7 +2309,7 @@ export function wish(
             // (ordered[0]), not this sidecar (a superseded fetch also resolves
             // to undefined — a benign extra error UI on a since-replaced cell).
             commitPatternErrorUI(
-              profilePickerPatternResultCell,
+              slot.resultCell,
               `Can't load profile-picker.tsx`,
             );
           }
@@ -2248,19 +2317,19 @@ export function wish(
       ).catch((error) => {
         // Defensive: a throw inside the `.then` body (or a truly-rejecting
         // fetch) would otherwise be an unhandled rejection. Surface it too.
-        if (!cancelled && profilePickerPatternResultCell) {
+        if (!cancelled && slot.resultCell) {
           commitPatternErrorUI(
-            profilePickerPatternResultCell,
+            slot.resultCell,
             errorMessage(error),
           );
         }
       });
-    } else if (!cancelled && profilePickerPatternResultCell) {
+    } else if (!cancelled && slot.resultCell) {
       runtime.run(
         tx,
         cachedProfilePickerPattern,
         pickerInputForTx(tx),
-        profilePickerPatternResultCell.withTx(tx),
+        slot.resultCell.withTx(tx),
       );
     }
 
@@ -2269,7 +2338,7 @@ export function wish(
       tx.commit();
     }
 
-    return profilePickerPatternResultCell;
+    return slot.resultCell;
   }
 
   // Wish action, reactive to changes in inputsCell and any cell we read during
@@ -2548,6 +2617,7 @@ export function wish(
                     sendResult(
                       tx,
                       launchSuggestionPattern(
+                        ctx,
                         {
                           situation: query,
                           context: context ?? {},
@@ -2587,6 +2657,7 @@ export function wish(
                   queryKey,
                   () =>
                     launchSuggestionPattern(
+                      ctx,
                       {
                         situation: query,
                         context: context ?? {},
@@ -2642,6 +2713,14 @@ export function wish(
           );
         } else {
           // Otherwise it's a generic query, instantiate suggestion.tsx
+          const suggestionCtx: WishContext = {
+            runtime,
+            tx,
+            parentCell,
+            scope,
+            nowCell,
+            nowCause: cause,
+          };
           measureWishPhase(
             "send-suggestion",
             queryKey,
@@ -2649,6 +2728,7 @@ export function wish(
               sendResult(
                 tx,
                 launchSuggestionPattern(
+                  suggestionCtx,
                   { situation: query, context: context ?? {} },
                   tx,
                 ),

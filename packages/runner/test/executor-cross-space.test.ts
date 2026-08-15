@@ -21,10 +21,20 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
+import { Runtime, spaceCellSchema } from "../src/runtime.ts";
+import type { Cell } from "../src/cell.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
+import { wish as wishBuiltin } from "../src/builtins/wish.ts";
+import { UI } from "../src/builder/types.ts";
+import {
+  getPatternEnvironment,
+  setPatternEnvironment,
+} from "../src/builder/env.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
@@ -300,6 +310,208 @@ describe("Phase 5 cross-space serving", () => {
         await client.dispose();
       }
     } finally {
+      await serving.dispose();
+      await manager.close();
+    }
+  });
+
+  it("two demanders on one wish node get their OWN sidecar surfaces — no cross-user mixing (builtins.md §5; the F2 fix)", async () => {
+    // The mixed-demand schedule the phase exists to serve: the scheduler
+    // runs demanded instances over ONE singular wish node (same Action
+    // closure, per-instance stamped txs — scheduler/run.ts), so the
+    // builtin's per-node sidecar caches MUST key per demanding identity.
+    // Pre-fix, demander #2 reused demander #1's create-surface result
+    // cell and clobbered the shared pending input — cross-user mixing in
+    // both directions.
+    const manager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+      servingHomeSpace: homeSpace,
+    });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: manager,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+
+    // Seed BOTH users' home spaces: a defaultPattern link with no
+    // profiles, so a #profile wish falls to the create surface.
+    const seedHome = async (signer: Identity) => {
+      const did = signer.did() as MemorySpace;
+      const m = SharedServerStorageManager.connectTo(server, { as: signer });
+      const r = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: m,
+      });
+      const tx = r.edit();
+      const homeCell = r.getCell(did, did, spaceCellSchema, tx);
+      const defaultCell = r.getCell(
+        did,
+        "x-space-home-default",
+        undefined,
+        tx,
+      );
+      (homeCell as Cell<Record<string, unknown>>).key("defaultPattern").set(
+        defaultCell as never,
+      );
+      const committed = await tx.commit();
+      expect(committed.error).toBeUndefined();
+      await r.storageManager.synced();
+      await r.dispose();
+      await m.close();
+      return did;
+    };
+    const aliceDid = await seedHome(aliceSigner);
+    const bobDid = await seedHome(bobSigner);
+
+    // Serve the profile-create sidecar SOURCE through a gated fetch stub:
+    // the test controls when the (memoized, node-shared) pattern fetch
+    // resolves, so both demanders run while the fetch is pending — the
+    // exact schedule that clobbered the shared input holder.
+    const sidecarSource = [
+      "import { pattern } from 'commonfabric';",
+      "export default pattern<{ profiles: unknown }, { echo: unknown }>(",
+      "  ({ profiles }) => ({ echo: profiles }),",
+      ");",
+    ].join("\n");
+    const gate = Promise.withResolvers<void>();
+    const originalFetch = globalThis.fetch;
+    const originalEnvironment = getPatternEnvironment();
+    setPatternEnvironment({
+      apiUrl: new URL("https://x-space-sidecar.test/"),
+    });
+    globalThis.fetch = (async (input: Request | URL | string) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/api/patterns/system/profile-create.tsx")) {
+        await gate.promise;
+        return new Response(sidecarSource, { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const cancels: (() => void)[] = [];
+    try {
+      // Preload the foreign home docs into the serving runtime (wish
+      // reads are synchronous; the scheduler's re-trigger is not driven
+      // in this direct-drive test).
+      for (const did of [aliceDid, bobDid]) {
+        const home = serving.getCell(did, did, spaceCellSchema);
+        await home.sync();
+        await (home as Cell<Record<string, unknown>>).key("defaultPattern")
+          .resolveAsCell().sync();
+      }
+
+      // The wish node: ONE inputs cell, ONE parent, ONE cause — the
+      // singular node — driven directly with per-demander stamped txs.
+      const seedTx = serving.edit();
+      const inputsCell = serving.getCell<{ query: string }>(
+        homeSpace,
+        "x-space-wish-inputs",
+        undefined,
+        seedTx,
+      );
+      inputsCell.set({ query: "#profile" });
+      const parentCell = serving.getCell<Record<string, unknown>>(
+        homeSpace,
+        "x-space-wish-parent",
+        undefined,
+        seedTx,
+      );
+      const causeCell = serving.getCell<Record<string, unknown>>(
+        homeSpace,
+        "x-space-wish-cause",
+        undefined,
+        seedTx,
+      );
+      const seedCommitted = await seedTx.commit();
+      expect(seedCommitted.error).toBeUndefined();
+
+      const sent: {
+        user: string;
+        tx: IExtendedStorageTransaction;
+        state: Cell<unknown>;
+      }[] = [];
+      const action = wishBuiltin(
+        inputsCell as never,
+        (tx, result) => {
+          sent.push({
+            user: "pending",
+            tx,
+            state: result as Cell<unknown>,
+          });
+        },
+        (cancel) => cancels.push(cancel),
+        [causeCell as never],
+        parentCell as never,
+        serving,
+      );
+
+      const runAs = async (
+        principal: string,
+        sessionId: string,
+        actionId: string,
+      ): Promise<Cell<unknown>> => {
+        const tx = serving.edit();
+        stampWaveRunContext(tx, {
+          actionId,
+          kind: "derivation",
+          scopeKeyIdentity: { principal, sessionId },
+          acting: { user: principal, session: sessionId },
+        });
+        sent.length = 0;
+        action(tx);
+        expect(sent.length).toBe(1);
+        const state = sent[0].state;
+        const sidecar = state.key(UI as never).key("props").key("$cell")
+          .resolveAsCell();
+        const committed = await tx.commit();
+        expect(committed.error).toBeUndefined();
+        return sidecar;
+      };
+
+      // Alice's instance runs first (fetch pending), then bob's.
+      const aliceSidecar = await runAs(aliceDid, "sess-a", "wish/x-a");
+      const bobSidecar = await runAs(bobDid, "sess-b", "wish/x-b");
+
+      // Demander #2 must get their OWN create surface, not demander
+      // #1's cell (pre-fix: the closure cache short-circuited on the
+      // first demander's cell — bob typed into alice's surface).
+      expect(bobSidecar.sourceURI).not.toBe(aliceSidecar.sourceURI);
+
+      // Release the pattern fetch: each pending launch must run ITS OWN
+      // demander's input into ITS OWN cell (pre-fix: the shared input
+      // holder was clobbered with bob's home link, and alice's pending
+      // launch ran bob's input into alice's cell).
+      gate.resolve();
+      // The landed echo resolves through the run's input `profiles`
+      // link into the DEMANDER's home space; before the run lands the
+      // key is unset and resolves within the served space.
+      const echoSpaceOf = (sidecar: Cell<unknown>): string | undefined => {
+        try {
+          const echo = (sidecar as Cell<Record<string, unknown>>)
+            .key("echo").resolveAsCell();
+          const link = echo.getAsNormalizedFullLink();
+          return link.space === homeSpace ? undefined : link.space;
+        } catch {
+          return undefined;
+        }
+      };
+      await waitUntil(
+        () =>
+          echoSpaceOf(aliceSidecar) !== undefined &&
+          echoSpaceOf(bobSidecar) !== undefined,
+        `both sidecar runs to land (alice: ${
+          echoSpaceOf(aliceSidecar)
+        }, bob: ${echoSpaceOf(bobSidecar)})`,
+      );
+      expect(echoSpaceOf(aliceSidecar)).toBe(aliceDid);
+      expect(echoSpaceOf(bobSidecar)).toBe(bobDid);
+    } finally {
+      gate.resolve();
+      globalThis.fetch = originalFetch;
+      setPatternEnvironment(originalEnvironment);
+      for (const cancel of cancels) cancel();
+      await serving.idle();
       await serving.dispose();
       await manager.close();
     }
