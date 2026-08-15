@@ -344,6 +344,54 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
+  // The $ref-carrying stream shape is schema-less to the arg parser, so a
+  // bare call skips the implicit-pipe read and the absence gate above
+  // decides — with stdin untouched. A rejecting reader pins the "untouched"
+  // half: piped bytes cannot reach a verb through this shape, they can only
+  // be spelled explicitly (`--json`, `--json-file -`).
+  it("refuses a bare $ref-stream verb call without reading piped stdin", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        $ref: "#/$defs/RecordMessageEvent",
+        asCell: ["stream"],
+        $defs: {
+          RecordMessageEvent: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+          },
+        },
+      } as JSONSchema,
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        [],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.reject(new Error("stdin was read")),
+        },
+      ),
+    ).rejects.toThrow(
+      /Invalid input for "recordMessage": no payload was supplied/,
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
   it("normalizes an absent payload to {} so an all-defaulted verb receives its defaults", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -761,6 +809,42 @@ describe("executePieceCallable", () => {
         value: {
           detail: { value: "Use `cat` to read files" },
         },
+      },
+    ]);
+  });
+
+  it("invokes a schema-less verb bare without reading piped stdin", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "archive",
+      inputSchema: { asCell: ["stream"] } as JSONSchema,
+    });
+
+    // A rejecting reader proves stdin stays untouched: the verb declares no
+    // input, so the bare spelling dispatches immediately instead of waiting
+    // for a pipe to reach EOF.
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "archive",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.reject(new Error("stdin was read")),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["archive"],
+        value: undefined,
       },
     ]);
   });
