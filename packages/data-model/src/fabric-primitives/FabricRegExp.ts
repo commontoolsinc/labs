@@ -272,10 +272,25 @@ export class FabricRegExp extends BaseFabricPrimitive
           );
         }
 
-        const flavor = (state.flavor as string) ?? DEFAULT_FLAVOR;
-        const source = (state.source as string) ?? "";
-        const flags = (state.flags as string) ?? "";
-        return new FabricRegExp(flavor, source, flags);
+        const fields = FabricRegExp.#stateFields(state);
+        if (fields === null) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            "expected string `flavor`, `source` and `flags`",
+          );
+        }
+
+        const { flavor, source, flags } = fields;
+        try {
+          return new FabricRegExp(flavor, source, flags);
+        } catch (e) {
+          return new ProblematicValue(
+            typeTag,
+            state,
+            (e instanceof Error) ? e.message : String(e),
+          );
+        }
       }
     })(),
   );

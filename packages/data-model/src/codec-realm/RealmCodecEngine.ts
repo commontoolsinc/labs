@@ -138,12 +138,17 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     data: RealmCodecValue,
     context: ReconstructionContext,
   ): FabricValue {
+    // Saved and restored rather than set and cleared, so that a decode reached
+    // from inside another one -- a codec calling back through the public entry
+    // point -- cannot leave the outer walk without its set.
+    const outer = this.#decodeSeen;
+
     this.#decodeSeen = new Set();
 
     try {
       return this.decodeValue(data, context);
     } finally {
-      this.#decodeSeen = undefined;
+      this.#decodeSeen = outer;
     }
   }
 
