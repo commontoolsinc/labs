@@ -40,12 +40,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   schema-observing lazy view over a cell, a transaction mode that hands one back
   from every read, and the runner disposition for a reader that touches data the
   schema no longer describes.
-- [Content-addressed schemas, Phase 0](content-addressed-schemas-phase-0.md)
-  builds the readers-first resolution infrastructure for
-  [the content-addressed schemas spec](../specs/content-addressed-schemas.md):
-  the pure decomposition contract, the session schema registry, `cid:` ref
-  resolution, traversal that follows references, and sync-side registration
-  with cold-miss recovery — all inert until Phase 1 turns on the writers.
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes.

@@ -1,7 +1,14 @@
+---
+status: historical
+created: 2026-08-14
+archived: 2026-08-15
+reason: "Executed plan; content-addressed schemas Phase 0 (readers-first resolution infrastructure) shipped, registry-lifetime decision included."
+---
+
 # Content-Addressed Schemas — Phase 0: Resolution Infrastructure
 
 Executes Phase 0 of
-[the content-addressed schemas spec](../specs/content-addressed-schemas.md):
+[the content-addressed schemas spec](../../specs/content-addressed-schemas.md):
 readers learn to handle schema references that nothing yet writes. Everything
 here is inert until Phase 1 turns on the writers, so no experimental flag is
 needed; the flag (`contentAddressedSchemas`) arrives with Phase 1.
@@ -153,9 +160,8 @@ checked. Protocol-level selector references — a client SENDING
 storage at the protocol boundary — are the spec's Phase 2, not part of
 this exit. Phase 0 unblocks Phase 1 (flag-gated writers) in the spec.
 
-All four stages are checked. The plan stays live (not archived) until the
-registry-lifetime open item below is settled; that decision closes
-Phase 0.
+All four stages are checked, and the registry-lifetime open item below is
+settled. Phase 0 is complete.
 
 ## Open items
 
@@ -163,13 +169,16 @@ Phase 0.
   runner, because `resolveCfcSchemaRef` has no storage handle and verified
   content-addressed entries are safe to share realm-wide. Stage 4's sync
   registration writes into the same module-level registry.
-- Registry lifetime and disposal — deferred (review finding, decision
-  pending): the module-level registry retains entries for the realm's
-  lifetime with no disposal hook, while the spec's Resolution section
-  speaks of session lifetime. Either the registry gains an owner with a
-  lifecycle (natural candidate: Stage 4's `StorageManager` registration
-  seam) or the spec's retention story is revised to realm lifetime with an
-  explicit bound. To be settled no later than Stage 4.
+- Registry lifetime and disposal — settled (2026-08-15, Robin): retention
+  is session-scoped through leases. Every `StorageManager` acquires a
+  registry lease for its open lifetime (re-acquired on reuse after
+  `close()`); when the last lease in the realm releases, the registry and
+  its closure memo clear. Clients therefore get true session lifetime and
+  tests get a clean registry between cases, while a lease-less realm — the
+  memory server registers through traversal without a manager — retains
+  for the process lifetime, documented as a deliberate caveat: its entries
+  are a cache over its own store, so a size cap there is safe if it ever
+  measures as needed. This decision closes Phase 0.
 - Whether a fragment ref may point into a singleton document
   (`cid:<hash>#/$defs/<name>` where the document is not a cyclic group) is
   disallowed until something needs it: singleton documents are referenced

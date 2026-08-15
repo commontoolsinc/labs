@@ -7,6 +7,7 @@ import {
   internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model/schema-hash";
 import {
+  acquireSchemaRegistryLease,
   lookupSchemaDocument,
   registerSchemaDocument,
   SchemaDocumentHashMismatchError,
@@ -82,6 +83,56 @@ describe("schema-registry", () => {
   describe("lookupSchemaDocument()", () => {
     it("returns `undefined` for a hash nothing registered", () => {
       expect(lookupSchemaDocument("fid1:never-registered")).toBeUndefined();
+    });
+  });
+
+  describe("acquireSchemaRegistryLease()", () => {
+    it("clears the registry when the last lease releases, and not before", () => {
+      const releaseA = acquireSchemaRegistryLease();
+      const releaseB = acquireSchemaRegistryLease();
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { leased: { type: "string" } },
+      };
+      const hash = internSchemaAsTaggedHashString(schema);
+      registerSchemaDocument(hash, schema);
+
+      releaseA();
+      expect(lookupSchemaDocument(hash)).toBeDefined();
+      releaseB();
+      expect(lookupSchemaDocument(hash)).toBeUndefined();
+    });
+
+    it("counts a release once, however many times it is called", () => {
+      const releaseA = acquireSchemaRegistryLease();
+      const releaseB = acquireSchemaRegistryLease();
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { leasedTwice: { type: "string" } },
+      };
+      const hash = internSchemaAsTaggedHashString(schema);
+      registerSchemaDocument(hash, schema);
+
+      releaseA();
+      releaseA();
+      expect(lookupSchemaDocument(hash)).toBeDefined();
+      releaseB();
+      expect(lookupSchemaDocument(hash)).toBeUndefined();
+    });
+
+    it("retains lease-less registrations until the next last-lease-out transition", () => {
+      // The memory server's shape: registration with no lease held.
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { leaseless: { type: "string" } },
+      };
+      const hash = internSchemaAsTaggedHashString(schema);
+      registerSchemaDocument(hash, schema);
+      expect(lookupSchemaDocument(hash)).toBeDefined();
+
+      const release = acquireSchemaRegistryLease();
+      release();
+      expect(lookupSchemaDocument(hash)).toBeUndefined();
     });
   });
 

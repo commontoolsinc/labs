@@ -157,6 +157,29 @@ describe("schema-doc-sync", () => {
     expect(holeFailure).toBeDefined();
   });
 
+  it("keeps registrations alive past one manager's close while another session holds its lease", async () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { leaseSurvivor: { type: "string" } },
+    };
+    const decomposed = decomposeSchema(schema);
+    await writeSchemaDocs(decomposed);
+
+    const rootHash = parseExternalSchemaRef(decomposed.rootRef)!.taggedHash;
+    const result = await readerStorage.open(space).sync(
+      `cid:${rootHash}` as URI,
+      { path: [], schema: false },
+    );
+    expect(result.error).toBeUndefined();
+    expect(lookupSchemaDocument(rootHash)).toBeDefined();
+
+    // The reader's session ends; the writer's lease still holds retention.
+    // (The last-lease-out clear itself is pinned by the registry unit tests;
+    // the shared teardown performs that transition after this test.)
+    await readerStorage.close();
+    expect(lookupSchemaDocument(rootHash)).toBeDefined();
+  });
+
   it("delivers and registers the schema closure behind a reference link in the same round trip", async () => {
     const schema: JSONSchemaObj = {
       type: "object",

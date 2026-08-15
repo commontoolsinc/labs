@@ -10,7 +10,7 @@ document's hash is well-founded.
 ## Status
 
 Design; the readers-first resolution infrastructure (Phase 0 of
-[the implementation plan](../plans/content-addressed-schemas-phase-0.md))
+[the implementation plan](../history/plans/content-addressed-schemas-phase-0.md))
 is landing, and nothing writes references yet. The unmerged branch
 `memory/connection-scoped-schema-cas` (`syncSchemaCasV1`) addresses the
 transport half of the same problem — it scopes the sync schema table to the
@@ -21,7 +21,7 @@ question below.
 
 ## Last Updated
 
-2026-08-14
+2026-08-15
 
 ## Motivation
 
@@ -246,11 +246,17 @@ mechanism follows the module-loading precedent (session-lifetime strong
 index, async storage-backed fallback):
 
 - A **session schema registry**: a strong `Map` from tagged hash to interned
-  schema, session lifetime. Populated from both directions: decomposition on
-  the write path registers what it writes; sync registers every schema
-  document that arrives. Memory is bounded by the number of distinct schema
-  documents seen in the session — strictly less than the duplicated inline
-  copies it replaces.
+  schema. Populated from both directions: decomposition on the write path
+  registers what it writes; sync registers every schema document that
+  arrives. Retention is session-scoped through leases — every
+  `StorageManager` holds one for its open lifetime, and the last lease's
+  release clears the registry — so memory is bounded by the distinct schema
+  documents the live sessions have seen, strictly less than the duplicated
+  inline copies they replace; concurrent sessions share retention for the
+  union of their lifetimes. A realm that never holds a lease (the memory
+  server registers through traversal without one) retains for the process
+  lifetime; its entries are a cache over its own store, so a size cap there
+  is safe if ever needed — an evicted document is one local read away.
 - `resolveSchemaRefs` (`packages/runner/src/cfc/schema-refs.ts`) extends
   from `#/$defs/<name>`-only to `cid:` refs (with optional `#/$defs/<name>`
   fragment), resolving through the registry. An unresolvable ref keeps the

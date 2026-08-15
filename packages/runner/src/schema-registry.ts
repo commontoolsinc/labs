@@ -7,13 +7,20 @@
  * happens in pure schema code with no runtime handle, and because content
  * addressing makes realm-wide sharing safe: registration verifies every
  * document's content against its claimed hash, so an entry can only ever be
- * the one value its key names, whoever registered it. Memory is bounded by
- * the number of distinct schema documents the realm has seen — strictly
- * less than the duplicated inline copies they replace.
+ * the one value its key names, whoever registered it.
  *
- * Entries are strong on purpose: a `cid:` ref in a link or selector must
- * resolve for as long as the realm lives, and the schema intern table's
- * `WeakRef`s cannot promise that.
+ * Retention is session-scoped through leases: every `StorageManager`
+ * acquires one for its lifetime, and when the last lease in the realm
+ * releases, the registry clears. Entries are therefore strong while any
+ * session lives — a `cid:` ref in a link or selector must resolve for as
+ * long as a session can read it, which the schema intern table's `WeakRef`s
+ * cannot promise — and bounded by the distinct schema documents the live
+ * sessions have seen, strictly less than the duplicated inline copies they
+ * replace. Concurrent sessions share retention (the union of overlapping
+ * lifetimes). A realm that never holds a lease — the memory server
+ * registers through traversal without one — retains for the process
+ * lifetime; its entries are a cache over its own store, so a future size
+ * cap is safe there (an evicted document is one local read away).
  */
 
 import type { JSONSchema } from "@commonfabric/api";
@@ -31,6 +38,34 @@ export class SchemaDocumentHashMismatchError extends Error {
 }
 
 const documentsByHash = new Map<string, JSONSchema>();
+
+let activeLeases = 0;
+
+/**
+ * Acquires a retention lease on the registry, returning its release. Every
+ * `StorageManager` holds one for its lifetime; when the last lease in the
+ * realm releases, the registry clears — that transition is what gives
+ * clients session-lifetime retention and tests a clean registry between
+ * cases. Releasing is idempotent, so a manager closed twice releases once.
+ *
+ * Registration without a lease is allowed (the memory server registers
+ * through traversal without one) and retains until the NEXT
+ * last-lease-out transition, or for the process lifetime in a realm that
+ * never holds a lease.
+ */
+export function acquireSchemaRegistryLease(): () => void {
+  activeLeases++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeLeases--;
+    if (activeLeases === 0) {
+      documentsByHash.clear();
+      completeClosures.clear();
+    }
+  };
+}
 
 /**
  * Registers a schema document under its tagged hash, verifying the content

@@ -48,6 +48,7 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import {
+  acquireSchemaRegistryLease,
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
@@ -770,6 +771,11 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+  // Schema-registry retention lease: held for the manager's open lifetime,
+  // released on close (idempotent), re-acquired when a closed manager is
+  // reused through open(). Last lease out clears the realm's registry — the
+  // session-lifetime retention contract in schema-registry.ts.
+  #schemaRegistryLease?: () => void;
   // Docs already offered a link-target pull via shouldPullDoc. One entry per
   // (space, scope, id) for the manager's lifetime: the first pull registers a
   // server-side watch that keeps the doc flowing afterwards, so a second kick
@@ -842,6 +848,7 @@ export class StorageManager implements IStorageManager {
   ) {
     this.id = options.id ?? crypto.randomUUID();
     this.#sessionId = this.id;
+    this.#schemaRegistryLease = acquireSchemaRegistryLease();
     this.as = options.as;
     this.#settings = options.settings ?? {};
     this.#sessionFactory = sessionFactory;
@@ -938,6 +945,9 @@ export class StorageManager implements IStorageManager {
   }
 
   open(space: MemorySpace): IStorageProvider {
+    // A manager reused after close() starts a new session; retention
+    // follows it.
+    this.#schemaRegistryLease ??= acquireSchemaRegistryLease();
     let provider = this.#providers.get(space);
     if (!provider) {
       // Session principal drives user/session scoped storage. Even when we have
@@ -1165,6 +1175,8 @@ export class StorageManager implements IStorageManager {
   }
 
   async close(): Promise<void> {
+    this.#schemaRegistryLease?.();
+    this.#schemaRegistryLease = undefined;
     if (this.#providers.size === 0) {
       return;
     }
@@ -1177,6 +1189,8 @@ export class StorageManager implements IStorageManager {
   }
 
   async closeNow(): Promise<void> {
+    this.#schemaRegistryLease?.();
+    this.#schemaRegistryLease = undefined;
     if (this.#providers.size === 0) {
       return;
     }
