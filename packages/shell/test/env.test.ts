@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 
 type ShellEnvGlobals = typeof globalThis & Record<string, string | undefined>;
 
@@ -45,7 +46,34 @@ Deno.test({
       eagerSourceAnnotation: false,
       // Default ON — one flag covers default-app and home roots alike.
       systemPatternAutoUpdate: true,
+      // Server-execution v2: the first-party default (ON since Phase 7's
+      // flip) when the build define is unset.
+      serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,
     });
+  },
+});
+
+Deno.test({
+  name: "serverExecution: the build define selects the OFF arm (rollback lever) or forces ON",
+  permissions: { read: true },
+  async fn() {
+    const off = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_EXECUTION: "false",
+    }, importFreshEnvModule);
+    expect(off.EXPERIMENTAL.serverExecution).toBe(false);
+    const on = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_EXECUTION: "true",
+    }, importFreshEnvModule);
+    expect(on.EXPERIMENTAL.serverExecution).toBe(true);
+    const unset = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_EXECUTION: undefined,
+    }, importFreshEnvModule);
+    expect(unset.EXPERIMENTAL.serverExecution).toBe(
+      SERVER_EXECUTION_DEFAULT_ENABLED,
+    );
   },
 });
 

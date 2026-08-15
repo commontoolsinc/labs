@@ -1,3 +1,5 @@
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+
 declare global {
   var $ENVIRONMENT: string | undefined;
   var $API_URL: string | undefined;
@@ -70,7 +72,12 @@ export const EXPERIMENTAL = {
   // home-golden-replay.test.ts, so the home root no longer needs a second flag.
   systemPatternAutoUpdate:
     flagValue(EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE) ?? true,
-  // Server-execution v2 (docs/specs/server-side-execution/). Default OFF —
-  // today's behavior byte-for-byte.
-  serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE),
+  // Server-execution v2 (docs/specs/server-side-execution/): the
+  // first-party default (ON since the plan's Phase 7 flip), overridable
+  // by the build define either way (`EXPERIMENTAL_SERVER_EXECUTION=false`
+  // builds the OFF-arm shell — the rollback lever and CI's regression
+  // guard). The worker refuses to initialize if its resolved posture
+  // disagrees with this declaration (runtime-client's posture agreement).
+  serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE) ??
+    SERVER_EXECUTION_DEFAULT_ENABLED,
 };

@@ -44,7 +44,11 @@
  * |                            | its identity/session, are the caller's domain)   |
  * | experimental               | per-site (required param — pass                  |
  * |                            | `experimentalOptionsFromEnv(...)`, host data, or |
- * |                            | an explicit `{}`; requiredness is the seal)      |
+ * |                            | an explicit `{}`; requiredness is the seal).     |
+ * |                            | productionServer/remoteClient resolve an unset   |
+ * |                            | `serverExecution` to the first-party default     |
+ * |                            | (ON since Phase 7); the single-process presets   |
+ * |                            | keep the constructor default (OFF)               |
  * | cfcEnforcementMode         | core-pinned `"enforce-explicit"`; overridable in |
  * |                            | patternTest/unitTest (per-test laxer mode) and   |
  * |                            | browserWorker (host-controlled rollout)          |
@@ -97,6 +101,7 @@
  * |                            | it hand-rolls its options deliberately           |
  */
 
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -206,9 +211,12 @@ export const EXPERIMENTAL_ENV_VARS = {
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
   lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
-  // Server-execution v2 (docs/specs/server-side-execution/): OFF is today
-  // byte-for-byte; the ON arm is the CI second arm from Phase 1 stage A on
-  // (testing.md §2), so every server-side process must be reachable by env.
+  // Server-execution v2 (docs/specs/server-side-execution/): ON by default
+  // since the plan's Phase 7 flip — the deployed-topology presets below
+  // resolve an unset flag to `SERVER_EXECUTION_DEFAULT_ENABLED`; an
+  // explicit "false" selects the OFF arm (the rollback lever, and CI's
+  // regression-guard lanes) until the OFF path is removed. Env-reachable
+  // so every server-side process can be flipped either way.
   serverExecution: "EXPERIMENTAL_SERVER_EXECUTION",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
@@ -267,6 +275,30 @@ interface CoreParams {
  * modes) get flipped HERE, in one reviewed place, for every preset user at
  * once — the constructor defaults then only govern non-preset constructions.
  */
+/**
+ * The first-party server-execution default for the DEPLOYED-TOPOLOGY
+ * presets (server-execution v2, docs/plans/server-execution-v2.md Phase
+ * 7's flip): `productionServer` and `remoteClient` run against a serving
+ * toolshed, so an UNSET flag resolves to
+ * `SERVER_EXECUTION_DEFAULT_ENABLED` — explicit in the returned options,
+ * which claims the process's ambient flag through the Runtime's enabler.
+ * An explicit value (env "false" — the OFF arm / rollback lever) always
+ * wins. The single-process presets (`patternTest`, `localDev`,
+ * `unitTest`) deliberately do NOT apply it: an emulated-storage runtime
+ * has no serving host, so it runs the derive-and-commit model (the
+ * ambient baseline, OFF) by construction — see
+ * `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ */
+function withServerExecutionDefault(
+  experimental: ExperimentalOptions,
+): ExperimentalOptions {
+  return {
+    ...experimental,
+    serverExecution: experimental.serverExecution ??
+      SERVER_EXECUTION_DEFAULT_ENABLED,
+  };
+}
+
 function coreOptions(params: CoreParams): RuntimeOptions {
   return {
     apiUrl: params.apiUrl,
@@ -361,7 +393,10 @@ export const runtimePresets = {
    */
   productionServer(params: ProductionServerPresetParams): RuntimeOptions {
     return {
-      ...coreOptions(params),
+      ...coreOptions({
+        ...params,
+        experimental: withServerExecutionDefault(params.experimental),
+      }),
       patternEnvironment: { apiUrl: params.patternApiUrl ?? params.apiUrl },
       ...(params.consoleHandler !== undefined
         ? { consoleHandler: params.consoleHandler }
@@ -382,7 +417,10 @@ export const runtimePresets = {
    */
   remoteClient(params: RemoteClientPresetParams): RuntimeOptions {
     return {
-      ...coreOptions(params),
+      ...coreOptions({
+        ...params,
+        experimental: withServerExecutionDefault(params.experimental),
+      }),
       patternEnvironment: { apiUrl: params.apiUrl },
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }

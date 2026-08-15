@@ -29,6 +29,8 @@ import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
  *    dropped or mis-mapped.
  */
 
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+
 type PresetName = keyof typeof runtimePresets;
 const PRESET_NAMES = Object.keys(runtimePresets) as PresetName[];
 
@@ -128,6 +130,18 @@ describe("runtimePresets conformance (CT-1814)", () => {
             if (key === "experimental" && preset === "unitTest") {
               // unitTest defaulted it; every other preset got the sentinel.
               expect(output.experimental).toEqual({});
+            } else if (
+              key === "experimental" &&
+              (preset === "productionServer" || preset === "remoteClient")
+            ) {
+              // The DEPLOYED-TOPOLOGY presets carry the sentinel PLUS the
+              // first-party server-execution default for an unset flag
+              // (server-execution v2 Phase 7's flip; the single-process
+              // presets keep the constructor default — the OFF baseline).
+              expect(output.experimental).toEqual({
+                ...experimental,
+                serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,
+              });
             } else {
               expect(output[key], context).toBe(
                 minimalCore[

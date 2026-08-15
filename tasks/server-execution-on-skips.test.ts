@@ -134,11 +134,15 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /runner: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list is EMPTY — stage P2-F retired the sx2-serving-loop entry (the demand-cycle terminal state closed the starvation fork), so the ON arm runs the full suite", async () => {
+Deno.test("main: the patterns list holds exactly the topics-navigation entry (Phase 4's mixed-posture entry, re-justified by Phase 7: the ON shell build landed with the flip, the inherited red did not lift) — printed loudly, never silent", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  assertEquals(out, []);
-  assertMatch(err[0], /patterns: no skips — full suite runs/);
+  assertEquals(out, ["--ignore=integration/topics-navigation.test.ts"]);
+  assertMatch(
+    err[0],
+    /patterns: SKIP integration\/topics-navigation\.test\.ts \(until phase-7\)/,
+  );
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
 });
 
 Deno.test("main: populated lists emit the --ignore flag on stdout", async () => {

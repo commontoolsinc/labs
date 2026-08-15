@@ -26,6 +26,7 @@
 // byte-identical); the servingLoop stats block is absent and the
 // ON-arm assertions are skipped explicitly.
 
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { env } from "@commonfabric/integration";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -45,7 +46,13 @@ import {
 
 const { API_URL, SPACE_NAME } = env;
 
-const FLAG_ON = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === "true";
+// The arm this process runs in: the explicit env value, else the
+// first-party default (ON since the server-execution v2 Phase 7 flip —
+// the deployed-topology presets resolve an unset flag to it, and so does
+// the toolshed the harness started).
+const FLAG_ON = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === undefined
+  ? SERVER_EXECUTION_DEFAULT_ENABLED
+  : Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === "true";
 
 type ServingLoopStats = {
   waves: number;
@@ -81,9 +88,7 @@ const waitForStats = async (
     if (stats !== undefined && predicate(stats)) return stats;
     if (Date.now() > deadline) {
       throw new Error(
-        `timed out waiting for ${label} — last stats: ${
-          JSON.stringify(stats)
-        }`,
+        `timed out waiting for ${label} — last stats: ${JSON.stringify(stats)}`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 50));

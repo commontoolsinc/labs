@@ -35,6 +35,7 @@
 // writes); the servingLoop stats block is absent, settles ride
 // `synced()`, and the ON-arm assertions are skipped explicitly.
 
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { env } from "@commonfabric/integration";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -54,7 +55,13 @@ import {
 
 const { API_URL, SPACE_NAME } = env;
 
-const FLAG_ON = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === "true";
+// The arm this process runs in: the explicit env value, else the
+// first-party default (ON since the server-execution v2 Phase 7 flip —
+// the deployed-topology presets resolve an unset flag to it, and so does
+// the toolshed the harness started).
+const FLAG_ON = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === undefined
+  ? SERVER_EXECUTION_DEFAULT_ENABLED
+  : Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === "true";
 
 /** The Phase-6 budget-isolation calibration. The spec budget for the
  * push hot path is 300 ms p50 LAN on a quiet box (README §3.3);

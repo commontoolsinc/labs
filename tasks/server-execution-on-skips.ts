@@ -2,11 +2,14 @@
 
 // The EXPLICIT per-phase skip lists of the server-execution v2 ON arm
 // (docs/specs/server-side-execution/testing.md §2): in CI the integration
-// suites run twice — EXPERIMENTAL_SERVER_EXECUTION off (byte-identical to
-// today) and on — and the ON arm may skip a test only by listing it here,
-// with the plan phase whose not-yet-landed surface it exercises and a
-// reason. Never by silent filtering: the CI step prints every skip from
-// this file, and an empty list means the ON arm runs the full suite.
+// suites run twice — since the plan's Phase 7 flip the DEFAULT lanes (flag
+// unset = the first-party default, ON) ARE the ON arm, and the
+// explicit-`EXPERIMENTAL_SERVER_EXECUTION=false` lanes are the OFF
+// regression guard (byte-identical to the pre-flip posture) — and the ON
+// arm may skip a test only by listing it here, with the plan phase whose
+// not-yet-landed surface it exercises and a reason. Never by silent
+// filtering: the CI step prints every skip from this file, and an empty
+// list means the ON arm runs the full suite.
 //
 // An entry retires when its phase lands (docs/plans/server-execution-v2.md);
 // a file listed here that no longer exists fails the run, so the lists
@@ -68,8 +71,10 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * the load pass runs under the flush deadline), so the surface runs —
  * carrying the in-CI amplification-ratio gate and the pattern-updater
  * CHECK-half witness (verification-coverage.md's closed OW19 row).
- * Every list is EMPTY but for the ONE Phase-4 mixed-posture entry
- * below: the ON arm otherwise runs the full suites.
+ * Every list is EMPTY but for the ONE topics-navigation entry below
+ * (Phase 4's mixed-posture entry, re-justified by Phase 7 — the ON
+ * shell build landed with the flip, the inherited red did not lift):
+ * the ON arm otherwise runs the full suites.
  */
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
@@ -83,8 +88,18 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   patterns: [
     {
       file: "integration/topics-navigation.test.ts",
-      phase: "phase-3-followup",
-      reason: "MIXED-POSTURE honesty (Phase 4 fixer, 2026-08-11; the " +
+      phase: "phase-7",
+      reason: "Phase 7 (2026-08-15): the ON shell build now LANDS by the " +
+        "flip (the default lane's binary bakes the shell ON), which " +
+        "discharges the first of this entry's two lifting conditions — " +
+        "the second (the inherited red) does NOT lift: under the full " +
+        "post-flip default posture the file fails FAST at the " +
+        "controller's prop set (`updated result does not match its " +
+        "write destination: missing required property myName`, " +
+        "PiecePropIo.set → validateWriteDestination), reproduced on the " +
+        "Phase-7 tree 2026-08-15; a browser-ON/controller-ON red owed to " +
+        "the flip-follow-up triage. Original entry: " +
+        "MIXED-POSTURE honesty (Phase 4 fixer, 2026-08-11; the " +
         "workflow contract's list-the-affected-tests clause): the " +
         "ON-arm CI lane ships the binary's OFF-built browser shell, " +
         "so its green run of this file exercised an OFF-shell + " +
