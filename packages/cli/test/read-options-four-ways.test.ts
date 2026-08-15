@@ -16,7 +16,11 @@ import {
 } from "../lib/callable.ts";
 import { getCellValue } from "../lib/piece.ts";
 import { projectWishValue, resolveWish } from "../lib/wish.ts";
-import { executeMountedCallableFile } from "../lib/exec.ts";
+import {
+  type ExecutedMountedCallableFile,
+  executeMountedCallableFile,
+} from "../lib/exec.ts";
+import { renderExecOutcome } from "../commands/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import {
   type CellSelection,
@@ -31,10 +35,18 @@ import { safeStringify } from "../lib/render.ts";
  * One cell is seeded once. Each of the four arrivals — `cf piece get`,
  * `cf piece call`, `cf wish`, `cf exec` — is driven at its own outermost
  * in-process seam against that cell, under one selection, and the four
- * renderings are compared as the bytes `render()` would have written. A
- * vocabulary that answers from two starting points and silently does nothing
- * from the other two teaches a rule that is false half the time, and only a
- * comparison across all four can witness that.
+ * SELECTED VALUES are compared byte for byte. A vocabulary that answers from
+ * two starting points and silently does nothing from the other two teaches a
+ * rule that is false half the time, and only a comparison across all four can
+ * witness that.
+ *
+ * The selected value is the whole of what is compared here, and deliberately
+ * so: the envelope around it is each command's own. A verb arrival wraps its
+ * answer in the Invocation JSON, a read arrival writes the value alone, and
+ * those bytes therefore differ by design — comparing raw stdout across the
+ * four would assert a sameness the commands do not have and should not. What
+ * the envelope is, at each arrival, is pinned separately below and in
+ * test/exec-read-options.test.ts.
  *
  * The cell is the profile the `#profile` wish resolves to, because that is the
  * one cell a wish can be made to arrive at without inventing a target: a wish
@@ -214,10 +226,12 @@ describe("read options, four ways", () => {
   /** `cf exec <mountedFile>` — the read that arrives through a filesystem
    * mount. A real mount-state file and a real mounted callable path; the
    * runtime under it is the same one the other three read through. */
-  async function viaExec(
+  /** `cf exec`'s whole outcome, so both the selected value and the envelope
+   * written around it can be read from one drive of the command. */
+  async function execOutcome(
     profile: Cell<unknown>,
     selection: CellSelection,
-  ): Promise<unknown> {
+  ): Promise<ExecutedMountedCallableFile> {
     const mountpoint = join(tmpDir, "mount");
     const filePath = join(
       mountpoint,
@@ -260,7 +274,14 @@ describe("read options, four ways", () => {
       },
       { selection },
     );
-    return executed.invocation?.result;
+    return executed;
+  }
+
+  async function viaExec(
+    profile: Cell<unknown>,
+    selection: CellSelection,
+  ): Promise<unknown> {
+    return (await execOutcome(profile, selection)).invocation?.result;
   }
 
   /** The four arrivals, each rendered as `render()` would write it. */
@@ -342,5 +363,30 @@ describe("read options, four ways", () => {
       "exec": address,
     });
     expect(new Set(Object.values(rendered)).size).toBe(1);
+  });
+
+  it("wraps the identical selected value in each arrival's own envelope", async () => {
+    const profile = await seedProfile();
+    const selection = await parseCellSelectionOptions({ select: "name" });
+
+    const written: string[] = [];
+    const executed = await execOutcome(profile, selection!);
+    renderExecOutcome(executed, {
+      write: (text) => written.push(text),
+      writeError: () => {},
+    });
+
+    // The selected value agrees with the other three arrivals — that is the
+    // test above — and here is what `cf exec` actually WRITES around it. The
+    // envelope is the Invocation JSON, so stdout is not the bare value and a
+    // comparison of raw output across the four would fail on this by design
+    // rather than on any disagreement about the selection.
+    const envelope = JSON.parse(written[0]) as Record<string, unknown>;
+    expect(envelope.result).toEqual({ name: "Ada Lovelace" });
+    expect(envelope.invocation).toBe(executed.invocation?.id);
+    expect(envelope.status).toBe("settled");
+    // Not the bare value: the wrapper is real, so raw stdout is not what the
+    // four-way comparison could ever have been over.
+    expect(written[0]).not.toBe(safeStringify({ name: "Ada Lovelace" }));
   });
 });

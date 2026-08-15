@@ -11,6 +11,7 @@ import {
 } from "../commands/wish.ts";
 import { setQuietMode } from "../commands/piece.ts";
 import type { WishReadConfig, WishReadResult } from "../lib/wish.ts";
+import { CellSelectionError } from "../lib/cell-selection.ts";
 import { withEnv } from "./utils.ts";
 
 // Drives the `cf wish` action body in-process with a stubbed readWish/exit
@@ -18,8 +19,12 @@ import { withEnv } from "./utils.ts";
 // shaping, JSON output and the error/exit paths are covered without a live
 // server. The wish resolution itself is covered in test/wish.test.ts.
 
-/** Stub readWish that records the config and returns a canned result. */
-function stubDeps(result: WishReadResult): {
+/**
+ * Stub readWish that records the config and returns a canned result, or
+ * rejects with `throws` — the shape a selection that fails against what the
+ * wish resolved to arrives in.
+ */
+function stubDeps(result: WishReadResult, throws?: Error): {
   deps: WishCommandDeps;
   calls: WishReadConfig[];
   exits: number[];
@@ -30,6 +35,7 @@ function stubDeps(result: WishReadResult): {
     deps: {
       readWish: (config: WishReadConfig) => {
         calls.push(config);
+        if (throws) return Promise.reject(throws);
         return Promise.resolve(result);
       },
       exit: (code: number) => {
@@ -185,6 +191,40 @@ describe("cf wish command action", () => {
     expect(exits).toEqual([1]);
     expect(errors.join("\n")).toContain('wish "#profile"');
     expect(errors.join("\n")).toContain("No profile exists yet");
+  });
+
+  it("reports a malformed selection through the exit seam, not Deno.exit", async () => {
+    const { deps, calls, exits } = stubDeps({ result: { name: "Ada" } });
+
+    const errors = await captureStderr(() =>
+      captureStdout(() =>
+        wishAction({ ...BASE_OPTIONS, filter: "" }, "#profile", deps)
+      ).then((out) => expect(out).toBe(""))
+    );
+
+    // Reaching the assertions at all is half the point: a direct `Deno.exit`
+    // on this path takes the test runner down rather than failing, so an
+    // earlier version of it could not be covered from here.
+    expect(exits).toEqual([1]);
+    expect(errors.join("\n")).toContain("--filter predicate must not be empty");
+    // Refused before the wish was issued, so no read was attempted.
+    expect(calls).toEqual([]);
+  });
+
+  it("reports a selection that fails against the target through the seam", async () => {
+    const { deps, exits } = stubDeps(
+      { result: null },
+      new CellSelectionError("kept nothing over the target"),
+    );
+
+    const errors = await captureStderr(() =>
+      captureStdout(() =>
+        wishAction({ ...BASE_OPTIONS, select: "absent" }, "#profile", deps)
+      ).then((out) => expect(out).toBe(""))
+    );
+
+    expect(exits).toEqual([1]);
+    expect(errors.join("\n")).toContain("kept nothing over the target");
   });
 
   it("wish.parse routes missing config through cliffy as exit 1", async () => {

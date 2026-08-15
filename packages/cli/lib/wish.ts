@@ -140,12 +140,22 @@ export async function resolveWish(
   const outCell = result.key("out");
   const error: unknown = outCell.key("error").get();
   const resolved = outCell.key("result");
+  // Whether the wish matched is read where the wish WROTE it, not inferred
+  // from what the target holds. A matched target whose value nothing has set
+  // dereferences to `undefined` exactly as an unmatched wish does, and only
+  // one of the two is an absent result: the matched one still has an address,
+  // which is the whole of what a marked position asks for.
+  const matched = resolved.getRaw() !== undefined;
   const value: unknown = resolved.get();
 
   return {
-    result: value === undefined
-      ? null
-      : await selectWishValue(runtime, space, resolved, value, spec),
+    // `?? null` covers the matched-but-unset target a caller selected nothing
+    // over: there is an address to shape but no value to render, and a wish
+    // answers absence as JSON null. A selection never lands here undefined —
+    // `selectWishValue` refuses that rather than returning it.
+    result: matched
+      ? await selectWishValue(runtime, space, resolved, value, spec) ?? null
+      : null,
     error: typeof error === "string" && error.length > 0 ? error : undefined,
   };
 }

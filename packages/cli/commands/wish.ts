@@ -5,7 +5,7 @@ import { cliText } from "../lib/cli-name.ts";
 import { render } from "../lib/render.ts";
 import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
-import { exitWithDataError, normalizeApiUrl, setQuietMode } from "./piece.ts";
+import { normalizeApiUrl, setQuietMode } from "./piece.ts";
 import { projectWishValue, readWish } from "../lib/wish.ts";
 import {
   type CellSelection,
@@ -88,12 +88,23 @@ export async function wishAction(
   // flags, so it is reported without a resolution having been attempted. The
   // same grammar and the same messages `cf piece get` and `cf piece call`
   // report, because it is the same parser.
+  // Through the command's own exit seam rather than `exitWithDataError`, whose
+  // `exit` is typed `never`: this command's seam returns, because its unit
+  // tests inject a non-terminating exit and go on to read what was written. A
+  // direct `Deno.exit` here would take the test runner — or an embedder — down
+  // with it.
+  const exitSelectionError = (message: string): void => {
+    console.error(message);
+    deps.exit(1);
+  };
+
   let selection: CellSelection | undefined;
   try {
     selection = await parseCellSelectionOptions(options);
   } catch (error) {
     if (error instanceof CellSelectionError) {
-      exitWithDataError({ message: error.message });
+      exitSelectionError(error.message);
+      return; // Reached only when a test injects a non-terminating exit.
     }
     throw error;
   }
@@ -116,7 +127,8 @@ export async function wishAction(
     // over a non-array, a projection that kept nothing — is a data error about
     // the target in hand, not a usage error about the command line.
     if (thrown instanceof CellSelectionError) {
-      exitWithDataError({ message: thrown.message });
+      exitSelectionError(thrown.message);
+      return; // Reached only when a test injects a non-terminating exit.
     }
     throw thrown;
   }

@@ -36,7 +36,9 @@ describe("cf wish read options", () => {
     await storageManager.close();
   });
 
-  async function seedProfile(): Promise<void> {
+  async function seedProfile(
+    options: { bio?: boolean } = {},
+  ): Promise<void> {
     let tx = runtime.edit();
     const profileSpaceCell = runtime.getSpaceCell(profileSpace, undefined, tx);
     const profileCell = runtime.getCell(
@@ -49,7 +51,9 @@ describe("cf wish read options", () => {
       name: "Ada Lovelace",
       initialNameApplied: "Ada Lovelace",
       avatar: "ada.png",
-      bio: "Mathematician & first programmer.",
+      ...(options.bio === false
+        ? {}
+        : { bio: "Mathematician & first programmer." }),
       elements: [
         { title: "Analytical Engine", done: true },
         { title: "Bernoulli numbers", done: false },
@@ -139,6 +143,33 @@ describe("cf wish read options", () => {
     // step it was composed ahead of. `projectWishValue` is what `cf wish`
     // renders through, so an address it flattened would never reach stdout.
     expect(projectWishValue(result)).toEqual(result);
+  });
+
+  it("answers a marked position the wish resolved to but nothing has set", async () => {
+    await seedProfile({ bio: false });
+    const selection = await parseCellSelectionOptions({ select: "@" });
+
+    const { result, error } = await resolveWish(runtime, userIdentity.did(), {
+      query: "#profile",
+      path: ["bio"],
+      selection,
+    });
+
+    expect(error).toBeUndefined();
+    // "The wish matched nothing" and "the wish matched a cell holding nothing"
+    // are different facts, and only the first is an absent result. A target
+    // whose value is unset still HAS an address, which is the whole of what a
+    // marked position asks for — deciding absence from the dereferenced value
+    // answers null here and loses an address that exists.
+    expect(result).toEqual({
+      $link: {
+        id: runtime.getCell(profileSpace, "profile-default")
+          .getAsNormalizedFullLink().id,
+        space: profileSpace,
+        scope: "space",
+        path: ["bio"],
+      },
+    });
   });
 
   it("refuses a --filter over a target that is not an array", async () => {

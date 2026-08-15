@@ -7,7 +7,8 @@ import {
   type ExecutedMountedCallableFile,
   executeMountedCallableFile,
 } from "../lib/exec.ts";
-import { renderExecOutcome } from "../commands/exec.ts";
+import { exitExecFailure, renderExecOutcome } from "../commands/exec.ts";
+import { invocationPhaseReporter } from "../commands/piece.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import {
@@ -282,6 +283,44 @@ describe("cf exec read options", () => {
     });
   });
 
+  it("reaches the committed phase before a selection can fail the call", async () => {
+    const filePath = await mountCallable("add.handler");
+    const { pieces, piece } = harness(handlerCell(), "add");
+    const phases: string[] = [];
+
+    // A projection naming a field the result does not have: it materializes
+    // nothing, which the selection step refuses — and it can only refuse AFTER
+    // the handling has committed, because there is no result to shape until
+    // then. This is the ordering the failure report exists for.
+    const selection = await parseCellSelectionOptions({
+      select: "nosuchfield",
+    });
+
+    await expect(executeMountedCallableFile(
+      filePath,
+      ["invoke"],
+      {
+        stateDir: join(tmpDir, "state"),
+        // deno-lint-ignore no-explicit-any
+        loadPieces: () => Promise.resolve(pieces as any),
+        // deno-lint-ignore no-explicit-any
+        loadPiece: () => Promise.resolve(piece as any),
+        isStdinTerminal: () => true,
+        onPhase: (phase) => phases.push(phase),
+      },
+      { selection },
+    )).rejects.toThrow();
+
+    // The mutation landed and only then did the call fail, so a caller that
+    // simply reran the command would commit a second time. `cf exec` mints a
+    // fresh pair per call and takes no `--invocation`, which is why the phase
+    // has to be reported rather than inferred from the exit code.
+    expect(phases).toContain("committed");
+    expect(phases.indexOf("dispatched")).toBeLessThan(
+      phases.indexOf("committed"),
+    );
+  });
+
   it("writes a handler's outcome as the Invocation JSON on stdout", () => {
     const out: string[] = [];
     const err: string[] = [];
@@ -328,8 +367,14 @@ describe("cf exec read options", () => {
     expect(out).toEqual(["{}"]);
     expect(err).toHaveLength(1);
     expect(err[0]).toContain("of:tool-result@user");
-    expect(err[0]).toContain("cf piece get --piece of:tool-result@user");
     expect(err[0]).not.toContain("(space ");
+    // All three parts of the address, each where the reading command takes it.
+    // Dropping the space leaves a command that runs and reads whichever space
+    // the caller happens to have configured, which is the failure a spelling
+    // no command accepts at least could not cause.
+    expect(err[0]).toContain(
+      "cf piece get --space did:key:test-home --piece of:tool-result@user",
+    );
   });
 
   it("writes a space-scoped address bare, which is the form that means space", () => {
@@ -347,8 +392,105 @@ describe("cf exec read options", () => {
       { write: () => {}, writeError: (text) => err.push(text) },
     );
 
-    expect(err[0]).toContain("cf piece get --piece of:tool-result`)");
+    expect(err[0]).toContain(
+      "cf piece get --space did:key:test-home --piece of:tool-result`)",
+    );
     expect(err[0]).not.toContain("@space");
+  });
+
+  it("reports a pre-dispatch failure without naming an invocation", () => {
+    const errs: string[] = [];
+    const codes: number[] = [];
+    exitExecFailure(
+      new Error("no mount covers /tmp/nope"),
+      "inv-unspent",
+      "initial_sync",
+      {
+        printError: (text) => errs.push(text),
+        exit: ((code: number) => {
+          codes.push(code);
+        }) as unknown as (code: number) => never,
+      },
+    );
+
+    expect(codes).toEqual([1]);
+    expect(errs).toEqual(["no mount covers /tmp/nope"]);
+    // Nothing dispatched, so the id was never spent and never announced.
+    // Printing it would offer a retry key for a call that never happened —
+    // and a tool, which never enters these phases, would get one every time.
+    expect(errs.join("\n")).not.toContain("inv-unspent");
+    expect(errs.join("\n")).not.toContain("phase:");
+  });
+
+  it("names the invocation and phase once a failure is past dispatch", () => {
+    const errs: string[] = [];
+    const codes: number[] = [];
+    exitExecFailure(
+      new Error("selection kept nothing"),
+      "inv-7",
+      "committed",
+      {
+        printError: (text) => errs.push(text),
+        exit: ((code: number) => {
+          codes.push(code);
+        }) as unknown as (code: number) => never,
+      },
+    );
+
+    expect(codes).toEqual([1]);
+    // The message, then the retry key beside the furthest phase — the shape
+    // `cf piece call` prints, so a script reads one format either way. The
+    // phase is what says the handling may already have committed, which is
+    // the whole reason a caller must not simply run the command again.
+    expect(errs).toEqual([
+      "selection kept nothing",
+      "invocation: inv-7 phase: committed",
+    ]);
+  });
+
+  it("announces the invocation pair on stderr at dispatch, before the commit", () => {
+    const announced: string[] = [];
+    const seen: string[] = [];
+    const onPhase = invocationPhaseReporter(
+      { id: "inv-9", session: "sess-3" },
+      (next) => seen.push(next),
+      (message) => announced.push(message),
+    );
+
+    onPhase("initial_sync");
+    onPhase("dispatched");
+    onPhase("committed");
+
+    // Both halves, before the commit phase is reached: a caller whose process
+    // dies after the dispatch still holds the pair, and `cf exec` accepts no
+    // `--invocation`, so this announcement is the only place it is ever named.
+    expect(announced).toEqual(["invocation: inv-9", "session: sess-3"]);
+    expect(seen).toEqual(["initial_sync", "dispatched", "committed"]);
+  });
+
+  it("consumes a read option before the file and leaves the rest to the callable", async () => {
+    const missing = join(tmpDir, "not-a-mount", "search.tool");
+    const { code, stderr } = await cf(
+      `exec --select id ${missing} --query milk`,
+    );
+    const relevant = stderr.filter((line) =>
+      !line.includes("deno run ") && !isIgnorableDenoWarningLine(line)
+    ).join("\n");
+
+    expect(code).not.toBe(0);
+    // Through real cliffy parsing with `.stopEarly()`: `--select id` was taken
+    // as exec's own flag and the FILE was taken as the positional, which is
+    // what naming the file here proves. A `--select` that landed in the
+    // positional would put "--select" or "id" in this message instead, and
+    // `--query milk` would have been rejected as an unknown flag rather than
+    // left for the callable to parse.
+    expect(relevant).toContain(missing);
+    expect(relevant).not.toContain("Unknown option");
+    // Pre-dispatch: nothing was resolved, nothing ran, and no invocation was
+    // spent — so the failure names none. This is the action body's own path,
+    // which no unit test reaches.
+    expect(relevant).not.toContain("invocation:");
+    expect(relevant).not.toContain("phase:");
   });
 
   it("refuses --select beside --schema, which name one projection twice", async () => {

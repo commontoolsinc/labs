@@ -235,8 +235,11 @@ cf exec --select comment.writtenAt \
 ```
 
 A tool prints its result on stdout as it always did, with the result cell's
-address on stderr — written as an address argument, so
-`cf piece get --piece <that>` takes it unchanged.
+address on stderr. The line spells out the whole command that reads it back,
+`--space` beside `--piece`: an address has three parts, and `cf piece get`
+takes the space on its own flag. `cf exec` gets its space from the mount it ran
+through, while `cf piece get` falls back to whichever space the caller has
+configured, so the two name the same cell only when the line says which.
 
 `packages/cli/README.md` has the grammar and the supported schema subset.
 

@@ -423,8 +423,10 @@ All four fields are always present, so a caller indexes them without branching:
 `id` keeps its scheme, `space` and `scope` are filled in even when they match
 the reader's own, and `path` is `[]` at a document's root. No schema is inlined
 and no write-redirect flag rides along. The rendered `id` is what
-`cf piece call --piece` and `cf piece get --piece` accept, scheme included — an
-address emitted by one command composes into the next unchanged.
+`cf piece call --piece` and `cf piece get --piece` accept, scheme included, and
+`space` is what their `--space` takes. Both travel together or neither does: the
+`id` alone names a cell in whichever space the reading command already has
+configured, which is the emitting one only by coincidence.
 
 The address names the deepest stored link crossed on the way to the marked
 position, plus the segments that remain below that link. Marking `title` under

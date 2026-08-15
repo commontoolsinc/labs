@@ -85,8 +85,11 @@ come back as values and which come back as addresses you can use later.
 
 ## Why this matters
 
-The last step is not shared today, and the same note renders two different ways
-depending on how you reached it. Read it from the board that holds it:
+The last step is now shared: all four arrivals take `--filter`, `--select` and
+`--schema`, parse them with one parser, and refuse the same mistakes in the
+same words. What follows is the divergence that motivated sharing it — the same
+note rendering two different ways depending on how you reached it. Read it from
+the board that holds it:
 
 ```json
 { "title": "Notes", "body": "…" }
@@ -101,7 +104,7 @@ operation comes along as a raw internal pointer:
 ```
 
 Neither behavior was designed. Each command grew its own output handling and
-they drifted.
+they drifted, which is what one shared read step exists to prevent recurring.
 
 ## What the model settles
 

@@ -62,7 +62,7 @@ unsupported. Both restrictions hold whichever syntax the reader writes in.
 
 ### What a shape can say today
 
-There are two syntaxes, and today both ride `--schema`
+There are two syntaxes, each on its own flag
 (`packages/cli/README.md`, "Output Conventions"):
 
 ```bash
@@ -72,12 +72,10 @@ There are two syntaxes, and today both ride `--schema`
 ```
 
 The concise form is sugar for the flat case; the full form is a JSON Schema
-object and is what expresses nested structure.
-[CLI surface shape](cli-surface-shape.md) proposes giving them separate flags —
-`--select` for the concise syntax, `--schema` for full schemas — and this
-document writes them that way throughout. The measured facts at the end use
-`--schema` for both, because that is the flag the measurements were taken
-against.
+object and is what expresses nested structure. [CLI surface
+shape](cli-surface-shape.md) is where the split between them is reasoned out.
+The measured facts at the end write `--schema` for both, because that is the
+flag the measurements were taken against.
 
 **`--filter` is the other axis.** A shape names paths; it cannot say "only the
 elements where `status == "open"`". That is `--filter`, a predicate over array
