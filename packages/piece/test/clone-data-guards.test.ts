@@ -16,11 +16,13 @@ import {
   FabricPrimitive,
 } from "@commonfabric/data-model/fabric-value";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import {
   assertNoCloneFabricInstance,
   cloneCellKey,
   cloneEntityKey,
   cloneInternalManifest,
+  cloneLabelViewProhibitsCrossSpaceCopy,
   pinCloneSnapshotCells,
 } from "../src/ops/clone-data-guards.ts";
 
@@ -57,6 +59,36 @@ class ClonePrimitive extends FabricPrimitive {
 }
 
 describe("clone data guards", () => {
+  it("allows only source-space storage and structural provenance labels", () => {
+    expect(cloneLabelViewProhibitsCrossSpaceCopy({
+      version: 1,
+      entries: [{
+        path: [],
+        label: {
+          confidentiality: [cfcAtom.space(SPACE_A)],
+          integrity: [
+            { type: CFC_ATOM_TYPE.LinkReference, of: "of:source" },
+            { type: CFC_ATOM_TYPE.TransformedBy, identity: "module:test" },
+          ],
+        },
+      }],
+    }, SPACE_A)).toBe(false);
+    expect(cloneLabelViewProhibitsCrossSpaceCopy({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { confidentiality: [cfcAtom.space(SPACE_B)] },
+      }],
+    }, SPACE_A)).toBe(true);
+    expect(cloneLabelViewProhibitsCrossSpaceCopy({
+      version: 1,
+      entries: [{
+        path: [],
+        label: { integrity: ["application-endorsement"] },
+      }],
+    }, SPACE_A)).toBe(true);
+  });
+
   it("keys cell paths separately but groups paths by entity", () => {
     const first = cellWith("of:first", SPACE_A, ["left"]);
     const second = cellWith("of:first", SPACE_A, ["right"]);

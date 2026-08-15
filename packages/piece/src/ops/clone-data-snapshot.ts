@@ -49,8 +49,9 @@ export function snapshotCloneValue(
     }
     cells.set(key, cell);
   }
-  assertCloneDataUnlabeled(cell);
-  assertCloneDataUnlabeled(value);
+  const sourceSpace = cell?.space;
+  assertCloneDataUnlabeled(cell, sourceSpace);
+  assertCloneDataUnlabeled(value, sourceSpace);
   const raw = cell?.getRawUntyped();
   if (value instanceof FabricInstance || raw instanceof FabricInstance) {
     throw new Error(
@@ -141,8 +142,9 @@ export async function preloadCloneValue(
   }
 
   assertNoCloneFabricInstance(value);
-  assertCloneDataUnlabeled(cell);
-  assertCloneDataUnlabeled(value);
+  const sourceSpace = cell?.space;
+  assertCloneDataUnlabeled(cell, sourceSpace);
+  assertCloneDataUnlabeled(value, sourceSpace);
   if (
     value === null || typeof value !== "object" ||
     value instanceof FabricPrimitive || value instanceof FabricInstance ||

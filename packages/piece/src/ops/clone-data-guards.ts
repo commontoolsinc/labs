@@ -7,13 +7,20 @@
 import {
   type Cell,
   type IExtendedStorageTransaction,
+  type MemorySpace,
 } from "@commonfabric/runner";
-import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
+import {
+  type CfcLabelView,
+  cfcLabelViewForCellFailClosed,
+} from "@commonfabric/runner/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import {
   FabricInstance,
   FabricPrimitive,
 } from "@commonfabric/data-model/fabric-value";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export function cloneCellKey(cell: Cell<unknown>): string {
   const link = cell.getAsNormalizedFullLink();
@@ -49,14 +56,36 @@ export function assertNoCloneFabricInstance(
   }
 }
 
-/** Reject a value copy that would discard Common Fabric Control labels. */
-export function assertCloneDataUnlabeled(carrier: unknown): void {
-  const view = cfcLabelViewForCellFailClosed(carrier);
-  const labeled = view?.entries.some((entry) =>
-    (entry.label.confidentiality?.length ?? 0) > 0 ||
-    (entry.label.integrity?.length ?? 0) > 0
-  );
-  if (labeled) {
+/** Whether a value copy would discard a meaningful Common Fabric Control label. */
+export function cloneLabelViewProhibitsCrossSpaceCopy(
+  view: CfcLabelView | undefined,
+  sourceSpace: MemorySpace | undefined,
+): boolean {
+  return view?.entries.some((entry) => {
+    const confidentiality = entry.label.confidentiality ?? [];
+    const integrity = entry.label.integrity ?? [];
+    return confidentiality.some((atom) =>
+      sourceSpace === undefined ||
+      !deepEqual(atom, cfcAtom.space(sourceSpace))
+    ) || integrity.some((atom) =>
+      !isObjectOrArray(atom) ||
+      (atom.type !== CFC_ATOM_TYPE.LinkReference &&
+        atom.type !== CFC_ATOM_TYPE.TransformedBy)
+    );
+  }) ?? false;
+}
+
+/** Reject a value copy that would discard a meaningful CFC label. */
+export function assertCloneDataUnlabeled(
+  carrier: unknown,
+  sourceSpace?: MemorySpace,
+): void {
+  if (
+    cloneLabelViewProhibitsCrossSpaceCopy(
+      cfcLabelViewForCellFailClosed(carrier),
+      sourceSpace,
+    )
+  ) {
     throw new Error(
       "piece data with confidentiality or integrity labels cannot be copied " +
         "into another space",
