@@ -5,26 +5,34 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
+
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
-import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
-import { CfHarnessEngine } from "../src/engine.ts";
-import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
-import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
-import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
-import { createHarnessImageAttachment } from "../src/image-attachments.ts";
-import { discoverHarnessSkills } from "../src/skills/registry.ts";
+import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
+import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
 import {
   CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
   type PromptSlotBinding,
 } from "../src/contracts/prompt-slot.ts";
+import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
+import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import {
+  type OpenAIChatCompletionRequest,
+  OpenAICompatibleGatewayClient,
+} from "../src/gateway/openai-client.ts";
+import { createHarnessImageAttachment } from "../src/image-attachments.ts";
+import type { HarnessModelClient } from "../src/model/client.ts";
+import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
+import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
+import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
 import type {
   ProcessRunner,
   ProcessRunRequest,
@@ -37,17 +45,11 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
-import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { discoverHarnessSkills } from "../src/skills/registry.ts";
 import {
-  type OpenAIChatCompletionRequest,
-  OpenAICompatibleGatewayClient,
-} from "../src/gateway/openai-client.ts";
-import type { HarnessRunState } from "../src/run-state.ts";
-import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
-import type { HarnessModelClient } from "../src/model/client.ts";
-import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
-import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
-import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,

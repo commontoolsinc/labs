@@ -29,22 +29,23 @@
  */
 
 import { fromFileUrl } from "@std/path/from-file-url";
+
+// The comparison's two leaf cases. A materialized root is not plain data: at an
+// `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
+// a fabric special object (bytes, an epoch). Neither survives a structural
+// comparison unaided — see `comparableState`.
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
-import { Database } from "@db/sqlite";
+import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   listSpaceStores,
   snapshotSpaceStore,
   spaceStorePath,
 } from "@commonfabric/memory/v2/dump";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { resolveSpaceStoreUrl } from "@commonfabric/memory/v2/storage-path";
-import type { Signer } from "@commonfabric/memory/interface";
-import {
-  type Options,
-  type SessionFactory,
-  StorageManager,
-} from "../../runner/src/storage/v2.ts";
 import {
   type Cell,
   CHIP_UI,
@@ -56,25 +57,21 @@ import {
   TILE_UI,
   UI,
 } from "@commonfabric/runner";
-import {
-  companionFileName,
-  companionSpace,
-  vintageCompanionDir,
-} from "./vintage-layout.ts";
 import type { RuntimeProgram } from "@commonfabric/runner";
-// The comparison's two leaf cases. A materialized root is not plain data: at an
-// `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
-// a fabric special object (bytes, an epoch). Neither survives a structural
-// comparison unaided — see `comparableState`.
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { Database } from "@db/sqlite";
+
+import type { NormalizedFullLink } from "../../runner/src/link-types.ts";
 // Relative into the runner's internals for the same reason as the test
 // utilities below: `getMetaLink` and the link shape it returns are how the
 // runtime itself reaches a root's argument document, and re-deriving that
 // here would be a second spelling to drift.
 import { getMetaLink } from "../../runner/src/link-utils.ts";
-import type { NormalizedFullLink } from "../../runner/src/link-types.ts";
+import {
+  type Options,
+  type SessionFactory,
+  StorageManager,
+} from "../../runner/src/storage/v2.ts";
 // Relative into the runner's test utilities: they are not part of the runner's
 // public exports, and the loopback-server auth handshake has exactly one
 // correct spelling — duplicating it here would be a second copy to drift.
@@ -82,6 +79,11 @@ import {
   TEST_MEMORY_SERVER_AUTH,
   testPrincipalSessionOpenAuthFactory,
 } from "../../runner/test/memory-v2-test-utils.ts";
+import {
+  companionFileName,
+  companionSpace,
+  vintageCompanionDir,
+} from "./vintage-layout.ts";
 
 class LoopbackSessions implements SessionFactory {
   constructor(private readonly server: () => MemoryV2Server.Server) {}

@@ -1,3 +1,7 @@
+import { encodeHex } from "@std/encoding/hex";
+
+import { sha256 } from "@commonfabric/content-hash";
+
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type {
   HarnessAssistantTranscriptMessage,
@@ -6,8 +10,6 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
-import { sha256 } from "@commonfabric/content-hash";
-import { encodeHex } from "@std/encoding/hex";
 
 /**
  * Shared OpenAI Responses API wire mapping.

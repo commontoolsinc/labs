@@ -1,11 +1,9 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
-import {
-  chatViewOfRequest,
-  responsesBodyFromChatFixture,
-} from "./support/responses-fixture.ts";
-
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
+
+import type { HarnessRunArtifacts } from "../src/artifacts.ts";
+import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
 import {
   buildCfHarnessBaseSystemPrompt,
   buildCfHarnessBatchSystemPrompt,
@@ -23,18 +21,20 @@ import {
   resolveCfHarnessCliSystemPrompt,
   runCfHarnessCli,
 } from "../src/cli.ts";
-import { CfHarnessEngine } from "../src/engine.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
+import { HarnessControlError } from "../src/control-errors.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import type { HarnessModelClient } from "../src/model/client.ts";
 import {
   CfHarnessPromptLoop,
   type HarnessPromptLoopResult,
   type RunHarnessPromptOptions,
   type RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
-import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
-import type { HarnessRunArtifacts } from "../src/artifacts.ts";
-import type { HarnessModelClient } from "../src/model/client.ts";
-import { HarnessControlError } from "../src/control-errors.ts";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 
 const ONE_PIXEL_PNG = decodeBase64(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",

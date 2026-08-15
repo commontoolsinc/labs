@@ -1,16 +1,38 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { describe, it } from "@std/testing/bdd";
+
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { entityRefFrom } from "@commonfabric/data-model/cell-rep";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
-import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import {
+  entityIdFrom,
+  Runtime,
+  type RuntimeFetch,
+  runtimePresets,
+  RuntimeTelemetry,
+} from "@commonfabric/runner";
+import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { parseLink } from "../../runner/src/link-utils.ts";
+import * as V2Storage from "../../runner/src/storage/v2.ts";
+import {
+  type CellRef,
+  type CfcLabelView,
+  ClientNotificationType,
+  RequestType,
+} from "../protocol/mod.ts";
 import {
   browserWorkerParamsFromInitializationData,
   renderConfidentialityResolverFor,
@@ -18,27 +40,11 @@ import {
   RuntimeProcessor,
   sanitizeForPostMessage,
 } from "./runtime-processor.ts";
-import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { type RuntimeFetch, runtimePresets } from "@commonfabric/runner";
-import {
-  type CellRef,
-  type CfcLabelView,
-  ClientNotificationType,
-  RequestType,
-} from "../protocol/mod.ts";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
-import { entityRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { entityIdFrom, Runtime, RuntimeTelemetry } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
-import * as V2Storage from "../../runner/src/storage/v2.ts";
-import { parseLink } from "../../runner/src/link-utils.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",

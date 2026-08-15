@@ -1,3 +1,14 @@
+import type { CellScope } from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
+import {
+  type EntityRef,
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { homeSchema } from "@commonfabric/home-schemas";
+import { createSession, Identity, type Session } from "@commonfabric/identity";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import {
   applyPieceSourceTransition,
   type Cell,
@@ -36,36 +47,24 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
+import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
-import type { CellScope } from "@commonfabric/api";
-import { cfcAtom } from "@commonfabric/api/cfc";
-import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   type NameSchema,
   nameSchema,
   pieceListSchema,
 } from "@commonfabric/runner/schemas";
-import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
-import {
-  type EntityRef,
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { createSession, Identity, type Session } from "@commonfabric/identity";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { getLogger } from "@commonfabric/utils/logger";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import { homeSchema } from "@commonfabric/home-schemas";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
+import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
 import {
   getResultCellWithSourceSchema,
   isLegacyPieceRegistryRoot,
 } from "../../../runner/src/piece-helpers.ts";
-import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
 import { pieceId } from "../piece-id.ts";
-import { PieceController } from "./piece-controller.ts";
-import { compileProgram } from "./utils.ts";
 // System space-root pattern refs, their derivation, and the source→URL
 // resolution live in ../system-pattern-url.ts; re-exported here for existing
 // importers.
@@ -75,6 +74,8 @@ import {
   HOME_PATTERN_SOURCE,
   patternSourceUrl,
 } from "../system-pattern-url.ts";
+import { PieceController } from "./piece-controller.ts";
+import { compileProgram } from "./utils.ts";
 export {
   DEFAULT_APP_PATTERN_SOURCE,
   deriveSystemPatternSource,
