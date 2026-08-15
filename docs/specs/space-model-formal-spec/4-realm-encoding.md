@@ -1,0 +1,287 @@
+# Realm-Crossing Encoding for Fabric Values
+
+This document specifies the wire format used to carry fabric values between
+realms over a structured-clone transport — `structuredClone()` and
+`postMessage()` — including the envelope and its marker, the tagged form,
+per-type encodings, the ownership contract on decode, and what the format
+refuses.
+
+## Status
+
+Draft formal spec — the realm-crossing counterpart to
+[3-json-encoding.md](./3-json-encoding.md).
+
+---
+
+## 1. Overview
+
+This format exists for one boundary: worker IPC, where a value is constructed,
+handed to a transport that clones it, decoded on the far side, and discarded.
+It is not a storage format and has no persistence story. A value written down
+for later, or read by something that did not receive it directly, uses the JSON
+encoding.
+
+The two formats divide along what their transports carry. JSON reaches a
+`string`, so every type JavaScript has and JSON lacks — `bigint`, `undefined`,
+the special numbers, bytes, patterns — is written out as tagged text, and a
+`/`-prefixed key in user data has to be escaped clear of the tags. Structured
+cloning carries all of those but `symbol`, and carries them with their types
+intact, so most of a value passes through untouched and tagging is reserved for
+what genuinely needs it.
+
+### 1.1 Transport Requirements
+
+A transport carrying this format must:
+
+1. **Preserve the types** listed in Section 3 as self-representing.
+2. **Preserve shared object references** — one object referenced from many
+   positions must arrive as one object referenced from many positions.
+
+The second is load-bearing rather than incidental: Section 2 rests on it
+entirely. A transport that deep-copies naively, reproducing each reference as a
+fresh object, cannot carry this format at all. The structured clone algorithm
+provides it.
+
+## 2. The Envelope and the Marker
+
+An encoded value is a two-element array:
+
+```
+[marker, tree]
+```
+
+`marker` is an object created by the encoder, and `tree` is the walked value.
+The same `marker` object appears at slot zero of every tagged form within
+`tree` (Section 3).
+
+### 2.1 Detection
+
+A decoder takes the marker from slot zero of the envelope and recognizes every
+tagged form beneath it by **object identity** — `===` against that object.
+Nothing about a tagged form's *shape* distinguishes it from an array the
+payload built for itself, and nothing is meant to: an encoded tree contains
+ordinary arrays and ordinary objects, and identity alone separates the
+encoder's from the payload's.
+
+This is what lets the format do without escaping entirely, where JSON needs
+`/quote`, `/object`, and a reserved-key rule (`3-json-encoding.md` Sections 6
+and 9). There is no reserved key, no reserved shape, and no user data that
+needs rewriting before it reaches the wire.
+
+### 2.2 The Marker
+
+The marker **must be an object**. Identity comparison on a primitive is value
+equality, so a primitive marker would be reproducible by any payload holding
+the same one, and would mark nothing.
+
+The marker **must be minted per encode call**, and must not outlive the call
+that made it. Two facts together are what make an envelope unforgeable from
+within a payload:
+
+- It is **younger than the value**. It is created after the value exists, so
+  nothing already assembled can hold a reference to it — whatever its author
+  has seen of some earlier encoding.
+- It is **confined**. It never leaves the encoder until the call returns,
+  living only in encoder-private state and in the tagged forms the walk is
+  building. Age alone would not settle it, because a value's contents need not
+  all exist when the walk starts: a getter runs mid-walk, after the marker
+  exists. What closes that gap is that such a getter has nowhere to read the
+  marker from.
+
+A marker held across calls fails the first of these. A value may legitimately
+contain a subtree of some *earlier* encoding — the code that assembled it is
+entitled to whatever it has seen — and a copy-on-write walk carries such a
+subtree through unchanged, into a data position. A long-lived marker sitting
+there would be read as an envelope, and user data would decode as a tagged
+value.
+
+The marker must itself be an encodable fabric value, for that same reason: a
+value holding an earlier call's marker has to encode without complaint, being
+ordinary data.
+
+### 2.3 What the Marker Is Not
+
+The marker is **not a secret and not authentication**. Whatever asks for an
+encoding is trusted with the result, and whatever receives a payload is trusted
+to read it. A hostile peer builds its own marker and forges freely — exactly as
+it could always send any tagged value it liked, under any format.
+
+What the marker rules out is *confusion within a payload this encoder
+produced*, which is the escaping problem and the whole of what it is for.
+
+### 2.4 Version
+
+The marker carries a version identifier, `fvr1`, as its contents. Recognition
+never reads it — identity does all the work — so it is there for two other
+purposes: legibility in a debugger, and giving a receiver something to check
+when it wants to know which build wrote a payload.
+
+This is the format's answer to a boundary it does not otherwise control.
+`postMessage()` spans tabs, windows and frames, any of which could pair two
+different deployments, and a receiver that reads the version can refuse a build
+whose encoding it does not understand. A receiver that wants that check
+performs it itself; carrying the version is what makes it possible.
+
+## 3. Type Encodings
+
+### 3.1 Self-Representing Types
+
+Carried by the transport as themselves, with no tag:
+
+`null`, `undefined`, `boolean`, `number` (including `-0`, `NaN`, and
+`±Infinity`), `bigint`, `string`.
+
+Where JSON must tag four of the seven primitive types, this format tags one.
+`symbol` is the exception — the transport refuses it outright — so it crosses
+under a tag like any other value a transport cannot carry directly.
+
+### 3.2 Containers
+
+Arrays and plain objects are carried directly.
+
+- **Array holes need no representation.** Cloning preserves a sparse array's
+  length and its absent indices, so a hole crosses as a hole. There is no
+  counterpart to JSON's `/hole` run-length form.
+- **Keys are visited in their own order**, not sorted. JSON sorts to make its
+  text canonical, which is what lets an encoding be hashed and compared as
+  bytes; nothing here is compared that way, and sorting would force a rebuild
+  of every object.
+- **A `/`-prefixed key is ordinary.** This format reserves no key.
+
+A key this runtime reserves — `__proto__` or `constructor` — is refused on both
+sides, because a rebuild by assignment cannot reproduce one faithfully.
+
+### 3.3 The Tagged Form
+
+A value that a codec claims is encoded as a three-element array:
+
+```
+[marker, tag, state]
+```
+
+`tag` is the wire type tag (`3-json-encoding.md` Section 2 defines the
+`<Type>@<Version>` syntax, which is shared). `state` is the codec's encoded
+state — final for a terminal codec, and itself walked for a nonterminal one.
+
+Three positional slots rather than a container keyed by the tag, because an
+array is the cheapest shape the transport carries: no hash table, and a tag
+string that is the codec's own constant rather than a key built per envelope.
+
+### 3.4 Standard Type Encodings
+
+| Type | Tag | State |
+|---|---|---|
+| `FabricBytes` | `Bytes@1` | `ArrayBuffer` |
+| `FabricHash` | `Hash@1` | `{ tag: string, hash: ArrayBuffer }` |
+| `FabricEpochDays` | `EpochDays@1` | `bigint` |
+| `FabricEpochNsec` | `EpochNsec@1` | `bigint` |
+| `FabricRegExp` | `RegExp@1` | `{ source, flags, flavor }` |
+| `symbol` | `Symbol@1` | `string` (the registry key) |
+
+Bytes travel as a bare `ArrayBuffer` rather than as a view onto one, that being
+what `postMessage()` can *transfer*: a caller assembling a transfer list finds
+the transferable object in the tree rather than having to reach through a view
+and reason about its offset. Both byte-carrying types do this. A bare
+`Uint8Array` is therefore not a form this format emits.
+
+Two of these differ from their JSON counterparts in kind rather than in
+spelling, which is most of the reason this format exists. `FabricBytes` is
+terminal here and carries bytes as bytes, where JSON must represent them as
+base64url text. `FabricRegExp` is terminal here and nonterminal under JSON —
+concrete proof that terminality belongs to the pair (class, format) rather than
+to the class.
+
+Types binding a format-neutral codec — `FabricError`, `UnknownValue`,
+`ProblematicValue`, and every `FabricInstance` — encode the same way under both
+formats, their state being fabric values all the way down.
+
+## 4. Cycles and Shared References
+
+Per Section 1.6 of [1-fabric-values.md](./1-fabric-values.md), an engine must
+state what it does about each. This format:
+
+- **Refuses cycles**, in both directions.
+- **Preserves a shared reference exactly where nothing beneath it needed
+  encoding.**
+
+Neither answer comes from the transport, which would carry either faithfully;
+both come from the walk.
+
+The two directions refuse a cycle differently, for the reason they differ
+everywhere else. Encoding **raises**: the value is a local caller's, and a
+cycle in it is that caller's bug. Decoding **reports**, settled against the
+engine's leniency, because a cycle arriving on a channel is untrusted data like
+any other malformation — and cloning delivers one faithfully, so a peer can
+send one.
+
+Sharing is preserved by copy-on-write rather than by a memo. A subtree needing
+no encoding is returned by identity, so every position that held the one object
+still holds it. Where a shared subtree *does* need encoding, each position
+rebuilds it independently, and the encoding holds two equal objects where the
+value held one — structure a receiver cannot distinguish from two that were
+always distinct.
+
+## 5. Ownership
+
+**`decode()` cedes its input.** The decoder retains what it likes of the tree
+and freezes whatever it retains; a caller must not use the tree afterwards.
+
+Two retentions are deliberate:
+
+1. A subtree needing no decoding is returned by identity rather than rebuilt.
+2. A byte-carrying value **takes over** the `ArrayBuffer` it arrived in rather
+   than copying it.
+
+An `ArrayBuffer` cannot be frozen, which is what makes ceding it a requirement
+rather than a courtesy: sole ownership is the only available defense for a
+value that promises its bytes are immutable.
+
+**A tree carrying bytes decodes exactly once.** Taking a buffer over detaches
+it, so a second decode of the same tree fails where the first succeeded. On the
+boundary this format exists for the restriction costs nothing — the tree is the
+receiver's own clone of a value it will not be handed again, which is the whole
+reason the copy can be elided — but a caller wanting two readings of one
+payload keeps the value it decoded, not the tree it decoded from.
+
+## 6. Refusals
+
+A conforming decoder refuses, reporting each as a malformation settled against
+leniency:
+
+- An envelope that is not a two-element array, or whose slot zero is not an
+  object.
+- A `symbol` or a function met in an untagged position. The transport carries
+  neither, so neither can arrive across the boundary — but a decoder is
+  callable in the realm that built its argument, and what the format never
+  emits is refused wherever it is found.
+- Any other value the transport carries but this format never emits: a bare
+  `Uint8Array`, a `Date`, a `Map`, a `Set`.
+- A key this runtime reserves, per Section 3.2.
+- A tag that is not syntactically a tag, per Section 9 of
+  [1-fabric-values.md](./1-fabric-values.md).
+- A cycle, per Section 4.
+
+A tag that is *syntactically* a tag but that no codec claims is not a refusal:
+it becomes an `UnknownValue` and round-trips, exactly as under JSON
+(`3-json-encoding.md` Section 8).
+
+## 7. Serialization Context Responsibilities
+
+The realm encoding context is responsible for:
+
+- Minting a marker per `encode()` call, per Section 2.2, and building the
+  envelope around the walked tree.
+- Adopting the marker from an envelope's slot zero on decode, after validating
+  the envelope's shape — the one place the decoder takes instruction from the
+  data it is reading.
+- Owning recursion and tag-wrapping around the shallow per-type codecs, as the
+  JSON context does (`3-json-encoding.md` Section 7): tags come from
+  `codec.tagForValue(value)` on encode, and decode routes each tag to its
+  registered codec.
+- Re-wrapping unknown types using the per-instance `wireTypeTag` preserved in
+  `UnknownValue`, and constructing `UnknownValue` for tags with no registered
+  codec.
+- Settling a codec's rejection according to leniency, identically to JSON.
+
+There is no escaping step and no stringify step, both of which the JSON context
+carries.

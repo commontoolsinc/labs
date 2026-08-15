@@ -19,6 +19,9 @@ This spec covers:
 - **JSON encoding** -- the `fvj1:` encoding prefix, the `/<Type>@<Version>`
   wire format for special types, escaping, detection rules, and the `/`-key
   reservation rule
+- **Realm-crossing encoding** -- the wire format for a structured-clone
+  transport: the envelope and the marker that identifies it, per-type
+  encodings, the ownership contract on decode, and what the format refuses
 - **Hashing** (Section 6) -- content-based identity for fabric values
 - **Implementation guidance** (Section 7) -- migration from legacy formats
 
@@ -37,3 +40,7 @@ system, schemas.
   fabric values: the `fvj1:` encoding prefix, `/<Type>@<Version>` tagged
   objects, standard type encodings, detection, escaping, and the `/`-key
   reservation rule.
+- [4-realm-encoding.md](./4-realm-encoding.md) -- The realm-crossing wire
+  format, for `structuredClone()` and `postMessage()`: the `[marker, tree]`
+  envelope, identity-based detection, standard type encodings, cycles and
+  sharing, and the ownership contract that ceding `decode()`'s input carries.
