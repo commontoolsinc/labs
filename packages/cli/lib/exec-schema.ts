@@ -571,6 +571,14 @@ async function resolveImplicitPipedHandlerInput(
     return null;
   }
 
+  // A schema-less input declares no payload, so no piped input exists to
+  // infer: return before consulting stdin at all. Reading it would hold the
+  // advertised bare spelling open until a non-terminal stdin reaches EOF —
+  // a hang whenever the pipe outlives the call.
+  if (isSchemaLessHandlerInput(spec.inputSchema)) {
+    return null;
+  }
+
   const isTerminal = deps.isStdinTerminal?.() ?? Deno.stdin.isTerminal();
   if (isTerminal) {
     return null;

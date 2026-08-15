@@ -585,6 +585,31 @@ describe("resolveParsedExecInput edge cases", () => {
     ).toEqual({});
   });
 
+  it("resolves a bare schema-less handler call without reading piped stdin", async () => {
+    // A rejecting reader proves stdin stays untouched: a schema-less input
+    // declares no payload, so the bare call must not wait on EOF even when
+    // stdin is a pipe.
+    const deps = {
+      isStdinTerminal: () => false,
+      readTextInput: () => Promise.reject(new Error("stdin was read")),
+    };
+
+    const stream = await resolveExecInvocation(
+      makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
+      [],
+      deps,
+    );
+    expect(stream.parsed.verb).toBe("invoke");
+    expect(stream.input).toBeUndefined();
+
+    const unschematized = await resolveExecInvocation(
+      makeSpec("handler", true),
+      [],
+      deps,
+    );
+    expect(unschematized.input).toBeUndefined();
+  });
+
   it("normalizes only object inputs for tools with a string help field", () => {
     const spec = makeSpec("tool", {
       type: "object",
