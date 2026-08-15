@@ -156,7 +156,11 @@ const testStepPeekSchema = internSchema(
     properties: {
       action: { type: "unknown" },
       assertion: { type: "unknown" },
-      event: { type: "unknown" },
+      // The payload is delivered to the stream verbatim, so it is read as
+      // authored. `type: "unknown"` marks a value the traversal must not
+      // descend into, which is right for the classification-only fields
+      // above and wrong here: it drops an object payload to `undefined`.
+      event: true,
       trustedUi: {
         type: "object",
         properties: {
