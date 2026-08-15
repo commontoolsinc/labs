@@ -1,7 +1,8 @@
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { Program } from "@commonfabric/js-compiler";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
+
 import { compilerStack } from "./deferred-compiler-stack.ts";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 /**
  * Per-module content-addressed identity.

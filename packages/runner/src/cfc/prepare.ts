@@ -1,35 +1,41 @@
+import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/api";
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
   type CfcAtom,
   cfcAtom,
 } from "@commonfabric/api/cfc";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import {
+  cloneForMutation,
+  type CloneForMutationResult,
+  FabricPrimitive,
+  isFabricObjectOrArray,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import {
   internSchema,
   internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
-import {
-  FabricPrimitive,
-  isFabricObjectOrArray,
-} from "@commonfabric/data-model/fabric-value";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
-import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
-import {
-  cloneForMutation,
-  type CloneForMutationResult,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
-import type { FabricValue } from "@commonfabric/api";
-import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import {
+  isPrimitiveCellLink,
+  isWriteRedirectLink,
+  parseLink,
+} from "../link-utils.ts";
+import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
+import { ignoreReadForScheduling } from "../scheduler.ts";
 import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
-import { ignoreReadForScheduling } from "../scheduler.ts";
 import type {
   IExtendedStorageTransaction,
   MediaType,
@@ -41,14 +47,6 @@ import {
   isMachineryRead,
   isSchedulerDependencyRead,
 } from "../storage/reactivity-log.ts";
-import {
-  isPrimitiveCellLink,
-  isWriteRedirectLink,
-  parseLink,
-} from "../link-utils.ts";
-import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
-import { encodePointer } from "../../../memory/v2/path.ts";
-import { ContextualFlowControl } from "../cfc.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
   canonicalizeCfcMetadata,
@@ -62,24 +60,15 @@ import {
   normalizeClause,
 } from "./clause.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
-import { externalIngestStamp } from "./external-ingest.ts";
-import {
-  atomsOutsideCeiling,
-  type CfcFloorTrustContext,
-  cfcIntegritySatisfiesFloor,
-  cfcIntegritySatisfiesFloorCoherently,
-  uniqueCfcAtoms,
-} from "./observation.ts";
 import {
   type CfcGrantConsumptionContext,
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
+import { externalIngestStamp } from "./external-ingest.ts";
 import {
   createTxCfcGrantResolver,
   flushCfcGrantConsumptionClaims,
 } from "./grants.ts";
-import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
-import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
 import {
   deriveLabelMetadataTemplateEntries,
   isLabelMetadataTemplateEntry,
@@ -89,18 +78,27 @@ import {
   containsCfcFieldCommitment,
   transformCfcLabelForCrossSpacePersist,
 } from "./label-representation.ts";
-import { createTrustResolver } from "./trust.ts";
+import { cfcLabelViewFromMetadata } from "./label-view-state.ts";
+import {
+  CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
+  CfcSchemaMigrationError,
+} from "./migration-reason.ts";
 import {
   type ReadClassSelection,
   readConsumesEntry,
   type ReadObservationShape,
 } from "./observation-classes.ts";
+import {
+  atomsOutsideCeiling,
+  type CfcFloorTrustContext,
+  cfcIntegritySatisfiesFloor,
+  cfcIntegritySatisfiesFloorCoherently,
+  uniqueCfcAtoms,
+} from "./observation.ts";
+import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
-import {
-  CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
-  CfcSchemaMigrationError,
-} from "./migration-reason.ts";
+import { createTrustResolver } from "./trust.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
@@ -117,6 +115,7 @@ import {
   recordedTrustedEventProvenanceMatchesUiContract,
   uiContractsFromSchema,
 } from "./ui-contract.ts";
+import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
 const INTERNAL_VERIFIER_META = {
   ...ignoreReadForScheduling,

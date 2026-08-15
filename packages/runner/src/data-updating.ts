@@ -1,7 +1,7 @@
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import type { CfcConfClause } from "./cfc/clause.ts";
+import type { JSONSchemaObj } from "@commonfabric/api";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { forEachSubschema } from "./schema-walk.ts";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
 import {
   fabricFromNativeValue,
   type FabricPlainObject,
@@ -9,22 +9,40 @@ import {
   type FabricValue,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
 import { type CellScope, type JSONSchema } from "./builder/types.ts";
-import type { JSONSchemaObj } from "@commonfabric/api";
-import { ContextualFlowControl } from "./cfc.ts";
-import { isCellScope, scopeRank } from "./scope.ts";
-import { createRef } from "./create-ref.ts";
-import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   CellImpl,
   isCell,
   recordRelevantSchemaWritePolicyInput,
 } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
+import { canonicalizeLogicalPath } from "./cfc/canonical.ts";
+import type { CfcConfClause } from "./cfc/clause.ts";
+import {
+  type CfcLabelView,
+  cloneCfcLabelView,
+  getCarriedCfcLabelView,
+} from "./cfc/label-view-state.ts";
+import {
+  type CfcCellLinkRefPayload,
+  linkCfcLabelView,
+} from "./cfc/link-label-view.ts";
+import {
+  readStoredCfcMetadata,
+  storedCfcMetadataAppliesToPath,
+} from "./cfc/metadata.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+  type CfcAddress,
+} from "./cfc/types.ts";
+import { createRef } from "./create-ref.ts";
+import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import { resolveLink } from "./link-resolution.ts";
-import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
@@ -37,43 +55,26 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { findAndInlineDataUriLinks } from "./data-uri.ts";
-import {
-  type CfcCellLinkRefPayload,
-  linkCfcLabelView,
-} from "./cfc/link-label-view.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { resolveSchema, resolveSchemaForValue } from "./schema.ts";
-import type {
-  IExtendedStorageTransaction,
-  IReadOptions,
-} from "./storage/interface.ts";
 import { type Runtime } from "./runtime.ts";
-import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
-import { toURI } from "./uri-utils.ts";
 import {
   allowMutableTransactionRead,
   markReadAsAttemptedWrite,
 } from "./scheduler.ts";
+import { forEachSubschema } from "./schema-walk.ts";
+import { resolveSchema, resolveSchemaForValue } from "./schema.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import type {
+  IExtendedStorageTransaction,
+  IReadOptions,
+} from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
-import {
-  readStoredCfcMetadata,
-  storedCfcMetadataAppliesToPath,
-} from "./cfc/metadata.ts";
-import { canonicalizeLogicalPath } from "./cfc/canonical.ts";
-import {
-  type CfcLabelView,
-  cloneCfcLabelView,
-  getCarriedCfcLabelView,
-} from "./cfc/label-view-state.ts";
-import {
-  CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
-  type CfcAddress,
-} from "./cfc/types.ts";
-import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
+import { toURI } from "./uri-utils.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,

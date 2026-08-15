@@ -1,7 +1,8 @@
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { CfcAtom } from "@commonfabric/api/cfc";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isObjectNotArray } from "@commonfabric/utils/types";
+
 import { type AtomPattern, matchAtomPattern } from "./atom-pattern.ts";
 
 /**

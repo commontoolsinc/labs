@@ -1,10 +1,11 @@
 import type { ProgramResolver, Source } from "@commonfabric/js-compiler";
-import { compilerStack } from "./deferred-compiler-stack.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+
 import {
   loadVerifiedSourceClosure,
   type SourceDoc,
 } from "../compilation-cache/cell-cache.ts";
+import { resolveFabricRefToIdentity } from "../fabric-ref-resolution.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import {
   parseFabricRef,
@@ -14,7 +15,7 @@ import {
   FABRIC_MOUNT_ROOT,
   type FabricMount,
 } from "../sandbox/module-record-compiler.ts";
-import { resolveFabricRefToIdentity } from "../fabric-ref-resolution.ts";
+import { compilerStack } from "./deferred-compiler-stack.ts";
 import type { FabricImportOptions, ResolvedFabricPin } from "./types.ts";
 
 const MAX_FABRIC_MOUNTS = 32;

@@ -1,8 +1,9 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { CfcConfClause } from "./clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import type { CfcConfClause } from "./clause.ts";
 import {
   CLASSIFIED_KIND_FAMILIES,
   classifyAtomField,

@@ -1,8 +1,3 @@
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import type { EntityKind } from "../entity-kind.ts";
-import type { PatternBuilder } from "./pattern.ts";
-import type { NormalizedFullLink } from "../link-types.ts";
-
 import type {
   ActionFunction,
   AsCell,
@@ -67,15 +62,20 @@ import type {
   WhenFunction,
   WishFunction,
 } from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
 import { toSchema } from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+
 import type { ImplementationIdentity } from "../cfc/types.ts";
-import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
+import type { EntityKind } from "../entity-kind.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
+import { type Runtime } from "../runtime.ts";
 import {
   type IExtendedStorageTransaction,
   type MemorySpace,
 } from "../storage/interface.ts";
-import { type Runtime } from "../runtime.ts";
+import type { PatternBuilder } from "./pattern.ts";
+import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 
 // Define runtime constants here - actual runtime values
 

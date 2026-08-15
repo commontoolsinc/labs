@@ -1,11 +1,13 @@
 import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
-import { type Runtime } from "../runtime.ts";
-import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { MemorySpace } from "../storage/interface.ts";
-import type { URI } from "../sigil-types.ts";
 import { parseFabricUrl } from "../fabric-url.ts";
+import { type Runtime } from "../runtime.ts";
+import { type Action } from "../scheduler.ts";
+import type { URI } from "../sigil-types.ts";
 import { slugIdForSpace } from "../slugs.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../storage/interface.ts";
 
 /**
  * cellFromUrl({ url, hosts }) — the cell a URL names, if it names one.

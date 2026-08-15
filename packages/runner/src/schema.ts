@@ -1,52 +1,18 @@
 import { AnyCellWrapping } from "@commonfabric/api";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { getLogger } from "@commonfabric/utils/logger";
-import {
-  isObjectNotArray,
-  isObjectOrArray,
-  isReadonlyObjectOrArray,
-} from "@commonfabric/utils/types";
-import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
-import {
-  cloneIfNecessary,
-  type FabricValue,
-  shallowMutableClone,
-} from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
+  cloneIfNecessary,
   FabricInstance,
   FabricPrimitive,
+  type FabricValue,
+  shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
-import { createCell, isCell } from "./cell.ts";
-import { canFollowScopedLink } from "./scope.ts";
-import { forEachSubschema } from "./schema-walk.ts";
-import { arrayMatchesPositionally } from "./schema-match.ts";
-import {
-  readMaybeLink,
-  resolveLink,
-  undefinedDataLink,
-} from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
-import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
-import { type Runtime } from "./runtime.ts";
-import {
-  type IMemorySpaceValueAddress,
-  type NormalizedFullLink,
-} from "./link-utils.ts";
-import {
-  createQueryResultProxy,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { toCell } from "./back-to-cell.ts";
-import { materializeSchemaView } from "./schema-view.ts";
 import {
   canBranchMatch,
   combineOptionalSchema,
@@ -57,9 +23,19 @@ import {
   mergeSchemaFlags,
   SchemaObjectTraverser,
 } from "@commonfabric/runner/traverse";
-import { ignoreReadForScheduling } from "./scheduler.ts";
-import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  isObjectNotArray,
+  isObjectOrArray,
+  isReadonlyObjectOrArray,
+} from "@commonfabric/utils/types";
+
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import { toCell } from "./back-to-cell.ts";
+import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
+import { createCell, isCell } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import {
   type CfcLabelView,
   cfcLabelViewForDereference,
@@ -68,12 +44,34 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import type { CfcAddress } from "./cfc/types.ts";
-import { isCellScope } from "./scope.ts";
+import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
+import type { CfcAddress } from "./cfc/types.ts";
+import {
+  readMaybeLink,
+  resolveLink,
+  undefinedDataLink,
+} from "./link-resolution.ts";
+import {
+  type IMemorySpaceValueAddress,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
+import {
+  createQueryResultProxy,
+  isCellResultForDereferencing,
+} from "./query-result-proxy.ts";
+import { type Runtime } from "./runtime.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
+import { arrayMatchesPositionally } from "./schema-match.ts";
+import { materializeSchemaView } from "./schema-view.ts";
+import { forEachSubschema } from "./schema-walk.ts";
+import { canFollowScopedLink, isCellScope } from "./scope.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
+import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import { internalVerifierRead } from "./storage/reactivity-log.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,

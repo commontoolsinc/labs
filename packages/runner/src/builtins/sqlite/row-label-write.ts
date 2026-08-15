@@ -21,25 +21,26 @@
 //
 // Zero cost when no table declares a rule.
 
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   evaluateRowLabel,
   type RowLabelSpec,
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
-import type { CfcConfClause } from "../../cfc/clause.ts";
-import type { CfcAtom } from "@commonfabric/api/cfc";
-import {
-  type SqliteDbRef,
-  tableDeclaresRowLabel,
-} from "@commonfabric/memory/v2";
-import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 import {
   blankWriteSql,
   parseUpdateSetColumns,
   parseWriteParamColumns,
   parseWriteTable,
 } from "@commonfabric/memory/sqlite/write-targets";
+import {
+  type SqliteDbRef,
+  tableDeclaresRowLabel,
+} from "@commonfabric/memory/v2";
+
+import type { CfcConfClause } from "../../cfc/clause.ts";
+import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 
 /** One written row's computed label — recorded as the write's CFC policy
  *  input (sink-request) before the commit. */

@@ -1,10 +1,9 @@
 #!/usr/bin/env -S deno run -A
 
-import { deepEqual, Runtime } from "@commonfabric/runner";
 import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type JSONSchema } from "@commonfabric/runner";
 import { env } from "@commonfabric/integration";
+import { deepEqual, type JSONSchema, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 const { API_URL } = env;
 
 // Create test identity

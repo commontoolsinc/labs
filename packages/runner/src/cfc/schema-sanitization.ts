@@ -5,8 +5,8 @@ import {
   type JSONSchema,
   type JSONValue,
 } from "@commonfabric/api";
-import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import {
   cloneIfNecessary,
   type FabricPlainObject,
@@ -15,17 +15,24 @@ import {
   isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import { isSubschema } from "../schema-walk.ts";
 import {
   hasOwnEnumerableDataProperty,
   isCellKind,
   isSchemaScope,
 } from "../scope.ts";
-import { isSubschema } from "../schema-walk.ts";
+import type { CfcConfClause } from "./clause.ts";
+import { clauseAlternatives, isOrClause } from "./clause.ts";
+import {
+  DEFAULT_EXCHANGE_FUEL,
+  evaluateExchangeRules,
+} from "./exchange-eval.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
+import { buildCfcPolicySnapshot } from "./policy.ts";
 import {
   cfcSchemaChildRoot,
   isEmbeddedCfcSchemaRef,
@@ -33,12 +40,6 @@ import {
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "./schema-refs.ts";
-import {
-  DEFAULT_EXCHANGE_FUEL,
-  evaluateExchangeRules,
-} from "./exchange-eval.ts";
-import { buildCfcPolicySnapshot } from "./policy.ts";
-import { clauseAlternatives, isOrClause } from "./clause.ts";
 import {
   MATERIAL_RISK_DISCHARGE_KINDS,
   MATERIAL_RISK_DISCHARGE_POLICY,

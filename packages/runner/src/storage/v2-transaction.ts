@@ -1,27 +1,31 @@
+import type { FabricValue } from "@commonfabric/api";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import type {
   CommitPrecondition,
   PatchOp,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { getLogger } from "@commonfabric/utils/logger";
+import { PathKeyMap } from "@commonfabric/utils/path-key-map";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+
+import {
+  patchOpIsStructural,
+  patchOpPointerFields,
+} from "../../../memory/v2/patch.ts";
 import {
   encodePointer,
   parsePointer,
   pathsOverlap,
 } from "../../../memory/v2/path.ts";
-import {
-  patchOpIsStructural,
-  patchOpPointerFields,
-} from "../../../memory/v2/patch.ts";
-import { PathKeyMap } from "@commonfabric/utils/path-key-map";
-import type { FabricValue } from "@commonfabric/api";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
+import type { CellScope } from "../builder/types.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type {
   Activity,
   ChangeGroup,
@@ -59,6 +63,31 @@ import type {
 } from "./interface.ts";
 import { createReadOnlyTransactionError } from "./interface.ts";
 import {
+  buildMergeableIntent,
+  foldMergeableIntent,
+  isNoopMergeableDelta,
+  type MergeableBuildContext,
+  type MergeableOpDelta,
+  type MergeableOpIntent,
+  mergeableOpPayloadContains,
+  type OpSuppression,
+} from "./mergeable-ops.ts";
+import {
+  ignoreReadForCommit,
+  isMutableTransactionReadAllowed,
+  isReadIgnoredForScheduling,
+  isReadMarkedAsAttemptedWrite,
+  isUiInputBlindWriteTx,
+  registerCommitRejectionListener,
+  takeCoverageWaits,
+} from "./reactivity-log.ts";
+import {
+  ReadOnlyAddressError,
+  TransactionAborted,
+  TransactionCompleteError,
+  WriteIsolationError,
+} from "./transaction-errors.ts";
+import {
   claim,
   load as loadInline,
   read as readAttestation,
@@ -69,37 +98,9 @@ import {
   getValueTypeName,
   isContainerValue,
 } from "./transaction/mutable-path-write.ts";
-import {
-  ReadOnlyAddressError,
-  TransactionAborted,
-  TransactionCompleteError,
-  WriteIsolationError,
-} from "./transaction-errors.ts";
-import {
-  ignoreReadForCommit,
-  isMutableTransactionReadAllowed,
-  isReadIgnoredForScheduling,
-  isReadMarkedAsAttemptedWrite,
-  isUiInputBlindWriteTx,
-  registerCommitRejectionListener,
-  takeCoverageWaits,
-} from "./reactivity-log.ts";
-import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
-import {
-  buildMergeableIntent,
-  foldMergeableIntent,
-  isNoopMergeableDelta,
-  type MergeableBuildContext,
-  type MergeableOpDelta,
-  type MergeableOpIntent,
-  mergeableOpPayloadContains,
-  type OpSuppression,
-} from "./mergeable-ops.ts";
+import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
-import { normalizeCellScope } from "../scope.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import type { CellScope } from "../builder/types.ts";
 
 type RootAttestation = IAttestation;
 
