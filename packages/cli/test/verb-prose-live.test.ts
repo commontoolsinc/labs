@@ -92,6 +92,23 @@ const PROGRAM = {
       "  node: Node;",
       "}",
       "",
+      "interface Cat {",
+      "  /** How loud it is. */",
+      "  meow: string;",
+      "  kind: 'cat';",
+      "}",
+      "",
+      "interface Dog {",
+      "  /** How deep it is. */",
+      "  woof: string;",
+      "  kind: 'dog';",
+      "}",
+      "",
+      "interface ClassifyEvent {",
+      "  /** The animal to file. */",
+      "  pet: Cat | Dog;",
+      "}",
+      "",
       "interface RenameEvent { title: string; }",
       "",
       "interface Out {",
@@ -103,6 +120,8 @@ const PROGRAM = {
       "  annotate: Stream<AddEvent>;",
       "  /** Graft a subtree onto the board. */",
       "  graft: Stream<GraftEvent>;",
+      "  /** File an animal by its kind. */",
+      "  classify: Stream<ClassifyEvent>;",
       "  rename: Stream<RenameEvent>;",
       "}",
       "",
@@ -123,10 +142,15 @@ const PROGRAM = {
       "        event.node.children.map((child) => child.label).join(','),",
       "    );",
       "  });",
+      "  const classify = action((event: ClassifyEvent) => {",
+      "    items.push(",
+      "      event.pet.kind === 'cat' ? event.pet.meow : event.pet.woof,",
+      "    );",
+      "  });",
       "  const rename = action((event: RenameEvent) => {",
       "    items.set([event.title]);",
       "  });",
-      "  return { items, add, annotate, graft, rename };",
+      "  return { items, add, annotate, graft, classify, rename };",
       "});",
     ].join("\n"),
   }],
@@ -377,6 +401,35 @@ describe("an author's verb prose reaching a caller", () => {
       }
     });
 
+    it("carries prose out of the arms of a union the served side flattened", async () => {
+      const live = await runLivePiece("verb-prose-listing-union");
+      try {
+        // `pet: Cat | Dog` is `anyOf` on the declared side and a single merged
+        // object on the served one — the handler reads both arms' fields, so
+        // the read carries `meow` and `woof` side by side with no combinator
+        // at all. Neither field's prose is reachable from the position: it
+        // lives inside whichever arm declares it, one reference further in.
+        //
+        // This is the case a walk that only pairs `properties` key-for-key
+        // cannot reach even with reference following, because there is no
+        // matching key to follow from.
+        const row = verbRow(await verbsJson(live), "classify");
+        expect(row.inputSchema).toMatchObject({
+          properties: {
+            pet: {
+              description: "The animal to file.",
+              properties: {
+                meow: { description: "How loud it is." },
+                woof: { description: "How deep it is." },
+              },
+            },
+          },
+        });
+      } finally {
+        await live.dispose();
+      }
+    });
+
     it("leaves a served reference as a reference and its definition untouched", async () => {
       const live = await runLivePiece("verb-prose-listing-ref-shape");
       try {
@@ -477,6 +530,25 @@ describe("an author's verb prose reaching a caller", () => {
           .toMatchObject({
             properties: {
               details: { properties: { note: { description: NESTED_PROSE } } },
+            },
+          });
+      } finally {
+        await live.dispose();
+      }
+    });
+
+    it("carries prose out of the arms of a union the served side flattened", async () => {
+      const live = await runLivePiece("verb-prose-help-json-union");
+      try {
+        expect((await callHelpJson(live, "classify")).inputSchema)
+          .toMatchObject({
+            properties: {
+              pet: {
+                properties: {
+                  meow: { description: "How loud it is." },
+                  woof: { description: "How deep it is." },
+                },
+              },
             },
           });
       } finally {

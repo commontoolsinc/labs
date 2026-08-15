@@ -2001,7 +2001,7 @@ function handlerVerbResults(
  * What a pattern's own result schema says a verb is for, and what its event
  * fields mean — the author's doc comments, as the compiler lowered them.
  */
-interface DeclaredVerbProse {
+export interface DeclaredVerbProse {
   /**
    * The doc comment on the property declaring the verb: what the verb DOES.
    * A sibling of the property's `$ref`, and never a statement about the event
@@ -2037,8 +2037,13 @@ interface DeclaredVerbProse {
  * The `$defs` live at the result schema's ROOT while the `$ref` sits on the
  * property, so the root is passed explicitly. Resolving the property alone
  * would consult a document that carries no definitions at all.
+ *
+ * Exported for the direct tests in `test/verb-prose-overlay.test.ts`, alongside
+ * `withDeclaredFieldProse`: the two are the pure halves of this feature, and a
+ * result schema holding a boolean property or an unresolvable reference is
+ * reachable by construction and not by compiling a pattern.
  */
-function declaredVerbProse(
+export function declaredVerbProse(
   pattern: { resultSchema?: unknown } | null | undefined,
 ): Map<string, DeclaredVerbProse> {
   const prose = new Map<string, DeclaredVerbProse>();
@@ -2083,29 +2088,47 @@ interface DescriptionEdit {
 
 /**
  * `served` with `description` annotations filled in from `declared` wherever it
- * has none, at every position the two documents share — following a `$ref` on
- * either side to find one.
+ * has none.
+ *
+ * THE POSITIONS IT WALKS, enumerated rather than summarized, because the
+ * summary is the part a reader would otherwise have to take on trust:
+ *
+ * - `properties`, by key.
+ * - `items` in its single-schema form, and in its positional array form.
+ * - `prefixItems`, by index.
+ * - the members of `allOf`, `anyOf` and `oneOf`.
+ *
+ * It follows a `$ref` on either side to reach any of those. Everything else a
+ * JSON Schema can hold is NOT walked and keeps whatever prose it arrived with:
+ * `additionalProperties`, `patternProperties`, `propertyNames`, `contains`,
+ * `not`, `if`/`then`/`else`, `dependentSchemas`, and `unevaluated*`.
  *
  * ANNOTATIONS ONLY, and that bound is the point rather than a simplification.
  * The two schemas disagree about shape by construction, not by accident:
  * `served` is the handler's read of the event, narrowed to what its body
  * touches, while `declared` is the event TYPE the pattern's result publishes.
- * A field declared and never read appears in one and not the other. Copying a
- * `description` cannot change which payloads pass, so this can never make the
+ * A field declared and never read appears in one and not the other; a union the
+ * declared side spells as `anyOf` can arrive flattened into one object. Copying
+ * a `description` cannot change which payloads pass, so this can never make the
  * served schema disagree with the dispatch it governs. Copying anything else
  * could, which is why nothing else is copied and no position is ADDED: a key
- * absent from `served` stays absent, a `$ref` is never inlined, and a page
- * never offers a flag the handler does not read.
+ * absent from `served` stays absent, a `$ref` is never inlined, a combinator is
+ * never flattened, and a page never offers a flag the handler does not read.
  *
  * The root description is never taken. It belongs to the verb, not to the
  * event object, and it travels as the spec's own `description`.
  *
- * The bound on what this reaches: a position is filled only where the walk can
- * put the two documents side by side. A served `$ref` naming a definition the
- * served root does not carry stops the descent there, as does a declared `$ref`
- * that does not resolve — those subtrees keep whatever prose they already had.
+ * Two more bounds worth stating. A served `$ref` naming a definition the served
+ * root does not carry stops the descent there, as does a declared `$ref` that
+ * does not resolve. And where the served side spells a combinator the declared
+ * side does not, the branches are offered the declared node as a whole and no
+ * branch takes its description — a disjunction's arms are alternatives, and one
+ * sentence written across all of them would describe each of them wrongly.
+ *
+ * Exported for the direct tests in `test/verb-prose-overlay.test.ts`, which
+ * reach the degenerate schema shapes a compiled pattern does not produce.
  */
-function withDeclaredFieldProse(
+export function withDeclaredFieldProse(
   served: JSONSchema | true,
   declared: JSONSchema | undefined,
 ): JSONSchema | true {
@@ -2195,18 +2218,22 @@ function collectDescriptionEdits(
 ): void {
   const { served, servedRoot, declaredRoot } = pair;
   if (!isObjectOrArray(served)) return;
-  // Only the declared side is resolved through: it is read, never emitted, so
-  // inlining it costs the served shape nothing.
-  const declared = isObjectOrArray(pair.declared) &&
-      typeof pair.declared.$ref === "string"
-    ? resolveCfcSchemaRefs(pair.declared, declaredRoot)
-    : pair.declared;
-  if (!isObjectOrArray(declared)) return;
+  // Every declared node that can describe this position: the node itself and,
+  // transitively, the members of any combinator it carries. A union the
+  // declared side spells as `anyOf` can arrive on the served side flattened
+  // into one object, and then a field's prose is inside whichever arm declares
+  // it — reachable only by asking the arms.
+  const candidates = declaredCandidates(pair.declared, declaredRoot);
+  if (candidates.length === 0) return;
+  const declared = candidates[0];
 
   if (
     fillOwnDescription && served.description === undefined &&
     typeof declared.description === "string"
   ) {
+    // From the position's own node, never from an arm of a combinator on it: an
+    // arm describes one alternative, and promoting that to describe the whole
+    // position would state something the author did not.
     edits.push({
       path: [...path, "description"],
       description: declared.description,
@@ -2238,60 +2265,172 @@ function collectDescriptionEdits(
     return;
   }
 
-  const childPair = (
+  const descend = (
     servedChild: JSONSchema,
     declaredChild: JSONSchema | undefined,
-  ): ProsePair | undefined =>
-    declaredChild === undefined ? undefined : {
-      served: servedChild,
-      declared: declaredChild,
-      servedRoot,
-      declaredRoot,
-    };
+    childPath: readonly string[],
+    fillChildDescription: boolean,
+  ): void => {
+    if (declaredChild === undefined) return;
+    collectDescriptionEdits(
+      {
+        served: servedChild,
+        declared: declaredChild,
+        servedRoot,
+        declaredRoot,
+      },
+      childPath,
+      fillChildDescription,
+      edits,
+      visitedDefinitions,
+    );
+  };
 
-  if (
-    isObjectOrArray(target.properties) && isObjectOrArray(declared.properties)
-  ) {
-    const declaredProperties = declared.properties as Record<
-      string,
-      JSONSchema
-    >;
+  /** The first candidate that offers something at this position. */
+  const fromCandidates = <T>(
+    pick: (candidate: Record<string, unknown>) => T | undefined,
+  ): T | undefined => {
+    for (const candidate of candidates) {
+      const found = pick(candidate);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+
+  if (isObjectOrArray(target.properties)) {
     for (
       const [key, child] of Object.entries(
         target.properties as Record<string, JSONSchema>,
       )
     ) {
-      const next = childPair(child, declaredProperties[key]);
-      if (next === undefined) continue;
-      collectDescriptionEdits(
-        next,
+      descend(
+        child,
+        fromCandidates((candidate) =>
+          isObjectOrArray(candidate.properties)
+            ? (candidate.properties as Record<string, JSONSchema>)[key]
+            : undefined
+        ),
         [...targetPath, "properties", key],
         true,
-        edits,
-        visitedDefinitions,
       );
     }
   }
 
-  // An array's element schema, so a documented field inside a list of objects
-  // keeps its prose. Tuple `items` (an array of schemas) needs no case of its
-  // own: `isObjectOrArray` admits it, and the recursion then finds no
-  // `properties` on either side and records nothing.
-  if (target.items !== undefined && declared.items !== undefined) {
-    const next = childPair(
+  // `items` in its single-schema form: one element schema for the whole array,
+  // so a documented field inside a list of objects keeps its prose.
+  if (target.items !== undefined && !Array.isArray(target.items)) {
+    descend(
       target.items as JSONSchema,
-      declared.items as JSONSchema,
+      fromCandidates((candidate) =>
+        candidate.items !== undefined && !Array.isArray(candidate.items)
+          ? candidate.items as JSONSchema
+          : undefined
+      ),
+      [...targetPath, "items"],
+      true,
     );
-    if (next !== undefined) {
-      collectDescriptionEdits(
-        next,
-        [...targetPath, "items"],
+  }
+
+  // Positional element schemas: `prefixItems`, and the array form of `items`
+  // that predates it. Paired by index against the same keyword, which is the
+  // only correspondence a tuple has — position IS its identity.
+  for (const keyword of ["prefixItems", "items"] as const) {
+    const servedList = target[keyword];
+    if (!Array.isArray(servedList)) continue;
+    const declaredList = fromCandidates((candidate) =>
+      Array.isArray(candidate[keyword])
+        ? candidate[keyword] as JSONSchema[]
+        : undefined
+    );
+    if (declaredList === undefined) continue;
+    const shared = Math.min(servedList.length, declaredList.length);
+    for (let index = 0; index < shared; index++) {
+      descend(
+        servedList[index] as JSONSchema,
+        declaredList[index],
+        [...targetPath, keyword, String(index)],
         true,
-        edits,
-        visitedDefinitions,
       );
     }
   }
+
+  // Combinator members. `allOf` is included deliberately, and the refusal to
+  // prove a container through a conjunction elsewhere in the tree does not
+  // carry here: that refusal is about PROOF, which needs the members combined
+  // the way the specification says, and this is annotation. A value satisfies
+  // every conjunct, so a description on any conjunct describes the value.
+  //
+  // Members pair by index when both sides spell the same keyword with the same
+  // arity. Otherwise each served member is offered the declared node whole, and
+  // takes no description of its own from it — a disjunction's arms are
+  // alternatives, and one sentence copied onto all of them describes each
+  // wrongly, while a field nested inside an arm is still worth reaching.
+  for (const keyword of COMBINATOR_KEYWORDS) {
+    const servedMembers = target[keyword];
+    if (!Array.isArray(servedMembers)) continue;
+    const declaredMembers = fromCandidates((candidate) =>
+      Array.isArray(candidate[keyword]) &&
+        (candidate[keyword] as unknown[]).length === servedMembers.length
+        ? candidate[keyword] as JSONSchema[]
+        : undefined
+    );
+    for (let index = 0; index < servedMembers.length; index++) {
+      descend(
+        servedMembers[index] as JSONSchema,
+        declaredMembers === undefined ? declared : declaredMembers[index],
+        [...targetPath, keyword, String(index)],
+        declaredMembers !== undefined,
+      );
+    }
+  }
+}
+
+/** The combinator keywords the walk descends, in a fixed order. */
+const COMBINATOR_KEYWORDS = ["allOf", "anyOf", "oneOf"] as const;
+
+/**
+ * Every declared node that can describe one position: the node itself, plus —
+ * transitively — the members of any combinator it carries, each with its
+ * references followed. The node itself is always first, so a caller wanting
+ * only the position's own account can take `[0]`.
+ *
+ * Flattening the combinator is what lets a served side that spells a union as
+ * one merged object still find each field's prose, which lives in whichever arm
+ * declares it. Nothing here is written back: these are read to look a position
+ * up, and the served document keeps its own shape.
+ *
+ * Terminates on a cycle two ways over, because either alone can be defeated: a
+ * followed reference is recorded by its pointer string, and a resolved node by
+ * its identity. Identity alone is not enough, since `resolveCfcSchemaRefs` only
+ * interns when its input is deep-frozen and hands back a fresh object
+ * otherwise.
+ */
+function declaredCandidates(
+  declared: JSONSchema | undefined,
+  declaredRoot: JSONSchema,
+): Record<string, unknown>[] {
+  const candidates: Record<string, unknown>[] = [];
+  const seenNodes = new Set<unknown>();
+  const seenRefs = new Set<string>();
+  const visit = (node: JSONSchema | undefined): void => {
+    if (node === undefined || !isObjectOrArray(node)) return;
+    let resolved: JSONSchema | undefined = node;
+    if (typeof node.$ref === "string") {
+      if (seenRefs.has(node.$ref)) return;
+      seenRefs.add(node.$ref);
+      resolved = resolveCfcSchemaRefs(node, declaredRoot);
+    }
+    if (!isObjectOrArray(resolved) || seenNodes.has(resolved)) return;
+    seenNodes.add(resolved);
+    candidates.push(resolved);
+    for (const keyword of COMBINATOR_KEYWORDS) {
+      const members = resolved[keyword];
+      if (!Array.isArray(members)) continue;
+      for (const member of members) visit(member as JSONSchema);
+    }
+  };
+  visit(declared);
+  return candidates;
 }
 
 /**
@@ -2316,21 +2455,36 @@ function applyDescriptionEdits(
  * ever fills a hole — it cannot overwrite an author's own words, and a path
  * whose interior has since been rewritten by an earlier edit still lands, since
  * each edit reads the document the previous one produced.
+ *
+ * An array along the way is copied as an array. A combinator member and a tuple
+ * position are addressed by index, and object-spreading a list to replace one
+ * would hand back `{"0": …, "1": …}` — a served `anyOf` silently turned into
+ * something no reader of it expects.
+ *
+ * It carries no guard against a path that addresses nothing, because there is
+ * no such path to guard against: `collectDescriptionEdits` builds every one by
+ * walking this document, and an edit only ever ADDS a `description` key, which
+ * leaves every other path it recorded still addressing what it addressed. That
+ * invariant is the precondition — a caller assembling a path any other way owes
+ * its own check.
  */
 function writeDescriptionAt(
   node: JSONSchema,
   path: readonly string[],
   description: string,
 ): JSONSchema {
-  if (!isObjectOrArray(node) || path.length === 0) return node;
   const [head, ...rest] = path;
-  if (rest.length === 0) {
-    return { ...node, [head]: description } as JSONSchema;
+  const value: unknown = rest.length === 0 ? description : writeDescriptionAt(
+    (node as Record<string, JSONSchema>)[head],
+    rest,
+    description,
+  );
+  if (Array.isArray(node)) {
+    const copy = [...node] as unknown[];
+    copy[Number(head)] = value;
+    return copy as unknown as JSONSchema;
   }
-  const child = (node as Record<string, JSONSchema>)[head];
-  const updated = writeDescriptionAt(child, rest, description);
-  if (updated === child) return node;
-  return { ...node, [head]: updated } as JSONSchema;
+  return { ...(node as object), [head]: value } as JSONSchema;
 }
 
 /** One verb's declared result, matched through the piece's compiled pattern.

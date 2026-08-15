@@ -287,14 +287,21 @@ page renders flags from, at the positions that schema already has.
 
 **Which means walking two documents that agree about almost nothing
 structurally.** The same field can be a `$ref` in one and an inline object in
-the other, and which it is depends on what the handler body happens to read — so
-a walk that steps through `properties` key-for-key finds a bare `$ref` on one
-side, no `properties` under it, and stops one level short of the prose. Both
-sides' references are followed for that reason. A served reference is followed
-without being inlined: it names a definition several positions can share, and a
-caller's tooling reads that shape. A field's own prose is therefore written
-where the field is, never into the definition it points at, which would
-attribute one position's sentence to every other holder of the same type.
+the other, and a union the declared side spells as `anyOf` can arrive as one
+merged object — which of these happens depends on what the handler body reads.
+So a walk that steps through `properties` key-for-key finds a bare `$ref` on one
+side with no `properties` under it, or a field whose prose is inside an arm that
+no longer exists on the other side, and stops short of the words in both cases.
+
+Both sides' references are followed for that reason, and a declared combinator
+is read through to its members. A served reference is followed *without* being
+inlined, and a served combinator is never flattened: a caller's tooling reads
+that shape, and a definition several positions share is not one position's to
+rewrite. A field's own prose is therefore written where the field is, never into
+the definition it points at — which would attribute one position's sentence to
+every other holder of the same type. The precise list of positions the fold
+walks is on `withDeclaredFieldProse` (`packages/cli/lib/piece.ts`), enumerated
+rather than summarized, along with the keywords it leaves alone.
 
 **Folded in, never substituted.** The two documents disagree about shape, by
 construction: the declared type is what a caller may send, the read schema is
