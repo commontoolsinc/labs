@@ -84,18 +84,6 @@ import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
  * readily as through a container.
  */
 export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
-  /**
-   * Containers whose decoding is in progress, or `undefined` outside a decode.
-   *
-   * A field rather than a threaded argument because `decodeValue()` takes only
-   * the data and the context, so a decode walk has nowhere to carry state --
-   * the encode walk gets its `seen` from `encodeValue()`. A walk is
-   * synchronous and does not re-enter, so one field per instance is enough,
-   * and {@link #decode} clears it however the walk ends. The `TODO(danfuzz)`
-   * below is where this belongs once the base carries walk state.
-   */
-  #decodeSeen: Set<object> | undefined;
-
   //
   // Instance members
   //
@@ -138,18 +126,10 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     data: RealmCodecValue,
     context: ReconstructionContext,
   ): FabricValue {
-    // Saved and restored rather than set and cleared, so that a decode reached
-    // from inside another one -- a codec calling back through the public entry
-    // point -- cannot leave the outer walk without its set.
-    const outer = this.#decodeSeen;
-
-    this.#decodeSeen = new Set();
-
-    try {
-      return this.decodeValue(data, context);
-    } finally {
-      this.#decodeSeen = outer;
-    }
+    // A set is started here because this format's transport is the tree
+    // itself, so a peer can hand one over with a cycle in it. `JsonCodecEngine`
+    // starts none, its input being the product of a parse.
+    return this.decodeValue(data, context, new Set());
   }
 
   /** @inheritDoc */
@@ -250,55 +230,63 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     return result ?? (value as RealmCodecValue);
   }
 
-  /** @inheritDoc */
+  /**
+   * @inheritDoc
+   *
+   * Every object node goes through the guard, whichever arm then takes it. The
+   * tagged form needs it as much as a container does: `decodeTagged()` walks
+   * the state again for a nonterminal codec, for a tag no codec claims, and
+   * for a tag that is not one, so a `Map` graph can close a cycle without a
+   * single plain container in it, and cloning carries such a graph faithfully.
+   */
   protected override decodeValue(
     data: RealmCodecValue,
     context: ReconstructionContext,
+    seen?: Set<object>,
   ): FabricValue {
-    const unwrapped = RealmCodecEngine.#unwrapTag(data);
-
-    if (unwrapped !== null) {
-      // The tagged form is a container too, and a recursion edge like any
-      // other: `decodeTagged()` walks the state again for a nonterminal
-      // codec, for a tag no codec claims, and for a tag that is not one. A
-      // `Map` graph can therefore close a cycle without a single plain
-      // container in it, and cloning carries such a graph faithfully.
-      const cycle = this.#enterOrReport(data as object);
-      if (cycle !== null) {
-        return cycle;
-      }
-
-      try {
-        return this.decodeTagged(unwrapped.tag, unwrapped.state, context);
-      } finally {
-        this.#decodeSeen?.delete(data as object);
-      }
-    }
-
     // Self-representing primitives pass straight through. That is every
     // primitive but `symbol`, which cannot have arrived untagged: cloning
-    // refuses one, so the only way a symbol crosses is under a tag, handled
-    // above.
+    // refuses one, so the only way a symbol crosses is under a tag, below.
     if ((data === null) || (typeof data !== "object")) {
       return data as FabricValue;
     }
 
-    if (Array.isArray(data)) {
-      return this.#decodeArray(data, context);
-    } else if (isPlainObject(data)) {
-      return this.#decodePlainObject(data, context);
+    if (seen !== undefined) {
+      const cycle = this.enterOrReport(seen, data);
+      if (cycle !== null) {
+        return cycle;
+      }
     }
 
-    // Wire data is untrusted, and cloning carries a good deal this format
-    // never emits -- a bare `Uint8Array`, a `Date`, a multi-entry `Map` --
-    // all of which reach here.
-    return this.reportMalformed(
-      "",
-      data,
-      `Cannot decode ${
-        backtickQuote(toCompactDebugString(data, 50))
-      }: not a form this format emits.`,
-    );
+    try {
+      const unwrapped = RealmCodecEngine.#unwrapTag(data);
+
+      if (unwrapped !== null) {
+        return this.decodeTagged(
+          unwrapped.tag,
+          unwrapped.state,
+          context,
+          seen,
+        );
+      } else if (Array.isArray(data)) {
+        return this.#decodeArray(data, context, seen);
+      } else if (isPlainObject(data)) {
+        return this.#decodePlainObject(data, context, seen);
+      }
+
+      // Wire data is untrusted, and cloning carries a good deal this format
+      // never emits -- a bare `Uint8Array`, a `Date`, a multi-entry `Map` --
+      // all of which reach here.
+      return this.reportMalformed(
+        "",
+        data,
+        `Cannot decode ${
+          backtickQuote(toCompactDebugString(data, 50))
+        }: not a form this format emits.`,
+      );
+    } finally {
+      seen?.delete(data);
+    }
   }
 
   /**
@@ -312,12 +300,8 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
   #decodeArray(
     data: readonly RealmCodecValue[],
     context: ReconstructionContext,
+    seen: Set<object> | undefined,
   ): FabricValue {
-    const cycle = this.#enterOrReport(data);
-    if (cycle !== null) {
-      return cycle;
-    }
-
     const length = data.length;
     let result: FabricValue[] | undefined;
 
@@ -327,7 +311,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       }
 
       const original = data[i]!;
-      const decoded = this.decodeValue(original, context);
+      const decoded = this.decodeValue(original, context, seen);
 
       if (result !== undefined) {
         result[i] = decoded;
@@ -342,7 +326,6 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       }
     }
 
-    this.#decodeSeen?.delete(data);
     return Object.freeze(result ?? (data as FabricValue));
   }
 
@@ -357,12 +340,8 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
   #decodePlainObject(
     data: Record<string, RealmCodecValue>,
     context: ReconstructionContext,
+    seen: Set<object> | undefined,
   ): FabricValue {
-    const cycle = this.#enterOrReport(data);
-    if (cycle !== null) {
-      return cycle;
-    }
-
     const keys = Object.keys(data);
     let result: Record<string, FabricValue> | undefined;
 
@@ -370,12 +349,11 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       const key = keys[i]!;
 
       if (isUnsafeObjectKey(key)) {
-        this.#decodeSeen?.delete(data);
         return this.reportReservedKey(key, data);
       }
 
       const original = data[key]!;
-      const decoded = this.decodeValue(original, context);
+      const decoded = this.decodeValue(original, context, seen);
 
       if (result !== undefined) {
         result[key] = decoded;
@@ -388,34 +366,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
       }
     }
 
-    this.#decodeSeen?.delete(data);
     return Object.freeze(result ?? (data as FabricValue));
-  }
-
-  /**
-   * Enters a container into the in-progress set, reporting rather than
-   * entering if it is already there.
-   *
-   * Reported rather than raised, unlike the encode side's refusal: a cycle
-   * here arrived from a channel, and every malformation off a channel settles
-   * against `lenient`. Raising would also be the one refusal `lenient` could
-   * not contain.
-   *
-   * @returns The report, or `null` if the container was entered.
-   */
-  #enterOrReport(value: object): FabricValue | null {
-    if (this.#decodeSeen === undefined) {
-      return null;
-    } else if (this.#decodeSeen.has(value)) {
-      return this.reportMalformed(
-        "",
-        toCompactDebugString(value, 50),
-        "circular reference in decoded data",
-      );
-    }
-
-    this.#decodeSeen.add(value);
-    return null;
   }
 
   //

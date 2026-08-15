@@ -383,12 +383,17 @@ describe("RealmCodecEngine", () => {
     });
 
     it("decodes the same tagged value at two positions, which is no cycle", () => {
-      // The guard must catch a container reached while still being decoded,
-      // not one merely seen twice. Sequential visits leave the set between
-      // them, so this is the check that it does not over-refuse.
-      const value = { x: new FabricEpochDays(7n), y: new FabricEpochDays(7n) };
+      // The guard must catch a node reached while still being decoded, not one
+      // merely seen twice. Sequential visits leave the set between them, so
+      // this is the check that it does not over-refuse.
+      //
+      // One `Map` at both positions, and not two values that encode alike:
+      // `wrapTag()` builds a fresh `Map` per visit, so encoding a value that
+      // holds one instance twice yields two nodes and revisits nothing. The
+      // encoded form is reused directly to get the shared node this needs.
+      const shared = realmFromFabricValue(new FabricEpochDays(7n));
       const decoded = fabricFromRealmValue(
-        realmFromFabricValue(value),
+        { x: shared, y: shared },
       ) as Record<string, FabricValue>;
 
       expect(decoded.x).toBeInstanceOf(FabricEpochDays);
