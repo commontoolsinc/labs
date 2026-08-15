@@ -1544,7 +1544,8 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
           first.docId,
           (entries) =>
             entries.map((entry) =>
-              entry.origin === "declared"
+              entry.origin === "declared" &&
+                (entry.path[0] === "out" || entry.path[0] === "aux")
                 ? {
                   ...entry,
                   label: {

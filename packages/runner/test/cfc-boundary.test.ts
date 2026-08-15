@@ -5878,7 +5878,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: signer.did(),
           }],
         },
-        origin: "declared",
+        origin: "derived",
       });
       verify.abort();
     } finally {
@@ -5978,7 +5978,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             subject: signer.did(),
           }],
         },
-        origin: "declared",
+        origin: "derived",
       });
       verify.abort();
     } finally {

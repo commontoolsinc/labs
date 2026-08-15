@@ -440,6 +440,50 @@ const resolveCurrentPrincipalLabelValues = (
   return resolved.length > 0 ? (resolved as readonly CfcAtom[]) : undefined;
 };
 
+const currentPrincipalIntegrityParts = (
+  schema: JSONSchema,
+  label: IFCLabel,
+): {
+  staticSchema: JSONSchema;
+  staticLabel: IFCLabel;
+  dynamicIntegrity: readonly CfcAtom[];
+} => {
+  if (!isObjectOrArray(schema) || !isObjectOrArray(schema.ifc)) {
+    return { staticSchema: schema, staticLabel: label, dynamicIntegrity: [] };
+  }
+  const integrity = label.integrity ?? [];
+  const addIntegrity = Array.isArray(schema.ifc.addIntegrity)
+    ? schema.ifc.addIntegrity
+    : [];
+  const dynamicIntegrity = [...integrity, ...addIntegrity].filter(
+    hasCurrentPrincipalPlaceholder,
+  ) as CfcAtom[];
+  if (dynamicIntegrity.length === 0) {
+    return { staticSchema: schema, staticLabel: label, dynamicIntegrity };
+  }
+  const staticIntegrity = integrity.filter((value) =>
+    !hasCurrentPrincipalPlaceholder(value)
+  );
+  const staticAddIntegrity = addIntegrity.filter((value) =>
+    !hasCurrentPrincipalPlaceholder(value)
+  );
+  return {
+    staticSchema: {
+      ...schema,
+      ifc: {
+        ...schema.ifc,
+        integrity: staticIntegrity,
+        addIntegrity: staticAddIntegrity,
+      },
+    },
+    staticLabel: {
+      ...label,
+      integrity: staticIntegrity.length > 0 ? staticIntegrity : undefined,
+    },
+    dynamicIntegrity,
+  };
+};
+
 const isCurrentPrincipalClaimAtom = (value: unknown): value is {
   readonly kind: string;
   readonly subject?: unknown;
@@ -6214,11 +6258,15 @@ export const prepareBoundaryCommit = (
           ) {
             remintedDeclaredPaths.set(pathKey(entry.path), entry.path);
           }
+          const currentPrincipalParts = currentPrincipalIntegrityParts(
+            entry.schema,
+            entry.label,
+          );
           const derived = gateRuntimeMintedIntegrity(
             derivePersistedLabel(
               tx,
-              entry.schema,
-              entry.label,
+              currentPrincipalParts.staticSchema,
+              currentPrincipalParts.staticLabel,
               mergedSchemaEntryLabels,
               target.space,
             ),
@@ -6255,6 +6303,39 @@ export const prepareBoundaryCommit = (
             }]
             : [];
         });
+    if (!ingestVerificationFailed) {
+      const actingPrincipal = state.trustSnapshot?.actingPrincipal;
+      for (const entry of mergedSchemaEntries) {
+        const { dynamicIntegrity } = currentPrincipalIntegrityParts(
+          entry.schema,
+          entry.label,
+        );
+        const resolvedIntegrity = resolveCurrentPrincipalLabelValues(
+          dynamicIntegrity,
+          actingPrincipal,
+        );
+        if (resolvedIntegrity === undefined) continue;
+        const gated = gateRuntimeMintedIntegrity(
+          { integrity: [...resolvedIntegrity] },
+          identityForSchemaPath(writeAuthorIdentities.get(key), entry.path),
+        ).integrity;
+        if (gated === undefined || gated.length === 0) continue;
+        for (
+          const path of concreteWrittenPathsForPattern(
+            tx,
+            target,
+            entry.path,
+            writeTargets.get(key)?.paths ?? [],
+          )
+        ) {
+          persistedLabelEntries.push({
+            path,
+            label: { integrity: [...gated] },
+            origin: "derived",
+          });
+        }
+      }
+    }
     // WP5 (§8.12.1/§8.12.8; docs/specs/cfc-persisted-declassification.md §4
     // item 3): the declared-component monotonicity gate. Each declared entry
     // this walk is about to persist replaces the stored declared entry at
