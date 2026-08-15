@@ -101,19 +101,26 @@ the canonical document forms every later stage must accept.
 
 ### Stage 4 — sync registration and cold-miss recovery
 
-- [ ] Documents arriving by sync that are `cid:`-addressed and parse as
-      schema documents register into the session registry on arrival
-      (`packages/runner/src/storage/v2.ts`, where synced documents are
-      already inspected — the `syncCfcSchemaDocument` neighborhood).
-      Combined with Stage 3, a client that syncs a document holding
-      reference links receives and registers the schema closure in the same
-      round trip.
-- [ ] A closure-load helper for the cold miss: given a root reference,
-      sync `cid:<hash>` and every document reachable from it, then retry
-      resolution. Recovery is event-driven — resolution failure triggers
-      the load and the arrival re-runs the read, the same shape as any
-      not-yet-synced dependency; no polling
-      (`docs/development/waiting-in-tests.md` governs the tests here).
+- [x] Documents arriving by sync register on arrival:
+      `#registerArrivedSchemaDocuments` in
+      `packages/runner/src/storage/v2.ts` runs as each frame is applied
+      (before notifications, so re-triggered readers find what the frame
+      delivered), hash-verifies, and chases the unregistered documents
+      behind each registration's external refs. The chase is handed to the
+      manager's cross-space ledger (`trackPendingWork`), whose resolve loop
+      re-checks after every settle, so one `synced()` covers a whole chain.
+      Combined with Stage 3's server traversal, a client that syncs a
+      document holding reference links receives and registers the schema
+      closure in the same round trip — pinned end-to-end by
+      `test/schema-doc-sync.test.ts` over two managers sharing one
+      loopback server.
+- [x] Cold-miss recovery is event-driven twice over: the traversal loader
+      reports an absent document through the missing-link-target channel
+      (`Runtime.ensureLinkedDocLoaded` kicks the fetch; the tracked read
+      re-runs the reader on arrival), and
+      `StorageManager.syncSchemaDocumentClosure(space, taggedHash)` is the
+      direct helper that pulls a reference's whole closure and fails
+      loudly on a hole. No polling anywhere.
 
 ## Test plan
 
@@ -145,6 +152,10 @@ checked. Protocol-level selector references — a client SENDING
 `{ "$ref": "cid:…" }` in a watch spec, and the server resolving it from
 storage at the protocol boundary — are the spec's Phase 2, not part of
 this exit. Phase 0 unblocks Phase 1 (flag-gated writers) in the spec.
+
+All four stages are checked. The plan stays live (not archived) until the
+registry-lifetime open item below is settled; that decision closes
+Phase 0.
 
 ## Open items
 

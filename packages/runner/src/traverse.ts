@@ -2384,7 +2384,22 @@ function loadExternalSchemaDocs(
     // A plain read: loads the document AND records the dependency, so an
     // absent document's later arrival re-triggers the reader.
     const result = tx.read(address);
-    if (result.error !== undefined) continue;
+    if (result.error !== undefined) {
+      // Absent from the local replica: report it so the runtime kicks an
+      // asynchronous load (the missing-link-target channel; server-side
+      // traversals have no replica gap and no receiver). Arrival registers
+      // the document and re-runs the reader; its own refs chase from there.
+      context.onMissingLinkTarget?.(
+        {
+          space: address.space,
+          id: address.id,
+          path: [],
+          scope: address.scope,
+        } as NormalizedFullLink,
+        referrer.space,
+      );
+      continue;
+    }
     context.schemaTracker.add(key, REJECTING_SELECTOR);
     const doc = result.ok.value;
     if (!isObjectOrArray(doc) || !("value" in doc)) continue;

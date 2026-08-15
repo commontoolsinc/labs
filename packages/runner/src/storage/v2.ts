@@ -47,6 +47,12 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
+import {
+  lookupSchemaDocument,
+  registerSchemaDocument,
+} from "../schema-registry.ts";
+import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
+import { isSubschema } from "../schema-walk.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
@@ -960,6 +966,7 @@ export class StorageManager implements IStorageManager {
             }, routeSignal),
         syncReplayDependencies: (document) =>
           this.syncCfcSchemaDocument(space, document),
+        trackPendingWork: (work) => this.trackUntilSettled(work),
         getTelemetry: () => this.#telemetry,
       });
       this.#providers.set(space, provider);
@@ -1466,6 +1473,46 @@ export class StorageManager implements IStorageManager {
     }
   }
 
+  /**
+   * Syncs the schema document behind `taggedHash` and, transitively, every
+   * document its external refs reach, so a subsequent resolution of
+   * `cid:<taggedHash>` finds a complete closure. Registration happens as
+   * each document's frame is applied (`#registerArrivedSchemaDocuments`);
+   * this helper only drives the pulls and reads the registry between them.
+   * Returns the failure when a document cannot be pulled, does not exist,
+   * or does not verify — the closure then stays incomplete and resolution
+   * stays closed, which is the intended fail state, not a retry condition.
+   */
+  async syncSchemaDocumentClosure(
+    space: MemorySpace,
+    taggedHash: string,
+  ): Promise<Error | undefined> {
+    const provider = this.open(space);
+    const visited = new Set<string>();
+    const pending = [taggedHash];
+    while (pending.length > 0) {
+      const hash = pending.pop()!;
+      if (visited.has(hash)) continue;
+      visited.add(hash);
+      let document = lookupSchemaDocument(hash);
+      if (document === undefined) {
+        const result = await provider.sync(`cid:${hash}` as URI, {
+          path: [],
+          schema: false,
+        });
+        if (result.error !== undefined) return result.error;
+        document = lookupSchemaDocument(hash);
+        if (document === undefined) {
+          return new Error(
+            `Schema document did not arrive or verify: cid:${hash}`,
+          );
+        }
+      }
+      pending.push(...collectExternalSchemaRefHashes(document));
+    }
+    return undefined;
+  }
+
   private async syncCfcSchemaDocument(
     space: MemorySpace,
     document: EntityDocument | undefined,
@@ -1689,6 +1736,14 @@ type ProviderOptions = {
   syncReplayDependencies: (
     document: EntityDocument | undefined,
   ) => Promise<Error | undefined>;
+  /**
+   * Registers background work (the schema-document dependency chase) with
+   * the manager's cross-space ledger, so `synced()` awaits it to
+   * quiescence — the ledger's resolve loop re-checks after every settle,
+   * which is what lets a chased document's arrival enqueue the next chase
+   * and still be covered by one `synced()`.
+   */
+  trackPendingWork?: (work: Promise<unknown>) => void;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
 };
@@ -2092,6 +2147,7 @@ class SpaceReplica implements ISpaceReplica {
   #schedulerObservationFlushPromise:
     | Promise<Result<Unit, StorageTransactionRejected>>
     | undefined;
+  readonly #trackPendingWork?: (work: Promise<unknown>) => void;
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
@@ -2173,6 +2229,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#settings = options.settings;
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
+    this.#trackPendingWork = options.trackPendingWork;
   }
 
   did(): MemorySpace {
@@ -4124,6 +4181,54 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
+  /**
+   * Registers the `cid:` schema documents a sync frame delivered
+   * (`docs/specs/content-addressed-schemas.md`), and chases the unregistered
+   * documents behind each one's external refs so the closure completes
+   * without a reader having to trip over every hole in turn. Registration
+   * is hash-verified; a mismatched document is warned about and skipped —
+   * it never enters the registry, so refs to it stay unresolved. A `cid:`
+   * document that is not a schema (a blob) either fails the subschema shape
+   * check or registers harmlessly: the registry asserts content-addressed
+   * identity, nothing more.
+   *
+   * The chase syncs within this space and is handed to the manager's
+   * cross-space ledger, so `synced()` covers the whole chain.
+   */
+  #registerArrivedSchemaDocuments(upserts: SessionSync["upserts"]): void {
+    for (const upsert of upserts) {
+      if (upsert.deleted === true) continue;
+      const id = upsert.id;
+      if (typeof id !== "string" || !id.startsWith("cid:")) continue;
+      const value = isObjectOrArray(upsert.doc)
+        ? (upsert.doc as { value?: unknown }).value
+        : undefined;
+      if (!isSubschema(value)) continue;
+      let registered: JSONSchema;
+      try {
+        registered = registerSchemaDocument(
+          id.slice("cid:".length),
+          value as JSONSchema,
+        );
+      } catch (error) {
+        logger.warn("schema-doc-reject", () => [
+          "Rejected arrived schema document (content does not match its id):",
+          id,
+          error,
+        ]);
+        continue;
+      }
+      for (const dep of collectExternalSchemaRefHashes(registered)) {
+        if (lookupSchemaDocument(dep) !== undefined) continue;
+        const chase = this.sync(`cid:${dep}` as URI, {
+          path: [],
+          schema: false,
+        });
+        this.#trackPendingWork?.(chase);
+      }
+    }
+  }
+
   private applySessionSync(
     sync: SessionSync,
     type: "pull" | "integrate",
@@ -4182,6 +4287,10 @@ class SpaceReplica implements ISpaceReplica {
       record.materialized = undefined;
       this.#watchedIds.delete(docKey(id, remove.scope));
     }
+
+    // Before notifications: readers re-run on the notification, and their
+    // resolution must find the documents this frame delivered.
+    this.#registerArrivedSchemaDocuments(sync.upserts);
 
     // Parked accepts apply BEFORE the differential compare: when the frame
     // authoritatively covers a doc the session itself wrote (mixed
