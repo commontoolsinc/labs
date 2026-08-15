@@ -1832,11 +1832,13 @@ delta):
   the already-landed chain — foreign session frames → the scheduler's
   autonomous storage-notification runs → the seal's loop wake — so
   the spec sentence is satisfied by construction, not by new
-  machinery. The seal wake is LATCHED when no input waiter is armed
-  (the review's F4: a seal chained in a cycle's last microtasks was
-  invisible to the idle check and fell back to the idle timeout —
-  latency-only, closed with the same level-conversion shape as the
-  shadow-flip wake; not a guard, so no mutation probe attaches).
+  machinery. Chained-not-yet-applied wave seals now COUNT as work in
+  the loop's idle check (the review's F4: a seal chained in a cycle's
+  last microtasks was invisible to the contribution count and fell
+  back to the idle timeout — latency-only; the level shape was chosen
+  over an edge latch after the latch double-counted the loop's own
+  mid-cycle watermark seal, caught by the shadow-clamp pin; not a
+  guard, so no mutation probe attaches).
   Activation's foreign basis re-mark (§6 step 2's Phase-5 sentence)
   rides `selectForeignBasisRows` + per-space head resolution,
   fail-degrading to surfacing (accounting parity with the home scan;

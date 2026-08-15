@@ -341,12 +341,13 @@ executing:
   for it — survival-tested: the foreign read's loopback session IS
   the registration; a foreign commit's frames arrive on that session,
   the scheduler runs autonomously off storage notifications, and the
-  re-run's SEAL wakes the loop — a wake the loop LATCHES when no
-  input waiter is armed (a seal chained in a cycle's last microtasks
-  is not yet visible to the idle check; the latch keeps the wake
-  deterministic instead of falling back to the idle timeout, which
-  the removed fan-out had covered incidentally). The foreign commit
-  is never home input — W and the input batch stay per home space.
+  re-run's SEAL wakes the loop — with chained-not-yet-applied seals
+  counted as WORK by the idle check (a seal chained in a cycle's
+  last microtasks is otherwise invisible to it; the level keeps the
+  wake deterministic instead of falling back to the idle timeout,
+  which the removed fan-out had covered incidentally). The foreign
+  commit is never home input — W and the input batch stay per home
+  space.
   Foreign SCOPED reads are the exception: fail-closed refused until
   the grant-scoped read design's resolution lands — protocol.md §2.)*
 - **Scope discovery is part of read discovery**: a run's scope is the

@@ -325,12 +325,19 @@ export class SpaceServer implements TransactionSealDestination {
    * shape as the shadow-flip wake): set when re-armed roots became
    * retryable mid-cycle, consumed by the next #waitForInput. */
   #pendingStructureRetryWake = false;
-  /** Level-converted SEAL wake (the F4 fix — same latch shape): set
-   * when a wave-bound seal arrived while no input waiter was armed
-   * (the cycle's last microtasks, after wave-detach), so the next
-   * #waitForInput runs a cycle immediately instead of sleeping out the
-   * idle window over a contribution #hasWork() could not yet see. */
-  #pendingSealWake = false;
+  /** Wave-bound seals CHAINED but not yet applied (the F4 fix, as a
+   * LEVEL): seal() returns after arming the seal chain, so a seal
+   * landing in a cycle's last microtasks — after the closing wave
+   * detached — is invisible to #hasWork()'s contribution count until
+   * the chain runs, and the edge-triggered wake fired into no waiter;
+   * the loop then armed and slept out the idle window over real work.
+   * Counting chained-not-yet-applied seals makes #hasWork() see them:
+   * a pre-detach seal drains before its own cycle's commit barrier
+   * (`await #sealChain`), so it adds no spurious cycle, while a
+   * post-detach seal keeps the loop running one more cycle — the
+   * deterministic wake the removed host fan-out had provided
+   * incidentally. */
+  #pendingWaveSeals = 0;
   /** The activation scan's head: records at or below it are covered
    * by the basis re-mark and never drained (activation filters the
    * queued feed the same way). Late-arrival accounting keys off it. */
@@ -806,24 +813,24 @@ export class SpaceServer implements TransactionSealDestination {
       },
     );
     this.#sealChain = sealed.then(() => undefined, () => undefined);
+    // The F4 window: a seal chained during the cycle's last microtasks
+    // (after wave-detach) is not yet APPLIED when #hasWork() evaluates
+    // — count it as pending work until the chain settles, so the loop
+    // runs one more cycle instead of sleeping out the idle window over
+    // a real contribution (correctness was never at stake — the
+    // wait's timeout commits the pending wave — but the wake should
+    // be deterministic, not eventually-timed). A pre-detach seal
+    // drains before its own cycle's `await #sealChain`, adding no
+    // extra cycle.
+    this.#pendingWaveSeals += 1;
+    const sealApplied = () => {
+      this.#pendingWaveSeals -= 1;
+    };
+    sealed.then(sealApplied, sealApplied);
     // The scheduler runs autonomously off storage notifications: a seal
     // can arrive while the loop waits for input, and the wave it opened
-    // must be committed — wake the loop. LATCHED when no waiter is
-    // armed (the F4 residual, same shape as the shadow-flip latch): a
-    // seal chained during the cycle's last microtasks — after the
-    // closing wave detached, before the loop re-arms — is not yet
-    // APPLIED when #hasWork() evaluates (wave.seal runs later on the
-    // seal chain), so the edge-triggered wake alone let the loop arm
-    // and sleep out the idle window before committing the contribution
-    // (the removed host fan-out had closed this window incidentally;
-    // correctness was never at stake — the wait's timeout commits the
-    // pending wave — but the wake should be deterministic, not
-    // eventually-timed).
-    if (this.#feedArrived !== undefined) {
-      this.#feedArrived.resolve();
-    } else {
-      this.#pendingSealWake = true;
-    }
+    // must be committed — wake the loop.
+    this.#feedArrived?.resolve();
     return sealed;
   }
 
@@ -1408,6 +1415,9 @@ export class SpaceServer implements TransactionSealDestination {
   #hasWork(): boolean {
     return this.#feed.length > 0 ||
       (this.#currentWave?.contributionCount ?? 0) > 0 ||
+      // Chained-not-yet-applied wave seals (the F4 fix): real work the
+      // contribution count cannot see yet.
+      this.#pendingWaveSeals > 0 ||
       this.#eventScanOwed ||
       this.#effectsRetirementOwed ||
       // Deferred effect batches of the OPEN wave are work (round-2
@@ -1456,14 +1466,6 @@ export class SpaceServer implements TransactionSealDestination {
       // consume the latch and run a cycle now — the floor has lifted
       // and the catch-up wave must not wait out the idle window.
       this.#pendingShadowFlipWake = false;
-      return;
-    }
-    if (this.#pendingSealWake) {
-      // A wave-bound seal landed while no waiter was armed (the F4
-      // latch): its contribution is on the seal chain — run a cycle
-      // now so the wave commits deterministically instead of after
-      // the idle timeout.
-      this.#pendingSealWake = false;
       return;
     }
     this.#feedArrived = Promise.withResolvers<void>();
