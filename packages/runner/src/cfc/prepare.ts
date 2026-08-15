@@ -177,15 +177,18 @@ const labelForEntriesAtPath = (
   entries: readonly LabelMapEntry[],
   path: readonly string[],
 ): IFCLabel | undefined => {
-  // Per-component longest-prefix resolution: within one origin component a
-  // more specific entry replaces its ancestor (§4.6.3 replace-down), but
-  // components layer independently, so the effective label is the join of
-  // each component's most-specific ancestor-or-equal entry. Legacy entries
-  // (no origin) form one combined component, preserving the historical
-  // single-map resolution for pre-component metadata.
+  // Resolve confidentiality and integrity independently within each origin
+  // component. A child declaration that only supplies integrity leaves its
+  // ancestor's confidentiality in force. An explicit empty array still
+  // replaces the ancestor for that field. Origin components then layer by
+  // joining their independently resolved fields.
   const matches = new Map<
     string,
-    { path: readonly string[]; label: IFCLabel }
+    {
+      path: readonly string[];
+      field: "confidentiality" | "integrity";
+      values: CfcAtom[];
+    }
   >();
   for (const entry of entries) {
     if (!isPrefix(entry.path, path)) {
@@ -216,22 +219,27 @@ const labelForEntriesAtPath = (
     // vice versa. Scoped to structure/derived-origin shape-class
     // templates (a separate resolution bucket per component); everything
     // else keeps replace-down.
-    const bucket = template && entry.observes === "shape"
+    const componentBucket = template && entry.observes === "shape"
       ? `${component}\u0000shape-template`
       : component;
-    const match = matches.get(bucket);
-    if (match === undefined || match.path.length < entry.path.length) {
-      matches.set(bucket, entry);
-    } else if (match.path.length === entry.path.length) {
-      // Two equally specific prefixes of one queried path are the same
-      // path — or, with wildcard segments, a concrete entry and a `*`
-      // template covering the same slot; duplicate (path, origin) entries
-      // shouldn't survive coalescing, but join defensively (fail-toward-
-      // taint) rather than drop one.
-      matches.set(bucket, {
-        path: match.path,
-        label: mergeLabels(match.label, entry.label),
-      });
+    for (const field of ["confidentiality", "integrity"] as const) {
+      const values = entry.label[field];
+      if (values === undefined) continue;
+      const bucket = `${componentBucket}\u0000${field}`;
+      const match = matches.get(bucket);
+      if (match === undefined || match.path.length < entry.path.length) {
+        matches.set(bucket, { path: entry.path, field, values: [...values] });
+      } else if (match.path.length === entry.path.length) {
+        // Two equally specific prefixes of one queried path are the same
+        // path — or, with wildcard segments, a concrete entry and a `*`
+        // template covering the same slot. Join equal-specificity values
+        // defensively rather than dropping one.
+        matches.set(bucket, {
+          path: match.path,
+          field,
+          values: uniqueCfcAtoms([...match.values, ...values]),
+        });
+      }
     }
   }
   if (matches.size === 0) {
@@ -239,9 +247,8 @@ const labelForEntriesAtPath = (
   }
   let joined: IFCLabel | undefined;
   for (const match of matches.values()) {
-    joined = joined === undefined
-      ? match.label
-      : mergeLabels(joined, match.label);
+    const label = { [match.field]: match.values } as IFCLabel;
+    joined = joined === undefined ? label : mergeLabels(joined, label);
   }
   return joined;
 };

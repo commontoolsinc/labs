@@ -50,6 +50,24 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     expect(result1).toEqual({ type: "string" });
   });
 
+  it("carries array confidentiality onto an element schema", () => {
+    const confidentiality = [cfcAtom.space("did:key:shared-space")];
+    const schema: JSONSchema = {
+      type: "array",
+      ifc: { confidentiality },
+      items: {
+        type: "object",
+        properties: { body: { type: "string" } },
+      },
+    };
+
+    expect(ContextualFlowControl.schemaAtPath(schema, ["0"]))
+      .toMatchObject({
+        type: "object",
+        ifc: { confidentiality },
+      });
+  });
+
   it("does not collide cached paths whose segments contain NUL bytes", () => {
     // Deep-frozen so the schemaAtPath memo engages; "a\0b" as a single
     // property name must not share a cache entry with the nested path

@@ -702,6 +702,12 @@ export class ContextualFlowControl {
           cursor = true;
         }
       } else if (cursor.type === "array") {
+        if (cursor.ifc !== undefined) {
+          ContextualFlowControl.addIfcAtoms(
+            joined,
+            cursor.ifc.confidentiality,
+          );
+        }
         if (isArrayIndexPropertyName(part)) {
           const index = Number(part);
           if (cursor.prefixItems && index < cursor.prefixItems.length) {

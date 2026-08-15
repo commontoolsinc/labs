@@ -378,6 +378,45 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     }
   });
 
+  it("inherits a parent confidentiality ceiling past a child integrity declaration", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      await seedSpaceSource(
+        runtime,
+        "writer-fit-component-source",
+        signer.did(),
+      );
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(
+        signer.did(),
+        "writer-fit-component-source",
+        undefined,
+        tx,
+      );
+      const secret = (source.getRaw() as { secret: string }).secret;
+      runtime.getCell(
+        signer.did(),
+        "writer-fit-component-target",
+        {
+          type: "object",
+          properties: {
+            value: { type: "string", ifc: { integrity: [] } },
+          },
+          ifc: { confidentiality: [cfcAtom.space(signer.did())] },
+        },
+        tx,
+      ).set({ value: secret });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("uses an array container ceiling for its synthetic length write", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
