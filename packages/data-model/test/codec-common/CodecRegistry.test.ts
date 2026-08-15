@@ -87,9 +87,9 @@ function buildRegistry(
   classSource: Constructor | undefined,
   example: FabricValue,
 ) {
-  const first = new TestCodec("First@1", undefined);
-  const handler = new TestCodec("Handler@1", classSource, example);
-  const last = new TestCodec("Last@1", undefined);
+  const first = new TestCodec("first@1", undefined);
+  const handler = new TestCodec("handler@1", classSource, example);
+  const last = new TestCodec("last@1", undefined);
   const registry = new CodecRegistry(TEST_FORMAT);
   registry.register(first);
   registry.register(handler);
@@ -140,7 +140,7 @@ const UNCLASSIFIABLE_CODEC: FabricCodec<string> = {
   },
 
   get recognizedTypeTag(): string | undefined {
-    return "Unclassifiable@1";
+    return "unclassifiable@1";
   },
 
   canEncode(_value: FabricValue): boolean {
@@ -148,7 +148,7 @@ const UNCLASSIFIABLE_CODEC: FabricCodec<string> = {
   },
 
   tagForValue(_value: FabricValue): string {
-    return "Unclassifiable@1";
+    return "unclassifiable@1";
   },
 
   encode(_value: FabricValue): string {
@@ -180,16 +180,16 @@ describe("CodecRegistry", () => {
     // with the kind is pinned where a walker reads it.
 
     it("reaches a primitive-registered codec by value and by tag", () => {
-      const codec = new TestTerminalCodec("TermPrim@1");
+      const codec = new TestTerminalCodec("termPrim@1");
       const registry = new CodecRegistry(TEST_FORMAT);
       registry.registerPrimitive("bigint", codec);
 
       expect(registry.codecFromValue(914n)).toBe(codec);
-      expect(registry.codecFromTag("TermPrim@1")).toBe(codec);
+      expect(registry.codecFromTag("termPrim@1")).toBe(codec);
     });
 
     it("finds a class's codec when one is passed to `extend()`", () => {
-      const codec = new TestTerminalCodec("ViaExtend@1", FabricRegExp);
+      const codec = new TestTerminalCodec("viaExtend@1", FabricRegExp);
       class Extended {
         static get [TEST_CODEC](): TerminalCodec<string> {
           return codec;
@@ -198,19 +198,19 @@ describe("CodecRegistry", () => {
 
       const registry = new CodecRegistry(TEST_FORMAT).extend([Extended]);
 
-      expect(registry.codecFromTag("ViaExtend@1")).toBe(codec);
+      expect(registry.codecFromTag("viaExtend@1")).toBe(codec);
     });
 
     it("registers codecs of either kind through `extend()`", () => {
-      const nonterminal = new TestCodec("Nonterm@1", FabricRegExp);
-      const terminal = new TestTerminalCodec("Term@1");
+      const nonterminal = new TestCodec("nonterm@1", FabricRegExp);
+      const terminal = new TestTerminalCodec("term@1");
       const registry = new CodecRegistry(TEST_FORMAT).extend(
         nonterminal,
         terminal,
       );
 
-      expect(registry.codecFromTag("Nonterm@1")).toBe(nonterminal);
-      expect(registry.codecFromTag("Term@1")).toBe(terminal);
+      expect(registry.codecFromTag("nonterm@1")).toBe(nonterminal);
+      expect(registry.codecFromTag("term@1")).toBe(terminal);
     });
 
     it("throws given a codec whose recognized tag is empty", () => {
@@ -294,7 +294,7 @@ describe("CodecRegistry", () => {
 
   describe("registerClass()", () => {
     it("registers the codec bound under the format's own symbol", () => {
-      const codec = new TestTerminalCodec("FromFormat@1", FabricRegExp);
+      const codec = new TestTerminalCodec("fromFormat@1", FabricRegExp);
       class Formatted {
         static get [TEST_CODEC](): TerminalCodec<string> {
           return codec;
@@ -304,11 +304,11 @@ describe("CodecRegistry", () => {
 
       registry.registerClass(Formatted);
 
-      expect(registry.codecFromTag("FromFormat@1")).toBe(codec);
+      expect(registry.codecFromTag("fromFormat@1")).toBe(codec);
     });
 
     it("registers a class's `[CODEC]` when it has one", () => {
-      const codec = new TestCodec("FromCodec@1", FabricRegExp);
+      const codec = new TestCodec("fromCodec@1", FabricRegExp);
       class Neutral {
         static get [CODEC](): NonterminalCodec {
           return codec;
@@ -318,14 +318,14 @@ describe("CodecRegistry", () => {
 
       registry.registerClass(Neutral);
 
-      expect(registry.codecFromTag("FromCodec@1")).toBe(codec);
+      expect(registry.codecFromTag("fromCodec@1")).toBe(codec);
     });
 
     it("prefers `[CODEC]` over the format's symbol when a class binds both", () => {
       // The format-neutral codec is the one that serves every format, so it
       // wins wherever a class offers a choice.
-      const neutral = new TestCodec("Neutral@1", FabricRegExp);
-      const formatted = new TestTerminalCodec("Formatted@1", FabricRegExp);
+      const neutral = new TestCodec("neutral@1", FabricRegExp);
+      const formatted = new TestTerminalCodec("formatted@1", FabricRegExp);
       class Both {
         static get [CODEC](): NonterminalCodec {
           return neutral;
@@ -338,8 +338,8 @@ describe("CodecRegistry", () => {
 
       registry.registerClass(Both);
 
-      expect(registry.codecFromTag("Neutral@1")).toBe(neutral);
-      expect(registry.codecFromTag("Formatted@1")).toBeUndefined();
+      expect(registry.codecFromTag("neutral@1")).toBe(neutral);
+      expect(registry.codecFromTag("formatted@1")).toBeUndefined();
     });
 
     it("throws given a class binding neither symbol", () => {
@@ -355,7 +355,7 @@ describe("CodecRegistry", () => {
       // Two formats' symbols on one class is the arrangement this exists to
       // serve; a registry reads only its own.
       const other: unique symbol = Symbol("other.codec");
-      const codec = new TestTerminalCodec("Other@1", FabricRegExp);
+      const codec = new TestTerminalCodec("other@1", FabricRegExp);
       class OtherFormatOnly {
         static get [other](): TerminalCodec<string> {
           return codec;
@@ -485,44 +485,44 @@ describe("CodecRegistry", () => {
 
     it("carries over every kind of registration the base holds", () => {
       const base = new CodecRegistry(TEST_FORMAT);
-      const codec = new TestCodec("Carried@1", undefined);
-      const primitive = new TestCodec("Prim@1", undefined);
+      const codec = new TestCodec("carried@1", undefined);
+      const primitive = new TestCodec("prim@1", undefined);
       base.register(codec);
       base.registerPrimitive("bigint", primitive);
       base.registerSelfRep("string");
 
       const extended = base.extend();
 
-      expect(extended.codecFromTag("Carried@1")).toBe(codec);
-      expect(extended.codecFromTag("Prim@1")).toBe(primitive);
+      expect(extended.codecFromTag("carried@1")).toBe(codec);
+      expect(extended.codecFromTag("prim@1")).toBe(primitive);
       expect(extended.codecFromValue("florp")).toBe(SELF_REP);
     });
 
     it("registers a codec given on its own", () => {
-      const added = new TestCodec("Added@1", undefined);
+      const added = new TestCodec("added@1", undefined);
       const extended = new CodecRegistry(TEST_FORMAT).extend(added);
 
-      expect(extended.codecFromTag("Added@1")).toBe(added);
+      expect(extended.codecFromTag("added@1")).toBe(added);
     });
 
     it("registers codecs given individually and in lists, in any mix", () => {
-      const loose = new TestCodec("Loose@1", undefined);
-      const listed = new TestCodec("Listed@1", undefined);
-      const alsoListed = new TestCodec("AlsoListed@1", undefined);
+      const loose = new TestCodec("loose@1", undefined);
+      const listed = new TestCodec("listed@1", undefined);
+      const alsoListed = new TestCodec("alsoListed@1", undefined);
 
       const extended = new CodecRegistry(TEST_FORMAT)
         .extend(loose, [listed, alsoListed]);
 
-      expect(extended.codecFromTag("Loose@1")).toBe(loose);
-      expect(extended.codecFromTag("Listed@1")).toBe(listed);
-      expect(extended.codecFromTag("AlsoListed@1")).toBe(alsoListed);
+      expect(extended.codecFromTag("loose@1")).toBe(loose);
+      expect(extended.codecFromTag("listed@1")).toBe(listed);
+      expect(extended.codecFromTag("alsoListed@1")).toBe(alsoListed);
     });
 
     it("leaves the base without the added registrations", () => {
       const base = new CodecRegistry(TEST_FORMAT);
-      base.extend(new TestCodec("Added@1", undefined));
+      base.extend(new TestCodec("added@1", undefined));
 
-      expect(base.codecFromTag("Added@1")).toBe(undefined);
+      expect(base.codecFromTag("added@1")).toBe(undefined);
     });
   });
 
@@ -531,14 +531,14 @@ describe("CodecRegistry", () => {
     // has to refuse on its own; these cases pin that each one does.
     it("`register()` throws", () => {
       const registry = Object.freeze(new CodecRegistry(TEST_FORMAT));
-      expect(() => registry.register(new TestCodec("Nope@1", undefined)))
+      expect(() => registry.register(new TestCodec("nope@1", undefined)))
         .toThrow("Cannot modify frozen `CodecRegistry`");
     });
 
     it("`registerPrimitive()` throws", () => {
       const registry = Object.freeze(new CodecRegistry(TEST_FORMAT));
       expect(() =>
-        registry.registerPrimitive("bigint", new TestCodec("Nope@1", undefined))
+        registry.registerPrimitive("bigint", new TestCodec("nope@1", undefined))
       ).toThrow("Cannot modify frozen `CodecRegistry`");
     });
 
@@ -550,11 +550,11 @@ describe("CodecRegistry", () => {
 
     it("still returns a codec for a registered tag", () => {
       const base = new CodecRegistry(TEST_FORMAT);
-      const codec = new TestCodec("Readable@1", undefined);
+      const codec = new TestCodec("readable@1", undefined);
       base.register(codec);
       Object.freeze(base);
 
-      expect(base.codecFromTag("Readable@1")).toBe(codec);
+      expect(base.codecFromTag("readable@1")).toBe(codec);
     });
   });
 
