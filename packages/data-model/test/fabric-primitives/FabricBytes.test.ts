@@ -11,15 +11,15 @@
  * offset is at or past the end copies nothing rather than failing.
  */
 
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
-import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
+import { JSON_CODEC } from "@/codec-interface/interface.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 
 describe("FabricBytes", () => {
   // Pure type-identity / supertype check: cross-cutting carve-out per the

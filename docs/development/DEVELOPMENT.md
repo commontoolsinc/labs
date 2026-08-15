@@ -55,6 +55,22 @@ about one aspect of the runtime, are indexed in
   outside the aliased tree, which has no `@/` form at all — a `bench/` or
   `test/` file reaching a fixture in its own tree, in a package whose alias
   covers `src/`.
+- Collate a package's imports. Every specifier naming the same top-level
+  package, or the same namespace-and-package pair, sits in one contiguous run:
+  `@commonfabric/utils/base64url` next to `@commonfabric/utils/types`,
+  `@std/testing/bdd` next to `@std/testing/time`. A package that appears in two
+  places in the list reads as two dependencies, and the second appearance hides
+  from anyone scanning for what the file rests on.
+- Alpha-sorting each run is strongly suggested. Sorting is what makes a list
+  scannable rather than merely grouped, and it answers by rule the question of
+  where a new import goes. Sort on the specifier, comparing without regard to
+  case, so that `codec-type-tags.ts` precedes `EmptyReconstructionContext.ts`
+  the way a reader expects. Where sorting and the grouping above disagree, the
+  grouping wins: sort within the standard-library, external, and internal
+  blocks, not across them.
+- Separate those three blocks with a blank line. Do it when writing a file, or
+  when reordering its imports for some other reason; a file whose imports are
+  otherwise correct is not worth touching for this alone.
 
 ### Classes
 
