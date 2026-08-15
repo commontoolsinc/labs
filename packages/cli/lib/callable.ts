@@ -13,6 +13,7 @@ import {
   relaxDefaultedRequired,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc/schema-sanitization";
+import { cfcSchemaChildRoot } from "@commonfabric/runner/cfc/schema-refs";
 import {
   type CallableKind,
   classifyCallableEntry,
@@ -362,6 +363,365 @@ export function schemaIsObjectShaped(
 }
 
 /**
+ * The root of a payload, as a refusal names it. Positions below it are spelled
+ * the way the read boundary spells its own (`normalizeProjectionSchema`,
+ * cell-selection.ts): a property is `.name`, an array element is `[index]`. A
+ * caller meets both refusals through the same command, so they name a position
+ * the same way.
+ */
+const EVENT_ROOT_POSITION = "<event>";
+
+/** A field a payload carries at a position whose schema does not declare it,
+ * with what that position does declare. */
+interface UndeclaredEventField {
+  key: string;
+  position: string;
+  declared: string[];
+}
+
+/**
+ * The edit distance between `left` and `right`, for the near-miss below.
+ * Adjacent transposition counts as one edit rather than two, because it is the
+ * typo the refusal exists for: `titel` is one slip from `title` however many
+ * substitutions it takes to spell as substitutions.
+ */
+function fieldEditDistance(left: string, right: string): number {
+  const rows: number[][] = [
+    Array.from({ length: right.length + 1 }, (_, j) => j),
+  ];
+  for (let i = 1; i <= left.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= right.length; j++) {
+      const previous = rows[i - 1];
+      current[j] = left[i - 1] === right[j - 1]
+        ? previous[j - 1]
+        : 1 + Math.min(previous[j - 1], previous[j], current[j - 1]);
+      if (
+        i > 1 && j > 1 && left[i - 1] === right[j - 2] &&
+        left[i - 2] === right[j - 1]
+      ) {
+        current[j] = Math.min(current[j], rows[i - 2][j - 2] + 1);
+      }
+    }
+    rows.push(current);
+  }
+  return rows[left.length][right.length];
+}
+
+/**
+ * The declared field `key` was most likely meant to be, or `undefined` where
+ * nothing is close enough to name. A call site prints no schema, so for a
+ * misspelled field the declared vocabulary is the whole remediation, and the
+ * one name a caller transposed two letters of is the useful half of it.
+ */
+function nearestDeclaredField(
+  key: string,
+  declared: readonly string[],
+): string | undefined {
+  const lowered = key.toLowerCase();
+  let best: string | undefined;
+  let bestDistance = Infinity;
+  for (const candidate of declared) {
+    const distance = fieldEditDistance(lowered, candidate.toLowerCase());
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return bestDistance <= Math.max(1, Math.floor(key.length / 4))
+    ? best
+    : undefined;
+}
+
+/** One property map an object-shaped position reaches, with the local-ref
+ * scope the schemas inside it resolve against. */
+interface DeclaredFieldSource {
+  properties: Record<string, JSONSchema>;
+  root: JSONSchema;
+}
+
+/** What a position declares, and whether anything there honors a field none of
+ * its maps name. */
+interface DeclaredFields {
+  sources: DeclaredFieldSource[];
+  honorsUndeclared: boolean;
+}
+
+/**
+ * Every property map an object-shaped position reaches, and whether it honors a
+ * field none of them name.
+ *
+ * A conjunction constrains one value from several members at once, so the
+ * fields it declares are the UNION across its members: a payload satisfying an
+ * `allOf` satisfies every member, and a field one member names is a field the
+ * position names. Taking the union is also the safe direction — the cost of
+ * missing a member is refusing a field that was declared, and the cost of an
+ * extra member is accepting one that would have been dropped.
+ *
+ * A disjunction anywhere inside makes the whole position honor everything: a
+ * branch a payload was meant for may name a field the others do not, and
+ * choosing among branches is the caller's, not this gate's.
+ *
+ * `followed` breaks reference cycles, and it records the REFERENCE rather than
+ * the schema it resolved to — the same key `localRefTarget` cycles on, and the
+ * only one that works here: resolution hands back a fresh view of a definition
+ * each time, so a recursive `$ref` reaches an object this walk has never seen
+ * and descends forever. A member is skipped once its reference has been
+ * followed in the scope it was written in; a definition contributes its fields
+ * once, and a schema naming itself terminates.
+ */
+function declaredFieldsAt(
+  node: Record<string, unknown>,
+  root: JSONSchema,
+  into: DeclaredFields = { sources: [], honorsUndeclared: false },
+  followed: Map<JSONSchema, Set<string>> = new Map(),
+): DeclaredFields {
+  if (isSchemaObject(node.properties as JSONSchema)) {
+    into.sources.push({
+      properties: node.properties as Record<string, JSONSchema>,
+      root,
+    });
+  }
+  if (node.additionalProperties !== undefined) into.honorsUndeclared = true;
+  if (!Array.isArray(node.allOf)) return into;
+  for (const member of node.allOf as JSONSchema[]) {
+    const memberRoot = cfcSchemaChildRoot(member, root);
+    if (isSchemaObject(member) && typeof member.$ref === "string") {
+      let inScope = followed.get(memberRoot);
+      if (inScope?.has(member.$ref)) continue;
+      if (inScope === undefined) {
+        inScope = new Set();
+        followed.set(memberRoot, inScope);
+      }
+      inScope.add(member.$ref);
+    }
+    const resolved = localRefTarget(member, memberRoot);
+    if (!isSchemaObject(resolved)) continue;
+    if (resolved.anyOf !== undefined || resolved.oneOf !== undefined) {
+      into.honorsUndeclared = true;
+      continue;
+    }
+    declaredFieldsAt(
+      resolved,
+      cfcSchemaChildRoot(resolved, memberRoot),
+      into,
+      followed,
+    );
+  }
+  return into;
+}
+
+/** The vocabulary a refusal names: every field the position's maps declare, in
+ * the order they were reached, each named once. */
+function declaredFieldNames(sources: DeclaredFieldSource[]): string[] {
+  const names: string[] = [];
+  for (const source of sources) {
+    for (const key of Object.keys(source.properties)) {
+      if (!names.includes(key)) names.push(key);
+    }
+  }
+  return names;
+}
+
+/**
+ * Whether a position describes the array a payload holds there.
+ *
+ * The array counterpart of {@link schemaIsObjectShaped}, and it answers the
+ * question the same way: a stated `type` says so, and otherwise the container
+ * keyword being present does. An untyped position naming `items` is an array
+ * to everything except schema traversal's own descent, which requires the
+ * stated type and empties the position without it — the same asymmetry the
+ * object side has, one container over.
+ */
+function schemaIsArrayShaped(node: Record<string, unknown>): boolean {
+  const declaredType = node.type;
+  if (declaredType === "array") return true;
+  if (Array.isArray(declaredType)) return declaredType.includes("array");
+  if (declaredType !== undefined) return false;
+  return node.items !== undefined || node.prefixItems !== undefined;
+}
+
+/** Whether a schema node marks its position as a cell or a stream, which is
+ * where a caller may write a link in place of a value. */
+function carriesCellMarker(node: Record<string, unknown>): boolean {
+  return node.asCell !== undefined || node.asStream !== undefined;
+}
+
+/**
+ * The first field the payload carries that the schema at its position does not
+ * declare, walking the PAYLOAD (finite JSON the caller supplied, so the walk
+ * terminates on its own) and consulting the schema beside it.
+ *
+ * Whether a position describes the object a payload holds there is
+ * {@link schemaIsObjectShaped}'s question, asked here rather than answered
+ * again: a stated `type: "object"`, a `properties` map with no type beside it,
+ * a type union admitting an object, and a conjunction with an object-shaped
+ * member all describe one. Every one of them drops what it does not name, so
+ * every one of them is judged.
+ *
+ * Three positions are passed over, each because the schema stops proving what
+ * the runtime will do with what sits under it:
+ *
+ * - a disjunction (`anyOf`/`oneOf`), here or inside a conjunction, where a
+ *   payload need satisfy only one branch and a field missing from the branch
+ *   this walk inspected may be named by another. Choosing among branches is
+ *   the caller's, not this gate's;
+ * - a position marked `asCell`/`asStream` below the root, where the value may
+ *   be a link (whose `"/"` is not a field anybody declared) and an inline value
+ *   is carried across the boundary rather than filtered at dispatch. The ROOT's
+ *   own marker is ignored, because the stream marker is what makes the schema a
+ *   verb's in the first place and the payload under it is the event;
+ * - a position describing neither the object nor the array the payload holds
+ *   there.
+ *
+ * A key several members of a conjunction constrain is passed over too, one
+ * level down: the walk cannot say which member's schema governs beneath it.
+ *
+ * Every one of them fails open. A refusal spends nothing and can be retried,
+ * but a call this gate wrongly refuses cannot be made at all, so the direction
+ * to be wrong in is the permissive one.
+ */
+function firstUndeclaredEventField(
+  value: unknown,
+  schema: JSONSchema | undefined,
+  root: JSONSchema,
+  position: string,
+  atRoot: boolean,
+): UndeclaredEventField | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  if (!isSchemaObject(schema)) return undefined;
+  if (!atRoot && carriesCellMarker(schema)) return undefined;
+  const scopeRoot = cfcSchemaChildRoot(schema, root);
+  const node = localRefTarget(schema, scopeRoot);
+  if (!isSchemaObject(node)) return undefined;
+  if (!atRoot && carriesCellMarker(node)) return undefined;
+  if (node.anyOf !== undefined || node.oneOf !== undefined) return undefined;
+  const nodeRoot = cfcSchemaChildRoot(node, scopeRoot);
+
+  if (Array.isArray(value)) {
+    if (!schemaIsArrayShaped(node)) return undefined;
+    const prefixItems = Array.isArray(node.prefixItems)
+      ? node.prefixItems as JSONSchema[]
+      : undefined;
+    for (let index = 0; index < value.length; index++) {
+      const child = prefixItems !== undefined && index < prefixItems.length
+        ? prefixItems[index]
+        : node.items as JSONSchema | undefined;
+      const found = firstUndeclaredEventField(
+        value[index],
+        child,
+        nodeRoot,
+        `${position}[${index}]`,
+        false,
+      );
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
+  if (!schemaIsObjectShaped(node, nodeRoot)) return undefined;
+  const declared = declaredFieldsAt(node, nodeRoot);
+  if (declared.sources.length === 0) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>);
+  const declaringSources = (key: string) =>
+    declared.sources.filter((source) => Object.hasOwn(source.properties, key));
+  if (!declared.honorsUndeclared) {
+    for (const [key] of entries) {
+      if (declaringSources(key).length === 0) {
+        return {
+          key,
+          position,
+          declared: declaredFieldNames(declared.sources),
+        };
+      }
+    }
+  }
+  for (const [key, child] of entries) {
+    const matches = declaringSources(key);
+    const childSchema = matches.length === 1
+      ? matches[0].properties[key]
+      : matches.length === 0
+      ? node.additionalProperties as JSONSchema | undefined
+      : undefined;
+    const found = firstUndeclaredEventField(
+      child,
+      childSchema,
+      matches.length === 1 ? matches[0].root : nodeRoot,
+      `${position}.${key}`,
+      false,
+    );
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Refuse a payload carrying a field the verb does not declare, naming the
+ * field, the position it sat at, the vocabulary that position takes, and the
+ * declared name it is one edit from.
+ *
+ * The comparison needs no source of truth beyond the schema already in hand:
+ * the verb's event schema names exactly the fields the verb declares. What it
+ * adds is treating an undeclared one as a reason to refuse, which nothing else
+ * on this path does — the runtime's own read drops the field and delivers the
+ * rest, so the handler runs, the receipt is written, and the caller is told the
+ * call settled with a field it wrote never having arrived. A TypeScript author
+ * never meets that; a caller writing JSON by hand or by model meets it first.
+ *
+ * Which positions drop, measured against the read a handler's event goes
+ * through (`SchemaObjectTraverser.traverseObjectWithSchema`, runner
+ * traverse.ts, whose `addOptionalProperty` is a no-op on the
+ * `validateAndTransform` path), for an object holding one declared and one
+ * undeclared field:
+ *
+ * | The schema at a position | What the handler receives |
+ * | --- | --- |
+ * | `{type: "object"}` | both fields |
+ * | `{type: "object", properties: {declared}}` | the declared field |
+ * | `{type: ["object", "null"], properties: {declared}}` | the declared field |
+ * | `{allOf: [{type: "object", properties: {declared}}]}` | the declared field |
+ * | `{properties: {declared}}` | nothing |
+ * | `{type: "object", properties: {}}` | nothing |
+ * | `{anyOf: [...]}` | both fields |
+ * | any of those plus `additionalProperties` | both fields |
+ *
+ * So a position with no property map is open by construction and refuses
+ * nothing — a verb declaring no fields THAT way takes anything. Every position
+ * that has one drops what none of its maps name, whether or not it also states
+ * a type and whether it reaches the map directly or through a conjunction.
+ *
+ * The two rows delivering NOTHING are two readings of "declares no fields", and
+ * both refuse every field written there. A bare `properties` map drops the
+ * fields it declares as well, which is a defect of its own and not one a gate
+ * over undeclared fields can speak to.
+ *
+ * @internal Exported for the tests that pin the refusal's wording.
+ */
+export function undeclaredVerbFieldError(
+  input: unknown,
+  schema: JSONSchema | undefined,
+): string | undefined {
+  if (schema === undefined || schema === true) return undefined;
+  const found = firstUndeclaredEventField(
+    input,
+    schema,
+    schema,
+    EVENT_ROOT_POSITION,
+    true,
+  );
+  if (found === undefined) return undefined;
+  const nearest = nearestDeclaredField(found.key, found.declared);
+  return `"${found.key}" at ${found.position} is not a field this verb ` +
+    "declares. " +
+    (nearest === undefined ? "" : `Did you mean "${nearest}"? `) +
+    (found.declared.length === 0
+      ? `${found.position} declares no fields at all`
+      : `${found.position} takes ${
+        found.declared.map((key) => `"${key}"`).join(", ")
+      }`);
+}
+
+/**
  * Reject a payload that cannot satisfy the verb's event schema, before it is
  * sent.
  *
@@ -379,6 +739,13 @@ export function schemaIsObjectShaped(
  * and is judged like any supplied payload; against everything else it stays
  * `undefined` and passes — `$event` is genuinely optional in the generated
  * handler schema, and value-less verbs are a supported shape.
+ *
+ * A field the verb does not declare is judged FIRST, ahead of the schema
+ * validation. Both can hold at once — a misspelled required field is missing
+ * and undeclared in one stroke — and of the two answers only one names
+ * something the caller actually wrote. "`titel` is not a field, did you mean
+ * `title`" sends them to the character they typed; "`title` is missing" sends
+ * them looking for a field that is already there.
  */
 export function verbInputSchemaError(
   input: unknown,
@@ -386,6 +753,8 @@ export function verbInputSchemaError(
 ): string | undefined {
   if (input === undefined) return undefined;
   if (schema === undefined || schema === true) return undefined;
+  const undeclared = undeclaredVerbFieldError(input, schema);
+  if (undeclared !== undefined) return undeclared;
   return validateSchemaValue(
     relaxDefaultedRequired(schema, schema, new Map()),
     input,

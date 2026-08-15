@@ -187,6 +187,48 @@ from a later update preserves an existing unambiguous class.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
+### What a call refuses before it dispatches
+
+`piece call` judges the payload against the verb's declared event schema before
+anything is sent, so a refusal costs nothing: the invocation id was never spent
+and the corrected retry can reuse it.
+
+A field the verb does not declare is one of the things it refuses. The runtime
+hands a handler the fields its event schema names and drops the rest, so a
+payload carrying a field nobody declared would otherwise run the handler without
+it and report the call settled. The refusal names the field, the position it sat
+at, the vocabulary that position takes, and the declared name it is one edit
+from:
+
+```console
+$ cf piece call --piece ID addItem '{"titel":"Milk","done":false}'
+Invalid input for "addItem": "titel" at <event> is not a field this verb
+declares. Did you mean "title"? <event> takes "title", "done"
+```
+
+Positions below the root are spelled the way a `--schema` position is —
+`<event>.item`, `<event>.tags[1]` — so one vocabulary covers both refusals.
+
+Every position that names its fields is judged, whether it states
+`type: "object"`, carries a `properties` map with no type beside it, states a
+type union admitting an object, or reaches its map through a conjunction, whose
+fields are the union across its members. A **disjunction** (`anyOf`, `oneOf`) is
+passed over — a payload need satisfy only one branch — and so is a position
+marked as a cell or a stream, which may hold a link rather than a value. A call
+reaching either goes out rather than being refused on a guess.
+
+The declared vocabulary is what `cf piece call --piece ID <verb> --help` prints,
+which is the list to check when a field comes back refused. It names the fields
+the verb's handler READS, which can be fewer than its TypeScript event type
+declares: a field the body never touches is one the runtime would have dropped,
+and the refusal says so rather than accepting it and losing it.
+
+A verb that publishes **no event schema at all**, or one whose schema carries no
+`properties` key, takes any payload: with nothing declared, nothing is dropped
+either. That is not the same as a schema whose `properties` is empty — that one
+declares that there are no fields, so the runtime delivers none and every field
+a caller sends is refused.
+
 ### Transforming `piece get` and `piece call` output
 
 `piece get` can filter an array before it reaches stdout and project the result
