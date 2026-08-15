@@ -138,23 +138,28 @@ export class FabricRegExp extends BaseFabricPrimitive
    * Reads the three fields a wire state carries, or `null` if any of them is
    * present with a type it cannot have.
    *
-   * A missing field takes its default, which is what lets a narrower encoder
-   * omit one. A field that is present and not a string is a different thing
-   * entirely: the constructor stores a non-`es2025` flavor's `source` and
-   * `flags` without touching them, so an unchecked object here reaches the
-   * public getters, which are typed `string`, and takes an unfrozen reference
-   * into a frozen instance with it.
+   * An absent field takes its default, which is what lets a narrower encoder
+   * omit one. A field that is *present* and not a string is a different thing
+   * entirely, and that includes one present as `undefined`: nothing here emits
+   * such a state, and defaulting it would silently answer a question the wire
+   * did actually ask -- a `flavor` sent that way would come back `es2025`,
+   * naming a dialect the sender did not.
+   *
+   * The rest matters more than it looks. The constructor stores a non-`es2025`
+   * flavor's `source` and `flags` without touching them, so an unchecked
+   * object here reaches the public getters, which are typed `string`, and
+   * takes an unfrozen reference into a frozen instance with it.
    */
   static #stateFields(
     state: Record<string, unknown>,
   ): { flavor: string; source: string; flags: string } | null {
-    const { flavor, source, flags } = state;
-
-    for (const one of [flavor, source, flags]) {
-      if ((one !== undefined) && (typeof one !== "string")) {
+    for (const key of ["flavor", "source", "flags"] as const) {
+      if (Object.hasOwn(state, key) && (typeof state[key] !== "string")) {
         return null;
       }
     }
+
+    const { flavor, source, flags } = state;
 
     return {
       flavor: (flavor as string | undefined) ?? DEFAULT_FLAVOR,

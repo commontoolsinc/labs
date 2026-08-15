@@ -187,6 +187,12 @@ describe("FabricRegExp", () => {
               { flavor: "future", source: { mutable: true }, flags: "g" },
               { flavor: "future", source: "a", flags: ["g"] },
               { flavor: ["future"], source: "a", flags: "g" },
+              // Present as `undefined` is present, not absent. A peer can
+              // reach this through the nonterminal walk by encoding the field
+              // as `{"/Undefined@1": null}`, and defaulting it would answer a
+              // question the wire did ask -- with `flavor`, by naming a
+              // dialect the sender did not.
+              { flavor: undefined, source: "a", flags: "g" },
             ]
           ) {
             expect(codec.decode(expectedTag, state as never, context))
