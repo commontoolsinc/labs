@@ -1,19 +1,20 @@
-import ts from "typescript";
-import {
-  CF_HELPERS_IDENTIFIER,
-  HelpersOnlyTransformer,
-  TransformationContext,
-} from "../core/mod.ts";
 import {
   type SchemaGenerationOptions,
   SchemaGenerator,
 } from "@commonfabric/schema-generator";
 import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
+import ts from "typescript";
+
 import {
   getNodeText,
   getTypeFromTypeNodeWithFallback,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
+import {
+  CF_HELPERS_IDENTIFIER,
+  HelpersOnlyTransformer,
+  TransformationContext,
+} from "../core/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";

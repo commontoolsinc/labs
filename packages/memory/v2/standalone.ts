@@ -12,10 +12,11 @@
  * bundles.
  */
 
+import { Identity } from "@commonfabric/identity";
+
 import { encodeMemoryBoundary } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
-import { Identity } from "@commonfabric/identity";
 
 const standaloneMemoryAudience = (await Identity.fromPassphrase(
   "common tools standalone memory audience",

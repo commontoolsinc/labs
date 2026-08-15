@@ -11,8 +11,11 @@
  * feeding a source whose import differs in exactly one respect and asserting
  * whether the helper is detected.
  */
-import ts from "typescript";
+
 import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
+
+import ts from "typescript";
+
 import {
   CF_HELPERS_IDENTIFIER,
   CFHelpers,

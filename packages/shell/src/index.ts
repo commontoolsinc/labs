@@ -1,9 +1,7 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 import "@commonfabric/ui";
-import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
-import { setupHostToggles } from "./lib/host-toggles.ts";
-import { consumeDeviceLinkFragment } from "./lib/device-link.ts";
+
 // Statically imported, deliberately. A dynamic `await import()` here pushes
 // `shared/app/*` into esbuild's lazy `__esm` wrappers, and esbuild then emits
 // one of those wrappers as a NON-async function containing a top-level await —
@@ -13,12 +11,19 @@ import { consumeDeviceLinkFragment } from "./lib/device-link.ts";
 // `index` entry sets `splitting: false`, so esbuild inlines dynamic imports
 // rather than emitting a chunk.
 import { handleDeviceLink } from "./lib/device-link-login.ts";
+import { consumeDeviceLinkFragment } from "./lib/device-link.ts";
+import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
+import { setupHostToggles } from "./lib/host-toggles.ts";
+
 import "./components/index.ts";
 import "./views/index.ts";
-import { Navigation } from "../shared/mod.ts";
-import type { XRootView } from "./views/RootView.ts";
-import { ROOT_KEY } from "./lib/root-key.ts";
+
 import { KeyStore } from "@commonfabric/identity";
+
+import { Navigation } from "../shared/mod.ts";
+import { ROOT_KEY } from "./lib/root-key.ts";
+import type { XRootView } from "./views/RootView.ts";
+
 import "./globals.ts";
 
 // Device-link login: /#k=<base64url 32-byte BIP39 entropy>.

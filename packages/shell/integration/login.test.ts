@@ -1,6 +1,8 @@
-import { env, waitForCondition } from "@commonfabric/integration";
-import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+
+import { env, waitForCondition } from "@commonfabric/integration";
+
 import { ShellIntegration } from "../../integration/shell-utils.ts";
 import { clickPierce, pierce } from "./shadow-dom.ts";
 
