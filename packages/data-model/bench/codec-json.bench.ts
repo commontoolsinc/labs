@@ -18,7 +18,7 @@
  * `b.start()` / `b.end()`.
  */
 
-import { fabricFromJsonValue, jsonFromFabricValue } from "../src/codecs.ts";
+import { fabricFromJsonValue, jsonFromFabricValue } from "@/codecs.ts";
 import {
   ARRAYS,
   groupKey,

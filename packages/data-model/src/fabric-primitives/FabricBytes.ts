@@ -10,10 +10,10 @@ import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
+  JSON_CODEC,
   ReconstructionContext,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.

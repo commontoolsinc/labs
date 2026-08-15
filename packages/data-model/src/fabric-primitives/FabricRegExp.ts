@@ -1,20 +1,20 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import type {
   FabricRegExp as ApiFabricRegExp,
   FabricRegExpConstructor as ApiFabricRegExpConstructor,
 } from "@commonfabric/api";
+import { backtickQuote } from "@commonfabric/utils/markdown";
+import { isPlainObject } from "@commonfabric/utils/types";
 
-import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
+import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
+import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import {
+  JSON_CODEC,
   type NonterminalCodec,
   type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
-import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
-import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
-import { isPlainObject } from "@commonfabric/utils/types";
+import type { FabricValue } from "@/interface.ts";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";

@@ -16,11 +16,11 @@
  * and several codecs all appear at once.
  */
 
-import type { FabricValue } from "../../src/interface.ts";
-import { FabricBytes } from "../../src/fabric-primitives/FabricBytes.ts";
-import { FabricEpochNsec } from "../../src/fabric-primitives/FabricEpochNsec.ts";
-import { FabricRegExp } from "../../src/fabric-primitives/FabricRegExp.ts";
-import { FabricError } from "../../src/fabric-instances/FabricError.ts";
+import type { FabricValue } from "@/interface.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricError } from "@/fabric-instances/FabricError.ts";
 
 /** Container sizes: the empty case, then five orders of magnitude. */
 export const SIZES = [0, 1, 10, 100, 1000, 10000, 100000] as const;
