@@ -214,6 +214,25 @@ export interface CallableResultRef {
   scope: CellScope;
 }
 
+/**
+ * `ref` written the way an address argument is written, so a command that
+ * prints one and a command that takes one agree on the spelling.
+ *
+ * `parseScopedIdSegment` reads `<id>@<scope>` and reads a bare id as the space
+ * scope, so the bare form is what a space-scoped address renders as — spelling
+ * `@space` out would be a second way to write an address that already has one.
+ * Every other scope carries its suffix, because reopening a user- or
+ * session-scoped cell without it resolves the space-scoped instance, which is
+ * a different cell.
+ *
+ * The space is not part of it: an address argument is read against the space
+ * the command is connected to, and a caller carrying one across spaces names
+ * the other with `--space` rather than inside the id.
+ */
+export function addressArgument(ref: CallableResultRef): string {
+  return ref.scope === "space" ? ref.id : `${ref.id}@${ref.scope}`;
+}
+
 export interface ExecutedCallable {
   outputText?: string;
   /** Present for handler sends carrying a caller-supplied invocation id. */

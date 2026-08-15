@@ -258,6 +258,51 @@ describe("cf wish command action", () => {
     expect(exits).toEqual([]);
   });
 
+  it("parses the read options and hands the selection to readWish", async () => {
+    const { deps, calls } = stubDeps({ result: { name: "Ada" } });
+    await captureStdout(() =>
+      wishAction(
+        { ...BASE_OPTIONS, quiet: true, select: "name,bio", filter: undefined },
+        "#profile",
+        deps,
+      )
+    );
+
+    // The parsed selection, not the raw flag text: `cf wish` reads the same
+    // grammar `cf piece get` and `cf piece call` read, through the same
+    // parser, so a caller learns it once.
+    expect(calls[0].selection?.projection?.source).toBe("name,bio");
+    expect(calls[0].selection?.projection?.flag).toBe("--select");
+    expect(calls[0].selection?.filter).toBeUndefined();
+  });
+
+  it("parses --filter into the predicate the shared grammar defines", async () => {
+    const { deps, calls } = stubDeps({ result: [] });
+    await captureStdout(() =>
+      wishAction(
+        { ...BASE_OPTIONS, quiet: true, filter: '.status == "open"' },
+        "#mentionable",
+        deps,
+      )
+    );
+
+    expect(calls[0].selection?.filter?.source).toBe('.status == "open"');
+    expect(calls[0].selection?.filter?.paths).toEqual([["status"]]);
+    expect(calls[0].selection?.projection).toBeUndefined();
+  });
+
+  it("names no selection at all when no read option is given", async () => {
+    const { deps, calls } = stubDeps({ result: { name: "Ada" } });
+    await captureStdout(() =>
+      wishAction({ ...BASE_OPTIONS, quiet: true }, "#profile", deps)
+    );
+
+    // Absent rather than empty: a wish that asked for nothing reads the whole
+    // target, and an empty selection object would send it through the
+    // projection machinery for no reason.
+    expect("selection" in calls[0]).toBe(false);
+  });
+
   it("--allow-empty prints null and does not exit on an empty result", async () => {
     const { deps, exits } = stubDeps({
       result: null,

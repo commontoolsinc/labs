@@ -325,6 +325,22 @@ flags, since it skips the receipt readback they are answered from.
 selection, so each address names a position in the value you were handed — but
 not with `--filter`, which moves the positions a link names.
 
+`wish` and `exec` take the same three flags too, so all four arrivals shape
+their output the one way. `wish` writes them beside its target and shapes the
+cell the query resolved to; a query that matched nothing stays an ordinary empty
+result rather than becoming an error. `exec` writes them **before the mounted
+file**, because everything after it belongs to the callable's own schema-derived
+interface — which also means a callable run through its own shebang cannot carry
+them. `exec` settles a handler under an invocation of its own and prints the
+same Invocation JSON `piece call` does; a tool's result stays on stdout with its
+result cell's address on stderr, written as an address argument `--piece` takes
+unchanged.
+
+```bash
+deno task cf wish '#profile' -i ./claude.key --select name,avatar
+deno task cf exec --select id,title /tmp/cf/…/result/search.tool --query milk
+```
+
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The
 JSON forms match `cf exec`:

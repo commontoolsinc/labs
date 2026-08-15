@@ -455,8 +455,11 @@ entries it holds, because the links are stored inline in the document being
 read, and a rejection below one of those links propagates up through the
 containers holding it rather than being read past.
 
-The same options work on a call's result, on a wish, and on a direct read: one
-read layer, several arrivals.
+The same options work on a call's result, on a wish, on a verb reached through
+a filesystem mount, and on a direct read: one read layer, four arrivals.
+`cf exec` writes them before the mounted file, since everything after it
+belongs to the callable's own interface; the other three take them wherever
+their own options go.
 
 The demo's act 10 is this step run against the session's own tree: the whole
 board first, then only what is open, then the refusal.

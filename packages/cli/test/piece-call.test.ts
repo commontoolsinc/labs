@@ -4777,6 +4777,32 @@ describe("renderPieceCallOutcome", () => {
     assertEquals(rendered, ["{}"]);
     assertEquals(hinted.length, 1);
     assertStringIncludes(hinted[0], "of:x");
+    // The address argument the next command takes, not the three-part prose
+    // that named the same cell in a spelling nothing parses. `cf exec` prints
+    // the same shape for the same cell.
+    assertStringIncludes(hinted[0], "cf piece get --piece of:x");
+    expect(hinted[0]).not.toContain("(space did:key:s");
+  });
+
+  it("spells a non-space-scoped tool result cell with its scope", () => {
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        outputText: "{}",
+        resultRef: { id: "of:x", space: "did:key:s", scope: "user" },
+      } as ExecutedPieceCallable,
+      "tool",
+      "fid1:piece",
+      deps,
+    );
+    // Reopening a user-scoped cell without its scope resolves the
+    // space-scoped instance, which is a different cell — so the suffix rides
+    // the address rather than sitting in a parenthetical the way the prose
+    // form's did.
+    assertStringIncludes(hinted[0], "cf piece get --piece of:x@user");
   });
 
   it("handler invocations render the Invocation JSON with next steps", () => {

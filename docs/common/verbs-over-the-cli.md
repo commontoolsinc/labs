@@ -196,9 +196,9 @@ receipt to name.
 ### Asking for a smaller result
 
 A verb decides what it returns; the caller decides how much of it to look at.
-`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`
-takes, with the same grammar — shape the `result` before it reaches stdout, and
-go before the callable name:
+`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`,
+`cf wish` and `cf exec` take, with the same grammar — shape the `result` before
+it reaches stdout, and go before the callable name:
 
 ```bash
 cf piece call --piece <topic> --select comment.writtenAt addComment \
@@ -220,6 +220,23 @@ selection to be about — and `--no-wait`, which never reads the receipt back,
 refuses all three flags. `--show-links` composes with a projection, because a
 projection leaves every surviving path where it was; it does not compose with
 `--filter`, which moves the positions a link names.
+
+**A verb reached through a filesystem mount is the same call.** `cf exec` takes
+the three flags too, written before the mounted file, since everything after it
+belongs to the callable's own schema-derived interface. It settles the handling
+under an invocation of its own and prints the same Invocation JSON this section
+shows, so a mounted handler's outcome has an address and a shape rather than
+being unreported:
+
+```bash
+cf exec --select comment.writtenAt \
+  /tmp/cf/<space>/pieces/<piece>/result/addComment.handler \
+  --body first --agent-name Sol
+```
+
+A tool prints its result on stdout as it always did, with the result cell's
+address on stderr — written as an address argument, so
+`cf piece get --piece <that>` takes it unchanged.
 
 `packages/cli/README.md` has the grammar and the supported schema subset.
 

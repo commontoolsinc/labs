@@ -229,10 +229,15 @@ either. That is not the same as a schema whose `properties` is empty — that on
 declares that there are no fields, so the runtime delivers none and every field
 a caller sends is refused.
 
-### Transforming `piece get` and `piece call` output
+### Transforming command output
 
-`piece get` can filter an array before it reaches stdout and project the result
-to a smaller shape:
+Reading is one operation reached from four starting points, and every one of
+them takes the same three flags — `--filter`, `--select` and `--schema` — with
+the same grammar, the same conflict rule and the same error messages. The
+vocabulary is learned once and written wherever you arrived from.
+
+`piece get` filters an array before it reaches stdout and projects the result to
+a smaller shape:
 
 ```bash
 cf piece get --piece ID items --filter '.status == "open"'
@@ -241,20 +246,52 @@ cf piece get --piece ID items \
   --select id,title,author.name
 ```
 
-`piece call` takes the same three flags, with the same grammar, the same
-conflict rule, and the same error messages, written before the callable name:
+`piece call` writes them before the callable name:
 
 ```bash
 cf piece call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
 cf piece call --piece ID --filter '.status == "open"' listTopics
 ```
 
-Everything below describes both commands. The one difference is what the
-selection is about: `piece get` shapes a cell's value, and `piece call` shapes
-the **result of the call** — a handler's `result` inside the Invocation JSON, or
-a tool's JSON on stdout. See
-[what a selection means for a call](#what-a-selection-means-for-a-call) for the
-three cases where that difference shows.
+`wish` writes them beside the target it resolves:
+
+```bash
+cf wish '#profile' -i ./claude.key --select name,avatar
+cf wish '#mentionable' -i ./claude.key -s my-space --filter '.status == "open"'
+```
+
+`exec` writes them **before the mounted file**, because everything after the
+file belongs to the callable's own schema-derived interface:
+
+```bash
+cf exec --select id,title /tmp/cf/…/result/search.tool --query milk
+cf exec --select 'entry@' /tmp/cf/…/result/add.handler --title Milk
+```
+
+A mounted callable run through its own shebang — `./search.tool --query milk` —
+cannot carry them, because the shim appends its arguments after the file. Reach
+for the `cf exec` spelling when you want to shape what comes back.
+
+Everything below describes all four. What differs is only what the selection is
+about:
+
+| Command      | What the selection shapes                                                                                |
+| ------------ | -------------------------------------------------------------------------------------------------------- |
+| `piece get`  | the value at the cell its address and path name                                                          |
+| `piece call` | the **result of the call** — a handler's `result` inside the Invocation JSON, or a tool's JSON on stdout |
+| `wish`       | the cell the query resolved to, before the walk that strips handles                                      |
+| `exec`       | the same result `piece call` shapes, for the verb the mounted file names                                 |
+
+See [what a selection means for a call](#what-a-selection-means-for-a-call) for
+the cases where the call's difference shows. `exec` is the same invocation
+reached through a mount, so it meets the value-less verb and the
+graph-quiescence coupling described there; it has neither `--no-wait` nor
+`--show-links`, so the two cases about those flags do not arise. `wish` adds one
+of its own: a query that matched nothing is an ordinary outcome rather than an
+error, so the selection is never reached and the empty result comes back as it
+always did. A selection that keeps nothing over a target that DID resolve is
+refused, because "the wish matched nothing" and "your projection kept nothing"
+are different facts.
 
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
@@ -677,7 +714,9 @@ output with later errors.
 
 For `cf exec`, `--json` belongs after the mounted callable path. For
 `cf piece call`, it belongs after the callable name. In both commands, it
-selects complete JSON input:
+selects complete JSON input — and in both, that is the opposite side of the
+callable from where the read options go, which shape what comes back rather than
+what goes in:
 
 ```bash
 cf exec /tmp/cf/home/pieces/notes/result/search.tool --json '{"query":"milk"}'
