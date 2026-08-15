@@ -3853,6 +3853,11 @@ const isNonEndorsementProvenanceAtom = (atom: unknown): boolean =>
   // currentPrincipalIntegrityReason, never a requiredIntegrity target.
   isCurrentPrincipalClaimAtom(atom);
 
+const isAmbientStorageProvenanceAtom = (atom: unknown): boolean =>
+  isNonEndorsementProvenanceAtom(atom) ||
+  (isObjectOrArray(atom) &&
+    atom.type === CFC_ATOM_TYPE.TransformedBy);
+
 // A consumed read whose label carries no confidentiality and whose integrity is
 // ENTIRELY non-endorsement provenance (a link reference / origin / a
 // current-principal claim) is structural plumbing, not a data input. It must
@@ -3878,6 +3883,29 @@ const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
   const integrity = label.integrity ?? [];
   return integrity.length > 0 &&
     integrity.every(isNonEndorsementProvenanceAtom);
+};
+
+// The owning Space label is the baseline policy for storage in that space. It
+// does not identify application data that needs an integrity endorsement.
+// Runtime transformation attribution can accompany that baseline without
+// making it an application endorsement. Custom confidentiality and another
+// space's baseline remain data-bearing.
+const isSameSpaceAmbientOnlyConsumedLabel = (
+  label: IFCLabel,
+  targetSpace: MemorySpace,
+): boolean => {
+  const confidentiality = label.confidentiality ?? [];
+  if (
+    confidentiality.length === 0 ||
+    !confidentiality.every((atom) =>
+      deepEqual(atom, cfcAtom.space(targetSpace))
+    )
+  ) {
+    return false;
+  }
+  const integrity = label.integrity ?? [];
+  return integrity.length === 0 ||
+    integrity.every(isAmbientStorageProvenanceAtom);
 };
 
 // Trust context for CONCEPT-valued requiredIntegrity floors (Epic D5): the
@@ -4116,6 +4144,9 @@ const verifyInputRequirements = (
       read.journalIndex < bound &&
       !isProvenanceOnlyConsumedLabel(read.label!)
     );
+    const integrityGating = gating.filter((read) =>
+      !isSameSpaceAmbientOnlyConsumedLabel(read.label!, target.space)
+    );
     // Stage-0 precision counters (cfc-value-level-provenance.md §6): what
     // the shipped prefix did for THIS protected write versus the pre-D4
     // transaction-global quantification. Recorded before the entry's own
@@ -4169,7 +4200,7 @@ const verifyInputRequirements = (
     // (dial off/observe) would break the floor's pinned byte-compat rollout
     // — the read-side half of #14 rides the same dial as the write-side
     // half by design.
-    if (requiredIntegrity.length > 0 && gating.length > 0) {
+    if (requiredIntegrity.length > 0 && integrityGating.length > 0) {
       // Coherent satisfaction (§8.10.3, Epic B5): each requirement must be
       // met by ONE shared witness atom across every gated read, not by a
       // different witness per read — "each input was screened by someone"
@@ -4177,7 +4208,7 @@ const verifyInputRequirements = (
       // the plain floor. Quantifies over D4's per-write prefix `gating`, not
       // the transaction-global `gatedReads`.
       const ok = cfcIntegritySatisfiesFloorCoherently(
-        gating.map((read) => read.label?.integrity ?? []),
+        integrityGating.map((read) => read.label?.integrity ?? []),
         requiredIntegrity,
         cfcFloorTrustContext(tx),
       );

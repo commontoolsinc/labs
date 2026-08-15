@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
@@ -34,6 +35,10 @@ const REPRESENTS_PRINCIPAL_ATOM = {
   subject: signer.did(),
 };
 const ADMIN_ATOM = "group-chat-admin";
+const TRANSFORMED_BY_ATOM = {
+  type: CFC_ATOM_TYPE.TransformedBy,
+  identity: { kind: "builtin", builtinId: "ambient-test" },
+};
 
 // Seed a doc's stored CFC metadata directly via an ungated path-[] full-document
 // write (how the runtime persists it), so a later read picks up the given label.
@@ -143,6 +148,132 @@ describe("CFC requiredIntegrity provenance scoping (S7)", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("same-space ambient confidentiality does not gate integrity", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      await seedLabeledDoc(runtime, "ri-space-lookup", "lookup", {
+        confidentiality: [cfcAtom.space(signer.did())],
+      });
+
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "ri-space-lookup", undefined, tx).get();
+      runtime.getCell(signer.did(), "ri-space-sink", SINK_SCHEMA, tx).set({
+        out: "granted",
+      });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("same-space runtime provenance does not gate integrity", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      await seedLabeledDoc(runtime, "ri-space-provenance", "lookup", {
+        confidentiality: [cfcAtom.space(signer.did())],
+        integrity: [TRANSFORMED_BY_ATOM],
+      });
+
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "ri-space-provenance", undefined, tx)
+        .get();
+      runtime.getCell(
+        signer.did(),
+        "ri-space-provenance-sink",
+        SINK_SCHEMA,
+        tx,
+      ).set({ out: "granted" });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("another space's ambient confidentiality still gates integrity", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      await seedLabeledDoc(runtime, "ri-foreign-space-lookup", "lookup", {
+        confidentiality: [cfcAtom.space("did:key:z6MkForeignSpace")],
+      });
+
+      const tx = runtime.edit();
+      runtime.getCell(
+        signer.did(),
+        "ri-foreign-space-lookup",
+        undefined,
+        tx,
+      ).get();
+      runtime.getCell(
+        signer.did(),
+        "ri-foreign-space-sink",
+        SINK_SCHEMA,
+        tx,
+      ).set({ out: "rejected" });
+
+      tx.prepareCfc();
+      expect(String((await tx.commit()).error?.message)).toContain(
+        "requiredIntegrity failed",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("foreign-space runtime provenance still gates integrity", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      await seedLabeledDoc(runtime, "ri-foreign-provenance", "lookup", {
+        confidentiality: [cfcAtom.space("did:key:z6MkForeignSpace")],
+        integrity: [TRANSFORMED_BY_ATOM],
+      });
+
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "ri-foreign-provenance", undefined, tx)
+        .get();
+      runtime.getCell(
+        signer.did(),
+        "ri-foreign-provenance-sink",
+        SINK_SCHEMA,
+        tx,
+      ).set({ out: "rejected" });
+
+      tx.prepareCfc();
+      expect(String((await tx.commit()).error?.message)).toContain(
+        "requiredIntegrity failed",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
