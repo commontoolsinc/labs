@@ -3597,23 +3597,27 @@ export class SchemaObjectTraverser<V extends FabricValue>
         return fail(TRAVERSE_FAILURES.invalidType);
       }
 
-      const newValue: FabricValue[] = [];
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(
         doc.address,
         schemaObj,
       );
-      using t = this.tracker.include(doc.value, schema, newValue, doc);
-      if (t === null) {
-        // newValue will be converted to a createObject result by the
-        // function that added it to the tracker, so don't do that here
-        return { ok: this.tracker.getExisting(doc.value, schema) };
-      }
+      // An opaque position is answered without descending, so it is not part
+      // of a cycle and registers nothing. Registering the empty container
+      // first would hand a re-entrant read that bare container in place of
+      // the presence value, losing the back-to-cell annotation with it.
       if (valid === TypeValidity.Unknown) {
         return {
           ok: this.objectCreator.createOpaquePresence?.(newLink) ??
             this.objectCreator.createObject(newLink, undefined),
         };
+      }
+      const newValue: FabricValue[] = [];
+      using t = this.tracker.include(doc.value, schema, newValue, doc);
+      if (t === null) {
+        // newValue will be converted to a createObject result by the
+        // function that added it to the tracker, so don't do that here
+        return { ok: this.tracker.getExisting(doc.value, schema) };
       }
       const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
       if (!Array.isArray(entries)) {
@@ -3664,20 +3668,22 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (valid === TypeValidity.False) {
         return fail(TRAVERSE_FAILURES.invalidType);
       }
-      const newValue: Record<string, FabricValue> = {};
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
-      using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
-      if (t === null) {
-        // newValue will be converted to a createObject result by the
-        // function that added it to the tracker, so don't do that here
-        return { ok: this.tracker.getExisting(doc.value, schemaObj) };
-      }
+      // See the array arm above: an opaque position descends into nothing, so
+      // it registers nothing.
       if (valid === TypeValidity.Unknown) {
         return {
           ok: this.objectCreator.createOpaquePresence?.(newLink) ??
             this.objectCreator.createObject(newLink, undefined),
         };
+      }
+      const newValue: Record<string, FabricValue> = {};
+      using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
+      if (t === null) {
+        // newValue will be converted to a createObject result by the
+        // function that added it to the tracker, so don't do that here
+        return { ok: this.tracker.getExisting(doc.value, schemaObj) };
       }
       const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
       if (entries === undefined || entries === null) {

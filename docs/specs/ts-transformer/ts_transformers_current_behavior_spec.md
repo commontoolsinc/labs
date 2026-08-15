@@ -575,8 +575,9 @@ structurally representable.
   `pattern:any-result-schema`
 - individual inferred-result **fields** whose type is `unknown` emit **Error**
   `pattern-result:unknown-type`, naming the offending paths — the schema would
-  carry `{ type: "unknown" }` there and a consumer reading the field back
-  would materialize `undefined` (`schema-injection.ts:2621`)
+  carry `{ type: "unknown" }` there, which a consumer does not materialize: it
+  reads the field back as an opaque reference carrying no properties
+  (`schema-injection.ts:2621`)
 - authors who intentionally want a permissive/opaque output boundary must make
   it explicit with `pattern<Input, Output>(...)`
 
@@ -737,8 +738,9 @@ report these through the same collector (deduplicated via §2.2's
   §6.6
 - **Error** `reactive-capture:unknown-type` (`src/ast/type-building.ts:681`) —
   a captured reactive value's inferred type is `unknown`, so its schema would
-  be `{ type: "unknown" }` and the runner would read it back as `undefined`;
-  the message directs authors to add an explicit type
+  be `{ type: "unknown" }` and the runner would not materialize it, reading it
+  back as an opaque reference carrying no properties; the message directs
+  authors to add an explicit type
 - **Error** `reactive:call-argument-computation`
   (`expression-rewrite/emitters/compute-wrap-invariants.ts:112`) — an authored
   reactive computation (e.g. `profile ?? profileWish.result` or

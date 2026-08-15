@@ -655,11 +655,12 @@ export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
 
 /**
  * Reports when a reactive value consumed across a boundary has inferred type
- * `unknown`. That type lowers to `{ type: "unknown" }`, which the runner reads
- * back as `undefined` rather than materializing the value (see
- * `runner/src/traverse.ts`, `_traverseWithSchemaInner`: a
- * `TypeValidity.Unknown` field short-circuits to `undefined`). `any` lowers to
- * a permissive `true` schema and materializes, so it is not flagged.
+ * `unknown`. That type lowers to `{ type: "unknown" }`, which marks a
+ * reference the runner does not materialize: it reads back as an opaque
+ * value that answers presence and identity and carries no properties (see
+ * `runner/src/traverse.ts`, where a `TypeValidity.Unknown` position is
+ * answered without descending). `any` lowers to a permissive `true` schema
+ * and materializes, so it is not flagged.
  *
  * Both reactive-input sites share this: closure-captured inputs (the capture
  * leaves below — `computed`/`lift`, `handler`/`action`, reactive array methods,
@@ -682,9 +683,9 @@ export function reportUnknownReactiveType(
     message:
       `Reactive value \`${describeCapture(expression, label)}\` has inferred ` +
       `type \`unknown\`, so its schema is \`{ type: "unknown" }\`, which the ` +
-      `runner reads back as \`undefined\` instead of materializing it. Add an ` +
-      `explicit type so it can be inferred (e.g. ` +
-      `\`fetchJson<{ /* result shape */ }>({ ... })\`).`,
+      `runner does not materialize: it reads back as an opaque reference ` +
+      `carrying none of the value's properties. Add an explicit type so it ` +
+      `can be inferred (e.g. \`fetchJson<{ /* result shape */ }>({ ... })\`).`,
     node: expression,
   });
 }

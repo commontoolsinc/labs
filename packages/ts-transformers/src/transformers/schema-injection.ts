@@ -2698,8 +2698,9 @@ function reportAnyResultSchema(
  * Reports on a pattern's inferred result schema. A top-level `any`/`unknown`
  * result is an error (the whole output is permissive). A concrete result that
  * nests `unknown` fields is also an error: those fields lower to
- * `{ type: "unknown" }`, which a consumer reading them back materializes as
- * `undefined` — the producer-side form of the unknown-capture bug.
+ * `{ type: "unknown" }`, which a consumer does not materialize — it reads
+ * them back as opaque references carrying no properties, the producer-side
+ * form of the unknown-capture bug.
  */
 function reportUnknownPatternResult(
   context: TransformationContext,
@@ -2723,8 +2724,9 @@ function reportUnknownPatternResult(
       `${
         paths.length > 1 ? "have" : "has"
       } inferred type \`unknown\`, so the ` +
-      `output schema carries \`{ type: "unknown" }\` there. A consumer that ` +
-      `reads such a field back materializes it as \`undefined\`. Add an ` +
+      `output schema carries \`{ type: "unknown" }\` there. A consumer does ` +
+      `not materialize such a field: it reads back as an opaque reference ` +
+      `carrying no properties. Add an ` +
       `explicit Output type, e.g. pattern<Input, { /* shape */ }>(...).`,
     node: node.expression,
   });
