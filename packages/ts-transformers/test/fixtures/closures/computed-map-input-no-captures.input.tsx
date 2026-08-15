@@ -7,6 +7,7 @@
  * 2. The inner .map() runs on the plain array, so it is NOT rewritten to .mapWithPattern()
  * 3. SchemaInjectionTransformer infers the result type from the computed body
  */
+
 import { Cell, computed, pattern } from "commonfabric";
 
 interface Item {

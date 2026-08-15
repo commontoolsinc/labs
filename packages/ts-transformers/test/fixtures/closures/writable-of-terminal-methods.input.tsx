@@ -4,6 +4,7 @@
  * of opaque classification — new Writable() is an opaque origin and
  * .get()/.set() are terminal methods.
  */
+
 import { action, pattern, UI, Writable } from "commonfabric";
 
 interface State {

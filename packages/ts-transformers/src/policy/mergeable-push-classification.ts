@@ -27,6 +27,7 @@
  * unstratified check gave every site. Under-approximation demotes to the
  * independent-write message or to silence, never to a wrong recommendation.
  */
+
 import ts from "typescript";
 
 export type MergeablePushMisuseKind =

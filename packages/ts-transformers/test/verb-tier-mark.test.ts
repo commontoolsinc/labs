@@ -10,6 +10,7 @@
  * pipeline, and the assertions read the emitted result-schema literal — the
  * artifact `cf piece verbs` will consult.
  */
+
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
