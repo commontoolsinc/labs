@@ -722,12 +722,11 @@ describe("projection-key-classification", () => {
     };
 
     it("derives `required` for every projected property where the source's own root is a `$ref`", async () => {
-      // A root spelled as a reference fails differently from a referenced
-      // child: nothing below it resolves at all, so every projected property
-      // loses its guarantee at once. The value still reads in simple cases,
-      // which is what makes this invisible at the call site — the output
-      // schema is weakened, and a consumer downstream of it sees required
-      // data as optional.
+      // A root spelled as a reference is followed like any other, so the
+      // target's own `required` reaches every projected property beneath it
+      // rather than none of them. Distinct from a referenced child because
+      // one unresolved hop here would strand the whole schema, not one
+      // position — which is why the case is pinned separately.
       expect(
         await derivedRequired({
           $ref: "#/$defs/Board",
