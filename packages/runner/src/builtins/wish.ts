@@ -1983,11 +1983,11 @@ export function wish(
   function commitPatternErrorUI(
     resultCell: Cell<any>,
     message: string,
-  ): void {
+  ): Promise<unknown> {
     const errorTx = runtime.edit();
     resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
     runtime.prepareTxForCommit(errorTx);
-    errorTx.commit();
+    return errorTx.commit();
   }
 
   // Run a just-fetched sidecar pattern (profile create / picker) into its result
@@ -2005,10 +2005,10 @@ export function wish(
       runtime.prepareTxForCommit(runTx);
       const { error } = await runTx.commit();
       if (error) {
-        commitPatternErrorUI(resultCell, toCompactDebugString(error));
+        await commitPatternErrorUI(resultCell, toCompactDebugString(error));
       }
     } catch (error) {
-      commitPatternErrorUI(resultCell, errorMessage(error));
+      await commitPatternErrorUI(resultCell, errorMessage(error));
     }
   }
 
@@ -2073,7 +2073,7 @@ export function wish(
           const readyTx = runtime.edit();
           profileCreatePatternReadyCell.withTx(readyTx).set(true);
           runtime.prepareTxForCommit(readyTx);
-          readyTx.commit();
+          trackSidecarLaunch(readyTx.commit());
         }
       }).then((pattern) => {
         if (cancelled || !profileCreatePatternResultCell) return;
@@ -2093,7 +2093,7 @@ export function wish(
         // later fetch has since landed a pattern, whose surface is in that same
         // cell and is the better answer than this launch's failure.
         if (!profileCreatePatternCache.cached()) {
-          commitPatternErrorUI(
+          return commitPatternErrorUI(
             profileCreatePatternResultCell,
             `Can't load profile-create.tsx`,
           );
@@ -2204,7 +2204,7 @@ export function wish(
             // `.result` is unaffected: under CT-1829 it rides the main wish state
             // (ordered[0]), not this sidecar (a superseded fetch also resolves
             // to undefined — a benign extra error UI on a since-replaced cell).
-            commitPatternErrorUI(
+            return commitPatternErrorUI(
               profilePickerPatternResultCell,
               `Can't load profile-picker.tsx`,
             );
@@ -2214,7 +2214,7 @@ export function wish(
         // Defensive: a throw inside the `.then` body (or a truly-rejecting
         // fetch) would otherwise be an unhandled rejection. Surface it too.
         if (!cancelled && profilePickerPatternResultCell) {
-          commitPatternErrorUI(
+          return commitPatternErrorUI(
             profilePickerPatternResultCell,
             errorMessage(error),
           );
