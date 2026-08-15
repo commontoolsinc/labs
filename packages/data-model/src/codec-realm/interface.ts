@@ -87,14 +87,23 @@ export const REALM_FORMAT_VERSION = "fvr1";
  * and the argument below would evaporate. `decode()` refuses an envelope whose
  * slot zero is not an object.
  *
- * **A payload cannot contain the marker, because the marker is younger than
- * the payload.** It is created after the value exists, so no value -- however
- * it was assembled, and whatever its author has seen of some earlier encoding
- * -- can hold a reference to it. That is why the marker is minted per call
- * rather than per engine: a long-lived one could be embedded in a value by
- * code that had legitimately seen an earlier encoded tree, and the copy-on-
- * write walk would carry it through to a data position, where the decoder
- * would read it as an envelope.
+ * **A payload cannot contain the marker**, and two facts together are what
+ * say so.
+ *
+ * It is *younger than the value*: created after the value exists, so nothing
+ * already assembled can hold a reference to it, whatever its author has seen
+ * of some earlier encoding. That is why it is minted per call rather than per
+ * engine -- a long-lived one could be embedded in a value by code that had
+ * legitimately seen an earlier encoded tree, and the walk would carry it
+ * through to a data position where the decoder would read it as an envelope.
+ *
+ * And it is *confined*: it never leaves the engine until `encode()` returns.
+ * It lives in a private field and in the tagged forms the walk is building,
+ * neither of which anything outside can reach, and a nested `encode()` mints
+ * and retires its own. Age alone would not settle it, because a value's
+ * contents need not all exist when the walk starts -- a getter runs mid-walk,
+ * after the marker exists. What closes that gap is that such a getter has
+ * nowhere to read the marker from.
  *
  * It is a frozen array of one string, which is also a `FabricValue` this
  * format encodes by identity. That matters: a value holding some *earlier*
@@ -135,10 +144,11 @@ export type RealmTaggedValue = readonly [
  * What crosses: `[marker, encodedValue]`.
  *
  * The outer envelope exists to carry the marker, and carries the version with
- * it. A receiver reads slot zero to learn what to compare against, and may
- * read the version inside it to refuse a build whose encoding it does not
- * understand -- which is what makes the same-build boundary a thing a receiver
- * checks rather than a thing it assumes.
+ * it. A receiver reads slot zero to learn what to compare against, and the
+ * version inside it is there for one that wants to refuse a build whose
+ * encoding it does not understand. Nothing in this package does that yet: the
+ * version is carried, not enforced, and a receiver that cares has to check it
+ * for itself.
  */
 export type RealmEncodedValue = readonly [RealmFormatMarker, RealmCodecValue];
 

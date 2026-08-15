@@ -31,16 +31,16 @@ import {
  * repeated at slot zero of each tagged form, and a receiver takes it from the
  * outer envelope and recognizes the rest by `===` against it. Structured
  * cloning preserving shared references is what carries that across; the marker
- * being younger than the value is what keeps a payload from containing one.
- * {@link RealmFormatMarker} states both, and the second is the whole of the
- * unforgeability argument.
+ * being younger than the value it encodes, and confined to the engine until
+ * that encode returns, is what keeps a payload from containing one.
+ * {@link RealmFormatMarker} states all three.
  *
- * The marker carries a version string, so the boundary this format exists for
- * -- worker IPC within one process, where both ends are the same build -- is
- * an assumption a receiver can now check rather than one it has to take on
- * faith. `postMessage()` also spans tabs, windows and frames, any of which
- * could pair two deployments; a receiver that reads the version can refuse a
- * build it does not understand.
+ * The marker carries a version string, which is what a receiver would check
+ * to hold the boundary this format exists for: worker IPC within one process,
+ * where both ends are the same build. `postMessage()` also spans tabs, windows
+ * and frames, any of which could pair two deployments. Nothing here enforces
+ * it -- the version is carried rather than checked -- but carrying it is what
+ * makes the check possible at all.
  *
  * Two pieces of `JsonCodecEngine` have no counterpart here, each because the
  * transport does the work directly:
@@ -59,8 +59,9 @@ import {
  * and no symbol is therefore handed to the transport exactly as it arrived --
  * the same object, not a reconstruction of it -- and copied once by the
  * transport instead of twice. The envelope stops that one layer in -- the
- * outermost value is always the two-element wrapper -- which costs one array
- * per call and no rebuild of anything beneath it. That is the ordinary case
+ * outermost value is always the two-element wrapper -- which costs two
+ * allocations per call, the wrapper and the marker, and no rebuild of
+ * anything beneath it. That is the ordinary case
  * for plain data, and it makes the walk's cost proportional to what actually
  * needs encoding rather than to the size of the value. `JsonCodecEngine` never
  * faces the choice, having to reach text.
@@ -135,7 +136,8 @@ export class RealmCodecEngine
    * Mints this call's marker and returns `[marker, walkedTree]`. The tree
    * inside is still copy-on-write, so a payload needing no encoding is the
    * caller's own object rather than a reconstruction of it; what the envelope
-   * costs is one two-element array per call, and what it buys is a receiver
+   * costs is two allocations per call, the wrapper and the marker, and what it
+   * buys is a receiver
    * able to tell this form from anything else on the channel, and to tell
    * which build wrote it.
    *
@@ -222,10 +224,13 @@ export class RealmCodecEngine
   /**
    * @inheritDoc
    *
-   * @throws If called outside an `encode()`, there being no marker to build an
-   *   envelope around. Unreachable through this class, whose only walk starts
-   *   there, and stated rather than assumed because the alternative is
-   *   emitting an envelope nothing can recognize.
+   * @throws If there is no marker to build an envelope around, which is the
+   *   case outside an encode and a decode both. Note what it therefore does
+   *   *not* catch: during a decode the field holds the sender's marker, so a
+   *   tag wrapped there would be wrapped under that one rather than refused.
+   *   Nothing reaches it that way -- `decodeTagged()` never encodes -- and the
+   *   guard is here for the case it does cover, an envelope built with no
+   *   marker at all being one nothing could recognize.
    */
   protected override wrapTag(
     tag: string,
@@ -345,10 +350,26 @@ export class RealmCodecEngine
     context: ReconstructionContext,
     seen?: Set<object>,
   ): FabricValue {
-    // Self-representing primitives pass straight through. That is every
-    // primitive but `symbol`, which cannot have arrived untagged: cloning
-    // refuses one, so the only way a symbol crosses is under a tag, below.
-    if ((data === null) || (typeof data !== "object")) {
+    // Self-representing primitives pass straight through. A `symbol` and a
+    // function are not among them and are refused here rather than returned:
+    // cloning carries neither, so neither can reach this across the boundary
+    // -- but `decode()` is callable in the realm that built its argument, and
+    // what this format never emits is refused wherever it is found rather
+    // than only where a transport would have stopped it. `encode()` refuses
+    // both too, from the other side.
+    if (data === null) {
+      return null;
+    }
+
+    if ((typeof data === "symbol") || (typeof data === "function")) {
+      return this.reportMalformed(
+        "",
+        toCompactDebugString(data, 50),
+        `Cannot decode ${typeof data}: not a form this format emits.`,
+      );
+    }
+
+    if (typeof data !== "object") {
       return data as FabricValue;
     }
 

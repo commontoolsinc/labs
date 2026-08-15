@@ -91,7 +91,7 @@ async function crossRealm(value: FabricValue): Promise<EchoReport> {
 
 describe("RealmCodecEngine", () => {
   describe("encode()", () => {
-    it("emits the walked tree itself, with no envelope around it", () => {
+    it("wraps the walked tree, which is otherwise the caller's own", () => {
       const value = { a: 1 };
 
       // Not merely equal: the same object. An envelope would make that
@@ -285,7 +285,7 @@ describe("RealmCodecEngine", () => {
       );
     });
 
-    it("refuses a `Map`, which this format no longer emits at all", () => {
+    it("refuses a `Map`, which is no form this format emits", () => {
       // Cloning carries one faithfully, so a peer can send one; nothing here
       // makes one, so meeting one is a malformation like any other.
       expect(() => fabricFromRealmValue(wire(new Map([["a", 1]]))))
@@ -295,10 +295,28 @@ describe("RealmCodecEngine", () => {
     it("refuses an envelope that is not two elements", () => {
       // The one place this engine takes instruction from the data, so the
       // shape is checked before slot zero is read as a marker.
-      for (const bad of [[], [1, 2, 3], "nope", 42]) {
+      // Two of these have an object at slot zero, so only the slot-count
+      // clause refuses them. Without those the check would be pinned by
+      // nothing: every other shape here is caught by the array or
+      // marker-object clauses instead.
+      for (const bad of [[], [{}], [{}, 1, 2], [1, 2, 3], "nope", 42]) {
         expect(() => fabricFromRealmValue(bad as never))
           .toThrow(/two-element envelope/);
       }
+    });
+
+    it("refuses a symbol or a function met untagged", () => {
+      // Cloning carries neither, so neither reaches this across the boundary
+      // -- but `decode()` is callable in the realm that built its argument,
+      // and passing them through would leave a value in the result that this
+      // format cannot emit and `encode()` will not take.
+      expect(() => fabricFromRealmValue(wire(Symbol("u"))))
+        .toThrow(/Cannot decode symbol/);
+      expect(() => fabricFromRealmValue(wire(() => 1)))
+        .toThrow(/Cannot decode function/);
+      // Nested, where a pass-through would hide inside a frozen container.
+      expect(() => fabricFromRealmValue(wire({ a: Symbol("u") })))
+        .toThrow(/Cannot decode symbol/);
     });
 
     it("refuses an envelope whose marker is not an object", () => {
@@ -350,11 +368,11 @@ describe("RealmCodecEngine", () => {
       expect((decoded.a as FabricValue[])[0]).toBe(lookalike);
     });
 
-    it("refuses a single-entry `Map` whose key is not a tag", () => {
-      // Cloning carries a `Map` keyed by anything at all, so this format can
-      // find a non-string in tag position where JSON never can. The engine
-      // hands the key over as it found it, and the shared tag check judges
-      // it, so what is refused here is refused the same way under any format.
+    it("refuses a tagged form whose tag is not a tag", () => {
+      // Slot one holds whatever a peer put there, so this format can find a
+      // non-string in tag position where JSON never can. The engine hands it
+      // over as it found it, and the shared tag check judges it, so what is
+      // refused here is refused the same way under any format.
       expect(() => fabricFromRealmValue(wire(tagged(42, "x"))))
         .toThrow(/malformed tag/);
       expect(() => fabricFromRealmValue(wire(tagged(Symbol("s"), "x"))))
@@ -396,7 +414,7 @@ describe("RealmCodecEngine", () => {
     });
 
     it("returns that same rejection as a `ProblematicValue` when lenient", () => {
-      // Every realm codec now reports by returning one, as its JSON
+      // Every realm codec reports by returning one, as its JSON
       // counterpart does; `lenient` is what decides which a caller sees.
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
@@ -426,9 +444,9 @@ describe("RealmCodecEngine", () => {
     });
 
     it("wraps an unclaimed tag in an `UnknownValue` rather than refusing", () => {
-      // A single-entry `Map` IS the tagged form, so this is a well-formed
-      // value carrying a tag no codec claims -- a different thing from a
-      // malformation.
+      // Three slots headed by the marker ARE the tagged form, so this is a
+      // well-formed value carrying a tag no codec claims -- a different thing
+      // from a malformation.
       const decoded = fabricFromRealmValue(wire(tagged("nope@1", 1)));
 
       expect(decoded).toBeInstanceOf(UnknownValue);
@@ -621,6 +639,36 @@ describe("RealmCodecEngine", () => {
       // the whole of what keeps the result immutable.
       expect(Object.isFrozen(inner)).toBe(true);
       expect(Object.isFrozen(innerArray)).toBe(true);
+    });
+
+    it("leaves an outer encode its own marker when one nests inside it", () => {
+      // `#marker` is a field, so a call that starts DURING another walk has to
+      // hand the outer one back rather than clear it. A getter is the shortest
+      // way to reach that: it runs while the outer walk is suspended in
+      // `encodePlainObject()`, and re-enters through the public entry point.
+      //
+      // Sequential calls would test nothing here -- the outer has returned
+      // before the second starts, so restoring and clearing look identical.
+      // What discriminates them is a tagged form built AFTER the nested call
+      // returns: with the marker cleared, `wrapTag()` has none and throws.
+      const engine = newDefaultRealmCodecEngine();
+      let nestedMarker: unknown;
+
+      const value = {
+        get first(): FabricValue {
+          nestedMarker = (engine.encode(7n) as unknown as unknown[])[0];
+          return 1;
+        },
+        second: new FabricEpochDays(2n),
+      };
+
+      const encoded = engine.encode(value) as unknown as [
+        unknown,
+        Record<string, unknown[]>,
+      ];
+
+      expect(encoded[1].second![0]).toBe(encoded[0]);
+      expect(nestedMarker).not.toBe(encoded[0]);
     });
 
     it("does not read an earlier encode's marker as this one's", () => {
