@@ -5,9 +5,10 @@
 // checks cannot run in-process: main() reports a rejected flag by exiting.
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
-import { dirname, fromFileUrl, join } from "@std/path";
 import { existsSync } from "@std/fs";
+import { dirname, fromFileUrl, join } from "@std/path";
+
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 
 const packageDir = dirname(fromFileUrl(import.meta.url));
 const repoRoot = join(packageDir, "..", "..");

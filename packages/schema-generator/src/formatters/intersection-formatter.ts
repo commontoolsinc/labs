@@ -1,14 +1,15 @@
-import ts from "typescript";
 import type {
   MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
+import { getLogger } from "@commonfabric/utils/logger";
+import { isObjectOrArray } from "@commonfabric/utils/types";
+import ts from "typescript";
+
+import { attachDocTags, extractDocFromType } from "../doc-utils.ts";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { cloneSchemaDefinition, getNativeTypeSchema } from "../type-utils.ts";
-import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
-import { attachDocTags, extractDocFromType } from "../doc-utils.ts";
 import { isCellType } from "../typescript/cell-brand.ts";
 
 const logger = getLogger("schema-generator.intersection");

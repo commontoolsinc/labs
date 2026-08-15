@@ -19,6 +19,9 @@
  *                            coverage artifacts, one subdirectory per name.
  */
 
+import { walk } from "@std/fs/walk";
+import * as path from "@std/path";
+
 import {
   acceptsCoverageDebt,
   aggregateCacheStates,
@@ -67,8 +70,6 @@ import {
   fillMissingFamiliesFromFingerprint,
   inferCurrentRunFallbackState,
 } from "./compile-cache-state.ts";
-import { walk } from "@std/fs/walk";
-import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
   collectRegressedLines,

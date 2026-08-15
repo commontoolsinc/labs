@@ -72,11 +72,13 @@
  */
 
 import { exists } from "@std/fs";
+
+import { resolveSystemPatternSource } from "@commonfabric/runner";
+
 import {
   VINTAGE_SPACES_SUFFIX,
   vintageCompanionDir,
 } from "../packages/piece/test/vintage-layout.ts";
-import { resolveSystemPatternSource } from "@commonfabric/runner";
 
 /** Root of the committed fixture tree. See the note above on why it is here. */
 export const VINTAGES_DIR = "packages/piece/test/vintages";

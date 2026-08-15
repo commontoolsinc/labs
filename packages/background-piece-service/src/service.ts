@@ -3,15 +3,16 @@ import {
   type Cell,
   type MemorySpace,
   type Runtime,
+  useCancelGroup,
 } from "@commonfabric/runner";
+
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
   type BGPieceEntry,
 } from "./schema.ts";
-import { getBGPieces } from "./utils.ts";
 import { SpaceManager } from "./space-manager.ts";
-import { useCancelGroup } from "@commonfabric/runner";
+import { getBGPieces } from "./utils.ts";
 
 type SpaceManagerLike = Pick<SpaceManager, "start" | "stop" | "watch">;
 

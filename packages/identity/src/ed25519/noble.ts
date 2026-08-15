@@ -1,4 +1,6 @@
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import * as ed25519 from "@noble/ed25519";
+
 import {
   AsBytes,
   DIDKey,
@@ -8,7 +10,6 @@ import {
   Signer,
   Verifier,
 } from "../interface.ts";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { AuthorizationError, bytesToDid, didToBytes } from "./utils.ts";
 
 export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {

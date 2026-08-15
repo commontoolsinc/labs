@@ -1,5 +1,6 @@
-import { add } from "./mod.ts";
 import { assert } from "@std/assert";
+
+import { add } from "./mod.ts";
 
 Deno.test("add-sync", function () {
   assert(add(5, 10) === 15, "add(5, 10) should equal 15");
