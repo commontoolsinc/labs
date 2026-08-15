@@ -186,6 +186,49 @@ const DEFAULT_FLUSH_DEADLINE_MS = 100;
 const DEFAULT_IDLE_PARK_MS = 30_000;
 const DEFAULT_PARK_DISPOSE_TIMEOUT_MS = 5_000;
 
+/**
+ * Phase 5's foreign re-mark decision (serving-loop.md §3b's cross-space
+ * bullet; §6 step 2): the (action, instance) set whose recorded FOREIGN
+ * inputs moved — each basis row whose `entity_space` is not the home
+ * space is judged against THAT space's own co-hosted engine's head,
+ * exactly like the home scan judges home rows. Returns only instances
+ * NOT already in `alreadyStale` (the home scan's findings), in row
+ * order. Extracted from the activation scan so the decision is
+ * unit-pinned (the F5 fix — the catch in `activate` converts any
+ * breakage here into a `basis-foreign-remark-failed` warn, an
+ * invisible-by-design degradation, so the helper itself must hold the
+ * test surface).
+ */
+export async function selectForeignStaleInstances(
+  engine: Engine.Engine,
+  scope: { branch: string; space: string },
+  engineForSpace: (space: MemorySpace) => Promise<Engine.Engine>,
+  alreadyStale: ReadonlyArray<{ action: string; actionScopeKey: string }>,
+): Promise<Array<{ action: string; actionScopeKey: string }>> {
+  const foreignRows = selectForeignBasisRows(engine, scope);
+  const staleKeys = new Set(
+    alreadyStale.map((entry) => `${entry.action}\0${entry.actionScopeKey}`),
+  );
+  const added: Array<{ action: string; actionScopeKey: string }> = [];
+  for (const row of foreignRows) {
+    const key = `${row.action}\0${row.actionScopeKey}`;
+    if (staleKeys.has(key)) continue;
+    const foreignEngine = await engineForSpace(row.entitySpace as MemorySpace);
+    const head = Engine.selectDocHead(foreignEngine, {
+      id: row.entity,
+      scopeKey: row.entityScopeKey,
+    });
+    if (head > row.seq) {
+      staleKeys.add(key);
+      added.push({
+        action: row.action,
+        actionScopeKey: row.actionScopeKey,
+      });
+    }
+  }
+  return added;
+}
+
 /** The well-known never-a-piece id classes excluded from piece demand
  * (RULED 2026-08-07): a `computed:` doc is a derivation result, a
  * `cid:` doc is a content-addressed bundle, and the watermark doc is
@@ -282,6 +325,12 @@ export class SpaceServer implements TransactionSealDestination {
    * shape as the shadow-flip wake): set when re-armed roots became
    * retryable mid-cycle, consumed by the next #waitForInput. */
   #pendingStructureRetryWake = false;
+  /** Level-converted SEAL wake (the F4 fix — same latch shape): set
+   * when a wave-bound seal arrived while no input waiter was armed
+   * (the cycle's last microtasks, after wave-detach), so the next
+   * #waitForInput runs a cycle immediately instead of sleeping out the
+   * idle window over a contribution #hasWork() could not yet see. */
+  #pendingSealWake = false;
   /** The activation scan's head: records at or below it are covered
    * by the basis re-mark and never drained (activation filters the
    * queued feed the same way). Late-arrival accounting keys off it. */
@@ -557,31 +606,12 @@ export class SpaceServer implements TransactionSealDestination {
     // surfacing, never a wedge).
     if (foreignReadInstances.length > 0) {
       try {
-        const foreignRows = selectForeignBasisRows(engine, {
-          branch: "",
-          space,
-        });
-        const staleKeys = new Set(
-          stale.map((entry) => `${entry.action}\0${entry.actionScopeKey}`),
-        );
-        for (const row of foreignRows) {
-          const key = `${row.action}\0${row.actionScopeKey}`;
-          if (staleKeys.has(key)) continue;
-          const foreignEngine = await this.#options.server.engineForSpace(
-            row.entitySpace as MemorySpace,
-          );
-          const head = Engine.selectDocHead(foreignEngine, {
-            id: row.entity,
-            scopeKey: row.entityScopeKey,
-          });
-          if (head > row.seq) {
-            staleKeys.add(key);
-            stale.push({
-              action: row.action,
-              actionScopeKey: row.actionScopeKey,
-            });
-          }
-        }
+        stale.push(...await selectForeignStaleInstances(
+          engine,
+          { branch: "", space },
+          (foreignSpace) => this.#options.server.engineForSpace(foreignSpace),
+          stale,
+        ));
       } catch (error) {
         logger.warn("basis-foreign-remark-failed", () => [
           `${foreignReadInstances.length} basis instance(s) carry ` +
@@ -778,8 +808,22 @@ export class SpaceServer implements TransactionSealDestination {
     this.#sealChain = sealed.then(() => undefined, () => undefined);
     // The scheduler runs autonomously off storage notifications: a seal
     // can arrive while the loop waits for input, and the wave it opened
-    // must be committed — wake the loop.
-    this.#feedArrived?.resolve();
+    // must be committed — wake the loop. LATCHED when no waiter is
+    // armed (the F4 residual, same shape as the shadow-flip latch): a
+    // seal chained during the cycle's last microtasks — after the
+    // closing wave detached, before the loop re-arms — is not yet
+    // APPLIED when #hasWork() evaluates (wave.seal runs later on the
+    // seal chain), so the edge-triggered wake alone let the loop arm
+    // and sleep out the idle window before committing the contribution
+    // (the removed host fan-out had closed this window incidentally;
+    // correctness was never at stake — the wait's timeout commits the
+    // pending wave — but the wake should be deterministic, not
+    // eventually-timed).
+    if (this.#feedArrived !== undefined) {
+      this.#feedArrived.resolve();
+    } else {
+      this.#pendingSealWake = true;
+    }
     return sealed;
   }
 
@@ -1412,6 +1456,14 @@ export class SpaceServer implements TransactionSealDestination {
       // consume the latch and run a cycle now — the floor has lifted
       // and the catch-up wave must not wait out the idle window.
       this.#pendingShadowFlipWake = false;
+      return;
+    }
+    if (this.#pendingSealWake) {
+      // A wave-bound seal landed while no waiter was armed (the F4
+      // latch): its contribution is on the seal chain — run a cycle
+      // now so the wave commits deterministically instead of after
+      // the idle timeout.
+      this.#pendingSealWake = false;
       return;
     }
     this.#feedArrived = Promise.withResolvers<void>();
