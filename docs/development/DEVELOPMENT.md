@@ -210,6 +210,21 @@ come up.
   ordinary English for writing something at length. `spell` is additionally an
   identifier here — the retired name for a pattern, still read by the state
   inspector — so prose that borrows the word costs a search as well.
+- **`visits`**, `reads`, `encounters`, `finds` — the list is open — not `meets`,
+  for coming across something during a walk or on a channel. It is the word that
+  is wrong here and not the sense, so pick what the site wants rather than one
+  substitute throughout: a walk visits every node it descends through, a decoder
+  reads what arrives, a format carrying no marker encounters data it never emits.
+  Often the cleanest sentence names where the thing arrived and wants no such
+  verb at all — "a cycle *here* arrived from a channel". What rules `meets` out
+  is that two other senses are already at work in these files, and both stay.
+  `meet` a requirement — `meet the condition`, `must meet the threshold` — is
+  ordinary and exact, with the caveat that the verb takes the requirement itself
+  as its object and not the artifact stating one: a value **satisfies** a schema,
+  or meets the schema's *requirements*, where "meets the schema" reaches past
+  what the verb selects for. And `meet` is the lattice operation the Contextual
+  Flow Control code is built on, a technical term with test files named after it,
+  where a stray prose use costs a search.
 
 ## Code Design & Principles
 
