@@ -24,7 +24,10 @@ import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodecEngine } from "./codec-json/JsonCodecEngine.ts";
 import { createBaseJsonRegistry } from "./codec-json/createBaseJsonRegistry.ts";
-import type { RealmCodecValue } from "./codec-realm/interface.ts";
+import type {
+  RealmCodecValue,
+  RealmEncodedValue,
+} from "./codec-realm/interface.ts";
 import { RealmCodecEngine } from "./codec-realm/RealmCodecEngine.ts";
 import { createBaseRealmRegistry } from "./codec-realm/createBaseRealmRegistry.ts";
 import { codecClasses as primitiveClasses } from "./fabric-primitives/index.ts";
@@ -199,7 +202,7 @@ const REALM_DECODE_EMPTY_CONTEXT = Object.freeze(
  * `value` -- a *realm value* is this transport form, as a *native value* is a
  * plain JavaScript one -- rather than as the boundary being crossed.
  */
-export function realmFromFabricValue(value: FabricValue): RealmCodecValue {
+export function realmFromFabricValue(value: FabricValue): RealmEncodedValue {
   return realmCodecEngine.encode(value);
 }
 
@@ -213,7 +216,7 @@ export function realmFromFabricValue(value: FabricValue): RealmCodecValue {
  * `RealmCodecEngine.decode()` states the whole of that contract.
  */
 export function fabricFromRealmValue(
-  data: RealmCodecValue,
+  data: RealmEncodedValue,
   context?: ReconstructionContext | undefined,
 ): FabricValue {
   return realmCodecEngine.decode(data, context ?? REALM_DECODE_EMPTY_CONTEXT);

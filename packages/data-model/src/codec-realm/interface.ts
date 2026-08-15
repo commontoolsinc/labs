@@ -38,10 +38,11 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
  *   this: a `FabricBytes` encodes to one directly, and a `FabricHash` to one
  *   beside its algorithm tag. A bare `Uint8Array` is therefore not a form this
  *   format emits, and `decodeValue()` refuses one.
- * * `Map` is the tagged form (see {@link RealmTaggedValue}). An encoded value
- *   carries no envelope of its own: both ends of this format are the same
- *   engine from the same build, so there is nothing for a format tag to
- *   identify and no version for it to guard.
+ * * An array is both the tagged form and the outer envelope -- see
+ *   {@link RealmTaggedValue} and {@link RealmEncodedValue}. Neither is
+ *   distinguishable by shape from a payload's own arrays, and neither is meant
+ *   to be: what marks them is the identity of the object in slot zero, which
+ *   {@link RealmFormatMarker} explains.
  *
  * `symbol` is absent: cloning refuses one outright, so this format registers
  * the shared `SymbolCodec` and a symbol crosses under a tag like any other
@@ -60,22 +61,86 @@ export type RealmCodecValue =
   | { readonly [key: string]: RealmCodecValue };
 
 /**
- * The tagged form: a single-entry `Map` binding a wire type tag to the encoded
- * state under it.
- *
- * A `Map` is what lets this format do without escaping entirely, where JSON
- * needs `/quote` and `/object` and a reserved-key rule to keep a tag apart
- * from user data. Two facts combine to make a tag unforgeable here. Cloning is
- * type-preserving, so a plain object arrives as a plain object and can never
- * present itself as a `Map`. And a native `Map` is not a `FabricValue`, so one
- * cannot appear in the payload being encoded to begin with. Every `Map` in an
- * encoded tree is therefore this engine's own work.
- *
- * The cost of the choice is that an encoded value is no longer inspectable
- * with JSON tooling, a `Map` having no literal syntax and no `JSON.stringify`
- * rendering.
+ * Content of the marker object. Recognition never reads it -- identity does
+ * all the work -- so this is here to be legible in a debugger, and to give a
+ * receiver something to check when it wants to know which build wrote a
+ * payload.
  */
-export type RealmTaggedValue = ReadonlyMap<string, RealmCodecValue>;
+export const REALM_FORMAT_VERSION = "fvr1";
+
+/**
+ * The object whose identity marks this format's envelopes.
+ *
+ * `RealmCodecEngine.encode()` mints one per call and puts it in slot zero of
+ * the outer envelope and of every tagged form beneath it. A receiver takes it
+ * from the outer envelope and recognizes the rest by `===` against it.
+ *
+ * That works because structured cloning preserves shared references: one
+ * object referenced from many positions arrives as one object referenced from
+ * many positions. It is the only property of the transport this format leans
+ * on beyond carrying its types, and it is the whole of what makes an envelope
+ * unmistakable.
+ *
+ * **It must be an object.** Recognition is `===`, which on a primitive is
+ * value equality rather than identity, so a primitive in slot zero would be
+ * reproducible by any payload that happened to hold the same one --
+ * and the argument below would evaporate. `decode()` refuses an envelope whose
+ * slot zero is not an object.
+ *
+ * **A payload cannot contain the marker, because the marker is younger than
+ * the payload.** It is created after the value exists, so no value -- however
+ * it was assembled, and whatever its author has seen of some earlier encoding
+ * -- can hold a reference to it. That is why the marker is minted per call
+ * rather than per engine: a long-lived one could be embedded in a value by
+ * code that had legitimately seen an earlier encoded tree, and the copy-on-
+ * write walk would carry it through to a data position, where the decoder
+ * would read it as an envelope.
+ *
+ * It is a frozen array of one string, which is also a `FabricValue` this
+ * format encodes by identity. That matters: a value holding some *earlier*
+ * call's marker has to encode without complaint, being ordinary data, and a
+ * marker shaped as something the walk refuses would make such a value
+ * unencodable.
+ *
+ * It is not a secret and not an authentication token. Whatever asks for an
+ * encoding is trusted with the result, and whatever receives a payload is
+ * trusted to read it; a hostile peer builds its own marker and forges freely,
+ * exactly as it could send any tagged value it liked. What the marker rules
+ * out is *confusion within a payload this engine encoded* -- which is the
+ * escaping problem, and the whole of what it is for.
+ */
+export type RealmFormatMarker = readonly [typeof REALM_FORMAT_VERSION];
+
+/**
+ * The tagged form: `[marker, tag, state]`.
+ *
+ * Nothing about the shape distinguishes one of these from an array a payload
+ * built for itself, and this type does not pretend otherwise -- structurally
+ * it is an ordinary `RealmCodecValue` array, which is what it has to be for
+ * cloning to carry it. The marker in slot zero is what decides, and only by
+ * identity.
+ *
+ * Three slots rather than a container keyed by the tag, because an array is
+ * the cheapest shape the transport carries: positional slots, no hash table,
+ * and a tag string that is the codec's own interned constant rather than a
+ * key built per envelope.
+ */
+export type RealmTaggedValue = readonly [
+  RealmFormatMarker,
+  string,
+  RealmCodecValue,
+];
+
+/**
+ * What crosses: `[marker, encodedValue]`.
+ *
+ * The outer envelope exists to carry the marker, and carries the version with
+ * it. A receiver reads slot zero to learn what to compare against, and may
+ * read the version inside it to refuse a build whose encoding it does not
+ * understand -- which is what makes the same-build boundary a thing a receiver
+ * checks rather than a thing it assumes.
+ */
+export type RealmEncodedValue = readonly [RealmFormatMarker, RealmCodecValue];
 
 /**
  * The realm-crossing wire format, for a `CodecRegistry` to be built over.

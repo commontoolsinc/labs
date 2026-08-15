@@ -301,6 +301,39 @@ describe("RealmCodecEngine", () => {
       }
     });
 
+    it("refuses an envelope whose marker is not an object", () => {
+      // `===` on a primitive is value equality, so a primitive in slot zero
+      // would be reproducible by any payload holding the same one, and the
+      // marker would stop marking anything.
+      for (const bad of ["fvr1", 42, null, undefined, 7n, true]) {
+        expect(() => fabricFromRealmValue([bad, { a: 1 }] as never))
+          .toThrow(/two-element envelope/);
+      }
+    });
+
+    it("treats a two-element array in a data position as data", () => {
+      // A genuine payload cannot hold the current marker at all, but a peer
+      // can send anything. Slot count is checked before identity, so this is
+      // an array and not an envelope missing its state.
+      const marker = realmFromFabricValue(null)[0];
+      const decoded = fabricFromRealmValue(
+        [marker, { a: [marker, "EpochDays@1"] }] as never,
+      ) as Record<string, FabricValue>;
+
+      expect(Array.isArray(decoded.a)).toBe(true);
+      expect((decoded.a as FabricValue[])[1]).toBe("EpochDays@1");
+    });
+
+    it("refuses an envelope nested as its own payload", () => {
+      // `E = [m, E]`. The walk meets `E` again beneath itself, where the guard
+      // has it, so this is a cycle rather than an unbounded descent.
+      const envelope: unknown[] = [["fvr1"], null];
+      envelope[1] = envelope;
+
+      expect(() => fabricFromRealmValue(envelope as never))
+        .toThrow(/circular reference/);
+    });
+
     it("treats an array the marker does not head as ordinary data", () => {
       // Three elements and a lookalike marker in slot zero, and still data:
       // recognition is identity, and this array's slot zero is some other
@@ -312,6 +345,9 @@ describe("RealmCodecEngine", () => {
 
       expect(Array.isArray(decoded.a)).toBe(true);
       expect((decoded.a as FabricValue[])[1]).toBe("EpochDays@1");
+      // And slot zero is still the array the payload built, not swapped for
+      // anything: an unrecognized head is data like the rest of it.
+      expect((decoded.a as FabricValue[])[0]).toBe(lookalike);
     });
 
     it("refuses a single-entry `Map` whose key is not a tag", () => {
@@ -592,9 +628,12 @@ describe("RealmCodecEngine", () => {
       // is minted per call rather than held on the engine. A value may
       // legitimately hold a subtree of some earlier encoding -- whatever
       // assembled it is trusted and has seen one -- and copy-on-write carries
-      // that subtree through by identity, so the older marker ends up sitting
-      // in a *data* position. A marker that outlived its call would be read
-      // there as an envelope, and user data would decode as a tagged value.
+      // that subtree through, so the older marker ends up sitting in a *data*
+      // position. A marker that outlived its call would be read there as an
+      // envelope, and user data would decode as a tagged value. What is
+      // asserted is only that: whether the walk passed the subtree through or
+      // rebuilt it, the same older marker object lands in slot zero either
+      // way, and the point is that it is not this call's.
       const earlier = realmFromFabricValue(new FabricEpochDays(7n));
       const value = Object.freeze({
         smuggled: payloadOf(earlier) as FabricValue,

@@ -5,7 +5,13 @@ import type { FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseCodecEngine } from "@/codec-common/BaseCodecEngine.ts";
 import type { ReconstructionContext } from "@/codec-interface/interface.ts";
-import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
+import {
+  REALM_FORMAT_VERSION,
+  type RealmCodecValue,
+  type RealmEncodedValue,
+  type RealmFormatMarker,
+  type RealmTaggedValue,
+} from "./interface.ts";
 
 /**
  * Whole-value codec engine for the realm-crossing wire format: the form a
@@ -20,37 +26,41 @@ import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
  * carries them with their types intact, so most of a value passes through
  * untouched and tagging is reserved for what genuinely needs it.
  *
- * **This format assumes both ends are the same build**, and that assumption is
- * load-bearing rather than incidental. It is what allows the absence of a
- * format tag: JSON's `fvj1:` earns its keep because JSON text is persisted and
- * read back by a build that did not write it, whereas a value in this form is
- * constructed, cloned across, decoded, and gone. The boundary it exists for is
- * worker IPC within one process.
+ * **An encoded value is `[marker, tree]`**, and the marker is what makes every
+ * envelope beneath it recognizable. It is a fresh object per `encode()` call,
+ * repeated at slot zero of each tagged form, and a receiver takes it from the
+ * outer envelope and recognizes the rest by `===` against it. Structured
+ * cloning preserving shared references is what carries that across; the marker
+ * being younger than the value is what keeps a payload from containing one.
+ * {@link RealmFormatMarker} states both, and the second is the whole of the
+ * unforgeability argument.
  *
- * Nothing here enforces that. `postMessage()` also spans tabs, windows and
- * frames, any of which could pair two different deployments -- and this format
- * would not detect it, having nothing that identifies itself. Carrying fabric
- * values across such a boundary needs a format tag reintroduced, or JSON,
- * rather than this as it stands.
+ * The marker carries a version string, so the boundary this format exists for
+ * -- worker IPC within one process, where both ends are the same build -- is
+ * an assumption a receiver can now check rather than one it has to take on
+ * faith. `postMessage()` also spans tabs, windows and frames, any of which
+ * could pair two deployments; a receiver that reads the version can refuse a
+ * build it does not understand.
  *
- * Three pieces of `JsonCodecEngine` have no counterpart here, each because the
+ * Two pieces of `JsonCodecEngine` have no counterpart here, each because the
  * transport does the work directly:
  *
  * * **No escaping.** `/quote` and `/object` exist because a JSON object is the
  *   only container JSON has, so a tag and a user's data compete for the same
- *   shape. A tag here is a `Map`, which no payload can present (see
- *   {@link RealmTaggedValue}).
+ *   shape. Here they compete for the same shape too -- an envelope is an
+ *   ordinary three-element array -- and identity settles it instead, which
+ *   costs nothing on the wire where escaping costs a rewrite of the object
+ *   around it.
  * * **No `/hole`.** Cloning preserves a sparse array's length and its absent
  *   indices, so a hole crosses as a hole.
- * * **No stringify step.** The tree is the wire, which is why `Encoded` and
- *   `SerializedForm` are the same type here where JSON's differ.
  *
  * Both walks are copy-on-write: a subtree in which nothing changed is returned
  * by identity rather than rebuilt. A payload holding no `FabricSpecialObject`
  * and no symbol is therefore handed to the transport exactly as it arrived --
  * the same object, not a reconstruction of it -- and copied once by the
- * transport instead of twice. Emitting no envelope is what lets that reach the
- * outermost value rather than stopping one layer in. That is the ordinary case
+ * transport instead of twice. The envelope stops that one layer in -- the
+ * outermost value is always the two-element wrapper -- which costs one array
+ * per call and no rebuild of anything beneath it. That is the ordinary case
  * for plain data, and it makes the walk's cost proportional to what actually
  * needs encoding rather than to the size of the value. `JsonCodecEngine` never
  * faces the choice, having to reach text.
@@ -99,7 +109,22 @@ import { type RealmCodecValue, type RealmTaggedValue } from "./interface.ts";
  * than living here, since a cycle can run through a codec-matched object as
  * readily as through a container.
  */
-export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
+export class RealmCodecEngine
+  extends BaseCodecEngine<RealmCodecValue, RealmEncodedValue> {
+  /**
+   * The marker for the encode or decode in progress, or `undefined` outside
+   * one.
+   *
+   * A field, unlike the walk's `seen` set, and for a reason that does not
+   * apply to that one. `seen` is per-node state, and holding it in a field is
+   * how an arm comes to forget to enter or leave a node; the marker is a
+   * per-call constant, set at one place and read at one place, with no arm
+   * that can silently skip it. What both share is the save-and-restore, so
+   * that a codec reaching back through a public entry point cannot leave the
+   * outer call without its own.
+   */
+  #marker: RealmFormatMarker | undefined;
+
   //
   // Instance members
   //
@@ -107,22 +132,46 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
   /**
    * @inheritDoc
    *
-   * The walked tree is what crosses: no envelope, and no further reduction.
-   * Copy-on-write therefore reaches all the way out, a payload needing no
-   * encoding being returned by identity rather than wrapped in a fresh
-   * container.
+   * Mints this call's marker and returns `[marker, walkedTree]`. The tree
+   * inside is still copy-on-write, so a payload needing no encoding is the
+   * caller's own object rather than a reconstruction of it; what the envelope
+   * costs is one two-element array per call, and what it buys is a receiver
+   * able to tell this form from anything else on the channel, and to tell
+   * which build wrote it.
+   *
+   * The marker is created here, after `value` exists, which is the whole of
+   * why an envelope cannot be forged from within a payload. See
+   * {@link RealmFormatMarker}.
    */
-  override encode(value: FabricValue): RealmCodecValue {
-    return this.encodeValue(value);
+  override encode(value: FabricValue): RealmEncodedValue {
+    // Saved and restored rather than set and cleared, so that an encode
+    // reached from inside another one cannot leave the outer call marker-less.
+    const outer = this.#marker;
+
+    this.#marker = Object.freeze([REALM_FORMAT_VERSION] as const);
+
+    try {
+      return [this.#marker, this.encodeValue(value)];
+    } finally {
+      this.#marker = outer;
+    }
   }
 
   /**
    * @inheritDoc
    *
-   * Walks the tree as it arrived. There is no envelope to check first: a
-   * receiver on this format's one boundary knows what it asked for, both ends
-   * being the same engine from the same build. What cloning carries but this
-   * format never emits is refused where it is met, by `decodeValue()`.
+   * Takes the marker from the envelope and walks what it wraps. The envelope
+   * is the one place this method takes instruction from the data, so its shape
+   * is checked before anything is read from it -- two elements, and an object
+   * in slot zero, a primitive there being reproducible by any payload holding
+   * the same one. What cloning carries but this format never emits is refused
+   * where it is found, by `decodeValue()`.
+   *
+   * Adopting the sender's marker is what makes recognition work across the
+   * boundary. The receiver's own objects are no use -- a marker minted here is
+   * a different object from the one that crossed -- and cloning having
+   * preserved the sender's sharing, the object in slot zero is the same object
+   * that sits in slot zero of every tagged form beneath it.
    *
    * **`data` is ceded to this method**, which retains whatever parts of it it
    * likes, so a caller must not use it afterwards. Two retentions are
@@ -141,21 +190,54 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * `value` is frozen as deeply as the walk reached.
    */
   override decode(
-    data: RealmCodecValue,
+    data: RealmEncodedValue,
     context: ReconstructionContext,
   ): FabricValue {
-    // A set is started here because this format's transport is the tree
-    // itself, so a peer can hand one over with a cycle in it. `JsonCodecEngine`
-    // starts none, its input being the product of a parse.
-    return this.decodeValue(data, context, new Set());
+    if (
+      !Array.isArray(data) || (data.length !== 2) || (data[0] === null) ||
+      (typeof data[0] !== "object")
+    ) {
+      return this.reportMalformed(
+        "",
+        toCompactDebugString(data, 50),
+        "not a value this format emits: expected a two-element envelope " +
+          "headed by a marker object",
+      );
+    }
+
+    const outer = this.#marker;
+
+    this.#marker = data[0] as RealmFormatMarker;
+
+    try {
+      // A set is started here because this format's transport is the tree
+      // itself, so a peer can hand one over with a cycle in it.
+      // `JsonCodecEngine` starts none, its input being the product of a parse.
+      return this.decodeValue(data[1] as RealmCodecValue, context, new Set());
+    } finally {
+      this.#marker = outer;
+    }
   }
 
-  /** @inheritDoc */
+  /**
+   * @inheritDoc
+   *
+   * @throws If called outside an `encode()`, there being no marker to build an
+   *   envelope around. Unreachable through this class, whose only walk starts
+   *   there, and stated rather than assumed because the alternative is
+   *   emitting an envelope nothing can recognize.
+   */
   protected override wrapTag(
     tag: string,
     state: RealmCodecValue,
   ): RealmTaggedValue {
-    return new Map([[tag, state]]);
+    const marker = this.#marker;
+
+    if (marker === undefined) {
+      throw new Error("Cannot wrap a tag outside an encode.");
+    }
+
+    return [marker, tag, state];
   }
 
   /**
@@ -254,8 +336,9 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * Every object node goes through the guard, whichever arm then takes it. The
    * tagged form needs it as much as a container does: `decodeTagged()` walks
    * the state again for a nonterminal codec, for a tag no codec claims, and
-   * for a tag that is not one, so a `Map` graph can close a cycle without a
-   * single plain container in it, and cloning carries such a graph faithfully.
+   * for a tag that is not one, so a graph of envelopes can close a cycle with
+   * no plain container in it at all, and cloning carries such a graph
+   * faithfully.
    */
   protected override decodeValue(
     data: RealmCodecValue,
@@ -277,7 +360,7 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     }
 
     try {
-      const unwrapped = RealmCodecEngine.#unwrapTag(data);
+      const unwrapped = this.#unwrapTag(data);
 
       if (unwrapped !== null) {
         return this.decodeTagged(
@@ -387,31 +470,33 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     return Object.freeze(result ?? (data as FabricValue));
   }
 
-  //
-  // Static members
-  //
-
   /**
    * Unwraps a tagged wire representation. Returns `{ tag, state }`, or `null`
-   * if `data` is not a tagged value. The `state` is extracted directly from
-   * `data`.
+   * if `data` is not one. The `state` is extracted directly from `data`.
    *
-   * The key is handed over as it was found, of whatever type.
+   * Slot zero decides, and only by identity: an array of the right length
+   * whose first element is some *other* object -- or an equal-looking marker
+   * some payload built for itself -- is a payload's own array and is walked as
+   * one. Nothing about the shape is evidence, which is why the comparison is
+   * `===` and not a structural test.
+   *
+   * The tag is handed over as it was found, of whatever type.
    * {@link RealmTaggedValue} says a tag is a `string`, but that describes what
-   * this format _emits_, and decoding is where data that came from somewhere
-   * else arrives -- structured cloning carries a `Map` keyed by anything at
-   * all. Whether what is here is a tag belongs to `decodeTagged()`, which
-   * asks it the same way for every format and settles the answer against
+   * this format _emits_, and decoding is where data from somewhere else
+   * arrives. Whether what sits there is a tag belongs to `decodeTagged()`,
+   * which asks it the same way for every format and settles the answer against
    * `lenient`.
    */
-  static #unwrapTag(
+  #unwrapTag(
     data: RealmCodecValue,
   ): { tag: any; state: RealmCodecValue } | null {
-    if (!((data instanceof Map) && (data.size === 1))) {
+    if (
+      !Array.isArray(data) || (data.length !== 3) ||
+      (data[0] !== this.#marker)
+    ) {
       return null;
     }
 
-    const [tag, state] = data.entries().next().value!;
-    return { tag, state };
+    return { tag: data[1], state: data[2] as RealmCodecValue };
   }
 }
