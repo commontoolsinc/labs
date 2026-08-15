@@ -231,37 +231,6 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
  * that declares nothing and a worker that resolves OFF agree, which is
  * every pre-existing deployment. Exported for testing.
  */
-/**
- * The LT9 worker persistence seam (server-execution v2 Phase 5, rec (c)
- * — ADOPTED-PENDING-VETO; events.md §5, protocol.md §5). Maps the
- * host's DECLARED event-append-queue persistence onto the storage
- * manager's `eventAppendQueueStore` option — the one seam the durable
- * adapter will also ride when sessionId persistence lands (OW20).
- *
- * This build honors: absent, `{ kind: "memory" }` (both the in-memory
- * default — the same persistence class as `sessionId` today). Any other
- * kind REFUSES loudly: the worker realm has no Web Storage, the durable
- * worker adapter is the OW20 follow-up, and silently downgrading a
- * declared durability to memory would lose queued user intents a host
- * believed durable (LT9's ruled requirement). Exported for testing.
- */
-export function resolveEventAppendQueuePersistence(
-  declared: InitializationData["eventAppendQueuePersistence"],
-): Record<never, never> {
-  if (declared === undefined || declared.kind === "memory") {
-    // The manager's own default IS the memory store; declare nothing.
-    return {};
-  }
-  throw new Error(
-    `event-append-queue persistence kind "${declared.kind}" is not ` +
-      "available in the worker runtime: the durable worker adapter " +
-      "lands with protocol §5's sessionId persistence " +
-      "(verification-coverage.md OW20) — refusing initialization " +
-      "rather than silently degrading a durability declaration to " +
-      "memory (events.md §5, LT9)",
-  );
-}
-
 export function assertServerExecutionPostureAgreement(
   declared: InitializationData["experimental"],
   runtime: { experimental: { serverExecution?: boolean | undefined } },
@@ -631,16 +600,6 @@ export class RuntimeProcessor {
         experimentalConcurrentWatchRefresh:
           data.concurrentWatchRefresh === true,
       },
-      // The LT9 coupling seam (server-execution v2 Phase 5, rec (c) —
-      // adopted pending veto): the host's declared event-queue
-      // persistence routes through the SAME manager option the durable
-      // adapter will use when protocol §5's sessionId persistence lands
-      // (OW20). This build honors exactly the in-memory kind; an
-      // undeliverable declaration refuses initialization loudly rather
-      // than silently degrading a durability promise.
-      ...(resolveEventAppendQueuePersistence(
-        data.eventAppendQueuePersistence,
-      )),
     });
 
     // Mirror the durability barrier to the page: `pending` is true while any

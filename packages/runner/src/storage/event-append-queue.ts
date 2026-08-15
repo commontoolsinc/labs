@@ -22,15 +22,22 @@
 // order is the spec's requirement; per-space serialization implies it
 // and keeps the machinery obvious.)
 //
-// Durability (LT9, RULED 2026-08-03): the queue rides an injectable
-// {@link EventAppendQueueStore} — "the same persistence class as
-// `sessionId`" (events.md §5, protocol.md §5). Protocol §5's
-// sessionId-persistence itself is unimplemented spec debt (today's
-// sessionId is process-lifetime), so the DEFAULT store is in-memory —
-// the same class — and a host that persists sessions supplies a durable
-// store through the same seam. The contract tests drive a durable fake
-// across queue instances; the browser adapter lands with the sessionId
-// persistence work it depends on.
+// Persistence class (LT9, RE-RULED 2026-08-15 — owner): the queue is
+// PROCESS-LIFETIME. Queued-but-undischarged intents surviving a client
+// RELOAD is a NON-GOAL this round — in the owner's words, the status quo
+// does not survive a client + server reload either — so the queue rides
+// an injectable {@link EventAppendQueueStore} whose ONE shipped
+// implementation is in-memory and MANAGER-SHARED: it outlives any single
+// SpaceReplica, so an in-process provisional-replica REPLACEMENT hands
+// the successor queue the predecessor's undischarged intents (that
+// in-process loss is machinery loss, not reload loss, and stays fixed).
+// The durable Web-Storage adapter and the reload self-start path that
+// Phase 3 carried for the earlier "durable" ruling are RETIRED with the
+// re-ruling; the recorded future shape, if reload survival is ever
+// wanted, is per-tab persistence + orphan adoption (verification-
+// coverage.md's closed OW20 row). Sessions are per tab: one writer per
+// session by construction, no leader election, no shared persisted
+// session.
 
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -68,14 +75,17 @@ export type EventAppendOutcome =
   | { delivered: true; deduped?: boolean }
   | { delivered: false; refused: string };
 
-/** The LT9 persistence seam. Both methods are best-effort from the
- * queue's view — a failing store degrades durability, never liveness. */
+/** The persistence seam (LT9, process-lifetime — see the header). Both
+ * methods are best-effort from the queue's view — a failing store
+ * degrades replacement survival, never liveness. */
 export interface EventAppendQueueStore {
   load(space: string): Promise<QueuedEventAppend[]>;
   save(space: string, entries: readonly QueuedEventAppend[]): Promise<void>;
 }
 
-/** An in-memory store: the default persistence class (see header). */
+/** The in-memory store: the ONE shipped implementation. The storage
+ * manager holds one per manager (shared across its replicas), which is
+ * what carries a dead predecessor replica's intents to its successor. */
 export const memoryEventAppendQueueStore = (): EventAppendQueueStore => {
   const bySpace = new Map<string, QueuedEventAppend[]>();
   return {
@@ -87,67 +97,43 @@ export const memoryEventAppendQueueStore = (): EventAppendQueueStore => {
   };
 };
 
-/** The subset of the Web Storage API the adapter needs (structural, so
- * hosts can hand in localStorage, sessionStorage, or a shim). */
-export type WebStorageLike = {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
-};
-
-/**
- * A Web-Storage-backed durable store (LT9; verdict blocker,
- * 2026-08-12): reload keeps queued-but-undischarged user intents.
- * Serialized through the memory boundary codec — the SAME encoding the
- * wire uses — so FabricValue payloads (registry symbols included)
- * round-trip with fidelity. `scope` partitions concurrent principals /
- * managers sharing one origin (pass something identity-derived).
- *
- * Hosts wire this through `Options.eventAppendQueueStore` wherever a
- * Storage API exists (browser main thread; Deno with --location). The
- * WORKER-hosted runtime has no Web Storage — its durable adapter is
- * the flagged OW20 follow-up (IndexedDB or a main-thread bridge).
- */
-export const webStorageEventAppendQueueStore = (
-  storage: WebStorageLike,
-  scope: string,
-): EventAppendQueueStore => {
-  const keyOf = (space: string) => `cf:event-append-queue:${scope}:${space}`;
-  return {
-    load: (space) => {
-      try {
-        const raw = storage.getItem(keyOf(space));
-        if (raw === null) return Promise.resolve([]);
-        const decoded = decodeMemoryBoundary(raw);
-        return Promise.resolve(
-          Array.isArray(decoded)
-            ? decoded as unknown as QueuedEventAppend[]
-            : [],
-        );
-      } catch (error) {
-        return Promise.reject(error);
-      }
-    },
-    save: (space, entries) => {
-      try {
-        if (entries.length === 0) {
-          storage.removeItem(keyOf(space));
-        } else {
-          storage.setItem(
-            keyOf(space),
-            encodeMemoryBoundary(entries as unknown as FabricValue),
-          );
-        }
-        return Promise.resolve();
-      } catch (error) {
-        return Promise.reject(error);
-      }
-    },
-  };
-};
-
 const RETRY_BASE_MS = 250;
 const RETRY_CAP_MS = 10_000;
+
+/**
+ * OW27 — event-flood shaping (README §3.8; RULED (a) by the owner
+ * 2026-08-15): the client's send path PACES per stream and never drops.
+ * A per-stream token bucket sits between the queue head and the wire:
+ * `burst` sends pass immediately, sustained sends drain at
+ * `ratePerSecond`, and a flood (key-repeat driving `stream.send()`)
+ * is HELD, in fired order, never coalesced and never dropped — events
+ * are intent, and dropping loses it. Because the queue discharges one
+ * append at a time in fired order (events.md §5), a paced head holds
+ * everything behind it, streams included: cross-stream head-of-line
+ * hold is the accepted cost of keeping fired order exact.
+ *
+ * The bound this imposes on the flooding user's OWN legitimate rapid
+ * interactions is the dial: with N sends queued past the burst the
+ * newest waits ≈ (N − burst) / ratePerSecond seconds. The default —
+ * 20/s sustained, 20 burst — is a starting posture, FLAGGED for the
+ * owner (Phase 7): a person's deliberate clicks never reach it, a
+ * held key (≈30 Hz auto-repeat) is paced to 20 commits/s and clears
+ * within half a second of release. `false` disables pacing (tests;
+ * the OFF arm never constructs this queue).
+ */
+export type EventAppendPacing = {
+  /** Sustained sends per second, per stream. */
+  ratePerSecond: number;
+  /** Bucket capacity: sends that pass immediately after a quiet spell. */
+  burst: number;
+  /** Clock seam (tests). Defaults to `Date.now`. */
+  now?: () => number;
+};
+
+export const DEFAULT_EVENT_APPEND_PACING: Readonly<EventAppendPacing> = {
+  ratePerSecond: 20,
+  burst: 20,
+};
 
 /** Wire-error names that classify a discharge outcome. Everything not
  * named here is treated as TRANSIENT and retried with backoff — the
@@ -194,6 +180,12 @@ export class EventAppendQueue {
    * settle it (clearing the timer alone would leave the loop's await
    * pending forever, wedging dispose-time sanitizers). */
   #retryRelease: (() => void) | undefined;
+  /** OW27 pacing: the per-stream token buckets (keyed by sidecar doc id
+   * — one per stream), or undefined when pacing is disabled. */
+  readonly #pacing: EventAppendPacing | undefined;
+  readonly #buckets = new Map<string, { tokens: number; refilledAt: number }>();
+  /** DIAGNOSTIC (tests): sends held by pacing so far. */
+  #pacedHolds = 0;
   #loaded: Promise<void>;
   /** The tail of the save chain — `persisted` awaits it (tests, and
    * any caller that must observe durability before proceeding). */
@@ -211,15 +203,22 @@ export class EventAppendQueue {
     nextLocalSeq: () => number;
     store?: EventAppendQueueStore;
     onRefused?: (append: QueuedEventAppend, reason: string) => void;
+    /** OW27 per-stream send pacing; absent = the default posture,
+     * `false` = unpaced. */
+    pacing?: EventAppendPacing | false;
   }) {
     this.#space = options.space;
     this.#store = options.store ?? memoryEventAppendQueueStore();
     this.#transact = options.transact;
     this.#nextLocalSeq = options.nextLocalSeq;
     this.#onRefused = options.onRefused;
+    this.#pacing = options.pacing === false
+      ? undefined
+      : options.pacing ?? DEFAULT_EVENT_APPEND_PACING;
     this.#loaded = this.#store.load(this.#space).then((persisted) => {
-      // Persisted intents fired EARLIER than anything this instance
-      // enqueues (they survived a reload): they discharge first.
+      // Intents a dead predecessor replica left in the manager-shared
+      // store were fired EARLIER than anything this instance enqueues:
+      // they discharge first.
       this.#queue.unshift(...persisted);
       for (const entry of persisted) {
         if (entry.clientSeq >= this.#clientSeq) {
@@ -230,7 +229,7 @@ export class EventAppendQueue {
     }).catch((error) => {
       logger.warn("event-queue-load-failed", () => [
         `event queue load for ${this.#space} failed; queued intents ` +
-        "from a previous session (if any) are not recovered",
+        "from a replaced predecessor replica (if any) are not recovered",
         error,
       ]);
     });
@@ -239,6 +238,11 @@ export class EventAppendQueue {
   /** Live entries (pending discharge), fired order. */
   get pending(): readonly QueuedEventAppend[] {
     return this.#queue;
+  }
+
+  /** DIAGNOSTIC (tests): how many sends OW27 pacing has held so far. */
+  get pacedHoldCount(): number {
+    return this.#pacedHolds;
   }
 
   /** Resolves once the persisted backlog (if any) has been loaded. */
@@ -331,8 +335,8 @@ export class EventAppendQueue {
       .then(() => this.#store.save(this.#space, this.#queue))
       .catch((error) => {
         logger.warn("event-queue-save-failed", () => [
-          `event queue save for ${this.#space} failed; a reload before ` +
-          "delivery may lose the queued intent (LT9 durability degraded)",
+          `event queue save for ${this.#space} failed; a replica ` +
+          "replacement before delivery may lose the queued intent",
           error,
         ]);
       });
@@ -348,12 +352,71 @@ export class EventAppendQueue {
     });
   }
 
+  /**
+   * OW27: wait for the head's stream to have a send token. Refills the
+   * stream's bucket from the elapsed time (capped at `burst`), consumes
+   * one token when available, else sleeps for the deficit — a closable
+   * wait on the same release seam as the retry backoff, so close()
+   * settles it. Never reorders: the head is the only send considered.
+   */
+  async #acquireSendToken(streamKey: string): Promise<void> {
+    const pacing = this.#pacing;
+    if (pacing === undefined) return;
+    const now = pacing.now ?? Date.now;
+    for (;;) {
+      if (this.#closed) return;
+      const at = now();
+      let bucket = this.#buckets.get(streamKey);
+      if (bucket === undefined) {
+        bucket = { tokens: pacing.burst, refilledAt: at };
+        this.#buckets.set(streamKey, bucket);
+      } else {
+        const elapsedS = Math.max(0, at - bucket.refilledAt) / 1000;
+        bucket.tokens = Math.min(
+          pacing.burst,
+          bucket.tokens + elapsedS * pacing.ratePerSecond,
+        );
+        bucket.refilledAt = at;
+      }
+      if (bucket.tokens >= 1) {
+        bucket.tokens -= 1;
+        // Housekeeping: a quiet stream's bucket refills to full and can
+        // be forgotten (a fresh bucket starts full).
+        if (this.#buckets.size > 64) {
+          for (const [key, other] of this.#buckets) {
+            if (key !== streamKey && other.tokens >= pacing.burst) {
+              this.#buckets.delete(key);
+            }
+          }
+        }
+        return;
+      }
+      this.#pacedHolds += 1;
+      const deficitMs = Math.max(
+        1,
+        Math.ceil(((1 - bucket.tokens) / pacing.ratePerSecond) * 1000),
+      );
+      await new Promise<void>((resolve) => {
+        this.#retryRelease = resolve;
+        this.#retryTimer = setTimeout(() => {
+          this.#retryTimer = undefined;
+          this.#retryRelease = undefined;
+          resolve();
+        }, deficitMs);
+      });
+    }
+  }
+
   async #drain(): Promise<void> {
     await this.#loaded;
     let attempt = 0;
     while (this.#queue.length > 0 && !this.#closed) {
       const head = this.#queue[0];
       try {
+        // OW27: pace per stream before the send (pace-never-drop; the
+        // head holds everything behind it in fired order).
+        await this.#acquireSendToken(head.sidecarId);
+        if (this.#closed) break;
         await this.#transact(this.#commitFor(head));
         this.#settle(head, { delivered: true });
         attempt = 0;

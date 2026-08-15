@@ -242,24 +242,6 @@ export interface InitializationData {
   // effect on the next runtime (reload), not live. Off by default; the shell
   // dogfood toggle `commonfabric.concurrentWatchRefresh()` sets it.
   concurrentWatchRefresh?: boolean;
-  // The LT9 offline-event-queue persistence declaration for the
-  // WORKER-hosted runtime (server-execution v2 Phase 5, rec (c) —
-  // ADOPTED-PENDING-VETO: the durable store wiring lands COUPLED to
-  // protocol §5's sessionId persistence, and this field IS the coupling
-  // seam — the same declarative surface will carry the session
-  // persistence config when that work lands). Structured-clone-safe by
-  // construction: the host DECLARES a store kind, the worker CONSTRUCTS
-  // the adapter (no live objects cross the IPC boundary).
-  //
-  // - absent / `{ kind: "memory" }`: the in-memory default — the same
-  //   persistence class as `sessionId` today (events.md §5,
-  //   protocol.md §5).
-  // - any other kind: the worker REFUSES initialization loudly. The
-  //   durable worker adapter (IndexedDB or a main-thread bridge) is the
-  //   OW20 follow-up that lands WITH sessionId persistence; declaring a
-  //   kind this build cannot honor must fail closed, never silently
-  //   degrade a durability promise to memory.
-  eventAppendQueuePersistence?: { kind: string };
 }
 
 export interface InitializeRequest extends BaseRequest {

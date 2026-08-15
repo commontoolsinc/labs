@@ -14,7 +14,6 @@ import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   assertServerExecutionPostureAgreement,
   browserWorkerParamsFromInitializationData,
-  resolveEventAppendQueuePersistence,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
@@ -2998,27 +2997,6 @@ describe("worker/host server-execution posture agreement (review 2026-08-11 m7)"
         { experimental: { serverExecution: true } },
       )
     ).toThrow(/posture mismatch/);
-  });
-});
-
-describe("resolveEventAppendQueuePersistence", () => {
-  // The LT9 coupling seam (server-execution v2 Phase 5, rec (c) —
-  // adopted pending veto): the host DECLARES an event-append-queue
-  // persistence kind; the worker honors exactly the in-memory default
-  // in this build and refuses anything else LOUDLY — a durability
-  // declaration must never silently degrade to memory (events.md §5;
-  // the durable worker adapter is verification-coverage.md OW20's
-  // follow-up, landing with protocol §5's sessionId persistence).
-  it("honors absent and memory declarations as the in-memory default", () => {
-    expect(resolveEventAppendQueuePersistence(undefined)).toEqual({});
-    expect(resolveEventAppendQueuePersistence({ kind: "memory" })).toEqual({});
-  });
-
-  it("refuses a kind this build cannot honor, loudly (fail closed)", () => {
-    expect(() => resolveEventAppendQueuePersistence({ kind: "web-storage" }))
-      .toThrow(/not available in the worker runtime/);
-    expect(() => resolveEventAppendQueuePersistence({ kind: "indexeddb" }))
-      .toThrow(/OW20/);
   });
 });
 

@@ -87,6 +87,7 @@ import type {
 import { SelectorTracker } from "./selector-tracker.ts";
 import {
   type EventAppendOutcome,
+  type EventAppendPacing,
   EventAppendQueue,
   type EventAppendQueueStore,
   memoryEventAppendQueueStore,
@@ -540,13 +541,19 @@ export interface Options {
   /** Space authority used only for fresh named-space ACL genesis. The durable
    *  replica session still authenticates as `as`. */
   spaceIdentity?: Signer;
-  /** The LT9 event-intent persistence seam (server-execution v2 Phase 3;
-   *  events.md §5): where each space's queued-but-undelivered event
-   *  appends live across manager lifetimes. Absent = in-memory (the
-   *  same persistence class as `sessionId` today — protocol.md §5's
-   *  sessionId persistence is itself unbuilt; a host that persists
-   *  sessions supplies a durable store through this seam). */
+  /** The event-intent queue's store seam (server-execution v2 Phase 3;
+   *  events.md §5; LT9 re-ruled 2026-08-15: PROCESS-LIFETIME — reload
+   *  survival is a non-goal this round). Absent = one in-memory store per
+   *  manager, shared across its replicas, so an in-process replica
+   *  replacement carries the predecessor's undischarged intents to the
+   *  successor. Tests inject their own to observe or fail the store. */
   eventAppendQueueStore?: EventAppendQueueStore;
+  /** OW27 (server-execution v2 Phase 7): the client event-append queue's
+   *  per-stream send pacing — pace-never-drop, README §3.8. Absent = the
+   *  default posture (`DEFAULT_EVENT_APPEND_PACING`); `false` = unpaced.
+   *  Lives only in the flag-gated append path (the OFF arm never
+   *  constructs the queue). */
+  eventAppendPacing?: EventAppendPacing | false;
   /** Server-execution v2 Phase 5: declares this manager a SERVING
    *  manager whose home space is `servingHomeSpace`. Providers opened
    *  for OTHER spaces refuse scoped (user/session) reads fail-closed
@@ -785,6 +792,7 @@ export class StorageManager implements IStorageManager {
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
   #eventAppendQueueStore?: EventAppendQueueStore;
+  #eventAppendPacing?: EventAppendPacing | false;
   /** Phase 5: the serving manager's home space (Options.servingHomeSpace). */
   #servingHomeSpace?: MemorySpace;
   #spaceIdentities = new Map<MemorySpace, Signer>();
@@ -840,14 +848,15 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? {};
     this.#sessionFactory = sessionFactory;
-    // ONE store per manager even in the in-memory default (verdict
-    // blocker, 2026-08-12 / LT9): the store must outlive any single
-    // SpaceReplica, or a provisional-replica replacement hands the new
-    // queue a FRESH private store and the old queue's undischarged user
-    // intents vanish in-process. A host that persists sessions supplies
-    // a durable adapter through the same seam (see Options).
+    // ONE store per manager (verdict blocker, 2026-08-12 / LT9): the
+    // store must outlive any single SpaceReplica, or a provisional-replica
+    // replacement hands the new queue a FRESH private store and the old
+    // queue's undischarged user intents vanish in-process. That is the
+    // one persistence class the queue has (process-lifetime; LT9
+    // re-ruled 2026-08-15 — see event-append-queue.ts).
     this.#eventAppendQueueStore = options.eventAppendQueueStore ??
       memoryEventAppendQueueStore();
+    this.#eventAppendPacing = options.eventAppendPacing;
     this.#servingHomeSpace = options.servingHomeSpace;
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
@@ -1000,6 +1009,7 @@ export class StorageManager implements IStorageManager {
           this.syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
         eventAppendQueueStore: this.#eventAppendQueueStore,
+        eventAppendPacing: this.#eventAppendPacing,
       });
       this.#providers.set(space, provider);
     }
@@ -1771,6 +1781,8 @@ type ProviderOptions = {
   getTelemetry?: () => TelemetrySink | undefined;
   /** The LT9 event-intent persistence seam (see Options). */
   eventAppendQueueStore?: EventAppendQueueStore;
+  /** OW27 per-stream send pacing (see Options). */
+  eventAppendPacing?: EventAppendPacing | false;
   /** Server-execution v2 Phase 5 (protocol.md §2's grant-scoped read
    * design, RULED 2026-08-13 — the delegated-scoped-read fail-closed
    * precondition): set on a SERVING manager's FOREIGN-space providers.
@@ -2162,6 +2174,7 @@ class SpaceReplica implements ISpaceReplica {
    * offline event queue. */
   #eventAppendQueue?: EventAppendQueue;
   #eventAppendQueueStore?: EventAppendQueueStore;
+  #eventAppendPacing?: EventAppendPacing | false;
   /** Phase 5's producer-side foreign-scoped-read refusal (see
    * ProviderOptions.refuseForeignScopedReads). */
   #refuseForeignScopedReads = false;
@@ -2291,13 +2304,13 @@ class SpaceReplica implements ISpaceReplica {
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
     this.#eventAppendQueueStore = options.eventAppendQueueStore;
+    this.#eventAppendPacing = options.eventAppendPacing;
     this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
-    // Eager queue init (LT9; verdict blocker, 2026-08-12): a persisted
-    // backlog — a dead predecessor's intents in the manager-shared
-    // store, or a durable adapter's reload survivors — must discharge
-    // WITHOUT waiting for a fresh fire. The constructor's load kicks
-    // the drain iff rows exist; an empty load is inert (no session is
-    // established until something discharges).
+    // Eager queue init (LT9; verdict blocker, 2026-08-12): a dead
+    // predecessor replica's intents in the manager-shared store must
+    // discharge WITHOUT waiting for a fresh fire. The constructor's
+    // load kicks the drain iff rows exist; an empty load is inert (no
+    // session is established until something discharges).
     this.#ensureEventAppendQueue();
   }
 
@@ -2652,6 +2665,7 @@ class SpaceReplica implements ISpaceReplica {
         // holds across event appends and ordinary commits alike.
         nextLocalSeq: () => this.#nextLocalSeq++,
         store: this.#eventAppendQueueStore,
+        pacing: this.#eventAppendPacing,
       });
     }
     return this.#eventAppendQueue;

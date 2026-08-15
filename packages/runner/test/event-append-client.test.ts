@@ -8,9 +8,10 @@
 //   `EventAppendDuplicateError` survives the wire for exactly this);
 //   deterministic refusals dropped loudly; transient failures retried
 //   with backoff, order preserved.
-// - LT9 durability rides the injectable store seam: a queue built over
-//   the same store as a dead predecessor discharges the predecessor's
-//   intents first, in their fired order.
+// - LT9 (process-lifetime, re-ruled 2026-08-15): a queue built over the
+//   same manager-shared store as a dead predecessor replica discharges
+//   the predecessor's intents first, in their fired order (in-process
+//   replacement survival — reload survival is a non-goal this round).
 // - the fire fork commits ONLY for OUTSIDE-the-scheduler sends (the
 //   root fire); a handler's cascade send during the echo commits
 //   NOTHING (the server's authoritative run owns the durable cascade).
@@ -29,7 +30,6 @@ import {
   type EventAppendQueueStore,
   memoryEventAppendQueueStore,
   type QueuedEventAppend,
-  webStorageEventAppendQueueStore,
 } from "../src/storage/event-append-queue.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
@@ -364,7 +364,9 @@ describe("event-append queue (events.md §5, LT9)", () => {
       space,
       transact: (commit: ClientCommit) => {
         const entry = ((commit.operations[0] as {
-          patches?: Array<{ values?: Array<{ firedAt?: { clientSeq?: number } }> }>;
+          patches?: Array<
+            { values?: Array<{ firedAt?: { clientSeq?: number } }> }
+          >;
         }).patches ?? [])[0]?.values?.[0];
         sent.push(entry?.firedAt?.clientSeq ?? -1);
         return Promise.resolve();
@@ -387,87 +389,123 @@ describe("event-append queue (events.md §5, LT9)", () => {
     expect(new Set(sent).size).toBe(3);
     queue.close();
   });
+});
 
-  it("webStorageEventAppendQueueStore round-trips FabricValue payloads (symbols included) through the memory boundary codec; an empty save clears the key", async () => {
-    const backing = new Map<string, string>();
-    const fakeStorage = {
-      getItem: (key: string) => backing.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        backing.set(key, value);
-      },
-      removeItem: (key: string) => {
-        backing.delete(key);
-      },
-    };
-    const store = webStorageEventAppendQueueStore(fakeStorage, "did:test:me");
-    const entries: QueuedEventAppend[] = [
-      { ...appendOf("evt-a"), clientSeq: 0 },
-      {
-        ...appendOf("evt-b"),
-        clientSeq: 1,
-        payload: { tag: Symbol.for("cf:test-tag"), n: 2 },
-      },
-    ];
-    await store.save(space, entries);
-    expect(backing.size).toBe(1);
-    const loaded = await store.load(space);
-    expect(loaded.length).toBe(2);
-    expect(loaded[0].eventId).toBe("evt-a");
-    expect(loaded[1].clientSeq).toBe(1);
-    expect((loaded[1].payload as { tag: symbol }).tag).toBe(
-      Symbol.for("cf:test-tag"),
-    );
-    // Scope partitions principals sharing one origin.
-    const other = webStorageEventAppendQueueStore(fakeStorage, "did:test:you");
-    expect((await other.load(space)).length).toBe(0);
-    // A drained queue clears its key (a queue that empties, LT9).
-    await store.save(space, []);
-    expect(backing.size).toBe(0);
-    expect((await store.load(space)).length).toBe(0);
-  });
+describe("OW27 event-flood shaping — per-stream pacing, pace-never-drop (README §3.8; RULED (a) 2026-08-15)", () => {
+  // A key-repeat flood: N sends on ONE stream in the same tick. The
+  // bucket lets `burst` through immediately and paces the rest at
+  // `ratePerSecond`; every send still commits, in fired order — no
+  // coalescing, no drop. Real clock (the file is on the real-clock list).
+  const floodOf = (n: number, stream = "flood") =>
+    Array.from({ length: n }, (_, i) => ({
+      ...appendOf(`evt-${stream}-${i}`),
+      sidecarId: `of:stream-events:${stream}`,
+    }));
 
-  it("a successor queue over a WEB-STORAGE store discharges a dead predecessor's intents with NO fresh fire (reload self-start; LT9)", async () => {
-    const backing = new Map<string, string>();
-    const fakeStorage = {
-      getItem: (key: string) => backing.get(key) ?? null,
-      setItem: (key: string, value: string) => {
-        backing.set(key, value);
-      },
-      removeItem: (key: string) => {
-        backing.delete(key);
-      },
-    };
-    const store = webStorageEventAppendQueueStore(fakeStorage, "did:test:me");
-    const dead = new EventAppendQueue({
-      space,
-      transact: () => Promise.reject(namedError("ConnectionError", "offline")),
-      nextLocalSeq: () => 1,
-      store,
-    });
-    void dead.enqueue(appendOf("evt-reload-1"));
-    await waitUntil(() => dead.pending.length === 1, "the intent to queue");
-    await dead.persisted;
-    dead.close();
-
-    const sent: string[] = [];
-    const revived = new EventAppendQueue({
+  it("bounds the commit rate of a flood WITHOUT losing or reordering a single intent", async () => {
+    const sentAt: Array<{ id: string; at: number }> = [];
+    const queue = new EventAppendQueue({
       space,
       transact: (commit: ClientCommit) => {
-        sent.push((commit.eventAppends ?? [])[0]?.eventId ?? "?");
+        sentAt.push({
+          id: (commit.eventAppends ?? [])[0]?.eventId ?? "?",
+          at: Date.now(),
+        });
         return Promise.resolve();
       },
       nextLocalSeq: (() => {
         let seq = 1;
         return () => seq++;
       })(),
-      store,
+      pacing: { ratePerSecond: 100, burst: 10 },
     });
-    // NO enqueue: the constructor's load must kick the discharge.
-    await waitUntil(() => sent.length === 1, "the reload self-start");
-    expect(sent).toEqual(["evt-reload-1"]);
-    await revived.persisted;
-    expect(backing.size).toBe(0);
-    revived.close();
+    const flood = floodOf(40);
+    const started = Date.now();
+    const outcomes = await Promise.all(
+      flood.map((entry) => queue.enqueue(entry)),
+    );
+    const elapsed = Date.now() - started;
+    // ZERO loss: every send delivered…
+    expect(outcomes.every((o) => o.delivered)).toBe(true);
+    // …in fired order…
+    expect(sentAt.map((s) => s.id)).toEqual(flood.map((e) => e.eventId));
+    // …at a BOUNDED rate: 10 pass on the burst, the remaining 30 drain at
+    // ≤100/s, so the flood takes ≥ ~300 ms and no 100 ms window carries
+    // more than burst + rate·window (+1 for boundary rounding).
+    expect(elapsed).toBeGreaterThanOrEqual(250);
+    let maxWindow = 0;
+    for (let i = 0; i < sentAt.length; i++) {
+      let count = 0;
+      for (
+        let j = i;
+        j < sentAt.length && sentAt[j].at - sentAt[i].at <= 100;
+        j++
+      ) {
+        count += 1;
+      }
+      maxWindow = Math.max(maxWindow, count);
+    }
+    expect(maxWindow).toBeLessThanOrEqual(21);
+    expect(queue.pacedHoldCount).toBeGreaterThanOrEqual(20);
+    queue.close();
+  });
+
+  it("MUTATION WITNESS: with pacing disabled the same flood is unbounded (every send in one tick)", async () => {
+    // Documents what the guard protects: `pacing: false` is the ablation
+    // the OW27 register row names — the OFF arm never constructs this
+    // queue, so this is the flag-gated path with its bound removed.
+    const sentAt: number[] = [];
+    const queue = new EventAppendQueue({
+      space,
+      transact: () => {
+        sentAt.push(Date.now());
+        return Promise.resolve();
+      },
+      nextLocalSeq: (() => {
+        let seq = 1;
+        return () => seq++;
+      })(),
+      pacing: false,
+    });
+    const started = Date.now();
+    await Promise.all(floodOf(40).map((entry) => queue.enqueue(entry)));
+    expect(sentAt.length).toBe(40);
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(queue.pacedHoldCount).toBe(0);
+    queue.close();
+  });
+
+  it("close() during a pacing hold settles the held outcomes (no dispose-time wedge) and keeps the intents queued for a successor", async () => {
+    const store = memoryEventAppendQueueStore();
+    const queue = new EventAppendQueue({
+      space,
+      transact: () => Promise.resolve(),
+      nextLocalSeq: () => 1,
+      store,
+      // One send per second, burst 1: the second send is HELD.
+      pacing: { ratePerSecond: 1, burst: 1 },
+    });
+    // Same STREAM (pacing is per stream — a second stream would get its
+    // own fresh bucket).
+    const [holdOne, holdTwo] = floodOf(2, "hold");
+    const first = queue.enqueue(holdOne);
+    const second = queue.enqueue(holdTwo);
+    expect(await first).toEqual({ delivered: true });
+    await waitUntil(
+      () => queue.pacedHoldCount >= 1,
+      "the second send to be held",
+    );
+    queue.close();
+    expect(await second).toEqual({
+      delivered: false,
+      refused: "event queue closed",
+    });
+    await queue.persisted;
+    // The held intent is not lost: it stays persisted for the successor
+    // (closed is not refused — the same rule as the retry-backoff close).
+    expect((await store.load(space)).map((e) => e.eventId)).toEqual([
+      holdTwo.eventId,
+    ]);
   });
 });
 
