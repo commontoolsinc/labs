@@ -26,7 +26,9 @@ import {
   type RealmFormatMarker,
   type RealmTaggedValue,
 } from "@/codec-realm/interface.ts";
+import { RealmCodecEngine } from "@/codec-realm/RealmCodecEngine.ts";
 import {
+  createDefaultRealmRegistry,
   fabricFromRealmValue,
   newDefaultRealmCodecEngine,
   realmFromFabricValue,
@@ -305,6 +307,67 @@ describe("RealmCodecEngine", () => {
       }
     });
 
+    it("refuses to wrap a tag when there is no marker to wrap it under", () => {
+      // `wrapTag()` is unreachable outside a walk through this class, so a
+      // subclass is what reaches it. The guard is worth having anyway: the
+      // alternative to throwing is emitting an envelope with no marker, which
+      // nothing could ever recognize, and which would fail far from here.
+      class Exposed extends RealmCodecEngine {
+        wrapOutsideEncode(): unknown {
+          return (this as unknown as {
+            wrapTag(t: string, s: unknown): unknown;
+          }).wrapTag("Bytes@1", 1);
+        }
+      }
+
+      const engine = new Exposed({ registry: createDefaultRealmRegistry() });
+
+      expect(() => engine.wrapOutsideEncode())
+        .toThrow(/Cannot wrap a tag outside an encode/);
+    });
+
+    it("reports a bad state for every codec that validates one", () => {
+      // Section 7.1 of `4-realm-encoding.md` requires a codec to reject the
+      // state it is handed rather than coerce it, so each of these is a
+      // requirement rather than an observation. Lenient, because the report is
+      // what is under test -- strictly these raise, which the cases above
+      // already cover.
+      const engine = newDefaultRealmCodecEngine({ lenient: true });
+      const bad = (tag: string, state: unknown) =>
+        engine.decode(
+          wire(tagged(tag, state)),
+          EMPTY_RECONSTRUCTION_CONTEXT,
+        ) as ProblematicValue;
+
+      // Wrong primitive type where a `bigint` is required.
+      expect(bad("EpochDays@1", "7").error).toMatch(/expected `bigint`/);
+      expect(bad("EpochNsec@1", 7).error).toMatch(/expected `bigint`/);
+
+      // Not a record at all, then a record with the wrong field types.
+      expect(bad("Hash@1", 42).error).toMatch(/expected object state/);
+      expect(bad("Hash@1", { tag: 1, hash: 2 }).error)
+        .toMatch(/expected string `tag`/);
+      expect(bad("RegExp@1", 42).error).toMatch(/expected object state/);
+      expect(bad("RegExp@1", { source: 1, flags: 2, flavor: 3 }).error)
+        .toMatch(/expected string/);
+
+      // Bytes wants the transport's own byte carrier and takes nothing else.
+      expect(bad("Bytes@1", "nope").error).toMatch(/expected `ArrayBuffer`/);
+
+      // Well-typed fields that still do not make a value. `RegExp@1` is the
+      // one codec here whose construction can fail on data that passed every
+      // type check, so its refusal has to survive a throw rather than only a
+      // shape test: a source and a flag set that `RegExp` itself rejects.
+      expect(
+        bad("RegExp@1", { source: "(", flags: "g", flavor: "es2025" })
+          .error,
+      ).toMatch(/Invalid regular expression/);
+      expect(
+        bad("RegExp@1", { source: "a", flags: "zz", flavor: "es2025" })
+          .error,
+      ).toMatch(/Invalid flags/);
+    });
+
     it("refuses a symbol or a function met untagged", () => {
       // Cloning carries neither, so neither reaches this across the boundary
       // -- but `decode()` is callable in the realm that built its argument,
@@ -447,10 +510,10 @@ describe("RealmCodecEngine", () => {
       // Three slots headed by the marker ARE the tagged form, so this is a
       // well-formed value carrying a tag no codec claims -- a different thing
       // from a malformation.
-      const decoded = fabricFromRealmValue(wire(tagged("nope@1", 1)));
+      const decoded = fabricFromRealmValue(wire(tagged("Nope@1", 1)));
 
       expect(decoded).toBeInstanceOf(UnknownValue);
-      expect((decoded as UnknownValue).wireTypeTag).toBe("nope@1");
+      expect((decoded as UnknownValue).wireTypeTag).toBe("Nope@1");
     });
 
     it("refuses a circular reference", () => {

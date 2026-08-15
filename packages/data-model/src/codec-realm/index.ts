@@ -1,6 +1,9 @@
 export {
   REALM_FORMAT,
+  REALM_FORMAT_VERSION,
   type RealmCodecValue,
+  type RealmEncodedValue,
+  type RealmFormatMarker,
   type RealmTaggedValue,
 } from "./interface.ts";
 
