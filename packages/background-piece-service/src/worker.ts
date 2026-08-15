@@ -1,3 +1,9 @@
+import {
+  createSession,
+  type DID,
+  Identity,
+  Session,
+} from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   Cell,
@@ -11,8 +17,9 @@ import {
   runtimePresets,
   Stream,
 } from "@commonfabric/runner";
-import { attachRuntimeTelemetryOtelBridge } from "@commonfabric/runner/telemetry-otel-bridge";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { attachRuntimeTelemetryOtelBridge } from "@commonfabric/runner/telemetry-otel-bridge";
+
 import { env } from "./env.ts";
 import {
   getMeter,
@@ -20,13 +27,6 @@ import {
   initOpenTelemetry,
   shutdownOpenTelemetry,
 } from "./otel.ts";
-
-import {
-  createSession,
-  type DID,
-  Identity,
-  Session,
-} from "@commonfabric/identity";
 import {
   InitializationData,
   isWorkerIPCRequest,

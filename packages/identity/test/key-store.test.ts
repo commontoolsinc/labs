@@ -1,6 +1,7 @@
+import { assert } from "@std/assert";
+
 import { Identity } from "../src/identity.ts";
 import { KeyStore } from "../src/key-store.ts";
-import { assert } from "@std/assert";
 
 Deno.test("KeyStore can store and recover keys", async () => {
   const store = await KeyStore.open("test-key-store-concurrent");

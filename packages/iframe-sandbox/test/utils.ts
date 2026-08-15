@@ -1,6 +1,7 @@
+import { defer } from "@commonfabric/utils/defer";
+
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 import { setIframeContextHandler } from "../src/index.ts";
-import { defer } from "@commonfabric/utils/defer";
 
 type Callback = (key: string, value: unknown) => void;
 interface Context {

@@ -1,5 +1,18 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { exists } from "@std/fs";
+import { describe, it } from "@std/testing/bdd";
+
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+
+import {
+  schemaRelaxedForComparison,
+  strandedKeys,
+} from "../packages/piece/test/state-continuity-harness.ts";
+import {
+  companionFileName,
+  companionSpace,
+  vintageCompanionDir,
+} from "../packages/piece/test/vintage-layout.ts";
 import {
   armVerdictGuard,
   AUTO,
@@ -40,17 +53,6 @@ import {
   vintageFileName,
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
-import {
-  schemaRelaxedForComparison,
-  strandedKeys,
-} from "../packages/piece/test/state-continuity-harness.ts";
-import { exists } from "@std/fs";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import {
-  companionFileName,
-  companionSpace,
-  vintageCompanionDir,
-} from "../packages/piece/test/vintage-layout.ts";
 
 const ID_A = "bafyaaaa";
 const ID_B = "bafybbbb";

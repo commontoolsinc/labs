@@ -1,7 +1,9 @@
+import { encodeHex } from "@std/encoding/hex";
+
 import { CFC_FUSE_ATOM_CLASS, cfcAtom } from "@commonfabric/api/cfc";
 import { sha256 } from "@commonfabric/content-hash";
 import { isLinkRef } from "@commonfabric/runner/shared";
-import { encodeHex } from "@std/encoding/hex";
+
 import type { CallableKind } from "./callables.ts";
 
 export type CfcProjectionKind =

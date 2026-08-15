@@ -4,11 +4,18 @@
 // Supports multiple spaces with on-demand connection.
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
+import type { JSONSchema } from "@commonfabric/api";
+import type {
+  PieceController,
+  PiecePatternRef,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 import type { Cell } from "@commonfabric/runner";
 import { schemaToTypeString } from "@commonfabric/runner";
-import { linkRefPayload } from "@commonfabric/runner/shared";
-import { nameSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import { nameSchema } from "@commonfabric/runner/schemas";
+import { linkRefPayload } from "@commonfabric/runner/shared";
+
 import {
   type CfcLabel,
   type CfcLabelView,
@@ -17,14 +24,23 @@ import {
   deriveCfcProjectionGeneration,
   joinLabels,
 } from "./annotations.ts";
-import { FsTree, type TransplantChanges } from "./tree.ts";
+import { parseMountedCallablePath } from "./callable-path.ts";
 import {
   buildCallableScript,
   type CallableKind,
   classifyCallableEntry,
   isHandlerCell,
 } from "./callables.ts";
-import { parseMountedCallablePath } from "./callable-path.ts";
+import {
+  collectVirtualDirectorySnapshot,
+  type DirectorySnapshotEntry,
+} from "./directory-handles.ts";
+import {
+  decodeFuseComponent,
+  decodeFusePathSegments,
+  encodeFuseComponent,
+  encodeFusePathSegments,
+} from "./path-codec.ts";
 import {
   buildFsProjection,
   buildJsonTree,
@@ -35,22 +51,7 @@ import {
   isVNode,
   stringifyEntryValue,
 } from "./tree-builder.ts";
-import {
-  decodeFuseComponent,
-  decodeFusePathSegments,
-  encodeFuseComponent,
-  encodeFusePathSegments,
-} from "./path-codec.ts";
-import {
-  collectVirtualDirectorySnapshot,
-  type DirectorySnapshotEntry,
-} from "./directory-handles.ts";
-import type { JSONSchema } from "@commonfabric/api";
-import type {
-  PieceController,
-  PiecePatternRef,
-  PiecesController,
-} from "@commonfabric/piece/ops";
+import { FsTree, type TransplantChanges } from "./tree.ts";
 
 /** Strip asCell markers from a schema for display as input schema. */
 function getInputSchema(

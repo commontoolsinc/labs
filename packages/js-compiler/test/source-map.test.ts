@@ -1,5 +1,9 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { StaticCache } from "@commonfabric/static";
+import { SourceMapConsumer, SourceMapGenerator } from "source-map-js";
+
 import {
   composeBundleSourceMap,
   getTypeScriptEnvironmentTypes,
@@ -9,8 +13,6 @@ import {
   SourceMapParser,
   TypeScriptCompiler,
 } from "../mod.ts";
-import { StaticCache } from "@commonfabric/static";
-import { SourceMapConsumer, SourceMapGenerator } from "source-map-js";
 
 const staticCache = StaticCache.fromFileSystem();
 const types = await getTypeScriptEnvironmentTypes(staticCache);

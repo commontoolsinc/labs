@@ -1,9 +1,10 @@
+import type { JSONSchema } from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
+
 import { favoriteEntrySchema, favoriteListSchema } from "./favorites.ts";
 import { journalEntrySchema, journalSchema } from "./journal.ts";
 import { learnedSectionSchema } from "./learned.ts";
 import { spacesListSchema } from "./spaces.ts";
-import type { JSONSchema } from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
 
 export const homeSchema = {
   type: "object",
