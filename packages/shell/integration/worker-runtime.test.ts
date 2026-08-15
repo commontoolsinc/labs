@@ -1,8 +1,9 @@
-import { env } from "@commonfabric/integration";
-import { ShellIntegration } from "@commonfabric/integration/shell-utils";
-import { Identity } from "@commonfabric/identity";
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+import { env } from "@commonfabric/integration";
+import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 
 const { FRONTEND_URL } = env;
 

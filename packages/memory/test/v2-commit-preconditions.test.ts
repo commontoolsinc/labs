@@ -1,5 +1,14 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+
+import type { FabricValue } from "@commonfabric/api";
+
+import {
+  commitPreconditionValueHash,
+  type EntityDocument,
+  toDocumentPath,
+} from "../v2.ts";
+import { connect, loopback } from "../v2/client.ts";
 import {
   applyCommit,
   close,
@@ -12,13 +21,6 @@ import {
   type SchedulerActionObservation,
 } from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
-import { connect, loopback } from "../v2/client.ts";
-import {
-  commitPreconditionValueHash,
-  type EntityDocument,
-  toDocumentPath,
-} from "../v2.ts";
-import type { FabricValue } from "@commonfabric/api";
 import {
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,

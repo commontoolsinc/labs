@@ -16,14 +16,16 @@
 // so we MUST resolve through the same helper rather than assuming files sit
 // directly under `store` — directory mode nests them one more `engine-v3/` deep.
 
-import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
+
+import { Database } from "@db/sqlite";
+
+import type { MemorySpace } from "../interface.ts";
 import {
   resolveSpaceStoreDirUrl,
   resolveSpaceStoreUrl,
   spaceFromStoreFilename,
 } from "./storage-path.ts";
-import type { MemorySpace } from "../interface.ts";
 
 const SQLITE_SUFFIX = ".sqlite";
 

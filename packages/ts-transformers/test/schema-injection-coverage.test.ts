@@ -1,6 +1,7 @@
-import ts from "typescript";
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { transformSource, validateSource } from "./utils.ts";
+
+import ts from "typescript";
+
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import {
   callSchemas,
@@ -11,6 +12,7 @@ import {
   parseModule,
   patternSchemas,
 } from "./transformed-ast.ts";
+import { transformSource, validateSource } from "./utils.ts";
 
 // Unit coverage for schema-injection.ts. These tests drive the whole
 // transformer pipeline with `/// <cts-enable />` pattern sources that exercise

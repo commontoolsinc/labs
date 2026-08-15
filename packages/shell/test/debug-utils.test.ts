@@ -1,6 +1,12 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
+
+import type {
+  RuntimeClient,
+  TriggerTraceEntry,
+} from "@commonfabric/runtime-client";
+
 import {
   clearRuntimeDebugGlobals,
   type CommonfabricDebugState,
@@ -9,10 +15,6 @@ import {
   summarizeDebugValue,
   summarizeTriggerTraceEntries,
 } from "../src/lib/debug-utils.ts";
-import type {
-  RuntimeClient,
-  TriggerTraceEntry,
-} from "@commonfabric/runtime-client";
 
 describe("debug utils", () => {
   it("summarizeDebugValue classifies common metadata/result shapes", () => {

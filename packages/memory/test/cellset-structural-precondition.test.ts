@@ -25,6 +25,10 @@
 
 import { assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+
+import type { FabricValue } from "@commonfabric/api";
+
+import { type EntityDocument, toDocumentPath } from "../v2.ts";
 import {
   applyCommit,
   close,
@@ -33,8 +37,6 @@ import {
   open,
   read,
 } from "../v2/engine.ts";
-import { type EntityDocument, toDocumentPath } from "../v2.ts";
-import type { FabricValue } from "@commonfabric/api";
 
 const toEntityDocument = (value: FabricValue): EntityDocument => ({ value });
 
