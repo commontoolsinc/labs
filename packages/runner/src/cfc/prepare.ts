@@ -1240,6 +1240,20 @@ const linkWritesByTarget = (
   return result;
 };
 
+type SchemaWritePolicyInput = Extract<WritePolicyInput, { kind: "schema" }>;
+
+const schemaWritesByTarget = (
+  inputs: readonly WritePolicyInput[],
+): Map<string, SchemaWritePolicyInput[]> => {
+  const result = new Map<string, SchemaWritePolicyInput[]>();
+  for (const input of inputs) {
+    if (input.kind !== "schema" || input.schema === undefined) continue;
+    const key = targetKey(input.target);
+    result.set(key, [...(result.get(key) ?? []), input]);
+  }
+  return result;
+};
+
 const pathKey = (path: readonly string[]): string =>
   encodePointer(canonicalizeLogicalPath(path));
 
@@ -1321,6 +1335,28 @@ const linkWritesCoverCfcAffectedPaths = (
           inputs,
           shapeSchemas,
         );
+    })
+  );
+
+const schemaWritesCoverCfcAffectedPaths = (
+  metadata: CfcMetadata,
+  writePaths: readonly (readonly string[])[],
+  inputs: readonly SchemaWritePolicyInput[],
+  shapeSchemas: readonly (JSONSchema | undefined)[],
+): boolean =>
+  writePaths.every((writePath) =>
+    metadata.labelMap.entries.every((entry) => {
+      const entryPath = canonicalizeLogicalPath(entry.path);
+      if (!pathsOverlap(entryPath, writePath)) return true;
+      return inputs.some((input) => {
+        const inputPath = canonicalizeLogicalPath(input.target.path);
+        const coversArrayLength = writePath.at(-1) === "length" &&
+          schemaPathHasArrayParent(writePath, shapeSchemas) &&
+          /^\d+$/.test(inputPath.at(-1) ?? "") &&
+          arraysEqual(inputPath.slice(0, -1), writePath.slice(0, -1));
+        return (pathsOverlap(inputPath, writePath) || coversArrayLength) &&
+          pathsOverlap(inputPath, entryPath);
+      });
     })
   );
 
@@ -5818,6 +5854,7 @@ export const prepareBoundaryCommit = (
     },
     generatedOutputPaths,
   );
+  const schemaWrites = schemaWritesByTarget(state.writePolicyInputs);
   const writeAuthorIdentities = writePolicyIdentitiesByTarget(
     state.writePolicyInputs,
     identityForInput,
@@ -5877,9 +5914,6 @@ export const prepareBoundaryCommit = (
   }
   const runtimeIntegrityOverwriteTargets = new Set<string>();
   for (const [key, target] of writeTargets) {
-    if (candidates.has(key)) {
-      continue;
-    }
     const existing = storedMetadataFor(
       tx,
       target.space,
@@ -5905,11 +5939,23 @@ export const prepareBoundaryCommit = (
     ) {
       continue;
     }
+    const schemaWriteInputs = schemaWrites.get(key) ?? [];
     const storedEnvelope = storedEnvelopeForTarget({ ...target, path: [] });
     const storedSchema = storedEnvelope.status === "loaded"
       ? storedEnvelope.schema
       : undefined;
     const shapeSchemas = [candidates.get(key), storedSchema];
+    if (
+      schemaWriteInputs.length > 0 &&
+      schemaWritesCoverCfcAffectedPaths(
+        existing,
+        target.paths,
+        schemaWriteInputs,
+        shapeSchemas,
+      )
+    ) {
+      continue;
+    }
     const linkWriteInputs = linkWrites.get(key) ?? [];
     if (
       linkWriteInputs.length > 0 &&
