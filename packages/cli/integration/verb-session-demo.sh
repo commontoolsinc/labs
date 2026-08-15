@@ -234,9 +234,10 @@ run cf piece call -s "$SPACE" --piece "$KID" --select item.title addChild -- --t
 run cf piece call -s "$SPACE" --piece "$EPIC" finish -- --body "shipping behind a flag"
 
 act "9 · A verb that declares no result"
-say "archive is Stream<void>: there is nothing for it to hand back, and the"
-say "invocation says so by settling with no result at all."
-run cf piece call -s "$SPACE" --piece "$KID" archive -- invoke
+say "archive is Stream<void>: nothing to supply, nothing handed back. The call"
+say "is the verb's name alone, and the invocation settles carrying no result"
+say "at all."
+run cf piece call -s "$SPACE" --piece "$KID" archive
 say "What it changed is a read away, on the one field the caller never sets."
 run cf piece get -s "$SPACE" --piece "$KID" status
 
