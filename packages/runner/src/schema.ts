@@ -1486,6 +1486,31 @@ class TransformObjectCreator
   }
 
   /**
+   * An opaque (`type: "unknown"`) position that holds something projects to an
+   * empty object carrying the back-to-cell annotation. That is the whole
+   * contract: it is truthy, it compares by identity through `equals()`, and
+   * writing it back stores a link to the same document. It carries no
+   * properties, so a reader that probes it learns nothing about the target
+   * beyond its existence — which is what `unknown` declares.
+   *
+   * An empty object rather than a fresh symbol only because the back-to-cell
+   * annotation is carried as a property and a symbol cannot hold one; see the
+   * TODO on `toCell`.
+   */
+  createOpaquePresence(
+    link: NormalizedFullLink,
+  ): AnyCellWrapping<FabricValue> {
+    return annotateWithBackToCellSymbols(
+      {},
+      this.runtime,
+      link,
+      this.tx,
+      this.synced,
+      this.labelViewFor(link),
+    );
+  }
+
+  /**
    * Plain-schema traversal has already ruled out asCell and default keywords,
    * so only attach the ordinary back-to-cell annotation here. Keeping this
    * beside createObject() makes the skipped semantics explicit and leaves the

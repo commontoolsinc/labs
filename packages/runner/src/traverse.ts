@@ -1270,6 +1270,14 @@ export interface IObjectCreator<T> {
   ): T;
 
   /**
+   * The value an opaque (`type: "unknown"`) position projects to when the
+   * traversal found something there. The traverser is the only place that
+   * knows presence, since it deliberately does not descend. Query traversal
+   * leaves this unimplemented and keeps projecting `undefined`.
+   */
+  createOpaquePresence?(link: NormalizedFullLink): T;
+
+  /**
    * Creates a value whose schema has already been proven to contain only exact
    * `type`, `properties`, and `items` keywords. Implementations may skip the
    * generic asCell/default/schema-shape checks; the result must otherwise have
@@ -3602,7 +3610,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
         return { ok: this.tracker.getExisting(doc.value, schema) };
       }
       if (valid === TypeValidity.Unknown) {
-        return { ok: this.objectCreator.createObject(newLink, undefined) };
+        return {
+          ok: this.objectCreator.createOpaquePresence?.(newLink) ??
+            this.objectCreator.createObject(newLink, undefined),
+        };
       }
       const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
       if (!Array.isArray(entries)) {
@@ -3663,7 +3674,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
         return { ok: this.tracker.getExisting(doc.value, schemaObj) };
       }
       if (valid === TypeValidity.Unknown) {
-        return { ok: this.objectCreator.createObject(newLink, undefined) };
+        return {
+          ok: this.objectCreator.createOpaquePresence?.(newLink) ??
+            this.objectCreator.createObject(newLink, undefined),
+        };
       }
       const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
       if (entries === undefined || entries === null) {
