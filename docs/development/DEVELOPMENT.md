@@ -26,7 +26,10 @@ about one aspect of the runtime, are indexed in
 
 ### Imports
 
-- Group imports by source: standard library, external, then internal.
+- Group imports by source: standard library, external, then internal, with a
+  blank line between the groups. Add the blank lines when writing a file, or
+  when reordering its imports for some other reason; a file whose imports are
+  otherwise correct is not worth touching for them alone.
 - Prefer named exports over default exports.
 - Use package names for internal imports.
 - Destructure when importing multiple names from the same module.
@@ -69,9 +72,6 @@ about one aspect of the runtime, are indexed in
   the way a reader expects. Where sorting and the grouping above disagree, the
   grouping wins: sort within the standard-library, external, and internal
   blocks, not across them.
-- Separate those three blocks with a blank line. Do it when writing a file, or
-  when reordering its imports for some other reason; a file whose imports are
-  otherwise correct is not worth touching for this alone.
 
 ### Classes
 
