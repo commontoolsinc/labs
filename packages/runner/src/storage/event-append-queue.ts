@@ -42,8 +42,6 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   type ClientCommit,
-  decodeMemoryBoundary,
-  encodeMemoryBoundary,
   type EventAppendDecl,
   type StreamEventEntry,
   type StreamLinkRef,
