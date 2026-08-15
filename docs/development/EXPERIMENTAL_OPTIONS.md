@@ -35,7 +35,7 @@ was last checked against the code.
 | [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A) | default ON at the plan's Phase 7 flip, then delete the flag and the OFF path | Phases 1–3 landed (stages A–G, the Phase 2 client speculation overlay, and Phase 3 events-down — clients no longer derive or commit handler writes under the flag), off by default |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **on** (first-party default since Phase 7's flip; explicit `false` = the OFF arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip) | soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–7 landed; ON by default in every deployed-topology process; the OFF arm stays selectable as the rollback lever through the soak |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -66,8 +66,10 @@ These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `undefined`, which means "take the built-in default". `commitPreconditions`,
-`plainResultReceipts`, and `computedCellIds` default on; the other flags in this
-category default off unless their section says otherwise.
+`plainResultReceipts`, `computedCellIds` and `lazyMaterialization` default on;
+`serverExecution` defaults on in the deployed-topology presets (its section);
+the other flags in this category default off unless their section says
+otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -355,7 +357,8 @@ rather than coerced. See [How flags propagate](#how-flags-propagate).
   states, no shippable intermediates (spec README §3.4); deliberately named
   unlike v1's `SERVER_PRIMARY_EXECUTION` so the archived v1 documents never
   alias it. Both states, defined:
-  - **OFF (the default): today's behavior, byte-for-byte.** Every client
+  - **OFF (explicit `false` — the rollback lever; the pre-flip default): the
+    pre-flip behavior, byte-for-byte.** Every client
     runtime runs and commits derivations exactly as it does today, and every
     client commit is `authored`-class — `derived` is never claimed off the
     flag. The commit `class` metadata is still *written* in this arm (it is
@@ -363,7 +366,8 @@ rather than coerced. See [How flags propagate](#how-flags-propagate).
     is enforced from it, and `stream-data` behaves as today. Any OFF-arm
     behavioral diff from a v2 stage is a phase-gate failure by itself
     (testing.md §2).
-  - **ON: the v2 posture, growing stage by stage.** With stages A–F landed
+  - **ON (the first-party DEFAULT since the Phase 7 flip, 2026-08-15): the
+    v2 posture.** With stages A–F landed
     this means: the per-class admission rows of protocol.md §2 are enforced
     — the `derived` row is the stage-B lease equality check PLUS stage F's
     derived-envelope defense-in-depth (the producing session must BE the
@@ -396,11 +400,42 @@ rather than coerced. See [How flags propagate](#how-flags-propagate).
     F10 interim — is DELETED). Later stages add their surfaces under
     this same flag; both halves of any coupled behavior move together
     on it.
-- **Current default and planned end state.** Off by default in every process.
-  The integration suites run an ON arm in CI from stage A on, with explicit
-  per-phase skip lists (testing.md §2). End state: the plan's Phase 7 flips
-  the default ON after Phases 1–6 gate green and a soak period, then the flag
-  retires and the OFF code path is removed.
+- **Current default and planned end state.** **ON by default** since the
+  plan's Phase 7 flip (2026-08-15): the ONE first-party default is
+  `SERVER_EXECUTION_DEFAULT_ENABLED` in
+  [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts),
+  read by every deployed-topology entry point — the `productionServer` /
+  `remoteClient` construction presets (toolshed's operator runtime, the
+  background piece service, the CLI, every pieces controller and
+  integration harness against a toolshed), toolshed's serving-host gate
+  and its memory service-principal grant, and the browser shell's build
+  define fallback. An UNSET flag resolves to it; an explicit
+  `EXPERIMENTAL_SERVER_EXECUTION=false` (or
+  `experimental.serverExecution: false`, or the shell define `false`)
+  selects the OFF arm — the rollback lever until the OFF path is removed.
+  Single-process harnesses are the deliberate exception: a bare `new
+  Runtime` and the `patternTest` / `localDev` / `unitTest` presets have no
+  serving host, so they resolve the ambient baseline (OFF) by construction —
+  the unit suites and `cf test` run the derive-and-commit model; the ON
+  posture's unit coverage sets the flag explicitly (the `executor-*` suites)
+  and its integration coverage is the default CI lanes. In CI (testing.md
+  §2) the DEFAULT lanes are the ON arm (skips only through
+  `tasks/server-execution-on-skips.ts`, printed loudly) and the
+  explicit-`false` lanes on an OFF-built binary are the regression guard.
+  End state: after a soak on main the flag retires and the OFF code path is
+  removed — a separate post-soak PR (the plan's Phase 7 task 2, split from
+  the flip because stacked PRs cannot soak).
+- **Status on 2026-08-15 (Phase 7 flip-ready).** Phases 1–6 landed; Phase 7
+  landed the flip preconditions — OW27 per-stream send pacing in the
+  event-append queue (pace-never-drop, README §3.8), the LT9 simplification
+  (process-lifetime queue), served-wish read authority (the process identity
+  is a memory service principal under the flag) and the nested-piece
+  demand-root chain in the run supply — and the flip itself. Known ON-arm
+  gaps carried honestly on the plan's Phase 7 section (browser-ON multi-user
+  scenarios at scoped cardinality ≥ 2 oscillate on the serving replica's
+  scope-name collapse — verification-coverage.md OW17; fresh
+  `compile-and-run` is inert until its serving port; the topics-navigation
+  skip stands).
 - **Status on 2026-08-05.** Phase 1 stages A–F landed (E re-keyed the
   vocabulary per instance; F landed the serving loop itself): the
   ExecutorHost + SpaceServer host one committing runtime per active space
@@ -412,9 +447,9 @@ rather than coerced. See [How flags propagate](#how-flags-propagate).
   still dark: OFF by default and byte-identical to today; the ON arm now
   actually serves (with the documented two-deriver interim). Stage G
   (effects + outbox) remains.
-- **Path to removal.** Execute the plan through its phase gates; at the
-  Phase 7 flip, retire the flag, remove the OFF path, and close out this
-  entry.
+- **Path to removal.** Soak the default on main; then the post-soak PR
+  retires the flag, removes the OFF path (and the OFF regression-guard CI
+  lanes + the OFF-built binary), and closes out this entry.
 
 ---
 

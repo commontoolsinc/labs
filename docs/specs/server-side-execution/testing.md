@@ -41,6 +41,19 @@ not-yet-implemented phases via explicit skip lists per phase, never via
 silent filtering. (v1's terminal failure mode: the flags-on branch never
 went through CI at all.)
 
+*Since the Phase 7 flip (2026-08-15) the arms swap roles by env: the
+DEFAULT lanes (flag unset = the first-party default,
+`SERVER_EXECUTION_DEFAULT_ENABLED` — ON) ARE the ON arm, in the FULL
+posture (the toolshed binary serves and its baked browser shell is ON),
+with the skip list printed there; the explicit
+`EXPERIMENTAL_SERVER_EXECUTION=false` lanes are the OFF regression
+guard, on a binary whose shell was built with the define `false`
+(`build-toolshed-off`) so the OFF arm is the pre-flip FULL posture too —
+never a mixed one. Both lanes stay until the OFF path is removed (the
+post-soak PR). Single-process suites (the unit suites, `cf test`) are
+not arms of this contract: they have no serving host and run the
+derive-and-commit model by construction (EXPERIMENTAL_OPTIONS.md).*
+
 ## 3. The watermark replaces polling
 
 `waitForSettled(space, seq)` — new test helper: resolves when the

@@ -151,7 +151,7 @@ client's only computational commit (spec §3.6).
 | Phase 3 ON — events down (D-v2-1) | unchanged | SpaceServer, reacting to the event commit / ONLY the event append; the local run is speculative echo, and the client handler-write commit path DELETES (events.md §7 — F10's interim ends) | unchanged | handler consequences land in the ACTING principal's instances, resolved from the server-stamped `firedAt` (scopes.md §5, protocol.md §2) | commits nothing but intent: event appends + UI-binding writes; echo via overlay |
 | Phase 4 ON — effect channel | unchanged | unchanged | external effects: server only; session effects (navigate): the server COMPUTES the intent, the client ENACTS and acks by nonce (protocol.md §5) | the effects doc is itself a session-scoped instance; the ack is written into the session's own instance (protocol.md §5) | adds the effects-doc subscription and the enact/ack duty (the ack is an authored write) |
 | Phase 5 ON — cross-space | home SpaceServer over foreign reads, under the piece's granted authority / commits HOME only — never derived into a foreign space (protocol.md §2b) | unchanged; cross-space mutation leaves ONLY as outbox event appends; `.inSpace` provisioning lands authored-class, foreign-first, under the event's acting principal | unchanged; the outbox also carries the cross-space appends | foreign reads name their instance explicitly, lease-holder-only (protocol.md §2's read row) | unchanged |
-| Phase 7 flip | SpaceServer only — the OFF path is removed | SpaceServer / events only | server, plus the client-enacted channel | unchanged from Phase 5; session-data GC is the remaining owed design (scopes.md §8 item 2) | final: speculate freely, commit only intent; flag retired |
+| Phase 7 flip (FLIP-READY landed 2026-08-15: default ON, OFF path KEPT as the rollback lever through the soak; removal is the split-out post-soak PR) | SpaceServer only (default); the OFF arm still selectable by explicit `false` | SpaceServer / events only | server, plus the client-enacted channel | unchanged from Phase 5; session-data GC is the remaining owed design (scopes.md §8 item 2); OW17's replica per-instance keying is the flip's blocker at scoped cardinality ≥ 2 | final: speculate freely, commit only intent; flag retires after the soak |
 
 A surface a milestone has not yet landed (navigateTo before
 Phase 4, cross-space before Phase 5) has no defined interim
@@ -529,11 +529,11 @@ Tasks:
 - [x] Handler fire commits the event only (payload + target stream);
       admission = append authority + CAS. LANDED 2026-08-10: the fire
       fork (cell.ts) commits a stamped append to the stream's sidecar
-      doc via the fired-order event queue. LT9's durability rides an
-      injectable STORE SEAM whose default is in-memory — the same
-      persistence class as `sessionId` today (protocol §5's sessionId
-      persistence is pre-existing spec debt; the browser adapter lands
-      with it, and until then a reload loses queued intents). The
+      doc via the fired-order event queue. LT9's persistence rides an
+      injectable STORE SEAM whose default is in-memory (Phase 7,
+      2026-08-15: LT9 RE-RULED process-lifetime — reload loss accepted
+      this round; the durable adapter is retired, the manager-shared
+      in-memory store stays). The
       scheduler tell is the discriminator — a send from a
       scheduler-stamped run commits nothing.
 - [x] Server processes events — client-committed and server-originated
@@ -742,14 +742,14 @@ Tasks:
       default unpaced) — serving-loop.md §5,
       `executor-outbox-budget.test.ts`,
       `toolshed/lib/server-execution.test.ts`.
-- [ ] Event/binding backpressure shaping ahead of the commit stream —
-      FLAGGED, not filled (verification-coverage OW27): the §3.8
-      binding-layer shaping's semantics (pace vs batch vs drop, the
-      hold-latency bound, per-stream keying, UI-default visibility)
-      are an unstated fork needing the owner's ruling; the register
-      row carries the candidate resolutions and their costs. The ON
-      arm ships without an event-flood bound until it lands (W4's
-      collapse is flag-disabled by design).
+- [x] Event/binding backpressure shaping ahead of the commit stream —
+      RULED (a) and LANDED with Phase 7 (2026-08-15; verification-
+      coverage OW27): per-stream token-bucket pacing in the client's
+      event-append queue, pace-never-drop; the default posture (20/s,
+      burst 20) is a flagged dial. (Original Phase-6 flag: the §3.8
+      shaping's semantics were an unstated fork — pace vs batch vs
+      drop, the hold-latency bound, per-stream keying, UI-default
+      visibility.)
 
 Success criteria:
 
@@ -771,16 +771,108 @@ Success criteria:
 
 ## Phase 7 — Flip and retire
 
+**Scoping (coordinator, 2026-08-15; owner ruling pending — built to
+it): this phase delivers FLIP-READY, and task 2's OFF-path REMOVAL is
+SPLIT OUT into a separate post-merge, post-soak PR** — stacked PRs get
+no CI matrix, so the soak can only start once the stack merges to
+main, and the flag must remain the rollback lever through the soak.
+The plan is NOT archived here (task 3 is close-out after the soak).
+
+Preconditions (all RULED 2026-08-15, all landed with this phase):
+
+- [x] **OW27 — event-flood shaping, RULED (a)**: per-stream token-bucket
+      pacing in the client's event-append queue, PACE-NEVER-DROP
+      (README §3.8's implementation sentence; verification-coverage
+      OW27 → LANDED). Default posture 20/s sustained, 20 burst — a dial,
+      flagged. Red-first flood test (bounded rate, zero loss, fired
+      order) + the disabled-pacing mutation witness. OFF arm untouched
+      by construction (it never enqueues).
+- [x] **The wish bootstrap write path — RULED `.inSpace()` chain**: the
+      served create surface's `.inSpace()` provisioning stays on the
+      existing chain (`optIntoInSpaceMultiSpaceCommit` →
+      `enableCrossSpaceChildCommit` → the wave's grant-gated §2b accept
+      posture; crossing count stays at two). What the lunch gate ACTUALLY
+      needed, peeled in order and landed: (1) served-wish READ
+      authority — under the flag the toolshed process identity is a
+      memory service principal, so the loopback plane reads the
+      demanding user's home space (`memoryServiceDidsFor`; OFF the
+      configured list verbatim); (2) a flag-ON client's wish REFERENCES
+      the served sidecar cell instead of fetching/instantiating it
+      itself (the bookkeeping-authored instantiation raced the server's
+      derived one — the ~13/s stale-basis loop); (3) the nested-piece
+      DEMAND-ROOT CHAIN in the run supply
+      (`SchedulerObservationIdentity.demandRootIds`) — the lunch
+      pattern's `#profile` wish lives in a sub-pattern whose runs had no
+      demanded instances and fell to the SERVICE identity's instances
+      (`user:<serviceDID>` rows in the store). Gate state: see the table
+      — RED at cardinality ≥ 2 (OW17), the #5612 gate row NOT edited.
+- [x] **LT9 simplification — RE-RULED (owner)**: reload survival is a
+      non-goal this round; the queue is process-lifetime. Retired: the
+      Web-Storage adapter and Phase 5's coupling seam; kept: the
+      manager-shared in-memory store (in-process replacement survival)
+      and its pins. events.md §5 / scenario-traces LT9 re-tensed with
+      the owner's rationale; OW20 CLOSED as out-of-scope-this-round with
+      the recorded future shape (per-tab persistence + orphan adoption).
+
 Tasks:
 
-- [ ] Default ON after Phases 1–6 gate green in CI for a soak period.
+- [x] **Default ON** — LANDED 2026-08-15 as FLIP-READY: the ONE
+      first-party default `SERVER_EXECUTION_DEFAULT_ENABLED = true`
+      (`packages/memory/v2/server-execution-default.ts`), resolved by
+      the `productionServer` / `remoteClient` presets, the shell define
+      fallback, and toolshed's serving-host gate + service-principal
+      grant; explicit `false` = the OFF arm (rollback lever); the
+      single-process presets keep the OFF baseline by construction
+      (EXPERIMENTAL_OPTIONS.md). CI: the default lanes ARE the ON arm in
+      the FULL posture (the ON shell build lands with the flip — OW25's
+      first condition), the explicit-`false` lanes on an OFF-built
+      binary are the regression guard; the skip list holds ONE entry
+      (topics-navigation, re-justified — see verification-coverage
+      OW25/OW30). **Soak-period caveat: the soak starts at MERGE** —
+      stacked PRs cannot soak; "Phases 1–6 gate green in CI" holds for
+      the sx2 family and the non-browser package suites (table below)
+      and does NOT hold for the browser-ON multi-user family (OW17 —
+      the flip's top blocker), so the flip is landed as READY, not as
+      soaked-and-judged.
 - [ ] Retire the flag; OFF path removed; `EXPERIMENTAL_OPTIONS.md` entry
-      closed out.
-- [ ] Archive this plan to `docs/history/plans/` per the lifecycle.
+      closed out — **SPLIT OUT: the post-soak removal PR** (named here as
+      the flip's follow-up; it also removes the OFF regression-guard CI
+      lanes and `build-toolshed-off`).
+- [ ] Archive this plan to `docs/history/plans/` per the lifecycle
+      (close-out, after the soak and the removal PR).
 
 Success criteria:
 
-- [ ] The integration suites run ON-only and green.
+- [ ] The integration suites run ON-only and green. (NOT ticked: the
+      OFF lanes stay as the regression guard through the soak by design;
+      and the ON lanes are expected-red on the browser-ON multi-user
+      family — table below.)
 - [ ] Cross-user propagation beats the client-computed baseline on the
       byte-identical workloads (the §1 "faster, not tolerably slower"
-      requirement).
+      requirement). (NOT ticked — UNMEASURED: the measurement leg is
+      BUILT — `CF_CHAT_MESSAGE_SERIES=N CF_CHAT_MESSAGE_DELAY_MS=ms` on
+      `cfc-group-chat-demo-two-browsers` posts N messages from the first
+      browser and times each send→other-browser-renders, printing
+      median/quartiles/max + load; protocol: fresh store per arm,
+      adjacent ON/OFF pairs, n ≥ 20 per arm, load recorded — but its
+      HARNESS is red under the full ON posture at the unmodified Phase-6
+      base (the two-browsers gate stalls at the first per-user write with
+      60–70k client action runs: OW17's cardinality-2 collapse), so no
+      honest ON number exists yet. The harness must not be tuned to
+      pass; the criterion waits for OW17.)
+
+**Phase-7 gates table (2026-08-15, this tree; fresh store per run,
+private port offset, load 1-min 4–6 unless noted):**
+
+| gate | posture | result |
+| --- | --- | --- |
+| `sx2-serving-loop`, `sx2-speculation`, `sx2-events`, `sx2-effect-channel`, `sx2-scale` | DEFAULT (unset = ON), toolshed serving by default, shell ON | 5/5 GREEN (one run; the sx2 arm detection now reads env-else-default) |
+| same five | explicit `EXPERIMENTAL_SERVER_EXECUTION=false` everywhere (the OFF regression guard) | 5/5 GREEN; toolshed logs no serving loop |
+| runner package integration (14) | DEFAULT | 14/14 GREEN |
+| runtime-client package integration | DEFAULT | 1/1 (45 steps) GREEN |
+| `counter` | DEFAULT | 1 red / 2 green (OW30's controller write-destination race — intermittent) |
+| `cf-checkbox` | DEFAULT | GREEN |
+| `topics-navigation` | DEFAULT (full posture) | RED fast (`missing required property myName`, OW30 class) — SKIP-LISTED with the Phase-7 reason |
+| `cfc-group-chat-demo-two-browsers` (the Phase-2 gate + the benchmark harness) | full ON — HEAD and the unmodified Phase-6 BASE (`c75f04f37`, env=true) | RED both: stalls at the first per-user write, client action runs 67k/56k (base) — the OW17 cardinality-2 collapse; NOT a Phase-7 regression |
+| lunch (`lunch-poll-vote`) | full ON, ≥2 runs at each step | base: 300 s wall at "both runtimes idle" (`lacks READ`; served wish never materialized). After (1)+(2)+(3): idle in 0.3–0.8 s, join UI renders, "host name filled" — then the join click's consequence never settles (cardinality-2 collapse; with the reverted extensions (4)+(5) both users' instances materialize and the loop storms — 4,427 waves / 5 min). RED; #5612 not edited |
+| OFF-arm neutrality | full runner suite (OFF ambient) + memory + toolshed unit suites | see the PR's bar |

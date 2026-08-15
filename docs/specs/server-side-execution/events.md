@@ -228,10 +228,18 @@ handler-run provenance records.
   the consequence — else a poison event wedges the stream), push.
 - Client offline at fire time (RULED 2026-08-02): events accumulate
   client-side as unacked authored commits and discharge on reconnect
-  in fired order. The queue is DURABLE client-side, in the same
-  persistence class as `sessionId` (protocol.md §5) — a reload
-  while offline preserves it; losing queued user actions to a
-  reload is not permitted (LT9, RULED 2026-08-03). A discharged
+  in fired order. The queue is PROCESS-LIFETIME (LT9, RE-RULED
+  2026-08-15 by the owner, superseding the 2026-08-03 "durable"
+  ruling): queued-but-undischarged intents surviving a client RELOAD
+  is a NON-GOAL this round — in the owner's words, *"the status quo
+  doesn't survive client + server reload either"* — so reload loss is
+  accepted; what the queue DOES survive is an in-process replica
+  replacement (the manager-shared in-memory store hands a dead
+  predecessor's intents to its successor — machinery loss, not reload
+  loss). Sessions are per tab: one writer per session by construction,
+  no leader election, no shared persisted session, no orphan adoption;
+  the recorded future shape, if reload survival is ever wanted, is
+  per-tab persistence + orphan adoption. A discharged
   event whose PRECONDITIONS are gone is
   DROPPED — no consequences commit — and the client MUST be signaled
   so the UI can react.

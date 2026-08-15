@@ -164,7 +164,22 @@ stream is passed to other spaces, which then append intents to it.
   demander #1's create surface and clobber the pending input).
   Client wishes are byte-identical to before (cardinality 1: the
   runtime's own user; the client suggestion-cell cause carries no
-  user key, exactly as before).
+  user key, exactly as before). *Phase 7: on a flag-ON NON-serving
+  runtime the sidecar surfaces (create/picker/suggestion) are the
+  SpaceServer's compile-instantiate steps (§3) — the client's
+  speculative wish run REFERENCES the served sidecar cell
+  (cause-derived, so both sides name one doc) and never fetches,
+  instantiates or writes it (pre-Phase-7 a flag-ON client's
+  bookkeeping-stamped instantiation raced the server's on the same
+  docs). The OFF arm and the serving runtime are unchanged.*
+  *Read authority for the demanding user's home space (Phase 7):
+  the served wish's foreign reads ride the serving runtime's loopback
+  plane, whose sessions are admitted by the memory ACL as the process
+  identity — under the flag the toolshed process's identity is a
+  memory service principal (protocol.md §2b's free-read row;
+  `memoryServiceDidsFor`), the posture every deployment checklist
+  already requires of the operator DID; foreign WRITES are not widened
+  by it (the §2b accept gate checks the ACTING identity's grant).*
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 

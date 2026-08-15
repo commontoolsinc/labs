@@ -641,9 +641,9 @@ these.
 
 ### T8 (GAPS(1))
 - Q1: client-side unacked `authored` event appends, in fired order.
-  [events §5; speculation §5] (LT9 RULED 2026-08-03: the queue is
-  DURABLE client-side, same persistence class as `sessionId` — a
-  reload while offline preserves it.)
+  [events §5; speculation §5] (LT9 RE-RULED 2026-08-15: the queue is
+  PROCESS-LIFETIME — reload loss accepted this round; an in-process
+  replica replacement is survived.)
 - Q2: discharge in fired order (RULED). [events §5; speculation §5]
 - Q3: DROP — "a doc the handler must write was deleted meanwhile"
   meets the unrunnable predicate verbatim; a raced consequence
@@ -933,6 +933,10 @@ answers.
 - **LT8 (T2.Q6) — RULED: accepted.** The reload ×
   optimistic-enactment window may re-enact a nonce; acceptable for
   reversible effects, which every shipped kind is (protocol.md §5).
-- **LT9 (T8.Q1) — RULED:** the offline event queue is DURABLE
-  client-side, same persistence class as `sessionId` (events.md
-  §5).
+- **LT9 (T8.Q1) — RULED 2026-08-03, RE-RULED 2026-08-15 (owner):**
+  the offline event queue is PROCESS-LIFETIME — reload survival is a
+  non-goal this round ("the status quo doesn't survive client + server
+  reload either"); in-process replica replacement is survived via the
+  manager-shared store; per-tab sessions, no leader election, no
+  shared persisted session (events.md §5). The 2026-08-03 "durable"
+  ruling and Phase 3's Web-Storage adapter are retired.

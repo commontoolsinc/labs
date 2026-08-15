@@ -231,8 +231,10 @@ FP1 and FP2 are the heavyweights.
 - **FP9 — `sessionId` minting (F).** Who generates it (client or
   server), with what uniqueness guarantee — now that LT2 makes the
   same value a trusted identity component in EVERY space?
-- **FP10 — session TTL × durable offline queue (F).** The queue
-  survives a reload (LT9); the session retires by TTL. A client
+- **FP10 — session TTL × offline queue (F).** *(Re-tensed 2026-08-15:
+  the queue is process-lifetime — LT9 re-ruled — so the reload half of
+  this question is moot; the TTL half stands for a live client that
+  reconnects after TTL with queued actions.)* A client
   reconnecting after TTL with queued actions: discharge fails?
   re-authenticate under a fresh session first (whose keys then
   differ)? TTL suspended while actions are queued?

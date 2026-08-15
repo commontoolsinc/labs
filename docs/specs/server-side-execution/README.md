@@ -391,6 +391,14 @@ session-scoped client act. The wiring:
   already isolates workers; v2 adds the budgets.
 - **Backpressure**: event floods (key-repeat driving `stream.send()`)
   are rate-shaped at the binding layer before they become commits.
+  *Implementation (OW27, RULED (a) by the owner 2026-08-15; Phase 7):
+  the client's event-append queue PACES per stream — a token bucket
+  between the queue head and the wire, `burst` sends immediate,
+  sustained sends at `ratePerSecond`, a flood HELD in fired order and
+  never dropped (events are intent; the default posture 20/s sustained,
+  20 burst, is a dial —* `DEFAULT_EVENT_APPEND_PACING` *in
+  `packages/runner/src/storage/event-append-queue.ts` — flagged for the
+  owner). The OFF arm never constructs the queue.*
 
 ## 4. Measured constraints (what the learning run bought)
 

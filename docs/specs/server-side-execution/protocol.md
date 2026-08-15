@@ -448,7 +448,7 @@ them). v2 keeps that invariant and adds the class discipline:
 
 | crossing | mechanism |
 | --- | --- |
-| read a foreign doc | free — logged read + server-internal wake (§3b) |
+| read a foreign doc | free — logged read + server-internal wake (§3b). *Mechanism (Phase 7): the serving runtime's loopback session is admitted by the memory ACL as the process identity, which is a memory service principal under the flag (`memoryServiceDidsFor`, toolshed) — the deployment checklist's operator-DID posture, automatic where the loop runs; OFF the flag the configured list is used verbatim.* |
 | derive FROM foreign state | home derivation reading foreign inputs; result commits HOME |
 | mutate a foreign space | **an event append to a foreign stream — the ONLY cross-space mutation** |
 | `derived` commit into a foreign space | FORBIDDEN — SpaceServer(B) is B's only deriver; A never derives into B |

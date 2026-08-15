@@ -937,6 +937,55 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   no later than Phase 5's cross-space serving (foreign scoped
   instances make the local collapse load-bearing); flag-don't-fill
   until then.
+  **Phase 7 evidence (2026-08-15) — the collapse is LOAD-BEARING NOW,
+  and it is the flip's honest blocker for multi-user browser
+  scenarios.** Three mechanisms peeled on the lunch gate under the full
+  ON posture, in order: (1) the served `#profile` wish could not READ
+  the demanding user's home space (memory ACL — the process identity
+  was not a service principal; fixed: `memoryServiceDidsFor`);
+  (2) a flag-ON client's wish also fetched + instantiated the create
+  sidecar through bookkeeping-stamped AUTHORED commits, racing the
+  server's derived ones on the same docs (fixed: the client references
+  the served sidecar cell only — builtins.md §5); (3) the lunch
+  pattern's `#profile` wish lives in a NESTED sub-pattern whose actions
+  carried the CHILD root as `pieceRootId`, so the run supply found no
+  demanded instances and the runs fell to the wave-level identity —
+  the served scoped writes landed under `user:<serviceDID>` /
+  `session:<serviceDID>:…` (store dump: 34 user rows + 7 session rows
+  keyed by the SERVICE identity in the lunch space) — the
+  silent-empty-instance trap for WRITES, protocol §2's S1 ("there is
+  no third source of run identity") violated in practice (fixed: the
+  demand-root CHAIN, `SchedulerObservationIdentity.demandRootIds` —
+  nested pieces resolve through the outer root; `executor-run-supply.
+  test.ts`, red-first). With (1)–(3) the gate reaches the join UI
+  ("host name filled") and stalls at the join click's consequence. Two
+  further extensions were BUILT AND REVERTED because they make
+  cardinality ≥ 2 real on the collapsed replica: (4) SPACE-ROOT
+  DEMANDERS — a client watching only the space-scoped piece root
+  registers NO identity (`watchedRootsForSpace` records identity for
+  scoped roots only), so the second browser was never demanded; a
+  registry of (principal, session) demanders per space root + a
+  demand-ARRIVAL re-run (`Scheduler.invalidateActionsForDemandRoots`,
+  needed because a clean action never re-runs for an instance that did
+  not exist when it last ran); (5) the OW17 WRITE-half mitigation — a
+  per-instance run's scoped patch ops sealed as whole-doc SETS (the
+  patch was diffed against a SIBLING instance's collapsed local value,
+  so the engine rejected the whole wave: "wave commit rejected …
+  missing path /value/$UI/props/$cell"). With (4)+(5) both users'
+  instances materialize (store: `user:alice` 37, `session:alice:*` 2,
+  `user:bob` …) and the serving replica OSCILLATES: two instances of
+  one node write the same collapsed local doc alternately, each
+  re-dirtying the other — a wave STORM (4,427 waves / 4,426 derived
+  commits in 5 min, watermarkLag 1,685) — the OW17 VALUE half in its
+  purest form. (4)+(5) are recorded here as the designed shape and are
+  GATED on this row's owed leg (replica-level per-instance keying);
+  they must land WITH it, not before. The same signature (client
+  actionRuns 60–75k / 5 min, no settle) reproduces on the two-browsers
+  gate under the full ON posture at the UNMODIFIED Phase-6 base — the
+  "browser-ON red family" (OW25) IS this collapse at cardinality ≥ 2.
+  Trigger, sharpened: BEFORE the flip's soak can be judged on
+  multi-user browser scenarios; the flip's Phase-7 gates table carries
+  it as the top blocker.
 - OW19 — the demand-cycle terminal state: CLOSED by stage P2-F
   (2026-08-13; the RULED 2026-08-07 direction, built whole). A
   demanded root CONFIRMED synced with no pattern meta parks TERMINAL
@@ -980,19 +1029,26 @@ nod, 2026-08-07; recorded in the plan's stage list):**
 **Phase 3 follow-ups (the independent review's owed rows,
 2026-08-11):**
 
-- OW20 — the LT9 BROWSER ADAPTER (the durable
-  `EventAppendQueueStore`, landing with protocol §5's sessionId
-  persistence it depends on) carries two queue debts alongside the
-  store itself: (i) queue SELF-START on reconnect — discharge today
-  begins only when the next fire calls `#kick`, so a persisted
-  backlog waits for fresh user intent instead of draining on
-  reconnect/construction with a live transport; (ii) the
-  save-ordering contract — `#persist` serializes saves behind the
-  previous save (review m6, pinned in `event-append-client.test.ts`),
-  and an async adapter MUST keep resolving `save()` per call (never
-  coalescing behind a debounce that drops intermediate snapshots)
-  or re-derive its own ordering guarantee. Trigger: the sessionId
-  persistence work.
+- OW20 — CLOSED with Phase 7 (2026-08-15) as OUT-OF-SCOPE-THIS-ROUND
+  (not deferred-owed): the owner RE-RULED LT9 — queued events surviving
+  a client reload is a NON-GOAL this round ("the status quo doesn't
+  survive client + server reload either"), the queue is
+  PROCESS-LIFETIME (events.md §5), and the durable adapter that carried
+  this row (Phase 3's Web-Storage store, Phase 5's
+  `InitializationData.eventAppendQueuePersistence` coupling seam) is
+  RETIRED. Kept: the manager-shared in-memory store and its in-process
+  replacement-survival pins (`event-append-client.test.ts`,
+  `space-host-late-hint.test.ts`) — machinery loss, not reload loss.
+  The recorded FUTURE shape, if reload survival is ever wanted:
+  per-tab persistence + orphan adoption (per-tab sessions, one writer
+  per session by construction, no leader election, no shared persisted
+  session). Original obligation, for the record: the LT9 BROWSER
+  ADAPTER (the durable `EventAppendQueueStore`, landing with protocol
+  §5's sessionId persistence it depends on) carried two queue debts —
+  (i) queue SELF-START on reconnect; (ii) the save-ordering contract
+  (`#persist` serializes saves behind the previous save — review m6,
+  still pinned; an async adapter MUST keep resolving `save()` per
+  call).
 - OW21 — updateArgument's FULL EVENT-ROUTING (per OW16's
   classification): the tool mutation stamps HANDLER-class with NO
   eventId, so on a flag-ON client the overlay REFUSES the seal
@@ -1069,6 +1125,22 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   (the inherited red's fix), and no later than the Phase-7 flip
   (a flip criterion measured on a mixed-posture lane would be
   vacuous).
+  Phase 7 (2026-08-15): the ON shell build LANDS BY THE FLIP — the
+  default binary bakes the shell ON (unset define = the first-party
+  default), so the default CI lanes are the FULL ON posture, and the
+  OFF regression guard gets its own OFF-built binary
+  (`build-toolshed-off`). The inherited red did NOT lift; it is now
+  ATTRIBUTED (OW17's Phase-7 evidence): under the full posture, at the
+  unmodified Phase-6 base, `cfc-group-chat-demo-two-browsers` stalls at
+  the first per-user write with 60–70k client action runs (the
+  cardinality-2 collapse), the lunch gate as recorded, and
+  `topics-navigation` fails fast at the controller's write-destination
+  validation (`missing required property myName` — the same class as
+  the intermittent `counter` failure below, OW30). The topics-navigation
+  skip entry stands with the Phase-7 reason; no browser-posture
+  criterion ticks on the default lanes' green until this family is
+  triaged — the flip's gates table records the lanes as expected-red
+  on the browser-ON family.
 - OW26 — the DEMANDED-EFFECT retry wedge (scheduler adjacency,
   surfaced by the owner-review P1 batch, 2026-08-12): when an
   `isEffect` builtin's action THROWS (the arms are builtins.md §4's
@@ -1168,9 +1240,29 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   degradation; post-echo the degraded arithmetic times out at every
   barrier (mutation-verified red at all four sites, green restored).
 
-- OW27 — binding-layer event/binding backpressure shaping (the
-  Phase-6 plan bullet's third item, FLAGGED as a design fork rather
-  than filled — 2026-08-14): README §3.8 promises "event floods
+- OW27 — LANDED with Phase 7 (2026-08-15; RULED (a) by the owner
+  2026-08-15 — "client-side send pacing in the flag-gated append path,
+  per-stream token bucket, pace-never-drop"): the client event-append
+  queue paces per stream (`EventAppendQueue` — `pacing`, keyed by the
+  stream's sidecar doc; burst passes, sustained sends drain at the
+  rate, a flood is HELD in fired order, never coalesced, never dropped;
+  the head holds everything behind it — cross-stream head-of-line
+  hold is the accepted cost of exact fired order). Default posture
+  `DEFAULT_EVENT_APPEND_PACING` = 20/s sustained, 20 burst — a DIAL,
+  FLAGGED for the owner (the bound on the flooding user's own rapid
+  interactions ≈ (queued − burst)/rate seconds; a held key at ~30 Hz
+  is paced to 20 commits/s and clears within half a second of
+  release). Pinned red-first in `event-append-client.test.ts`: a 40-send
+  key-repeat flood — bounded rate (no 100 ms window above burst +
+  rate·window), ZERO loss, fired order — plus the DISABLED-PACING
+  mutation witness (`pacing: false` → the flood sends in one tick) and
+  close-during-hold (held outcomes settle; the intent stays queued for
+  a successor). OFF-arm untouched by construction: the OFF arm never
+  enqueues (the fire fork is flag-gated), so pacing has nothing to act
+  on there. README §3.8 carries the implementation sentence. Original
+  obligation, for the record — the Phase-6 plan bullet's third item,
+  FLAGGED as a design fork rather than filled (2026-08-14): README
+  §3.8 promises "event floods
   (key-repeat driving `stream.send()`) are rate-shaped at the binding
   layer before they become commits", and under the flag the W4
   last-wins collapse is DISABLED (events.ts gates it off — collapse
@@ -2053,16 +2145,13 @@ delta):
   local precision) now triggers with the grant-scoped read
   RESOLUTION landing — the same work that first admits a foreign
   scoped instance producer.
-- LT9 rec (c) — ADOPTED-PENDING-VETO, the COUPLING SEAM half only
-  (the plan defers protocol §5's sessionId persistence beyond
-  Phase 5, so per the rec's fork the durable wiring waits):
-  `InitializationData.eventAppendQueuePersistence` is the typed
-  declarative seam the worker maps onto the manager's
-  `eventAppendQueueStore` option (`resolveEventAppendQueuePersistence`
-  — memory kind honored; any other kind REFUSES initialization
-  loudly rather than silently degrading a durability declaration).
-  OW20 stands unchanged (browser adapter + queue debts, trigger: the
-  sessionId persistence work).
+- LT9 rec (c) — was ADOPTED-PENDING-VETO (the COUPLING SEAM half only:
+  `InitializationData.eventAppendQueuePersistence` →
+  `resolveEventAppendQueuePersistence` → the manager's
+  `eventAppendQueueStore` option); VETOED BY SIMPLIFICATION with the
+  LT9 re-ruling (owner, 2026-08-15) and RETIRED in Phase 7 — the seam
+  and its tests are deleted (dead weight for a non-goal); OW20 CLOSED
+  (see its row).
 
 Delta 2026-08-14 — Phase 6 (push priority, budgets, scale; the phase
 PR):
@@ -2124,6 +2213,86 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
 - §7's `push.*` counters are DEFINED as sessions EVALUATED per group
   (an ordering witness, not delivered frames) — the exported type's
   doc said "sends"; corrected, no counter change.
+
+**Phase 7 (the flip): rows opened by the flip's own gates, 2026-08-15:**
+
+- OW28 — the `compile-and-run` SERVING PORT (stage G's out-of-scope
+  note; builtins.md §3): under the flag fresh `compile-and-run` is
+  INERT everywhere — the client gate suppresses fresh compiles for
+  every non-wave run and the serving side's async writebacks are
+  unstamped, so they refuse at the wave seal — and the flip ships that
+  inertness by default (`common-fabric.tsx`'s piece-creation flow among
+  the consumers). Owed: the port — compilation on the outbox as an
+  effect kind (request-hash memo on the program), the instantiation
+  joining the graph as a completion-class writeback. Trigger: BEFORE
+  the flip's soak is judged (a flip blocker in product terms; nothing
+  in CI exercises fresh compile-and-run in the ON arm — the pins in
+  `compile-and-run.test.ts` assert the gate, not the port).
+- OW29 — space-root demanders + demand-arrival re-runs (the reverted
+  Phase-7 extension recorded under OW17): a client whose only watch is
+  the space-scoped piece root supplies NO identity to the run supply,
+  and a clean action never re-runs for a newly arrived instance. Both
+  are needed for a second user of a shared space to be served at all;
+  both are GATED on OW17's replica per-instance keying (without it they
+  turn silent under-serving into a wave storm). Land the three
+  together. Trigger: OW17.
+- OW30 — the controller-side write-destination validation RACE under
+  the flag (`piece-controller.ts` `validateWriteDestination`, the
+  #4717 guard as narrowed 2026-08-07): under the full ON posture
+  `counter` failed once in three runs on the Phase-7 tree ("current
+  producer value is not accepted as an array container" — the
+  controller read a served-late/speculative producer value of the wrong
+  shape) and `topics-navigation` fails fast on the same class ("missing
+  required property myName"); green on re-run and at the base. Owed:
+  the convergence step the 2026-08-07 narrowing anticipated (validate
+  against a settled view — `waitForSettled` on the piece's space —
+  before judging the written subtree), and its pin. Trigger: the flip
+  soak (an intermittent red in the default lanes).
+
+Delta 2026-08-15 — Phase 7 (the flip; the phase PR):
+
+- README §3.8's backpressure sentence: IMPL-GATE → COVERED (OW27 LANDED
+  above; +1 binding implementation sentence — pace-never-drop, per
+  stream, fired order held; the default posture is a flagged dial).
+- events.md §5's offline-queue persistence sentence RE-TENSED (LT9
+  re-ruled — process-lifetime; the reload half is a non-goal this
+  round, the in-process replacement survival stays pinned); OW20
+  CLOSED, the LT9 rec (c) seam RETIRED (rows above).
+- protocol §2b's free-read row and serving-loop §3b's cross-space read
+  gained the read-authority mechanism sentence (the process identity is
+  a memory service principal under the flag —
+  `packages/toolshed/lib/server-execution-flag.ts`, pinned in
+  `server-execution-flag.test.ts`: OFF the configured list verbatim,
+  ON the identity joins it exactly once). NOT a write widening: the
+  wave's §2b accept gate ignores the service-DID blanket by design.
+- builtins.md §5's wish row: +1 binding sentence (a flag-ON non-serving
+  runtime references the served sidecar cell, never instantiates it)
+  — impl-gate; witnessed live on the lunch gate (the ~13/s stale-basis
+  loop stopped), unit pin owed with OW17's landing (the two-demander
+  sidecar test in `executor-cross-space.test.ts` covers the serving
+  side).
+- scheduler/types.ts `SchedulerObservationIdentity.demandRootIds` (the
+  nested-piece demand-root chain) — an implementation surface below
+  spec granularity, FLAGGED: scopes.md §5's "the demand supplies the
+  identity" now resolves a nested piece through its ancestors; pinned
+  red-first (`executor-run-supply.test.ts`).
+- testing.md §2: the CI arms' role swap by env (default = ON full
+  posture; explicit false = OFF full posture on the OFF-built binary);
+  `tasks/server-execution-on-skips.ts` prints on the default lanes.
+- The flip's own default: `SERVER_EXECUTION_DEFAULT_ENABLED = true`
+  (`packages/memory/v2/server-execution-default.ts`), resolved by the
+  `productionServer` / `remoteClient` presets, the shell define
+  fallback, and toolshed's flag helper; the single-process presets keep
+  the OFF baseline by construction (EXPERIMENTAL_OPTIONS.md). Pins:
+  `runtime-presets.test.ts` (deployed-topology presets carry the
+  default), `shell/test/env.test.ts` (define unset → default; `false`
+  → OFF), `toolshed/lib/server-execution-flag.test.ts`.
+- The plan's Phase-7 section carries the honest gates table: sx2 family
+  green ON (default) and OFF (explicit) fresh-store; runner and
+  runtime-client package integration suites green under the default;
+  the browser-ON multi-user family red at base and head (OW17); the
+  propagation benchmark leg BUILT (opt-in on the two-browsers gate) but
+  UNMEASURED — its harness is red under the full posture at the base.
 
 ## 4. Standing rule
 
