@@ -1,26 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import * as V2Storage from "../src/storage/v2.ts";
-import { raw } from "../src/module.ts";
+
+import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import { createCell } from "../src/cell.ts";
 import {
   readStoredCfcMetadata,
   storedCfcMetadataAppliesToPath,
 } from "../src/cfc/metadata.ts";
-import { Runtime } from "../src/runtime.ts";
-import { createCell } from "../src/cell.ts";
-import {
-  getDerivedInternalCellLink,
-  getMetaLink,
-  parseLink,
-  toMemorySpaceAddress,
-} from "../src/link-utils.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   canonicalizeCfcMetadata,
   canonicalizePreparedDigestInput,
@@ -32,12 +25,21 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
 } from "../src/cfc/types.ts";
-import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { ignoreReadForScheduling } from "../src/scheduler.ts";
-import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import {
+  getDerivedInternalCellLink,
+  getMetaLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
+import { raw } from "../src/module.ts";
 import { setResultCell } from "../src/result-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { ignoreReadForScheduling } from "../src/scheduler.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import * as V2Storage from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
   testSessionOpenAuthFactory,

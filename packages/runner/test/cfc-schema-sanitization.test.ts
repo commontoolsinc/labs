@@ -1,10 +1,11 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+
 import type { JSONSchema } from "../src/builder/types.ts";
-import { CELL_KINDS } from "../src/scope.ts";
 import {
   cfcObjectSchemaIsClosed,
   INJECTION_SAFE_ATOM,
@@ -18,6 +19,7 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "../src/cfc/mod.ts";
+import { CELL_KINDS } from "../src/scope.ts";
 
 const promptRisk = {
   type: "https://commonfabric.org/cfc/atom/Caveat",

@@ -1,26 +1,28 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
 import type {
   IExtendedStorageTransaction,
   ITransactionJournal,
   ITransactionWriteRequest,
   TransactionReactivityLog,
 } from "../src/storage/interface.ts";
-import {
-  ExtendedStorageTransaction,
-  TransactionWrapper,
-} from "../src/storage/extended-storage-transaction.ts";
 import { reactivityLogFromActivities } from "../src/storage/reactivity-log.ts";
 import {
   getTransactionReadActivities,
   getTransactionWriteAttempts,
   getTransactionWriteDetails,
 } from "../src/storage/transaction-inspection.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("transaction-inspection");
 const space = signer.did();

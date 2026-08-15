@@ -1,20 +1,22 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import { Identity } from "@commonfabric/identity";
 import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
+import type { Cell } from "../src/cell.ts";
+import { ENTITY_URI_SCHEMES } from "../src/entity-kind.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import {
   type Options,
   type SessionFactory,
   StorageManager,
 } from "../src/storage/v2.ts";
-import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import { ENTITY_URI_SCHEMES } from "../src/entity-kind.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
-import { Runtime } from "../src/runtime.ts";
-import type { Cell } from "../src/cell.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
   testPrincipalSessionOpenAuthFactory,

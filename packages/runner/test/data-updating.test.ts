@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { JSONSchema } from "../src/builder/types.ts";
+import { createRef } from "../src/create-ref.ts";
 import {
   applyChangeSet,
   type ChangeSet,
@@ -9,10 +15,6 @@ import {
   normalizeAndDiff,
   schemaIfcOverlapsPath,
 } from "../src/data-updating.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { createRef } from "../src/create-ref.ts";
-import { toURI } from "../src/uri-utils.ts";
-import { Runtime } from "../src/runtime.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
@@ -21,9 +23,9 @@ import {
   isSigilLink,
   parseLink,
 } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { toURI } from "../src/uri-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

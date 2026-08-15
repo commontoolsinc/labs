@@ -1,21 +1,23 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
-import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
-import {
-  getVerifiedProvenance,
-  recordVerifiedProvenance,
-} from "../src/harness/verified-provenance.ts";
 import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-contract";
+
 import {
   brandTrustedBuilderArtifact,
   isTrustedBuilderArtifact,
 } from "../src/builder/pattern-metadata.ts";
-import { ExecutableRegistry } from "../src/harness/executable-registry.ts";
 import type { JSONSchema, Module, Pattern } from "../src/builder/types.ts";
+import { resolvePolicyFacingImplementationIdentity } from "../src/cfc/implementation-identity.ts";
+import { ExecutableRegistry } from "../src/harness/executable-registry.ts";
 import type { HarnessedFunction } from "../src/harness/types.ts";
+import {
+  getVerifiedProvenance,
+  recordVerifiedProvenance,
+} from "../src/harness/verified-provenance.ts";
+import { Runtime } from "../src/runtime.ts";
 
 /**
  * C5 red-team gate for PR C (content-addressed `$implRef` + CFC provenance) of

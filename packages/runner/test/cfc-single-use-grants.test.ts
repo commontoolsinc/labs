@@ -1,23 +1,15 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import {
-  EmulatedStorageManager,
-  StorageManager,
-} from "../src/storage/cache.deno.ts";
-import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
-import { isPermanentRejection } from "../src/storage/rejection.ts";
-import { Runtime } from "../src/runtime.ts";
+
+import type { JSONSchema } from "../src/builder/types.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
 import type { CfcGrantResolverQuery } from "../src/cfc/exchange-eval.ts";
-import {
-  buildCfcPolicySnapshot,
-  type ExchangeRule,
-} from "../src/cfc/policy.ts";
 import {
   CFC_GRANT_ABSENT_DIGEST,
   CFC_GRANT_ID_PREFIX,
@@ -29,10 +21,20 @@ import {
   prepareCfcGrantWrite,
   verifyCfcGrantDocument,
 } from "../src/cfc/grants.ts";
-import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import {
+  buildCfcPolicySnapshot,
+  type ExchangeRule,
+} from "../src/cfc/policy.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
-import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
+import { Runtime } from "../src/runtime.ts";
+import {
+  EmulatedStorageManager,
+  StorageManager,
+} from "../src/storage/cache.deno.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import { isPermanentRejection } from "../src/storage/rejection.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-single-use-grants");
 

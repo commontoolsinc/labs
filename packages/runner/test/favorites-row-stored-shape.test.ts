@@ -1,12 +1,13 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
 import { fromFileUrl } from "@std/path/from-file-url";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Runtime } from "../src/runtime.ts";
+
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Runtime } from "../src/runtime.ts";
 
 // A pattern that maps over durable data must accept the rows its PRODUCER
 // actually writes. Nothing checks that agreement: the row's element schema

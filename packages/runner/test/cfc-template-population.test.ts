@@ -1,23 +1,25 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import {
-  linkResolutionProbe,
-  machineryRead,
-} from "../src/storage/reactivity-log.ts";
+import { Identity } from "@commonfabric/identity";
+
+import type { JSONSchema } from "../src/builder/types.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
 import {
   commitCfcFieldValue,
   containsCfcFieldCommitment,
 } from "../src/cfc/label-representation.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import {
+  linkResolutionProbe,
+  machineryRead,
+} from "../src/storage/reactivity-log.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-template-population");
 const foreignSigner = await Identity.fromPassphrase(

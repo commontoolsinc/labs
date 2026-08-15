@@ -1,7 +1,13 @@
-import { describe, it } from "@std/testing/bdd";
-import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+
+import {
+  canonicalizeCfcMetadata,
+  canonicalizeWritePolicyInput,
+} from "../src/cfc/canonical.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import {
   clauseAlternatives,
   clausesEqual,
@@ -9,10 +15,6 @@ import {
   isOrClause,
   normalizeClause,
 } from "../src/cfc/clause.ts";
-import {
-  canonicalizeCfcMetadata,
-  canonicalizeWritePolicyInput,
-} from "../src/cfc/canonical.ts";
 import type {
   CfcAddress,
   CfcMetadata,

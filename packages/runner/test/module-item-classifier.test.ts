@@ -1,13 +1,14 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 
-import { parseFunctionText } from "../src/sandbox/compiled-js-parser.ts";
+import { createFactoryShadowGuardSource } from "@commonfabric/utils/sandbox-contract";
+
 import {
   type BindingInfo,
   classifyModuleItems,
   RESERVED_FACTORY_BINDING_SET,
 } from "../src/sandbox/compiled-bundle-verifier.ts";
-import { createFactoryShadowGuardSource } from "@commonfabric/utils/sandbox-contract";
+import { parseFunctionText } from "../src/sandbox/compiled-js-parser.ts";
 
 // The security classifier is format-agnostic: it classifies a module's top-level
 // items (compiled-CJS form) against a pre-seeded binding env, independent of how

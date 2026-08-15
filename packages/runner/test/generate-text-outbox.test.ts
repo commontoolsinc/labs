@@ -1,32 +1,34 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type {
+  BuiltInGenerateTextParams,
+  BuiltInLLMParams,
+} from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { LLMClient } from "@commonfabric/llm";
 import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
 } from "@commonfabric/llm/client";
-import { LLMClient } from "@commonfabric/llm";
-import type {
-  BuiltInGenerateTextParams,
-  BuiltInLLMParams,
-} from "@commonfabric/api";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForLlmSettled } from "./support/llm-result.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
-import { Runtime } from "../src/runtime.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import {
-  ExtendedStorageTransaction,
-  TransactionWrapper,
-} from "../src/storage/extended-storage-transaction.ts";
+
+import { createBuilder } from "../src/builder/factory.ts";
 import {
   generateText as rawGenerateText,
   llm as rawLlm,
 } from "../src/builtins/llm.ts";
 import { createCell } from "../src/cell.ts";
+import { Runtime } from "../src/runtime.ts";
+import {
+  ExtendedStorageTransaction,
+  TransactionWrapper,
+} from "../src/storage/extended-storage-transaction.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test generate-text outbox");
 const space = signer.did();

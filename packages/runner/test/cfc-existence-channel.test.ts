@@ -1,16 +1,18 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
-import type { FabricPlainObject } from "@commonfabric/api";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
+import { afterEach, describe, it } from "@std/testing/bdd";
+
+import type { FabricPlainObject } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { resolveLink } from "../src/link-resolution.ts";
-import type { LabelMapEntry } from "../src/cfc/types.ts";
+import { Identity } from "@commonfabric/identity";
+
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import type { LabelMapEntry } from "../src/cfc/types.ts";
+import { resolveLink } from "../src/link-resolution.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-existence-channel");
 const space = signer.did();

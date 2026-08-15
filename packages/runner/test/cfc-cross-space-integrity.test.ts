@@ -1,21 +1,22 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
-import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
+
 import type { JSONSchema } from "../src/builder/types.ts";
-import { parseLink } from "../src/link-utils.ts";
-import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { type CfcConfClause, clausesEqual } from "../src/cfc/clause.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   buildCfcPolicySnapshot,
   type ExchangeRule,
 } from "../src/cfc/policy.ts";
-import { clausesEqual } from "../src/cfc/clause.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 // ===========================================================================
 // Cross-space integrity & declassification — expressing the four scenarios and

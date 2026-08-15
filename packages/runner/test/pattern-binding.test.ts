@@ -1,14 +1,13 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  findAllWriteRedirectCells,
-  opaqueArgumentKeys,
-  sendValueToBinding,
-  unwrapOneLevelAndBindToDoc,
-} from "../src/pattern-binding.ts";
-import { Runtime } from "../src/runtime.ts";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { isCell } from "../src/cell.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
@@ -17,12 +16,15 @@ import {
   isAliasBinding,
   parseLink,
 } from "../src/link-utils.ts";
+import {
+  findAllWriteRedirectCells,
+  opaqueArgumentKeys,
+  sendValueToBinding,
+  unwrapOneLevelAndBindToDoc,
+} from "../src/pattern-binding.ts";
+import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { isCell } from "../src/cell.ts";
-import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
-import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

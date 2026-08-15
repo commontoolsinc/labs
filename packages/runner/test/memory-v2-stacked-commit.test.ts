@@ -4,13 +4,15 @@ import {
   assertExists,
   assertStrictEquals,
 } from "@std/assert";
+
+import type { FabricValue } from "@commonfabric/api";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/api";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   type CommitPrecondition,
@@ -22,31 +24,31 @@ import {
   setPersistentSchedulerStateConfig,
   type SqliteOperation,
 } from "@commonfabric/memory/v2";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import {
-  getLogger,
-  getLoggerCountsBreakdown,
-} from "@commonfabric/utils/logger";
 import type {
   ClientCommit,
   ConfirmedRead,
   Operation,
   PendingRead,
 } from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import {
+  getLogger,
+  getLoggerCountsBreakdown,
+} from "@commonfabric/utils/logger";
+
+import { applyPatch } from "../../memory/v2/patch.ts";
 import {
   parentPath,
   parsePointer,
   pathsOverlap,
 } from "../../memory/v2/path.ts";
-import { applyPatch } from "../../memory/v2/patch.ts";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type {
   IStorageProvider,
   StorageNotification,
 } from "../src/storage/interface.ts";
-import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import { setConflictAdmissionMode } from "../src/storage/v2.ts";
+import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import {
   NotificationRecorder,
   ScriptedSessionTransport,
