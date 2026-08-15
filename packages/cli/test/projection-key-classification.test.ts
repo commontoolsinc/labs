@@ -335,6 +335,35 @@ describe("projection-key-classification", () => {
       }
     });
 
+    it("refuses every stated exception through the denylist that claims it", async () => {
+      const byFallThrough: string[] = [];
+      for (const key of PROJECTION_ANNOTATION_EXCEPTIONS) {
+        expect(projectionKeyTier(key)).toBe("refused");
+
+        let message = "<accepted, and should not have been>";
+        try {
+          await parseSelectionProjection(JSON.stringify({ [key]: {} }));
+        } catch (error) {
+          message = (error as Error).message;
+        }
+        // Refused is not enough on its own: an exception dropped from its
+        // denylist is still refused, by fall-through, because the exception
+        // set is what keeps it out of tier T. What changes is the answer. The
+        // denylists say WHY — `default` is the source schema's to state, the
+        // definition keys have no meaning without the `$ref` projection also
+        // refuses — while the fall-through says only that the reader does not
+        // know the key, which is a poor answer for one it knows perfectly well
+        // and refuses on purpose.
+        if (
+          !message.includes(`"${key}"`) ||
+          message.includes("is not a projection schema keyword")
+        ) {
+          byFallThrough.push(`${key}: ${message}`);
+        }
+      }
+      expect(byFallThrough).toEqual([]);
+    });
+
     it("is `ANNOTATION_KEYS` less projection's stated exceptions, in both directions", () => {
       for (const key of ANNOTATION_KEYS) {
         expect(
@@ -460,6 +489,32 @@ describe("projection-key-classification", () => {
         type: "object",
         properties: {
           values: { type: "array", items: { type: "number" } },
+          title: { type: "string" },
+        },
+        required: ["values"],
+      }, { values: [1], title: "Visible" });
+
+      const schema = await outputSchemaOf(source, {
+        type: "object",
+        properties: { values: { type: "array", items: true }, title: true },
+      });
+
+      expect((schema as Record<string, unknown>).required).toEqual(["values"]);
+    });
+
+    it("carries a source-required array into the output schema where every `anyOf` branch is an array", async () => {
+      // The positive of the union rule. Every branch names the container the
+      // caller projected, so whichever one the value took, the projection does
+      // not reject it — nothing the union admits can void the object.
+      const source = await seed("classification-anyof-all-arrays-source", {
+        type: "object",
+        properties: {
+          values: {
+            anyOf: [
+              { type: "array", items: { type: "number" } },
+              { type: "array", items: { type: "string" } },
+            ],
+          },
           title: { type: "string" },
         },
         required: ["values"],
@@ -688,6 +743,30 @@ describe("projection-key-classification", () => {
           },
         }, arrayProjection),
       ).toEqual(["values", "title"]);
+    });
+
+    it("derives `required` where a `$ref` names one of the runner's embedded documents", async () => {
+      // An embedded reference names a whole other document, so a reference
+      // INSIDE it resolves against itself. The vnode document's own root is
+      // `{"$ref": "#/$defs/VNode"}`, and that name exists only there — a
+      // reader that kept the referring document as the scope resolves nothing
+      // and proves no container.
+      expect(
+        await derivedRequired({
+          type: "object",
+          properties: {
+            ui: { $ref: "https://commonfabric.org/schemas/vnode.json" },
+            title: { type: "string" },
+          },
+          required: ["ui"],
+        }, {
+          type: "object",
+          properties: {
+            ui: { type: "object", properties: { type: true } },
+            title: true,
+          },
+        }),
+      ).toEqual(["ui"]);
     });
 
     it("derives no `required` for a position whose `$ref` names nothing in the document", async () => {

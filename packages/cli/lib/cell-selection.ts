@@ -646,12 +646,17 @@ const CONSULTED_PROJECTION_KEYS = new Set([
 /**
  * The annotation keywords projection refuses anyway. `default` is the source
  * schema's to state, and the two definition keys have no meaning without the
- * `$ref` projection also refuses. Every member is refused by one of the two
- * denylists above, which is what the coupling test asserts in both directions:
- * a key dropped from `ANNOTATION_KEYS` and left stranded here is drift a
+ * `$ref` projection also refuses.
+ *
+ * Every member is refused **by one of the two denylists above** rather than by
+ * the fall-through, which is asserted over the message each one produces:
+ * dropping a key from its denylist leaves it refused either way, since this set
+ * is what keeps it out of tier T, and only the answer changes. Separately, the
+ * coupling test asserts the two set relations in both directions — a key
+ * dropped from `ANNOTATION_KEYS` and left stranded here is drift a
  * one-directional assertion misses.
  *
- * @internal Exported for the `ANNOTATION_KEYS` coupling test.
+ * @internal Exported for the `ANNOTATION_KEYS` coupling and refusal tests.
  */
 export const PROJECTION_ANNOTATION_EXCEPTIONS: ReadonlySet<string> = new Set([
   "default",
@@ -2100,10 +2105,15 @@ function sourceItemSchema(
  * a shape this derivation can state (#5761), and declining to require costs a
  * key that would have survived while requiring wrongly costs the whole read.
  *
- * A `$ref` is followed first, so a named interface proves what it names. The
- * `visiting` set holds the resolved node as well as the one written at the
- * position, which is what stops a branch that refers back to the union
- * containing it from recurring.
+ * A `$ref` is followed first, so a named interface proves what it names.
+ *
+ * `visiting` holds the schema **as the document writes it**, which is what
+ * bounds the recursion: a branch is drawn from a `node.anyOf` array, resolution
+ * spreads shallowly and so leaves that array's members the document's own
+ * objects, and a document holds finitely many of them. Guarding the RESOLVED
+ * node instead would not bound anything — `resolveCfcSchemaRef` returns a fresh
+ * view whenever the target carries a reference, which is exactly the case a
+ * circle is made of, so no two visits to one definition share an identity.
  */
 function sourceProvesContainer(
   named: "object" | "array",
@@ -2115,14 +2125,12 @@ function sourceProvesContainer(
   const resolved = resolvedSourceNode(source, root);
   if (resolved === undefined) return false;
   const { schema: node, root: scope } = resolved;
-  if (visiting.has(node)) return false;
   const declared = schemaTypes(node);
   if (declared.length > 0) {
     return declared.every((type) => type === named);
   }
   if (node.allOf !== undefined) return false;
   visiting.add(source);
-  visiting.add(node);
   try {
     for (const branches of [node.anyOf, node.oneOf]) {
       if (
@@ -2135,7 +2143,6 @@ function sourceProvesContainer(
       }
     }
   } finally {
-    visiting.delete(node);
     visiting.delete(source);
   }
   return false;
