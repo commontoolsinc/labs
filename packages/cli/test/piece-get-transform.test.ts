@@ -480,9 +480,13 @@ describe("cf piece get transforms", () => {
         '{"additionalProperties":{"type":"string"}}',
       )).schema,
     ).toEqual({ type: "object", additionalProperties: { type: "string" } });
+    // `required` names the container and is then consumed: the caller's
+    // constraint goes no further, because the runner acts on a `required` it
+    // is handed and a caller's would void the read around a position it
+    // narrowed.
     expect(
       (await parseSelectionProjection('{"required":["id"]}')).schema,
-    ).toEqual({ type: "object", required: ["id"], additionalProperties: true });
+    ).toEqual({ type: "object", additionalProperties: true });
     expect(
       (await parseSelectionProjection('{"items":{"properties":{"id":true}}}'))
         .schema,

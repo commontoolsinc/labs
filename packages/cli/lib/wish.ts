@@ -1,5 +1,6 @@
 import type { DID } from "@commonfabric/identity";
 import {
+  type Cell,
   createBuilder,
   isCell,
   isStream,
@@ -7,6 +8,11 @@ import {
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
+import {
+  type CellSelection,
+  CellSelectionError,
+  deriveSelectedValue,
+} from "./cell-selection.ts";
 import { loadPieces, type SpaceConfig } from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
@@ -36,6 +42,10 @@ export interface WishReadConfig extends SpaceConfig {
    * current space), "profile" (profile elements), or arbitrary space DIDs.
    */
   scope?: (DID | "~" | "." | "profile")[];
+  /** `--filter`/`--select`/`--schema`: the shape the caller asked the resolved
+   * target to arrive in, read through the same step every other arrival reads
+   * through. See {@link WishSpec.selection} for where it applies. */
+  selection?: CellSelection;
 }
 
 export interface WishReadResult {
@@ -51,6 +61,17 @@ export interface WishSpec {
   path?: string[];
   schema?: JSONSchema;
   scope?: (DID | "~" | "." | "profile")[];
+  /**
+   * The caller's `--filter`/`--select`/`--schema`, applied to the cell the
+   * wish resolved to.
+   *
+   * It is answered against that live cell, which is what puts it BEFORE
+   * {@link projectWishValue}: an address marker reads its answer off a cell,
+   * and the walk that strips handles leaves nothing to read one from. The two
+   * are not alternatives — the selection decides what comes back, the walk
+   * decides how what remains is written down.
+   */
+  selection?: CellSelection;
 }
 
 /**
@@ -118,12 +139,66 @@ export async function resolveWish(
 
   const outCell = result.key("out");
   const error: unknown = outCell.key("error").get();
-  const value: unknown = outCell.key("result").get();
+  const resolved = outCell.key("result");
+  // Whether the wish matched is read where the wish WROTE it, not inferred
+  // from what the target holds. A matched target whose value nothing has set
+  // dereferences to `undefined` exactly as an unmatched wish does, and only
+  // one of the two is an absent result: the matched one still has an address,
+  // which is the whole of what a marked position asks for.
+  const matched = resolved.getRaw() !== undefined;
+  const value: unknown = resolved.get();
 
   return {
-    result: value === undefined ? null : value,
+    // `?? null` covers the matched-but-unset target a caller selected nothing
+    // over: there is an address to shape but no value to render, and a wish
+    // answers absence as JSON null. A selection never lands here undefined —
+    // `selectWishValue` refuses that rather than returning it.
+    result: matched
+      ? await selectWishValue(runtime, space, resolved, value, spec) ?? null
+      : null,
     error: typeof error === "string" && error.length > 0 ? error : undefined,
   };
+}
+
+/**
+ * Helper for {@link resolveWish}: `value` shaped the way the caller asked, or
+ * `value` itself where they asked for nothing.
+ *
+ * The selection is answered against `resolved` — the live cell the wish landed
+ * on — rather than against `value`, which is what lets an address marker
+ * answer at all and what puts the whole step ahead of
+ * {@link projectWishValue}.
+ *
+ * A wish that matched nothing has no cell to shape and never reaches here: an
+ * absent target is an ordinary outcome of a query, and a selection must not
+ * turn it into an error. A selection that materializes nothing over a target
+ * that DID resolve is refused rather than reported as an absent target, on the
+ * same grounds `cf piece get` and `cf piece call` refuse it — "the wish
+ * matched nothing" and "your projection kept nothing" are different facts.
+ */
+async function selectWishValue(
+  runtime: Runtime,
+  space: MemorySpace,
+  resolved: Cell<unknown>,
+  value: unknown,
+  spec: WishSpec,
+): Promise<unknown> {
+  if (spec.selection === undefined) return value;
+  const selected = await deriveSelectedValue(
+    runtime,
+    space,
+    resolved,
+    spec.selection,
+  );
+  if (selected === undefined) {
+    throw new CellSelectionError(
+      `Cannot shape the result of wish "${spec.query}": the filter/schema ` +
+        "expression did not materialize a JSON-renderable value. This is " +
+        "not JSON null, and it is not the empty result of a wish that " +
+        "matched nothing — inspect the target and the selection.",
+    );
+  }
+  return selected;
 }
 
 /** What {@link readWish} needs from a connected pieces controller. */
@@ -151,6 +226,7 @@ export async function readWish(
     path: config.path,
     schema: config.schema,
     scope: config.scope,
+    selection: config.selection,
   });
 }
 

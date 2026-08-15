@@ -33,7 +33,7 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 // fresh-data test stays green against the bug — which is precisely how the
 // mismatch survived every existing test. The swap is what production does when
 // the auto-update moves a piece to new source, and it is the moment the stored
-// row meets the schema.
+// row is checked against the schema.
 
 const signer = await Identity.fromPassphrase("favorites-row-stored-shape");
 const space = signer.did();

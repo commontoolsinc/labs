@@ -18,8 +18,8 @@ import { ProblematicStateError } from "./ProblematicStateError.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When the
- * serialization system meets a tag no codec claims during deserialization, it
- * wraps the tag and state here; on re-serialization, the preserved pair
+ * serialization system encounters a tag no codec claims during deserialization,
+ * it wraps the tag and state here; on re-serialization, the preserved pair
  * reproduces the original wire form. See Section 3.3 of the formal spec.
  *
  * The tag is a real tag, checked at construction. That is what makes the

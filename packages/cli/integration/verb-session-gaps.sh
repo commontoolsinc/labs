@@ -91,19 +91,46 @@ HELP=$($CF piece call --piece board $ARGS addItem -- --help 2>/dev/null)
 echo "$HELP" | grep -q -- "--title" &&
   ok "the flag is derived from the event schema" ||
   bad "no --title flag in the generated help"
-# The author's JSDoc reaches the COMPILED pattern but not the schema this help
-# page reads, so the prose is stripped before a caller can see it. Asserted as
-# a gap so the day it flows, this fails and tells us. The needle is read out
-# of the fixture rather than hard-coded, so rewording the doc comment moves
-# the probe with it instead of silently "re-opening" the gap.
-NEEDLE=$(sed -n '/interface AddItemEvent {/,/^}/p' "$FIXTURE" |
+# The author's prose, at both levels it is written on. Each needle is read out
+# of the FIXTURE rather than hard-coded, so rewording a doc comment moves the
+# probe with it — a hard-coded string would turn a reworded comment into a
+# failure and an unchanged one into a check that passes without reading
+# anything.
+FIELD_DOC=$(sed -n '/interface AddItemEvent {/,/^}/p' "$FIXTURE" |
   sed -n 's/.*\/\*\* *\(.*[^ ]\) *\*\/.*/\1/p' | head -1)
-if [ -z "$NEEDLE" ]; then
+if [ -z "$FIELD_DOC" ]; then
   bad "no JSDoc on AddItemEvent's field in the fixture — the probe has no needle"
 else
-  echo "$HELP" | grep -qiF "$NEEDLE"
-  gap "$?" "JSDoc on an event field reaching its flag description"
+  echo "$HELP" | grep -qiF "$FIELD_DOC" &&
+    ok "an event field's JSDoc reaches its flag description" ||
+    bad "the flag carries no description: [$FIELD_DOC]"
 fi
+# The verb's own comment, on the line above its `Stream` property. Its needle
+# comes from BoardOutput rather than from the event interface, because the two
+# travel by different routes — this one is a sibling of the property's `$ref`,
+# the one above lives inside the `$defs` target it names — and a probe that
+# could not tell them apart would report one arriving as both.
+VERB_DOC=$(sed -n '/interface BoardOutput {/,/^}/p' "$FIXTURE" |
+  grep -B 1 'addItem:' | sed -n 's/.*\/\*\* *\(.*[^ ]\) *\*\/.*/\1/p' | head -1)
+if [ -z "$VERB_DOC" ]; then
+  bad "no JSDoc on BoardOutput.addItem in the fixture — the probe has no needle"
+else
+  echo "$HELP" | grep -qiF "$VERB_DOC" &&
+    ok "the verb's own JSDoc reaches its help page" ||
+    bad "the help page has no summary line: [$VERB_DOC]"
+  # And the same words on the discovery surface, where a client reads them.
+  echo "$VERBS" | jq -e --arg d "$VERB_DOC" \
+    '[.verbs[]? | select(.name=="addItem") | .description] | index($d)' \
+    >/dev/null 2>&1 &&
+    ok "the verb's own JSDoc reaches its listing row" ||
+    bad "the listing row carries no description: [$VERB_DOC]"
+fi
+# The third prose level — an event INTERFACE's own comment — is not probed
+# here, and deliberately. It never compiles, so the honest assertion is that it
+# is absent from the page; but `AddItemEvent`'s comment and `addItem`'s are the
+# same sentence in this fixture, and the verb's does arrive. A containment probe
+# would read one level's success as the other's and report a gap closed that is
+# wide open. It is recorded in the walkthrough's table instead, against #5559.
 
 step "4. A create hands back the piece, and the address chains"
 R=$($CF piece call --quiet --show-links --piece board $ARGS \
@@ -129,6 +156,14 @@ KIDS=$($CF piece get --quiet --piece "$EPIC" children $ARGS \
   2>/dev/null)
 check "2" "$(echo "$KIDS" | jq -r 'length')" \
   "both children landed under the address the create returned"
+# Step 2's assertion one level down: an address alone discovers a surface, and
+# the surface it discovers is the item's own rather than the board's. Three
+# places say so in prose — the demo narrates it, and the walkthrough claims it
+# twice — and none of them could go stale without this failing first.
+ITEM_VERBS=$($CF piece verbs --piece "$EPIC" $ARGS --json 2>/dev/null)
+check "addChild,archive,blockOn,finish,recordNote" \
+  "$(echo "$ITEM_VERBS" | jq -r '[.verbs[]?.name] | sort | join(",")')" \
+  "an item lists its own verbs, and not the board's"
 
 step "5. Read addresses instead of contents"
 ADDR=$($CF piece get --quiet --piece "$EPIC" children $ARGS \

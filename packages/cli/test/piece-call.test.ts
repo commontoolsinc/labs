@@ -344,6 +344,54 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
+  // The $ref-carrying stream shape is schema-less to the arg parser, so a
+  // bare call skips the implicit-pipe read and the absence gate above
+  // decides — with stdin untouched. A rejecting reader pins the "untouched"
+  // half: piped bytes cannot reach a verb through this shape, they can only
+  // be spelled explicitly (`--json`, `--json-file -`).
+  it("refuses a bare $ref-stream verb call without reading piped stdin", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        $ref: "#/$defs/RecordMessageEvent",
+        asCell: ["stream"],
+        $defs: {
+          RecordMessageEvent: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+          },
+        },
+      } as JSONSchema,
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        [],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.reject(new Error("stdin was read")),
+        },
+      ),
+    ).rejects.toThrow(
+      /Invalid input for "recordMessage": no payload was supplied/,
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
   it("normalizes an absent payload to {} so an all-defaulted verb receives its defaults", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -761,6 +809,42 @@ describe("executePieceCallable", () => {
         value: {
           detail: { value: "Use `cat` to read files" },
         },
+      },
+    ]);
+  });
+
+  it("invokes a schema-less verb bare without reading piped stdin", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "archive",
+      inputSchema: { asCell: ["stream"] } as JSONSchema,
+    });
+
+    // A rejecting reader proves stdin stays untouched: the verb declares no
+    // input, so the bare spelling dispatches immediately instead of waiting
+    // for a pipe to reach EOF.
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "archive",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.reject(new Error("stdin was read")),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["archive"],
+        value: undefined,
       },
     ]);
   });
@@ -4282,9 +4366,12 @@ describe("verbInputSchemaError", () => {
       .toBeUndefined();
   });
 
+  // `{}` rather than a misspelling, so this reaches the schema validation
+  // rather than the undeclared-field refusal that now precedes it — a
+  // misspelled required property is BOTH, and it is refused as the undeclared
+  // field it is (verb-undeclared-field.test.ts).
   it("rejects a missing required property", () => {
-    expect(verbInputSchemaError({ mesage: "milk" }, objectSchema))
-      .toMatch(/message/);
+    expect(verbInputSchemaError({}, objectSchema)).toMatch(/message/);
   });
 
   it("rejects a payload of the wrong type", () => {
@@ -4690,6 +4777,32 @@ describe("renderPieceCallOutcome", () => {
     assertEquals(rendered, ["{}"]);
     assertEquals(hinted.length, 1);
     assertStringIncludes(hinted[0], "of:x");
+    // The address argument the next command takes, not the three-part prose
+    // that named the same cell in a spelling nothing parses. `cf exec` prints
+    // the same shape for the same cell.
+    assertStringIncludes(hinted[0], "cf piece get --piece of:x");
+    expect(hinted[0]).not.toContain("(space did:key:s");
+  });
+
+  it("spells a non-space-scoped tool result cell with its scope", () => {
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        outputText: "{}",
+        resultRef: { id: "of:x", space: "did:key:s", scope: "user" },
+      } as ExecutedPieceCallable,
+      "tool",
+      "fid1:piece",
+      deps,
+    );
+    // Reopening a user-scoped cell without its scope resolves the
+    // space-scoped instance, which is a different cell — so the suffix rides
+    // the address rather than sitting in a parenthetical the way the prose
+    // form's did.
+    assertStringIncludes(hinted[0], "cf piece get --piece of:x@user");
   });
 
   it("handler invocations render the Invocation JSON with next steps", () => {

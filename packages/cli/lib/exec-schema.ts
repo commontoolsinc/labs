@@ -8,6 +8,18 @@ export interface ExecCommandSpec {
   defaultVerb: "invoke" | "run";
   inputSchema: JSONSchema;
   outputSchemaSummary?: JSONSchema;
+  /**
+   * What this callable is FOR, in the author's own words: the doc comment on
+   * the pattern property that declares it.
+   *
+   * Absent where the author wrote none, which is why it is optional rather
+   * than defaulted — a page with no summary line says nothing, while one
+   * carrying a restated property name says something false about where it came
+   * from. It describes the callable and not its input, so it does not ride
+   * `inputSchema`, whose own `description` would be a claim about the event
+   * object a caller sends.
+   */
+  description?: string;
 }
 
 export interface ParsedExecArgs {
@@ -571,6 +583,14 @@ async function resolveImplicitPipedHandlerInput(
     return null;
   }
 
+  // A schema-less input declares no payload, so no piped input exists to
+  // infer: return before consulting stdin at all. Reading it would hold the
+  // advertised bare spelling open until a non-terminal stdin reaches EOF —
+  // a hang whenever the pipe outlives the call.
+  if (isSchemaLessHandlerInput(spec.inputSchema)) {
+    return null;
+  }
+
   const isTerminal = deps.isStdinTerminal?.() ?? Deno.stdin.isTerminal();
   if (isTerminal) {
     return null;
@@ -1027,6 +1047,7 @@ export function parseExecArgs(
 export function renderExecHelpJson(spec: ExecCommandSpec): string {
   const value: Record<string, unknown> = {
     callableKind: spec.callableKind,
+    ...(spec.description !== undefined && { description: spec.description }),
     inputSchema: spec.inputSchema,
   };
   if (spec.outputSchemaSummary !== undefined) {
@@ -1137,6 +1158,11 @@ export function renderPieceCallHelp(
   const lines = [
     "Usage:",
     ...pieceUsageLines(commandPrefix, spec),
+    // The verb's own prose, as a paragraph of its own between Usage and the
+    // sections describing the payload. Nothing stands here when the author
+    // wrote no comment: an empty paragraph would read as a summary the page
+    // failed to fill in, rather than as a verb nobody documented.
+    ...(spec.description !== undefined ? ["", spec.description] : []),
     "",
     "JSON input:",
     ...pieceJsonInputLines(spec.inputSchema),

@@ -66,7 +66,19 @@ type ActivePairsByRoot = WeakMap<
   WeakMap<object, WeakMap<object, WeakSet<object>>>
 >;
 
-const ANNOTATION_KEYS = new Set([
+/**
+ * The keywords a schema comparison may ignore: they annotate a schema without
+ * constraining the values it admits, so adding or removing one across a piece
+ * update proves nothing about compatibility either way.
+ *
+ * Exported because a second reader classifies keywords and would otherwise
+ * keep its own copy of this list. What it says is which keywords are
+ * validation-neutral **to this checker**; it is not a statement about what any
+ * other consumer of a schema does with a key, and a reader that acts on one —
+ * the runner reserves three `$comment` values as traversal control markers —
+ * has to settle that against that consumer rather than against this set.
+ */
+export const ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   "$comment",
   "$defs",
   "$id",

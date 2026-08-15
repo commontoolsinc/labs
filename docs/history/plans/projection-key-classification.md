@@ -1,14 +1,21 @@
+---
+status: historical
+created: 2026-08-13
+archived: 2026-08-14
+reason: "Shipped design; the projection reader now classifies keywords and constructs the schema it hands the read boundary."
+---
+
 # Projection keys, and the schema a read is handed
 
 This document designs
-[item 2 of the verbs implementation plan](verbs-implementation.md) — refusing a
+[item 2 of the verbs implementation plan](../../plans/verbs-implementation.md) — refusing a
 projection key the reader does not recognize — and the larger rule that refusal
 is only half of. It is written to be checkable: every claim about current
 behavior below was read out of the named code or measured against it, and the
 symbol it was read from is named beside it.
 
 The command surface it governs is `--schema` on the read commands. The design
-in [shaped reads and verb results](shaped-reads-and-verb-results.md) says what a
+in [shaped reads and verb results](../../plans/shaped-reads-and-verb-results.md) says what a
 projection is for; this says what a projection may contain and what leaves the
 CLI because of it.
 

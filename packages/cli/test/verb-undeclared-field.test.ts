@@ -1,0 +1,882 @@
+/**
+ * Pins the refusal `cf piece call` gives a payload carrying a field the verb's
+ * event schema does not declare: which positions it fires at, the wording a
+ * caller reads, and — in equal measure — the positions it passes over, each
+ * asserted as the call still dispatching.
+ *
+ * The gate itself is `verbInputSchemaError` (../lib/callable.ts). What is
+ * driven here is the whole path a caller takes to it, so the refusal is pinned
+ * against schemas the transformer emits rather than against hand-built ones
+ * that could only assert back what this file assumed.
+ */
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  executeResolvedCallable,
+  undeclaredVerbFieldError,
+  verbInputSchemaError,
+  VerbInputValidationError,
+} from "../lib/callable.ts";
+import { executePieceCallable } from "../lib/piece.ts";
+
+/**
+ * Dispatch `payload` at a verb publishing `schema`, through the same
+ * pre-dispatch gate `cf piece call` runs, and hand back what reached the
+ * stream.
+ *
+ * A position the walk passes over has to be asserted as the call DISPATCHING,
+ * not as the refusal being absent. Those are different facts, and only the
+ * first one fails when a branch that fails open starts failing closed — which
+ * on this feature means refusing a call that should have gone out. Reading the
+ * dispatched value back states it: the payload reached the stream, and reached
+ * it whole.
+ */
+async function dispatchedPayload(
+  schema: JSONSchema,
+  payload: unknown,
+): Promise<unknown> {
+  let sent: unknown;
+  const callableCell = {
+    schema,
+    get: () => ({ $stream: true }),
+    getRaw: () => ({ $stream: true }),
+    getAsNormalizedFullLink: () => ({ scope: "space" }),
+    send: (value: unknown, onCommit?: (tx: unknown) => void) => {
+      sent = value;
+      onCommit?.({ status: () => ({ status: "ok" }) });
+    },
+  };
+  await executeResolvedCallable({
+    callableCell: callableCell as never,
+    callableKind: "handler",
+    cellKey: "probe",
+    pieces: { runtime: {} } as never,
+    space: "did:key:undeclared-field-probe" as never,
+    inputSchema: schema,
+  }, payload);
+  return sent;
+}
+
+/**
+ * A list whose verbs cover the positions a payload can put a field in: the
+ * event root, an object below it, and an element of an array below that.
+ *
+ * Driven against a COMPILED, RUN pattern rather than a hand-built schema,
+ * because the shape the refusal keys on is one the TRANSFORMER emits. It emits
+ * an event schema naming the fields the handler body READS — `done` and `id`
+ * are in the interfaces below and reach the schema only because the bodies
+ * touch them — so a hand-written schema would assert back whatever this test
+ * assumed rather than what a real verb declares.
+ *
+ * `ping` is the verb that declares nothing: its event type names no field, and
+ * what the transformer emits for it is no schema at all.
+ */
+const PROGRAM = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      'import { action, NAME, pattern, type PatternFactory, type Stream, Writable } from "commonfabric";',
+      "",
+      "interface AddItemEvent { title: string; done: boolean; }",
+      "interface Recorded { entry: string; }",
+      "interface RenameEvent { item: { id: string; label: string }; }",
+      "interface TagEvent { tags: { name: string }[]; }",
+      "type PingEvent = Record<string, never>;",
+      "",
+      "export interface ListOutput {",
+      "  addItem: Stream<AddItemEvent, Recorded>;",
+      "  rename: Stream<RenameEvent, Recorded>;",
+      "  tag: Stream<TagEvent, Recorded>;",
+      "  ping: Stream<PingEvent, Recorded>;",
+      "  entries: string[];",
+      "  [NAME]: string;",
+      "}",
+      "",
+      "interface ListInput { label?: string; }",
+      "",
+      "export const List: PatternFactory<ListInput, ListOutput> = pattern<ListInput, ListOutput>(",
+      "  () => {",
+      "    const entries = new Writable<string[]>([]);",
+      "    const addItem = action<AddItemEvent, Recorded>((event) => {",
+      "      const entry = JSON.stringify({ title: event.title, done: event.done });",
+      "      entries.push(entry);",
+      "      return { entry };",
+      "    });",
+      "    const rename = action<RenameEvent, Recorded>((event) => {",
+      "      const entry = JSON.stringify({ id: event.item?.id, label: event.item?.label });",
+      "      entries.push(entry);",
+      "      return { entry };",
+      "    });",
+      "    const tag = action<TagEvent, Recorded>((event) => {",
+      "      const entry = JSON.stringify((event.tags ?? []).map((tag) => tag.name));",
+      "      entries.push(entry);",
+      "      return { entry };",
+      "    });",
+      "    const ping = action<PingEvent, Recorded>(() => {",
+      "      entries.push('ping');",
+      "      return { entry: 'ping' };",
+      "    });",
+      "    return { [NAME]: 'List', entries, addItem, rename, tag, ping };",
+      "  },",
+      ");",
+      "",
+      "export default List;",
+    ].join("\n"),
+  }],
+};
+
+/**
+ * Two verbs whose event schemas are written out rather than derived from a
+ * TypeScript event type, which is how a pattern reaches the object shapes the
+ * transformer never emits: a `properties` map with no `type` beside it, and a
+ * conjunction holding one.
+ */
+const EXPLICIT_SCHEMA_PROGRAM = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      'import { handler, NAME, pattern, schema, type Stream } from "commonfabric";',
+      'import "commonfabric/schema";',
+      "",
+      "interface Output {",
+      "  [NAME]: string;",
+      "  count: number;",
+      "  bare: Stream<{ title: string }>;",
+      "  conjunct: Stream<{ title: string }>;",
+      "}",
+      "",
+      "interface Input { count: number; }",
+      "",
+      "const model = schema({",
+      "  type: 'object',",
+      "  properties: { count: { type: 'number', default: 0, asCell: ['cell'] } },",
+      "  default: { count: 0 },",
+      "});",
+      "",
+      "const bare = handler(",
+      "  { properties: { title: { type: 'string' } } } as const,",
+      "  model,",
+      "  (_event, state) => { state.count.set(state.count.get() + 1); },",
+      ");",
+      "",
+      "const conjunct = handler(",
+      "  { allOf: [{ type: 'object', properties: { title: { type: 'string' } } }] } as const,",
+      "  model,",
+      "  (_event, state) => { state.count.set(state.count.get() + 1); },",
+      ");",
+      "",
+      "export default pattern<Input, Output>((state) => ({",
+      "  [NAME]: 'Explicit',",
+      "  count: state.count,",
+      "  bare: bare(state),",
+      "  conjunct: conjunct(state),",
+      "}), model);",
+    ].join("\n"),
+  }],
+};
+
+const CONFIG = {
+  apiUrl: "http://localhost:8000",
+  identity: "/tmp/test-identity.pem",
+  piece: "fid1:live",
+  space: "" as string,
+};
+
+interface Tracker {
+  /** Dispatch `verb` the way `cf piece call` does, with `payload` spelled as
+   * the one positional JSON argument a caller writes by hand. */
+  call: (
+    verb: string,
+    payload: unknown,
+    invocationId?: string,
+  ) => Promise<{ id: string; status: string; deduplicated?: boolean }>;
+  /** What the handlers recorded, read off the cell rather than through any
+   * rendering, so it says what the handler actually received. */
+  entries: () => string[];
+  root: Cell<any>;
+}
+
+/** Run `program` and hand a driver to `body`. */
+async function withProgram<T>(
+  passphrase: string,
+  program: typeof PROGRAM,
+  body: (tracker: Tracker) => Promise<T>,
+): Promise<T> {
+  const signer = await Identity.fromPassphrase(passphrase);
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL("https://example.com"),
+    storageManager,
+  });
+  const space = signer.did();
+
+  try {
+    const compiled = await runtime.patternManager.compilePattern(
+      program as never,
+      { space },
+    );
+    const tx = runtime.edit();
+    const rootCell = runtime.getCell(space, "undeclared-field", undefined, tx);
+    const root = runtime.run(tx, compiled, {}, rootCell);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    await root.pull();
+
+    const piece = {
+      result: { getCell: () => Promise.resolve(root) },
+      input: { getCell: () => Promise.resolve(root) },
+      getCell: () => root,
+      getPattern: () => Promise.resolve(compiled),
+    };
+    const deps = {
+      loadPieces: () =>
+        Promise.resolve({ getSpace: () => space, runtime } as never),
+      loadPiece: () => Promise.resolve(piece as never),
+    };
+
+    let dispatched = 0;
+    return await body({
+      root,
+      entries: () => (root.key("entries").get() ?? []) as unknown as string[],
+      call: async (verb, payload, invocationId) => {
+        dispatched++;
+        const executed = await executePieceCallable(
+          { ...CONFIG, space },
+          verb,
+          ["--json", JSON.stringify(payload)],
+          {
+            ...deps,
+            invocation: {
+              id: invocationId ?? `inv-${dispatched}`,
+              session: "sess",
+            },
+          } as never,
+        );
+        return executed.invocation as never;
+      },
+    });
+  } finally {
+    await runtime.dispose?.();
+    await storageManager.close?.();
+  }
+}
+
+/** Run the list program above and hand a driver to `body`. */
+function withList<T>(
+  passphrase: string,
+  body: (tracker: Tracker) => Promise<T>,
+): Promise<T> {
+  return withProgram(passphrase, PROGRAM, body);
+}
+
+describe("verb-undeclared-field", () => {
+  describe("undeclaredVerbFieldError()", () => {
+    const addItem: JSONSchema = {
+      type: "object",
+      properties: { title: { type: "string" }, done: { type: "boolean" } },
+      required: ["title"],
+    };
+
+    it("names the field, the position it sat at, and the vocabulary that position takes", () => {
+      expect(
+        undeclaredVerbFieldError({ title: "Milk", colour: "red" }, addItem),
+      )
+        .toBe(
+          '"colour" at <event> is not a field this verb declares. ' +
+            '<event> takes "title", "done"',
+        );
+    });
+
+    it("suggests the declared field a misspelling is one edit from", () => {
+      expect(undeclaredVerbFieldError({ titel: "Milk" }, addItem)).toBe(
+        '"titel" at <event> is not a field this verb declares. ' +
+          'Did you mean "title"? <event> takes "title", "done"',
+      );
+    });
+
+    // A transposition is one slip to the caller who made it, whatever it costs
+    // to spell as substitutions, and the threshold for a four-character key is
+    // one edit.
+    it("counts an adjacent transposition as one edit", () => {
+      expect(undeclaredVerbFieldError({ doen: true }, addItem)).toMatch(
+        /Did you mean "done"\?/,
+      );
+    });
+
+    it("returns `undefined` for a payload carrying exactly the declared fields", () => {
+      expect(undeclaredVerbFieldError({ title: "Milk", done: true }, addItem))
+        .toBeUndefined();
+      expect(undeclaredVerbFieldError({ title: "Milk" }, addItem))
+        .toBeUndefined();
+      expect(undeclaredVerbFieldError({}, addItem)).toBeUndefined();
+    });
+
+    it("returns `undefined` where the verb declares no schema", () => {
+      expect(undeclaredVerbFieldError({ anything: 1 }, undefined))
+        .toBeUndefined();
+      expect(undeclaredVerbFieldError({ anything: 1 }, true)).toBeUndefined();
+    });
+
+    // A position with no property map is open by construction: the runtime
+    // delivers the whole payload there, so nothing is dropped and nothing is
+    // refused.
+    it("returns `undefined` for an object schema stating no `properties`", () => {
+      expect(undeclaredVerbFieldError({ anything: 1 }, { type: "object" }))
+        .toBeUndefined();
+    });
+
+    // The other reading of "declares no fields": an explicit empty map, which
+    // the runtime answers by delivering nothing at all. Every field a caller
+    // writes there is refused, and there is no vocabulary to offer instead.
+    it("refuses every field against an explicitly empty `properties` map", () => {
+      expect(
+        undeclaredVerbFieldError({ title: "Milk" }, {
+          type: "object",
+          properties: {},
+        }),
+      ).toBe(
+        '"title" at <event> is not a field this verb declares. ' +
+          "<event> declares no fields at all",
+      );
+    });
+
+    // `additionalProperties` is what makes the runtime deliver a field no map
+    // names, so a position carrying one honors what it is sent.
+    it("returns `undefined` where the position declares `additionalProperties`", () => {
+      for (const additionalProperties of [true, {}, { type: "string" }]) {
+        expect(
+          undeclaredVerbFieldError({ title: "Milk", colour: "red" }, {
+            ...addItem,
+            additionalProperties,
+          } as JSONSchema),
+        ).toBeUndefined();
+      }
+    });
+
+    // The position half of the message is load-bearing: a field goes missing
+    // wherever its enclosing position drops what it does not name, not only at
+    // the root.
+    it("names a nested object position", () => {
+      expect(
+        undeclaredVerbFieldError({ item: { id: "1", lable: "Milk" } }, {
+          type: "object",
+          properties: {
+            item: {
+              type: "object",
+              properties: { id: { type: "string" }, label: { type: "string" } },
+            },
+          },
+        }),
+      ).toBe(
+        '"lable" at <event>.item is not a field this verb declares. ' +
+          'Did you mean "label"? <event>.item takes "id", "label"',
+      );
+    });
+
+    it("names an array element by its index", () => {
+      expect(
+        undeclaredVerbFieldError({
+          tags: [{ name: "a" }, { name: "b", colour: "red" }],
+        }, {
+          type: "object",
+          properties: {
+            tags: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        }),
+      ).toBe(
+        '"colour" at <event>.tags[1] is not a field this verb declares. ' +
+          '<event>.tags[1] takes "name"',
+      );
+    });
+
+    it("resolves the top-level `$ref` a stream schema wraps its event in", () => {
+      expect(
+        undeclaredVerbFieldError({ titel: "Milk" }, {
+          $ref: "#/$defs/AddItem",
+          asCell: ["stream"],
+          $defs: {
+            AddItem: {
+              type: "object",
+              properties: { title: { type: "string" } },
+            },
+          },
+        } as JSONSchema),
+      ).toMatch(/"titel" at <event> .* Did you mean "title"\?/);
+    });
+
+    // Below the root a marked position is where a caller may write a link
+    // instead of a value, and `"/"` is not a field anybody declared.
+    it("returns `undefined` inside a position marked `asCell`", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          target: {
+            type: "object",
+            properties: { n: { type: "number" } },
+            asCell: ["cell"],
+          },
+        },
+      };
+      expect(undeclaredVerbFieldError({ target: { n: 1, extra: 2 } }, schema))
+        .toBeUndefined();
+      expect(
+        undeclaredVerbFieldError(
+          { target: { "/": { id: "of:abc", path: [], space: "did:x:y" } } },
+          schema,
+        ),
+      ).toBeUndefined();
+    });
+
+    // A payload need satisfy only one branch of a disjunction, and schema
+    // traversal unions the branches before deciding which children exist, so a
+    // field only one branch names is one the runtime still delivers.
+    it("returns `undefined` at a position carrying a combinator", () => {
+      expect(
+        undeclaredVerbFieldError({ title: "Milk", colour: "red" }, {
+          type: "object",
+          properties: { title: { type: "string" } },
+          anyOf: [
+            { required: ["title"] },
+            {
+              type: "object",
+              properties: { colour: { type: "string" } },
+            },
+          ],
+        } as JSONSchema),
+      ).toBeUndefined();
+    });
+  });
+
+  // Every shape `schemaIsObjectShaped` recognizes drops what its maps do not
+  // name, so every one of them is judged. An explicit `type: "object"` is only
+  // the most common of the four.
+  describe('an object-shaped position with no explicit `type: "object"`', () => {
+    const bareProperties: JSONSchema = {
+      properties: { title: { type: "string" } },
+    } as JSONSchema;
+    const conjunction: JSONSchema = {
+      allOf: [{ type: "object", properties: { title: { type: "string" } } }],
+    } as JSONSchema;
+    const typeUnion: JSONSchema = {
+      type: ["object", "null"],
+      properties: { title: { type: "string" } },
+    } as JSONSchema;
+
+    it("refuses an undeclared field against a bare `properties` map", () => {
+      expect(
+        undeclaredVerbFieldError(
+          { title: "Milk", colour: "red" },
+          bareProperties,
+        ),
+      )
+        .toBe(
+          '"colour" at <event> is not a field this verb declares. ' +
+            '<event> takes "title"',
+        );
+    });
+
+    it("refuses an undeclared field against a conjunction", () => {
+      expect(
+        undeclaredVerbFieldError({ title: "Milk", colour: "red" }, conjunction),
+      )
+        .toBe(
+          '"colour" at <event> is not a field this verb declares. ' +
+            '<event> takes "title"',
+        );
+    });
+
+    it("refuses an undeclared field against a type union admitting an object", () => {
+      expect(
+        undeclaredVerbFieldError({ title: "Milk", colour: "red" }, typeUnion),
+      )
+        .toBe(
+          '"colour" at <event> is not a field this verb declares. ' +
+            '<event> takes "title"',
+        );
+    });
+
+    // A payload satisfying a conjunction satisfies every member, so the fields
+    // it declares are the union across them.
+    it("takes the fields a conjunction declares as the union across its members", () => {
+      const schema = {
+        type: "object",
+        properties: { title: { type: "string" } },
+        allOf: [
+          { properties: { body: { type: "string" } } },
+          { $ref: "#/$defs/Signed" },
+        ],
+        $defs: {
+          Signed: {
+            type: "object",
+            properties: { agentName: { type: "string" } },
+          },
+        },
+      } as JSONSchema;
+      expect(
+        undeclaredVerbFieldError(
+          { title: "Milk", body: "b", agentName: "Sol" },
+          schema,
+        ),
+      ).toBeUndefined();
+      expect(undeclaredVerbFieldError({ colour: "red" }, schema)).toBe(
+        '"colour" at <event> is not a field this verb declares. ' +
+          '<event> takes "title", "body", "agentName"',
+      );
+    });
+
+    // A member spelled `true` constrains nothing and declares nothing, so the
+    // rest of the conjunction is the whole vocabulary.
+    it("takes nothing from a conjunction member that is a boolean schema", () => {
+      const schema = {
+        type: "object",
+        properties: { title: { type: "string" } },
+        allOf: [true, { properties: { body: { type: "string" } } }],
+      } as JSONSchema;
+      expect(undeclaredVerbFieldError({ title: "Milk", body: "b" }, schema))
+        .toBeUndefined();
+      expect(undeclaredVerbFieldError({ colour: "red" }, schema)).toBe(
+        '"colour" at <event> is not a field this verb declares. ' +
+          '<event> takes "title", "body"',
+      );
+    });
+
+    // A definition whose conjunction names itself contributes its fields once
+    // and terminates, which is what lets a recursive event schema be judged at
+    // all.
+    it("takes the fields of a conjunction that names itself, once", () => {
+      const schema = {
+        type: "object",
+        properties: { title: { type: "string" } },
+        allOf: [{ $ref: "#/$defs/Loop" }],
+        $defs: {
+          Loop: {
+            type: "object",
+            properties: { body: { type: "string" } },
+            allOf: [{ $ref: "#/$defs/Loop" }],
+          },
+        },
+      } as JSONSchema;
+      expect(undeclaredVerbFieldError({ title: "Milk", body: "b" }, schema))
+        .toBeUndefined();
+      expect(undeclaredVerbFieldError({ colour: "red" }, schema)).toBe(
+        '"colour" at <event> is not a field this verb declares. ' +
+          '<event> takes "title", "body"',
+      );
+    });
+
+    // The array counterpart of the object type union: schema traversal descends
+    // the array branch, so the element's undeclared field goes missing there.
+    it("refuses an undeclared field inside a type union admitting an array", () => {
+      expect(
+        undeclaredVerbFieldError({ tags: [{ name: "a", colour: "red" }] }, {
+          type: "object",
+          properties: {
+            tags: {
+              type: ["array", "null"],
+              items: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        } as JSONSchema),
+      ).toBe(
+        '"colour" at <event>.tags[0] is not a field this verb declares. ' +
+          '<event>.tags[0] takes "name"',
+      );
+    });
+
+    it("dispatches a declared payload against a bare `properties` map", async () => {
+      const payload = { title: "Milk" };
+      expect(await dispatchedPayload(bareProperties, payload)).toEqual(payload);
+    });
+
+    it("dispatches a declared payload against a conjunction", async () => {
+      const payload = { title: "Milk" };
+      expect(await dispatchedPayload(conjunction, payload)).toEqual(payload);
+    });
+
+    // A disjunction inside a conjunction makes the whole position honor
+    // everything: the branch a payload was meant for may name a field the
+    // others do not.
+    it("dispatches an undeclared field where a conjunction holds a disjunction", async () => {
+      const schema = {
+        allOf: [
+          { type: "object", properties: { title: { type: "string" } } },
+          {
+            anyOf: [
+              { type: "object", properties: { colour: { type: "string" } } },
+              { type: "object", properties: { size: { type: "string" } } },
+            ],
+          },
+        ],
+      } as JSONSchema;
+      const payload = { title: "Milk", colour: "red" };
+      expect(await dispatchedPayload(schema, payload)).toEqual(payload);
+    });
+
+    // An untyped position naming `items` describes an array the same way an
+    // untyped position naming `properties` describes an object.
+    it("refuses an undeclared field inside an untyped `items` position", () => {
+      expect(
+        undeclaredVerbFieldError({ tags: [{ name: "a", colour: "red" }] }, {
+          type: "object",
+          properties: {
+            tags: {
+              items: {
+                type: "object",
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        } as JSONSchema),
+      ).toBe(
+        '"colour" at <event>.tags[0] is not a field this verb declares. ' +
+          '<event>.tags[0] takes "name"',
+      );
+    });
+  });
+
+  // Positions the walk cannot judge, each asserted as the call GOING OUT
+  // rather than as no refusal coming back. The two are different facts, and
+  // only the first one states that a caller can still make the call.
+  describe("a position the walk cannot judge", () => {
+    it("dispatches an array whose elements all carry declared fields", async () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          tags: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+        },
+      };
+      const payload = { tags: [{ name: "urgent" }, { name: "kitchen" }] };
+      expect(await dispatchedPayload(schema, payload)).toEqual(payload);
+    });
+
+    // No `items` beside the `type: "array"`, so the element has no schema and
+    // nothing there declares anything. The runtime delivers the element whole.
+    it("dispatches an array element whose position declares no schema", async () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { tags: { type: "array" } },
+      };
+      const payload = { tags: [{ name: "urgent", colour: "red" }] };
+      expect(await dispatchedPayload(schema, payload)).toEqual(payload);
+    });
+
+    // A `$ref` naming a definition spelled `true` resolves to the wildcard
+    // schema, which declares nothing and refuses nothing.
+    it("dispatches a position whose `$ref` resolves to a boolean schema", async () => {
+      const schema = {
+        type: "object",
+        properties: { detail: { $ref: "#/$defs/Anything" } },
+        $defs: { Anything: true },
+      } as JSONSchema;
+      const payload = { detail: { shape: "unconstrained", n: 1 } };
+      expect(await dispatchedPayload(schema, payload)).toEqual(payload);
+    });
+
+    // The marker rides the DEFINITION rather than the reference site, so it is
+    // reached only after the reference resolves.
+    it("dispatches a position whose `asCell` marker rides the `$ref` target", async () => {
+      const schema = {
+        type: "object",
+        properties: { target: { $ref: "#/$defs/Target" } },
+        $defs: {
+          Target: {
+            type: "object",
+            properties: { n: { type: "number" } },
+            asCell: ["cell"],
+          },
+        },
+      } as JSONSchema;
+      const payload = { target: { n: 1, extra: 2 } };
+      expect(await dispatchedPayload(schema, payload)).toEqual(payload);
+    });
+  });
+
+  describe("verbInputSchemaError()", () => {
+    const addItem: JSONSchema = {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    };
+
+    // Both refusals hold for this payload: `title` is missing and `titel` is
+    // undeclared. Only one of the two answers names something the caller
+    // wrote, and that is the one they get.
+    it("reports the undeclared field ahead of the required one it displaced", () => {
+      expect(verbInputSchemaError({ titel: "Milk" }, addItem)).toBe(
+        '"titel" at <event> is not a field this verb declares. ' +
+          'Did you mean "title"? <event> takes "title"',
+      );
+    });
+
+    it("returns `undefined` for a payload carrying exactly the declared fields", () => {
+      expect(verbInputSchemaError({ title: "Milk" }, addItem)).toBeUndefined();
+    });
+
+    it("still reports a declared field of the wrong type", () => {
+      expect(verbInputSchemaError({ title: 7 }, addItem)).toMatch(/title/);
+    });
+  });
+
+  describe("cf piece call against a live verb", () => {
+    it("declares an event schema naming `properties` with no `additionalProperties`", async () => {
+      // The coupling every refusal below rests on: the shape the transformer
+      // emits is one that drops what it does not name.
+      await withList("undeclared-shape", ({ root }) => {
+        expect(root.key("addItem").schema).toEqual({
+          type: "object",
+          properties: { title: { type: "string" }, done: { type: "boolean" } },
+          required: ["title", "done"],
+        });
+        expect(root.key("ping").schema).toBeUndefined();
+        return Promise.resolve();
+      });
+    });
+
+    it("refuses a payload carrying a field the verb does not declare", async () => {
+      await withList("undeclared-refused", async ({ call, entries }) => {
+        await expect(call("addItem", {
+          title: "Milk",
+          done: false,
+          colour: "red",
+        })).rejects.toThrow(VerbInputValidationError);
+        // Nothing dispatched, so nothing was recorded: the field was refused
+        // rather than dropped on the way in.
+        expect(entries()).toEqual([]);
+      });
+    });
+
+    it("names the verb, the field, the position and the near miss in what the caller reads", async () => {
+      await withList("undeclared-message", async ({ call }) => {
+        await expect(call("addItem", { titel: "Milk", done: false })).rejects
+          .toThrow(
+            'Invalid input for "addItem": "titel" at <event> is not a field ' +
+              'this verb declares. Did you mean "title"? <event> takes ' +
+              '"title", "done"',
+          );
+      });
+    });
+
+    it("names a nested position on a live verb", async () => {
+      await withList("undeclared-nested", async ({ call }) => {
+        await expect(call("rename", { item: { id: "1", lable: "Milk" } }))
+          .rejects.toThrow(
+            '"lable" at <event>.item is not a field this verb declares. ' +
+              'Did you mean "label"? <event>.item takes "id", "label"',
+          );
+      });
+    });
+
+    it("names an array element position on a live verb", async () => {
+      await withList("undeclared-element", async ({ call }) => {
+        await expect(
+          call("tag", { tags: [{ name: "a" }, { name: "b", colour: "red" }] }),
+        ).rejects.toThrow('"colour" at <event>.tags[1] is not a field');
+      });
+    });
+
+    it("dispatches a payload carrying exactly the declared fields", async () => {
+      await withList("undeclared-negative", async ({ call, entries }) => {
+        const outcome = await call("addItem", { title: "Milk", done: false });
+        expect(outcome.status).toBe("settled");
+        expect(entries()).toEqual(['{"title":"Milk","done":false}']);
+      });
+    });
+
+    it("dispatches every payload at a verb that declares no schema", async () => {
+      await withList("undeclared-open", async ({ call, entries }) => {
+        const outcome = await call("ping", { anything: 1 });
+        expect(outcome.status).toBe("settled");
+        expect(entries()).toEqual(["ping"]);
+      });
+    });
+
+    it("leaves the invocation id spendable by the corrected retry", async () => {
+      await withList("undeclared-id", async ({ call, entries }) => {
+        await expect(
+          call("addItem", { title: "Milk", colour: "red" }, "inv-once"),
+        ).rejects.toThrow(VerbInputValidationError);
+        const outcome = await call(
+          "addItem",
+          { title: "Milk", done: false },
+          "inv-once",
+        );
+        expect(outcome.status).toBe("settled");
+        expect(outcome.deduplicated).toBeUndefined();
+        expect(entries()).toEqual(['{"title":"Milk","done":false}']);
+      });
+    });
+  });
+
+  // The same two shapes on a running piece, reached through a verb whose event
+  // schema the pattern writes out. `count` reads what committed, so a dispatch
+  // is stated as the handling landing rather than as the command returning.
+  describe("cf piece call on a verb whose event schema states no `type`", () => {
+    const withExplicit = <T>(
+      passphrase: string,
+      body: (tracker: Tracker) => Promise<T>,
+    ) => withProgram(passphrase, EXPLICIT_SCHEMA_PROGRAM, body);
+
+    it("refuses an undeclared field against a bare `properties` map", async () => {
+      await withExplicit("explicit-bare-refused", async ({ call, root }) => {
+        await expect(call("bare", { title: "Milk", colour: "red" })).rejects
+          .toThrow(
+            '"colour" at <event> is not a field this verb declares. ' +
+              '<event> takes "title"',
+          );
+        // Nothing counted: unwritten, the cell has not materialized its
+        // default, so an absent count and a zero one are the same fact here.
+        expect(root.key("count").get() ?? 0).toBe(0);
+      });
+    });
+
+    it("refuses an undeclared field against a conjunction", async () => {
+      await withExplicit("explicit-allof-refused", async ({ call, root }) => {
+        await expect(call("conjunct", { title: "Milk", colour: "red" }))
+          .rejects.toThrow(
+            '"colour" at <event> is not a field this verb declares. ' +
+              '<event> takes "title"',
+          );
+        // Nothing counted: unwritten, the cell has not materialized its
+        // default, so an absent count and a zero one are the same fact here.
+        expect(root.key("count").get() ?? 0).toBe(0);
+      });
+    });
+
+    it("dispatches a declared payload against a bare `properties` map", async () => {
+      await withExplicit("explicit-bare-dispatch", async ({ call, root }) => {
+        const outcome = await call("bare", { title: "Milk" });
+        expect(outcome.status).toBe("settled");
+        expect(root.key("count").get()).toBe(1);
+      });
+    });
+
+    it("dispatches a declared payload against a conjunction", async () => {
+      await withExplicit("explicit-allof-dispatch", async ({ call, root }) => {
+        const outcome = await call("conjunct", { title: "Milk" });
+        expect(outcome.status).toBe("settled");
+        expect(root.key("count").get()).toBe(1);
+      });
+    });
+  });
+});

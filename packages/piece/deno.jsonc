@@ -12,6 +12,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./ops": "./src/ops/mod.ts"
+    "./ops": "./src/ops/mod.ts",
+    "./schema-compatibility": "./src/schema-compatibility.ts"
   }
 }

@@ -7,6 +7,11 @@ import { getDidFromFile } from "../lib/identity.ts";
 import { absPath } from "../lib/utils.ts";
 import { normalizeApiUrl, setQuietMode } from "./piece.ts";
 import { projectWishValue, readWish } from "../lib/wish.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
 
 /** Options the `cf wish` action receives (cliffy-parsed flags + env). */
 export interface WishCommandOptions {
@@ -18,6 +23,9 @@ export interface WishCommandOptions {
   quiet?: boolean;
   allowEmpty?: boolean;
   json?: boolean;
+  filter?: string;
+  select?: string;
+  schema?: string;
 }
 
 /** Injectable effects so the action body is unit-testable in-process. */
@@ -76,16 +84,54 @@ export async function wishAction(
 
   const path = options.path ? parseCellPath(options.path).map(String) : [];
   const scope = parseScopeFlags(options.scope);
+  // Read before the wish is issued: a malformed selection is a fact about the
+  // flags, so it is reported without a resolution having been attempted. The
+  // same grammar and the same messages `cf piece get` and `cf piece call`
+  // report, because it is the same parser.
+  // Through the command's own exit seam rather than `exitWithDataError`, whose
+  // `exit` is typed `never`: this command's seam returns, because its unit
+  // tests inject a non-terminating exit and go on to read what was written. A
+  // direct `Deno.exit` here would take the test runner — or an embedder — down
+  // with it.
+  const exitSelectionError = (message: string): void => {
+    console.error(message);
+    deps.exit(1);
+  };
 
-  const { result, error } = await deps.readWish({
-    apiUrl: normalizeApiUrl(options.apiUrl),
-    space,
-    identity,
-    query: target,
-    path,
-    scope,
-    jsonOutput: true,
-  });
+  let selection: CellSelection | undefined;
+  try {
+    selection = await parseCellSelectionOptions(options);
+  } catch (error) {
+    if (error instanceof CellSelectionError) {
+      exitSelectionError(error.message);
+      return; // Reached only when a test injects a non-terminating exit.
+    }
+    throw error;
+  }
+
+  let result: unknown;
+  let error: string | undefined;
+  try {
+    ({ result, error } = await deps.readWish({
+      apiUrl: normalizeApiUrl(options.apiUrl),
+      space,
+      identity,
+      query: target,
+      path,
+      scope,
+      jsonOutput: true,
+      ...(selection === undefined ? {} : { selection }),
+    }));
+  } catch (thrown) {
+    // A selection that does not fit what the wish resolved to — a `--filter`
+    // over a non-array, a projection that kept nothing — is a data error about
+    // the target in hand, not a usage error about the command line.
+    if (thrown instanceof CellSelectionError) {
+      exitSelectionError(thrown.message);
+      return; // Reached only when a test injects a non-terminating exit.
+    }
+    throw thrown;
+  }
 
   if (error && result === null && !options.allowEmpty) {
     console.error(`wish "${target}": ${error}`);
@@ -164,6 +210,23 @@ export const wish = new Command()
     "--json",
     "Select JSON output explicitly. This command always outputs JSON.",
   )
+  .option(
+    "--filter <predicate:string>",
+    "Filter an array with a jq-inspired predicate",
+  )
+  .option(
+    "--select <fields:string>",
+    "Project output to comma-separated field paths; a trailing @ asks for a " +
+      "position's address, and @ alone for the resolved target's own",
+  )
+  .option(
+    "--schema <schema:string>",
+    "Project output with an inline JSON Schema, @file, or the --select " +
+      "field list",
+    // Both flags carry the one projection, so a command naming both has not
+    // said which shape it wants. Refuse before the wish rather than pick.
+    { conflicts: ["select"] },
+  )
   .example(
     cliText(`cf wish '#profile' -i ./claude.key`),
     "Read the viewer's active profile object as JSON.",
@@ -175,6 +238,14 @@ export const wish = new Command()
   .example(
     cliText(`cf wish '#mentionable' -i ./claude.key -s my-space`),
     "Read a space-relative target (needs an explicit --space).",
+  )
+  .example(
+    cliText(`cf wish '#profile' -i ./claude.key --select name,avatar`),
+    "Project the resolved target to selected fields.",
+  )
+  .example(
+    cliText(`cf wish '#profile' -i ./claude.key --select '@'`),
+    "Return the resolved target's address instead of its contents.",
   )
   .arguments("<target:string>")
   .action(async (options, target) => {

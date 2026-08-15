@@ -1,6 +1,6 @@
 import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
-import { VerbInputValidationError } from "../lib/callable.ts";
+import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
 import {
   applyPieceInput,
   checkPiecePattern,
@@ -736,9 +736,15 @@ export function renderPieceCallOutcome(
       // it is advisory until the invocation protocol carries it in the
       // stdout Invocation JSON (verb contract WS-D), and --quiet callers
       // asked for the bare result.
-      const ref = result.resultRef;
+      //
+      // Written as an address argument, which is the same spelling the
+      // receipt hint below uses and the same one `cf exec` prints: a caller
+      // reads the address off one command and passes it to the next without
+      // taking it apart first.
+      const ref = addressArgument(result.resultRef);
       hintOut(
-        `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
+        `Tool result cell: ${ref} (read it back with ` +
+          `\`cf piece get --piece ${ref}\`)`,
         false,
       );
     }
@@ -754,18 +760,12 @@ export function renderPieceCallOutcome(
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
     // The address the envelope published, when the runtime wrote a receipt.
     // It leads the detached next steps because it collects the outcome
-    // without running the verb again. The scope is part of the address —
-    // reopening a user- or session-scoped cell without it resolves the
-    // space-scoped instance, a different cell (CallableResultRef) — so the
-    // hint spells the non-default scopes in the `id@scope` form
-    // `parseScopedId` accepts, and only those: the bare form already means
-    // space.
+    // without running the verb again, and it is written as an address
+    // argument so it composes into the command named beside it.
     const receipt = result.invocation.receipt;
     const receiptId = receipt === undefined
       ? undefined
-      : receipt.scope === "space"
-      ? receipt.id
-      : `${receipt.id}@${receipt.scope}`;
+      : addressArgument(receipt);
     hintOut(
       opts.detached
         ? cliText(

@@ -196,9 +196,9 @@ receipt to name.
 ### Asking for a smaller result
 
 A verb decides what it returns; the caller decides how much of it to look at.
-`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`
-takes, with the same grammar — shape the `result` before it reaches stdout, and
-go before the callable name:
+`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`,
+`cf wish` and `cf exec` take, with the same grammar — shape the `result` before
+it reaches stdout, and go before the callable name:
 
 ```bash
 cf piece call --piece <topic> --select comment.writtenAt addComment \
@@ -220,6 +220,26 @@ selection to be about — and `--no-wait`, which never reads the receipt back,
 refuses all three flags. `--show-links` composes with a projection, because a
 projection leaves every surviving path where it was; it does not compose with
 `--filter`, which moves the positions a link names.
+
+**A verb reached through a filesystem mount is the same call.** `cf exec` takes
+the three flags too, written before the mounted file, since everything after it
+belongs to the callable's own schema-derived interface. It settles the handling
+under an invocation of its own and prints the same Invocation JSON this section
+shows, so a mounted handler's outcome has an address and a shape rather than
+being unreported:
+
+```bash
+cf exec --select comment.writtenAt \
+  /tmp/cf/<space>/pieces/<piece>/result/addComment.handler \
+  --body first --agent-name Sol
+```
+
+A tool prints its result on stdout as it always did, with the result cell's
+address on stderr. The line spells out the whole command that reads it back,
+`--space` beside `--piece`: an address has three parts, and `cf piece get`
+takes the space on its own flag. `cf exec` gets its space from the mount it ran
+through, while `cf piece get` falls back to whichever space the caller has
+configured, so the two name the same cell only when the line says which.
 
 `packages/cli/README.md` has the grammar and the supported schema subset.
 
@@ -347,6 +367,50 @@ cf piece call --piece <board> --invocation add-1 \
 
 That is the difference worth holding onto: a **settled** id replays its original
 result, while a **refused** id was never consumed and is still yours to use.
+
+### A field the verb does not declare
+
+A payload is judged against the verb's declared event schema before anything is
+sent, and a field that schema does not name is refused there. The runtime hands
+a handler the fields its event schema names and drops the rest, so a field
+nobody declared would otherwise reach nothing while the call reported itself
+settled. The refusal names the field, the position it sat at, the vocabulary
+that position takes, and the declared name it is one edit from:
+
+```bash
+cf piece call --piece <board> addTopic '{"titel":"Ship it","agentName":"Sol"}'
+```
+
+```
+Invalid input for "addTopic": "titel" at <event> is not a field this verb
+declares. Did you mean "title"? <event> takes "title", "body", "agentName"
+```
+
+Positions below the root are spelled the way a `--schema` position is —
+`<event>.item`, `<event>.tags[1]` — so one vocabulary covers this refusal and
+the one an unrecognized projection key gets.
+
+Every position that names its fields is judged, however it names them: with a
+stated `type: "object"`, with a `properties` map and no type beside it, with a
+type union admitting an object, or through a conjunction — whose fields are the
+**union** across its members, since a payload satisfying an `allOf` satisfies
+every one of them.
+
+Two kinds of position are passed over, and a call reaching one goes out rather
+than being refused on a guess. Under a **disjunction** (`anyOf`, `oneOf`) a
+payload need satisfy only one branch, so a field missing from one branch may be
+named by another. And a position marked as a cell or a stream may hold a link
+rather than a value, whose `"/"` is nothing anybody declared.
+
+The declared vocabulary is what `cf piece call --piece <id> <verb> --help`
+prints, and it names the fields the verb's handler **reads**. That can be fewer
+than the TypeScript event type declares: a field the body never touches is one
+the runtime would have dropped, so the call is refused rather than accepted and
+quietly emptied. A verb that publishes no event schema at all takes any payload
+— with nothing declared, nothing is dropped either.
+
+Like every other refusal here, this one costs nothing: the invocation id was
+never spent, and the corrected retry can reuse it.
 
 ### Reading is not calling
 
