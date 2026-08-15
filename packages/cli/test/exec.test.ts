@@ -416,8 +416,23 @@ describe("parseExecArgs", () => {
     );
     expect(() => parseExecArgs(spec, ["--query", "tea", "--mode", "invalid"]))
       .toThrow(/Invalid value for --mode/i);
+    // The five elements the payload door gives for the same mistake: the
+    // name, the position, the refusal, and the accepted vocabulary. A caller
+    // who mistypes a flag and one who mistypes a payload key made one
+    // mistake, and the flag spelling is the one the walkthrough teaches.
     expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
-      .toThrow(/Unknown flag --unknown/i);
+      .toThrow(
+        /"--unknown" at <event> is not a field this verb declares\./,
+      );
+    expect(() => parseExecArgs(spec, ["--query", "tea", "--unknown", "value"]))
+      .toThrow(/<event> takes "--mode", "--query"/);
+
+    // The fifth element, on a name close enough to have been meant.
+    expect(() => parseExecArgs(spec, ["--quer", "tea"]))
+      .toThrow(/Did you mean "--query"\?/);
+    // And withheld where nothing is close: a wrong guess is worse than none.
+    expect(() => parseExecArgs(spec, ["--zzzzzzzz", "tea"]))
+      .not.toThrow(/Did you mean/);
   });
 });
 
@@ -496,8 +511,14 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(spec, ["--no-enabled"]).input).toEqual({
       enabled: false,
     });
+    // The field exists; the negation is what does not apply. Listing the
+    // vocabulary here would send the caller looking for a name they already
+    // found, so this refusal names only the field it is about.
     expect(() => parseExecArgs(spec, ["--no-query"])).toThrow(
-      /Unknown flag/,
+      /--no-query negates --query, which is not a boolean field/,
+    );
+    expect(() => parseExecArgs(spec, ["--no-query"])).not.toThrow(
+      /declared fields are/,
     );
     expect(() => parseExecArgs(spec, ["--query"])).toThrow(/Missing value/);
   });
@@ -509,8 +530,14 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(booleanSpec, ["--value", "true"]).input).toBe(true);
     expect(() => parseExecArgs(stringSpec, ["--value", "one", "extra"]))
       .toThrow(/Unexpected argument extra/);
+    // A verb taking a single value has no fields to name, so the vocabulary
+    // is the fixed four rather than schema-derived — but the caller still
+    // gets told what it is, in the same sentence shape.
     expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
-      /Unknown flag/,
+      /--other is not a flag this verb takes/,
+    );
+    expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
+      /--value, --value-file, --json, --json-file/,
     );
     expect(() => parseExecArgs(stringSpec, ["--json", "--other"])).toThrow(
       /cannot be combined/,
@@ -530,8 +557,11 @@ describe("parseExecArgs edge cases", () => {
     const spec = makeSpec("tool", { type: "object", properties: {} });
 
     expect(() => parseExecArgs(spec, ["invoke"])).toThrow(/Invalid verb/);
+    // `--help` is not unknown — alone it prints the help page. What it does
+    // not do is take an argument, and only a verb declaring a `help` field
+    // gives it one to fill.
     expect(() => parseExecArgs(spec, ["--help", "extra"])).toThrow(
-      /Unknown flag --help/,
+      /--help takes no arguments/,
     );
     expect(parseExecArgs(spec, ["run", "--help"])).toMatchObject({
       verb: "run",
@@ -541,7 +571,7 @@ describe("parseExecArgs edge cases", () => {
     expect(parseExecArgs(spec, ["run", "--help", "--json"]))
       .toMatchObject({ showHelp: true, showHelpJson: true });
     expect(() => parseExecArgs(spec, ["run", "--help", "extra"])).toThrow(
-      /Unknown flag --help/,
+      /--help takes no arguments/,
     );
   });
 });

@@ -209,6 +209,17 @@ declares. Did you mean "title"? <event> takes "title", "done"
 Positions below the root are spelled the way a `--schema` position is —
 `<event>.item`, `<event>.tags[1]` — so one vocabulary covers both refusals.
 
+`cf exec` refuses the same mistake in the same words when it arrives as a flag,
+which is how the mounted-file door spells a field. Only the spelling differs,
+because that is what the caller typed and must retype; the position is always
+`<event>`, since a flag can name nothing below the root:
+
+```console
+$ cf exec /tmp/cf/home/pieces/notes/result/addItem.handler invoke --titel Milk
+"--titel" at <event> is not a field this verb declares. Did you mean
+"--title"? <event> takes "--title", "--done"
+```
+
 Every position that names its fields is judged, whether it states
 `type: "object"`, carries a `properties` map with no type beside it, states a
 type union admitting an object, or reaches its map through a conjunction, whose

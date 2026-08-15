@@ -2,6 +2,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { schemaToTypeString } from "@commonfabric/runner";
 import { cliCommand } from "./cli-name.ts";
+import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 
 export interface ExecCommandSpec {
   callableKind: "handler" | "tool";
@@ -220,6 +221,45 @@ function parseValueForSchema(
   return rawValue;
 }
 
+/**
+ * The refusal a flag naming no declared field earns.
+ *
+ * The same five elements `undeclaredVerbFieldError` gives the payload door:
+ * the name, the position, the refusal, a near miss, and the accepted
+ * vocabulary. A caller who types `--titel` and a caller who sends
+ * `{"titel": …}` have made one mistake, and the flag spelling is the one the
+ * verb-session walkthrough teaches — so it is the spelling most likely to be
+ * mistyped and was the one answering with the least.
+ *
+ * Two honest differences from the payload door, both forced:
+ *
+ * - The position is always `<event>`, because a flag can only name a root
+ *   field. A payload can nest, so its refusal has a path to report.
+ * - Names are written as flags, because that is what the caller typed and
+ *   what they must retype. `flagNameForKey` is what maps a declared field to
+ *   it, so the vocabulary here is the same event schema the payload door
+ *   validates against, spelled for this door.
+ *
+ * Declaration order, not sorted: it is the order the help page lists the
+ * flags in and the order the payload door names them in, so a caller reading
+ * two of the three sees one vocabulary rather than two arrangements of it.
+ */
+function undeclaredFlagError(
+  rawFlag: string,
+  descriptors: Map<string, FlagDescriptor>,
+): string {
+  const declared = [...descriptors.keys()];
+  const nearest = nearestName(rawFlag, declared);
+  return `"--${rawFlag}" at ${EVENT_ROOT_POSITION} is not a field this verb ` +
+    "declares. " +
+    (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
+    (declared.length === 0
+      ? `${EVENT_ROOT_POSITION} declares no fields at all`
+      : `${EVENT_ROOT_POSITION} takes ${
+        declared.map((name) => `"--${name}"`).join(", ")
+      }`);
+}
+
 function parseObjectInput(
   schema: JSONSchema,
   args: string[],
@@ -305,14 +345,19 @@ function parseObjectInput(
       negated = descriptor !== undefined;
     }
     if (!descriptor) {
-      throw new Error(`Unknown flag --${rawFlag}`);
+      throw new Error(undeclaredFlagError(rawFlag, descriptors));
     }
 
     const flagName = `--${descriptor.flagName}`;
     const type = schemaType(descriptor.schema);
     if (negated) {
       if (type !== "boolean") {
-        throw new Error(`Unknown flag --${rawFlag}`);
+        // The field exists, so naming the vocabulary would send the caller
+        // looking for a name they already found. What is wrong is the
+        // negation, and only its own field can say so.
+        throw new Error(
+          `--${rawFlag} negates ${flagName}, which is not a boolean field`,
+        );
       }
       input[descriptor.key] = false;
       usedGeneratedFlags = true;
@@ -402,7 +447,13 @@ function parseNonObjectInput(
     flag !== "--value" && flag !== "--json" && flag !== "--value-file" &&
     flag !== "--json-file"
   ) {
-    throw new Error(`Unknown flag ${flag}`);
+    // A verb taking a single non-object value has no fields to name, so the
+    // vocabulary here is fixed rather than schema-derived — but it is still
+    // the answer the caller needs, and the same sentence shape carries it.
+    throw new Error(
+      `${flag} is not a flag this verb takes — it takes a single value, ` +
+        `so the flags are --value, --value-file, --json, --json-file`,
+    );
   }
   if (flag === "--json" && rawValue === undefined) {
     return {
@@ -969,7 +1020,13 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      throw new Error("Unknown flag --help");
+      // `--help` is not unknown — alone it prints the help page, which is the
+      // branch above. It takes an argument only where the verb declares a
+      // `help` field for it to fill, and this one does not.
+      throw new Error(
+        "--help takes no arguments — it prints the help page, and this " +
+          "verb declares no help field for it to fill",
+      );
     }
   }
 
@@ -1009,7 +1066,13 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      throw new Error("Unknown flag --help");
+      // `--help` is not unknown — alone it prints the help page, which is the
+      // branch above. It takes an argument only where the verb declares a
+      // `help` field for it to fill, and this one does not.
+      throw new Error(
+        "--help takes no arguments — it prints the help page, and this " +
+          "verb declares no help field for it to fill",
+      );
     }
   }
 

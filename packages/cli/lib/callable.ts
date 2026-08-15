@@ -24,6 +24,7 @@ import {
   CellSelectionError,
   deriveSelectedValue,
 } from "./cell-selection.ts";
+import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -388,7 +389,6 @@ export function schemaIsObjectShaped(
  * caller meets both refusals through the same command, so they name a position
  * the same way.
  */
-const EVENT_ROOT_POSITION = "<event>";
 
 /** A field a payload carries at a position whose schema does not declare it,
  * with what that position does declare. */
@@ -396,35 +396,6 @@ interface UndeclaredEventField {
   key: string;
   position: string;
   declared: string[];
-}
-
-/**
- * The edit distance between `left` and `right`, for the near-miss below.
- * Adjacent transposition counts as one edit rather than two, because it is the
- * typo the refusal exists for: `titel` is one slip from `title` however many
- * substitutions it takes to spell as substitutions.
- */
-function fieldEditDistance(left: string, right: string): number {
-  const rows: number[][] = [
-    Array.from({ length: right.length + 1 }, (_, j) => j),
-  ];
-  for (let i = 1; i <= left.length; i++) {
-    const current = [i];
-    for (let j = 1; j <= right.length; j++) {
-      const previous = rows[i - 1];
-      current[j] = left[i - 1] === right[j - 1]
-        ? previous[j - 1]
-        : 1 + Math.min(previous[j - 1], previous[j], current[j - 1]);
-      if (
-        i > 1 && j > 1 && left[i - 1] === right[j - 2] &&
-        left[i - 2] === right[j - 1]
-      ) {
-        current[j] = Math.min(current[j], rows[i - 2][j - 2] + 1);
-      }
-    }
-    rows.push(current);
-  }
-  return rows[left.length][right.length];
 }
 
 /**
@@ -437,19 +408,7 @@ function nearestDeclaredField(
   key: string,
   declared: readonly string[],
 ): string | undefined {
-  const lowered = key.toLowerCase();
-  let best: string | undefined;
-  let bestDistance = Infinity;
-  for (const candidate of declared) {
-    const distance = fieldEditDistance(lowered, candidate.toLowerCase());
-    if (distance < bestDistance) {
-      best = candidate;
-      bestDistance = distance;
-    }
-  }
-  return bestDistance <= Math.max(1, Math.floor(key.length / 4))
-    ? best
-    : undefined;
+  return nearestName(key, declared);
 }
 
 /** One property map an object-shaped position reaches, with the local-ref
