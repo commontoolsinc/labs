@@ -1006,7 +1006,10 @@ the durable rows of §5 carry APPENDS, never effect state).
   README §3.8's "outstanding LLM calls") and an egress-rate token
   bucket (`egressRatePerSecond`, burst = one second's tokens), both
   `SpaceServerPolicy` knobs threaded from the toolshed bootstrap's env
-  (`SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS`, default 16;
+  (`SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS`, default 16 — the
+  LITERAL `0` is the only opt-out to unbounded; an unparseable or
+  negative value falls back to the default with a warning, so a typo
+  can never disable the production bound — FAIL-CLOSED;
   `SERVER_EXECUTION_EGRESS_RATE_PER_S`, default unpaced;
   `SERVER_EXECUTION_FLUSH_DEADLINE_MS` tunes §3's T_flush the same
   way). The gate holds DISPATCH only: the in-flight dedupe entry exists
@@ -1102,7 +1105,10 @@ effect-channel ack writes, so the
 `outbox.budgetDeferrals` counts Phase-6 budget dispatch holds — §5;
 the `push` block is the memory server's Phase-6 push-priority
 counters (protocol.md §3), nested under `servingLoop` in the health
-route so the OFF-arm response never changes shape). Every
+route so the OFF-arm response never changes shape —
+`push.prioritizedSessions`/`push.followerSessions` count sessions
+EVALUATED per group in mixed batches, frame or no frame: an ordering
+witness, not a delivered-frame metric). Every
 Phase gate in the plan reads these counters; tests MUST assert on
 counters, not logs.
 

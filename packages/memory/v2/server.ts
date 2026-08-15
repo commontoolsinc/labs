@@ -200,8 +200,11 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
  * logs):
  * - `mixedFlushes` — flush batches where the split was non-vacuous
  *   (both a prioritized and a follower group existed);
- * - `prioritizedSessions` / `followerSessions` — session sends in each
- *   group across those mixed batches.
+ * - `prioritizedSessions` / `followerSessions` — sessions EVALUATED in
+ *   each group across those mixed batches (`refreshDirty`'s per-phase
+ *   count — a session is counted whether or not its evaluation produced
+ *   a frame, so a quiet co-space session counts as a follower). These
+ *   are an ORDERING witness, not a delivered-frame metric.
  * All-zero in the OFF arm by construction: only the serving loop's wave
  * commits classify dirty keys as derived. Registered by the Server
  * instance (last registration wins — one co-hosted server per process);

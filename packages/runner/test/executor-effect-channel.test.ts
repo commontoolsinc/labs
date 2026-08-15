@@ -368,10 +368,27 @@ describe("Phase 4 client-effect channel", () => {
     const tx = clientRuntime.edit();
     kick.withTx(tx).set({ n: Date.now() });
     expect((await tx.commit()).error).toBeUndefined();
-    const kickSeq = authoredSeqOf(engine, kick.getAsNormalizedFullLink().id);
+    const kickDocId = kick.getAsNormalizedFullLink().id;
+    const kickSeq = authoredSeqOf(engine, kickDocId);
+    // Regression armor for the OW26 trap arithmetic: wait for the
+    // serving loop's trailing derived echo to land BEFORE computing
+    // the barrier target. Pre-echo, `serverSeq`-degraded arithmetic
+    // is correct BY ACCIDENT (serverSeq still equals the kick's own
+    // authored seq at that instant), which left the degradation green
+    // across the whole suite; with the echo landed, wrong-class
+    // arithmetic targets the echo seq — which coverage never claims
+    // on a quiet space — and the wait below times out red.
     await waitUntil(
-      () => (host!.spaceServer(space)?.watermark ?? 0) >= kickSeq,
-      `the watermark to cover the ${kickName} barrier kick (seq ${kickSeq})`,
+      () => Engine.serverSeq(engine) > kickSeq,
+      `the trailing derived echo after the ${kickName} kick (seq ${kickSeq})`,
+    );
+    // Recomputed AFTER the echo: a no-op for correct (authored-class)
+    // arithmetic — the authored seq is stable — and the read that
+    // turns a serverSeq regression deterministically red.
+    const target = authoredSeqOf(engine, kickDocId);
+    await waitUntil(
+      () => (host!.spaceServer(space)?.watermark ?? 0) >= target,
+      `the watermark to cover the ${kickName} barrier kick (seq ${target})`,
     );
   };
 
@@ -1623,8 +1640,20 @@ describe("Phase 4 client-effect channel", () => {
     // the racing input's own AUTHORED seq (never `Engine.serverSeq`,
     // which the loop's derived echoes inflate — the recorded freeze).
     const racedSeq = authoredSeqOf(engine, kick.getAsNormalizedFullLink().id);
+    // Wait for the trailing echo BEFORE the barrier read (the same
+    // regression armor as `settleAnotherWaveFamily`): pre-echo, a
+    // serverSeq degradation reads correct-by-accident and the pin
+    // would stay green against the exact arithmetic it exists to pin.
     await waitUntil(
-      () => (host!.spaceServer(space)?.watermark ?? 0) >= racedSeq,
+      () => Engine.serverSeq(engine) > racedSeq,
+      "the trailing derived echo after the racing input",
+    );
+    const racedTarget = authoredSeqOf(
+      engine,
+      kick.getAsNormalizedFullLink().id,
+    );
+    await waitUntil(
+      () => (host!.spaceServer(space)?.watermark ?? 0) >= racedTarget,
       "the watermark to cover the input racing the failure window",
       15_000,
     );

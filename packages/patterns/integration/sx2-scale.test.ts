@@ -24,8 +24,9 @@
 //   ON-arm stats carry the `servingLoop.push` counter block (the
 //   deterministic frame-ORDER pin lives in
 //   packages/memory/test/v2-push-priority.test.ts — a live mixed batch
-//   is timing-shaped, so the gate here asserts the counters exist and
-//   never regress, not a forced reorder);
+//   is timing-shaped, so the gate here asserts only that the counter
+//   block is WIRED in the ON arm — present and non-negative — not a
+//   forced reorder);
 // - NO POLL-LOOPS (the plan's "no integration test needs a poll-loop
 //   for 'is the server done'"): the sx2 gate family itself is audited —
 //   server-done waits ride `waitForSettled`, never text-polling.

@@ -250,7 +250,7 @@ describe("v2 push priority (Phase 6, protocol.md §3)", () => {
     }
   });
 
-  it("keeps a derived-only batch on the single pass (no split without followers)", async () => {
+  it("counts nothing for a derived-only batch (the two-phase path runs with an EMPTY follower group — a vacuous split)", async () => {
     const server = new Server({
       ...testSessionOpenServerOptions,
       store: new URL("memory://push-priority-pure"),

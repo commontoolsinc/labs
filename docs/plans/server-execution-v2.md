@@ -730,13 +730,18 @@ Tasks:
       (verification-coverage OW8).
 - [x] Per-space budgets in the executor (CPU per wave, outstanding LLM
       calls, egress rate); a runaway pattern degrades only its own
-      space — LANDED 2026-08-14: T_flush already bounds per-wave CPU
-      (stage D) and is now env-tunable
+      space — LANDED 2026-08-14: T_flush (stage D) is the per-wave
+      compute bound — it bounds a wave's wall-clock accumulation
+      between seals, not a single non-yielding action, which escapes
+      any budget in both arms (pre-existing) — and is now env-tunable
       (`SERVER_EXECUTION_FLUSH_DEADLINE_MS`); the outbox gained the
       outstanding-network-effect cap (toolshed default 16,
-      `SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS`) and the egress-rate
-      token bucket (`SERVER_EXECUTION_EGRESS_RATE_PER_S`, default
-      unpaced) — serving-loop.md §5, `executor-outbox-budget.test.ts`.
+      `SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS` — literal `0` opts
+      out; unparseable values fall back to the default, loudly) and
+      the egress-rate token bucket (`SERVER_EXECUTION_EGRESS_RATE_PER_S`,
+      default unpaced) — serving-loop.md §5,
+      `executor-outbox-budget.test.ts`,
+      `toolshed/lib/server-execution.test.ts`.
 - [ ] Event/binding backpressure shaping ahead of the commit stream —
       FLAGGED, not filled (verification-coverage OW27): the §3.8
       binding-layer shaping's semantics (pace vs batch vs drop, the

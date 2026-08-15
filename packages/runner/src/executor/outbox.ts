@@ -69,7 +69,11 @@ export type OutboxBudgetPolicy = {
   /** Cap on DISPATCHED-but-unsettled network effects. Admitted effects
    * over the cap hold their dispatch (FIFO wake order) until a slot
    * frees; the in-flight dedupe entry exists from ADMISSION either way,
-   * so re-admits attach instead of double-firing. */
+   * so re-admits attach instead of double-firing. Undefined = unbounded.
+   * CAUTION for direct callers: `0` is NOT "unbounded" here — it holds
+   * every network dispatch forever (no slot can ever free). The env
+   * path never produces it (the toolshed bootstrap maps a literal env
+   * `0` to ABSENT — `serverExecutionPolicyFromEnv`). */
   maxOutstandingEffects?: number;
   /** Egress pacing: network-effect dispatches per second (token bucket
    * with burst = one second's tokens, minimum 1). */
@@ -261,7 +265,12 @@ export class SpaceOutbox {
   /** Park/teardown (Phase 6): admitted-but-held dispatches are dropped
    * — every waiter wakes into the closed check — and nothing new
    * dispatches. In-flight work is not awaited (park never awaits the
-   * network), exactly the pre-budget posture. */
+   * network), exactly the pre-budget posture. Accounting note: a
+   * dropped hold was counted `queued` at admission but is neither
+   * `completed` nor `failed` (it never dispatched), so after a park
+   * `outbox.queued` may exceed `completed + failed` by the drop count.
+   * No gate binds that identity; the drop is the sanctioned
+   * crash-equivalent posture (memo re-miss re-fires on re-activation). */
   close(): void {
     if (this.#closed) return;
     this.#closed = true;

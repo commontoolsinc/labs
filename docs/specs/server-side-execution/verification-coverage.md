@@ -1095,8 +1095,9 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   the three refusal tests' absence asserts then move from fixed
   drains to the kick-and-await-W barrier that batch had to revert.
   DISCHARGED with Phase 6 (2026-08-14) — the repro was re-run to
-  root cause, and the recorded symptoms all traced to the OBSERVER,
-  not a scheduler posture gap:
+  root cause, and every symptom that REPRODUCED traced to the
+  OBSERVER, not a scheduler posture gap (one recorded symptom did
+  not reproduce at all — the residual below):
   (i) the reverted kick-and-await-W barriers derived their targets
   from `Engine.serverSeq`, which counts the serving loop's own
   derived wave echoes — and coverage NEVER claims a trailing echo on
@@ -1114,6 +1115,40 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   erroring-demanded-effect posture already matches the
   erroring-derivation posture — charged, settled, W covers every
   authored seq. No scheduler change was needed or made.
+  (iv — recorded 2026-08-15, from the Phase-6 independent review)
+  The original record's computed-control contrast ("a throwing
+  computed under the IDENTICAL schedule does not wedge", above) was
+  ALSO observer read-timing, not a product asymmetry: the review's
+  directed computed-control probe — a throwing `computed` under the
+  identical schedule and the same flawed `serverSeq` arithmetic, run
+  at both the Phase-6 base and head — froze IDENTICALLY (same
+  watermark-only echoes, same frozen wrong-class target, same
+  instant coverage of the input's own authored seq). The original
+  control's barrier simply read its target BEFORE the trailing echo
+  landed. So the two postures are symmetric from BOTH directions —
+  erroring demanded-effect and erroring derivation are each charged,
+  settled, and W covers every authored seq — which is the
+  discharge's central claim; the review's main probe added the
+  product-liveness discriminator the original observation lacked
+  (during the recorded "wedge" state the product accepts and settles
+  a fresh authored input in ~50 ms, at base and head alike).
+  RESIDUAL (keep watching): the original record's "every subsequent
+  flush exhausts its deadline" was NOT reproduced — it is
+  unexplained, not explained: `wavesBudgetExhausted` stayed 0 in
+  every armed wedge-schedule state across the root-cause re-runs and
+  the independent review's probes (base and head). By mechanism the
+  recorded ingredients cannot produce it (an erroring action writes
+  nothing, so it cannot re-dirty itself, and budget backoff defers
+  invalid actions out of the dirty pull set), and real-load
+  exhaustion — normal and benign, observed under the sx2-scale
+  flood — is a plausible mundane source of the original observation.
+  This row REOPENS if a schedule surfaces where W genuinely stalls
+  below an authored seq; the OW26 pin suite in
+  `executor-effect-channel.test.ts` is the resurface point.
+  (Correction 2026-08-15: this residual previously lived only in the
+  Phase-6 PR body — the self-review's claim that the discharge text
+  carried it was wrong; the register is the canon and now carries
+  it.)
   The obligation's substance landed as: the OW26 pin test racing
   authored inputs into the failure window and asserting
   charged/settled/W-advances directly; the three refusal tests'
@@ -1125,7 +1160,13 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   authors: a settled-contract barrier targets the AUTHORED seq of
   its own kick — never a server seq, which derived echoes inflate
   (protocol §4's client-use sentence was always the contract; the
-  helper enforces it).
+  helper enforces it). The lesson is also PINNED in-suite
+  (2026-08-15, from the Phase-6 independent review): every barrier
+  waits for the trailing derived echo to land BEFORE reading its
+  target, because pre-echo a `serverSeq`-degraded target is correct
+  by accident and the whole suite stayed green under that
+  degradation; post-echo the degraded arithmetic times out at every
+  barrier (mutation-verified red at all four sites, green restored).
 
 - OW27 — binding-layer event/binding backpressure shaping (the
   Phase-6 plan bullet's third item, FLAGGED as a design fork rather
@@ -1791,7 +1832,9 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   after a restart surfaces the same loud error (nothing further is
   lost — its navigation already happened), and the throw is the
   first deterministic thrower on a DEMANDED effect node, exposing
-  the pre-existing OW26 scheduler wedge above;
+  the pre-existing OW26 scheduler wedge above (as recorded at the
+  time; DISCHARGED with Phase 6 as an observer artifact, not a
+  scheduler wedge — see the OW26 row);
   (P1-4) the ack WIRE SHAPE (`acks[nonce]` map vs protocol.md §5's
   scalar `{ ackedNonce }`) was PENDING OWNER RATIFICATION — neither
   the spec nor the implementation was touched; the plan doc's
@@ -2061,6 +2104,26 @@ PR):
   rides the ordinary suite.
 - OW26's discharge and the OW27 flag are recorded in their register
   rows above (§3).
+
+Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
+
+- OW26's row: the computed-control arm reconciled (observer
+  read-timing, probed at base and head) and the flush-deadline
+  residual moved INTO the register (it had lived only in the PR
+  body); the standing lesson is now pinned in-suite — every
+  kick-and-await-W barrier in `executor-effect-channel.test.ts` reads
+  its target after the trailing echo, so the `serverSeq` regression
+  class is deterministically red (mutation-verified at all four
+  barrier sites).
+- serving-loop §5's env-knob sentence gained +1 binding clause: the
+  outstanding-effect cap's env parse is FAIL-CLOSED (literal `0` is
+  the only opt-out; garbage/negative → default 16, warned). Pin:
+  `packages/toolshed/lib/server-execution.test.ts`
+  (`serverExecutionPolicyFromEnv`; the pre-fix parser mapped garbage
+  to unbounded — mutation-verified red).
+- §7's `push.*` counters are DEFINED as sessions EVALUATED per group
+  (an ordering witness, not delivered frames) — the exported type's
+  doc said "sends"; corrected, no counter change.
 
 ## 4. Standing rule
 
