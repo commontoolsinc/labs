@@ -3,6 +3,7 @@
  * navigation, and scroll clamping. Kept free of terminal I/O so the navigation
  * model can be unit-tested without a TTY.
  */
+
 import type { Document, StructureNode } from "./model.ts";
 import type { Match } from "./render.ts";
 import { cpLen } from "./ansi.ts";

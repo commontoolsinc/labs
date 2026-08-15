@@ -5,6 +5,7 @@
  * cursor-free pager behavior lives in view-session.test.ts; the pure edit
  * engine is covered in view-editbuffer.test.ts.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, promptText } from "./view-helpers.ts";
 import { highlightDocument } from "../lib/view/languages/typescript/parse.ts";

@@ -4,6 +4,7 @@
  * buffer), and refusing to discard unsaved edits. A fake {@link FileGateway}
  * stands in for the filesystem so this stays pure.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";

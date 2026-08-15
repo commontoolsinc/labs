@@ -9,6 +9,7 @@
  * displayed lines may be a rendered projection. The diff source (in
  * `diffedit.ts`) maps the single editable text back onto the files it touches.
  */
+
 import type { Document, Line, ViewMode } from "./model.ts";
 import type { DiffHunk, DiffModel } from "./diff.ts";
 import type { LineEndingProvenance } from "./editbuffer.ts";

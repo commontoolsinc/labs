@@ -9,6 +9,7 @@
  * PagerDeps} so the driver's control flow can be exercised without a real TTY;
  * {@link realPagerDeps} supplies the genuine Deno calls.
  */
+
 import { CSI, term } from "./ansi.ts";
 import type { Document } from "./model.ts";
 import { decodeKeys } from "./keys.ts";

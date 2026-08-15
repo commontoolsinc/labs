@@ -10,6 +10,7 @@
  * avoid pulling the heavy `ast/call-kind.ts` graph into the pager. A unit test
  * (`test/view/vocab.test.ts`) pins them against the transformer source.
  */
+
 import {
   COMMONFABRIC_BUILDER_EXPORT_NAMES,
   COMMONFABRIC_CALL_EXPORT_NAMES,

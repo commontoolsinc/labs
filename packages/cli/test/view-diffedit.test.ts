@@ -4,6 +4,7 @@
  * resurrected, and saving splices the edited lines back into the underlying
  * files. A diff matching no file on disk is read-only.
  */
+
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { parseDiff } from "../lib/view/diff.ts";

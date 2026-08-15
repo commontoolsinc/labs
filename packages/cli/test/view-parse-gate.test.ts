@@ -14,6 +14,7 @@
  *   - safe: metadata extraction stays intact on malformed input.
  *   - describeInitializer: an initializer is described by its first line.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import {
   createHighlighter,

@@ -6,6 +6,7 @@
  * {@link StructureNode} tree any language produces — so the TypeScript and JSON
  * languages share it. Markdown, whose hunk navigation is heading-based, does not.
  */
+
 import type { Definition, StructureNode } from "./model.ts";
 import type { HunkStructureContext } from "./languages/language.ts";
 import { lineIndexOf } from "./lines.ts";

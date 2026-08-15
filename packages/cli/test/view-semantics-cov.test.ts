@@ -5,6 +5,7 @@
  * small parsing helpers (JSONC stripping, extension classification, real-path
  * containment) that the canonical suite reaches only incidentally.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { expect } from "@std/expect";
 import { join } from "@std/path";

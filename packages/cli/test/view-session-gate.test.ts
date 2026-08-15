@@ -9,6 +9,7 @@
  * specific targets that carry only a start offset (a dependency reference) or no
  * offset at all (a plain use reference), which drive each fallback.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";

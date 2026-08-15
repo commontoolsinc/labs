@@ -6,6 +6,7 @@
  * and its diff-hunk navigation is heading-based rather than the generic node
  * remap, so {@link hunkStructure} routes to {@link markdownHeadingNodes}.
  */
+
 import type { StructureNode } from "../../model.ts";
 import type { HunkStructureContext, Language } from "../language.ts";
 import { utf8Decoder } from "../decoder.ts";

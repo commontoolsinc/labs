@@ -8,6 +8,7 @@
  * original diff, a missing workspace file, a hunk with no room to expand, the
  * read-only (no-disk) source, and the defensive guards in `save`.
  */
+
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import { join } from "@std/path";

@@ -4,6 +4,7 @@
  * These paths are exercised directly on the returned EditableSource so each
  * conditional branch is asserted on its real output.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";

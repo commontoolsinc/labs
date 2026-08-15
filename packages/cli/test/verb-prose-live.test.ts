@@ -11,6 +11,7 @@
  * actually lands. A fixture asserting those positions by hand would agree with
  * any implementation, the one that loses the prose included.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

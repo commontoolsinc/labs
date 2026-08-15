@@ -5,6 +5,7 @@
  * the renderer. `pager.ts` drives it against a real TTY, but it is fully
  * exercisable from tests by feeding keys and inspecting `view()`.
  */
+
 import type {
   Document,
   Line,

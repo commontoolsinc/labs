@@ -6,6 +6,7 @@
  * and children arrive as cells rather than as plain values. A renderer that
  * cannot follow those cells produces a bare tag with nothing inside it.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

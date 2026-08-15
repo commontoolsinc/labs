@@ -2,6 +2,7 @@
  * A non-idempotent accumulator WITHOUT expectNonIdempotent. The detected
  * violation must FAIL the test (the long-standing default behavior).
  */
+
 import { assert, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

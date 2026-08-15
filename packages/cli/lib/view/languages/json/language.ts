@@ -7,6 +7,7 @@
  * tree of object keys, so its diff-hunk navigation reuses the generic {@link
  * remapStructure} the TypeScript language also uses.
  */
+
 import type { Language } from "../language.ts";
 import { utf8Decoder } from "../decoder.ts";
 import { remapStructure } from "../../diffremap.ts";
