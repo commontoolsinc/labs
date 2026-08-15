@@ -885,7 +885,10 @@ describe("stage G outbox + sqlite discharge", () => {
   it("OW15: a DECLARED userless row delivers — the target stamps firedAt = { session: 'server' } with NO user; undeclared userless stays refused (the floor negatives)", async () => {
     const ow15Stream = { id: "of:ow15-stream", path: ["events"] };
     const ow15Sidecar = streamEntriesDocId(ow15Stream);
-    const ow15UndeclaredStream = { id: "of:ow15-undeclared", path: [] as string[] };
+    const ow15UndeclaredStream = {
+      id: "of:ow15-undeclared",
+      path: [] as string[],
+    };
     const ow15UndeclaredSidecar = streamEntriesDocId(ow15UndeclaredStream);
     insertExecutionOutboxRows(engine, {
       branch: "",

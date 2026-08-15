@@ -4,7 +4,10 @@ import { z } from "zod";
 import { resolveGitSha } from "@/lib/build-info.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { DashRoute, IndexRoute, StatsRoute } from "./health.routes.ts";
-import { getSlowQueries } from "@commonfabric/memory/v2/server";
+import {
+  getPushPriorityStats,
+  getSlowQueries,
+} from "@commonfabric/memory/v2/server";
 import { getServingLoopStats } from "@commonfabric/runner/executor/stats";
 import {
   getLoggerCountsBreakdown,
@@ -45,15 +48,21 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
   // The serving loop's §7 counters
   // (docs/specs/server-side-execution/serving-loop.md §7): present only
   // when an ExecutorHost runs in this process (the ON arm); the OFF-arm
-  // response is byte-identical to today.
+  // response is byte-identical to today. Phase 6 nests the memory
+  // server's push-priority counters (protocol.md §3) under the same
+  // ON-arm-only block — all-zero OFF by construction, but the block's
+  // very presence stays flag-gated so the OFF response never changes.
   const servingLoop = getServingLoopStats();
+  const push = getPushPriorityStats();
   return c.json({
     timestamp: Date.now(),
     serverStart: serverStartTimestamp,
     logCounts: getLoggerCountsBreakdown(),
     timingStats: getTimingStatsBreakdown(),
     slowQueries: [...getSlowQueries()],
-    ...(servingLoop === undefined ? {} : { servingLoop }),
+    ...(servingLoop === undefined ? {} : {
+      servingLoop: { ...servingLoop, ...(push === undefined ? {} : { push }) },
+    }),
   }, HttpStatusCodes.OK);
 };
 

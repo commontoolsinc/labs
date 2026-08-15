@@ -1001,8 +1001,22 @@ the durable rows of §5 carry APPENDS, never effect state).
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.
-- Per-space budget hooks live here (Phase 6): outstanding-effect caps,
-  egress rate.
+- Per-space budget hooks live here (Phase 6 — LANDED): a cap on
+  DISPATCHED-but-unsettled network effects (`maxOutstandingEffects` —
+  README §3.8's "outstanding LLM calls") and an egress-rate token
+  bucket (`egressRatePerSecond`, burst = one second's tokens), both
+  `SpaceServerPolicy` knobs threaded from the toolshed bootstrap's env
+  (`SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS`, default 16;
+  `SERVER_EXECUTION_EGRESS_RATE_PER_S`, default unpaced;
+  `SERVER_EXECUTION_FLUSH_DEADLINE_MS` tunes §3's T_flush the same
+  way). The gate holds DISPATCH only: the in-flight dedupe entry exists
+  from admission, so a re-admit during a hold attaches instead of
+  double-firing. LOCAL kinds (sqlite-query — no egress) bypass the
+  gate. On park/close, held dispatches DROP — the crash-equivalent
+  posture (memo re-miss re-fires on re-activation); firing them would
+  egress work for a dead runtime. Holds are counted
+  (`outbox.budgetDeferrals`, §7) — growth under load is the budget
+  working, not a failure.
 
 ## 6. Recovery, precisely
 
@@ -1052,8 +1066,10 @@ structureLoadRearmed, watermarkClamped,
 unstampedSealRefusals, foreignWriteRefusals, foreignEngineFailures,
 watermarkLag, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
-{hits, misses, inflight}, outbox: {queued, completed, failed}, lease:
-{held, lost} }` (`structureLoadFailures`/`structureLoadDeferred`
+{hits, misses, inflight}, outbox: {queued, completed, failed,
+budgetDeferrals}, lease:
+{held, lost}, push: {prioritizedSessions, followerSessions,
+mixedFlushes} }` (`structureLoadFailures`/`structureLoadDeferred`
 count demanded-structure loads that threw / could not land yet —
 never-a-piece id classes are EXCLUDED from piece demand and count
 nothing, RULED 2026-08-07; `structureLoadFailures` also counts a
@@ -1082,7 +1098,11 @@ foreign-engine resolutions that failed and were isolated per space —
 a growing count names a foreign store that persistently cannot open,
 never a home-space outage) (`effectAcks` counts
 effect-channel ack writes, so the
-§3 amplification metric is computable from counters alone). Every
+§3 amplification metric is computable from counters alone;
+`outbox.budgetDeferrals` counts Phase-6 budget dispatch holds — §5;
+the `push` block is the memory server's Phase-6 push-priority
+counters (protocol.md §3), nested under `servingLoop` in the health
+route so the OFF-arm response never changes shape). Every
 Phase gate in the plan reads these counters; tests MUST assert on
 counters, not logs.
 

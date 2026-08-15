@@ -31,8 +31,13 @@
 //   consequences, a chain with NO acting session, and an acting
 //   session NOT connected to the computing space (LT3) all raise the
 //   runtime error, write no intent anywhere, and the charging wave
-//   settles (a racing input CAN wedge the demanded-effect retry — the
-//   flagged OW26 scheduler adjacency, see the no-context test);
+//   settles; the refusal asserts sit behind deterministic
+//   kick-and-await-W barriers (OW26 root-caused and discharged in
+//   Phase 6: the recorded "wedge" was the reverted barriers' target
+//   arithmetic racing the loop's own derived echoes, plus an
+//   unrelated-doc input that never re-dirtied the thrower — the OW26
+//   pin test races inputs into the failure window and asserts the
+//   charged/settled/W-advances posture directly);
 // - enactment failure leaves the intent UN-ACKED (protocol.md §5's
 //   enact-then-ack ordering): the ack follows enactment SUCCESS, a
 //   failed enactment retracts the enacted-nonce record, and the entry
@@ -106,6 +111,33 @@ const waitUntil = async (
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+};
+
+/** The highest AUTHORED seq that wrote `docId` — the only seq class a
+ * kick-and-await-W barrier may target (protocol.md §4: settled for a
+ * client = W ≥ seq of its own AUTHORED commit). Deriving the target
+ * from `Engine.serverSeq` instead is the OW26 trap: the loop's own
+ * derived wave echoes ride the same counter, coverage never claims a
+ * trailing echo on a quiet space (the advance is input-driven and
+ * `#drainFeed` skips self-echoes), so a barrier that raced one froze
+ * "deterministically" — the recorded wedge, root-caused Phase 6. */
+const authoredSeqOf = (engine: Engine.Engine, docId: string): number => {
+  const commits = Engine.selectCommitsSince(engine, {
+    fromSeq: 0,
+    limit: 1000,
+  });
+  let seq = 0;
+  for (const commit of commits) {
+    const commitClass = (commit as { commitClass?: string }).commitClass ??
+      (commit as { class?: string }).class;
+    if (commitClass !== "authored") continue;
+    if (
+      (commit.writes as Array<{ id: string }>).some((w) => w.id === docId)
+    ) {
+      seq = Math.max(seq, commit.seq);
+    }
+  }
+  return seq;
 };
 
 /** The stored effects instance of one (principal, sessionId) — read
@@ -312,6 +344,35 @@ describe("Phase 4 client-effect channel", () => {
       expect((await tx.commit()).error).toBeUndefined();
     }
     return { compiled, argument, result };
+  };
+
+  /** The deterministic kick-and-await-W barrier (Phase 6, OW26's owed
+   * replacement for the bounded refusal-test drains): commit a fresh
+   * authored write and wait until the space's watermark covers ITS OWN
+   * authored seq — the settled contract exactly as a client uses it.
+   * The Phase-4 fixer built and reverted this barrier with
+   * `Engine.serverSeq`-derived targets; that arithmetic races the
+   * loop's own derived echo (see `authoredSeqOf`) and was the recorded
+   * OW26 "wedge". With authored-seq targets the barrier is safe — the
+   * probe sweep found no genuine contract stall at any input offset. */
+  const settleAnotherWaveFamily = async (
+    engine: Engine.Engine,
+    kickName: string,
+  ): Promise<void> => {
+    const kick = clientRuntime.getCell<{ n: number }>(
+      space,
+      kickName,
+      undefined,
+    );
+    await kick.sync();
+    const tx = clientRuntime.edit();
+    kick.withTx(tx).set({ n: Date.now() });
+    expect((await tx.commit()).error).toBeUndefined();
+    const kickSeq = authoredSeqOf(engine, kick.getAsNormalizedFullLink().id);
+    await waitUntil(
+      () => (host!.spaceServer(space)?.watermark ?? 0) >= kickSeq,
+      `the watermark to cover the ${kickName} barrier kick (seq ${kickSeq})`,
+    );
   };
 
   it("the served intent (T2 hops 1–4): fire → wave computes navigateTo → the §5 entry lands in the FIRING session's instance, issuedIn stamped, annotations addressing + acting", async () => {
@@ -1409,19 +1470,174 @@ describe("Phase 4 client-effect channel", () => {
       () => (host!.spaceServer(space)?.watermark ?? 0) > 0,
       "the serving loop to settle the kick",
     );
-    // Deliberately NOT the settleAnotherWaveFamily barrier here: an
-    // authored input landing in the tight window after a DEMANDED
-    // effect builtin's failure arms a scheduler liveness wedge — the
-    // failed action's retry parks idle-blocking and STARVES (no second
-    // charge ever appears), every subsequent flush exhausts its
-    // deadline, and W freezes below the new input (observed ≥30s with
-    // no recovery; a throwing `computed` under the IDENTICAL schedule
-    // does not wedge, so the class is the demanded-EFFECT retry park,
-    // not the throw itself). FLAGGED as verification-coverage.md OW26
-    // and in the Phase-4 fixer report — until that scheduler adjacency
-    // is fixed, this test bounds the drain with a fixed settle window
-    // instead of racing an input into the wedge.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The deterministic kick-and-await-W barrier (OW26 RETIRED the
+    // bounded 300 ms drain, Phase 6): a fresh authored wave family
+    // settles — W covers its own authored seq — before the absence
+    // assert, so a late intent write could not hide behind a fixed
+    // window. Safe now that the barrier targets AUTHORED seqs; the
+    // reverted Phase-4 barriers froze on `serverSeq`-derived targets
+    // that included the loop's own derived echoes (the recorded
+    // "wedge", root-caused Phase 6 — see authoredSeqOf).
+    await settleAnotherWaveFamily(engine, "noctx-barrier");
+    const instances = engine.database.prepare(
+      `SELECT scope_key FROM head WHERE id = :id AND op != 'delete'`,
+    ).all({ id: SERVER_EXECUTION_EFFECTS_DOC_ID }) as Array<
+      { scope_key: string }
+    >;
+    for (const row of instances) {
+      const value = Engine.readState(engine, {
+        id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+        scopeKey: row.scope_key,
+      })?.document?.value as SessionEffectsDocValue | undefined;
+      expect(value?.entries ?? []).toEqual([]);
+    }
+    cancelDemand();
+  });
+
+  it("the OW26 pin (Phase 6): authored inputs racing a DEMANDED effect's failure window — the erroring effect is charged, the space settles, W covers every authored seq", async () => {
+    // The verification-coverage.md OW26 recorded repro, re-run to root
+    // cause and pinned. A statically-demanded navigateTo throws
+    // builtins.md §4's no-context error; authored inputs race the
+    // failure window (one re-arming the thrower itself, one landing
+    // within milliseconds of the re-throw). The recorded symptoms all
+    // traced to the OBSERVER, not the scheduler:
+    // - "W freezes below the new input": the reverted barriers
+    //   targeted `Engine.serverSeq`, which counts the loop's own
+    //   derived wave echoes; coverage never claims a trailing echo on
+    //   a quiet space (input-driven advance; #drainFeed's self-echo
+    //   skip), so the barrier — not W's contract — hung. Deterministic
+    //   for this fast-settling thrower, intermittent (~1-in-4) when
+    //   the echo raced the target read, disarmed by a ≥500 ms gap.
+    // - "no further charge ever appears": the recorded racing input
+    //   wrote an UNRELATED doc; the thrower's registered reads are
+    //   path-granular, so it legitimately never re-ran.
+    // The erroring-demanded-effect posture already matches the
+    // erroring-derivation posture — charged, settled, W advances —
+    // which this pin asserts under the exact racing schedule (offset
+    // sweeps 0–250 ms, overlapping commits included, found no genuine
+    // contract stall).
+    ({ manager: clientManager, runtime: clientRuntime } = openClient(
+      aliceSigner,
+    ));
+    const engine = await server.engineForSpace(space);
+    const STATIC_NAVIGATE_PATTERN = [
+      "import { navigateTo, pattern } from 'commonfabric';",
+      "export default pattern<",
+      "  { target: unknown },",
+      "  { nav: boolean }",
+      ">(({ target }) => ({ nav: navigateTo(target) }));",
+    ].join("\n");
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: STATIC_NAVIGATE_PATTERN }],
+    }, { space });
+    const argument = clientRuntime.getCell<{ target: unknown }>(
+      space,
+      "ow26-arg",
+      undefined,
+    );
+    const destination = clientRuntime.getCell<{ label: string }>(
+      space,
+      "ow26-destination",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "ow26-result",
+      compiled.resultSchema,
+    );
+    await argument.sync();
+    await destination.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      destination.withTx(seed).set({ label: "somewhere" });
+      argument.withTx(seed).set({ target: destination as never });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    const servedErrors: unknown[] = [];
+    host = newHost(undefined, (runtime) => {
+      runtime.scheduler.onError((error) => {
+        servedErrors.push(error);
+      });
+    });
+    // Kick the serving side (activation + demand): an authored write.
+    const kick = clientRuntime.getCell<{ n: number }>(
+      space,
+      "ow26-kick",
+      undefined,
+    );
+    await kick.sync();
+    {
+      const tx = clientRuntime.edit();
+      kick.withTx(tx).set({ n: 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    // The §4 error is raised and charged to the served run…
+    await waitUntil(
+      () =>
+        servedErrors.some((error) =>
+          /no firing-event context/.test(String(error))
+        ),
+      "the builtins.md §4 no-context error to be charged to the run",
+    );
+    // …the charging wave settles (the baseline: the charging wave
+    // itself never wedged)…
+    await waitUntil(
+      () => (host!.spaceServer(space)?.watermark ?? 0) > 0,
+      "the serving loop to settle the kick",
+    );
+    // …then an input DIRTIES the demanded effect itself (a new target
+    // link), forcing the erroring re-run whose failure window the next
+    // input races…
+    const destination2 = clientRuntime.getCell<{ label: string }>(
+      space,
+      "ow26-destination-2",
+      undefined,
+    );
+    await destination2.sync();
+    {
+      const tx = clientRuntime.edit();
+      destination2.withTx(tx).set({ label: "elsewhere" });
+      argument.withTx(tx).set({ target: destination2 as never });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    // …and the RACING authored input lands in the tight window after
+    // that failure (back-to-back commits land it well inside the
+    // recorded <500 ms arming window).
+    {
+      const tx = clientRuntime.edit();
+      kick.withTx(tx).set({ n: 2 });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    // The settled contract, with the CORRECT arithmetic: W must cover
+    // the racing input's own AUTHORED seq (never `Engine.serverSeq`,
+    // which the loop's derived echoes inflate — the recorded freeze).
+    const racedSeq = authoredSeqOf(engine, kick.getAsNormalizedFullLink().id);
+    await waitUntil(
+      () => (host!.spaceServer(space)?.watermark ?? 0) >= racedSeq,
+      "the watermark to cover the input racing the failure window",
+      15_000,
+    );
+    // The erroring-derivation posture, not silence: the re-armed
+    // demanded effect's re-run is CHARGED again (the recorded "no
+    // further charge" came from an unrelated-doc input that never
+    // re-dirtied the thrower — a re-pointed target does).
+    expect(
+      servedErrors.filter((error) =>
+        /no firing-event context/.test(String(error))
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+    // And no intent leaked from any of the erroring runs.
     const instances = engine.database.prepare(
       `SELECT scope_key FROM head WHERE id = :id AND op != 'delete'`,
     ).all({ id: SERVER_EXECUTION_EFFECTS_DOC_ID }) as Array<
@@ -1501,14 +1717,13 @@ describe("Phase 4 client-effect channel", () => {
       },
       "the sessionless event's handler consequence to land",
     );
-    // Bounded settle, then assert: no NEW intent anywhere — not in
-    // alice's instance, not in a service-keyed one. NOT a
-    // kick-and-await-W barrier: an authored input racing the window
-    // right after the §4 throw intermittently arms the OW26
-    // demanded-effect retry wedge (see the no-context test) and
-    // freezes W — the fixed drain stays until that scheduler
-    // adjacency is fixed.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The deterministic kick-and-await-W barrier (OW26 RETIRED the
+    // bounded 300 ms drain, Phase 6), then assert: no NEW intent
+    // anywhere — not in alice's instance, not in a service-keyed one.
+    // The Phase-4 attempt froze ~1-in-4 on `serverSeq`-derived targets
+    // racing the wave echo; authored-seq targets are safe (see the
+    // no-context test).
+    await settleAnotherWaveFamily(engine, "sessionless-barrier");
     expect(
       intentsOf(engine, aliceSigner.did(), clientManager.id).length,
     ).toBe(intentsBefore);
@@ -1583,9 +1798,9 @@ describe("Phase 4 client-effect channel", () => {
       },
       "the LT3 event's handler consequence to land",
     );
-    // Bounded settle (not a kick-and-await-W barrier — the OW26 wedge;
-    // see the sessionless test above).
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The deterministic kick-and-await-W barrier (OW26 RETIRED the
+    // bounded 300 ms drain, Phase 6; see the sessionless test above).
+    await settleAnotherWaveFamily(engine, "lt3-barrier");
     expect(
       intentsOf(
         engine,

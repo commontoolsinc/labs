@@ -69,5 +69,10 @@ installFakeClock({
     // auto-advance expires the lease TTL instantly and turns the renew
     // cadence + reactivation backoff into a runaway.
     "executor-cross-space",
+    // The Phase-6 outbox-budget suite: the egress-rate token bucket's
+    // pacing sleeps are wall-clock policy, and the auto-advance clock's
+    // virtual timers diverge from the bucket's time source (Date.now) —
+    // the rate gate would regenerate its refill sleep unboundedly.
+    "executor-outbox-budget",
   ],
 });

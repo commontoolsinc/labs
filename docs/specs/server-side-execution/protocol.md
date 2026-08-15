@@ -558,6 +558,18 @@ the target's `eventWatermark` makes processing exactly-once.
   Bookkeeping MUST NOT ride the commit stream at all (lease renewals are
   table updates; watermarks piggyback on derived commits), so in practice
   priority is about big authored blobs vs small derived values.
+  *(LANDED Phase 6 — the implementation shape, stated so no one infers a
+  stronger one: each session gets ONE frame per flush cycle, so priority
+  orders the serialized per-session evaluation/send chain — a two-phase
+  fan-out runs every connection's derived-subscribed sessions before any
+  bulk-only session — never the content of a frame; a session whose one
+  frame mixes derived and bulk carries the whole frame at derived
+  priority, because frames apply atomically and splitting one would put
+  the catch-up marker ahead of undelivered covered docs — an INV-5
+  hazard. Counters: `servingLoop.push.{prioritizedSessions,
+  followerSessions, mixedFlushes}`, all-zero in the OFF arm by
+  construction; the deterministic order pin is
+  `packages/memory/test/v2-push-priority.test.ts`.)*
 - Self-echo: SpaceServer skips its own `derived` commits on receipt
   (serving-loop.md §3).
 

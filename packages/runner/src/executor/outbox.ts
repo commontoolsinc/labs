@@ -58,6 +58,33 @@ export interface SealedEffectBatch {
   context: WaveRunContext | undefined;
 }
 
+/** Per-space egress budgets (Phase 6 — serving-loop.md §5's
+ * "outstanding-effect caps, egress rate"; README §3.8's multi-tenancy
+ * contract: a runaway pattern degrades only its own space). Applied to
+ * NETWORK effect kinds only — a local kind (sqlite-query) egresses
+ * nothing and throttling it would only starve local DB work. Both
+ * knobs default UNBOUNDED (today's behavior); the toolshed bootstrap
+ * sets production values from env. */
+export type OutboxBudgetPolicy = {
+  /** Cap on DISPATCHED-but-unsettled network effects. Admitted effects
+   * over the cap hold their dispatch (FIFO wake order) until a slot
+   * frees; the in-flight dedupe entry exists from ADMISSION either way,
+   * so re-admits attach instead of double-firing. */
+  maxOutstandingEffects?: number;
+  /** Egress pacing: network-effect dispatches per second (token bucket
+   * with burst = one second's tokens, minimum 1). */
+  egressRatePerSecond?: number;
+  /** Test clock (defaults to Date.now). */
+  now?: () => number;
+};
+
+/** Local (non-egress) effect kinds exempt from the budget gate — an
+ * implementation choice FLAGGED in the Phase-6 PR: the spec names the
+ * budget's targets by example ("outstanding LLM calls, egress rate"),
+ * and sqlite-query is the one shipped effect kind with no network
+ * egress. */
+const LOCAL_EFFECT_KINDS = new Set(["sqlite-query"]);
+
 export class SpaceOutbox {
   readonly #stats: ServingLoopStats;
   readonly #server: MemoryServer;
@@ -102,6 +129,19 @@ export class SpaceOutbox {
    * effect (fetch/llm callbacks return synchronously after starting
    * it), and outbox.completed counts only when it settles. */
   #capturing: Array<Promise<unknown>> | undefined;
+  // Per-space egress budgets (Phase 6, serving-loop.md §5).
+  readonly #budget: OutboxBudgetPolicy | undefined;
+  readonly #now: () => number;
+  /** DISPATCHED-but-unsettled network effects (the outstanding cap's
+   * subject; local kinds bypass the gate and are never counted). */
+  #outstanding = 0;
+  /** FIFO of admitted-but-held dispatch starters, woken one per freed
+   * slot (and drained wholesale on close — the park path). */
+  readonly #dispatchWaiters: Array<() => void> = [];
+  /** Token bucket for the egress rate (burst = one second's tokens). */
+  #egressTokens = 0;
+  #egressRefilledAt = 0;
+  #closed = false;
 
   constructor(options: {
     stats: ServingLoopStats;
@@ -117,6 +157,8 @@ export class SpaceOutbox {
     /** The host's process-lifetime localSeq counter, shared with the
      * wave sink (the replay-keying discipline — engine-wave-sink.ts). */
     localSeqRef: { value: number };
+    /** Per-space egress budgets (Phase 6); absent = unbounded. */
+    budget?: OutboxBudgetPolicy;
   }) {
     this.#stats = options.stats;
     this.#server = options.server;
@@ -124,6 +166,108 @@ export class SpaceOutbox {
     this.#space = options.space;
     this.#sessionId = options.sessionId;
     this.#localSeqRef = options.localSeqRef;
+    this.#budget = options.budget;
+    this.#now = options.budget?.now ?? Date.now;
+    this.#egressRefilledAt = this.#now();
+    this.#egressTokens = this.#burstCapacity();
+  }
+
+  #burstCapacity(): number {
+    const rate = this.#budget?.egressRatePerSecond;
+    if (rate === undefined || rate <= 0) return Number.POSITIVE_INFINITY;
+    return Math.max(1, Math.floor(rate));
+  }
+
+  /** Continuous refill up to the burst capacity. */
+  #refillEgressTokens(): void {
+    const rate = this.#budget?.egressRatePerSecond;
+    if (rate === undefined || rate <= 0) return;
+    const now = this.#now();
+    const elapsed = Math.max(0, now - this.#egressRefilledAt);
+    if (elapsed <= 0) return;
+    this.#egressTokens = Math.min(
+      this.#burstCapacity(),
+      this.#egressTokens + (elapsed / 1000) * rate,
+    );
+    this.#egressRefilledAt = now;
+  }
+
+  /** Ms until one egress token is available (0 when unpaced). */
+  #msUntilEgressToken(): number {
+    const rate = this.#budget?.egressRatePerSecond;
+    if (rate === undefined || rate <= 0) return 0;
+    this.#refillEgressTokens();
+    if (this.#egressTokens >= 1) return 0;
+    return Math.ceil(((1 - this.#egressTokens) / rate) * 1000);
+  }
+
+  /** Whether the budget gate applies to this effect (network kinds
+   * only). */
+  #budgeted(effect: PostCommitSideEffect): boolean {
+    if (this.#budget === undefined) return false;
+    if (
+      this.#budget.maxOutstandingEffects === undefined &&
+      (this.#budget.egressRatePerSecond === undefined ||
+        this.#budget.egressRatePerSecond <= 0)
+    ) {
+      return false;
+    }
+    return !LOCAL_EFFECT_KINDS.has(effect.kind);
+  }
+
+  /**
+   * Hold until a dispatch slot AND an egress token are available (FIFO
+   * wake for the cap; timer wake for the rate). Returns false when the
+   * outbox closed while holding — the park path: the deferred dispatch
+   * is DROPPED, the sanctioned crash-equivalent posture (the effect
+   * re-misses from its memo key on re-activation; firing against a
+   * dying runtime would egress work for a dead space).
+   */
+  async #acquireDispatchSlot(): Promise<boolean> {
+    while (true) {
+      if (this.#closed) return false;
+      const cap = this.#budget?.maxOutstandingEffects;
+      if (cap !== undefined && this.#outstanding >= cap) {
+        this.#stats.outbox.budgetDeferrals += 1;
+        await new Promise<void>((resolve) =>
+          this.#dispatchWaiters.push(resolve)
+        );
+        continue;
+      }
+      const waitMs = this.#msUntilEgressToken();
+      if (waitMs > 0) {
+        this.#stats.outbox.budgetDeferrals += 1;
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      if (this.#egressTokens !== Number.POSITIVE_INFINITY) {
+        this.#egressTokens = Math.max(0, this.#egressTokens - 1);
+      }
+      this.#outstanding += 1;
+      return true;
+    }
+  }
+
+  #releaseDispatchSlot(): void {
+    this.#outstanding = Math.max(0, this.#outstanding - 1);
+    this.#dispatchWaiters.shift()?.();
+  }
+
+  /** DIAGNOSTIC (tests): dispatched-but-unsettled network effects. */
+  get outstandingCount(): number {
+    return this.#outstanding;
+  }
+
+  /** Park/teardown (Phase 6): admitted-but-held dispatches are dropped
+   * — every waiter wakes into the closed check — and nothing new
+   * dispatches. In-flight work is not awaited (park never awaits the
+   * network), exactly the pre-budget posture. */
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    while (this.#dispatchWaiters.length > 0) {
+      this.#dispatchWaiters.shift()?.();
+    }
   }
 
   /** The runtime's async-work observer hook (installed by the
@@ -197,7 +341,18 @@ export class SpaceOutbox {
         if (batch.context !== undefined) {
           this.#carriage.set(key, batch.context);
         }
-        const work = this.#runEffect(key, effect, batch.tx);
+        // The in-flight entry (dedupe/carriage/retirement) exists from
+        // ADMISSION; only the DISPATCH defers behind the Phase-6 budget
+        // gate — a re-admit during the hold attaches to this entry
+        // instead of double-firing (the eager-registration contract).
+        const work = this.#budgeted(effect)
+          ? this.#acquireDispatchSlot().then((acquired) =>
+            acquired
+              ? this.#runEffect(key, effect, batch.tx)
+                .finally(() => this.#releaseDispatchSlot())
+              : undefined
+          )
+          : this.#runEffect(key, effect, batch.tx);
         const retirement = work.catch(() => undefined)
           .then(() => this.#awaitRetireBarriers(key))
           .finally(() => {

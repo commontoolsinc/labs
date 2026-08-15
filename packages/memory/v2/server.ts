@@ -191,6 +191,33 @@ const recordSlowQueryDuration = (
 /** Returns the last N slow query/watch operations (>100ms). */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
+/**
+ * Push-priority counters (server-execution v2 Phase 6 — protocol.md §3's
+ * "push priority" contract): when one flush batch carries BOTH derived
+ * novelty and other content, sessions subscribed to the derived docs are
+ * evaluated and sent first; everything else follows. The counters make
+ * the reorder observable (testing.md §4: gates assert counters, not
+ * logs):
+ * - `mixedFlushes` — flush batches where the split was non-vacuous
+ *   (both a prioritized and a follower group existed);
+ * - `prioritizedSessions` / `followerSessions` — session sends in each
+ *   group across those mixed batches.
+ * All-zero in the OFF arm by construction: only the serving loop's wave
+ * commits classify dirty keys as derived. Registered by the Server
+ * instance (last registration wins — one co-hosted server per process);
+ * surfaced under the health route's `servingLoop.push` block.
+ */
+export type PushPriorityStats = {
+  prioritizedSessions: number;
+  followerSessions: number;
+  mixedFlushes: number;
+};
+
+let pushPriorityStatsProvider: (() => PushPriorityStats) | undefined;
+
+export const getPushPriorityStats = (): PushPriorityStats | undefined =>
+  pushPriorityStatsProvider?.();
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -830,14 +857,28 @@ class Connection {
     space: string,
     dirtyIds?: ReadonlySet<string>,
     dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
-  ): Promise<void> {
+    // Push priority (Phase 6, protocol.md §3): when the flush batch
+    // carries derived novelty, the fan-out runs this connection TWICE —
+    // a "prioritized" phase over sessions subscribed to the derived
+    // keys, then a "followers" phase over the rest — so derived frames
+    // clear the whole serialized send chain ahead of bulk evaluation.
+    // A session's single frame still carries its whole covered batch:
+    // priority orders the chain, never frame content or catch-up-marker
+    // semantics. Absent phase = today's single pass. Returns the number
+    // of sessions this call evaluated (the split-vacuity witness).
+    phase?: {
+      derivedDirty: ReadonlySet<string>;
+      group: "prioritized" | "followers";
+    },
+  ): Promise<number> {
     if (this.#closed) {
-      return;
+      return 0;
     }
 
+    let processed = 0;
     for (const { space: sessionSpace, sessionId } of this.#sessions.values()) {
       if (this.#closed) {
-        return;
+        return processed;
       }
       // A construction intentionally reuses one authenticated session id in
       // every space. Dirty refresh is still space-specific: syncing that id
@@ -846,6 +887,20 @@ class Connection {
       if (sessionSpace !== space) {
         continue;
       }
+      if (phase !== undefined) {
+        // Membership is re-read per phase; a prioritized session keeps
+        // tracking its delivered derived docs (trackedIds persist), so
+        // the phases stay disjoint across the back-to-back calls.
+        const prioritized = this.server.sessionTracksAny(
+          space,
+          sessionId,
+          phase.derivedDirty,
+        );
+        if (prioritized !== (phase.group === "prioritized")) {
+          continue;
+        }
+      }
+      processed += 1;
       const effect = await this.server.syncSessionForConnection(
         space,
         sessionId,
@@ -859,7 +914,7 @@ class Connection {
         if (effect !== null) {
           this.server.rollbackUndeliveredSync(space, sessionId, effect);
         }
-        return;
+        return processed;
       }
       // ACL revocation can remove the session while watch evaluation awaits
       // its engine. Never emit the already-computed effect after that removal
@@ -886,6 +941,7 @@ class Connection {
         }
       }
     }
+    return processed;
   }
 
   close(): void {
@@ -913,6 +969,23 @@ export class Server {
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
+  // Push priority (Phase 6, protocol.md §3): the subset of each space's
+  // dirty keys whose LATEST novelty came from a `derived` commit — a
+  // PARALLEL annotation, deliberately not a `DirtyOrigin` field: the
+  // origin record is load-bearing for own-echo suppression and is
+  // DELETED on mixed provenance (CT-1927), which must not erase the
+  // priority class. Populated only by `noteExecutorCommit` (the wave
+  // commits), consumed and cleared with the dirty batch, re-merged by
+  // the requeue arm on fan-out failure. A key later re-dirtied by an
+  // authored commit stays in the set — the doc still carries derived
+  // novelty the subscriber has not seen, and priority is best-effort
+  // ordering, never a correctness gate.
+  #derivedDirtyBySpace = new Map<string, Set<string>>();
+  #pushPriorityStats: PushPriorityStats = {
+    prioritizedSessions: 0,
+    followerSessions: 0,
+    mixedFlushes: 0,
+  };
   #refreshTurn: ArmedTurn | null = null;
   #refreshing: Promise<void> | null = null;
   // Transactions and fan-out share one publication turn per space. A verdict
@@ -1027,6 +1100,40 @@ export class Server {
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+    // Push-priority counters (Phase 6): module-level provider for the
+    // health route, same last-registration-wins posture as the runner's
+    // serving-loop stats registry (one co-hosted server per process).
+    pushPriorityStatsProvider = () => this.pushPriorityStats();
+  }
+
+  /** A copy of the push-priority counters (Phase 6, protocol.md §3). */
+  pushPriorityStats(): PushPriorityStats {
+    return { ...this.#pushPriorityStats };
+  }
+
+  /** Whether the session currently tracks (has been delivered / watches)
+   * ANY of `keys` — the flush loop's cheap admission gate, reused by the
+   * push-priority partition (Phase 6). */
+  sessionTracksAny(
+    space: string,
+    sessionId: string,
+    keys: ReadonlySet<string>,
+  ): boolean {
+    const session = this.#sessions.get(space, sessionId);
+    if (session === null) return false;
+    for (const key of keys) {
+      if (session.trackedIds.has(key)) return true;
+    }
+    return false;
+  }
+
+  /** Count one non-vacuous push-priority reorder (Phase 6). Called by the
+   * connection's flush loop when a batch produced BOTH a prioritized and
+   * a follower group. */
+  notePushPrioritySplit(prioritized: number, followers: number): void {
+    this.#pushPriorityStats.mixedFlushes += 1;
+    this.#pushPriorityStats.prioritizedSessions += prioritized;
+    this.#pushPriorityStats.followerSessions += followers;
   }
 
   nowSeconds(): number {
@@ -4025,10 +4132,21 @@ export class Server {
    * skips its own by class + holder — serving-loop.md §3's self-echo).
    */
   noteExecutorCommit(notice: AdmittedCommitNotice): void {
-    this.markSpaceDirty(
-      notice.space,
-      notice.writes.map((write) => toDirtyKey(write.id, write.scopeKey)),
+    const keys = notice.writes.map((write) =>
+      toDirtyKey(write.id, write.scopeKey)
     );
+    // Push priority (Phase 6, protocol.md §3): the wave's derived rows
+    // are the content subscribers wait on — classify their dirty keys so
+    // the flush loop can order sessions carrying them ahead of bulk.
+    if (notice.class === "derived" && keys.length > 0) {
+      let derived = this.#derivedDirtyBySpace.get(notice.space);
+      if (derived === undefined) {
+        derived = new Set();
+        this.#derivedDirtyBySpace.set(notice.space, derived);
+      }
+      for (const key of keys) derived.add(key);
+    }
+    this.markSpaceDirty(notice.space, keys);
     this.#notifyCommitAdmitted(notice);
   }
 
@@ -4403,6 +4521,7 @@ export class Server {
       this.#dirtySpaces.clear();
       this.#dirtyDocsBySpace.clear();
       this.#dirtyOriginsBySpace.clear();
+      this.#derivedDirtyBySpace.clear();
     }
   }
 
@@ -4458,6 +4577,20 @@ export class Server {
 
       pending = undefined;
 
+      // Push priority (Phase 6, protocol.md §3): spaces carrying derived
+      // novelty flush ahead of spaces with only bulk/authored content —
+      // the cross-space half of "derived commits flush first" (the
+      // per-session half is refreshDirty's two-pass). Stable partition:
+      // insertion order is preserved within each group.
+      spaces.sort((left, right) => {
+        const leftDerived = (this.#derivedDirtyBySpace.get(left)?.size ?? 0) > 0
+          ? 0
+          : 1;
+        const rightDerived =
+          (this.#derivedDirtyBySpace.get(right)?.size ?? 0) > 0 ? 0 : 1;
+        return leftDerived - rightDerived;
+      });
+
       for (const space of spaces) {
         await this.withSpacePublicationLock(space, async () => {
           // Removed at its own processing turn (CT-1927): pre-deleting the
@@ -4473,6 +4606,12 @@ export class Server {
           if (dirtyOrigins !== undefined) {
             this.#dirtyOriginsBySpace.delete(space);
           }
+          // Push priority (Phase 6): consume the batch's derived-key
+          // classification with the batch.
+          const derivedDirty = this.#derivedDirtyBySpace.get(space);
+          if (derivedDirty !== undefined) {
+            this.#derivedDirtyBySpace.delete(space);
+          }
           // Fan-out is a scheduled/batched timer decoupled from transact, so it
           // must be its own root span. `root: true` makes that explicit — the
           // context manager propagates the active context into timer callbacks,
@@ -4487,12 +4626,42 @@ export class Server {
                 span.setAttribute("subscriber.count", this.#connections.size);
                 span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
                 try {
-                  for (const connection of this.#connections.values()) {
-                    await connection.refreshDirty(
-                      space,
-                      dirtyIds,
-                      dirtyOrigins,
-                    );
+                  if (derivedDirty !== undefined && derivedDirty.size > 0) {
+                    // Push priority (Phase 6, protocol.md §3): two-phase
+                    // fan-out — every connection's derived-subscribed
+                    // sessions evaluate and send BEFORE any connection's
+                    // bulk-only sessions, so a big authored blob's
+                    // evaluation never heads-of-line a derived frame
+                    // anywhere in the serialized chain.
+                    let prioritized = 0;
+                    for (const connection of this.#connections.values()) {
+                      prioritized += await connection.refreshDirty(
+                        space,
+                        dirtyIds,
+                        dirtyOrigins,
+                        { derivedDirty, group: "prioritized" },
+                      );
+                    }
+                    let followers = 0;
+                    for (const connection of this.#connections.values()) {
+                      followers += await connection.refreshDirty(
+                        space,
+                        dirtyIds,
+                        dirtyOrigins,
+                        { derivedDirty, group: "followers" },
+                      );
+                    }
+                    if (prioritized > 0 && followers > 0) {
+                      this.notePushPrioritySplit(prioritized, followers);
+                    }
+                  } else {
+                    for (const connection of this.#connections.values()) {
+                      await connection.refreshDirty(
+                        space,
+                        dirtyIds,
+                        dirtyOrigins,
+                      );
+                    }
                   }
                 } finally {
                   span.end();
@@ -4543,6 +4712,18 @@ export class Server {
                   currentOrigins.set(id, origin);
                 }
               }
+            }
+            // Push priority (Phase 6): re-merge the consumed batch's
+            // derived classification alongside the requeued ids (union —
+            // a key derived in EITHER batch still carries undelivered
+            // derived novelty).
+            if (derivedDirty !== undefined && derivedDirty.size > 0) {
+              let currentDerived = this.#derivedDirtyBySpace.get(space);
+              if (currentDerived === undefined) {
+                currentDerived = new Set();
+                this.#derivedDirtyBySpace.set(space, currentDerived);
+              }
+              for (const id of derivedDirty) currentDerived.add(id);
             }
             this.scheduleRefresh();
             throw error;

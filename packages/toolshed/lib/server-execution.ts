@@ -32,16 +32,45 @@ export function startServerExecutionHost(options: {
   apiUrl: URL;
   envGet?: EnvReader;
 }): ExecutorHost | undefined {
-  const experimental = experimentalOptionsFromEnv(
-    options.envGet ?? Deno.env.get,
-  );
+  const envGet = options.envGet ?? Deno.env.get;
+  const experimental = experimentalOptionsFromEnv(envGet);
   if (experimental.serverExecution !== true) {
     return undefined;
   }
   console.log(
     `Server-execution v2: serving loop ON (service ${options.identity.did()})`,
   );
+  // Phase 6 policy knobs (serving-loop.md §3's T_flush "tuned in
+  // Phase 6 with the other budgets"; §5's per-space budgets). Each is
+  // env-overridable; the defaults are the production posture:
+  // - T_flush stays the SpaceServer's built-in default (100 ms, the
+  //   ruled 50–100 ms order) unless overridden;
+  // - the outstanding-network-effect cap defaults to 16 per space (the
+  //   §3.8 multi-tenancy contract needs a bound ON by default — a
+  //   runaway LLM fan-out must degrade only its own space);
+  // - egress pacing defaults OFF (the cap alone bounds concurrency;
+  //   a rate value is a deliberate operator choice).
+  const envInt = (name: string): number | undefined => {
+    const raw = envGet(name);
+    if (raw === undefined || raw === "") return undefined;
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  };
+  const flushDeadlineMs = envInt("SERVER_EXECUTION_FLUSH_DEADLINE_MS");
+  // `0` (or any non-positive value) means UNBOUNDED — the operator's
+  // explicit opt-out of the default cap; unset means the default.
+  const maxOutstandingEffects =
+    envGet("SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS") === undefined ||
+      envGet("SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS") === ""
+      ? 16
+      : envInt("SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS");
+  const egressRatePerSecond = envInt("SERVER_EXECUTION_EGRESS_RATE_PER_S");
   host = new ExecutorHost({
+    policy: {
+      ...(flushDeadlineMs !== undefined ? { flushDeadlineMs } : {}),
+      ...(maxOutstandingEffects !== undefined ? { maxOutstandingEffects } : {}),
+      ...(egressRatePerSecond !== undefined ? { egressRatePerSecond } : {}),
+    },
     server: options.server,
     serviceIdentity: options.identity.did(),
     createRuntime: (space) => {

@@ -721,19 +721,48 @@ only push priority and the budget/backpressure hardening.
 
 Tasks:
 
-- [ ] Push priority on the subscription channel: subscribed-doc
-      `derived` commits flush first (protocol.md §3).
-- [ ] Per-space budgets in the executor (CPU per wave, outstanding LLM
-      calls, egress rate); a runaway pattern degrades only its own space.
-- [ ] Event/binding backpressure shaping ahead of the commit stream.
+- [x] Push priority on the subscription channel: subscribed-doc
+      `derived` commits flush first (protocol.md §3) — LANDED
+      2026-08-14: two-phase fan-out (derived-subscribed sessions
+      before bulk-only, across every connection), `servingLoop.push`
+      counters; ordering pinned in
+      `packages/memory/test/v2-push-priority.test.ts`
+      (verification-coverage OW8).
+- [x] Per-space budgets in the executor (CPU per wave, outstanding LLM
+      calls, egress rate); a runaway pattern degrades only its own
+      space — LANDED 2026-08-14: T_flush already bounds per-wave CPU
+      (stage D) and is now env-tunable
+      (`SERVER_EXECUTION_FLUSH_DEADLINE_MS`); the outbox gained the
+      outstanding-network-effect cap (toolshed default 16,
+      `SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS`) and the egress-rate
+      token bucket (`SERVER_EXECUTION_EGRESS_RATE_PER_S`, default
+      unpaced) — serving-loop.md §5, `executor-outbox-budget.test.ts`.
+- [ ] Event/binding backpressure shaping ahead of the commit stream —
+      FLAGGED, not filled (verification-coverage OW27): the §3.8
+      binding-layer shaping's semantics (pace vs batch vs drop, the
+      hold-latency bound, per-stream keying, UI-default visibility)
+      are an unstated fork needing the owner's ruling; the register
+      row carries the candidate resolutions and their costs. The ON
+      arm ships without an event-flood bound until it lands (W4's
+      collapse is flag-disabled by design).
 
 Success criteria:
 
 - [ ] No integration test needs a poll-loop for "is the server done."
+      (Gate landed: `sx2-scale` audits the sx2 family — watermark
+      settles, no `waitForCondition`; ticks on CI green.)
 - [ ] `cf-checkbox` in-suite ≈ isolated (v1 measured 4 s vs 138 s; flat
       accumulation is the requirement, whatever the v1 mechanism was).
+      (Gate landed: `sx2-scale`'s accumulation test measures the
+      requirement's substance headlessly — a late fresh space's settle
+      latency stays in the first space's ballpark; ticks on CI green.)
 - [ ] A deliberate LLM fan-out loop in one space leaves a second space's
-      propagation latency inside budget.
+      propagation latency inside budget. (Gate landed: `sx2-scale`'s
+      isolation test — a 20-wide fetch fan-out against a slow local
+      endpoint, the same egress class as an LLM loop, CI-runnable
+      keyless; space B's settle stays inside the calibrated envelope
+      and space A's `outbox.budgetDeferrals` proves the budget
+      engaged; ticks on CI green.)
 
 ## Phase 7 — Flip and retire
 

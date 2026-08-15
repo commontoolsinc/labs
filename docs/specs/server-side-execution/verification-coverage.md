@@ -1088,22 +1088,92 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   ≥500ms between the failure and the next input the wedge does not
   arm. Reachable only downstream of a §4 runtime error today, but
   one erroring pattern then degrades the whole space's serving
-  (waitForSettled stalls for every session). Owed: a scheduler fix
-  aligning the erroring-demanded-effect posture with the
-  erroring-derivation posture (charge, bounded retry, settle), plus
-  a regression test racing an input into the failure window; the
-  three refusal tests' absence asserts then move from fixed drains
-  to the kick-and-await-W barrier this batch had to revert.
-  Trigger: before the Phase-7 flip (a flip with a user-authorable
-  space-wide W freeze is not shippable), or the first additional
-  throwing effect builtin, whichever lands first.
+  (waitForSettled stalls for every session). Original owed: a
+  scheduler fix aligning the erroring-demanded-effect posture with
+  the erroring-derivation posture (charge, bounded retry, settle),
+  plus a regression test racing an input into the failure window;
+  the three refusal tests' absence asserts then move from fixed
+  drains to the kick-and-await-W barrier that batch had to revert.
+  DISCHARGED with Phase 6 (2026-08-14) — the repro was re-run to
+  root cause, and the recorded symptoms all traced to the OBSERVER,
+  not a scheduler posture gap:
+  (i) the reverted kick-and-await-W barriers derived their targets
+  from `Engine.serverSeq`, which counts the serving loop's own
+  derived wave echoes — and coverage NEVER claims a trailing echo on
+  a quiet space (the advance is input-driven; `#drainFeed` skips
+  self-echoes for `#coverageHead`), so the BARRIER hung, not W's
+  contract (deterministic for the fast-settling statically-demanded
+  thrower, ~1-in-4 when the echo raced the target read, disarmed by
+  a ≥500 ms gap — every recorded arm);
+  (ii) "no further charge ever appears" came from the recorded racing
+  input writing an UNRELATED doc — the thrower's registered reads
+  are path-granular, so it legitimately never re-ran (an input that
+  re-points the target re-runs and re-charges it);
+  (iii) offset sweeps 0–250 ms (overlapping commits included, 30+
+  runs) found NO genuine settled-contract stall: the
+  erroring-demanded-effect posture already matches the
+  erroring-derivation posture — charged, settled, W covers every
+  authored seq. No scheduler change was needed or made.
+  The obligation's substance landed as: the OW26 pin test racing
+  authored inputs into the failure window and asserting
+  charged/settled/W-advances directly; the three refusal tests'
+  bounded 300 ms drains RETIRED for deterministic kick-and-await-W
+  barriers with authored-seq targets (`settleAnotherWaveFamily` +
+  `authoredSeqOf` in `executor-effect-channel.test.ts` — the
+  reverted barriers' safety, restored by correct arithmetic, is the
+  discharge's acceptance evidence). Standing lesson, binding on test
+  authors: a settled-contract barrier targets the AUTHORED seq of
+  its own kick — never a server seq, which derived echoes inflate
+  (protocol §4's client-use sentence was always the contract; the
+  helper enforces it).
+
+- OW27 — binding-layer event/binding backpressure shaping (the
+  Phase-6 plan bullet's third item, FLAGGED as a design fork rather
+  than filled — 2026-08-14): README §3.8 promises "event floods
+  (key-repeat driving `stream.send()`) are rate-shaped at the binding
+  layer before they become commits", and under the flag the W4
+  last-wins collapse is DISABLED (events.ts gates it off — collapse
+  would destroy durable intent ids), so the ON arm currently has NO
+  event-flood bound at all; the two shapers that exist do not satisfy
+  §3.8 (the scheduler's WakeShaper shapes when patterns OBSERVE a
+  commit — after it exists; the UI InputTimingController reduces
+  commit volume but is per-component, defaults `immediate` for
+  boolean bindings, and is OFF-arm-visible to change). The unstated
+  semantics are exactly the escalate-don't-fill fork class: pace vs
+  batch vs drop (events are intent — dropping loses it), the hold-
+  latency bound a paced send imposes on the flooding user's own
+  legitimate rapid interactions, per-stream vs per-space keying, and
+  whether UI timing defaults may change (user-visible in BOTH arms).
+  Candidate resolutions, costs recorded: (a) client-side send pacing
+  in the flag-gated append path (token bucket per stream, pace-never-
+  drop — OFF-arm untouched by construction; chooses a latency bound);
+  (b) batch coalescing — N held sends commit as ONE authored commit
+  carrying N event appends (intent preserved, commit RATE bounded;
+  touches fresh Phase-3 admission machinery and the offline-queue
+  discharge path); (c) UI-layer defaults (flag-reach into packages/ui
+  — rejected shape unless gated). Owed: the owner's semantics ruling,
+  then the implementation with its tests. Trigger: before the
+  Phase-7 flip (the ON arm ships with no event-flood bound until
+  then; W4's cheap guard still bounds the OFF arm).
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**
 
-- OW8 — push priority: subscribed derived rows flush before
-  bookkeeping/bulk (README §3.3, protocol §3). Counter/ordering
-  assertion in `sx2-scale`.
+- OW8 — LANDED with Phase 6 (2026-08-14): `noteExecutorCommit`
+  classifies derived commits' dirty keys, and the fan-out runs two
+  phases per flush batch — every connection's derived-subscribed
+  sessions evaluate and send before any bulk-only session (protocol
+  §3's implementation-shape note carries the frame/marker rationale).
+  The ORDERING half pins deterministically at the unit level
+  (`packages/memory/test/v2-push-priority.test.ts` —
+  registration-order-adversarial, mutation-probed against the
+  reverted split, with vacuous-arm negatives); the COUNTER half rides
+  `sx2-scale` (`servingLoop.push.*` present and sane in the ON arm) —
+  split deliberately: a live mixed batch needs derived and bulk
+  novelty in one flush window, which wall-clock integration timing
+  cannot force reliably. Original obligation: push priority —
+  subscribed derived rows flush before bookkeeping/bulk (README §3.3,
+  protocol §3), counter/ordering assertion in `sx2-scale`.
 
 Delta 2026-08-10 — Phase 3 (events-down, D-v2-1; the phase PR):
 
@@ -1950,6 +2020,47 @@ delta):
   loudly rather than silently degrading a durability declaration).
   OW20 stands unchanged (browser adapter + queue debts, trigger: the
   sessionId persistence work).
+
+Delta 2026-08-14 — Phase 6 (push priority, budgets, scale; the phase
+PR):
+
+- protocol §3's push-priority row: IMPL-GATE → COVERED. The
+  implementation-shape note added to §3 (session-chain ordering,
+  two-phase fan-out, whole-frame-at-derived-priority for mixed
+  frames, the INV-5 rationale against frame splitting) is +1 binding
+  sentence; its pins are the memory unit suite's
+  registration-order-adversarial ordering test (mutation-probed
+  against the reverted split) and `sx2-scale`'s counter half
+  (OW8's row above carries the split rationale).
+- serving-loop §5's budget-hooks row: IMPL-GATE → COVERED. The §5
+  rewrite (+1 binding sentence set) names the mechanism: outstanding
+  cap + egress token bucket as `SpaceServerPolicy` knobs, env-wired
+  in the toolshed bootstrap (`SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS`
+  default 16, `SERVER_EXECUTION_EGRESS_RATE_PER_S` default unpaced,
+  `SERVER_EXECUTION_FLUSH_DEADLINE_MS` for T_flush — the §3 "tuned in
+  Phase 6" knob's landing), eager in-flight registration with
+  dispatch-only deferral, the sqlite-query LOCAL exemption, and
+  drop-on-park. Pins: `executor-outbox-budget.test.ts` (cap + FIFO
+  drain, local exemption, token pacing, close-drops — real-clock,
+  listed in the preload). NEW implementation surfaces below spec
+  granularity, FLAGGED in the Phase-6 PR rather than silently
+  normative: (i) the LOCAL_EFFECT_KINDS exemption set (sqlite-query
+  is the one shipped non-egress effect kind); (ii) the 16-outstanding
+  toolshed default (an operator-tunable production posture, not a
+  spec constant); (iii) `outbox.budgetDeferrals` + the
+  `servingLoop.push` counter block (§7's list updated).
+- The Phase-6 gate calibration (impl-gate, lands with `sx2-scale`):
+  the budget-isolation and flat-accumulation gates bind
+  noise-tolerant envelopes (absolute ceiling + same-box baseline
+  multiple, constants at the head of `sx2-scale.test.ts`) rather
+  than the §3.3 300 ms LAN p50, which is a quiet-box number the
+  plan's Phase-7 criterion re-measures under the §1 method; the
+  cf-checkbox in-suite≈isolated criterion is held as its SUBSTANCE
+  (server latency flat as spaces accumulate) measured headlessly —
+  the v1 mechanism was never pinned and the browser-context timing
+  rides the ordinary suite.
+- OW26's discharge and the OW27 flag are recorded in their register
+  rows above (§3).
 
 ## 4. Standing rule
 

@@ -91,8 +91,8 @@ import type {
 } from "../storage/interface.ts";
 import type { CommitError } from "../storage/interface.ts";
 import {
-  type EnsurePieceVerdict,
   ensurePieceRunningVerdict,
+  type EnsurePieceVerdict,
 } from "../ensure-piece-running.ts";
 import {
   stampWaveRunContext,
@@ -131,8 +131,16 @@ const EFFECTS_RETIREMENT_ACTION_ID = "server-execution/effects-retirement";
 
 export type SpaceServerPolicy = {
   /** serving-loop.md §3's consequence-flush deadline T_flush (order
-   * 50–100 ms; a policy knob tuned in Phase 6). */
+   * 50–100 ms; a policy knob tuned in Phase 6 — the toolshed bootstrap
+   * reads SERVER_EXECUTION_FLUSH_DEADLINE_MS). */
   flushDeadlineMs?: number;
+  /** Phase 6 (serving-loop.md §5's per-space budgets; README §3.8):
+   * cap on dispatched-but-unsettled NETWORK effects per space —
+   * "outstanding LLM calls". Undefined = unbounded. */
+  maxOutstandingEffects?: number;
+  /** Phase 6: per-space network-effect egress pacing (dispatches per
+   * second, token bucket). Undefined = unpaced. */
+  egressRatePerSecond?: number;
   /** serving-loop.md §1's IDLE_PARK_MS. */
   idleParkMs?: number;
   renewIntervalMs?: number;
@@ -524,7 +532,9 @@ export class SpaceServer implements TransactionSealDestination {
           scopeKeyByOpIndex,
         ),
     });
-    // The effect channel (stage G, serving-loop.md §4–§5).
+    // The effect channel (stage G, serving-loop.md §4–§5). Phase 6
+    // threads the per-space egress budgets (§5's outstanding-effect cap
+    // + egress rate) from the policy.
     const outbox = new SpaceOutbox({
       stats: this.#options.stats,
       space: this.#options.space,
@@ -532,6 +542,24 @@ export class SpaceServer implements TransactionSealDestination {
       engine,
       sessionId: this.#holder,
       localSeqRef: this.#options.localSeqRef,
+      ...(this.#options.policy?.maxOutstandingEffects !== undefined ||
+          this.#options.policy?.egressRatePerSecond !== undefined
+        ? {
+          budget: {
+            ...(this.#options.policy?.maxOutstandingEffects !== undefined
+              ? {
+                maxOutstandingEffects: this.#options.policy
+                  .maxOutstandingEffects,
+              }
+              : {}),
+            ...(this.#options.policy?.egressRatePerSecond !== undefined
+              ? {
+                egressRatePerSecond: this.#options.policy.egressRatePerSecond,
+              }
+              : {}),
+          },
+        }
+        : {}),
     });
     this.#outbox = outbox;
     runtime.asyncWorkObserver = (work) => outbox.observeAsyncWork(work);
@@ -613,12 +641,14 @@ export class SpaceServer implements TransactionSealDestination {
     // surfacing, never a wedge).
     if (foreignReadInstances.length > 0) {
       try {
-        stale.push(...await selectForeignStaleInstances(
-          engine,
-          { branch: "", space },
-          (foreignSpace) => this.#options.server.engineForSpace(foreignSpace),
-          stale,
-        ));
+        stale.push(
+          ...await selectForeignStaleInstances(
+            engine,
+            { branch: "", space },
+            (foreignSpace) => this.#options.server.engineForSpace(foreignSpace),
+            stale,
+          ),
+        );
       } catch (error) {
         logger.warn("basis-foreign-remark-failed", () => [
           `${foreignReadInstances.length} basis instance(s) carry ` +
@@ -687,8 +717,7 @@ export class SpaceServer implements TransactionSealDestination {
     // registry through the seam above.
     runtime.installSealDestination(this, {
       runStamper: (tx, info) => this.#stampRun(tx, info),
-      runInstanceResolver: (pieceRootId) =>
-        this.#runInstancesFor(pieceRootId),
+      runInstanceResolver: (pieceRootId) => this.#runInstancesFor(pieceRootId),
     });
 
     // Stage B's renew cadence, finally driven (serving-loop.md §2).
@@ -769,7 +798,6 @@ export class SpaceServer implements TransactionSealDestination {
     this.#feed.push(record);
     this.#feedArrived?.resolve();
   }
-
 
   /** A session opened or its demand may have changed: reconsider the
    * demanded roots on the next cycle. */
@@ -1042,9 +1070,7 @@ export class SpaceServer implements TransactionSealDestination {
         ? {
           capabilityRef: info.kind === "event-handler"
             ? `event-consequence:${info.eventId ?? "unidentified"}`
-            : `demanded-run:${
-              (info.acting ?? acting)!.user
-            }`,
+            : `demanded-run:${(info.acting ?? acting)!.user}`,
         }
         : {}),
       ...(info.streamEntry !== undefined
@@ -1112,7 +1138,9 @@ export class SpaceServer implements TransactionSealDestination {
       const instanceKey = key.slice(0, key.indexOf("\0"));
       if (!instances.has(instanceKey)) instances.set(instanceKey, identity);
     }
-    return [...instances.entries()].map(([actionScopeKey, scopeKeyIdentity]) => ({
+    return [...instances.entries()].map((
+      [actionScopeKey, scopeKeyIdentity],
+    ) => ({
       scopeKeyIdentity,
       actionScopeKey: actionScopeKey as ScopeKey,
     }));
@@ -2851,6 +2879,10 @@ export class SpaceServer implements TransactionSealDestination {
     // awaited (park never awaits the network); its writebacks fail
     // against the disposed runtime and are caught by the builtins.
     this.#pendingEffectsByWave.clear();
+    // Phase 6: wake budget-held dispatches into the closed check so
+    // they DROP (the crash-equivalent path) instead of firing network
+    // work for a dead runtime after re-activation rebuilt the outbox.
+    this.#outbox?.close();
     this.#outbox = undefined;
     try {
       if (this.#runtime !== undefined) {

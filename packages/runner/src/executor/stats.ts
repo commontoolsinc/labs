@@ -131,7 +131,16 @@ export type ServingLoopStats = {
     skippedIdempotent: number;
   };
   memo: { hits: number; misses: number; inflight: number };
-  outbox: { queued: number; completed: number; failed: number };
+  outbox: {
+    queued: number;
+    completed: number;
+    failed: number;
+    /** Phase 6 (serving-loop.md §5's per-space budgets): dispatch
+     * holds — an admitted network effect waiting on the outstanding
+     * cap or an egress-rate token. Growth under load is the budget
+     * WORKING (the runaway degrades its own space), not a failure. */
+    budgetDeferrals: number;
+  };
   lease: { held: number; lost: number };
 };
 
@@ -162,7 +171,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     skippedIdempotent: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
-  outbox: { queued: 0, completed: 0, failed: 0 },
+  outbox: { queued: 0, completed: 0, failed: 0, budgetDeferrals: 0 },
   lease: { held: 0, lost: 0 },
 });
 
