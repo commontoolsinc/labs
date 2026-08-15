@@ -38,6 +38,9 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
   const signer = await Identity.fromPassphrase(
     "worker reconciler cfc render policy",
   );
+  const otherSpace = await Identity.fromPassphrase(
+    "worker reconciler cfc render policy target space",
+  );
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     storageManager,
@@ -101,6 +104,37 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           entries: [{
             path: [],
             label: { confidentiality: [healthRecordAtom] },
+          }],
+        },
+      },
+    });
+    const ambientSecret = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-ambient-secret",
+      undefined,
+      tx,
+    );
+    const ambientSecretLink = ambientSecret.getAsNormalizedFullLink();
+    tx.writeOrThrow({
+      space: signer.did(),
+      id: ambientSecretLink.id!,
+      type: "application/json",
+      path: [],
+    }, {
+      value: "Ambient storage label",
+      cfc: {
+        version: 1,
+        schemaHash: "test-ambient-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: {
+              confidentiality: [
+                cfcAtom.space(signer.did()),
+                healthRecordAtom,
+              ],
+            },
           }],
         },
       },
@@ -362,6 +396,36 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       }
     }
 
+    class CrossSpaceSchemaCell extends MockCell {
+      readonly schema = {
+        ifc: {
+          confidentiality: [
+            cfcAtom.space(otherSpace.did()),
+            cfcAtom.space(signer.did()),
+          ],
+        },
+      };
+
+      constructor(
+        value: unknown,
+        private readonly target: ReturnType<typeof runtime.getCell>,
+      ) {
+        super(value);
+      }
+
+      getAsNormalizedFullLink() {
+        return {
+          ...this.target.getAsNormalizedFullLink(),
+          space: signer.did(),
+          id: "cfc-render-policy-cross-space-alias",
+        };
+      }
+
+      resolveAsCell() {
+        return this.target;
+      }
+    }
+
     await t.step(
       "blocks a confidential cell above the boundary max confidentiality",
       async () => {
@@ -460,6 +524,72 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             renderedText.includes("Sensitive diagnosis: migraine"),
             false,
           );
+          assertEquals(
+            renderedText.includes("Content hidden by policy"),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "same-space storage policy does not block an otherwise admitted cell",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [],
+            declassifyConfidentiality: [healthRecordAtom],
+          },
+          children: [ambientSecret as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await t.settle();
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Ambient storage label"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by policy"),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "schema fallback removes the resolved target's ambient space",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+        const target = runtime.getCell<string>(
+          otherSpace.did(),
+          "cfc-render-policy-cross-space-target",
+        );
+        const alias = new CrossSpaceSchemaCell("Cross-space alias", target);
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-render-boundary",
+          props: {
+            maxConfidentiality: [cfcAtom.space(otherSpace.did())],
+          },
+          children: [alias as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await t.settle();
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Cross-space alias"), false);
           assertEquals(
             renderedText.includes("Content hidden by policy"),
             true,

@@ -19,7 +19,7 @@
  * Nothing does that yet; this note is the marker.
  */
 
-import type { CfcAtom } from "@commonfabric/api/cfc";
+import { type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
 import {
   areLinksSame,
   type Cancel,
@@ -31,6 +31,7 @@ import {
   isStream,
   type JSONSchema,
   KeepAsCell,
+  type MemorySpace,
   parseLink,
   type Stream,
   UI,
@@ -905,8 +906,25 @@ export class WorkerReconciler {
    * (`watchCellMembership`), so they can never drift out of lockstep.
    */
   private resolveCellLabelView(cell: Cell<unknown>): CfcLabelView | undefined {
-    return cfcLabelViewForCell(cell) ??
-      cfcLabelViewForCell(cell.resolveAsCell());
+    return this.resolveCellLabelContext(cell).labelView;
+  }
+
+  private resolveCellLabelContext(cell: Cell<unknown>): {
+    labelView: CfcLabelView | undefined;
+    space: MemorySpace;
+  } {
+    const direct = cfcLabelViewForCell(cell);
+    if (direct !== undefined) {
+      return {
+        labelView: direct,
+        space: cell.getAsNormalizedFullLink().space,
+      };
+    }
+    const resolved = cell.resolveAsCell();
+    return {
+      labelView: cfcLabelViewForCell(resolved),
+      space: resolved.getAsNormalizedFullLink().space,
+    };
   }
 
   private representsPrincipalSubjectForCell(
@@ -1127,9 +1145,9 @@ export class WorkerReconciler {
       return true;
     }
 
-    let labelView: CfcLabelView | undefined;
+    let labelContext: ReturnType<WorkerReconciler["resolveCellLabelContext"]>;
     try {
-      labelView = this.resolveCellLabelView(cell);
+      labelContext = this.resolveCellLabelContext(cell);
     } catch {
       return false;
     }
@@ -1141,14 +1159,16 @@ export class WorkerReconciler {
     const useResolver = this.resolveRenderConfidentiality !== undefined &&
       policy.maxConfidentiality !== undefined;
 
-    if (labelView === undefined) {
+    if (labelContext.labelView === undefined) {
       // Schema IFC is a constraint, not the data label. Use it only as a
       // conservative fallback when no stored/read label metadata is available.
       // Exchange resolution is deliberately NOT applied here: schema IFC does
       // not carry the runtime `Space(...)` principals resolution targets, and
       // the per-atom exact-match fit stays fail-closed for anything it cannot
       // admit — the resolver drives the stored-label path below.
-      const schemaLabels = this.confidentialityLabelsFromCellSchema(cell);
+      const ownSpace = cfcAtom.space(labelContext.space);
+      const schemaLabels = this.confidentialityLabelsFromCellSchema(cell)
+        .filter((atom) => !deepEqual(atom, ownSpace));
       if (schemaLabels.length === 0) {
         return true;
       }
@@ -1157,11 +1177,13 @@ export class WorkerReconciler {
       );
     }
 
-    const confidentiality = this.confidentialityLabels(labelView);
+    const ownSpace = cfcAtom.space(labelContext.space);
+    const confidentiality = this.confidentialityLabels(labelContext.labelView)
+      .filter((atom) => !deepEqual(atom, ownSpace));
     if (useResolver) {
       return this.resolvedConfidentialityRenderable(
         confidentiality,
-        this.integrityLabels(labelView),
+        this.integrityLabels(labelContext.labelView),
         policy,
       );
     }
