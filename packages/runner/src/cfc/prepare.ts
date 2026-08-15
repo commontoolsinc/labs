@@ -1713,6 +1713,204 @@ const valueWriteTargets = (
   return result;
 };
 
+type VerifierValueAddress = {
+  space: MemorySpace;
+  scope: ReturnType<typeof normalizeCellScope>;
+  id: URI;
+  path: readonly string[];
+};
+
+const verifierValueFollowingLinks = (
+  tx: IExtendedStorageTransaction,
+  initialValue: unknown,
+  initialAddress: VerifierValueAddress,
+  seen: Set<string>,
+): { value: unknown; address: VerifierValueAddress } | undefined => {
+  let value = initialValue;
+  let address = initialAddress;
+  while (isPrimitiveCellLink(value)) {
+    const link = parseLink(value, { ...address, path: [...address.path] });
+    if (link?.id === undefined || link.space === undefined) return undefined;
+    address = {
+      space: link.space,
+      id: link.id as URI,
+      scope: normalizeCellScope(link.scope),
+      path: canonicalizeLogicalPath(link.path),
+    };
+    const key = JSON.stringify([
+      address.space,
+      address.scope,
+      address.id,
+      address.path,
+    ]);
+    if (seen.has(key)) {
+      throw new Error(`link cycle while checking CFC policy at ${key}`);
+    }
+    seen.add(key);
+    value = writeValueForTarget(tx, address);
+    if (value === undefined) {
+      value = tx.readValueOrThrow(address, {
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+      });
+    }
+  }
+  return { value, address };
+};
+
+const verifierValueAtPathFollowingLinks = (
+  tx: IExtendedStorageTransaction,
+  address: VerifierValueAddress,
+  relativePath: readonly string[],
+): { value: unknown; address: VerifierValueAddress } | undefined => {
+  let value = writeValueForTarget(tx, address);
+  if (value === undefined) {
+    value = tx.readValueOrThrow(address, {
+      meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+    });
+  }
+  const seen = new Set<string>();
+  let resolved = verifierValueFollowingLinks(tx, value, address, seen);
+  for (const segment of relativePath) {
+    if (
+      resolved === undefined || !isObjectOrArray(resolved.value) ||
+      !(segment in resolved.value)
+    ) {
+      return undefined;
+    }
+    const childAddress = {
+      ...resolved.address,
+      path: [...resolved.address.path, segment],
+    };
+    resolved = verifierValueFollowingLinks(
+      tx,
+      resolved.value[segment],
+      childAddress,
+      seen,
+    );
+  }
+  return resolved;
+};
+
+const concreteWrittenPathsForPattern = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    scope: ReturnType<typeof normalizeCellScope>;
+    id: URI;
+  },
+  pattern: readonly string[],
+  writtenPaths: readonly (readonly string[])[],
+  linkWrites: readonly LinkWritePolicyInput[] = [],
+): readonly (readonly string[])[] => {
+  const concrete = new Map<string, readonly string[]>();
+  const add = (path: readonly string[]): void => {
+    concrete.set(pathKey(path), path);
+  };
+  const expand = (
+    value: unknown,
+    address: {
+      space: MemorySpace;
+      scope: ReturnType<typeof normalizeCellScope>;
+      id: URI;
+      path: readonly string[];
+    },
+    index: number,
+    path: readonly string[],
+    seenLinks = new Set<string>(),
+  ): void => {
+    const resolved = verifierValueFollowingLinks(
+      tx,
+      value,
+      address,
+      seenLinks,
+    );
+    if (resolved === undefined) return;
+    value = resolved.value;
+    address = resolved.address;
+    if (index === pattern.length) {
+      add(path);
+      return;
+    }
+    const segment = pattern[index];
+    if (segment === "*") {
+      if (Array.isArray(value)) {
+        for (let item = 0; item < value.length; item++) {
+          if (item in value) {
+            expand(
+              value[item],
+              { ...address, path: [...address.path, String(item)] },
+              index + 1,
+              [...path, String(item)],
+              new Set(seenLinks),
+            );
+          }
+        }
+      } else if (isObjectOrArray(value)) {
+        for (const key of Object.keys(value)) {
+          expand(
+            value[key],
+            { ...address, path: [...address.path, key] },
+            index + 1,
+            [...path, key],
+            new Set(seenLinks),
+          );
+        }
+      }
+      return;
+    }
+    if (!isObjectOrArray(value) || !(segment in value)) return;
+    expand(
+      value[segment],
+      { ...address, path: [...address.path, segment] },
+      index + 1,
+      [...path, segment],
+      seenLinks,
+    );
+  };
+
+  for (const writtenPath of writtenPaths) {
+    if (isPrefix(pattern, writtenPath)) {
+      add(writtenPath.slice(0, pattern.length));
+      continue;
+    }
+    if (isPrefix(writtenPath, pattern)) {
+      const value = writeValueForTarget(tx, { ...target, path: [] });
+      expand(value, { ...target, path: [] }, 0, []);
+    }
+  }
+  for (const input of linkWrites) {
+    const targetPath = canonicalizeLogicalPath(input.target.path);
+    if (
+      targetPath.length > pattern.length ||
+      !targetPath.every((segment, index) =>
+        pattern[index] === "*" || pattern[index] === segment
+      )
+    ) {
+      continue;
+    }
+    const sourceValue = tx.readValueOrThrow({
+      space: input.source.space,
+      id: input.source.id as URI,
+      scope: normalizeCellScope(input.source.scope),
+      path: canonicalizeLogicalPath(input.source.path),
+    }, {
+      meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+    });
+    expand(
+      sourceValue,
+      {
+        space: input.source.space,
+        id: input.source.id as URI,
+        scope: normalizeCellScope(input.source.scope),
+        path: canonicalizeLogicalPath(input.source.path),
+      },
+      targetPath.length,
+      targetPath,
+    );
+  }
+  return [...concrete.values()];
+};
+
 // ---------------------------------------------------------------------------
 // S16 flow labels (default transition): one conservative confidentiality join
 // per transaction — everything the transaction observed taints everything it
@@ -3090,20 +3288,29 @@ const policySchemaMatchesValue = (
   ) {
     return false;
   }
-  if (Array.isArray(schema.anyOf)) {
-    return schema.anyOf.some((branch) =>
+  if (
+    Array.isArray(schema.anyOf) &&
+    !schema.anyOf.some((branch) =>
       policySchemaMatchesValue(branch, value, schemaRoot)
-    );
+    )
+  ) {
+    return false;
   }
-  if (Array.isArray(schema.oneOf)) {
-    return schema.oneOf.filter((branch) =>
-      policySchemaMatchesValue(branch, value, schemaRoot)
-    ).length === 1;
+  if (
+    Array.isArray(schema.oneOf) &&
+    schema.oneOf.filter((branch) =>
+        policySchemaMatchesValue(branch, value, schemaRoot)
+      ).length !== 1
+  ) {
+    return false;
   }
-  if (Array.isArray(schema.allOf)) {
-    return schema.allOf.every((branch) =>
+  if (
+    Array.isArray(schema.allOf) &&
+    !schema.allOf.every((branch) =>
       policySchemaMatchesValue(branch, value, schemaRoot)
-    );
+    )
+  ) {
+    return false;
   }
   if (isObjectOrArray(value) && isObjectOrArray(schema.properties)) {
     return Object.entries(schema.properties).every(([key, childSchema]) =>
@@ -4518,10 +4725,10 @@ const rootLabelFromSchema = (
  * pending schema input carries, so the link-label derivation below trusts it
  * the same way; stored CFC metadata still takes precedence when present.
  */
-const setupResultSchemaFor = (
+const setupResultFor = (
   tx: IExtendedStorageTransaction,
   source: LinkWritePolicyInput["source"],
-): JSONSchema | undefined => {
+): { exists: boolean; schema?: JSONSchema } => {
   const document = tx.readOrThrow({
     space: source.space,
     id: source.id as URI,
@@ -4532,12 +4739,15 @@ const setupResultSchemaFor = (
     meta: INTERNAL_VERIFIER_META,
   });
   if (!isObjectOrArray(document)) {
-    return undefined;
+    return { exists: document !== undefined };
   }
   const schema = (document as Record<string, unknown>).schema;
-  return schema === undefined || schema === null
-    ? undefined
-    : schema as JSONSchema;
+  return {
+    exists: true,
+    ...(schema === undefined || schema === null
+      ? {}
+      : { schema: schema as JSONSchema }),
+  };
 };
 
 // `sourceMetadata` is returned alongside the derived label so the persist
@@ -4556,7 +4766,7 @@ const derivePersistedLinkLabel = (
     input.source.scope,
     "application/json",
   );
-  const setupResultSchema = setupResultSchemaFor(tx, input.source);
+  const setupResult = setupResultFor(tx, input.source);
   const recordedSourceSchema = candidateSchemas.get(targetKey(input.source));
   const ambientSourceConfidentiality = recordedSourceSchema === undefined
     ? undefined
@@ -4565,12 +4775,12 @@ const derivePersistedLinkLabel = (
       input.source.space,
     );
   let pendingSourceSchema = ambientSourceConfidentiality !== undefined &&
-      setupResultSchema !== undefined
+      setupResult.schema !== undefined
     ? addRootConfidentiality(
-      setupResultSchema,
+      setupResult.schema,
       ambientSourceConfidentiality,
     )
-    : recordedSourceSchema ?? setupResultSchema;
+    : recordedSourceSchema ?? setupResult.schema;
   let pendingSourceLabel = pendingSourceSchema !== undefined
     ? persistedLabelFromSchemaAtPath(
       tx,
@@ -4596,7 +4806,7 @@ const derivePersistedLinkLabel = (
       detail.address.path.length <= 1 &&
       detail.previousValue === undefined
     );
-    if (sourceCreatedInThisTx) {
+    if (sourceCreatedInThisTx || !setupResult.exists) {
       const targetCandidate = candidateSchemas.get(targetKey(input.target));
       if (targetCandidate !== undefined) {
         pendingSourceSchema = targetCandidate;
@@ -5232,11 +5442,12 @@ const attemptedWritePathsUnder = (
  *   carry the per-tx derived integrity).
  *
  * Scope (v1, exact-match membership — D5 upgrades to pattern/concept):
- * wildcard (`*`) floor entries stay read-gate-only; unlike `writeAuthorizedBy`
- * there is NO pattern-setup escape — the floor is a value requirement, so a
- * setup that writes a floored path must itself mint the required integrity
- * (`addIntegrity`), fail-closed; a pure delete (no written value) is not a
- * floored write — the floor governs values, not absence.
+ * wildcard (`*`) entries resolve to the concrete values written in the
+ * transaction. Unlike `writeAuthorizedBy` there is NO pattern-setup escape —
+ * the floor is a value requirement, so a setup that writes a floored path must
+ * itself mint the required integrity (`addIntegrity`), fail-closed; a pure
+ * delete (no written value) is not a floored write — the floor governs values,
+ * not absence.
  */
 const verifyWriteFloor = (
   tx: IExtendedStorageTransaction,
@@ -5267,154 +5478,222 @@ const verifyWriteFloor = (
   const entryLabels = new Map<string, IFCLabel>(
     entries.map((entry) => [pathKey(entry.path), entry.label]),
   );
+  const writtenPaths = valueWriteTargets(tx).get(targetKey(target))?.paths ??
+    [];
+  const linkPaths = ctx.linkWriteInputs.map((input) =>
+    canonicalizeLogicalPath(input.target.path)
+  );
+  const schemaIntegrityAtPath = (
+    concretePath: readonly string[],
+  ): readonly CfcAtom[] =>
+    uniqueCfcAtoms(entries.flatMap((candidate) => {
+      if (
+        candidate.path.length > concretePath.length ||
+        !candidate.path.every((segment, index) =>
+          segment === "*" || segment === concretePath[index]
+        )
+      ) {
+        return [];
+      }
+      return gateRuntimeMintedIntegrity(
+        derivePersistedLabel(
+          tx,
+          candidate.schema,
+          candidate.label,
+          entryLabels,
+          target.space,
+        ),
+        ctx.identityForPath(candidate.path),
+      ).integrity ?? [];
+    }));
+  const linkedValueIntegrity = (
+    input: LinkWritePolicyInput,
+    derived: ReturnType<typeof derivePersistedLinkLabel>,
+    carriedPath: readonly string[] = [],
+  ): readonly CfcAtom[] => {
+    const identity = ctx.identityForInput(input);
+    const carriedLabel = labelForEntriesAtPath(
+      input.cfcLabelView?.entries ?? [],
+      carriedPath,
+    );
+    return uniqueCfcAtoms([
+      ...(derived.label?.integrity ?? []),
+      ...(gateRuntimeMintedIntegrity(carriedLabel ?? {}, identity).integrity ??
+        []),
+    ]);
+  };
   for (const entry of entries) {
     const ifc = isObjectOrArray(entry.schema) ? entry.schema.ifc : undefined;
     const floor = Array.isArray(ifc?.requiredIntegrity)
       ? ifc.requiredIntegrity
       : [];
     if (floor.length === 0) continue;
-    if (entry.path.includes("*")) continue;
-    // Floor applicability is STRUCTURAL — did anything land at/under the floor
-    // path, or does a link cover it? It must never hinge solely on the
-    // value-conditioned `ifcEntryAppliesToAttemptedWrite`, whose schema/value
-    // matcher can return false for values that genuinely landed (e.g. a nested
-    // link sigil at a typed slot) and would silently skip the floor — letting
-    // unendorsed data through (review). The value-conditioned check remains
-    // only as a widening fallback for ancestor-write shapes the structural
-    // sources miss; over-applying a floor to a non-matching union arm
-    // over-rejects (fail-closed), never leaks.
-    const linksHere = ctx.linkWriteInputs.filter((input) =>
-      concretePathHasPrefix(
-        canonicalizeLogicalPath(input.target.path),
-        entry.path,
-      )
-    );
-    // A link written at a strict ANCESTOR swaps the whole container: the value
-    // now living at the floor path is the linked source's value at the
-    // corresponding nested path (for a fresh doc it reconstructs as
-    // `undefined`, so this must not depend on the value matcher either).
-    const ancestorLinks = ctx.linkWriteInputs.filter((input) => {
-      const linkPath = canonicalizeLogicalPath(input.target.path);
-      return linkPath.length < entry.path.length &&
-        concretePathHasPrefix(entry.path, linkPath);
-    });
-    const writesUnder = attemptedWritePathsUnder(tx, target, entry.path);
-    if (
-      linksHere.length === 0 && ancestorLinks.length === 0 &&
-      writesUnder.length === 0 &&
-      !ifcEntryAppliesToAttemptedWrite(
+    const floorPaths = entry.path.includes("*")
+      ? concreteWrittenPathsForPattern(
         tx,
         target,
         entry.path,
-        entry.schema,
-        entry.root,
+        [...writtenPaths, ...linkPaths],
+        ctx.linkWriteInputs,
+      ).filter((floorPath) =>
+        !entry.path.some((segment, index) =>
+          segment === "*" && floorPath[index] === "length" &&
+          schemaTypesAtPath(entry.path.slice(0, index), [schema]).includes(
+            "array",
+          )
+        )
       )
-    ) {
-      continue;
-    }
-
-    // The label this commit persists at the path: schema integrity +
-    // `addIntegrity` mints + `exactCopyOf`/`projection` carries,
-    // evidence-gated so a pattern author cannot forge runtime-minted atoms
-    // to satisfy their own floor.
-    const base = gateRuntimeMintedIntegrity(
-      derivePersistedLabel(
-        tx,
-        entry.schema,
-        entry.label,
-        entryLabels,
-        target.space,
-      ),
-      ctx.identityForPath(entry.path),
-    ).integrity ?? [];
-
-    // One contribution per link written at/under the floor path (each linked
-    // value must individually carry the floor), plus one `value` contribution
-    // when plain data was written (crediting the flow meet when available).
-    const contributions: (readonly CfcAtom[])[] = [];
-    for (const input of linksHere) {
-      const derived = derivePersistedLinkLabel(
-        tx,
-        input,
-        ctx.candidateSchemas,
-        ctx.identityForInput(input),
+      : [entry.path];
+    for (const floorPath of floorPaths) {
+      // Floor applicability is STRUCTURAL — did anything land at/under the floor
+      // path, or does a link cover it? It must never hinge solely on the
+      // value-conditioned `ifcEntryAppliesToAttemptedWrite`, whose schema/value
+      // matcher can return false for values that genuinely landed (e.g. a nested
+      // link sigil at a typed slot) and would silently skip the floor — letting
+      // unendorsed data through (review). The value-conditioned check remains
+      // only as a widening fallback for ancestor-write shapes the structural
+      // sources miss; over-applying a floor to a non-matching union arm
+      // over-rejects (fail-closed), never leaks.
+      const linksHere = ctx.linkWriteInputs.filter((input) =>
+        concretePathHasPrefix(
+          canonicalizeLogicalPath(input.target.path),
+          floorPath,
+        )
       );
-      // An underivable link (`reason` set, `label` undefined) contributes empty
-      // integrity — it fails the floor, fail-closed, alongside the persist
-      // loop's own missing-source reason (both reject).
-      contributions.push(derived.label?.integrity ?? []);
-    }
-    for (const input of ancestorLinks) {
-      // Re-point the derivation at the floor path INSIDE the linked source:
-      // the value at the floor path is source.path + (floor − linkPath), so
-      // the credit is the source's own label at that nested path (an endorsed
-      // nested value passes; an unendorsed one fails, fail-closed).
-      const linkPath = canonicalizeLogicalPath(input.target.path);
-      const relative = entry.path.slice(linkPath.length);
-      const derived = derivePersistedLinkLabel(
-        tx,
-        {
+      // A link written at a strict ANCESTOR swaps the whole container: the value
+      // now living at the floor path is the linked source's value at the
+      // corresponding nested path (for a fresh doc it reconstructs as
+      // `undefined`, so this must not depend on the value matcher either).
+      const ancestorLinks = ctx.linkWriteInputs.filter((input) => {
+        const linkPath = canonicalizeLogicalPath(input.target.path);
+        return linkPath.length < floorPath.length &&
+          concretePathHasPrefix(floorPath, linkPath);
+      });
+      const writesUnder = attemptedWritePathsUnder(tx, target, floorPath);
+      if (
+        linksHere.length === 0 && ancestorLinks.length === 0 &&
+        writesUnder.length === 0 &&
+        !ifcEntryAppliesToAttemptedWrite(
+          tx,
+          target,
+          floorPath,
+          entry.schema,
+          entry.root,
+        )
+      ) {
+        continue;
+      }
+
+      // The label this commit persists at the path: schema integrity +
+      // `addIntegrity` mints + `exactCopyOf`/`projection` carries,
+      // evidence-gated so a pattern author cannot forge runtime-minted atoms
+      // to satisfy their own floor.
+      const base = gateRuntimeMintedIntegrity(
+        derivePersistedLabel(
+          tx,
+          entry.schema,
+          entry.label,
+          entryLabels,
+          target.space,
+        ),
+        ctx.identityForPath(entry.path),
+      ).integrity ?? [];
+
+      // One contribution per link written at/under the floor path (each linked
+      // value must individually carry the floor), plus one `value` contribution
+      // when plain data was written (crediting the flow meet when available).
+      const contributions: (readonly CfcAtom[])[] = [];
+      for (const input of linksHere) {
+        const derived = derivePersistedLinkLabel(
+          tx,
+          input,
+          ctx.candidateSchemas,
+          ctx.identityForInput(input),
+        );
+        // An underivable link (`reason` set, `label` undefined) contributes empty
+        // integrity — it fails the floor, fail-closed, alongside the persist
+        // loop's own missing-source reason (both reject).
+        contributions.push(uniqueCfcAtoms([
+          ...linkedValueIntegrity(input, derived),
+          ...schemaIntegrityAtPath(
+            canonicalizeLogicalPath(input.target.path),
+          ),
+        ]));
+      }
+      for (const input of ancestorLinks) {
+        // Re-point the derivation at the floor path INSIDE the linked source:
+        // the value at the floor path is source.path + (floor − linkPath), so
+        // the credit is the source's own label at that nested path (an endorsed
+        // nested value passes; an unendorsed one fails, fail-closed).
+        const linkPath = canonicalizeLogicalPath(input.target.path);
+        const relative = floorPath.slice(linkPath.length);
+        const resolved = verifierValueAtPathFollowingLinks(tx, {
+          space: input.source.space,
+          id: input.source.id as URI,
+          scope: normalizeCellScope(input.source.scope),
+          path: canonicalizeLogicalPath(input.source.path),
+        }, relative);
+        if (resolved?.value === undefined) continue;
+        const resolvedInput = {
           ...input,
           source: {
             ...input.source,
-            path: [
-              ...canonicalizeLogicalPath(input.source.path),
-              ...relative,
-            ],
+            space: resolved.address.space,
+            id: resolved.address.id,
+            scope: resolved.address.scope,
+            path: resolved.address.path,
           },
-          target: { ...input.target, path: entry.path },
-        },
-        ctx.candidateSchemas,
-        ctx.identityForInput(input),
-      );
-      contributions.push(derived.label?.integrity ?? []);
-    }
-    const written = writeValueForTarget(tx, { ...target, path: entry.path });
-    // A value contribution exists when plain data lands at/under the floor
-    // path, judged three ways (any one suffices, fail-closed):
-    // - the reconstructed value at the path is not pure link structure
-    //   (plain/mixed data written at or above the path);
-    // - some attempted write at/under the path carries a value and is not
-    //   covered by a link input — the descendant-only mixed case (one child a
-    //   link, a sibling plain data) where the parent may reconstruct as
-    //   pure-link or undefined and would otherwise be judged by the link
-    //   contributions alone (review). The per-path value probe keeps DELETE
-    //   details (no value) out;
-    // - nothing else contributed at all (a value-shaped write with no link
-    //   inputs — e.g. a raw sigil smuggled without link policy inputs), so the
-    //   floor is still evaluated, fail-closed.
-    const descendantValueWrite = writesUnder.some((writePath) =>
-      !linksHere.some((input) =>
-        concretePathHasPrefix(
-          writePath,
-          canonicalizeLogicalPath(input.target.path),
+          target: { ...input.target, path: floorPath },
+        };
+        const derived = derivePersistedLinkLabel(
+          tx,
+          resolvedInput,
+          ctx.candidateSchemas,
+          ctx.identityForInput(input),
+        );
+        contributions.push(uniqueCfcAtoms([
+          ...linkedValueIntegrity(resolvedInput, derived, relative),
+          ...schemaIntegrityAtPath(floorPath),
+        ]));
+      }
+      // Storage may report both a container write and the concrete descendants
+      // that populate it. Judge only the deepest plain-value writes so an array
+      // item can carry the integrity declared by its item schema without an
+      // earlier empty-container write becoming a second, unendorsed value.
+      const plainWritePaths = writesUnder.filter((writePath) =>
+        writeValueForTarget(tx, { ...target, path: writePath }) !== undefined &&
+        !linksHere.some((input) =>
+          concretePathHasPrefix(
+            writePath,
+            canonicalizeLogicalPath(input.target.path),
+          )
+        ) &&
+        !writesUnder.some((candidate) =>
+          candidate.length > writePath.length &&
+          concretePathHasPrefix(candidate, writePath)
         )
-      ) &&
-      writeValueForTarget(tx, { ...target, path: writePath }) !== undefined
-    );
-    // Nothing landed anywhere: a pure delete/clear — absence is not a floored
-    // value (the floor governs values written, not removals).
-    if (
-      written === undefined && !descendantValueWrite &&
-      contributions.length === 0
-    ) {
-      continue;
-    }
-    const valueWritten =
-      (written !== undefined && !isPureLinkStructure(written)) ||
-      descendantValueWrite ||
-      contributions.length === 0;
-    if (valueWritten) contributions.push(ctx.flowIntegrity);
-
-    const misses = contributions.some((extra) =>
-      !cfcIntegritySatisfiesFloor([...base, ...extra], floor, trust)
-    );
-    if (misses) {
-      failures.push(
-        `write floor failed at /${
-          entry.path.join("/")
-        } (requiredIntegrity, §8.12.4.1)`,
       );
+      for (const writePath of plainWritePaths) {
+        contributions.push(uniqueCfcAtoms([
+          ...schemaIntegrityAtPath(writePath),
+          ...ctx.flowIntegrity,
+        ]));
+      }
+
+      // Nothing landed anywhere: a pure delete/clear — absence is not a floored
+      // value (the floor governs values written, not removals).
+      if (contributions.length === 0) continue;
+
+      const misses = contributions.some((extra) =>
+        !cfcIntegritySatisfiesFloor([...base, ...extra], floor, trust)
+      );
+      if (misses) {
+        failures.push(
+          `write floor failed at /${
+            floorPath.join("/")
+          } (requiredIntegrity, §8.12.4.1)`,
+        );
+      }
     }
   }
   return failures;
@@ -5541,7 +5820,7 @@ export const prepareBoundaryCommit = (
     );
   }
   const runtimeIntegrityOverwriteTargets = new Set<string>();
-  for (const [key, target] of valueWriteTargets(tx)) {
+  for (const [key, target] of writeTargets) {
     if (candidates.has(key)) {
       continue;
     }

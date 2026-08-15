@@ -77,6 +77,36 @@ describe("CFC wildcard policy applicability on unresolvable links", () => {
     expect(wildcardPolicyMatchesValue(tx, target, policySchema, linkValue))
       .toBe(false);
   });
+
+  it("honors sibling conditions beside a matching union", () => {
+    const trustedBranch = {
+      type: "object",
+      properties: {
+        origin: { type: "string", enum: ["sent"] },
+      },
+      required: ["origin"],
+    } as const satisfies JSONSchema;
+    const importedBranch = {
+      type: "object",
+      properties: {
+        origin: { type: "string", enum: ["imported"] },
+      },
+      required: ["origin"],
+    } as const satisfies JSONSchema;
+    const mergedTrustedPolicy = {
+      ...trustedBranch,
+      anyOf: [trustedBranch, importedBranch],
+      ifc: { writeAuthorizedBy: ["trusted-handler"] },
+    } as const satisfies JSONSchema;
+    const tx = {
+      getWriteDetails: () => [],
+      readValueOrThrow: () => ({ origin: "imported" }),
+    } as unknown as IExtendedStorageTransaction;
+
+    expect(
+      wildcardPolicyMatchesValue(tx, target, mergedTrustedPolicy, linkValue),
+    ).toBe(false);
+  });
 });
 
 describe("CFC wildcard policy value conditions on fabric-primitive types", () => {
