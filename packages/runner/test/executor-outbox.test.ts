@@ -671,6 +671,10 @@ describe("stage G outbox + sqlite discharge", () => {
       actionId: "handle-foreign-only",
       kind: "event-handler",
       eventId: "evt-foreign-only",
+      // The §2b provisioning carriage (Phase 5's accept gate): a
+      // foreign write is admitted only under acting + grant.
+      acting: { user: "user:alice", session: "sess-1" },
+      capabilityRef: "cap-fo",
     });
     foreignCell.withTx(tx1).set({ value: 5 });
     wave.enqueueOutboundAppend(tx1, {

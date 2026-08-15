@@ -63,5 +63,11 @@ installFakeClock({
     // renew interval and flush deadline; auto-advance turns the renew
     // cadence into a runaway.
     "executor-effect-channel",
+    // The Phase-5 cross-space suite drives a live ExecutorHost (the
+    // foreign-wake journey) under the same wall-clock policies — the
+    // renew interval, flush deadline, and the failure-park backoff;
+    // auto-advance expires the lease TTL instantly and turns the renew
+    // cadence + reactivation backoff into a runaway.
+    "executor-cross-space",
   ],
 });

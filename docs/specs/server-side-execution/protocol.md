@@ -382,16 +382,42 @@ keep resolving from the session. FP2 (RULED 2026-08-03) widens the
 holder condition to ANY live lease holder on the co-hosted memory
 server, so cross-space scoped reads (§2b's free read row) can name
 their foreign instance instead of silently resolving
-`user:<serviceDID>`. Anticipated hardening, OUT OF v2 SCOPE and
-named without design: grant-scoped foreign reads — admissibility
-derived from the piece's granted read authority rather than lease
-identity — alongside remote attestation. (Phase-1 implementation
-bound, stage F: the landed check consults the READ space's own live
-lease — sufficient for every Phase-1 producer, which reads only its
-own space. FP2's widened acceptance — a home holder naming a FOREIGN
-space's instances under its own space's lease — has no producer
-until Phase 5's cross-space serving and lands with it, alongside the
-cross-engine lease lookup it needs.)
+`user:<serviceDID>`. **Phase 5 LANDED both halves the Phase-1 bound
+deferred:** the read space's own lease is checked first, then FP2's
+cross-engine fallback — any live lease on the co-hosted server; and
+the equality is SHARPENED to the FULL DR1 holder minted by the
+co-hosted process (service identity + process-instance component),
+retiring the Phase-1 recorded acceptance under which a second
+process sharing the service DID passed on the first process's lease
+row (verification-coverage.md's stage-F read-row entry).
+
+**The grant-scoped read DESIGN (Phase 5; the RULED 2026-08-13
+precondition — the design, or an explicit fail-closed refusal, lands
+BEFORE any delegated-scoped-read producer ships, and producer and
+refusal land together as one stack).** A DELEGATED scoped read — the
+home SpaceServer reading a FOREIGN scoped instance on behalf of a
+carried actor — resolves against the CARRIED actor's instance under
+an explicit grant, NEVER the delegating envelope, and NEVER silently
+empty (the FP2 silent-empty-instance trap is the failure mode this
+kills). The design, stated for the implementation that follows the
+per-doc grant store (OW13's trigger): the read carries the acting
+identity + `capabilityRef` exactly like the server-produced authored
+row; admission resolves the grant against the target doc and admits
+the NAMED instance (`entity_scope_key` constructed from the CARRIED
+actor); a read whose grant does not resolve REFUSES — it never falls
+back to lease-wide trust or the envelope. Until that store exists,
+the FAIL-CLOSED interim is normative and LANDED with Phase 5's
+producers, at both ends of the stack: (i) the serving runtime's
+storage plane REFUSES scoped (user/session) reads of any non-home
+space outright — a foreign scoped read cannot leave the producer,
+named or unnamed; (ii) admission REFUSES an UNNAMED scoped root from
+a co-hosted serving session (a live-lease principal) reading a space
+whose lease it does not hold — the shape that would silently resolve
+`user:<serviceDID>`. Cross-space serving therefore reads foreign
+SPACE-scope state freely (§2b's free-read row) and foreign SCOPED
+state not at all; lifting that refusal is exactly the grant
+resolution above, never a lease-trust widening. Remote attestation
+stays anticipated future work.
 
 **Run identity for a derivation (S1).** A derivation runs PER
 DEMANDED INSTANCE and the DEMAND supplies the identity — a

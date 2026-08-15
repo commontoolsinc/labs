@@ -547,6 +547,14 @@ export interface Options {
    *  sessionId persistence is itself unbuilt; a host that persists
    *  sessions supplies a durable store through this seam). */
   eventAppendQueueStore?: EventAppendQueueStore;
+  /** Server-execution v2 Phase 5: declares this manager a SERVING
+   *  manager whose home space is `servingHomeSpace`. Providers opened
+   *  for OTHER spaces refuse scoped (user/session) reads fail-closed
+   *  (protocol.md §2's grant-scoped read design, RULED 2026-08-13) —
+   *  a serving runtime's foreign scoped read would otherwise resolve
+   *  against the delegating service envelope and silently read an
+   *  empty instance. Absent on every non-serving manager. */
+  servingHomeSpace?: MemorySpace;
 }
 
 /**
@@ -777,6 +785,8 @@ export class StorageManager implements IStorageManager {
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
   #eventAppendQueueStore?: EventAppendQueueStore;
+  /** Phase 5: the serving manager's home space (Options.servingHomeSpace). */
+  #servingHomeSpace?: MemorySpace;
   #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -838,6 +848,7 @@ export class StorageManager implements IStorageManager {
     // a durable adapter through the same seam (see Options).
     this.#eventAppendQueueStore = options.eventAppendQueueStore ??
       memoryEventAppendQueueStore();
+    this.#servingHomeSpace = options.servingHomeSpace;
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
     }
@@ -966,6 +977,11 @@ export class StorageManager implements IStorageManager {
         settings: this.#settings,
         subscription: this.#subscription,
         scopeKeyIdentity: () => this.scopeKeyIdentity(),
+        // Phase 5's producer-side foreign-scoped-read refusal: only a
+        // serving manager sets a home space, and only its FOREIGN
+        // providers refuse (see Options.servingHomeSpace).
+        refuseForeignScopedReads: this.#servingHomeSpace !== undefined &&
+          this.#servingHomeSpace !== space,
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -1755,6 +1771,15 @@ type ProviderOptions = {
   getTelemetry?: () => TelemetrySink | undefined;
   /** The LT9 event-intent persistence seam (see Options). */
   eventAppendQueueStore?: EventAppendQueueStore;
+  /** Server-execution v2 Phase 5 (protocol.md §2's grant-scoped read
+   * design, RULED 2026-08-13 — the delegated-scoped-read fail-closed
+   * precondition): set on a SERVING manager's FOREIGN-space providers.
+   * A scoped (user/session) read against such a provider REFUSES
+   * loudly instead of shipping an unnamed scoped root the memory
+   * server would resolve against the delegating service envelope —
+   * the silent-empty-instance trap. Space-scope foreign reads (the
+   * §2b free-read row) are unaffected. */
+  refuseForeignScopedReads?: boolean;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -2137,6 +2162,9 @@ class SpaceReplica implements ISpaceReplica {
    * offline event queue. */
   #eventAppendQueue?: EventAppendQueue;
   #eventAppendQueueStore?: EventAppendQueueStore;
+  /** Phase 5's producer-side foreign-scoped-read refusal (see
+   * ProviderOptions.refuseForeignScopedReads). */
+  #refuseForeignScopedReads = false;
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
@@ -2263,6 +2291,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
     this.#eventAppendQueueStore = options.eventAppendQueueStore;
+    this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
     // Eager queue init (LT9; verdict blocker, 2026-08-12): a persisted
     // backlog — a dead predecessor's intents in the manager-shared
     // store, or a durable adapter's reload survivors — must discharge
@@ -3409,6 +3438,30 @@ class SpaceReplica implements ISpaceReplica {
       );
       if (watchEntries.length === 0) {
         return { ok: {} };
+      }
+      // Phase 5's delegated-scoped-read fail-closed refusal, producer
+      // side (protocol.md §2's grant-scoped read design; see
+      // ProviderOptions.refuseForeignScopedReads): a serving runtime's
+      // scoped read of a FOREIGN space never reaches the wire — the
+      // unnamed scoped root would resolve against the delegating
+      // service envelope (a silently empty instance), and the runner
+      // cannot yet name a per-run foreign instance on a subscription.
+      // The memory server's admission carries the co-hosted belt; this
+      // is the producer half, so the two land as one stack.
+      if (this.#refuseForeignScopedReads) {
+        for (const [address] of watchEntries) {
+          const scope = address.scope ?? "space";
+          if (scope !== "space") {
+            throw new Error(
+              `foreign scoped read refused on the serving path: ` +
+                `${address.id} (scope "${scope}") in ${this.#space} — ` +
+                "a serving runtime reads foreign scoped instances only " +
+                "under the grant-scoped read design (protocol.md §2; " +
+                "delegated scoped reads are fail-closed until grant " +
+                "resolution lands)",
+            );
+          }
+        }
       }
 
       const watches = watchEntries.map(([address, selector]) => ({

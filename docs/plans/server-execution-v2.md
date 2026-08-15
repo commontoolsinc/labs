@@ -648,14 +648,45 @@ Success criteria:
 
 Tasks:
 
-- [ ] Home-space runtime reads foreign spaces with the piece's granted
+- [x] Home-space runtime reads foreign spaces with the piece's granted
       authority; foreign commits wake the home runtime (server-internal
-      subscription).
+      subscription). LANDED 2026-08-14: foreign SPACE-scope reads flow
+      on the serving runtime's ordinary storage plane (per-space
+      loopback sessions), and the host fans a foreign admission to
+      every active SpaceServer whose runtime holds sessions into that
+      space (the §3b server-internal wake — never home input; W stays
+      per home space); activation's basis re-mark judges foreign rows
+      against their own co-hosted engines (serving-loop.md §6 step 2).
+      Foreign SCOPED reads are FAIL-CLOSED refused at both ends — the
+      RULED 2026-08-13 delegated-scoped-read precondition: the
+      grant-scoped read design landed in protocol.md §2 (carried actor
+      + grant; resolution refuses, never envelope fallback), its
+      fail-closed interim is the producer-side provider refusal + the
+      admission-side unnamed-scoped refusal, and the read row gained
+      FP2's cross-engine widening + the per-process full-DR1-holder
+      sharpening (`v2-explicit-read.test.ts`'s Phase-5 arms,
+      red-first).
 - [ ] Per-reader clearance enforced where the read is served (sqlite row
-      admissibility, CFC labels).
-- [ ] `.inSpace()` provisioning server-side: foreign-first split at the
+      admissibility, CFC labels). (The per-reader memo/materialization
+      machinery is builtins.md §2's landed base; cross-space label
+      metadata flows with reads on the existing per-run CFC path.
+      Foreign-batch sqlite attachment stays refused — no producer; its
+      identity design rides the grant-scoped read design. Ticks with
+      the acceptance gate below.)
+- [x] `.inSpace()` provisioning server-side: foreign-first split at the
       wave commit step, event-derived deterministic DIDs (CT-1650),
-      replay-idempotent (protocol.md §2b).
+      replay-idempotent (protocol.md §2b). LANDED 2026-08-14: the
+      serving loop runs the wave's accept-with-carriage posture — a
+      foreign write is admitted at accumulation iff the run carries
+      the §2b delegated carriage (acting + capabilityRef; #stampRun
+      supplies the grant for served runs acting as a principal), a
+      carriage-less foreign write keeps the ruled action-scoped
+      refusal — and resolves foreign co-hosted engines ahead of the
+      commit step (stage G's foreign-first sequencing + FP1 rows were
+      already live). The RULED wish line item rides the same crossing:
+      per-demanding-identity wish resolution (builtins.md §5 —
+      `homeSpacePrincipalFor`; the serving wish resolves the
+      demanding user's home space, never the service identity's).
 
 Success criteria:
 
@@ -665,7 +696,10 @@ Success criteria:
 - [ ] Profile creation (the `.inSpace()` flow: `profile-create`,
       `home-profile`) green in the ON arm, including a kill between the
       foreign and home commits — replay converges on the same DIDs, no
-      orphans, no duplicates.
+      orphans, no duplicates. (The wave-level kill/replay halves are
+      pinned — foreign-failure-withholds-home and
+      requeue-after-foreign-landed in `executor-wave.test.ts`; the
+      browser-flow gates carry the E2E.)
 
 ## Phase 6 — Push priority, budgets, scale
 

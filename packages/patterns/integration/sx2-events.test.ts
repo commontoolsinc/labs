@@ -194,15 +194,20 @@ describe("sx2 events (Phase 3 gates)", () => {
     const dupWatermark =
       (watermarkCell(cc.runtime, space).get() as { seq?: number } | undefined)
         ?.seq ?? 0;
+    // The caller-supplied eventId travels WITH the session it was
+    // chosen within (main's WS-D invocation-identity contract — an
+    // unscoped id is refused); the same (id, session, stream) pair
+    // scopes to the same durable delivery id, which is exactly what
+    // the dedupe horizon needs to see a duplicate.
     resultCell.key("increment").send(
       undefined as never,
       undefined,
-      { eventId: "sx2-dup-1" } as never,
+      { eventId: "sx2-dup-1", session: "sx2-dup-session" } as never,
     );
     resultCell.key("increment").send(
       undefined as never,
       undefined,
-      { eventId: "sx2-dup-1" } as never,
+      { eventId: "sx2-dup-1", session: "sx2-dup-session" } as never,
     );
     await cc.runtime.idle();
     await settleAfter(space, dupWatermark);

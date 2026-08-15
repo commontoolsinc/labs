@@ -908,3 +908,313 @@ Deno.test("a non-canonical entity_scope_key (raw '/') is refused at admission �
     await server.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Phase 5 — the read row's cross-space widening and its fail-closed twin
+// (protocol.md §2; verification-coverage.md's stage-F read-row entry):
+//
+// - FP2 (RULED 2026-08-03): the requester holds A live execution_lease on
+//   the co-hosted memory server — its OWN space's lease, not necessarily
+//   the read space's — so a home SpaceServer's cross-space serving reads
+//   can name a FOREIGN space's instances.
+// - The per-process sharpening: equality is against the FULL DR1 holder
+//   minted by THIS process, so a second process sharing the service DID
+//   no longer passes on this process's lease rows.
+// - The delegated-scoped-read fail-closed refusal (RULED 2026-08-13, the
+//   Phase-5 precondition): a co-hosted serving session's UNNAMED scoped
+//   read of a space it does not hold refuses loudly instead of silently
+//   resolving the delegating envelope's (empty) instance.
+// ---------------------------------------------------------------------------
+
+const HOME_SPACE = "did:key:z6Mk-explicit-read-home";
+
+const openSessionIn = async (
+  harness: Harness,
+  space: string,
+  principal: string,
+): Promise<{ sessionId: string }> => {
+  await harness.connection.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: nextRequestId("open"),
+    space,
+    session: {},
+    invocation: {
+      iss: principal,
+      aud: harness.sessionOpen.audience,
+      challenge: harness.sessionOpen.challenge.value,
+    },
+  }));
+  const response = shiftMessage(harness.messages) as ResponseMessage<
+    { sessionId: string; sessionOpen: SessionOpenAuthMetadata }
+  >;
+  assertExists(response.ok, JSON.stringify(response.error));
+  harness.sessionOpen = response.ok.sessionOpen;
+  return { sessionId: response.ok.sessionId };
+};
+
+Deno.test("Phase 5: a home holder names a FOREIGN space's instance under its own space's lease (FP2's widened read row)", async () => {
+  const server = newServer("memory://explicit-read-fp2");
+  setServerExecutionConfig(true);
+  try {
+    // Alice's instance lives in SPACE; the serving session's lease lives
+    // in HOME_SPACE (the home SpaceServer serving cross-space reads).
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+
+    const homeEngine = await server.engineForSpace(HOME_SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      acquireExecutionLease(homeEngine, {
+        space: HOME_SPACE,
+        holder,
+        ttlMs: 600_000,
+      }),
+      true,
+    );
+
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSessionIn(
+      service,
+      SPACE,
+      SERVICE,
+    );
+    const widened = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("fp2"),
+      space: SPACE,
+      sessionId: serviceSession,
+      query: {
+        roots: [{
+          id: "of:profile",
+          scope: "user",
+          entityScopeKey: aliceKey,
+          selector: { path: [], schema: false },
+        }],
+      },
+    });
+    assertExists(
+      widened.ok,
+      `FP2's widened acceptance must admit a co-hosted home holder: ${
+        JSON.stringify(widened.error)
+      }`,
+    );
+    assertEquals(widened.ok.entities.length, 1);
+    assertEquals(widened.ok.entities[0].document?.value, { name: "alice" });
+
+    // A plain client with NO lease anywhere stays refused — the widening
+    // admits holders, never everyone.
+    const bob = await connect(server);
+    const { sessionId: bobSession } = await openSession(bob, BOB);
+    const refused = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("fp2-nonholder"),
+      space: SPACE,
+      sessionId: bobSession,
+      query: {
+        roots: [{
+          id: "of:profile",
+          scope: "user",
+          entityScopeKey: aliceKey,
+          selector: { path: [], schema: false },
+        }],
+      },
+    });
+    assertEquals(refused.error?.name, "ProtocolError");
+
+    alice.connection.close();
+    service.connection.close();
+    bob.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+Deno.test("Phase 5: a second process's lease row admits nobody here (the per-process DR1 sharpening)", async () => {
+  const server = newServer("memory://explicit-read-per-process");
+  setServerExecutionConfig(true);
+  try {
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+    const aliceKey = resolveScopeKey("user", { principal: ALICE });
+
+    // The lease row was minted by ANOTHER process sharing the service
+    // DID (a deploy overlap): its holder carries a foreign
+    // process-instance component. The Phase-1 service-identity-only
+    // equality admitted this session on that row; the sharpened check
+    // must refuse — this process's serving session holds nothing.
+    const engine = await server.engineForSpace(SPACE);
+    const foreignProcessHolder = executionLeaseHolder(
+      SERVICE,
+      "00000000-dead-beef-0000-000000000000",
+    );
+    assertEquals(
+      acquireExecutionLease(engine, {
+        space: SPACE,
+        holder: foreignProcessHolder,
+        ttlMs: 600_000,
+      }),
+      true,
+    );
+
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSessionIn(
+      service,
+      SPACE,
+      SERVICE,
+    );
+    const refused = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("per-process"),
+      space: SPACE,
+      sessionId: serviceSession,
+      query: {
+        roots: [{
+          id: "of:profile",
+          scope: "user",
+          entityScopeKey: aliceKey,
+          selector: { path: [], schema: false },
+        }],
+      },
+    });
+    assertEquals(
+      refused.error?.name,
+      "ProtocolError",
+      "a session must not be admitted on ANOTHER process's lease row " +
+        `(per-process sharpening): ${JSON.stringify(refused.ok)}`,
+    );
+
+    alice.connection.close();
+    service.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});
+
+Deno.test("Phase 5: a co-hosted serving session's UNNAMED scoped read of a foreign space is refused fail-closed (the grant-scoped read design's interim)", async () => {
+  const server = newServer("memory://explicit-read-fail-closed");
+  setServerExecutionConfig(true);
+  try {
+    const alice = await connect(server);
+    const { sessionId: aliceSession } = await openSession(alice, ALICE);
+    await writeAliceProfile(server, aliceSession, 1, { name: "alice" });
+
+    // The serving session's lease lives in HOME_SPACE; SPACE is foreign
+    // to it.
+    const homeEngine = await server.engineForSpace(HOME_SPACE);
+    const holder = executionLeaseHolder(SERVICE);
+    assertEquals(
+      acquireExecutionLease(homeEngine, {
+        space: HOME_SPACE,
+        holder,
+        ttlMs: 600_000,
+      }),
+      true,
+    );
+    const service = await connect(server);
+    const { sessionId: serviceSession } = await openSessionIn(
+      service,
+      SPACE,
+      SERVICE,
+    );
+
+    // UNNAMED scoped root: pre-Phase-5 this resolved user:<serviceDID> —
+    // a silently EMPTY instance. Now it refuses loudly.
+    const refused = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("fail-closed"),
+      space: SPACE,
+      sessionId: serviceSession,
+      query: {
+        roots: [{
+          id: "of:profile",
+          scope: "user",
+          selector: { path: [], schema: false },
+        }],
+      },
+    });
+    assertEquals(
+      refused.error?.name,
+      "ProtocolError",
+      "an unnamed scoped read by a foreign serving session must refuse " +
+        `fail-closed, never silently resolve the service instance: ${
+          JSON.stringify(refused.ok)
+        }`,
+    );
+    assertEquals(
+      refused.error?.message.includes("grant-scoped read design"),
+      true,
+    );
+
+    // The same session's unnamed SPACE-scope read stays free (§2b's
+    // free-read row): only scoped roots are the trap.
+    const spaceRead = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("space-scope"),
+      space: SPACE,
+      sessionId: serviceSession,
+      query: {
+        roots: [{
+          id: "of:profile",
+          selector: { path: [], schema: false },
+        }],
+      },
+    });
+    assertExists(spaceRead.ok, JSON.stringify(spaceRead.error));
+
+    // An ordinary client's unnamed scoped read is untouched (resolves
+    // its own instance as today).
+    const bob = await connect(server);
+    const { sessionId: bobSession } = await openSession(bob, BOB);
+    const bobOwn = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("bob-own"),
+      space: SPACE,
+      sessionId: bobSession,
+      query: {
+        roots: [{
+          id: "of:profile",
+          scope: "user",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }) as ResponseMessage<GraphQueryResult>;
+    assertExists(bobOwn.ok, JSON.stringify(bobOwn.error));
+
+    // A serving session's unnamed scoped read of ITS OWN space (it holds
+    // the lease there) keeps today's tolerated behavior — the home
+    // collapsed-view path (the OW17 residual), not the cross-space trap.
+    const homeService = await connect(server);
+    const { sessionId: homeSession } = await openSessionIn(
+      homeService,
+      HOME_SPACE,
+      SERVICE,
+    );
+    const homeRead = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("home-scoped"),
+      space: HOME_SPACE,
+      sessionId: homeSession,
+      query: {
+        roots: [{
+          id: "of:home-doc",
+          scope: "user",
+          selector: { path: [], schema: false },
+        }],
+      },
+    });
+    assertExists(homeRead.ok, JSON.stringify(homeRead.error));
+
+    alice.connection.close();
+    service.connection.close();
+    bob.connection.close();
+    homeService.connection.close();
+  } finally {
+    resetServerExecutionConfig();
+    await server.close();
+  }
+});

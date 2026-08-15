@@ -330,6 +330,20 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
 }
 
 /**
+ * The user whose HOME SPACE this wish resolution targets (server-execution
+ * v2 Phase 5; builtins.md §5's per-demanding-identity wish resolution,
+ * RULED 2026-08-14): the runtime's own user on a client (cardinality 1,
+ * today's behavior), the RUN's demanding identity on a serving runtime —
+ * NEVER the service identity (the lunch-wall trap: a served wish
+ * materializing against the service home space). Undefined on a serving
+ * runtime whose run carries no demanding principal; callers refuse with
+ * a WishError.
+ */
+function homeSpaceUserDID(ctx: WishContext): string | undefined {
+  return ctx.runtime.homeSpacePrincipalFor(ctx.tx);
+}
+
+/**
  * A profile link is valid when it resolves to a cell in another space (the
  * profile's own `inSpace` space) with an empty path. An unset link, or one that
  * still points into the home space, means the profile does not exist yet.
@@ -516,7 +530,7 @@ function searchFavoritesForHashtag(
   pathPrefix: string[],
 ): BaseResolution[] {
   const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
-  const userDID = ctx.runtime.userIdentityDID;
+  const userDID = homeSpaceUserDID(ctx);
   if (!userDID) return [];
 
   const favoritesCell = measureWishPhase(
@@ -807,7 +821,7 @@ function resolveHomeSpaceTarget(
 ): BaseResolution[] | null {
   switch (parsed.key) {
     case "#favorites": {
-      const userDID = ctx.runtime.userIdentityDID;
+      const userDID = homeSpaceUserDID(ctx);
       if (!userDID) {
         throw new WishError("User identity DID not available for #favorites");
       }
@@ -851,7 +865,7 @@ function resolveHomeSpaceTarget(
     }
 
     case "#journal": {
-      const userDID = ctx.runtime.userIdentityDID;
+      const userDID = homeSpaceUserDID(ctx);
       if (!userDID) {
         throw new WishError("User identity DID not available for #journal");
       }
@@ -862,7 +876,7 @@ function resolveHomeSpaceTarget(
     }
 
     case "#learned": {
-      const userDID = ctx.runtime.userIdentityDID;
+      const userDID = homeSpaceUserDID(ctx);
       if (!userDID) {
         throw new WishError("User identity DID not available for #learned");
       }
@@ -876,7 +890,7 @@ function resolveHomeSpaceTarget(
       // The free-form learned summary string (home `learned.summary`). This is
       // what `#profile` used to resolve to before it was repurposed for the
       // profile default pattern object; summary consumers wish for this instead.
-      const userDID = ctx.runtime.userIdentityDID;
+      const userDID = homeSpaceUserDID(ctx);
       if (!userDID) {
         throw new WishError(
           "User identity DID not available for #learnedSummary",
@@ -889,7 +903,7 @@ function resolveHomeSpaceTarget(
     }
 
     case "#profile": {
-      const userDID = ctx.runtime.userIdentityDID;
+      const userDID = homeSpaceUserDID(ctx);
       if (!userDID) {
         throw new WishError("User identity DID not available for #profile");
       }
@@ -1276,7 +1290,7 @@ function resolveSpaceTarget(
   }
 
   // "~" → include home space
-  if (ctx.scope?.includes("~") && ctx.runtime.userIdentityDID) {
+  if (ctx.scope?.includes("~") && homeSpaceUserDID(ctx) !== undefined) {
     const homeSpaceCell = getHomeSpaceCell(ctx);
     results.push(resolutionFor(homeSpaceCell));
   }
@@ -1540,6 +1554,7 @@ export function createSidecarPatternCache(options: {
   async function fetchPattern(
     runtime: Runtime,
     url: string,
+    compileSpace?: Cell<unknown>["space"],
   ): Promise<Pattern | undefined> {
     try {
       const program = await runtime.harness.resolve(
@@ -1552,7 +1567,13 @@ export function createSidecarPatternCache(options: {
       const compiled = await runtime.patternManager.compilePattern(
         program,
         options.compileInUserSpace
-          ? { space: runtime.userIdentityDID }
+          // Phase 5: a SERVING runtime's compile-cache context is the
+          // SERVED space (the wave's home — its writebacks are
+          // bookkeeping wave writes, serving-loop.md §3d), never the
+          // service identity's own space (a foreign wave write — the
+          // lunch-wall class). Callers pass it; clients keep the
+          // per-user cache context (CT-1623).
+          ? { space: compileSpace ?? runtime.userIdentityDID }
           : undefined,
       );
 
@@ -1577,6 +1598,7 @@ export function createSidecarPatternCache(options: {
     fetch(
       runtime: Runtime,
       onSuccess?: (pattern: Pattern) => void,
+      compileSpace?: Cell<unknown>["space"],
     ): Promise<Pattern | undefined> {
       const url = patternUrl();
       if (!fetchPromise || fetchUrl !== url) {
@@ -1585,6 +1607,7 @@ export function createSidecarPatternCache(options: {
         const started: Promise<Pattern | undefined> = fetchPattern(
           runtime,
           url,
+          compileSpace,
         ).then((fetched) => {
           // Only the fetch the cache currently points to records and reports
           // its result; launches chained on a superseded fetch get undefined
@@ -1935,7 +1958,11 @@ export function wish(
     const cachedSuggestionPattern = suggestionPatternCache.cached();
     if (!cachedSuggestionPattern) {
       // Once fetch completes, run the pattern without a tx (it creates its own)
-      void suggestionPatternCache.fetch(runtime).then(
+      void suggestionPatternCache.fetch(
+        runtime,
+        undefined,
+        runtime.servingPosture ? parentCell.space : undefined,
+      ).then(
         (pattern) => {
           if (!cancelled && pattern && suggestionPatternResultCell) {
             runtime.run(
@@ -2031,13 +2058,18 @@ export function wish(
     };
     const tx = providedTx || runtime.edit();
 
+    // Phase 5: the sidecar cells key by the HOME-SPACE user — the
+    // demanding identity on a serving runtime (two users' create
+    // surfaces must not collide on the service DID), the runtime's own
+    // user on a client (unchanged).
+    const sidecarUser = homeSpaceUserDID(ctx) ?? runtime.userIdentityDID;
     if (!profileCreatePatternResultCell) {
       profileCreatePatternResultCell = runtime.getCell(
         parentCell.space,
         {
           wish: {
             profileCreatePattern: cause,
-            user: runtime.userIdentityDID,
+            user: sidecarUser,
           },
         },
         undefined,
@@ -2050,7 +2082,7 @@ export function wish(
         {
           wish: {
             profileCreatePatternReady: cause,
-            user: runtime.userIdentityDID,
+            user: sidecarUser,
           },
         },
         undefined,
@@ -2086,15 +2118,17 @@ export function wish(
           runtime.prepareTxForCommit(readyTx);
           readyTx.commit();
         }
-      }).then((pattern) => {
-        if (!cancelled && pattern && profileCreatePatternResultCell) {
-          runSidecarInOwnTx(
-            profileCreatePatternResultCell,
-            pattern,
-            profileCreateInputForTx,
-          );
-        }
-      });
+      }, runtime.servingPosture ? parentCell.space : undefined).then(
+        (pattern) => {
+          if (!cancelled && pattern && profileCreatePatternResultCell) {
+            runSidecarInOwnTx(
+              profileCreatePatternResultCell,
+              pattern,
+              profileCreateInputForTx,
+            );
+          }
+        },
+      );
     } else if (!cancelled && profileCreatePatternResultCell) {
       runtime.run(
         tx,
@@ -2161,7 +2195,9 @@ export function wish(
         {
           wish: {
             profilePickerPattern: cause,
-            user: runtime.userIdentityDID,
+            // Phase 5: keyed by the home-space user (the demanding
+            // identity on serving) — see launchProfileCreatePattern.
+            user: homeSpaceUserDID(ctx) ?? runtime.userIdentityDID,
           },
         },
         undefined,
@@ -2183,7 +2219,11 @@ export function wish(
 
     const cachedProfilePickerPattern = profilePickerPatternCache.cached();
     if (!cachedProfilePickerPattern) {
-      void profilePickerPatternCache.fetch(runtime).then(
+      void profilePickerPatternCache.fetch(
+        runtime,
+        undefined,
+        runtime.servingPosture ? parentCell.space : undefined,
+      ).then(
         (pattern) => {
           if (cancelled || !profilePickerPatternResultCell) return;
           if (pattern) {

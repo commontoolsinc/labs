@@ -71,7 +71,10 @@ import {
   ExecutionLeaseCycle,
   executionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
-import { selectStaleBasisInstances } from "@commonfabric/memory/v2/scheduler-basis";
+import {
+  selectForeignBasisRows,
+  selectStaleBasisInstances,
+} from "@commonfabric/memory/v2/scheduler-basis";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
@@ -545,11 +548,48 @@ export class SpaceServer implements TransactionSealDestination {
       engine,
       { branch: "", space },
     );
+    // Phase 5's foreign re-mark (serving-loop.md §3b's cross-space
+    // bullet; §6 step 2): recorded FOREIGN inputs are judged against
+    // their own space's co-hosted engine — same surfacing posture as
+    // the home scan (counted and logged; recovery correctness rides
+    // recompute-on-demand over the fresh runtime either way, so a
+    // failed foreign-head resolution degrades to conservative
+    // surfacing, never a wedge).
     if (foreignReadInstances.length > 0) {
-      logger.warn("basis-foreign-rows", () => [
-        `${foreignReadInstances.length} basis instance(s) carry ` +
-        "cross-space reads; cross-space re-marking lands with Phase 5",
-      ]);
+      try {
+        const foreignRows = selectForeignBasisRows(engine, {
+          branch: "",
+          space,
+        });
+        const staleKeys = new Set(
+          stale.map((entry) => `${entry.action}\0${entry.actionScopeKey}`),
+        );
+        for (const row of foreignRows) {
+          const key = `${row.action}\0${row.actionScopeKey}`;
+          if (staleKeys.has(key)) continue;
+          const foreignEngine = await this.#options.server.engineForSpace(
+            row.entitySpace as MemorySpace,
+          );
+          const head = Engine.selectDocHead(foreignEngine, {
+            id: row.entity,
+            scopeKey: row.entityScopeKey,
+          });
+          if (head > row.seq) {
+            staleKeys.add(key);
+            stale.push({
+              action: row.action,
+              actionScopeKey: row.actionScopeKey,
+            });
+          }
+        }
+      } catch (error) {
+        logger.warn("basis-foreign-remark-failed", () => [
+          `${foreignReadInstances.length} basis instance(s) carry ` +
+          "cross-space reads and the foreign re-mark failed; " +
+          "recompute-on-demand covers them (serving-loop.md §6 step 2)",
+          error,
+        ]);
+      }
     }
     logger.info?.("activate", () => [
       `space ${space} activated: W=${this.#watermark} scanHead=${scanHead} ` +
@@ -625,13 +665,41 @@ export class SpaceServer implements TransactionSealDestination {
     return true;
   }
 
-  #foreignEngineFor(_space: MemorySpace): Engine.Engine {
-    // Cross-space serving is Phase 5; Phase 1 waves write their home
-    // space only (no provisioning producers exist yet).
-    throw new Error(
-      "cross-space wave commits are Phase 5 (protocol.md §2b); no " +
-        "Phase-1 producer writes a foreign space",
-    );
+  /** Resolved co-hosted engines for FOREIGN spaces this loop's waves
+   * provision into (protocol.md §2b — Phase 5). Populated by
+   * #resolveForeignEngines ahead of each commit step; the sink's
+   * engineFor lookup is synchronous, so a miss here is a sequencing
+   * bug, not a recoverable state. Cleared on park (a re-activation
+   * re-resolves — engines may have been closed meanwhile). */
+  readonly #foreignEngines = new Map<MemorySpace, Engine.Engine>();
+
+  #foreignEngineFor(space: MemorySpace): Engine.Engine {
+    const engine = this.#foreignEngines.get(space);
+    if (engine === undefined) {
+      // The commit-step backstop (serving-loop.md §3d): reachable only
+      // if a foreign batch bypassed #resolveForeignEngines — the
+      // accumulation gate admits sanctioned crossings and the cycle
+      // resolves their engines before commitWave, so this names a bug.
+      throw new Error(
+        `no resolved co-hosted engine for foreign space ${space}: the ` +
+          "wave commit step runs after #resolveForeignEngines " +
+          "(protocol.md §2b; serving-loop.md §3d's commit-step backstop)",
+      );
+    }
+    return engine;
+  }
+
+  /** Resolve the co-hosted engines for a closing wave's foreign spaces
+   * (Phase 5): same host, same process — store sequencing, not a
+   * network await (protocol.md §2b). */
+  async #resolveForeignEngines(wave: WaveAccumulator): Promise<void> {
+    for (const space of wave.foreignSpaces) {
+      if (this.#foreignEngines.has(space)) continue;
+      this.#foreignEngines.set(
+        space,
+        await this.#options.server.engineForSpace(space),
+      );
+    }
   }
 
   /** The host's in-process feed (plane (d)): every admitted commit for
@@ -641,6 +709,7 @@ export class SpaceServer implements TransactionSealDestination {
     this.#feed.push(record);
     this.#feedArrived?.resolve();
   }
+
 
   /** A session opened or its demand may have changed: reconsider the
    * demanded roots on the next cycle. */
@@ -789,10 +858,16 @@ export class SpaceServer implements TransactionSealDestination {
         onUnstampedSeal: () => {
           this.#options.stats.unstampedSealRefusals += 1;
         },
-        // Default posture ("refuse", RULED 2026-08-14 (c)): a foreign-
-        // space write refuses at ACCUMULATION, action-scoped — the wave
-        // and the loop survive a misdirected wish materialization
-        // instead of dying at the commit-step guard. Counted into §7.
+        // The Phase-5 serving posture (serving-loop.md §3d; protocol.md
+        // §2b): foreign-space writes are ADMITTED at accumulation IFF
+        // the sealing run carries the §2b delegated carriage (acting
+        // identity + capabilityRef — the sanctioned `.inSpace`/
+        // provisioning shape, which #stampRun supplies for served runs
+        // acting as a principal). A carriage-less foreign write — the
+        // lunch-wall class: a run resolving against the SERVICE
+        // identity's ambient state — still refuses action-scoped,
+        // loud, and counted into §7's foreignWriteRefusals.
+        foreignWrites: "accept",
         onForeignWriteRefusal: () => {
           this.#options.stats.foreignWriteRefusals += 1;
         },
@@ -852,6 +927,28 @@ export class SpaceServer implements TransactionSealDestination {
         ? { acting: info.acting }
         : acting !== undefined
         ? { acting }
+        : {}),
+      // Phase 5 (protocol.md §2b's sanctioned crossing): a served run
+      // acting AS a principal carries the delegated GRANT alongside its
+      // actor, so its provisioning writes (a handler's `.inSpace`
+      // creation, a demanded wish's home-space bootstrap) are
+      // admissible at the wave's accept gate and at the target's
+      // delegated admission. Structural presence, following the FP1
+      // outbox precedent (`stream-append:<sidecarId>`): grant
+      // RESOLUTION against per-doc grants is the OW13 owed hardening —
+      // no per-doc grant store exists yet. Never for bookkeeping (the
+      // loop's own writes carry no acting principal, protocol.md §1),
+      // and never without an actor (a carriage-less foreign write
+      // refuses at accumulation, by design).
+      ...(info.kind !== "bookkeeping" &&
+          (info.acting !== undefined || acting !== undefined)
+        ? {
+          capabilityRef: info.kind === "event-handler"
+            ? `event-consequence:${info.eventId ?? "unidentified"}`
+            : `demanded-run:${
+              (info.acting ?? acting)!.user
+            }`,
+        }
         : {}),
       ...(info.streamEntry !== undefined
         ? { streamEntry: info.streamEntry }
@@ -2388,6 +2485,11 @@ export class SpaceServer implements TransactionSealDestination {
     this.#currentWave = undefined;
     await this.#sealChain;
 
+    // Phase 5 (protocol.md §2b): resolve the co-hosted engines for the
+    // wave's foreign provisioning targets BEFORE the commit step — the
+    // sink's engineFor is synchronous. Same host, same process.
+    await this.#resolveForeignEngines(closing);
+
     const derivedThrough = !exhausted && advanceSealed
       ? advanceTo
       : this.#watermark;
@@ -2634,6 +2736,10 @@ export class SpaceServer implements TransactionSealDestination {
     this.#terminalStructureLoads.clear();
     this.#rearmedAwaitingSettle.clear();
     this.#pendingStructureRetryWake = false;
+    // Phase 5: foreign engine resolutions die with the tenure (a
+    // re-activation re-resolves; the map must not outlive engines the
+    // server may close meanwhile).
+    this.#foreignEngines.clear();
     const wave = this.#currentWave;
     this.#currentWave = undefined;
     await this.#sealChain;

@@ -60,6 +60,7 @@ import {
   stampSpeculationRunContext,
 } from "./speculation/overlay-destination.ts";
 import { EffectsChannel } from "./speculation/effects-channel.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
 import { Action, Scheduler } from "./scheduler.ts";
 import {
   type CommitBackpressurePolicy,
@@ -2567,12 +2568,52 @@ export class Runtime {
     );
   }
 
+  /**
+   * The principal whose HOME SPACE a home-space resolution targets —
+   * the wish builtin's `#favorites`/`#profile` family (server-execution
+   * v2 Phase 5; builtins.md §5's per-demanding-identity wish
+   * resolution, RULED 2026-08-14):
+   *
+   * - On a CLIENT (and the whole OFF arm): the runtime's own user —
+   *   cardinality 1, today's behavior byte-for-byte.
+   * - On a SERVING runtime: the RUN's identity — the demand-supplied
+   *   instance identity (P2-F's run supply) or the event's stamped
+   *   actor — read from the transaction's stamped wave run context.
+   *   NEVER the runtime's own identity: that is the SERVICE identity,
+   *   and resolving it was the lunch-wall trap (a wish materializing
+   *   against the service home space — a foreign wave write).
+   * - On a serving runtime with NO acting run identity (a space-scope
+   *   run with no demanding principal): undefined — the caller
+   *   refuses loudly rather than falling back to the service DID.
+   */
+  homeSpacePrincipalFor(
+    tx?: IExtendedStorageTransaction,
+  ): DID | undefined {
+    if (!this.servingPosture) return this.userIdentityDID;
+    const context = tx === undefined ? undefined : waveRunContextOf(tx);
+    const principal = context?.scopeKeyIdentity?.principal ??
+      context?.acting?.user;
+    return principal as DID | undefined;
+  }
+
   getHomeSpaceCell(
     tx?: IExtendedStorageTransaction,
   ): Cell<SpaceCellContents> {
+    const principal = this.homeSpacePrincipalFor(tx);
+    if (principal === undefined) {
+      // Serving posture with no demanding identity (see
+      // homeSpacePrincipalFor): fail closed — never the service DID.
+      throw new Error(
+        "home-space resolution on a serving runtime requires the run's " +
+          "demanding identity (builtins.md §5's per-demanding-identity " +
+          "wish resolution; scopes.md §5 — the demand supplies the " +
+          "identity); refusing to resolve the SERVICE identity's home " +
+          "space",
+      );
+    }
     return this.getCell(
-      this.userIdentityDID,
-      this.userIdentityDID,
+      principal,
+      principal,
       spaceCellSchema,
       tx,
     ) as Cell<SpaceCellContents>;

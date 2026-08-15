@@ -20,11 +20,11 @@ families), the Phase 1 dry-run, and the doc-review panels
 | doc | rules | instrument-covered | impl-gate | deferral | derivable | owed |
 | --- | --- | --- | --- | --- | --- | --- |
 | README | 31 | 17 | 9 | 1 | 2 | 2* |
-| protocol | 61 | 47 | 6 | 3 | 4 | 1* |
+| protocol | 63 | 47 | 8 | 3 | 4 | 1* |
 | events | 34 | 25 | 4 | 2 | 2 | 1 |
 | scopes | 25 | 17 | 3 | 1 | 2 | 2 |
 | builtins | 15 | 6 | 3 | 1 | 4 | 1 |
-| serving-loop | 78 | 46 | 20 | 1 | 5 | 6 |
+| serving-loop | 79 | 46 | 21 | 1 | 5 | 6 |
 | key-vocabulary | 9 | 5 | 3 | 0 | 0 | 1 |
 | speculation | 16 | 11 | 2 | 0 | 1 | 2 |
 | testing | 14 | 4 | 10 | 0 | 0 | 0 |
@@ -823,7 +823,11 @@ above carries the coverage):**
   fail-closed admission refusal, BEFORE any delegated-scoped-read
   producer ships — a Phase-5 work-order PRECONDITION, and the
   producer and its refusal/design land together as one stack, so no
-  interim exposure window exists.
+  interim exposure window exists. DISCHARGED with Phase 5
+  (2026-08-14): the design landed in protocol §2 and its fail-closed
+  interim landed at both ends of the stack (the 2026-08-14 delta
+  below carries the coverage); the grant-RESOLUTION obligation stays
+  owed on its original trigger.
 
 **Stage G pre-gate — LANDED with stage G (2026-08-06):**
 
@@ -1019,7 +1023,10 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   test that a post-handover session stops receiving other
   instances' rows. Trigger: Phase 5's grant-scoped read hardening
   (FP2's named follow-up), or the first multi-server lease
-  handover work, whichever lands first.
+  handover work, whichever lands first. DISCHARGED with Phase 5
+  (2026-08-14; the delta below carries the evidence — the re-verify
+  and the post-handover tests exist, the half-(ii) mitigation
+  stands).
 - OW23 — unvalidated scope strings reach `resolveScopeKey` with no
   default arm (pre-existing adjacency): the switch covers the three
   `CellScope` members and TypeScript exhaustiveness assumes the
@@ -1781,6 +1788,112 @@ residual postures, and the delegated-scoped-reads deferral; protocol
 - OW13 updated in place with the delegated-scoped-reads deferral
   ruling (no count move — the register row carries the Phase-5
   work-order precondition; see the row).
+
+Delta 2026-08-14 — Phase 5 (cross-space serving; the phase PR;
+protocol 61 → 63, serving-loop 78 → 79 — the map edited with this
+delta):
+
+- protocol §2's grant-scoped read DESIGN (+1 rule) with its
+  FAIL-CLOSED interim (+1 rule) — the RULED 2026-08-13 Phase-5
+  precondition, discharged as one stack with the producers: →
+  COVERED, impl-gate, red-first. `memory/test/v2-explicit-read.test.ts`
+  ("Phase 5" arms, all three red at the pre-change tree): FP2's
+  cross-engine widening (a home holder names a FOREIGN space's
+  instance under its own space's lease; a lease-less client stays
+  refused), the per-process sharpening (a second process's lease row
+  admits nobody — full-DR1-holder equality), and the fail-closed
+  unnamed-scoped-foreign refusal (a co-hosted serving session's
+  unnamed scoped read of a space it does not hold refuses; ordinary
+  clients, space-scope foreign reads, and home scoped reads are
+  untouched). The producer half is
+  `runner/test/executor-cross-space.test.ts`'s provider refusal (a
+  serving manager's FOREIGN provider refuses scoped reads; space-scope
+  and home and non-serving managers unaffected). The unnamed-path
+  check is fully synchronous (the resolved-engine index), preserving
+  the ACL revocation-race invariant; its per-query cost is one
+  prepared-statement lease probe per open co-hosted engine, only for
+  flag-ON scoped reads by principal-bearing sessions.
+- protocol §2's read-row Phase-1 recorded acceptance (the
+  service-identity-only equality): RETIRED — the sharpened check
+  compares the full DR1 holder minted by the co-hosted process
+  (CHANGED sentences on the existing row; coverage above).
+- serving-loop §3b's server-internal foreign wake (+1 rule,
+  impl-gate): → COVERED, with a survival-test finding recorded
+  honestly. `executor-cross-space.test.ts`'s wake test pins the
+  END-TO-END behavior — a home derivation over a foreign doc
+  re-derives on the foreign commit alone (idle window 600 s). A
+  host-side fan-out built for the wake was MUTATION-PROBED REDUNDANT
+  (the test stayed green with it disabled) and REMOVED: the wake is
+  the already-landed chain — foreign session frames → the scheduler's
+  autonomous storage-notification runs → the seal's loop wake — so
+  the spec sentence is satisfied by construction, not by new
+  machinery. Activation's foreign basis re-mark (§6 step 2's Phase-5
+  sentence) rides `selectForeignBasisRows` + per-space head
+  resolution, fail-degrading to surfacing (accounting parity with
+  the home scan; recovery correctness rides recompute-on-demand).
+- serving-loop §3d's accumulation gate (CHANGED sentence — the
+  Phase-5 accept-with-carriage posture): → COVERED.
+  `executor-wave.test.ts`: full carriage admitted with the foreign
+  scoped row keyed from the CARRIED identity (the stage-F delegated
+  test, now under the live gate); partial carriage (no grant) refused
+  at ACCUMULATION action-scoped with the wave surviving vacuous; the
+  sink's scoped-op-without-carriage refusal re-pinned DIRECTLY as the
+  backstop ("Phase 5 backstop" test). The serving loop passes
+  "accept" (space-server.ts) and resolves foreign co-hosted engines
+  ahead of the commit step; a carriage-less foreign write stays
+  counted in §7's `foreignWriteRefusals`.
+- builtins §5's wish row (CHANGED — the RULED 2026-08-14
+  per-demanding-identity lift): → COVERED, impl-gate.
+  `executor-cross-space.test.ts`'s home-space resolution test: a
+  stamped derivation resolves the DEMANDING principal's home space, a
+  stamped handler resolves the ACTOR's, an identity-less serving run
+  refuses (never the service DID), and a client runtime is
+  byte-identical to before. The wish builtin's guards ride
+  `homeSpacePrincipalFor`; the sidecar compile-cache context is the
+  SERVED space on serving runtimes; sidecar result cells key by the
+  home-space user (two demanders never collide on the service DID).
+  The lunch-ON gate's profile leg is the E2E witness (the phase PR's
+  gates table carries its status).
+- OW13 — the delegated-grant RESOLUTION row's Phase-5 PRECONDITION is
+  DISCHARGED (the design + fail-closed refusals above, one stack with
+  the producers). The row's original obligation — grant RESOLUTION
+  against a per-doc grant store, with negative tests — STAYS OWED on
+  its original trigger (the store landing); Phase 5's write-side
+  carriage stays presence+completeness (`capabilityRef` minted
+  structurally at #stampRun: `event-consequence:<eventId>` /
+  `demanded-run:<principal>`, the FP1 `stream-append:<sidecarId>`
+  precedent — a below-spec-granularity surface FLAGGED in the
+  Phase-5 PR).
+- OW22 — DISCHARGED (evidence recorded on this delta; the row's
+  trigger was Phase 5's grant-scoped read hardening): the exemption
+  re-verifies on CURRENT holdership at every push-path use
+  (`#currentLeaseHolderExemption` — Phase 5 widens it to exactly the
+  admission's co-hosted condition, full-holder equality), lease loss
+  clears the persisted bit, and the post-handover test exists
+  red-first ("lease-holder push exemption dies with the lease" +
+  the resume revalidation test, `v2-explicit-read.test.ts`). The
+  half (ii) wire-upsert scope-name mitigation (forced full resync)
+  stands unchanged and keeps its comment.
+- OW17 — RE-TAGGED with the Phase-5 posture (flag-don't-fill upheld):
+  the trigger anticipated foreign scoped instances making the
+  replica's scope-name collapse load-bearing; Phase 5 instead
+  REFUSES foreign scoped reads fail-closed (the grant-design
+  interim), so no foreign instance can enter a serving replica and
+  the collapse's exposure is unchanged from P2-F. The owed leg
+  (replica-level per-instance read keying + per-(action × instance)
+  local precision) now triggers with the grant-scoped read
+  RESOLUTION landing — the same work that first admits a foreign
+  scoped instance producer.
+- LT9 rec (c) — ADOPTED-PENDING-VETO, the COUPLING SEAM half only
+  (the plan defers protocol §5's sessionId persistence beyond
+  Phase 5, so per the rec's fork the durable wiring waits):
+  `InitializationData.eventAppendQueuePersistence` is the typed
+  declarative seam the worker maps onto the manager's
+  `eventAppendQueueStore` option (`resolveEventAppendQueuePersistence`
+  — memory kind honored; any other kind REFUSES initialization
+  loudly rather than silently degrading a durability declaration).
+  OW20 stands unchanged (browser adapter + queue debts, trigger: the
+  sessionId persistence work).
 
 ## 4. Standing rule
 

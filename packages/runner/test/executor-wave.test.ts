@@ -837,6 +837,9 @@ describe("stage D seal-into-wave", () => {
         kind: "event-handler",
         eventId: "e-prov",
         acting: { user: "did:key:alice", session: "sess-1" },
+        // The §2b provisioning shape (Phase 5's accept-with-carriage
+        // gate): every foreign commit carries acting + grant.
+        capabilityRef: "cap:test-grant",
       });
       tx.enableMultiSpaceWrites?.([foreign, space]);
       foreignCell.withTx(tx).set({ value });
@@ -1107,6 +1110,8 @@ describe("stage D seal-into-wave", () => {
       kind: "event-handler",
       eventId: "e-foreign-writer",
       acting: { user: "did:key:alice", session: "sess-1" },
+      // The §2b provisioning carriage (Phase 5's accept gate).
+      capabilityRef: "cap:test-grant",
     });
     writerTx.enableMultiSpaceWrites?.([foreign, space]);
     foreignSeed.withTx(writerTx).set({ value: 3 });
@@ -1119,6 +1124,13 @@ describe("stage D seal-into-wave", () => {
     stampWaveRunContext(readerTx, {
       actionId: "derive-from-foreign",
       kind: "derivation",
+      // A demanded run acting as its demander (the Phase-5 wish shape:
+      // per-demanding-identity resolution riding §2b's crossing) — the
+      // acting + grant carriage is what admits its foreign write at
+      // the accept gate.
+      acting: { user: "did:key:alice", session: "sess-1" },
+      scopeKeyIdentity: { principal: "did:key:alice", sessionId: "sess-1" },
+      capabilityRef: "cap:test-grant",
     });
     readerTx.enableMultiSpaceWrites?.([foreign, space]);
     const seen = foreignSeed.withTx(readerTx).get();
@@ -2121,20 +2133,81 @@ describe("stage D seal-into-wave", () => {
     expect(meta.acting_session).toBe("sess-1");
     expect(meta.capability_ref).toBe("cap:test-grant");
 
-    // WITHOUT the capabilityRef (partial carriage): the foreign batch has
-    // no delegated identity, so the scoped write is refused — never
-    // silently keyed from the sink's own principal.
-    const partialWave = await provision({
+    // WITHOUT the capabilityRef (partial carriage): refused at
+    // ACCUMULATION (Phase 5's accept-with-carriage gate — a foreign
+    // write is admitted only under the full §2b delegated carriage), so
+    // the tx fails action-scoped and NOTHING reaches the sink, let
+    // alone keys from its principal. The sink's own delegated
+    // validation stays as backstop (its direct test below).
+    const partialWave = newWave({ lease });
+    runtime.installSealDestination(partialWave);
+    const foreignScoped = runtime.getCell<{ value: number }>(
+      foreign,
+      "wave-delegated-scoped",
+      undefined,
+      undefined,
+      "user",
+    );
+    const home = runtime.getCell<{ value: number }>(
+      space,
+      "wave-delegated-home",
+      undefined,
+    );
+    const partialTx = runtime.edit();
+    stampWaveRunContext(partialTx, {
       actionId: "provision-scoped-2",
       kind: "event-handler",
       eventId: "e-partial",
       acting,
       scopeKeyIdentity: { principal: acting.user, sessionId: acting.session },
       // no capabilityRef
-    }, 21);
+    });
+    partialTx.enableMultiSpaceWrites?.([foreign, space]);
+    foreignScoped.withTx(partialTx).set({ value: 21 });
+    home.withTx(partialTx).set({ value: 22 });
+    const partialCommit = await partialTx.commit();
+    expect(partialCommit.error?.message ?? "").toContain(
+      "foreign-space write refused at wave accumulation",
+    );
+    runtime.clearSealDestination();
     const outcome2 = await partialWave.commitWave(sink);
     await partialWave.settled();
-    expect(outcome2.aborted).toBe("foreign-commit-failed");
+    // Nothing sealed: the refused tx withdrew whole, the wave is vacuous.
+    expect(outcome2.aborted).toBeUndefined();
+    expect(outcome2.committedEventIds).toEqual([]);
+  });
+
+  it("Phase 5 backstop: the sink still refuses a foreign batch's scoped op without delegated carriage (protocol.md §2's delegated row)", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave sink backstop foreign space",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const foreignEngine = await server.engineForSpace(foreign);
+    const sink = new EngineWaveCommitSink({
+      engineFor: () => foreignEngine,
+      sessionId: executionLeaseHolder(`service:${space}`),
+    });
+    const refused = await sink.commitWave({
+      space: foreign,
+      home: false,
+      basisSeq: 0,
+      rebasedHeads: [],
+      operations: [{
+        op: "set",
+        id: "of:backstop",
+        scope: "user",
+        value: { value: { v: 1 } },
+      } as never],
+      preconditions: [],
+      annotations: [],
+      consequenceOf: [],
+      basisInstances: [],
+      holder: undefined,
+      // no delegated carriage
+    });
+    expect(refused.error?.message ?? "").toContain(
+      "scoped write in a foreign wave batch refused",
+    );
   });
 
   it("stage F: a read in a space the run wrote nothing to folds the reader into a withdrawal (the discharged stage-D bound)", async () => {

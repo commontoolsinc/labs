@@ -142,6 +142,13 @@ export class ExecutorHost {
 
   #onCommitAdmitted(notice: AdmittedCommitNotice): void {
     if (this.#closed) return;
+    // Phase 5's server-internal foreign wake needs NO host machinery
+    // (survival-tested: a fan-out built here was mutation-probed
+    // redundant and removed): a foreign commit's frames arrive on the
+    // home serving runtime's foreign loopback session, the scheduler
+    // runs autonomously off storage notifications, and the re-run's
+    // SEAL wakes the loop (SpaceServer.seal's feed wake). The
+    // executor-cross-space E2E pins the end-to-end behavior.
     const existing = this.#spaces.get(notice.space);
     if (existing !== undefined) {
       // Active OR still activating: the record must reach the feed

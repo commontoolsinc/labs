@@ -47,6 +47,11 @@ export function startServerExecutionHost(options: {
     createRuntime: (space) => {
       const storageManager = LoopbackStorageManager.connect(options.server, {
         as: options.identity,
+        // Phase 5 (protocol.md §2's grant-scoped read design): the
+        // serving manager's FOREIGN-space providers refuse scoped
+        // reads fail-closed — the producer half of the
+        // delegated-scoped-read precondition.
+        servingHomeSpace: space,
       });
       const runtime = new Runtime({
         apiUrl: options.apiUrl,

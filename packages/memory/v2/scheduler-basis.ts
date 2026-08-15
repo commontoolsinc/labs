@@ -154,6 +154,47 @@ ORDER BY b.action, b.action_scope_key
   return { stale: shape(stale), foreignReadInstances: shape(foreign) };
 };
 
+/** One cross-space basis row (Phase 5's foreign re-mark): the recorded
+ * foreign input plus its owning (action, instance), so the activation
+ * scan can compare the recorded seq against the FOREIGN space's head
+ * through that space's own co-hosted engine (serving-loop.md §3b's
+ * foreign-read logging; §6 step 2). */
+export type ForeignBasisRow = SchedulerBasisEntry & StaleBasisInstance;
+
+/**
+ * Every basis row whose recorded input lives in ANOTHER space
+ * (serving-loop.md §3b's cross-space bullet). The caller judges
+ * staleness against each entity_space's own engine — this engine cannot
+ * (its head table holds only its own docs).
+ */
+export const selectForeignBasisRows = (
+  engine: Engine,
+  options: { branch: string; space: string },
+): ForeignBasisRow[] => {
+  const rows = engine.database.prepare(`
+SELECT action, action_scope_key, entity_space, entity, entity_scope_key, seq
+FROM scheduler_basis
+WHERE branch = :branch
+  AND entity_space != :space
+ORDER BY action, action_scope_key, entity_space, entity, entity_scope_key
+`).all({ branch: options.branch, space: options.space }) as Array<{
+    action: string;
+    action_scope_key: string;
+    entity_space: string;
+    entity: string;
+    entity_scope_key: string;
+    seq: number;
+  }>;
+  return rows.map((row) => ({
+    action: row.action,
+    actionScopeKey: row.action_scope_key,
+    entitySpace: row.entity_space,
+    entity: row.entity,
+    entityScopeKey: row.entity_scope_key,
+    seq: row.seq,
+  }));
+};
+
 /** Read one instance's rows back (recovery's re-mark scan, and tests). */
 export const selectSchedulerBasisRows = (
   engine: Engine,

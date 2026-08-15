@@ -102,8 +102,8 @@ import {
   trackGraph,
 } from "./query.ts";
 import {
+  executionLeaseHolder,
   liveExecutionLeaseHolder,
-  serviceIdentityOfExecutionLeaseHolder,
 } from "./execution-lease.ts";
 import { respondToHello } from "./handshake.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
@@ -904,6 +904,9 @@ export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
   #engines = new Map<string, Promise<Engine.Engine>>();
+  // The resolved-engine index for the SYNC cross-engine lease lookup
+  // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
+  #resolvedEngines = new Map<string, Engine.Engine>();
   // Synthesized session state for direct out-of-band document writes, such as blob uploads.
   #directSessionId = `server:${crypto.randomUUID()}`;
   #directLocalSeq = 0;
@@ -1380,6 +1383,7 @@ export class Server {
       Engine.close(await engine);
     }
     this.#engines.clear();
+    this.#resolvedEngines.clear();
     this.#connections.clear();
     this.#readPool.close();
   }
@@ -2741,6 +2745,22 @@ export class Server {
         ),
       );
     }
+    {
+      // Phase 5's fail-closed twin (sync — no added await on the
+      // unnamed path): a foreign serving session's UNNAMED scoped root
+      // refuses rather than silently resolving the service instance.
+      const denyForeign = this.#denyForeignServingScopedRead(
+        message.space,
+        session,
+        message.query.roots,
+      );
+      if (denyForeign) {
+        return respondTypedError<GraphQueryResult>(
+          message.requestId,
+          denyForeign,
+        );
+      }
+    }
     if (this.#namesExplicitInstance(message.query.roots)) {
       // protocol.md §2's read row: explicit entity_scope_key roots are
       // lease-holder-only. Gated on the sync scan so the no-key path
@@ -2953,6 +2973,20 @@ export class Server {
         return respondTypedError<WatchSetResult>(message.requestId, deny);
       }
     }
+    {
+      // Phase 5's fail-closed twin (sync — see graphQuery's site).
+      const denyForeign = this.#denyForeignServingScopedRead(
+        message.space,
+        session,
+        message.watches.flatMap((watch) => watch.query.roots),
+      );
+      if (denyForeign) {
+        return respondTypedError<WatchSetResult>(
+          message.requestId,
+          denyForeign,
+        );
+      }
+    }
     if (
       this.#namesExplicitInstance(
         message.watches.flatMap((watch) => watch.query.roots),
@@ -3045,6 +3079,20 @@ export class Server {
         );
       if (deny) {
         return respondTypedError<WatchAddResult>(message.requestId, deny);
+      }
+    }
+    {
+      // Phase 5's fail-closed twin (sync — see graphQuery's site).
+      const denyForeign = this.#denyForeignServingScopedRead(
+        message.space,
+        session,
+        message.watches.flatMap((watch) => watch.query.roots),
+      );
+      if (denyForeign) {
+        return respondTypedError<WatchAddResult>(
+          message.requestId,
+          denyForeign,
+        );
       }
     }
     if (
@@ -3987,28 +4035,36 @@ export class Server {
   /**
    * The read-side admission row (protocol.md §2, ratified LD5): a read
    * naming an explicit `entity_scope_key` is admissible only for a live
-   * lease holder on this co-hosted memory server. The operand mapping
-   * (stage F design): the session's authenticated principal must equal
-   * the SERVICE-IDENTITY component of the read space's live lease holder
-   * — the identity the ExecutorHost minted its DR1 holder from. A
-   * non-holder naming a key is REJECTED; a read naming none resolves
-   * from the session as today and never reaches this check.
+   * lease holder on this co-hosted memory server. Phase 5 landed both
+   * halves the Phase-1 bounds deferred (verification-coverage.md's
+   * stage-F read-row entry):
    *
-   * Phase-1 bound, deliberate: the check consults the READ space's own
-   * lease row. FP2's widening — a home SpaceServer naming a FOREIGN
-   * space's instances under its own space's lease — has no producer
-   * until cross-space serving (Phase 5) and needs the cross-engine
-   * lease lookup designed with it.
+   * - FP2's WIDENING (RULED 2026-08-03): the requester holds A live
+   *   `execution_lease` on this co-hosted memory server — its OWN
+   *   space's lease, not necessarily the read space's — so a home
+   *   SpaceServer's cross-space serving reads can name a FOREIGN
+   *   space's instances instead of silently resolving
+   *   `user:<serviceDID>`. The read space's own lease is checked
+   *   first; the fallback is the sync cross-engine scan
+   *   (#liveCoHostedLeaseSpaceFor).
+   * - The PER-PROCESS sharpening: equality is against the FULL DR1
+   *   holder minted by THIS process (`executionLeaseHolder`, binding
+   *   the module-level process-instance component), never the
+   *   service-identity component alone — a second process sharing the
+   *   service DID no longer passes on this process's lease rows.
    *
-   * A second Phase-1 bound, also deliberate: the equality below
-   * compares the SERVICE-IDENTITY component of the holder, not the
-   * full DR1 holder — so a second process authenticated as the same
-   * service DID passes on the FIRST process's lease row. Co-hosted
-   * Phase 1 runs one serving process per memory server, so the
-   * distinction has no instances; the per-process sharpening belongs
-   * to Phase 5's cross-engine lease lookup design (the same design
-   * FP2's widening needs), recorded in verification-coverage.md's
-   * stage-F read-row entry.
+   * A non-holder naming a key is REJECTED; an ordinary read naming
+   * none resolves from the session as today. The one NEW unnamed-read
+   * refusal is the delegated-scoped-read fail-closed rule (protocol.md
+   * §2's grant-scoped read design, the RULED 2026-08-13 Phase-5
+   * precondition): a session that IS a co-hosted serving session (its
+   * principal holds a live lease on some space of this server) reading
+   * a SCOPED root of a space whose lease it does NOT hold, WITHOUT an
+   * explicit instance name, would silently resolve the service
+   * identity's (empty) instance — the FP2 silent-empty-instance trap,
+   * cross-space edition. That shape REFUSES loudly instead; the
+   * serving runtime names foreign instances explicitly or does not
+   * read them.
    */
   async #denyExplicitInstanceReads(
     space: string,
@@ -4071,12 +4127,19 @@ export class Server {
       );
     }
     const engine = await this.openEngine(space);
-    const holder = liveExecutionLeaseHolder(engine, space);
-    if (
-      holder === undefined ||
-      session.principal === undefined ||
-      serviceIdentityOfExecutionLeaseHolder(holder) !== session.principal
-    ) {
+    const fullHolder = session.principal === undefined
+      ? undefined
+      : executionLeaseHolder(session.principal);
+    const readSpaceHolder = liveExecutionLeaseHolder(engine, space);
+    const holdsReadSpace = fullHolder !== undefined &&
+      readSpaceHolder === fullHolder;
+    // FP2's widened acceptance: a live lease on ANY space of this
+    // co-hosted server admits (the home SpaceServer naming a foreign
+    // instance for a cross-space serving read).
+    const holdsCoHosted = holdsReadSpace ||
+      (session.principal !== undefined &&
+        this.#liveCoHostedLeaseSpaceFor(session.principal) !== undefined);
+    if (!holdsCoHosted) {
       return toError(
         "ProtocolError",
         "read naming an entity_scope_key rejected: requester does not " +
@@ -4104,12 +4167,23 @@ export class Server {
     session: SessionState,
   ): Promise<boolean> {
     if (session.leaseHolderReads !== true) return false;
+    if (session.principal === undefined) {
+      session.leaseHolderReads = false;
+      return false;
+    }
+    // The same holdership the admission accepts (Phase 5): the read
+    // space's own lease, or — FP2's widening — any live co-hosted
+    // lease held by THIS process's full DR1 holder (a home SpaceServer
+    // keeps receiving the foreign instances its cross-space serving
+    // reads named). Full-holder equality throughout (the per-process
+    // sharpening).
     const engine = await this.openEngine(space);
-    const holder = liveExecutionLeaseHolder(engine, space);
+    const fullHolder = executionLeaseHolder(session.principal);
+    const holdsReadSpace = liveExecutionLeaseHolder(engine, space) ===
+      fullHolder;
     if (
-      holder === undefined ||
-      session.principal === undefined ||
-      serviceIdentityOfExecutionLeaseHolder(holder) !== session.principal
+      !holdsReadSpace &&
+      this.#liveCoHostedLeaseSpaceFor(session.principal) === undefined
     ) {
       session.leaseHolderReads = false;
       return false;
@@ -4126,6 +4200,66 @@ export class Server {
       if (root.entityScopeKey !== undefined) return true;
     }
     return false;
+  }
+
+  /**
+   * The delegated-scoped-read fail-closed refusal (Phase 5; protocol.md
+   * §2's grant-scoped read design — RULED 2026-08-13: the design, or an
+   * explicit fail-closed admission refusal, lands BEFORE any
+   * delegated-scoped-read producer ships). A co-hosted SERVING session
+   * (its principal holds a live lease on some space of this server)
+   * reading a SCOPED root of a space whose lease it does NOT hold,
+   * without naming an `entity_scope_key`, would silently resolve the
+   * delegating service envelope's (empty) instance — the FP2
+   * silent-empty-instance trap, cross-space edition. Refused loudly.
+   *
+   * FULLY SYNCHRONOUS (called without await at the three read sites):
+   * ordinary client reads keep sharing one engine turn with their
+   * authorization (the ACL revocation-race invariant). Ordinary
+   * sessions hold no lease and exit at the scan; a serving session's
+   * HOME reads (it holds the read space's lease) keep today's
+   * tolerated collapsed-view behavior (the OW17 residual).
+   */
+  #denyForeignServingScopedRead(
+    space: string,
+    session: SessionState,
+    roots: Iterable<GraphQuery["roots"][number]>,
+  ): V2Error | undefined {
+    if (!getServerExecutionConfig()) return undefined;
+    if (session.principal === undefined) return undefined;
+    let unnamedScopedRoot: string | undefined;
+    for (const root of roots) {
+      if (
+        root.entityScopeKey === undefined && (root.scope ?? "space") !== "space"
+      ) {
+        unnamedScopedRoot = `${root.id} (scope "${root.scope}")`;
+        break;
+      }
+    }
+    if (unnamedScopedRoot === undefined) return undefined;
+    const fullHolder = executionLeaseHolder(session.principal);
+    // Home holdership short-circuits: only a RESOLVED engine can hold a
+    // lease row (a never-opened engine has none), so the sync map is
+    // authoritative here.
+    const readEngine = this.#resolvedEngines.get(space);
+    if (
+      readEngine !== undefined &&
+      liveExecutionLeaseHolder(readEngine, space) === fullHolder
+    ) {
+      return undefined;
+    }
+    const leaseSpace = this.#liveCoHostedLeaseSpaceFor(session.principal);
+    if (leaseSpace === undefined || leaseSpace === space) return undefined;
+    return toError(
+      "ProtocolError",
+      `scoped read of ${unnamedScopedRoot} refused: the requesting ` +
+        `session is a co-hosted serving session (live lease on ` +
+        `${leaseSpace}) reading foreign space ${space} without naming ` +
+        "an entity_scope_key — resolving it from the delegating " +
+        "envelope would silently read an empty instance (protocol.md " +
+        "§2's grant-scoped read design; delegated scoped reads are " +
+        "fail-closed until grant resolution lands)",
+    );
   }
 
   /** The identity a session's scoped reads and cache keys resolve
@@ -4471,13 +4605,51 @@ export class Server {
       }
       return await Engine.open({ url });
     })();
-    opened.catch(() => {
+    // The SYNC engine view (server-execution v2 Phase 5): the read-row
+    // admission's cross-engine lease lookup (protocol.md §2, FP2) must
+    // stay synchronous on the unnamed read path (the ACL revocation-race
+    // invariant — no added microtask boundary), so resolved engines are
+    // indexed here for the sync scan. A lease can only exist on an OPEN
+    // engine (co-hosted activation opens it before acquiring), so the
+    // resolved map sees every live lease.
+    opened.then((engine) => {
+      if (this.#engines.get(space) === opened) {
+        this.#resolvedEngines.set(space, engine);
+      }
+    }, () => {
       if (this.#engines.get(space) === opened) {
         this.#engines.delete(space);
+        this.#resolvedEngines.delete(space);
       }
     });
     this.#engines.set(space, opened);
     return opened;
+  }
+
+  /**
+   * The live co-hosted execution lease held by `principal`'s serving
+   * process, if any (server-execution v2 Phase 5; protocol.md §2's read
+   * row as widened by FP2, RULED 2026-08-03). Two properties, both
+   * deliberate:
+   *
+   * - PER-PROCESS sharpening (the Phase-1 recorded acceptance's
+   *   follow-up, verification-coverage.md's stage-F read-row entry):
+   *   equality is against the FULL DR1 holder minted by THIS process —
+   *   `executionLeaseHolder(principal)` binds the module-level
+   *   process-instance component the co-hosted ExecutorHost mints
+   *   holders from — so a second process authenticated as the same
+   *   service DID no longer passes on this process's lease rows.
+   * - SYNCHRONOUS: scans the RESOLVED engine map only (see openEngine),
+   *   so callers on the read path add no microtask boundary. Sound
+   *   because a lease row can only be written through an open co-hosted
+   *   engine.
+   */
+  #liveCoHostedLeaseSpaceFor(principal: string): string | undefined {
+    const holder = executionLeaseHolder(principal);
+    for (const [space, engine] of this.#resolvedEngines) {
+      if (liveExecutionLeaseHolder(engine, space) === holder) return space;
+    }
+    return undefined;
   }
 }
 

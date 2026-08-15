@@ -26,9 +26,10 @@
 //   rule as the transact path, keyed by the accumulator's per-RUN scope
 //   keys), attached before and detached after the synchronous apply. A
 //   sink constructed WITHOUT the hook still refuses such a batch
-//   loudly. Sqlite ops in FOREIGN batches stay refused — no Phase-1
-//   producer folds sqlite into provisioning, and the attachment
-//   identity for a foreign run is Phase 5's cross-space design.
+//   loudly. Sqlite ops in FOREIGN batches stay refused — Phase 5 KEPT
+//   this refusal deliberately: no sanctioned producer folds sqlite into
+//   provisioning, and the foreign attachment identity rides the
+//   grant-scoped read design (protocol.md §2).
 //
 // Stage G also forwards the wave's durable outbound-append rows
 // (serving-loop.md §5, FP1): `batch.outboxAppends` land INSIDE the same
@@ -171,9 +172,11 @@ export class EngineWaveCommitSink implements WaveCommitSink {
             error: {
               name: "WaveCommitRejected",
               message: "sqlite ops in a FOREIGN wave batch are refused: " +
-                "cross-space sqlite attachment lands with Phase 5's " +
-                "cross-space serving (protocol.md §2b; the stage-G " +
-                "discharge covers home batches only)",
+                "no sanctioned producer folds sqlite into provisioning, " +
+                "and the foreign attachment identity rides the " +
+                "grant-scoped read design (protocol.md §2, §2b; the " +
+                "stage-G discharge covers home batches only — Phase 5 " +
+                "kept this refusal deliberately)",
             },
           });
         }

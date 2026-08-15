@@ -136,17 +136,27 @@ stream is passed to other spaces, which then append intents to it.
   LOAD-BEARING on main in `filter.ts`/`flatmap.ts` (#4367, #4438), so
   "do not port" is not on the table; decide its end state against
   serving-loop.md §6 when Phase 1 lands the list coordinators.
-- `wish` home-space materialization under serving (RULED 2026-08-14
-  (c)): a serving-runtime wish that materializes home-space state
-  resolves against the SERVICE identity's home space, so its writes
-  are foreign to the served space — REFUSED at wave accumulation
-  (serving-loop.md §3d: action-scoped, loud, counted into §7's
-  `foreignWriteRefusals`; the wave and the loop keep serving; the
-  commit-step foreign-engine guard stays as backstop). No client
-  diversion. Phase 5 lifts it as per-demanding-identity wish
-  resolution riding protocol.md §2b's `.inSpace` sanctioned crossing —
-  both halves already exist (P2-F's per-run identity supply, stage G's
-  foreign-first provisioning sequencing).
+- `wish` home-space materialization under serving — LIFTED by Phase 5
+  as **per-demanding-identity wish resolution** (RULED 2026-08-14;
+  supersedes the (c)-ruled interim refusal): on a serving runtime the
+  wish's home-space targets (`#favorites`/`#journal`/`#profile`
+  family) resolve against the RUN's demanding identity — the
+  demand-supplied instance identity (P2-F's run supply) or the
+  event's stamped actor, read from the stamped run context — NEVER
+  the service identity (`Runtime.homeSpacePrincipalFor`); a
+  home-space wish with NO demanding identity refuses loudly (a
+  WishError at the resolution guards; a hard error at the cell
+  resolution backstop). Its home-space bootstrap writes ride
+  protocol.md §2b's `.inSpace` sanctioned crossing — authored-class,
+  foreign-first, under the demanding principal's acting identity +
+  grant (the wave's accept-with-carriage gate, serving-loop.md §3d).
+  A carriage-less foreign write — the lunch-wall class — still
+  refuses at accumulation, action-scoped and counted
+  (`foreignWriteRefusals`). The serving side's sidecar compile-cache
+  context is the SERVED space, never the service identity's own
+  (the same class of ambient-identity leak, closed with the same
+  lift). Client wishes are byte-identical to before (cardinality 1:
+  the runtime's own user).
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 

@@ -530,18 +530,19 @@ export class WaveAccumulator
     onUnstampedSeal?: () => void;
     /** Foreign-space writes at ACCUMULATION (serving-loop.md §3d, RULED
      * 2026-08-14 (c) — the lunch-wall trigger's ruled seat): on
-     * `"refuse"` (the DEFAULT — the Phase-1..4 truth that no sanctioned
-     * producer writes a foreign space from a serving wave yet), a
-     * sealing tx carrying a foreign-space commit is refused
-     * ACTION-SCOPED — that tx fails loudly (its already-sealed spaces
-     * withdraw per §3d's failure isolation) and the wave keeps serving
-     * everything else, instead of the whole wave dying later at the
-     * commit step's foreign-engine guard (loop-failed → park: a space
-     * outage from one misdirected wish materialization). `"accept"`
-     * is the Phase-5 posture — per-demanding-identity resolution
-     * riding §2b's `.inSpace` sanctioned crossing — kept dark-but-
-     * tested by the §2b accumulator tests until Phase 5 flips the
-     * serving loop over. The commit-step guard stays as backstop. */
+     * `"refuse"` (the pre-Phase-5 default), a sealing tx carrying a
+     * foreign-space commit is refused ACTION-SCOPED — that tx fails
+     * loudly (its already-sealed spaces withdraw per §3d's failure
+     * isolation) and the wave keeps serving everything else, instead
+     * of the whole wave dying later at the commit step's
+     * foreign-engine guard (loop-failed → park: a space outage from
+     * one misdirected wish materialization). `"accept"` is the
+     * Phase-5 SERVING posture (the serving loop passes it since
+     * Phase 5): a foreign write is admitted IFF the sealing run's
+     * context carries the §2b delegated carriage (acting identity +
+     * capabilityRef — the sanctioned `.inSpace`/provisioning shape);
+     * a carriage-less foreign write keeps refusing action-scoped and
+     * counted. The commit-step guard stays as backstop. */
     foreignWrites?: "refuse" | "accept";
     /** Fired once per refused foreign-space write (above): the serving
      * loop counts it into §7's `foreignWriteRefusals`. */
@@ -585,6 +586,20 @@ export class WaveAccumulator
    * appends never actually ride). */
   get hasOutboundAppends(): boolean {
     return this.#contributions.some((c) => c.outboundAppends.length > 0);
+  }
+
+  /** The FOREIGN spaces sealed contributions target (protocol.md §2b's
+   * provisioning commits). The serving loop resolves these spaces'
+   * co-hosted engines BEFORE driving the commit step, so the sink's
+   * synchronous engineFor lookup never misses (Phase 5). */
+  get foreignSpaces(): MemorySpace[] {
+    const spaces = new Set<MemorySpace>();
+    for (const contribution of this.#contributions) {
+      for (const sealed of contribution.spaces) {
+        if (sealed.space !== this.#space) spaces.add(sealed.space);
+      }
+    }
+    return [...spaces];
   }
 
   /**
@@ -858,39 +873,57 @@ export class WaveAccumulator
         },
       });
     }
-    if (space !== this.#space && this.#foreignWrites === "refuse") {
-      // Accumulation-time refusal (serving-loop.md §3d, RULED 2026-08-14
-      // (c)): a foreign-space write from a serving-wave action — the
-      // lunch-wall trigger was a wish materialization resolving against
-      // the SERVICE identity's home space — refuses HERE, action-scoped:
-      // seal() fails this tx (withdrawing its already-sealed spaces) and
-      // the wave keeps every other contribution, where the pre-ruling
-      // behavior let the batch through and the whole wave died at the
-      // commit step's foreign-engine guard, parking the space. Loud and
-      // counted; Phase 5 (per-demanding-identity resolution riding §2b's
-      // `.inSpace` crossing) flips the posture.
-      const actionId = assembly.context?.actionId;
-      logger.warn("foreign-write-refused", () => [
-        `foreign-space write refused at wave accumulation: action ` +
-        `${actionId ?? "<unstamped>"} attempted to write ${space} from ` +
-        `the wave serving ${this.#space} (serving-loop.md §3d, RULED ` +
-        "2026-08-14 (c); cross-space serving is Phase 5)",
-      ]);
-      this.#onForeignWriteRefusal?.({
-        space,
-        ...(actionId !== undefined ? { actionId } : {}),
-      });
-      return Promise.resolve({
-        error: {
-          name: "StorageTransactionAborted",
-          message: `foreign-space write refused at wave accumulation ` +
-            `(serving-loop.md §3d, RULED 2026-08-14 (c)): action ` +
-            `${actionId ?? "<unstamped>"} may not write ${space} from ` +
-            `the wave serving ${this.#space}; cross-space serving is ` +
-            "Phase 5",
-          reason: new Error("foreign-write-refused"),
-        },
-      });
+    if (space !== this.#space) {
+      // Accumulation-time gate (serving-loop.md §3d, RULED 2026-08-14
+      // (c); lifted by Phase 5 for the SANCTIONED shape only):
+      //
+      // - "refuse" (the pre-Phase-5 default): every foreign-space write
+      //   refuses HERE, action-scoped — seal() fails this tx
+      //   (withdrawing its already-sealed spaces) and the wave keeps
+      //   every other contribution, instead of the whole wave dying at
+      //   the commit step's foreign-engine guard (the lunch-wall
+      //   trigger: a wish materialization resolving against the SERVICE
+      //   identity's home space).
+      // - "accept" (the Phase-5 serving posture): a foreign write is
+      //   admitted IFF the sealing run's context carries the §2b
+      //   delegated carriage — acting identity AND capabilityRef, the
+      //   provisioning shape protocol.md §2's server-produced authored
+      //   row requires on EVERY foreign commit. A carriage-less foreign
+      //   write keeps refusing exactly like "refuse": admitting it
+      //   would commit authored-class under the bare service envelope
+      //   with no acting identity — the silent-empty-instance trap's
+      //   write-side twin. The commit-step sink's delegated validation
+      //   stays as backstop.
+      const carriage = assembly.context !== undefined &&
+        this.#delegatedFor(assembly.context) !== undefined;
+      if (this.#foreignWrites === "refuse" || !carriage) {
+        const actionId = assembly.context?.actionId;
+        const why = this.#foreignWrites === "refuse"
+          ? "cross-space serving is Phase 5"
+          : "the run context carries no §2b delegated carriage (acting " +
+            "identity + capabilityRef; protocol.md §2's server-produced " +
+            "authored row)";
+        logger.warn("foreign-write-refused", () => [
+          `foreign-space write refused at wave accumulation: action ` +
+          `${actionId ?? "<unstamped>"} attempted to write ${space} from ` +
+          `the wave serving ${this.#space} (serving-loop.md §3d, RULED ` +
+          `2026-08-14 (c); ${why})`,
+        ]);
+        this.#onForeignWriteRefusal?.({
+          space,
+          ...(actionId !== undefined ? { actionId } : {}),
+        });
+        return Promise.resolve({
+          error: {
+            name: "StorageTransactionAborted",
+            message: `foreign-space write refused at wave accumulation ` +
+              `(serving-loop.md §3d, RULED 2026-08-14 (c)): action ` +
+              `${actionId ?? "<unstamped>"} may not write ${space} from ` +
+              `the wave serving ${this.#space} — ${why}`,
+            reason: new Error("foreign-write-refused"),
+          },
+        });
+      }
     }
     const replica = this.#replicaFor(space);
     if (replica.sealNative === undefined) {

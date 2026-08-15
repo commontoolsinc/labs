@@ -337,7 +337,14 @@ executing:
   granted authority) registers, by being logged, a server-internal wake
   on that doc for the home SpaceServer. Same one-run-late soundness.
   v2 assumes spaces co-hosted on one memory server; sharding is out of
-  scope.
+  scope. *(Phase 5 pinned the wake end to end and added NO machinery
+  for it — survival-tested: the foreign read's loopback session IS
+  the registration; a foreign commit's frames arrive on that session,
+  the scheduler runs autonomously off storage notifications, and the
+  re-run's SEAL wakes the loop. The foreign commit is never home
+  input — W and the input batch stay per home space. Foreign SCOPED
+  reads are the exception: fail-closed refused until the grant-scoped
+  read design's resolution lands — protocol.md §2.)*
 - **Scope discovery is part of read discovery**: a run's scope is the
   narrowest scope of anything it read, so it too is discovered by
   running. A narrowing discovery writes the broad-slot redirect AND
@@ -785,18 +792,25 @@ sequential, stop at first failure). The wave does not close until the
 split completes or fails as a unit (same-host store sequencing, not a
 network await).
 
-Until Phase 5 sanctions the crossing, a serving wave REFUSES
-foreign-space writes at ACCUMULATION (RULED 2026-08-14 (c)):
-home-space wish materialization under serving — a wish resolving
-against the serving RUNTIME's home space, which is the service
-identity's — refuses at the seal sink, action-scoped (that action's
-tx fails loudly and is counted into §7's `foreignWriteRefusals`; its
-already-sealed spaces withdraw per this section's failure isolation)
-while the wave commits everything else; the commit-step
-foreign-engine guard stays as backstop. Phase 5's line item for
-lifting this is per-demanding-identity wish resolution riding §2b's
-`.inSpace` sanctioned crossing (builtins.md §5 carries the register
-row).
+Phase 5 SANCTIONED the crossing, and the accumulation gate (RULED
+2026-08-14 (c)) survives as its shape check: a serving wave ADMITS a
+foreign-space write at ACCUMULATION iff the sealing run's context
+carries the §2b delegated carriage — acting identity AND
+`capabilityRef`, the provisioning shape protocol.md §2's
+server-produced authored row requires on EVERY foreign commit. A
+carriage-less foreign write — the lunch-wall class: a run resolving
+against the SERVICE identity's ambient state — still refuses at the
+seal sink, action-scoped (that action's tx fails loudly and is
+counted into §7's `foreignWriteRefusals`; its already-sealed spaces
+withdraw per this section's failure isolation) while the wave commits
+everything else; the commit-step foreign-engine resolution (the
+serving loop resolves the wave's foreign co-hosted engines ahead of
+the commit step) keeps the sink's delegated validation as backstop.
+The producers this admits: `.inSpace` provisioning handlers (the
+event's acting principal + grant), and per-demanding-identity wish
+resolution — a demanded run acting as its demander (scopes.md §5)
+whose home-space bootstrap writes ride the same crossing (builtins.md
+§5 carries the register row; RULED 2026-08-14).
 
 ## 3e. Pattern updates
 
@@ -963,7 +977,11 @@ On activate after crash or deploy:
    Recovery is index-guided re-marking, NOT commit replay — own derived
    commits are echo-skipped live (§3), so replay could not re-mark the
    frontier anyway. Subscribe from the head the index scan ran against;
-   later commits arrive as ordinary input.
+   later commits arrive as ordinary input. Rows whose `entity_space` is
+   FOREIGN (§3b's cross-space reads) are judged against that space's
+   own co-hosted engine's head (Phase 5); a failed foreign resolution
+   degrades to surfacing, never a wedge — correctness rides
+   recompute-on-demand either way.
 3. The first wave recomputes the dirty frontier; memo hits suppress
    re-firing completed effects; memo misses re-fire effects whose
    results never landed. External effects are therefore at-least-once
