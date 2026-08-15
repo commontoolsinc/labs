@@ -66,12 +66,13 @@ about one aspect of the runtime, are indexed in
   as `@/...` rather than by a `../` path that climbs out of the current
   directory to reach it. The alias exists so that a module's address does not
   depend on where the importing file sits, and a `../` path spends that. The
-  rule is about `../` and nothing else. A `./` path addresses something at or
-  below the importing file, so no climbing is involved and no address depends on
-  the file's own position; `./` and `@/` are both fine, and a file may use each
-  where it reads better. A `../` path whose target lies outside the aliased tree
-  has no `@/` form at all, and stays as it is — a `bench/` or `test/` file
-  reaching a fixture in its own tree, in a package whose alias covers `src/`.
+  rule is about `../` and nothing else: a `./` path addresses the importing
+  file's own directory or something under it, and so never states how two
+  directories sit relative to each other. `./` and `@/` are both fine, and a
+  file may use each where it reads better. A `../` path whose target lies
+  outside the aliased tree has no `@/` form at all, and stays as it is — a
+  `bench/` or `test/` file reaching a fixture in its own tree, in a package
+  whose alias covers `src/`.
 
 ### Classes
 
