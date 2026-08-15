@@ -1,22 +1,24 @@
-import { describe, it } from "@std/testing/bdd";
-import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
 import type { URI } from "@commonfabric/memory/interface";
+
+import { parsePointer } from "../../memory/v2/path.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type {
-  IExtendedStorageTransaction,
-  IReadActivity,
-} from "../src/storage/interface.ts";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   CFC_PREFIX_PROVENANCE_MAX_WRITES,
   type CfcPrefixProvenanceSummary,
   prepareBoundaryCommit,
 } from "../src/cfc/mod.ts";
-import { parsePointer } from "../../memory/v2/path.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
+import type {
+  IExtendedStorageTransaction,
+  IReadActivity,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-prefix-provenance");
 

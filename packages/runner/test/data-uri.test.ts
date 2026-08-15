@@ -14,28 +14,30 @@
  * hold in place.
  */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { fromBase64url } from "@commonfabric/utils/base64url";
-import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
 import {
   linkRefFrom,
   linkRefPayload,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { UnknownValue } from "@commonfabric/data-model/codec-common";
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
 import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
-import { isSigilLink, type NormalizedLink } from "../src/link-utils.ts";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { fromBase64url } from "@commonfabric/utils/base64url";
+
 import { createCell } from "../src/cell.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { isSigilLink, type NormalizedLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

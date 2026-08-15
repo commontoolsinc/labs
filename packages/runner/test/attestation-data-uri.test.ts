@@ -5,14 +5,16 @@
  * silently diverge on what a payload means.
  */
 
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
-import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
-import { load } from "../src/storage/transaction/attestation.ts";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+
 import type { URI } from "../src/sigil-types.ts";
+import { load } from "../src/storage/transaction/attestation.ts";
 
 /** `data:` cell URI (base64url payload) with the given payload text. */
 const uriOf = (payload: string): URI =>

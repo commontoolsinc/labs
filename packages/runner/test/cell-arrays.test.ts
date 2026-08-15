@@ -1,8 +1,10 @@
 // Cell array tests: element conversion plus optimized plain-schema traversal.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
+
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
@@ -10,9 +12,10 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { toCell } from "../src/back-to-cell.ts";
-import { type Cell, elementSchemaFor, isCell } from "../src/cell.ts";
 import { JSONSchema } from "../src/builder/types.ts";
+import { type Cell, elementSchemaFor, isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";

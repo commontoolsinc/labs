@@ -1,14 +1,15 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Identity } from "@commonfabric/identity";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Runtime } from "../src/runtime.ts";
-import { Engine } from "../src/harness/engine.ts";
-import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
-import type { RuntimeProgram } from "../src/harness/types.ts";
+import { Identity } from "@commonfabric/identity";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
+import { Engine } from "../src/harness/engine.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 

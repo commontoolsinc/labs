@@ -1,5 +1,11 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+
+import { lift } from "../src/builder/module.ts";
+import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { reactive } from "../src/builder/reactive.ts";
 import {
   type FactoryInput,
   type Frame,
@@ -9,12 +15,8 @@ import {
   type Module,
   type Pattern,
 } from "../src/builder/types.ts";
-import { lift } from "../src/builder/module.ts";
-import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
-import { reactive } from "../src/builder/reactive.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

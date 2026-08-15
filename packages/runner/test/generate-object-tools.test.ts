@@ -8,10 +8,12 @@
  * 3. Maintains backward compatibility when no tools are provided
  */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   addMockObjectResponse,
   addMockResponse,
@@ -20,25 +22,25 @@ import {
   loadConversationFixture,
   setMockResponseGate,
 } from "@commonfabric/llm/client";
-import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
-import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
-import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForLlmSettled } from "./support/llm-result.ts";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { defer } from "@commonfabric/utils/defer";
+
+import { createBuilder } from "../src/builder/factory.ts";
+import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
+import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
-import { cfcAtom } from "@commonfabric/api/cfc";
 import { INJECTION_SAFE_ATOM } from "../src/cfc/schema-sanitization.ts";
+import { getMetaLink, parseLink } from "../src/link-utils.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 // D1b (cfc-llm-derived-stamp-builtins.test.ts): generateObject stamps LlmDerived
 // on EVERY node of the result schema so the mark rides split child-document
 // writes too. So instruction-inert result paths carry [InjectionSafe, LlmDerived]
 // and non-inert paths carry [LlmDerived].
 const LLM_DERIVED_ATOM = cfcAtom.llmDerived();
-import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
-import { Runtime } from "../src/runtime.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getMetaLink, parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

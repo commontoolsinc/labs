@@ -18,11 +18,12 @@
  *     --allow-write=/tmp,/var/folders test/compact-real.bench.ts
  */
 
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { type ChangeSet, compactChangeSet } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 const signer = await Identity.fromPassphrase("compact-real-bench");
 const space = signer.did();

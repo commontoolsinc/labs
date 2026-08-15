@@ -6,28 +6,30 @@
  * to read, write, and maintain.
  */
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { join } from "@std/path";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+
+import type {
+  BuiltInLLMMessage,
+  BuiltInLLMTool,
+  JSONSchema,
+} from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   clearMockResponses,
   type ConversationFixture,
   loadConversationFixture,
   loadConversationFixtureFile,
 } from "@commonfabric/llm/client";
-import type {
-  BuiltInLLMMessage,
-  BuiltInLLMTool,
-  JSONSchema,
-} from "@commonfabric/api";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
-import { join } from "@std/path";
 import { waitForLlmMessages, waitForLlmSettled } from "./support/llm-result.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator fixtures");
 const space = signer.did();

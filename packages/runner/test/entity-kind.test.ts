@@ -1,5 +1,8 @@
-import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 import {
   COMPUTED_URI_SCHEME,
@@ -12,8 +15,6 @@ import {
   stripEntityUriScheme,
   uriSchemeForEntityKind,
 } from "../src/entity-kind.ts";
-import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 
 describe("entity-kind", () => {
   const base = hashOf({ probe: "entity-kind" });
