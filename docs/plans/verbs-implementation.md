@@ -48,11 +48,11 @@ without reconstructing it.
 | 9a. listing marks | on main (#5309) |
 | 10. listing rows carry a handler's declared result | on main (#5629) |
 | 9b. closed-world event emission | **ruled against** (#5589); does not land |
-| 12. `cf` refuses an undeclared field on a call | **in review** (#5835) — where the ruling puts this capability |
+| 12. `cf` refuses an undeclared field on a call | on main (#5835) — where the ruling puts this capability |
 | 4. `receipt` as a top-level envelope field | on main (#5694) |
-| 2. an unrecognized projection key is refused | **in review** (#5817); design landed (#5753) |
+| 2. an unrecognized projection key is refused | on main (#5817); design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
-| 5. `cf wish` and `cf exec` take the read options | **in review** (#5844) |
+| 5. `cf wish` and `cf exec` take the read options | on main (#5844) |
 | 11. a caller may name a reference | not started; sequenced, gated on one measurement |
 
 Item 9 is split because its two halves have different fates: the marks landed,
@@ -132,9 +132,10 @@ property of what a target holds when a reader looks, not of a reference. What
 that leaves is provenance, whether an address can say it names a spot rather
 than a canonical cell, which is a different question and gates nothing either.
 
-**2. An unrecognized projection key is refused.** *(M)* **In review as #5817**,
-which is the thing to read before picking any of this up. Two denylists are
-consulted and every key in neither is accepted and carried onward. The design is
+**2. An unrecognized projection key is refused.** *(M)* **On main as #5817.**
+The design is the thing to read before picking any of this up. The failure it
+removes: two denylists were consulted and every key in neither was accepted and
+carried onward. The design is
 [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md),
 which carries the tiers, the measured blast radius, and the reasoning; read it
 before picking this up. What follows is what a driver needs to sequence the
@@ -346,19 +347,19 @@ the piece — the root pattern's own verb, reachable today by `pieces.add` from
 inside the runtime and by a model through the dialog builtin, and by no other
 caller.
 
-**12. `cf` refuses an undeclared field on a call.** *(S)* **In review as
-#5835.** A payload carrying a field the verb does not declare is accepted,
-the field is dropped on the way in, and the caller is told the call settled —
-the silent-strip failure, which is what a caller writing JSON by hand or by
+**12. `cf` refuses an undeclared field on a call.** *(S)* **On main as
+#5835.** The failure it removes: a payload carrying a field the verb does not
+declare was accepted, the field dropped on the way in, and the caller told the
+call settled — the silent-strip failure, which is what a caller writing JSON by hand or by
 model hits and a TypeScript author never does.
 
 *This is item 2's shape, one surface over.* There a projection key in neither
 denylist is accepted and ignored; here an event field the schema does not
-declare is accepted and ignored. Both are the CLI declining to refuse what it
+declare is accepted and ignored. Both were the CLI declining to refuse what it
 cannot honor, and both are fixed by the CLI refusing it — not by a schema
-forbidding it, which is the distinction #5589 turns on. Worth building the two
-with the same vocabulary for what a refusal says, since a caller meets both
-through the same command.
+forbidding it, which is the distinction #5589 turns on. They share one
+vocabulary for what a refusal says, since a caller meets both through the same
+command, and #5850 carried it to the flag door as well.
 
 *The check has a home already.* `verbInputSchemaError`
 (`packages/cli/lib/callable.ts`) validates a payload against the verb's declared
@@ -474,7 +475,7 @@ its own track.
 | 11 | One piece, one address | **decided — they are aliases**; the documentation half is #5754 | — | Measured: the two routes differ because one resolves the link chain and the other renders the link as stored. That is the read model working, not a defect, so the outcome is the statement rather than the fix. What remains is a doc correction and closing #5632 — no code changes, and step 13 is not gated on it |
 | 12 | An unrecognized projection key is refused | **on main** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
 | 12a | `cf` refuses an undeclared field on a call | **on main** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
-| 13 | `cf wish` and `cf exec` take the read options | **in review** (#5844) — item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
+| 13 | `cf wish` and `cf exec` take the read options | **on main** (#5844) — item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
 | 14 | A caller may name a reference | item 11, #5560 | — | Item 11 has carried this since the State table was written and the ordering never gave it a step, so nothing scheduled it. Sequenced last only because it is unstarted, not because anything gates it — and it is the most consequential thing open: the shape-matching payload the CLI does accept **stores a detached copy and reports success**, so a caller relating two pieces is told it worked |
 
 **`--show-links` is not redundant, and nothing should schedule its removal
