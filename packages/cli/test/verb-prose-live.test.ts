@@ -1,3 +1,16 @@
+/**
+ * An author's documentation reaching the caller who asks for it, across the
+ * three surfaces that answer: `cf piece verbs --json`, and both spellings of a
+ * verb's own help page.
+ *
+ * Every case runs against a COMPILED, RUN pattern rather than a hand-built
+ * schema, because the subject is precisely what the compile pipeline does with
+ * an author's words. The prose reaches the pattern by several different routes
+ * — a sibling of a `$ref`, a field inside the `$defs` target that `$ref` names,
+ * a field two definitions deep — and only a real compile puts each where it
+ * actually lands. A fixture asserting those positions by hand would agree with
+ * any implementation, the one that loses the prose included.
+ */
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -12,13 +25,18 @@ import { verbListingJson } from "../commands/piece.ts";
  * says what it does where its `Stream` is declared, and each event field says
  * what it means where it is declared.
  *
- * Driven against a COMPILED, RUN pattern rather than a hand-built schema,
- * because the whole subject is what survives the compile pipeline and what
- * does not. A fixture asserting the shape by hand would agree with any
- * implementation, including the one that loses the prose: the two descriptions
- * below reach the pattern by two different routes — one as a sibling of the
- * verb property's `$ref`, one inside the `$defs` target that `$ref` names —
- * and only a real compile puts them where they actually land.
+ * The shapes here are chosen because the two documents the fix reconciles make
+ * DIFFERENT inlining choices, measured on this fixture:
+ *
+ * - `details` is a `$ref` on the declared side and inlined on the served one,
+ *   so reaching `details.note` and `details.tags` means following a declared
+ *   reference the served document does not have.
+ * - `details.tags.items` is a `$ref` on BOTH sides, so its element prose is
+ *   already in place — and the served `$ref` must survive, since a caller's
+ *   tooling reads that shape.
+ * - `primary` is the same `Tag` reached a second way, inlined. It proves the
+ *   walk annotates a position without disturbing the shared definition, and
+ *   that reaching one definition twice is handled.
  *
  * `rename` carries no prose at all. It is the control: a verb an author has
  * not documented must gain no description, so an implementation that invents
@@ -28,10 +46,9 @@ import { verbListingJson } from "../commands/piece.ts";
  * `AddEvent.urgent` is the other control, and it is the more interesting one.
  * It is declared, documented, and ABSENT from the schema the verb dispatches
  * through, because the handler's body never reads it and that schema is the
- * handler's read rather than the declared type. So the two documents this file
- * is about disagree on shape as well as on prose, and the assertion below pins
- * which one wins: the prose is folded into what a caller is served, never
- * served in its place.
+ * handler's read rather than the declared type. So the two documents disagree
+ * on shape as well as on prose, and the assertions below pin which one wins:
+ * the prose is folded into what a caller is served, never served in its place.
  */
 const PROGRAM = {
   main: "/main.tsx",
@@ -40,11 +57,39 @@ const PROGRAM = {
     contents: [
       'import { action, cell, pattern, Stream } from "commonfabric";',
       "",
+      "interface Tag {",
+      "  /** The tag's visible text. */",
+      "  label: string;",
+      "}",
+      "",
+      "interface Details {",
+      "  /** Free text the caller may attach. */",
+      "  note: string;",
+      "  /** Labels to file it under. */",
+      "  tags: Tag[];",
+      "}",
+      "",
       "interface AddEvent {",
       "  /** One line naming the work. */",
       "  title: string;",
       "  /** Whether to file it at the top of the board. */",
       "  urgent?: boolean;",
+      "  /** Anything else worth recording. */",
+      "  details: Details;",
+      "  /** The tag that leads. */",
+      "  primary: Tag;",
+      "}",
+      "",
+      "interface Node {",
+      "  /** What this node is called. */",
+      "  label: string;",
+      "  /** Nodes filed under this one. */",
+      "  children: Node[];",
+      "}",
+      "",
+      "interface GraftEvent {",
+      "  /** The subtree to graft. */",
+      "  node: Node;",
       "}",
       "",
       "interface RenameEvent { title: string; }",
@@ -54,16 +99,34 @@ const PROGRAM = {
       "  items: string[];",
       "  /** File a new root item on the board. */",
       "  add: Stream<AddEvent>;",
+      "  /** Attach a note to the board. */",
+      "  annotate: Stream<AddEvent>;",
+      "  /** Graft a subtree onto the board. */",
+      "  graft: Stream<GraftEvent>;",
       "  rename: Stream<RenameEvent>;",
       "}",
       "",
       "export default pattern<Record<string, never>, Out>(() => {",
       "  const items = cell<string[]>([]);",
-      "  const add = action((event: AddEvent) => { items.push(event.title); });",
+      "  const add = action((event: AddEvent) => {",
+      "    items.push(",
+      "      event.title + event.primary.label +",
+      "        event.details.tags.map((tag) => tag.label).join(','),",
+      "    );",
+      "  });",
+      "  const annotate = action((event: AddEvent) => {",
+      "    items.push(event.details.note);",
+      "  });",
+      "  const graft = action((event: GraftEvent) => {",
+      "    items.push(",
+      "      event.node.label +",
+      "        event.node.children.map((child) => child.label).join(','),",
+      "    );",
+      "  });",
       "  const rename = action((event: RenameEvent) => {",
       "    items.set([event.title]);",
       "  });",
-      "  return { items, add, rename };",
+      "  return { items, add, annotate, graft, rename };",
       "});",
     ].join("\n"),
   }],
@@ -71,6 +134,12 @@ const PROGRAM = {
 
 const VERB_PROSE = "File a new root item on the board.";
 const FIELD_PROSE = "One line naming the work.";
+/** `Details.note` — one declared reference deep. */
+const NESTED_PROSE = "Free text the caller may attach.";
+/** `Details.tags` — the array property, one declared reference deep. */
+const NESTED_ARRAY_PROSE = "Labels to file it under.";
+/** `Tag.label` — reached through the inlined `primary`, two deep. */
+const ELEMENT_PROSE = "The tag's visible text.";
 
 interface LivePiece {
   piece: unknown;
@@ -78,8 +147,10 @@ interface LivePiece {
   dispose: () => Promise<void>;
 }
 
-/** Compile and run the program above, and hand back the piece surface both
- * caller-facing commands walk. */
+/**
+ * Compile and run the program above, and hand back the piece surface both
+ * caller-facing commands walk.
+ */
 async function runLivePiece(passphrase: string): Promise<LivePiece> {
   const signer = await Identity.fromPassphrase(passphrase);
   const storageManager = StorageManager.emulate({ as: signer });
@@ -223,7 +294,120 @@ describe("an author's verb prose reaching a caller", () => {
         // piece a caller is talking to.
         expect(Object.keys(inputSchema.properties as object)).toEqual([
           "title",
+          "details",
+          "primary",
         ]);
+      } finally {
+        await live.dispose();
+      }
+    });
+
+    it("carries an array field's prose from behind a declared reference", async () => {
+      const live = await runLivePiece("verb-prose-listing-nested-array");
+      try {
+        const row = verbRow(await verbsJson(live), "add");
+        // `details` is a `$ref` to `Details` on the declared side and an inline
+        // object on the served one, so `tags` sits at a position the two
+        // documents do not share key-for-key. An overlay that recurses through
+        // `properties` without following a `$ref` finds the declared `details`
+        // has no `properties` of its own and stops, leaving this bare — which
+        // is the defect this case exists for.
+        expect(row.inputSchema).toMatchObject({
+          properties: {
+            details: {
+              description: "Anything else worth recording.",
+              properties: {
+                tags: { type: "array", description: NESTED_ARRAY_PROSE },
+              },
+            },
+          },
+        });
+      } finally {
+        await live.dispose();
+      }
+    });
+
+    it("carries an object field's prose from behind a declared reference", async () => {
+      const live = await runLivePiece("verb-prose-listing-nested-object");
+      try {
+        // `annotate` reads `details.note` and nothing else, so its served
+        // `details` is an inline object holding one undocumented scalar. The
+        // same declared reference has to be followed to reach it, at a
+        // different position and on a different verb.
+        const row = verbRow(await verbsJson(live), "annotate");
+        expect(row.inputSchema).toMatchObject({
+          properties: {
+            details: {
+              properties: {
+                note: { type: "string", description: NESTED_PROSE },
+              },
+            },
+          },
+        });
+      } finally {
+        await live.dispose();
+      }
+    });
+
+    it("terminates on a self-referential event type and annotates it", async () => {
+      const live = await runLivePiece("verb-prose-listing-cycle");
+      try {
+        // `Node.children` is `Node[]`, which compiles to a genuine cycle in the
+        // SERVED document: `$defs.AnonymousType_1.items` references
+        // `$defs.Node`, whose `children` references `AnonymousType_1` again.
+        // Following references without refusing a definition already visited
+        // does not fail this assertion — it never reaches it, exhausting the
+        // stack first. Reaching the assertion at all is half of what this pins.
+        const row = verbRow(await verbsJson(live), "graft");
+        // The other half: the cycle is walked far enough to be useful. The
+        // served `children` is a bare reference with no prose of its own, and
+        // its description comes from the declared `Node`, one reference in.
+        expect(row.inputSchema).toMatchObject({
+          properties: {
+            node: {
+              description: "The subtree to graft.",
+              properties: {
+                children: { description: "Nodes filed under this one." },
+              },
+            },
+          },
+        });
+      } finally {
+        await live.dispose();
+      }
+    });
+
+    it("leaves a served reference as a reference and its definition untouched", async () => {
+      const live = await runLivePiece("verb-prose-listing-ref-shape");
+      try {
+        const inputSchema = verbRow(await verbsJson(live), "add")
+          .inputSchema as Record<string, unknown>;
+        const properties = inputSchema.properties as Record<string, any>;
+        // `Tag` is reached twice — through `details.tags.items` and through
+        // `primary` — and both are served as references that must stay
+        // references, byte for byte. An implementation that inlined a target to
+        // annotate it would satisfy every description assertion in this file
+        // and silently change the shape a caller's tooling reads, so these are
+        // equalities rather than subsets.
+        expect(properties.details.properties.tags.items).toEqual({
+          $ref: "#/$defs/Tag",
+        });
+        expect(properties.primary).toEqual({
+          $ref: "#/$defs/Tag",
+          description: "The tag that leads.",
+        });
+        // And the shared definition is untouched. This is the assertion that
+        // fails against writing a position's own prose into the target it
+        // names: `primary` is "The tag that leads.", and a `Tag` carrying that
+        // sentence would tell every OTHER holder of a tag the same thing —
+        // including `details.tags`, which leads nothing.
+        expect((inputSchema.$defs as Record<string, any>).Tag).toEqual({
+          type: "object",
+          properties: {
+            label: { type: "string", description: ELEMENT_PROSE },
+          },
+          required: ["label"],
+        });
       } finally {
         await live.dispose();
       }
@@ -268,6 +452,58 @@ describe("an author's verb prose reaching a caller", () => {
       }
     });
 
+    it("carries an array field's prose from behind a declared reference", async () => {
+      const live = await runLivePiece("verb-prose-help-json-nested-array");
+      try {
+        // The help path assembles its spec separately from the listing, so a
+        // fix applied to one and not the other passes half this file. Both
+        // nested shapes are asserted on both surfaces for that reason.
+        expect((await callHelpJson(live, "add")).inputSchema).toMatchObject({
+          properties: {
+            details: {
+              properties: { tags: { description: NESTED_ARRAY_PROSE } },
+            },
+          },
+        });
+      } finally {
+        await live.dispose();
+      }
+    });
+
+    it("carries an object field's prose from behind a declared reference", async () => {
+      const live = await runLivePiece("verb-prose-help-json-nested-object");
+      try {
+        expect((await callHelpJson(live, "annotate")).inputSchema)
+          .toMatchObject({
+            properties: {
+              details: { properties: { note: { description: NESTED_PROSE } } },
+            },
+          });
+      } finally {
+        await live.dispose();
+      }
+    });
+
+    it("leaves a served reference as a reference and its definition untouched", async () => {
+      const live = await runLivePiece("verb-prose-help-json-ref-shape");
+      try {
+        const inputSchema = (await callHelpJson(live, "add"))
+          .inputSchema as Record<string, any>;
+        expect(inputSchema.properties.details.properties.tags.items).toEqual({
+          $ref: "#/$defs/Tag",
+        });
+        expect(inputSchema.$defs.Tag).toEqual({
+          type: "object",
+          properties: {
+            label: { type: "string", description: ELEMENT_PROSE },
+          },
+          required: ["label"],
+        });
+      } finally {
+        await live.dispose();
+      }
+    });
+
     it("leaves an undocumented verb with no description", async () => {
       const live = await runLivePiece("verb-prose-help-json-undocumented");
       try {
@@ -296,8 +532,14 @@ describe("an author's verb prose reaching a caller", () => {
     it("prints an event field's doc comment beside its flag", async () => {
       const live = await runLivePiece("verb-prose-help-text-field");
       try {
-        expect(await callHelpText(live, "add"))
-          .toContain(`--title <string>  Required. ${FIELD_PROSE}`);
+        // On the flag's own line, after its required-ness. The column width is
+        // whatever the widest flag on the page needs, so the gap is matched as
+        // whitespace rather than counted — but it must be a gap and not a line
+        // break, which is what makes this an assertion about the flag line
+        // rather than about the page containing the sentence anywhere.
+        expect(await callHelpText(live, "add")).toMatch(
+          new RegExp(`--title <string> +Required\\. ${FIELD_PROSE}`),
+        );
       } finally {
         await live.dispose();
       }

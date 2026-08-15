@@ -5,6 +5,7 @@ import { loadIdentity } from "./identity.ts";
 import {
   Cell,
   deepEqual,
+  encodeJsonPointer,
   entityIdFrom,
   experimentalOptionsFromEnv,
   formatFabricRef,
@@ -316,12 +317,14 @@ async function resultProjectionFailedAtPath(
  */
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
-  /** This verb's documentation, resolved on demand — a thunk for the same
+  /**
+   * This verb's documentation, resolved on demand — a thunk for the same
    * reason `declaredResult` is one, and attached under the same condition:
    * the pattern declaring the verb is the only document that carries it, and
    * reaching it costs a load no dispatch should pay.
    *
-   * Only the help page pulls it. A dispatch needs nothing an author wrote. */
+   * Only the help page pulls it. A dispatch needs nothing an author wrote.
+   */
   declaredProse?: () => Promise<DeclaredVerbProse | undefined>;
 }
 
@@ -1852,14 +1855,16 @@ export interface PieceCallableListing {
    * declared result. Absent when the verb declares none — the value-less
    * shape, which is the common one. */
   outputSchema?: JSONSchema;
-  /** What the verb is FOR, in the author's own words: the doc comment on the
+  /**
+   * What the verb is FOR, in the author's own words: the doc comment on the
    * pattern property declaring it, the same prose `call <verb> --help` prints
    * as its summary line.
    *
    * Absent where the author documented nothing, and absent where the pattern
    * could not be read (`incomplete`). Never derived from the name — a listing
    * that restates `addItem` as "add item" reports the schema back to the
-   * caller who wrote it and calls it documentation. */
+   * caller who wrote it and calls it documentation.
+   */
   description?: string;
   /** Listing mark: a UI affordance outside the headless contract (inferred
    * from session-scoped handler bindings at compile time). Hidden from the
@@ -1992,22 +1997,29 @@ function handlerVerbResults(
   return verbs;
 }
 
-/** What a pattern's own result schema says a verb is for, and what its event
- * fields mean — the author's doc comments, as the compiler lowered them. */
+/**
+ * What a pattern's own result schema says a verb is for, and what its event
+ * fields mean — the author's doc comments, as the compiler lowered them.
+ */
 interface DeclaredVerbProse {
-  /** The doc comment on the property declaring the verb: what the verb DOES.
+  /**
+   * The doc comment on the property declaring the verb: what the verb DOES.
    * A sibling of the property's `$ref`, and never a statement about the event
    * object, which is why it is held apart from `eventSchema` below rather than
-   * merged into it. */
+   * merged into it.
+   */
   description?: string;
-  /** The verb's declared event schema with its `$ref` followed against the
+  /**
+   * The verb's declared event schema with its `$ref` followed against the
    * result schema's own root, so the field descriptions inside the `$defs`
    * target are reachable. Read for annotations ONLY — never to decide a shape;
-   * see `withDeclaredFieldProse`. */
+   * see `withDeclaredFieldProse`.
+   */
   eventSchema?: JSONSchema;
 }
 
-/** Every verb's prose, keyed by the result property declaring it.
+/**
+ * Every verb's prose, keyed by the result property declaring it.
  *
  * A pattern's `resultSchema` is the only place both descriptions survive
  * compilation. Neither reaches the callable cell a verb dispatches through:
@@ -2024,7 +2036,8 @@ interface DeclaredVerbProse {
  *
  * The `$defs` live at the result schema's ROOT while the `$ref` sits on the
  * property, so the root is passed explicitly. Resolving the property alone
- * would consult a document that carries no definitions at all. */
+ * would consult a document that carries no definitions at all.
+ */
 function declaredVerbProse(
   pattern: { resultSchema?: unknown } | null | undefined,
 ): Map<string, DeclaredVerbProse> {
@@ -2052,8 +2065,26 @@ function declaredVerbProse(
   return prose;
 }
 
-/** `served` with `description` annotations filled in from `declared` wherever
- * it has none, at every position the two schemas share.
+/**
+ * One `description` to write into the served schema, addressed by its path
+ * within that document.
+ *
+ * Addressed rather than applied in place because a served position may live
+ * inside a shared `$defs` entry, which several positions reach and no
+ * single-pass rebuild of the tree can reach twice. Collecting first and
+ * applying second lets one definition receive edits found from anywhere in the
+ * walk without the walk having to know where it sits.
+ */
+interface DescriptionEdit {
+  /** Keys from the served document's root down to the `description` slot. */
+  readonly path: readonly string[];
+  readonly description: string;
+}
+
+/**
+ * `served` with `description` annotations filled in from `declared` wherever it
+ * has none, at every position the two documents share — following a `$ref` on
+ * either side to find one.
  *
  * ANNOTATIONS ONLY, and that bound is the point rather than a simplification.
  * The two schemas disagree about shape by construction, not by accident:
@@ -2063,78 +2094,243 @@ function declaredVerbProse(
  * `description` cannot change which payloads pass, so this can never make the
  * served schema disagree with the dispatch it governs. Copying anything else
  * could, which is why nothing else is copied and no position is ADDED: a key
- * absent from `served` stays absent, and a page never offers a flag the
- * handler does not read.
+ * absent from `served` stays absent, a `$ref` is never inlined, and a page
+ * never offers a flag the handler does not read.
  *
  * The root description is never taken. It belongs to the verb, not to the
- * event object, and it travels as the spec's own `description`. */
+ * event object, and it travels as the spec's own `description`.
+ *
+ * The bound on what this reaches: a position is filled only where the walk can
+ * put the two documents side by side. A served `$ref` naming a definition the
+ * served root does not carry stops the descent there, as does a declared `$ref`
+ * that does not resolve — those subtrees keep whatever prose they already had.
+ */
 function withDeclaredFieldProse(
   served: JSONSchema | true,
   declared: JSONSchema | undefined,
 ): JSONSchema | true {
-  return served === true
-    ? served
-    : fillDescriptions(served, declared, false) as JSONSchema;
-}
-
-function fillDescriptions(
-  served: JSONSchema,
-  declared: JSONSchema | undefined,
-  fillRoot: boolean,
-): JSONSchema {
-  if (
-    declared === undefined || !isObjectOrArray(served) ||
-    !isObjectOrArray(declared)
-  ) {
+  if (served === true || declared === undefined || !isObjectOrArray(served)) {
     return served;
   }
-  let next: Record<string, unknown> | undefined;
-  const patched = () => (next ??= { ...served });
+  const edits: DescriptionEdit[] = [];
+  collectDescriptionEdits(
+    { served, declared, servedRoot: served, declaredRoot: declared },
+    [],
+    false,
+    edits,
+    new Set<string>(),
+  );
+  return applyDescriptionEdits(served, edits);
+}
+
+/**
+ * The two documents at one position, plus the roots their `$ref`s resolve
+ * against. Held together because every step of the walk needs all four.
+ */
+interface ProsePair {
+  readonly served: JSONSchema;
+  readonly declared: JSONSchema;
+  readonly servedRoot: JSONSchema;
+  readonly declaredRoot: JSONSchema;
+}
+
+/**
+ * The `$defs` name a served node references, or `undefined` when it references
+ * nothing the served root defines.
+ *
+ * Matched by ENCODING each definition name with the runner's own encoder and
+ * comparing, rather than by decoding the `$ref`. The encoder is the function
+ * that wrote these strings, so round-tripping through it cannot disagree with
+ * them, and no pointer-decoding helper has to be re-exported to get here.
+ */
+function servedDefinitionName(
+  node: JSONSchema,
+  servedRoot: JSONSchema,
+): string | undefined {
+  if (!isObjectOrArray(node) || typeof node.$ref !== "string") return undefined;
+  if (!isObjectOrArray(servedRoot) || !isObjectOrArray(servedRoot.$defs)) {
+    return undefined;
+  }
+  for (const name of Object.keys(servedRoot.$defs)) {
+    if (encodeJsonPointer(["#", "$defs", name]) === node.$ref) return name;
+  }
+  return undefined;
+}
+
+/**
+ * Walk both documents in lockstep, recording every `description` the served
+ * side lacks and the declared side supplies.
+ *
+ * `path` addresses `served` within the served document. `fillOwnDescription` is
+ * false only at the root, whose description belongs to the verb rather than to
+ * the event object.
+ *
+ * TERMINATION, which `$ref`-following makes a real question. Descent is over
+ * the SERVED structure, whose inline part is a finite tree, so the only way to
+ * recur forever is through a served `$ref` — and every one of those resolves to
+ * a `$defs` entry, so refusing a definition already in `visitedDefinitions`
+ * bounds the walk at the number of definitions plus the inline depth. A
+ * self-referential type is the case that needs it: an item whose `children` are
+ * items reaches its own definition on the second hop. The declared side cannot
+ * extend the walk, because following its refs never descends the served side,
+ * and `resolveCfcSchemaRefs` carries a cycle guard of its own.
+ *
+ * `schemaAtPath` would look like the shorter road here and is not: it resolves
+ * refs eagerly and without a cycle guard, so it overflows the stack on exactly
+ * the self-referential type above, before any guard written here could run.
+ *
+ * Visiting a definition once is also what decides a collision: two positions
+ * referencing one definition write the prose found from the first, in the
+ * stable order `Object.entries` gives. Both are the author's words for that
+ * same definition, so the choice is between equals — and the position-specific
+ * half never goes there, because a node's own description is recorded at the
+ * node's own path, never at the shared target's.
+ */
+function collectDescriptionEdits(
+  pair: ProsePair,
+  path: readonly string[],
+  fillOwnDescription: boolean,
+  edits: DescriptionEdit[],
+  visitedDefinitions: Set<string>,
+): void {
+  const { served, servedRoot, declaredRoot } = pair;
+  if (!isObjectOrArray(served)) return;
+  // Only the declared side is resolved through: it is read, never emitted, so
+  // inlining it costs the served shape nothing.
+  const declared = isObjectOrArray(pair.declared) &&
+      typeof pair.declared.$ref === "string"
+    ? resolveCfcSchemaRefs(pair.declared, declaredRoot)
+    : pair.declared;
+  if (!isObjectOrArray(declared)) return;
 
   if (
-    fillRoot && served.description === undefined &&
+    fillOwnDescription && served.description === undefined &&
     typeof declared.description === "string"
   ) {
-    patched().description = declared.description;
+    edits.push({
+      path: [...path, "description"],
+      description: declared.description,
+    });
   }
 
+  // Where the served node's CHILDREN live. For a `$ref` that is the definition
+  // it names, which is left in place: a caller's tooling reads the served
+  // shape, and inlining the target to annotate it would rewrite what it reads.
+  // Definitions are observed to arrive with their own prose intact, so this
+  // descent commonly finds nothing to fill and exists to keep the walk honest
+  // where it does.
+  let target = served;
+  let targetPath = path;
+  const definitionName = servedDefinitionName(served, servedRoot);
+  if (definitionName !== undefined) {
+    if (visitedDefinitions.has(definitionName)) return;
+    visitedDefinitions.add(definitionName);
+    const definitions = isObjectOrArray(servedRoot)
+      ? servedRoot.$defs as Record<string, JSONSchema>
+      : {};
+    const definition = definitions[definitionName];
+    if (!isObjectOrArray(definition)) return;
+    target = definition;
+    targetPath = ["$defs", definitionName];
+  } else if (typeof served.$ref === "string") {
+    // A reference the served root does not define. Nothing here can annotate
+    // what it cannot address, so the subtree is left exactly as served.
+    return;
+  }
+
+  const childPair = (
+    servedChild: JSONSchema,
+    declaredChild: JSONSchema | undefined,
+  ): ProsePair | undefined =>
+    declaredChild === undefined ? undefined : {
+      served: servedChild,
+      declared: declaredChild,
+      servedRoot,
+      declaredRoot,
+    };
+
   if (
-    isObjectOrArray(served.properties) && isObjectOrArray(declared.properties)
+    isObjectOrArray(target.properties) && isObjectOrArray(declared.properties)
   ) {
     const declaredProperties = declared.properties as Record<
       string,
       JSONSchema
     >;
-    let properties: Record<string, JSONSchema> | undefined;
     for (
       const [key, child] of Object.entries(
-        served.properties as Record<string, JSONSchema>,
+        target.properties as Record<string, JSONSchema>,
       )
     ) {
-      const filled = fillDescriptions(child, declaredProperties[key], true);
-      if (filled !== child) {
-        (properties ??= { ...served.properties as Record<string, JSONSchema> })[
-          key
-        ] = filled;
-      }
+      const next = childPair(child, declaredProperties[key]);
+      if (next === undefined) continue;
+      collectDescriptionEdits(
+        next,
+        [...targetPath, "properties", key],
+        true,
+        edits,
+        visitedDefinitions,
+      );
     }
-    if (properties !== undefined) patched().properties = properties;
   }
 
   // An array's element schema, so a documented field inside a list of objects
   // keeps its prose. Tuple `items` (an array of schemas) needs no case of its
   // own: `isObjectOrArray` admits it, and the recursion then finds no
-  // `properties` on either side and hands the input straight back.
-  if (served.items !== undefined && declared.items !== undefined) {
-    const filled = fillDescriptions(
-      served.items as JSONSchema,
+  // `properties` on either side and records nothing.
+  if (target.items !== undefined && declared.items !== undefined) {
+    const next = childPair(
+      target.items as JSONSchema,
       declared.items as JSONSchema,
-      true,
     );
-    if (filled !== served.items) patched().items = filled;
+    if (next !== undefined) {
+      collectDescriptionEdits(
+        next,
+        [...targetPath, "items"],
+        true,
+        edits,
+        visitedDefinitions,
+      );
+    }
   }
+}
 
-  return (next ?? served) as JSONSchema;
+/**
+ * `root` with every collected description written in, sharing every subtree no
+ * edit touches. Returns `root` itself when there is nothing to write.
+ */
+function applyDescriptionEdits(
+  root: JSONSchema,
+  edits: readonly DescriptionEdit[],
+): JSONSchema {
+  let next = root;
+  for (const edit of edits) {
+    next = writeDescriptionAt(next, edit.path, edit.description);
+  }
+  return next;
+}
+
+/**
+ * `node` with `description` set at `path`, copying only the nodes along it.
+ *
+ * Every path ends at a `description` slot the walk found empty, so this only
+ * ever fills a hole — it cannot overwrite an author's own words, and a path
+ * whose interior has since been rewritten by an earlier edit still lands, since
+ * each edit reads the document the previous one produced.
+ */
+function writeDescriptionAt(
+  node: JSONSchema,
+  path: readonly string[],
+  description: string,
+): JSONSchema {
+  if (!isObjectOrArray(node) || path.length === 0) return node;
+  const [head, ...rest] = path;
+  if (rest.length === 0) {
+    return { ...node, [head]: description } as JSONSchema;
+  }
+  const child = (node as Record<string, JSONSchema>)[head];
+  const updated = writeDescriptionAt(child, rest, description);
+  if (updated === child) return node;
+  return { ...node, [head]: updated } as JSONSchema;
 }
 
 /** One verb's declared result, matched through the piece's compiled pattern.
@@ -2161,12 +2357,14 @@ async function declaredVerbResult(
   }
 }
 
-/** One verb's prose, read through the piece's compiled pattern.
+/**
+ * One verb's prose, read through the piece's compiled pattern.
  *
  * The listing's `declaredVerbProse` narrowed to a single name, on the same
  * terms `declaredVerbResult` above states: one reader, so a help page and
  * `cf piece verbs` cannot describe the same verb differently, and a pattern
- * that will not load costs the page its prose rather than the whole page. */
+ * that will not load costs the page its prose rather than the whole page.
+ */
 async function declaredVerbProseFor(
   loadPattern: () => Promise<any>,
   callableName: string,
@@ -2249,11 +2447,13 @@ export async function listPieceCallables(
     }
   }
 
-  /** The prose row for a callable, on the same terms `handlerResults` is
+  /**
+   * The prose row for a callable, on the same terms `handlerResults` is
    * claimed: the pattern's result properties key it, so only a row reached on
    * the RESULT cell may claim one. A same-named verb on the input cell is a
    * different stream that merely shares its name, and handing it another
-   * verb's documentation would be worse than handing it none. */
+   * verb's documentation would be worse than handing it none.
+   */
   const proseFor = (
     on: "result" | "input",
     name: string,
@@ -2455,7 +2655,8 @@ export async function listPieceCallables(
   };
 }
 
-/** The command spec a help page is rendered from: the resolved one, plus what
+/**
+ * The command spec a help page is rendered from: the resolved one, plus what
  * only the declaring pattern can say — the verb's declared result, its own
  * prose, and the prose on the event fields the page renders as flags.
  *
@@ -2467,7 +2668,8 @@ export async function listPieceCallables(
  * The served `inputSchema` stays the authority on shape. It is the document a
  * payload is validated against, and only its `description` annotations are
  * filled in here, so a page can never describe a flag the dispatch would
- * refuse. */
+ * refuse.
+ */
 async function withDeclaredPatternDocs(
   spec: ExecCommandSpec,
   resolved: ResolvedPieceCallable,

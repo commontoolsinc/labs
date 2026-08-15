@@ -8,7 +8,8 @@ export interface ExecCommandSpec {
   defaultVerb: "invoke" | "run";
   inputSchema: JSONSchema;
   outputSchemaSummary?: JSONSchema;
-  /** What this callable is FOR, in the author's own words: the doc comment on
+  /**
+   * What this callable is FOR, in the author's own words: the doc comment on
    * the pattern property that declares it.
    *
    * Absent where the author wrote none, which is why it is optional rather
@@ -16,7 +17,8 @@ export interface ExecCommandSpec {
    * carrying a restated property name says something false about where it came
    * from. It describes the callable and not its input, so it does not ride
    * `inputSchema`, whose own `description` would be a claim about the event
-   * object a caller sends. */
+   * object a caller sends.
+   */
   description?: string;
 }
 

@@ -144,9 +144,9 @@ interface ItemOutput {
 **A verb says what it does; its parameters describe themselves.** The comment
 on `addItem` does not restate what it takes or returns, because
 `AddItemEvent.title` and `AddItemResult.item` already say so where they are
-declared — which is where `--help` sources its `Output:` line today, and where
-it would source a flag's prose. Restating it in the verb comment would be the
-same content twice, and the copy that goes stale when a parameter changes.
+declared — which is where `--help` sources both its `Output:` line and a flag's
+prose. Restating it in the verb comment would be the same content twice, and
+the copy that goes stale when a parameter changes.
 
 **One interface, holding both.** An item's fields and its verbs sit together
 because that is what an item *is*: a child in `children` is a full item, and
@@ -284,6 +284,17 @@ report what a verb hands back, so both read the prose from the same load. The
 verb's own comment becomes the listing row's `description` and the help page's
 summary line. The event fields' comments are folded into the input schema the
 page renders flags from, at the positions that schema already has.
+
+**Which means walking two documents that agree about almost nothing
+structurally.** The same field can be a `$ref` in one and an inline object in
+the other, and which it is depends on what the handler body happens to read — so
+a walk that steps through `properties` key-for-key finds a bare `$ref` on one
+side, no `properties` under it, and stops one level short of the prose. Both
+sides' references are followed for that reason. A served reference is followed
+without being inlined: it names a definition several positions can share, and a
+caller's tooling reads that shape. A field's own prose is therefore written
+where the field is, never into the definition it points at, which would
+attribute one position's sentence to every other holder of the same type.
 
 **Folded in, never substituted.** The two documents disagree about shape, by
 construction: the declared type is what a caller may send, the read schema is
