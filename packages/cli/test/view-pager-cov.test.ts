@@ -6,6 +6,7 @@
  * runs without a real terminal. A separate test exercises the real deps' thin
  * wrappers.
  */
+
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument } from "./view-helpers.ts";

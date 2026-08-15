@@ -15,6 +15,7 @@
  *      schemas, bindings) for navigation and folding.
  *   3. A name -> {@link Definition} index for go-to-definition peeks.
  */
+
 import ts from "typescript";
 import type {
   Definition,

@@ -4,6 +4,7 @@
  * arguments say nothing. Run by assert-diagnostics.test.ts, which expects the
  * failures; it is not a pattern under test.
  */
+
 import { assert, cell, pattern, TESTS } from "commonfabric";
 
 function allPositive(...values: number[]): boolean {

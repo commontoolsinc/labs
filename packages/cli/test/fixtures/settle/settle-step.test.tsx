@@ -4,6 +4,7 @@
  * step. The settle step is transparent: it produces no assertion result and the
  * run passes.
  */
+
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

@@ -8,6 +8,7 @@
  * round it out. The general aesthetic (double-line dialog frames, drop shadows,
  * green buttons) is unchanged — only the colors differ.
  */
+
 import { hex, type Rgb, type Style } from "./ansi.ts";
 import type { Line, TokenClass } from "./model.ts";
 

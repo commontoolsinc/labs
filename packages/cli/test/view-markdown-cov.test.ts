@@ -6,6 +6,7 @@
  * backtick runs, and a heading tree that opens on a deeper-than-top level —
  * and asserts the real output rather than merely touching the lines.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import {
   createMarkdownHighlighter,

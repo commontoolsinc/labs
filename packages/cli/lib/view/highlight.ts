@@ -7,6 +7,7 @@
  * `renderLinePlain` and the concatenated span text of `renderLineColored` are
  * byte-for-byte identical to the document line.
  */
+
 import { paint, type Style } from "./ansi.ts";
 import type { Line, Span } from "./model.ts";
 import { bracketStyle, dialogStyleFor, lineBg, styleFor } from "./theme.ts";

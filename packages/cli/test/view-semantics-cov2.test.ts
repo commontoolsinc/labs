@@ -12,6 +12,7 @@
  * touches them. That is exactly the input the module documents itself as being
  * robust against: "every query is wrapped so a failure degrades to `null`".
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument } from "./view-helpers.ts";

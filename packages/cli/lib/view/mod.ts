@@ -9,6 +9,7 @@
  * Other source uses filename and shebang metadata unless an explicit language
  * selects another language.
  */
+
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
 import type { Document, Line } from "./model.ts";

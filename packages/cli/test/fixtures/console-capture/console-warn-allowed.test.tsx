@@ -2,6 +2,7 @@
  * Fixture: console.warn with allowConsoleWarnings: true.
  * The test runner must NOT fail this despite the warning.
  */
+
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

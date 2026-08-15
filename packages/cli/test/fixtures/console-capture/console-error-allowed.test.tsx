@@ -2,6 +2,7 @@
  * Fixture: console.error with allowConsoleErrors: true.
  * The test runner must NOT fail this despite the error.
  */
+
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

@@ -10,6 +10,7 @@
  * non-zero with the raw error on stderr. Each runs the real CLI as a
  * subprocess, like the other `cf view` command tests.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { cf } from "./utils.ts";
 

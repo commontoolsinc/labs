@@ -11,6 +11,7 @@
  * trailing commas are colored, not rejected. Object keys become a navigation
  * tree, so `wasd`/Tab step through a document's structure.
  */
+
 import type {
   Definition,
   Document,

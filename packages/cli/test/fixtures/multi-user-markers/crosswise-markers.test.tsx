@@ -5,6 +5,7 @@
  * writes its own marker document, so announcing in that order is
  * conflict-free and both markers arrive.
  */
+
 import { assert, multiUserTest, pattern, TESTS, Writable } from "commonfabric";
 
 export interface MarkerSetup {

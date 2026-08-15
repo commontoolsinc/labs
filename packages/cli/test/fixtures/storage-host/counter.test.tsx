@@ -4,6 +4,7 @@
  * pattern actually reached to find — which is the whole point of the option
  * (the pattern-vintage capture snapshots the store afterwards).
  */
+
 import { action, assert, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

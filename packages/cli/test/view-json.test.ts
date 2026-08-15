@@ -6,6 +6,7 @@
  * TypeScript parser. The highlighter is hand-written and lenient: malformed
  * input colors without throwing.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {

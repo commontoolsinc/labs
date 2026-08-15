@@ -3,6 +3,7 @@
  * (same shape as packages/patterns/test/non-idempotent/accumulator.test.tsx).
  * The detected violation satisfies the expectation, so this test must PASS.
  */
+
 import { assert, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {

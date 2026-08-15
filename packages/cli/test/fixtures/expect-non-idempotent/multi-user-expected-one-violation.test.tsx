@@ -5,6 +5,7 @@
  * seeing a violation satisfies the expectation — the run must PASS even
  * though bob (also flagged) saw none.
  */
+
 import {
   assert,
   computed,

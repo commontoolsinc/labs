@@ -15,6 +15,7 @@
  * `children`, which is what makes an unshaped read of `items` expand the whole
  * tree — the cost that shaped reads exist to bound.
  */
+
 import {
   action,
   type Default,

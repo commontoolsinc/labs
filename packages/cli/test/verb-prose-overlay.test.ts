@@ -16,6 +16,7 @@
  * carry — every position class here that a pattern CAN produce is asserted
  * there as well, against output the compiler actually emitted.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";

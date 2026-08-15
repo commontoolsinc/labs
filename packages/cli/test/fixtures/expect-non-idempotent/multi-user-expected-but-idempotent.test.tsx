@@ -3,6 +3,7 @@
  * trivially idempotent. No flagged participant sees a violation, so the run
  * must FAIL with the synthetic "expectNonIdempotent" result.
  */
+
 import { assert, multiUserTest, pattern, TESTS, Writable } from "commonfabric";
 
 export const alice = pattern(() => {
