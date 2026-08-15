@@ -863,11 +863,34 @@ export class SpaceServer implements TransactionSealDestination {
         // the sealing run carries the §2b delegated carriage (acting
         // identity + capabilityRef — the sanctioned `.inSpace`/
         // provisioning shape, which #stampRun supplies for served runs
-        // acting as a principal). A carriage-less foreign write — the
-        // lunch-wall class: a run resolving against the SERVICE
-        // identity's ambient state — still refuses action-scoped,
-        // loud, and counted into §7's foreignWriteRefusals.
+        // acting as a principal) AND the acting identity holds a
+        // structural write grant for the TARGET space (the probe
+        // below — the F1 fix: carriage alone is minted for every
+        // acting run and authorizes nothing). A carriage-less OR
+        // ungranted foreign write — the lunch-wall class: a run
+        // resolving against the SERVICE identity's ambient state, or
+        // one reaching for a space its actor holds no authority
+        // over — refuses action-scoped, loud, and counted into §7's
+        // foreignWriteRefusals.
         foreignWrites: "accept",
+        // The co-hosted memory server's structural grant supply
+        // (protocol.md §2b): owner-by-identity (the actor's own home
+        // space), fresh-store creation (§2b's sanctioned provisioning,
+        // DID-shape-checked), or the target's own ACL granting the
+        // actor WRITE — fail-closed otherwise. The refusal reason is
+        // logged here; the wave's refusal message stays generic.
+        foreignWriteGrant: async (foreignSpace, acting) => {
+          const verdict = await this.#options.server
+            .foreignWriteAuthorityFor(foreignSpace, acting.user);
+          if (!verdict.granted) {
+            logger.warn("foreign-write-ungranted", () => [
+              `foreign write to ${foreignSpace} by acting identity ` +
+              `${acting.user} holds no structural grant: ` +
+              `${verdict.reason} (protocol.md §2b)`,
+            ]);
+          }
+          return verdict.granted;
+        },
         onForeignWriteRefusal: () => {
           this.#options.stats.foreignWriteRefusals += 1;
         },

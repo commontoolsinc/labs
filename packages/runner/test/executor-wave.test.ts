@@ -92,6 +92,9 @@ describe("stage D seal-into-wave", () => {
 
   const newWave = (options: {
     lease?: ConstructorParameters<typeof WaveAccumulator>[0]["lease"];
+    foreignWriteGrant?: ConstructorParameters<
+      typeof WaveAccumulator
+    >[0]["foreignWriteGrant"];
   } = {}): WaveAccumulator =>
     new WaveAccumulator({
       space,
@@ -112,6 +115,13 @@ describe("stage D seal-into-wave", () => {
       // RULED 2026-08-14 (c)) — pinned by its own tests below and in
       // executor-serving-loop.test.ts.
       foreignWrites: "accept",
+      // Allow-all authority probe unless a test binds the grant arm:
+      // these tests exercise the wave MECHANICS (sequencing, carriage
+      // completeness, withdrawal closure) against synthetic spaces.
+      // The gate's real predicate is pinned by its own arms below and
+      // by executor-cross-space.test.ts against the memory server's
+      // foreignWriteAuthorityFor.
+      foreignWriteGrant: options.foreignWriteGrant ?? (() => true),
       ...(options.lease !== undefined ? { lease: options.lease } : {}),
     });
 
@@ -2210,6 +2220,125 @@ describe("stage D seal-into-wave", () => {
     );
   });
 
+  it("Phase 5 accept gate is an AUTHORIZATION boundary: an UNGRANTED crossing refuses action-scoped even with full carriage; the actor's own home space admits (protocol.md §2b; the F1 fix)", async () => {
+    // The F1 finding: carriage (acting + capabilityRef) is minted for
+    // every acting run, so a carriage-only gate authorized nothing —
+    // any served pattern acting for any user could write ANY co-hosted
+    // space. The gate now consults a REAL authorization predicate; here
+    // it is wired to the memory server's structural grant supply
+    // (foreignWriteAuthorityFor), exactly as the serving loop wires it.
+    const actorSigner = await Identity.fromPassphrase("wave grant actor");
+    const actor = actorSigner.did();
+    const victimSigner = await Identity.fromPassphrase(
+      "wave grant victim space",
+    );
+    const victim = victimSigner.did() as MemorySpace;
+    // The victim space EXISTS (engine open) and carries no ACL: the
+    // serving plane fails closed for it (fail-closed interim,
+    // protocol.md §2 — the client path's populated-legacy compat is a
+    // rollout accommodation, not a grant).
+    await server.engineForSpace(victim);
+
+    let refusals = 0;
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: Engine.serverSeq(engine),
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "wave-grant-session",
+      },
+      replicaFor: (s) => storageManager.open(s).replica,
+      foreignWrites: "accept",
+      foreignWriteGrant: async (s, acting) =>
+        (await server.foreignWriteAuthorityFor(s, acting.user)).granted,
+      onForeignWriteRefusal: () => {
+        refusals += 1;
+      },
+    });
+    runtime.installSealDestination(wave);
+    try {
+      // UNGRANTED: full §2b carriage, existing foreign space, no
+      // authority — the review's concrete attack (a run acting for
+      // alice writing a space alice holds nothing on). Pre-fix this
+      // ADMITTED; it must refuse action-scoped, loud and counted.
+      const ungrantedTarget = runtime.getCell<{ value: number }>(
+        victim,
+        "wave-grant-victim-doc",
+        undefined,
+      );
+      const homeBeside = runtime.getCell<{ value: number }>(
+        space,
+        "wave-grant-home-doc",
+        undefined,
+      );
+      const ungrantedTx = runtime.edit();
+      stampWaveRunContext(ungrantedTx, {
+        actionId: "provision-ungranted",
+        kind: "event-handler",
+        eventId: "e-ungranted",
+        acting: { user: actor, session: "sess-1" },
+        capabilityRef: "cap:test-grant",
+      });
+      ungrantedTx.enableMultiSpaceWrites?.([victim, space]);
+      ungrantedTarget.withTx(ungrantedTx).set({ value: 1 });
+      homeBeside.withTx(ungrantedTx).set({ value: 2 });
+      const ungrantedCommit = await ungrantedTx.commit();
+      expect(ungrantedCommit.error?.message ?? "").toContain(
+        "holds no structural write grant",
+      );
+      expect(refusals).toBe(1);
+
+      // GRANTED (owner-by-identity): the SAME carriage shape targeting
+      // the acting identity's OWN home space (space DID == actor DID)
+      // is admitted at the gate — the demanded wish bootstrap's
+      // sanctioned §2b crossing.
+      const ownTarget = runtime.getCell<{ value: number }>(
+        actor as MemorySpace,
+        "wave-grant-own-home-doc",
+        undefined,
+      );
+      const homeBeside2 = runtime.getCell<{ value: number }>(
+        space,
+        "wave-grant-home-doc-2",
+        undefined,
+      );
+      const grantedTx = runtime.edit();
+      stampWaveRunContext(grantedTx, {
+        actionId: "provision-own-home",
+        kind: "event-handler",
+        eventId: "e-own-home",
+        acting: { user: actor, session: "sess-1" },
+        capabilityRef: "cap:test-grant",
+      });
+      grantedTx.enableMultiSpaceWrites?.([actor as MemorySpace, space]);
+      ownTarget.withTx(grantedTx).set({ value: 3 });
+      homeBeside2.withTx(grantedTx).set({ value: 4 });
+      const grantedCommit = await grantedTx.commit();
+      expect(grantedCommit.error).toBeUndefined();
+      expect(refusals).toBe(1);
+      expect(wave.foreignSpaces).toEqual([actor as MemorySpace]);
+    } finally {
+      runtime.clearSealDestination();
+      wave.abandon("test-only");
+      await wave.settled();
+    }
+  });
+
+  it("Phase 5 accept gate cannot be configured VACUOUS: accept without an authority probe refuses at construction (the F1 fix)", () => {
+    expect(() =>
+      new WaveAccumulator({
+        space,
+        basisSeq: Engine.serverSeq(engine),
+        scopeKeyIdentity: {
+          principal: signer.did(),
+          sessionId: "wave-vacuous-session",
+        },
+        replicaFor: (s) => storageManager.open(s).replica,
+        foreignWrites: "accept",
+      })
+    ).toThrow("foreignWriteGrant");
+  });
+
   it("stage F: a read in a space the run wrote nothing to folds the reader into a withdrawal (the discharged stage-D bound)", async () => {
     const foreignSigner = await Identity.fromPassphrase(
       "wave read-only space",
@@ -2801,8 +2930,10 @@ describe("stage F fix round: foreign-batch settle sequences and shallow reads", 
         principal: signer.did(),
         sessionId: "wave-foreign-seq-session",
       },
-      // §2b Phase-5 machinery under test (see newWave's posture note).
+      // §2b Phase-5 machinery under test (see newWave's posture note,
+      // including the allow-all authority probe).
       foreignWrites: "accept",
+      foreignWriteGrant: () => true,
       replicaFor: (s) => {
         const real = storageManager.open(s).replica;
         return new Proxy(real, {
@@ -2964,8 +3095,10 @@ describe("stage F fix round: foreign-batch settle sequences and shallow reads", 
         principal: signer.did(),
         sessionId: "wave-shallow-session",
       },
-      // §2b Phase-5 machinery under test (see newWave's posture note).
+      // §2b Phase-5 machinery under test (see newWave's posture note,
+      // including the allow-all authority probe).
       foreignWrites: "accept",
+      foreignWriteGrant: () => true,
       replicaFor: (s) => storageManager.open(s).replica,
       lease: cycle,
     });

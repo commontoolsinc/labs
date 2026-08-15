@@ -29,6 +29,7 @@ import type {
 } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
+import { ACLManager } from "../src/acl-manager.ts";
 import { wish as wishBuiltin } from "../src/builtins/wish.ts";
 import { UI } from "../src/builder/types.ts";
 import {
@@ -312,6 +313,85 @@ describe("Phase 5 cross-space serving", () => {
     } finally {
       await serving.dispose();
       await manager.close();
+    }
+  });
+
+  it("foreignWriteAuthorityFor: the structural grant supply — owner-by-identity, fresh-store creation (non-creating probe), the target's own ACL, fail-closed otherwise (protocol.md §2b; the F1 fix)", async () => {
+    const aliceDid = aliceSigner.did();
+    const bobDid = bobSigner.did();
+
+    // Owner-by-identity: the target space IS the actor's DID (their
+    // home space — the wish bootstrap's sanctioned target).
+    expect(
+      await server.foreignWriteAuthorityFor(aliceDid, aliceDid),
+    ).toEqual({ granted: true, via: "owner" });
+
+    // Creation: a well-formed, never-materialized space is §2b's
+    // sanctioned provisioning...
+    const freshSigner = await Identity.fromPassphrase(
+      "x-space fresh provision target",
+    );
+    const fresh = freshSigner.did();
+    expect(await server.foreignWriteAuthorityFor(fresh, aliceDid)).toEqual({
+      granted: true,
+      via: "creation",
+    });
+    // ...and the probe itself must NOT create the store: a second
+    // probe still sees a fresh space (had the first probe materialized
+    // it, this would now be exists-with-no-ACL → refused).
+    expect(await server.foreignWriteAuthorityFor(fresh, bobDid)).toEqual({
+      granted: true,
+      via: "creation",
+    });
+
+    // A malformed space name never resolves (or provisions) a store —
+    // the F1c arbitrary-store-creation arm.
+    const garbage = await server.foreignWriteAuthorityFor(
+      "junk-not-a-space",
+      aliceDid,
+    );
+    expect(garbage.granted).toBe(false);
+    // No acting principal: refused outright.
+    expect(
+      (await server.foreignWriteAuthorityFor(fresh, undefined)).granted,
+    ).toBe(false);
+
+    // An EXISTING space with no ACL document fails closed on the
+    // serving plane (the client path's populated-legacy compat arm is
+    // a rollout accommodation, not a grant).
+    await server.engineForSpace(foreignSpace);
+    const noAcl = await server.foreignWriteAuthorityFor(
+      foreignSpace,
+      aliceDid,
+    );
+    expect(noAcl.granted).toBe(false);
+
+    // The target's OWN ACL document is a real grant: bob grants alice
+    // WRITE on bob's space; carol (no row, no wildcard) stays refused.
+    const bobManager = SharedServerStorageManager.connectTo(server, {
+      as: bobSigner,
+    });
+    const bobRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: bobManager,
+    });
+    try {
+      const acl = new ACLManager(bobRuntime, bobDid);
+      await acl.set(bobDid, "OWNER");
+      await acl.set(aliceDid, "WRITE");
+      await bobRuntime.storageManager.synced();
+      expect(await server.foreignWriteAuthorityFor(bobDid, aliceDid)).toEqual(
+        { granted: true, via: "acl" },
+      );
+      const carolSigner = await Identity.fromPassphrase("x-space carol");
+      const carol = await server.foreignWriteAuthorityFor(
+        bobDid,
+        carolSigner.did(),
+      );
+      expect(carol.granted).toBe(false);
+    } finally {
+      await bobRuntime.dispose();
+      await bobManager.close();
     }
   });
 

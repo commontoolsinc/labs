@@ -93,6 +93,10 @@ describe("stage G outbox + sqlite discharge", () => {
       // ("refuse", RULED 2026-08-14 (c)) — pinned in
       // executor-serving-loop.test.ts and executor-wave.test.ts.
       foreignWrites: "accept",
+      // Allow-all authority probe: these tests exercise the FP1 fold
+      // mechanics; the gate's grant predicate is pinned in
+      // executor-wave.test.ts and executor-cross-space.test.ts.
+      foreignWriteGrant: () => true,
       ...(options.lease !== undefined ? { lease: options.lease } : {}),
     });
 

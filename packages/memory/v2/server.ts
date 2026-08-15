@@ -4587,6 +4587,116 @@ export class Server {
     return this.openEngine(space);
   }
 
+  /**
+   * The structural write grant for a FOREIGN provisioning write
+   * (server-execution v2 Phase 5; protocol.md §2b; serving-loop.md
+   * §3d's accept gate): whether `principal` — the CARRIED acting
+   * identity of a served run — holds authority to write `space`. The
+   * wave's accumulation gate consults this per crossing, so "admitted
+   * iff carriage" becomes a real authorization predicate instead of a
+   * vacuous shape check (carriage is minted for every acting run).
+   *
+   * The grants, in check order — each a structural fact this process
+   * holds, never a trust widening:
+   *
+   * - **owner-by-identity**: the target space IS the principal's own
+   *   DID (a user's home space — the demanded wish bootstrap's
+   *   sanctioned target, builtins.md §5).
+   * - **creation**: the target store does not exist — §2b's sanctioned
+   *   provisioning ("provision a foreign/NEW space"), where the
+   *   creating commit is what makes it the actor's (CT-1650's
+   *   deterministic per-user-per-event DIDs; quota attribution stays
+   *   the recorded residual, README §3.8). Probed WITHOUT creating:
+   *   the open-engine map first, then the store path — `openEngine`
+   *   materializes a store as a side effect, which is exactly what an
+   *   ungranted probe must not do.
+   * - **acl**: the target's OWN ACL document grants the principal (or
+   *   `ANYONE`) WRITE/OWNER — the same per-space grant structure the
+   *   client session path enforces. Checked mode-independently: this
+   *   gate is the serving plane's normative fail-closed interim
+   *   (protocol.md §2's posture), not the client ACL rollout, so
+   *   `acl.mode: "off"` does not disable it, the service-DID blanket
+   *   (`#isServicePrincipal`) does NOT apply (resolving ambient
+   *   service authority is the lunch-wall class), and the
+   *   missing-ACL-populated-legacy compat arm does not apply either
+   *   (fail closed; the per-DOC grant resolution stays OW13's owed
+   *   hardening).
+   *
+   * Anything else refuses — including a malformed space name, so a
+   * carriage-bearing write to a garbage space string can never
+   * silently provision a store on the co-hosted server.
+   */
+  async foreignWriteAuthorityFor(
+    space: string,
+    principal: string | undefined,
+  ): Promise<
+    | { granted: true; via: "owner" | "creation" | "acl" }
+    | { granted: false; reason: string }
+  > {
+    if (!/^did:[^:]+:[^:]+$/.test(space)) {
+      return {
+        granted: false,
+        reason: `"${space}" is not a space DID — refusing to resolve (or ` +
+          "provision) a store for a malformed space name (protocol.md §2b)",
+      };
+    }
+    if (principal === undefined || principal === "") {
+      return {
+        granted: false,
+        reason: "no acting principal — a foreign provisioning write is " +
+          "admitted only under a carried actor's grant (protocol.md §2b)",
+      };
+    }
+    if (principal === space) {
+      return { granted: true, via: "owner" };
+    }
+    if (!(await this.#spaceStoreExists(space))) {
+      return { granted: true, via: "creation" };
+    }
+    const engine = await this.openEngine(space);
+    const state = this.#aclState(engine, space);
+    if (state.kind === "valid") {
+      const capability = state.acl[principal] ?? state.acl[ANYONE_USER] ??
+        null;
+      if (capability !== null && isCapable(capability, "WRITE")) {
+        return { granted: true, via: "acl" };
+      }
+      return {
+        granted: false,
+        reason: `the ACL of ${space} grants ${principal} ` +
+          `${capability ?? "nothing"} (WRITE required)`,
+      };
+    }
+    return {
+      granted: false,
+      reason: state.kind === "missing"
+        ? `${space} exists with no ACL document — the serving plane fails ` +
+          "closed (protocol.md §2's interim; the client path's legacy " +
+          "compat arm is a rollout accommodation, not a grant)"
+        : `${space} has a malformed, ownerless, or retracted ACL`,
+    };
+  }
+
+  /** Whether a store for `space` already exists, WITHOUT creating one
+   * (the foreignWriteAuthorityFor probe's creation arm — `openEngine`
+   * materializes stores as a side effect). An open (or opening) engine
+   * exists by definition; a file-backed store exists iff its file
+   * does; a memory-backed store exists only while an engine holds it. */
+  async #spaceStoreExists(space: string): Promise<boolean> {
+    if (this.#engines.has(space)) return true;
+    if (this.#store === undefined) return false;
+    const url = resolveSpaceStoreUrl(
+      this.#store,
+      space as `did:${string}:${string}`,
+    );
+    if (url.protocol !== "file:") return false;
+    try {
+      return await FS.exists(Path.fromFileUrl(url));
+    } catch {
+      return false;
+    }
+  }
+
   private openEngine(space: string): Promise<Engine.Engine> {
     const existing = this.#engines.get(space);
     if (existing !== undefined) {

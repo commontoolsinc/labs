@@ -478,6 +478,17 @@ export class WaveAccumulator
   readonly #lease: WaveLease | undefined;
   readonly #sealedTenure: number;
   readonly #foreignWrites: "refuse" | "accept";
+  readonly #foreignWriteGrant:
+    | ((
+      space: MemorySpace,
+      acting: { user: string; session?: string },
+    ) => boolean | Promise<boolean>)
+    | undefined;
+  /** Grant verdicts per (space, acting user) for THIS wave — one probe
+   * per crossing pair, not per sealed tx. A new wave re-probes (grants
+   * can change between waves; a transient probe failure must not stick
+   * beyond the wave that observed it). */
+  readonly #foreignGrantVerdicts = new Map<string, Promise<boolean>>();
   readonly #onForeignWriteRefusal:
     | ((info: { space: MemorySpace; actionId?: string }) => void)
     | undefined;
@@ -540,10 +551,29 @@ export class WaveAccumulator
      * Phase-5 SERVING posture (the serving loop passes it since
      * Phase 5): a foreign write is admitted IFF the sealing run's
      * context carries the §2b delegated carriage (acting identity +
-     * capabilityRef — the sanctioned `.inSpace`/provisioning shape);
-     * a carriage-less foreign write keeps refusing action-scoped and
-     * counted. The commit-step guard stays as backstop. */
+     * capabilityRef — the sanctioned `.inSpace`/provisioning shape)
+     * AND the acting identity holds a structural write grant for the
+     * TARGET space (`foreignWriteGrant` below — carriage alone is a
+     * shape, not an authorization: #stampRun mints it for every
+     * acting run). A carriage-less or UNGRANTED foreign write keeps
+     * refusing action-scoped and counted. The commit-step guard stays
+     * as backstop. */
     foreignWrites?: "refuse" | "accept";
+    /** The authorization predicate of the accept gate (Phase 5;
+     * protocol.md §2b): whether `acting` holds a structural write
+     * grant for `space`. REQUIRED with `foreignWrites: "accept"` — an
+     * accept-mode wave without an authority probe would admit any
+     * acting run into any co-hosted space (the F1 vacuous-gate class),
+     * so the constructor refuses the combination. The serving loop
+     * wires the co-hosted memory server's
+     * `foreignWriteAuthorityFor` (owner-by-identity / fresh-store
+     * creation / the target's own ACL grant — fail-closed otherwise);
+     * a probe that THROWS refuses the crossing (fail closed), scoped
+     * to this wave. Probed once per (space, acting user) per wave. */
+    foreignWriteGrant?: (
+      space: MemorySpace,
+      acting: { user: string; session?: string },
+    ) => boolean | Promise<boolean>;
     /** Fired once per refused foreign-space write (above): the serving
      * loop counts it into §7's `foreignWriteRefusals`. */
     onForeignWriteRefusal?: (
@@ -558,6 +588,19 @@ export class WaveAccumulator
     this.#sealedTenure = options.lease?.tenure ?? 0;
     this.#onUnstampedSeal = options.onUnstampedSeal;
     this.#foreignWrites = options.foreignWrites ?? "refuse";
+    this.#foreignWriteGrant = options.foreignWriteGrant;
+    if (
+      this.#foreignWrites === "accept" && this.#foreignWriteGrant === undefined
+    ) {
+      // The gate is an AUTHORIZATION boundary, not a shape check: an
+      // accept posture with no authority probe is exactly the vacuous
+      // gate the F1 review found (carriage is minted for every acting
+      // run). Refuse the configuration instead of admitting it.
+      throw new Error(
+        'foreignWrites: "accept" requires a foreignWriteGrant authority ' +
+          "probe (serving-loop.md §3d's accept gate; protocol.md §2b)",
+      );
+    }
     this.#onForeignWriteRefusal = options.onForeignWriteRefusal;
   }
 
@@ -858,20 +901,20 @@ export class WaveAccumulator
    * layered view later runs read) and holds the verdict open until the
    * wave commit step disposes of it.
    */
-  sealSpaceCommit(
+  async sealSpaceCommit(
     space: MemorySpace,
     native: NativeStorageCommit,
     source: IStorageTransaction,
   ): Promise<Result<Unit, CommitError>> {
     const assembly = this.#assembly;
     if (assembly === undefined) {
-      return Promise.resolve({
+      return {
         error: {
           name: "StorageTransactionAborted",
           message: "sealSpaceCommit outside a seal() call",
           reason: new Error("seal-out-of-order"),
         },
-      });
+      };
     }
     if (space !== this.#space) {
       // Accumulation-time gate (serving-loop.md §3d, RULED 2026-08-14
@@ -888,21 +931,37 @@ export class WaveAccumulator
       //   admitted IFF the sealing run's context carries the §2b
       //   delegated carriage — acting identity AND capabilityRef, the
       //   provisioning shape protocol.md §2's server-produced authored
-      //   row requires on EVERY foreign commit. A carriage-less foreign
-      //   write keeps refusing exactly like "refuse": admitting it
-      //   would commit authored-class under the bare service envelope
-      //   with no acting identity — the silent-empty-instance trap's
-      //   write-side twin. The commit-step sink's delegated validation
-      //   stays as backstop.
+      //   row requires on EVERY foreign commit — AND the acting
+      //   identity holds a structural write grant for the TARGET space
+      //   (the foreignWriteGrant probe; the F1 fix). Carriage alone is
+      //   a shape, not an authorization — #stampRun mints it for every
+      //   acting run, so a carriage-only gate admitted any served
+      //   pattern acting for any user into ANY co-hosted space through
+      //   the engine-direct sink (which bypasses session ACL). A
+      //   carriage-less foreign write keeps refusing exactly like
+      //   "refuse": admitting it would commit authored-class under the
+      //   bare service envelope with no acting identity — the
+      //   silent-empty-instance trap's write-side twin. An UNGRANTED
+      //   one refuses the same way, loud and counted. The commit-step
+      //   sink's delegated validation stays as backstop.
+      const acting = assembly.context?.acting;
       const carriage = assembly.context !== undefined &&
         this.#delegatedFor(assembly.context) !== undefined;
-      if (this.#foreignWrites === "refuse" || !carriage) {
+      let why: string | undefined;
+      if (this.#foreignWrites === "refuse") {
+        why = "cross-space serving is Phase 5";
+      } else if (!carriage || acting === undefined) {
+        why = "the run context carries no §2b delegated carriage (acting " +
+          "identity + capabilityRef; protocol.md §2's server-produced " +
+          "authored row)";
+      } else if (!(await this.#foreignGrantFor(space, acting))) {
+        why = `the acting identity ${acting.user} holds no structural ` +
+          `write grant for ${space} (protocol.md §2b: owner-by-identity, ` +
+          "fresh-store creation, or the target's own ACL grant; " +
+          "fail-closed otherwise)";
+      }
+      if (why !== undefined) {
         const actionId = assembly.context?.actionId;
-        const why = this.#foreignWrites === "refuse"
-          ? "cross-space serving is Phase 5"
-          : "the run context carries no §2b delegated carriage (acting " +
-            "identity + capabilityRef; protocol.md §2's server-produced " +
-            "authored row)";
         logger.warn("foreign-write-refused", () => [
           `foreign-space write refused at wave accumulation: action ` +
           `${actionId ?? "<unstamped>"} attempted to write ${space} from ` +
@@ -913,7 +972,7 @@ export class WaveAccumulator
           space,
           ...(actionId !== undefined ? { actionId } : {}),
         });
-        return Promise.resolve({
+        return {
           error: {
             name: "StorageTransactionAborted",
             message: `foreign-space write refused at wave accumulation ` +
@@ -922,7 +981,7 @@ export class WaveAccumulator
               `the wave serving ${this.#space} — ${why}`,
             reason: new Error("foreign-write-refused"),
           },
-        });
+        };
       }
     }
     const replica = this.#replicaFor(space);
@@ -1912,6 +1971,36 @@ export class WaveAccumulator
       ...(sqliteScopeKeys.length === 0 ? {} : { sqliteScopeKeys }),
       ...(outboxAppends.length === 0 ? {} : { outboxAppends }),
     };
+  }
+
+  /** The accept gate's authority verdict for one (space, acting user)
+   * crossing (the F1 fix): probes `foreignWriteGrant` once per pair
+   * per wave and caches the verdict promise. A probe that THROWS
+   * refuses the crossing — fail closed, never an unhandled crash out
+   * of the seal path — and the refusal is scoped to this wave (the
+   * next wave's fresh accumulator re-probes). */
+  #foreignGrantFor(
+    space: MemorySpace,
+    acting: { user: string; session?: string },
+  ): Promise<boolean> {
+    const key = `${space}\0${acting.user}`;
+    let verdict = this.#foreignGrantVerdicts.get(key);
+    if (verdict === undefined) {
+      verdict = (async () => this.#foreignWriteGrant!(space, acting))().then(
+        (granted) => granted,
+        (error) => {
+          logger.warn("foreign-write-grant-probe-failed", () => [
+            `the foreign-write authority probe for ${space} (acting ` +
+            `${acting.user}) failed; refusing the crossing fail-closed ` +
+            "for this wave (protocol.md §2b)",
+            error,
+          ]);
+          return false;
+        },
+      );
+      this.#foreignGrantVerdicts.set(key, verdict);
+    }
+    return verdict;
   }
 
   /** The delegated-identity carriage a contribution's foreign batch
