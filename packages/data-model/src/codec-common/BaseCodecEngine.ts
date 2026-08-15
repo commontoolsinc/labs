@@ -116,7 +116,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    *
    * @throws If `data` is not this format's serialized form -- which a format
    *   carrying a marker can tell from the marker alone, and one without can
-   *   only tell from meeting something it never emits -- or if a codec rejects
+   *   only tell from finding something it never emits -- or if a codec rejects
    *   a state and this instance is not lenient.
    */
   abstract decode(
@@ -154,7 +154,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * comes back out however the descent ends. That means the tagged form as
    * much as a container -- a format whose transport can carry a graph can
    * close a cycle through tagged nodes alone. Here rather than in
-   * {@link #decodeTagged}, because this method is the one that meets every
+   * {@link #decodeTagged}, because this method is the one that visits every
    * node, and entering in both places would enter a state twice and report a
    * cycle that is not there.
    */
@@ -308,7 +308,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * Three of the arms below walk the state again -- a nonterminal codec's, an
    * unknown tag's, and a malformed tag's -- and each carries `seen` into that
    * walk. Entering the state is not this method's business: it is
-   * {@link #decodeValue} that meets every node of the tree, the tagged form
+   * {@link #decodeValue} that visits every node of the tree, the tagged form
    * included, and entering there is what keeps one node from being entered
    * twice.
    */
@@ -411,7 +411,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * Enters a container into the in-progress set, reporting rather than
    * entering if it is already there.
    *
-   * Reported rather than raised, unlike the encode side's refusal: a cycle met
+   * Reported rather than raised, unlike the encode side's refusal: a cycle
    * here arrived from a channel, and every malformation off a channel settles
    * against {@link #lenient}. Raising unconditionally would also be the one
    * refusal a lenient decode could not contain.
