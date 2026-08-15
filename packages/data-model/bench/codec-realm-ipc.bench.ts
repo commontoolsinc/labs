@@ -30,7 +30,7 @@
  * that is exactly the distinction `decode()`'s contract turns on.
  */
 
-import type { RealmCodecValue } from "@/codec-realm/interface.ts";
+import type { RealmEncodedValue } from "@/codec-realm/interface.ts";
 import { realmFromFabricValue } from "@/codecs.ts";
 import type { FabricValue } from "@/interface.ts";
 import {
@@ -100,7 +100,7 @@ const SUBJECTS: readonly (readonly [string, FabricValue])[] = [
 ];
 
 /** Encoded once; `postMessage()` clones, so the far side never consumes this. */
-const ENCODED: readonly (readonly [string, RealmCodecValue])[] = SUBJECTS.map(
+const ENCODED: readonly (readonly [string, RealmEncodedValue])[] = SUBJECTS.map(
   ([name, value]) => [name, realmFromFabricValue(value)] as const,
 );
 

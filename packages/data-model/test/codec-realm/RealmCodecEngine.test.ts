@@ -22,6 +22,8 @@ import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-interface/EmptyReconstructionContext.ts";
 import {
   type RealmCodecValue,
+  type RealmEncodedValue,
+  type RealmFormatMarker,
   type RealmTaggedValue,
 } from "@/codec-realm/interface.ts";
 import {
@@ -36,6 +38,33 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { EchoReport } from "./realm-echo-worker.ts";
+
+/**
+ * A marker for hand-built wire data. `decode()` adopts whatever object the
+ * envelope carries, so a test's own marker works exactly as the engine's does
+ * -- which is itself the property that lets a peer send a well-formed payload.
+ */
+const WIRE_MARKER = ["fvr1"] as unknown as RealmFormatMarker;
+
+/** Wraps hand-built wire data in an envelope under {@link WIRE_MARKER}. */
+function wire(payload: unknown): RealmEncodedValue {
+  return [WIRE_MARKER, payload as RealmCodecValue];
+}
+
+/** A tagged form under {@link WIRE_MARKER}, for hand-built wire data. */
+function tagged(tag: unknown, state: unknown): RealmCodecValue {
+  return [WIRE_MARKER, tag, state] as unknown as RealmCodecValue;
+}
+
+/** The walked tree inside an encoded value's envelope. */
+function payloadOf(encoded: RealmEncodedValue): RealmCodecValue {
+  return encoded[1];
+}
+
+/** The state under a tagged form, for an encoded value that is one. */
+function stateOf(encoded: RealmEncodedValue): RealmCodecValue {
+  return (payloadOf(encoded) as unknown as RealmTaggedValue)[2];
+}
 
 /**
  * Encodes `value`, sends it to a real `Worker`, and returns what that worker
@@ -68,7 +97,7 @@ describe("RealmCodecEngine", () => {
       // Not merely equal: the same object. An envelope would make that
       // impossible for any value at all, however little of it needed
       // encoding.
-      expect(realmFromFabricValue(value)).toBe(value);
+      expect(payloadOf(realmFromFabricValue(value))).toBe(value);
     });
 
     it("returns a payload holding no encodable value by identity", () => {
@@ -76,13 +105,13 @@ describe("RealmCodecEngine", () => {
 
       // Copy-on-write: nothing here needs encoding, so nothing is rebuilt and
       // the transport does the only copying.
-      expect(realmFromFabricValue(value)).toBe(value);
+      expect(payloadOf(realmFromFabricValue(value))).toBe(value);
     });
 
     it("rebuilds only the containers on the path to an encoded value", () => {
       const untouched = { c: "two" };
       const value = { a: new FabricBytes(new Uint8Array([1])), b: untouched };
-      const payload = (realmFromFabricValue(value)) as Record<
+      const payload = payloadOf(realmFromFabricValue(value)) as Record<
         string,
         RealmCodecValue
       >;
@@ -94,14 +123,14 @@ describe("RealmCodecEngine", () => {
     it("leaves a `/`-prefixed key untouched, this format reserving no key", () => {
       const value = { "/quote": "not a tag here", "/Bytes@1": "nor this" };
 
-      expect(realmFromFabricValue(value)).toBe(value);
+      expect(payloadOf(realmFromFabricValue(value))).toBe(value);
     });
 
     it("encodes a `FabricBytes` to a transferable `ArrayBuffer`", () => {
-      const payload = realmFromFabricValue(
+      const payload = payloadOf(realmFromFabricValue(
         new FabricBytes(new Uint8Array([1, 2, 250])),
-      );
-      const state = (payload as RealmTaggedValue).get("Bytes@1");
+      ));
+      const state = (payload as unknown as RealmTaggedValue)[2];
 
       // An `ArrayBuffer` rather than a view onto one, that being the form
       // `postMessage()` can transfer.
@@ -112,20 +141,19 @@ describe("RealmCodecEngine", () => {
     it("encodes a `FabricBytes` to a buffer covering exactly its bytes", () => {
       // A transfer hands over the whole buffer, so a state covering more than
       // the value would cede bytes that are not part of it.
-      const payload = realmFromFabricValue(
+      const payload = payloadOf(realmFromFabricValue(
         new FabricBytes(new Uint8Array([1, 2, 250])),
-      );
-      const state = (payload as RealmTaggedValue)
-        .get("Bytes@1") as ArrayBuffer;
+      ));
+      const state = (payload as unknown as RealmTaggedValue)[2] as ArrayBuffer;
 
       expect(state.byteLength).toBe(3);
     });
 
     it("encodes a `FabricHash` to a tag and a transferable `ArrayBuffer`", () => {
-      const payload = realmFromFabricValue(
+      const payload = payloadOf(realmFromFabricValue(
         new FabricHash(new Uint8Array([1, 2, 3]), "fid1"),
-      );
-      const state = (payload as RealmTaggedValue).get("Hash@1") as {
+      ));
+      const state = (payload as unknown as RealmTaggedValue)[2] as {
         tag: string;
         hash: ArrayBuffer;
       };
@@ -142,8 +170,9 @@ describe("RealmCodecEngine", () => {
 
     it("does not hand out the bytes an encoded `FabricHash` holds", () => {
       const hash = new FabricHash(new Uint8Array([1, 2, 3]), "fid1");
-      const state = (realmFromFabricValue(hash) as RealmTaggedValue)
-        .get("Hash@1") as { hash: ArrayBuffer };
+      const state = stateOf(realmFromFabricValue(hash)) as {
+        hash: ArrayBuffer;
+      };
 
       new Uint8Array(state.hash)[0] = 99;
       // Read through `bytes`, not `toString()`: the string forms are computed
@@ -153,11 +182,11 @@ describe("RealmCodecEngine", () => {
     });
 
     it("encodes a `FabricEpochNsec` to a `bigint`", () => {
-      const payload = realmFromFabricValue(
+      const payload = payloadOf(realmFromFabricValue(
         new FabricEpochNsec(1234567890123456789n),
-      );
+      ));
 
-      expect((payload as RealmTaggedValue).get("EpochNsec@1")).toBe(
+      expect((payload as unknown as RealmTaggedValue)[2]).toBe(
         1234567890123456789n,
       );
     });
@@ -165,9 +194,11 @@ describe("RealmCodecEngine", () => {
     it("encodes an interned symbol to its registry key", () => {
       // Cloning refuses every symbol, so this is the one JavaScript primitive
       // the format has to encode at all.
-      const payload = realmFromFabricValue(Symbol.for("k") as FabricValue);
+      const payload = payloadOf(
+        realmFromFabricValue(Symbol.for("k") as FabricValue),
+      );
 
-      expect((payload as RealmTaggedValue).get("Symbol@1")).toBe("k");
+      expect((payload as unknown as RealmTaggedValue)[2]).toBe("k");
     });
 
     it("refuses a unique symbol rather than interning one", () => {
@@ -183,8 +214,7 @@ describe("RealmCodecEngine", () => {
     it("does not hand out the bytes an encoded `FabricBytes` holds", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
       const state = new Uint8Array(
-        ((realmFromFabricValue(bytes)) as RealmTaggedValue)
-          .get("Bytes@1") as ArrayBuffer,
+        stateOf(realmFromFabricValue(bytes)) as ArrayBuffer,
       );
 
       state[0] = 99;
@@ -193,7 +223,9 @@ describe("RealmCodecEngine", () => {
 
     it("keeps a shared subtree shared when it needs no encoding", () => {
       const shared = { s: 1 };
-      const payload = realmFromFabricValue({ a: shared, b: shared }) as Record<
+      const payload = payloadOf(
+        realmFromFabricValue({ a: shared, b: shared }),
+      ) as Record<
         string,
         RealmCodecValue
       >;
@@ -206,7 +238,9 @@ describe("RealmCodecEngine", () => {
 
     it("rebuilds a shared subtree separately when it needs encoding", () => {
       const shared = { bytes: new FabricBytes(new Uint8Array([1, 2])) };
-      const payload = realmFromFabricValue({ a: shared, b: shared }) as Record<
+      const payload = payloadOf(
+        realmFromFabricValue({ a: shared, b: shared }),
+      ) as Record<
         string,
         RealmCodecValue
       >;
@@ -240,20 +274,44 @@ describe("RealmCodecEngine", () => {
   describe("decode()", () => {
     it("returns a plain payload as it stands", () => {
       // With no envelope to strip, an ordinary value decodes to itself.
-      expect(fabricFromRealmValue({ a: 1 })).toEqual({ a: 1 });
+      expect(fabricFromRealmValue(wire({ a: 1 }))).toEqual({ a: 1 });
     });
 
     it("refuses a form this format never emits", () => {
       // Cloning carries a `Date`; this format has no codec that produces one,
       // so it can only have come from something other than an `encode()`.
-      expect(() => fabricFromRealmValue(new Date() as never)).toThrow(
+      expect(() => fabricFromRealmValue(wire(new Date()))).toThrow(
         /not a form this format emits/,
       );
     });
 
-    it("refuses a multi-entry `Map`, the tagged form being single-entry", () => {
-      expect(() => fabricFromRealmValue(new Map([["a", 1], ["b", 2]]) as never))
+    it("refuses a `Map`, which this format no longer emits at all", () => {
+      // Cloning carries one faithfully, so a peer can send one; nothing here
+      // makes one, so meeting one is a malformation like any other.
+      expect(() => fabricFromRealmValue(wire(new Map([["a", 1]]))))
         .toThrow(/not a form this format emits/);
+    });
+
+    it("refuses an envelope that is not two elements", () => {
+      // The one place this engine takes instruction from the data, so the
+      // shape is checked before slot zero is read as a marker.
+      for (const bad of [[], [1, 2, 3], "nope", 42]) {
+        expect(() => fabricFromRealmValue(bad as never))
+          .toThrow(/two-element envelope/);
+      }
+    });
+
+    it("treats an array the marker does not head as ordinary data", () => {
+      // Three elements and a lookalike marker in slot zero, and still data:
+      // recognition is identity, and this array's slot zero is some other
+      // object however equal it looks.
+      const lookalike = ["fvr1"];
+      const decoded = fabricFromRealmValue(
+        wire({ a: [lookalike, "EpochDays@1", 7n] }),
+      ) as Record<string, FabricValue>;
+
+      expect(Array.isArray(decoded.a)).toBe(true);
+      expect((decoded.a as FabricValue[])[1]).toBe("EpochDays@1");
     });
 
     it("refuses a single-entry `Map` whose key is not a tag", () => {
@@ -261,18 +319,18 @@ describe("RealmCodecEngine", () => {
       // find a non-string in tag position where JSON never can. The engine
       // hands the key over as it found it, and the shared tag check judges
       // it, so what is refused here is refused the same way under any format.
-      expect(() => fabricFromRealmValue(new Map([[42, "x"]]) as never))
+      expect(() => fabricFromRealmValue(wire(tagged(42, "x"))))
         .toThrow(/malformed tag/);
-      expect(() => fabricFromRealmValue(new Map([[Symbol("s"), "x"]]) as never))
+      expect(() => fabricFromRealmValue(wire(tagged(Symbol("s"), "x"))))
         .toThrow(/malformed tag/);
-      expect(() => fabricFromRealmValue(new Map([["hole", "x"]]) as never))
+      expect(() => fabricFromRealmValue(wire(tagged("hole", "x"))))
         .toThrow(/malformed tag/);
     });
 
     it("keeps the offending key in a lenient refusal", () => {
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
-        new Map([[42, "x"]]) as never,
+        wire(tagged(42, "x")),
         EMPTY_RECONSTRUCTION_CONTEXT,
       ) as ProblematicValue;
 
@@ -288,7 +346,7 @@ describe("RealmCodecEngine", () => {
       // and `FabricBytes` wants an `ArrayBuffer` where this carries a string.
       // The default engine is strict, so this throws.
       try {
-        fabricFromRealmValue(new Map([["Bytes@1", "nope"]]));
+        fabricFromRealmValue(wire(tagged("Bytes@1", "nope")));
         throw new Error("Should have thrown.");
       } catch (e) {
         expect(e).toBeInstanceOf(ProblematicStateError);
@@ -306,7 +364,7 @@ describe("RealmCodecEngine", () => {
       // counterpart does; `lenient` is what decides which a caller sees.
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
-        new Map([["Bytes@1", "nope"]]),
+        wire(tagged("Bytes@1", "nope")),
         EMPTY_RECONSTRUCTION_CONTEXT,
       );
 
@@ -321,7 +379,7 @@ describe("RealmCodecEngine", () => {
       // codec reports, so one throwing an `Error` of its own that named the
       // tag would have the message say it a second time.
       try {
-        fabricFromRealmValue(new Map([["Symbol@1", 42]]));
+        fabricFromRealmValue(wire(tagged("Symbol@1", 42)));
         throw new Error("Should have thrown.");
       } catch (e) {
         expect(e).toBeInstanceOf(ProblematicStateError);
@@ -335,7 +393,7 @@ describe("RealmCodecEngine", () => {
       // A single-entry `Map` IS the tagged form, so this is a well-formed
       // value carrying a tag no codec claims -- a different thing from a
       // malformation.
-      const decoded = fabricFromRealmValue(new Map([["nope@1", 1]]));
+      const decoded = fabricFromRealmValue(wire(tagged("nope@1", 1)));
 
       expect(decoded).toBeInstanceOf(UnknownValue);
       expect((decoded as UnknownValue).wireTypeTag).toBe("nope@1");
@@ -351,35 +409,41 @@ describe("RealmCodecEngine", () => {
       const array: RealmCodecValue[] = [1];
       array.push(array);
 
-      expect(() => fabricFromRealmValue(object)).toThrow(/circular reference/);
-      expect(() => fabricFromRealmValue(array)).toThrow(/circular reference/);
+      expect(() => fabricFromRealmValue(wire(object))).toThrow(
+        /circular reference/,
+      );
+      expect(() => fabricFromRealmValue(wire(array))).toThrow(
+        /circular reference/,
+      );
     });
 
     it("refuses a circular reference closed through tagged values alone", () => {
       // The tagged form is a container too: `decodeTagged()` walks the state
       // again for a nonterminal codec, for a tag no codec claims, and for a
-      // tag that is not one. So a `Map` graph can close a cycle with no plain
-      // container in it at all, and cloning carries such a graph faithfully.
-      const unknownTag = new Map<unknown, unknown>();
-      unknownTag.set("Nope@1", new Map([["Nope@1", unknownTag]]));
+      // tag that is not one. So a graph of envelopes can close a cycle with no
+      // plain container in it at all, and cloning carries one faithfully.
+      const unknownTag = tagged("Nope@1", null) as unknown as unknown[];
+      unknownTag[2] = unknownTag;
 
-      const malformedTag = new Map<unknown, unknown>();
-      malformedTag.set(42, malformedTag);
+      const malformedTag = tagged(42, null) as unknown as unknown[];
+      malformedTag[2] = malformedTag;
 
-      const nonterminal = new Map<unknown, unknown>();
-      nonterminal.set("Error@1", nonterminal);
+      const nonterminal = tagged("Error@1", null) as unknown as unknown[];
+      nonterminal[2] = nonterminal;
 
       for (const one of [unknownTag, malformedTag, nonterminal]) {
-        expect(() => fabricFromRealmValue(one as never))
+        expect(() => fabricFromRealmValue(wire(one)))
           .toThrow(/circular reference/);
       }
     });
 
     it("refuses a circular reference closed through a mix of the two", () => {
       const object: Record<string, RealmCodecValue> = {};
-      object.tagged = new Map([["Nope@1", object]]);
+      object.tagged = tagged("Nope@1", object);
 
-      expect(() => fabricFromRealmValue(object)).toThrow(/circular reference/);
+      expect(() => fabricFromRealmValue(wire(object))).toThrow(
+        /circular reference/,
+      );
     });
 
     it("decodes the same tagged value at two positions, which is no cycle", () => {
@@ -387,13 +451,14 @@ describe("RealmCodecEngine", () => {
       // merely seen twice. Sequential visits leave the set between them, so
       // this is the check that it does not over-refuse.
       //
-      // One `Map` at both positions, and not two values that encode alike:
-      // `wrapTag()` builds a fresh `Map` per visit, so encoding a value that
-      // holds one instance twice yields two nodes and revisits nothing. The
-      // encoded form is reused directly to get the shared node this needs.
-      const shared = realmFromFabricValue(new FabricEpochDays(7n));
+      // One tagged node at both positions, and not two values that encode
+      // alike: `wrapTag()` builds a fresh envelope per visit, so encoding a
+      // value that holds one instance twice yields two nodes and revisits
+      // nothing. A hand-built node is reused directly to get the sharing this
+      // needs.
+      const shared = tagged("EpochDays@1", 7n);
       const decoded = fabricFromRealmValue(
-        { x: shared, y: shared },
+        wire({ x: shared, y: shared }),
       ) as Record<string, FabricValue>;
 
       expect(decoded.x).toBeInstanceOf(FabricEpochDays);
@@ -413,7 +478,7 @@ describe("RealmCodecEngine", () => {
       }) as Record<string, RealmCodecValue>;
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const decoded = engine.decode(
-        { first: offender, second: offender },
+        wire({ first: offender, second: offender }),
         EMPTY_RECONSTRUCTION_CONTEXT,
       ) as Record<string, ProblematicValue>;
 
@@ -426,7 +491,7 @@ describe("RealmCodecEngine", () => {
       const object: Record<string, RealmCodecValue> = { a: 1 };
       object.self = object;
       const decoded = engine.decode(
-        object,
+        wire(object),
         EMPTY_RECONSTRUCTION_CONTEXT,
       ) as Record<string, FabricValue>;
 
@@ -449,7 +514,7 @@ describe("RealmCodecEngine", () => {
         writable: true,
       });
 
-      expect(() => fabricFromRealmValue(data as never)).toThrow(/reserves/);
+      expect(() => fabricFromRealmValue(wire(data))).toThrow(/reserves/);
     });
 
     it("returns that refusal as a `ProblematicValue` when lenient", () => {
@@ -461,7 +526,7 @@ describe("RealmCodecEngine", () => {
         writable: true,
       });
       const decoded = engine.decode(
-        data as never,
+        wire(data),
         EMPTY_RECONSTRUCTION_CONTEXT,
       ) as ProblematicValue;
 
@@ -475,19 +540,19 @@ describe("RealmCodecEngine", () => {
       // Copy-on-write on the decode side, as on the encode side. Each format
       // writes its own `decodeValue()`, so this is not covered by any test of
       // the shared engine.
-      expect(fabricFromRealmValue(data)).toBe(data);
+      expect(fabricFromRealmValue(wire(data))).toBe(data);
     });
 
     it("returns an array needing no decoding by identity", () => {
       const data = [1, "two", { three: 3 }];
 
-      expect(fabricFromRealmValue(data)).toBe(data);
+      expect(fabricFromRealmValue(wire(data))).toBe(data);
     });
 
     it("rebuilds only the objects on the path to a decoded value", () => {
       const untouched = { c: "two" };
-      const data = { a: new Map([["EpochNsec@1", 7n]]), b: untouched };
-      const decoded = fabricFromRealmValue(data as never) as Record<
+      const data = { a: tagged("EpochNsec@1", 7n), b: untouched };
+      const decoded = fabricFromRealmValue(wire(data)) as Record<
         string,
         FabricValue
       >;
@@ -498,8 +563,8 @@ describe("RealmCodecEngine", () => {
 
     it("rebuilds only the arrays on the path to a decoded value", () => {
       const untouched = [1, 2];
-      const data = [new Map([["EpochNsec@1", 7n]]), untouched];
-      const decoded = fabricFromRealmValue(data as never) as FabricValue[];
+      const data = [tagged("EpochNsec@1", 7n), untouched];
+      const decoded = fabricFromRealmValue(wire(data)) as FabricValue[];
 
       expect(decoded).not.toBe(data);
       expect(decoded[1]).toBe(untouched);
@@ -509,17 +574,52 @@ describe("RealmCodecEngine", () => {
       const inner = { c: "two" };
       const innerArray = [1, 2];
       const data = {
-        a: new Map([["EpochNsec@1", 7n]]),
+        a: tagged("EpochNsec@1", 7n),
         b: inner,
         d: innerArray,
       };
 
-      fabricFromRealmValue(data as never);
+      fabricFromRealmValue(wire(data));
 
       // Both came back by identity rather than rebuilt, so freezing them is
       // the whole of what keeps the result immutable.
       expect(Object.isFrozen(inner)).toBe(true);
       expect(Object.isFrozen(innerArray)).toBe(true);
+    });
+
+    it("does not read an earlier encode's marker as this one's", () => {
+      // The property the per-call marker exists for, and the whole of why it
+      // is minted per call rather than held on the engine. A value may
+      // legitimately hold a subtree of some earlier encoding -- whatever
+      // assembled it is trusted and has seen one -- and copy-on-write carries
+      // that subtree through by identity, so the older marker ends up sitting
+      // in a *data* position. A marker that outlived its call would be read
+      // there as an envelope, and user data would decode as a tagged value.
+      const earlier = realmFromFabricValue(new FabricEpochDays(7n));
+      const value = Object.freeze({
+        smuggled: payloadOf(earlier) as FabricValue,
+      });
+
+      const decoded = fabricFromRealmValue(
+        realmFromFabricValue(value),
+      ) as Record<string, FabricValue>;
+
+      // Data, three slots and all, rather than a reconstructed value.
+      expect(Array.isArray(decoded.smuggled)).toBe(true);
+      expect((decoded.smuggled as FabricValue[])[1]).toBe("EpochDays@1");
+      expect(decoded.smuggled).not.toBeInstanceOf(FabricEpochDays);
+    });
+
+    it("reads those same three slots as tagged under a matching marker", () => {
+      // The control for the case above, and what makes the pair a statement
+      // about identity rather than about shape: the very same slots, under the
+      // marker the envelope carries, do decode as the value they name.
+      const marker = realmFromFabricValue(null)[0];
+      const decoded = fabricFromRealmValue(
+        [marker, [marker, "EpochDays@1", 7n]] as never,
+      );
+
+      expect(decoded).toBeInstanceOf(FabricEpochDays);
     });
 
     it("decodes a tree carrying bytes exactly once", () => {
