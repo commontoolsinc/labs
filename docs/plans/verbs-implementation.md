@@ -52,7 +52,7 @@ without reconstructing it.
 | 4. `receipt` as a top-level envelope field | on main (#5694) |
 | 2. an unrecognized projection key is refused | **in review** (#5817); design landed (#5753) |
 | 3. a rejection propagates up through what holds it | on main (#5701) |
-| 5. `cf wish` and `cf exec` take the read options | not started |
+| 5. `cf wish` and `cf exec` take the read options | **in review** (#5844) |
 | 11. a caller may name a reference | not started; sequenced, gated on one measurement |
 
 Item 9 is split because its two halves have different fates: the marks landed,
@@ -260,6 +260,16 @@ that strips handles, because a marker needs a live cell to read an address from;
 and `exec` already prints its result cell as prose on stderr, in a spelling no
 other command accepts, which this is the occasion to make the declared shape.
 
+*A handler reached through `cf exec` had no outcome to shape.* The dispatch
+named no invocation, so the handling filed under no receipt and the command
+printed nothing at all — a read option there could only ever have answered
+nothing, which is the silence this item exists to remove. `cf exec` now mints
+an invocation per call, the same pair `resolveInvocationIdentity` mints for a
+`cf piece call` that names neither, and prints the Invocation JSON that call
+declares. A tool's stdout is unchanged; its result cell's address moves to the
+address-argument spelling, which is what removes the third spelling rather than
+adding a fourth.
+
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
 
@@ -452,7 +462,7 @@ its own track.
 | 3 | Listing rows carry a handler's declared result | **on main** (#5629) — item 10, #5619 | — | The consumer half of item 1 |
 | 4 | The forced-stream fallback stops inventing verbs | **on main** (#5683) — #5576, #5662 | 3 | Same file as step 3, which has landed, so this is the front of the queue. It narrows the listing, so sweep the open branches for writers first |
 | 5 | The help page stops claiming a verb returns nothing | **on main** (#5680) — #5558, first half | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
-| 5a | An author's prose reaches the caller | #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
+| 5a | An author's prose reaches the caller | **on main** (#5825) — #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
 | 6 | Help enumerates what a verb returns | **on main** (#5717) — #5558, second half | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
 | 7 | A returned piece reads back through its own cycle | **on main** (#5740) — #5577 | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
 | 8 | `receipt` as a top-level envelope field | **on main** (#5694) — item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
@@ -460,8 +470,8 @@ its own track.
 | 10 | Two identical projections stop colliding | **on main** (#5757) — #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
 | 11 | One piece, one address | **decided — they are aliases**; the documentation half is #5754 | — | Measured: the two routes differ because one resolves the link chain and the other renders the link as stored. That is the read model working, not a defect, so the outcome is the statement rather than the fix. What remains is a doc correction and closing #5632 — no code changes, and step 13 is not gated on it |
 | 12 | An unrecognized projection key is refused | **on main** (#5817) — item 2 | 9 | The largest remaining step, and the one carrying design surface, since it couples the projection reader to the compatibility checker's annotation keys. Its design is [projection keys, and the schema a read is handed](../history/plans/projection-key-classification.md) |
-| 12a | `cf` refuses an undeclared field on a call | **in review** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
-| 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
+| 12a | `cf` refuses an undeclared field on a call | **on main** (#5835) — item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says. Built against #5817's wording rather than its code, since that branch is unmerged |
+| 13 | `cf wish` and `cf exec` take the read options | **in review** (#5844) — item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving — and it now has. No resolving marker is planned, so the grammar step 13 spreads is the grammar that exists |
 | 14 | A caller may name a reference | item 11, #5560 | — | Item 11 has carried this since the State table was written and the ordering never gave it a step, so nothing scheduled it. Sequenced last only because it is unstarted, not because anything gates it — and it is the most consequential thing open: the shape-matching payload the CLI does accept **stores a detached copy and reports success**, so a caller relating two pieces is told it worked |
 
 **`--show-links` is not redundant, and nothing should schedule its removal
