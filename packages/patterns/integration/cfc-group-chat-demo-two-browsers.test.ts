@@ -25,6 +25,7 @@
  */
 
 import { env } from "@commonfabric/integration";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { UI } from "@commonfabric/runner";
@@ -52,6 +53,23 @@ import {
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME, CFC_BROWSER_PROFILE_COUNT } = env;
+// The opt-in propagation-benchmark leg (see the series step below).
+const CHAT_SERIES = Math.max(
+  0,
+  Number.parseInt(Deno.env.get("CF_CHAT_MESSAGE_SERIES") ?? "0", 10) || 0,
+);
+const CHAT_SERIES_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(Deno.env.get("CF_CHAT_MESSAGE_DELAY_MS") ?? "2000", 10) ||
+    0,
+);
+const CHAT_SERIES_ARM = (() => {
+  const raw = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION");
+  const on = raw === undefined
+    ? SERVER_EXECUTION_DEFAULT_ENABLED
+    : raw === "true";
+  return on ? "ON" : "OFF";
+})();
 const SAVE_PROFILE_ACTION = "TrustedGroupChatSaveProfile";
 const PROFILE_COUNT = Math.max(2, CFC_BROWSER_PROFILE_COUNT);
 
@@ -339,6 +357,55 @@ describe(
               lockdownMessage,
             ),
         );
+
+        // The Phase-7 cross-user PROPAGATION BENCHMARK leg (opt-in;
+        // docs/plans/server-execution-v2.md Phase 7's criterion — the
+        // README §1 "faster, not tolerably slower" bar): with
+        // CF_CHAT_MESSAGE_SERIES=N set, the first browser posts N further
+        // messages, DELAY apart, and each post is timed from the send
+        // click until the SECOND browser renders it — the byte-identical
+        // workload run in adjacent ON/OFF pairs by the measurement
+        // protocol (fresh store, load recorded, medians + quartiles). Off
+        // by default: the ordinary gate run is unchanged.
+        if (CHAT_SERIES > 0) {
+          const perPost: number[] = [];
+          for (let i = 0; i < CHAT_SERIES; i++) {
+            const text = `series ${i} ${userNames[0]}`;
+            await fillCfInput(pages[0], "#trusted-message-draft", text);
+            await waitForDisabled(pages[0], "#trusted-send-button", false);
+            const t0 = performance.now();
+            await clickCfButton(pages[0], "#trusted-send-button");
+            await waitForText(pages[1], "#trusted-conversation-preview", text);
+            perPost.push(performance.now() - t0);
+            if (CHAT_SERIES_DELAY_MS > 0) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, CHAT_SERIES_DELAY_MS)
+              );
+            }
+          }
+          const sorted = [...perPost].sort((a, b) => a - b);
+          const q = (f: number) =>
+            sorted[Math.min(sorted.length - 1, Math.floor(f * sorted.length))];
+          const load = (() => {
+            try {
+              return Deno.loadavg().map((v) => v.toFixed(2)).join("/");
+            } catch {
+              return "n/a";
+            }
+          })();
+          console.log(
+            `[chat-series] arm=${CHAT_SERIES_ARM} n=${perPost.length} ` +
+              `median=${q(0.5).toFixed(0)}ms q1=${q(0.25).toFixed(0)}ms ` +
+              `q3=${q(0.75).toFixed(0)}ms min=${sorted[0].toFixed(0)}ms ` +
+              `max=${sorted[sorted.length - 1].toFixed(0)}ms ` +
+              `delay=${CHAT_SERIES_DELAY_MS}ms load1/5/15=${load}`,
+          );
+          console.log(
+            `[chat-series] per-post ms: ${
+              perPost.map((v) => v.toFixed(0)).join(" ")
+            }`,
+          );
+        }
 
         // Admin can still add rooms, and every other user sees the shared room.
         await fillCfInput(pages[0], "#trusted-room-name", "Ops");
