@@ -51,10 +51,13 @@ about one aspect of the runtime, are indexed in
   after the code relying on it has already run is a different program, and
   nothing type-checks that. So grouping, collation and sorting all yield to this
   one: leave a bare import where it is, and move no other import across it. A
-  bare import of a module the file already imports by name is a separate matter
-  — it adds nothing, since the named import evaluates the module, side effects
-  included. Drop it, and put what it was there for in a comment on the surviving
-  statement.
+  bare import of a module the file also imports by name is a separate matter,
+  and which way it goes turns on the kind of that named import. Against a value
+  import the bare one adds nothing, since the value import evaluates the module,
+  side effects included: drop it, and put what it was there for in a comment on
+  the surviving statement. Against nothing but an `import type`, it stays — a
+  type-only import is erased and evaluates nothing, so the bare import is the
+  only thing producing the effect.
 - Import a given module in exactly one or two statements. Two shapes are
   allowed:
   - One unified statement, marking any type-only names inline:
