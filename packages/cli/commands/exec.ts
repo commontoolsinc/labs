@@ -84,6 +84,34 @@ export function renderExecOutcome(
 }
 
 /**
+ * The caller's read options, read before anything is resolved or dispatched.
+ *
+ * A malformed selection is a fact about the flags: it costs no mount lookup and
+ * runs no verb, so it is reported as the data error `cf piece get` reports for
+ * the same mistake. Routing it through {@link exitExecFailure} instead would
+ * name an invocation and a phase to retry from for a call that was never made.
+ * A selection that fails against a RESULT is the other case, and that one does
+ * name them.
+ *
+ * Extracted from the action body for the same reason `renderExecOutcome` is:
+ * command action bodies never execute under the unit suite
+ * (docs/development/COVERAGE.md).
+ */
+export async function parseExecSelection(
+  options: ExecCommandOptions,
+  deps?: Parameters<typeof exitWithDataError>[1],
+): Promise<CellSelection | undefined> {
+  try {
+    return await parseCellSelectionOptions(options);
+  } catch (error) {
+    if (error instanceof CellSelectionError) {
+      exitWithDataError({ message: error.message }, deps);
+    }
+    throw error;
+  }
+}
+
+/**
  * The failure exit for `cf exec`.
  *
  * Before `dispatched` there is no invocation worth naming: the pair minted for
@@ -165,21 +193,9 @@ export const exec = new Command()
   .stopEarly()
   .arguments("<mountedFile:string> [tail...:string]")
   .action(async (options: ExecCommandOptions, mountedFile, ...tail) => {
-    // Read before anything is resolved or dispatched, and OUTSIDE the failure
-    // wrapper below: a malformed selection is a fact about the flags, it costs
-    // no mount lookup and runs no verb, and reporting it through the wrapper
-    // would name an invocation and a phase to retry from for a call that was
-    // never made. A selection that fails against a RESULT does sit inside the
-    // wrapper, and does name one.
-    let selection: CellSelection | undefined;
-    try {
-      selection = await parseCellSelectionOptions(options);
-    } catch (error) {
-      if (error instanceof CellSelectionError) {
-        exitWithDataError({ message: error.message });
-      }
-      throw error;
-    }
+    // Outside the failure wrapper below, and refusing before a mount is even
+    // looked up: see {@link parseExecSelection}.
+    const selection = await parseExecSelection(options);
 
     // Minted here rather than inside the dispatch so this frame can both
     // announce it and name it again if the call fails. `cf exec` accepts no

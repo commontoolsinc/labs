@@ -7,7 +7,11 @@ import {
   type ExecutedMountedCallableFile,
   executeMountedCallableFile,
 } from "../lib/exec.ts";
-import { exitExecFailure, renderExecOutcome } from "../commands/exec.ts";
+import {
+  exitExecFailure,
+  parseExecSelection,
+  renderExecOutcome,
+} from "../commands/exec.ts";
 import { invocationPhaseReporter } from "../commands/piece.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
@@ -398,20 +402,51 @@ describe("cf exec read options", () => {
     expect(err[0]).not.toContain("@space");
   });
 
+  it("refuses a malformed selection as a data error, before any lookup", async () => {
+    const errs: string[] = [];
+    const codes: number[] = [];
+
+    await expect(parseExecSelection({ filter: "" }, {
+      printError: (text) => errs.push(text),
+      exit: (code): never => {
+        codes.push(code);
+        throw new Error("exit-sentinel");
+      },
+    })).rejects.toThrow("exit-sentinel");
+
+    expect(codes).toEqual([1]);
+    expect(errs.join("\n")).toContain("--filter predicate must not be empty");
+    // A flag error, so it names no invocation and no phase: nothing was
+    // dispatched, and offering a retry key here would be offering one for a
+    // call that was never made.
+    expect(errs.join("\n")).not.toContain("phase:");
+  });
+
+  it("passes a well-formed selection through untouched", async () => {
+    const selection = await parseExecSelection({ select: "id,title" });
+    expect(selection).toEqual(
+      await parseCellSelectionOptions({ select: "id,title" }),
+    );
+    expect(await parseExecSelection({})).toBeUndefined();
+  });
+
   it("reports a pre-dispatch failure without naming an invocation", () => {
     const errs: string[] = [];
     const codes: number[] = [];
-    exitExecFailure(
-      new Error("no mount covers /tmp/nope"),
-      "inv-unspent",
-      "initial_sync",
-      {
-        printError: (text) => errs.push(text),
-        exit: ((code: number) => {
-          codes.push(code);
-        }) as unknown as (code: number) => never,
-      },
-    );
+    expect(() =>
+      exitExecFailure(
+        new Error("no mount covers /tmp/nope"),
+        "inv-unspent",
+        "initial_sync",
+        {
+          printError: (text) => errs.push(text),
+          exit: (code): never => {
+            codes.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow("exit-sentinel");
 
     expect(codes).toEqual([1]);
     expect(errs).toEqual(["no mount covers /tmp/nope"]);
@@ -425,17 +460,20 @@ describe("cf exec read options", () => {
   it("names the invocation and phase once a failure is past dispatch", () => {
     const errs: string[] = [];
     const codes: number[] = [];
-    exitExecFailure(
-      new Error("selection kept nothing"),
-      "inv-7",
-      "committed",
-      {
-        printError: (text) => errs.push(text),
-        exit: ((code: number) => {
-          codes.push(code);
-        }) as unknown as (code: number) => never,
-      },
-    );
+    expect(() =>
+      exitExecFailure(
+        new Error("selection kept nothing"),
+        "inv-7",
+        "committed",
+        {
+          printError: (text) => errs.push(text),
+          exit: (code): never => {
+            codes.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow("exit-sentinel");
 
     expect(codes).toEqual([1]);
     // The message, then the retry key beside the furthest phase — the shape
