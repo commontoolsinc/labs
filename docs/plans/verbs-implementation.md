@@ -127,7 +127,10 @@ honest one.
 Unblocked and independent of the decision above. Item 2 is (M). Item 11 was
 listed here as its equal and is no longer: its CLI half reduces to a
 documentation correction. What remains of it — whether a rendered address
-should declare itself indirect — is deferred in #5760 and gates nothing.
+should declare itself indirect — is answered no in #5760: indirectness is a
+property of what a target holds when a reader looks, not of a reference. What
+that leaves is provenance, whether an address can say it names a spot rather
+than a canonical cell, which is a different question and gates nothing either.
 
 **2. An unrecognized projection key is refused.** *(M)* **In review as #5817**,
 which is the thing to read before picking any of this up. Two denylists are
@@ -495,9 +498,16 @@ re-runs as data arrives, and interim states are rarely acted on. A marker
 offering resolution over it would ship nondeterminism under a name promising
 determinism, so none is planned and the vocabulary has stopped moving.
 
-Two things follow, and both are recorded in #5760 rather than resolved here:
-whether a rendered address should declare itself indirect, deferred as not
-needed yet; and that a **non-reactive reader** is where eventual consistency
+Two things follow, and both belong to #5760 rather than here. A rendered
+address does not declare itself indirect, and cannot: replacing a cell's
+contents with a link to another cell is an ordinary write, and it turns every
+reference that named that cell directly into an indirect one with no holder
+changing. `resolveLink` re-probes for the sigil at the address on each
+resolution, which is why the answer is read from the target rather than carried
+on the reference — a marker would freeze a render-time observation into a value
+that outlives it. Provenance is the durable thing an address can carry instead,
+and whether it should is the question that survives. And a **non-reactive
+reader** is where eventual consistency
 stops paying, since `cf` exits before convergence on purpose rather than hold a
 committed write hostage to every recomputation it triggered.
 
@@ -690,8 +700,8 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5686 | design rule 1 says input schemas are closed-world; after the #5589 ruling the runtime does the opposite | unscheduled and unowned. Not settled by [designing verbs so they can change](verb-evolution.md), which says nothing about closed-world inputs — searched, not assumed |
 | #5756 | `ensureKeylessPatternIdentity`'s doc comment claims a structural-dedup property the code does not have | runner-owned. Measured: two structurally identical patterns get different keyless identities |
 | #5758 | a call's readback traverses the reference graph with no work budget | memory-owned. `maxDepth` and `maxEntities` are in `docs/specs/memory-v2/05-queries.md` and not on the wire |
-| #5759 | `Cell.equals()` is cache-dependent | runner-owned, and **answered**: this is the runtime's eventual consistency, not a defect. Closeable |
-| #5760 | an indirect reference has no contract | runner-owned. Two of its three questions are answered; whether a rendered address should declare itself indirect is deferred and gates nothing |
+| #5759 | `Cell.equals()` is cache-dependent | runner-owned. The answer on record is that this is the runtime's eventual consistency rather than a defect — reported from review rather than cited, so confirm it with whoever gave it before closing on that basis. `Cell.equalLinks` is the non-resolving comparison and has no call sites outside its own tests, which is the other half of what a confirmation should settle |
+| #5760 | an indirect reference has no contract | runner-owned. A rendered address cannot declare itself indirect: replacing a cell's contents with a link is an ordinary write, so indirectness is a property of what the target holds at read time rather than of the reference. What survives is provenance — whether an address can say it names a spot rather than a canonical cell. The other two answers are reported from review rather than cited, so confirm them with whoever gave them before closing on that basis |
 | #5761 | the projection derivation cannot express conjunction; `allOf` refuses | filed out of item 2 and **relied on by it**: `sourceProvesContainer` refuses to prove a container through `allOf` for this reason |
 
 **Filed against neighboring subsystems, and not sequenced here.** `{ proxy:
