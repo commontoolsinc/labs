@@ -355,6 +355,67 @@ describe("RealmCodecEngine", () => {
       expect(() => fabricFromRealmValue(array)).toThrow(/circular reference/);
     });
 
+    it("refuses a circular reference closed through tagged values alone", () => {
+      // The tagged form is a container too: `decodeTagged()` walks the state
+      // again for a nonterminal codec, for a tag no codec claims, and for a
+      // tag that is not one. So a `Map` graph can close a cycle with no plain
+      // container in it at all, and cloning carries such a graph faithfully.
+      const unknownTag = new Map<unknown, unknown>();
+      unknownTag.set("Nope@1", new Map([["Nope@1", unknownTag]]));
+
+      const malformedTag = new Map<unknown, unknown>();
+      malformedTag.set(42, malformedTag);
+
+      const nonterminal = new Map<unknown, unknown>();
+      nonterminal.set("Error@1", nonterminal);
+
+      for (const one of [unknownTag, malformedTag, nonterminal]) {
+        expect(() => fabricFromRealmValue(one as never))
+          .toThrow(/circular reference/);
+      }
+    });
+
+    it("refuses a circular reference closed through a mix of the two", () => {
+      const object: Record<string, RealmCodecValue> = {};
+      object.tagged = new Map([["Nope@1", object]]);
+
+      expect(() => fabricFromRealmValue(object)).toThrow(/circular reference/);
+    });
+
+    it("decodes the same tagged value at two positions, which is no cycle", () => {
+      // The guard must catch a container reached while still being decoded,
+      // not one merely seen twice. Sequential visits leave the set between
+      // them, so this is the check that it does not over-refuse.
+      const value = { x: new FabricEpochDays(7n), y: new FabricEpochDays(7n) };
+      const decoded = fabricFromRealmValue(
+        realmFromFabricValue(value),
+      ) as Record<string, FabricValue>;
+
+      expect(decoded.x).toBeInstanceOf(FabricEpochDays);
+      expect(decoded.y).toBeInstanceOf(FabricEpochDays);
+    });
+
+    it("reports a repeated reserved-key object as reserved, not circular", () => {
+      // The reserved-key arm returns early, so it has to leave the
+      // in-progress set on its way out. Without that, the second position
+      // holding the same object would be read as a back-edge and reported as
+      // a cycle -- the right refusal for the wrong reason.
+      const offender = Object.defineProperty({ a: 1 }, "constructor", {
+        value: "c",
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      }) as Record<string, RealmCodecValue>;
+      const engine = newDefaultRealmCodecEngine({ lenient: true });
+      const decoded = engine.decode(
+        { first: offender, second: offender },
+        EMPTY_RECONSTRUCTION_CONTEXT,
+      ) as Record<string, ProblematicValue>;
+
+      expect(decoded.first?.error).toMatch(/reserves/);
+      expect(decoded.second?.error).toMatch(/reserves/);
+    });
+
     it("reports a circular reference at the cycle when lenient", () => {
       const engine = newDefaultRealmCodecEngine({ lenient: true });
       const object: Record<string, RealmCodecValue> = { a: 1 };

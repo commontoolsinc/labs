@@ -125,10 +125,10 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * deliberate: a subtree needing no decoding comes back by identity rather
    * than rebuilt, and a `FabricBytes` takes over the buffer it arrived in.
    * Everything retained that can be frozen is frozen before it is returned;
-   * the byte buffer cannot be, which is what makes the cession a requirement
+   * the byte buffer cannot be, which is what makes ceding it a requirement
    * rather than a courtesy.
    *
-   * Across the boundary the cession costs nothing, the tree being the
+   * Across the boundary that costs a caller nothing, the tree being the
    * receiver's own clone of a sender's value. Same-realm it is visible:
    * `encode()` returns unchanged subtrees by identity too, so
    * `decode(encode(value))` can hand back the very objects that went in, and
@@ -258,7 +258,21 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
     const unwrapped = RealmCodecEngine.#unwrapTag(data);
 
     if (unwrapped !== null) {
-      return this.decodeTagged(unwrapped.tag, unwrapped.state, context);
+      // The tagged form is a container too, and a recursion edge like any
+      // other: `decodeTagged()` walks the state again for a nonterminal
+      // codec, for a tag no codec claims, and for a tag that is not one. A
+      // `Map` graph can therefore close a cycle without a single plain
+      // container in it, and cloning carries such a graph faithfully.
+      const cycle = this.#enterOrReport(data as object);
+      if (cycle !== null) {
+        return cycle;
+      }
+
+      try {
+        return this.decodeTagged(unwrapped.tag, unwrapped.state, context);
+      } finally {
+        this.#decodeSeen?.delete(data as object);
+      }
     }
 
     // Self-representing primitives pass straight through. That is every
@@ -292,8 +306,8 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * run-length form to validate, and so no count off the wire that could name
    * a length an array cannot hold.
    *
-   * Frozen on the way out whether it was rebuilt or passed through, per the
-   * cession {@link #decode} requires.
+   * Frozen on the way out whether it was rebuilt or passed through, per what
+   * {@link #decode} says a caller cedes to it.
    */
   #decodeArray(
     data: readonly RealmCodecValue[],
@@ -337,8 +351,8 @@ export class RealmCodecEngine extends BaseCodecEngine<RealmCodecValue> {
    * under JSON: this format reserves no key at all, its tags living in a
    * container a payload cannot produce.
    *
-   * Frozen on the way out whether it was rebuilt or passed through, per the
-   * cession {@link #decode} requires.
+   * Frozen on the way out whether it was rebuilt or passed through, per what
+   * {@link #decode} says a caller cedes to it.
    */
   #decodePlainObject(
     data: Record<string, RealmCodecValue>,
