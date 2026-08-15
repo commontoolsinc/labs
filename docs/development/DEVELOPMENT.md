@@ -32,6 +32,29 @@ about one aspect of the runtime, are indexed in
 - Destructure when importing multiple names from the same module.
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
+- Import a given module in one statement. Two statements naming the same module
+  represent one dependency as though it were two, and the second is easy to miss
+  when the first is being edited or removed. Merge the specifier lists instead.
+  Two details:
+  - Splitting a module's type imports from its value imports is the carve-out,
+    and needs no justification: `import type { ... } from "x";` alongside
+    `import { ... } from "x";` states one dependency in the two forms the type
+    system distinguishes. Keep the two statements adjacent. That split is the
+    whole of the exception — two value imports from one module, or two
+    `import type`s from it, are what this rule is about.
+  - A bare `import "x";` adds nothing to a file that already imports `x` by
+    name. The named import evaluates the module, side effects included, so the
+    bare form documents an effect it is not needed to produce. Put that in a
+    comment on the surviving statement.
+- Within a package that defines the `@/` import alias, address the aliased tree
+  as `@/...` rather than by a `../` path that climbs out of the current
+  directory to reach it. The alias exists so that a module's address does not
+  depend on where the importing file sits, and a `../` path spends that. The
+  rule reaches `../` alone: a `./` path, which addresses something at or below
+  the importing file, is outside it. So is a `../` path whose target lies
+  outside the aliased tree, which has no `@/` form at all — a `bench/` or
+  `test/` file reaching a fixture in its own tree, in a package whose alias
+  covers `src/`.
 
 ### Classes
 

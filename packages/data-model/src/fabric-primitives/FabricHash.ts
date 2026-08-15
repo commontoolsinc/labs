@@ -14,10 +14,10 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "@/codec-common/BaseFabricPrimitive.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import {
+  JSON_CODEC,
   type NonterminalCodec,
   type ReconstructionContext,
 } from "@/codec-interface/interface.ts";
-import { JSON_CODEC } from "@/codec-interface/interface.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 
