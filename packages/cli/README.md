@@ -223,8 +223,11 @@ the verb's handler READS, which can be fewer than its TypeScript event type
 declares: a field the body never touches is one the runtime would have dropped,
 and the refusal says so rather than accepting it and losing it.
 
-A verb that publishes no event schema at all — one whose event type names no
-fields — takes any payload. With nothing declared, nothing is dropped either.
+A verb that publishes **no event schema at all**, or one whose schema carries no
+`properties` key, takes any payload: with nothing declared, nothing is dropped
+either. That is not the same as a schema whose `properties` is empty — that one
+declares that there are no fields, so the runtime delivers none and every field
+a caller sends is refused.
 
 ### Transforming `piece get` and `piece call` output
 
