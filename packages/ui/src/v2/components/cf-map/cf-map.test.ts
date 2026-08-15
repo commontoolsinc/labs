@@ -7,6 +7,7 @@
  *
  * For full component integration tests, use browser-based testing.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type {

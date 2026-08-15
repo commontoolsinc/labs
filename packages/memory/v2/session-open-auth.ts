@@ -20,6 +20,7 @@
  *  - **audience** (`aud`): the invocation must carry this server's audience
  *    identity. An open signed for host A cannot be replayed to host B.
  */
+
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { fromDID } from "../util.ts";

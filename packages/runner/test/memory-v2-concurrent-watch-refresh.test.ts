@@ -10,6 +10,7 @@
  * on transport signals, and the "nothing more happens" assertions use a
  * deterministic microtask drain, not a timer.
  */
+
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";

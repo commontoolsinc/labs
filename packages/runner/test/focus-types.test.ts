@@ -4,6 +4,7 @@
  * These tests verify that key() correctly handles multiple keys.
  * If the types are incorrect, these tests will fail to compile.
  */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type {

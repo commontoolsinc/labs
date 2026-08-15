@@ -12,6 +12,7 @@
  *
  * Run: deno run -A test/liveness-scaling.profile.ts [sizes...]
  */
+
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";

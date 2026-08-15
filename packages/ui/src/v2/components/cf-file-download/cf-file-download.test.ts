@@ -1,6 +1,7 @@
 /**
  * Tests for CFFileDownload component
  */
+
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { CFFileDownload } from "./index.ts";

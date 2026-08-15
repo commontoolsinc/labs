@@ -20,6 +20,7 @@
  * @fires cf-click - Click with nearest data point
  * @fires cf-leave - Mouse leaves chart area
  */
+
 import { html, svg, PropertyValues } from "lit";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import { BaseElement } from "../../core/base-element.ts";

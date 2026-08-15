@@ -11,6 +11,7 @@
  * in arrays (e.g., `items: Writable<Default<Item[], []>>` where Item has
  * `name: Default<string, "">`).
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
