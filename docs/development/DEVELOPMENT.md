@@ -50,11 +50,12 @@ about one aspect of the runtime, are indexed in
   as `@/...` rather than by a `../` path that climbs out of the current
   directory to reach it. The alias exists so that a module's address does not
   depend on where the importing file sits, and a `../` path spends that. The
-  rule reaches `../` alone: a `./` path, which addresses something at or below
-  the importing file, is outside it. So is a `../` path whose target lies
-  outside the aliased tree, which has no `@/` form at all — a `bench/` or
-  `test/` file reaching a fixture in its own tree, in a package whose alias
-  covers `src/`.
+  rule is about `../` and nothing else. A `./` path addresses something at or
+  below the importing file, so no climbing is involved and no address depends on
+  the file's own position; `./` and `@/` are both fine, and a file may use each
+  where it reads better. A `../` path whose target lies outside the aliased tree
+  has no `@/` form at all, and stays as it is — a `bench/` or `test/` file
+  reaching a fixture in its own tree, in a package whose alias covers `src/`.
 - Collate a package's imports. Every specifier naming the same top-level
   package, or the same namespace-and-package pair, sits in one contiguous run:
   `@commonfabric/utils/base64url` next to `@commonfabric/utils/types`,
