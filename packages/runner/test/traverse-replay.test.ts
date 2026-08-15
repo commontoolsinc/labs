@@ -8,6 +8,7 @@
  * test/traverse-replay/regen-goldens.ts) and justify the golden diff in the
  * PR.
  */
+
 import { assert } from "@std/assert";
 import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";

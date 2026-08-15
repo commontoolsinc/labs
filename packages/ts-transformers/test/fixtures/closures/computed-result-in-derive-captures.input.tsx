@@ -3,6 +3,7 @@
  * not plain property access. The computed() return value is an
  * Reactive, so rewritePatternBody correctly treats it as opaque.
  */
+
 import { computed, pattern, UI } from "commonfabric";
 
 interface State {

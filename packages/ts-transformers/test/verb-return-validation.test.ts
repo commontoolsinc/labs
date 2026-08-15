@@ -9,6 +9,7 @@
  * `packages/api/index.ts`), so the declared-result cases also prove the
  * `action<E, R>` / `handler<E, T, R>` overloads are reachable from a pattern.
  */
+
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";

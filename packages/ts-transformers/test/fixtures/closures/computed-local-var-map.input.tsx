@@ -5,6 +5,7 @@
  * Inside a lift-applied callback, Reactive values are unwrapped to plain JS,
  * so `localVar` is a plain array and .mapWithPattern() doesn't exist on it.
  */
+
 import { computed, pattern, UI } from "commonfabric";
 
 interface Item {

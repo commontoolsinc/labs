@@ -6,6 +6,7 @@
  * supplies by hand what a capture derives mechanically — so every argument is
  * a chance to pin a fixture whose every replay fails.
  */
+
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";

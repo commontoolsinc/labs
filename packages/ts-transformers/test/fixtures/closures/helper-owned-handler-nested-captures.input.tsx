@@ -12,6 +12,7 @@
  * - generated handler state omits captures that the handler body still uses
  *   inside the nested `.then(...)` callback
  */
+
 import { action, Default, pattern, Stream, Writable } from "commonfabric";
 
 function flushLater(

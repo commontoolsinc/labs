@@ -6,6 +6,7 @@
  *
  * @element cf-area-mark
  */
+
 import type { CurveType, MarkType } from "../types.ts";
 import { MarkElement } from "./base-mark.ts";
 

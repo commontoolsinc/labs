@@ -10,6 +10,7 @@
  *
  * See docs/development/COVERAGE.md.
  */
+
 import { fromFileUrl, join, resolve } from "@std/path";
 import {
   PATTERN_COVERAGE_INTEGRATION_TEST_NAME,
