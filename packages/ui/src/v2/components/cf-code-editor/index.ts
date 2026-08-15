@@ -1,6 +1,4 @@
-import { CFCodeEditor } from "./cf-code-editor.ts";
-
-import { MimeType } from "./cf-code-editor.ts";
+import { CFCodeEditor, MimeType } from "./cf-code-editor.ts";
 
 if (!customElements.get("cf-code-editor")) {
   customElements.define("cf-code-editor", CFCodeEditor);

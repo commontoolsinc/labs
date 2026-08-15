@@ -1,8 +1,8 @@
+import { consume } from "@lit/context";
 import { html, type PropertyValues } from "lit";
-import { styles } from "./styles.ts";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
 import { oneOf } from "../../core/property-guards.ts";
 import {
@@ -13,6 +13,7 @@ import {
   type ComponentSize,
   defaultTheme,
 } from "../theme-context.ts";
+import { styles } from "./styles.ts";
 
 /**
  * CFButton - Interactive button element with multiple variants and sizes

@@ -1,19 +1,23 @@
+import { consume } from "@lit/context";
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
-import { consume } from "@lit/context";
+
 import { BaseElement } from "../../core/base-element.ts";
+
 import "../cf-avatar/index.ts";
-import type { AvatarSize } from "../cf-avatar/cf-avatar.ts";
+
+import type { DID } from "@commonfabric/identity";
 import {
   type CellHandle,
   type CfcLabelView,
   NAME,
   type RuntimeClient,
 } from "@commonfabric/runtime-client";
-import type { DID } from "@commonfabric/identity";
 import { navigate, openInNewTab } from "@commonfabric/shell/shared";
-import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+
 import { ownerPrincipalFromLabel } from "../../core/cfc-label.ts";
+import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import type { AvatarSize } from "../cf-avatar/cf-avatar.ts";
 import { type IdentitySeal, identitySeal } from "./identity-seal.ts";
 import {
   registerSeal,

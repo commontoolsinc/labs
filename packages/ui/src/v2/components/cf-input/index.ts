@@ -1,6 +1,4 @@
-import { CFInput } from "./cf-input.ts";
-
-import { InputType } from "./cf-input.ts";
+import { CFInput, InputType } from "./cf-input.ts";
 
 if (!customElements.get("cf-input")) {
   customElements.define("cf-input", CFInput);
