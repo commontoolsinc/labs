@@ -58,6 +58,11 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
    *
    * Checks the format tag, parses what follows it, and walks the resulting
    * tree back into fabric values.
+   *
+   * The walk carries no cycle guard, and needs none: what it walks is the
+   * product of `JSON.parse()`, and a parse of text yields a tree. This format
+   * never receives a tree it did not build itself, which is the condition
+   * under which a decode can be handed a cycle at all.
    */
   override decode(data: string, context: ReconstructionContext): FabricValue {
     if (!JsonCodecEngine.seemsLikeEncoded(data)) {
@@ -77,7 +82,11 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     return JsonCodecEngine.#toBytes(this.encodeValue(value));
   }
 
-  /** Deserializes UTF-8 JSON bytes back into a fabric value. */
+  /**
+   * Deserializes UTF-8 JSON bytes back into a fabric value. Carries no cycle
+   * guard, for the reason {@link #decode} gives: this walk too gets its tree
+   * from a parse.
+   */
   decodeFromBytes(
     bytes: Uint8Array,
     context: ReconstructionContext,
@@ -199,6 +208,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   protected override decodeValue(
     data: JsonCodecValue,
     context: ReconstructionContext,
+    seen?: Set<object>,
   ): FabricValue {
     const decoded = JsonCodecEngine.#unwrapTag(data);
     if (decoded !== null) {
@@ -219,14 +229,14 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
           if (isUnsafeObjectKey(key)) {
             return this.reportReservedKey(key, inner);
           }
-          result[key] = this.decodeValue(val, context);
+          result[key] = this.decodeValue(val, context, seen);
         }
         return Object.freeze(result);
       }
 
       // `/quote` and `/object` returned above, so no codec ever sees their
       // state, and `/quote` contents alone go undecoded.
-      return this.decodeTagged(tag, rawState, context);
+      return this.decodeTagged(tag, rawState, context, seen);
     }
 
     // Primitives pass through.
@@ -238,7 +248,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     }
 
     if (Array.isArray(data)) {
-      return this.#decodeArray(data, context);
+      return this.#decodeArray(data, context, seen);
     }
 
     // `Array.isArray()` above removed the array arm, but TypeScript keeps it
@@ -246,6 +256,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
     return this.#decodePlainObject(
       data as Record<string, JsonCodecValue>,
       context,
+      seen,
     );
   }
 
@@ -272,6 +283,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   #decodeArray(
     data: readonly JsonCodecValue[],
     context: ReconstructionContext,
+    seen: Set<object> | undefined,
   ): FabricValue {
     const result: FabricValue[] = new Array(data.length);
     let targetIndex = 0;
@@ -292,7 +304,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
         }
         targetIndex += count;
       } else {
-        result[targetIndex] = this.decodeValue(entry, context);
+        result[targetIndex] = this.decodeValue(entry, context, seen);
         targetIndex++;
       }
     }
@@ -324,6 +336,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
   #decodePlainObject(
     data: Record<string, JsonCodecValue>,
     context: ReconstructionContext,
+    seen: Set<object> | undefined,
   ): FabricValue {
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
@@ -342,7 +355,7 @@ export class JsonCodecEngine extends BaseCodecEngine<JsonCodecValue, string> {
       if (isUnsafeObjectKey(key)) {
         return this.reportReservedKey(key, data);
       }
-      result[key] = this.decodeValue(val, context);
+      result[key] = this.decodeValue(val, context, seen);
     }
     return Object.freeze(result);
   }

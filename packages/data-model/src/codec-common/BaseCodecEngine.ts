@@ -139,10 +139,29 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
   /** Wraps a tag and state into this format's tagged wire form. */
   protected abstract wrapTag(tag: string, state: Encoded): Encoded;
 
-  /** Decodes a transport tree back into fabric values. */
+  /**
+   * Decodes a transport tree back into fabric values.
+   *
+   * `seen` carries the nodes whose decoding is in progress, the decode side's
+   * counterpart to what {@link #encodeValue} threads, so that a cycle arriving
+   * on a channel is caught rather than followed. Whether there is one at all
+   * is the format's decision, taken at its public entry points: a format whose
+   * input it parses for itself cannot be handed a cycle and pays nothing here,
+   * where one handed a tree it did not build starts a set.
+   *
+   * An implementation that is given a set owes it one thing: every object it
+   * is about to descend through goes through {@link #enterOrReport} first, and
+   * comes back out however the descent ends. That means the tagged form as
+   * much as a container -- a format whose transport can carry a graph can
+   * close a cycle through tagged nodes alone. Here rather than in
+   * {@link #decodeTagged}, because this method is the one that meets every
+   * node, and entering in both places would enter a state twice and report a
+   * cycle that is not there.
+   */
   protected abstract decodeValue(
     data: Encoded,
     context: ReconstructionContext,
+    seen?: Set<object>,
   ): FabricValue;
 
   //
@@ -285,11 +304,19 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
    * Frozen-ness contract: a value returned through the codec arm here is
    * deep-frozen, so callers do not each have to freeze. The unknown-tag
    * fallback is a separate arm and is intentionally NOT covered by it.
+   *
+   * Three of the arms below walk the state again -- a nonterminal codec's, an
+   * unknown tag's, and a malformed tag's -- and each carries `seen` into that
+   * walk. Entering the state is not this method's business: it is
+   * {@link #decodeValue} that meets every node of the tree, the tagged form
+   * included, and entering there is what keeps one node from being entered
+   * twice.
    */
   protected decodeTagged(
     tag: any,
     rawState: Encoded,
     context: ReconstructionContext,
+    seen?: Set<object>,
   ): FabricValue {
     if (!isCodecTypeTag(tag)) {
       // Anything that is not a tag syntactically is an encoding error whatever
@@ -299,7 +326,7 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // decoded state, so that a lenient result carries what arrived.
       return this.reportMalformed(
         tag,
-        this.decodeValue(rawState, context),
+        this.decodeValue(rawState, context, seen),
         `tagged value has a malformed tag: ${
           backtickQuote(toCompactDebugString(tag, 30))
         }`,
@@ -312,14 +339,16 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
       // A tag this registry does not carry, kept in the unknown form so that
       // it round-trips. Not covered by the deep-frozen contract the codec arm
       // below states.
-      return new UnknownValue(tag, this.decodeValue(rawState, context));
+      return new UnknownValue(tag, this.decodeValue(rawState, context, seen));
     }
 
     // A terminal codec takes the state exactly as it arrived; a nonterminal
     // one takes it expanded. The casts restate what `instanceof` just
     // established, which TypeScript drops on a generic class.
     const terminal = matched instanceof BaseTerminalCodec;
-    const state = terminal ? rawState : this.decodeValue(rawState, context);
+    const state = terminal
+      ? rawState
+      : this.decodeValue(rawState, context, seen);
 
     let decoded: FabricValue;
 
@@ -376,6 +405,40 @@ export abstract class BaseCodecEngine<Encoded, SerializedForm = Encoded>
     // `FabricPrimitive` is already frozen, making it an O(1) cache hit -- and
     // the lenient fallback above alike.
     return deepFreeze(decoded);
+  }
+
+  /**
+   * Enters a container into the in-progress set, reporting rather than
+   * entering if it is already there.
+   *
+   * Reported rather than raised, unlike the encode side's refusal: a cycle met
+   * here arrived from a channel, and every malformation off a channel settles
+   * against {@link #lenient}. Raising unconditionally would also be the one
+   * refusal a lenient decode could not contain.
+   *
+   * The report carries a rendering of the container rather than the container
+   * itself, a cyclic graph being the one thing a `ProblematicValue` cannot
+   * hold onto.
+   *
+   * @param seen The containers whose decoding is in progress.
+   * @param value The container about to be walked.
+   * @returns The report, or `null` if `value` was entered.
+   * @throws If this engine is not lenient.
+   */
+  protected enterOrReport(
+    seen: Set<object>,
+    value: object,
+  ): FabricValue | null {
+    if (seen.has(value)) {
+      return this.reportMalformed(
+        "",
+        toCompactDebugString(value, 50),
+        "circular reference in decoded data",
+      );
+    }
+
+    seen.add(value);
+    return null;
   }
 
   /** Encodes one value through the codec the registry matched to it. */

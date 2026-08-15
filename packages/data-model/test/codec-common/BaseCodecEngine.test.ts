@@ -141,6 +141,76 @@ describe("BaseCodecEngine", () => {
     });
   });
 
+  describe("decodeValue()", () => {
+    // The guard these exercise is the base's, reached through `enterOrReport()`
+    // and the `seen` threaded from `decode()`. A format whose transport is a
+    // tree can be handed a cycle by a peer, where one that parses its own
+    // input cannot, so this is wire data like any other malformation and
+    // settles against `lenient` rather than raising unconditionally.
+
+    it("reports a circular reference through a container", () => {
+      const { engine } = newProbeEngine({ lenient: true });
+      const data: Record<string, ProbeValue> = { a: 1 };
+      data.self = data;
+
+      const result = engine.decode(data, CONTEXT) as Record<
+        string,
+        FabricValue
+      >;
+
+      expect(result.a).toBe(1);
+      expect(result.self).toBeInstanceOf(ProblematicValue);
+      expect((result.self as ProblematicValue).error)
+        .toMatch(/circular reference/);
+    });
+
+    it("reports a circular reference that closes through a tagged node", () => {
+      // A cycle need not run through a container at all: the state under a tag
+      // is walked for an unknown tag, as it is for a nonterminal codec, so
+      // guarding only the container arms would follow this one forever.
+      const { engine } = newProbeEngine({ lenient: true });
+      const state: Record<string, ProbeValue> = {};
+      const tagged = new Tagged("Zz@1", state);
+      state.back = tagged;
+
+      const result = engine.decode(tagged, CONTEXT);
+
+      expect(result).toBeInstanceOf(UnknownValue);
+      const inner = (result as UnknownValue).state as Record<
+        string,
+        FabricValue
+      >;
+      expect(inner.back).toBeInstanceOf(ProblematicValue);
+      expect((inner.back as ProblematicValue).error)
+        .toMatch(/circular reference/);
+    });
+
+    it("throws given a circular reference when not lenient", () => {
+      const { engine } = newProbeEngine();
+      const data: Record<string, ProbeValue> = { a: 1 };
+      data.self = data;
+
+      expect(() => engine.decode(data, CONTEXT))
+        .toThrow(ProblematicStateError);
+    });
+
+    it("does not mistake a repeated node for a circular one", () => {
+      // The same node twice over is not a cycle, so `seen` has to be unwound as
+      // the walk leaves each node rather than only grown. Both a container and
+      // a tagged node, those being entered by the same call site.
+      const { engine } = newProbeEngine();
+      const shared: Record<string, ProbeValue> = { v: 1 };
+      const tagged = new Tagged("Zz@1", 2);
+
+      expect(() =>
+        engine.decode(
+          { a: shared, b: shared, c: tagged, d: tagged },
+          CONTEXT,
+        )
+      ).not.toThrow();
+    });
+  });
+
   describe("decodeTagged()", () => {
     it("wraps an unrecognized tag in an `UnknownValue`, decoded state kept", () => {
       const { engine } = newProbeEngine();
