@@ -222,6 +222,32 @@ function parseValueForSchema(
 }
 
 /**
+ * The flags a verb taking a single non-object value accepts. Fixed rather
+ * than schema-derived, because such a verb declares no fields for a flag to
+ * name — the value is the whole payload.
+ */
+const SCALAR_INPUT_FLAGS = [
+  "value",
+  "value-file",
+  "json",
+  "json-file",
+] as const;
+
+/**
+ * `--help` was given an argument by a verb that declares no `help` field.
+ *
+ * Written once and used at both arrival points, which parse their arguments
+ * separately: two copies of one sentence drift, and this one is long enough
+ * that a drift would not be obvious in a diff.
+ *
+ * `--help` is not unknown — alone it prints the help page. It takes an
+ * argument only where the verb declares a `help` field for it to fill.
+ */
+const HELP_TAKES_NO_ARGUMENTS =
+  "--help takes no arguments — it prints the help page, and this verb " +
+  "declares no help field for it to fill";
+
+/**
  * The refusal a flag naming no declared field earns.
  *
  * The same five elements `undeclaredVerbFieldError` gives the payload door:
@@ -356,7 +382,7 @@ function parseObjectInput(
         // looking for a name they already found. What is wrong is the
         // negation, and only its own field can say so.
         throw new Error(
-          `--${rawFlag} negates ${flagName}, which is not a boolean field`,
+          `"--${rawFlag}" negates "${flagName}", which is not a boolean field`,
         );
       }
       input[descriptor.key] = false;
@@ -447,12 +473,17 @@ function parseNonObjectInput(
     flag !== "--value" && flag !== "--json" && flag !== "--value-file" &&
     flag !== "--json-file"
   ) {
-    // A verb taking a single non-object value has no fields to name, so the
-    // vocabulary here is fixed rather than schema-derived — but it is still
-    // the answer the caller needs, and the same sentence shape carries it.
+    // A verb taking a single non-object value has no fields, so its
+    // vocabulary is this fixed four rather than anything schema-derived, and
+    // there is no position to name — the value IS the payload. The near miss
+    // is owed all the same: a fixed vocabulary is still a vocabulary, and
+    // `--valu` is the same slip here as `--titel` is at the field door.
+    const nearest = nearestName(flag.replace(/^--/, ""), SCALAR_INPUT_FLAGS);
     throw new Error(
-      `${flag} is not a flag this verb takes — it takes a single value, ` +
-        `so the flags are --value, --value-file, --json, --json-file`,
+      `"${flag}" is not a flag this verb takes. ` +
+        (nearest === undefined ? "" : `Did you mean "--${nearest}"? `) +
+        "This verb takes a single value, so its flags are " +
+        SCALAR_INPUT_FLAGS.map((name) => `"--${name}"`).join(", "),
     );
   }
   if (flag === "--json" && rawValue === undefined) {
@@ -1020,13 +1051,7 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      // `--help` is not unknown — alone it prints the help page, which is the
-      // branch above. It takes an argument only where the verb declares a
-      // `help` field for it to fill, and this one does not.
-      throw new Error(
-        "--help takes no arguments — it prints the help page, and this " +
-          "verb declares no help field for it to fill",
-      );
+      throw new Error(HELP_TAKES_NO_ARGUMENTS);
     }
   }
 
@@ -1066,13 +1091,7 @@ export function parseExecArgs(
       };
     }
     if (!helpField) {
-      // `--help` is not unknown — alone it prints the help page, which is the
-      // branch above. It takes an argument only where the verb declares a
-      // `help` field for it to fill, and this one does not.
-      throw new Error(
-        "--help takes no arguments — it prints the help page, and this " +
-          "verb declares no help field for it to fill",
-      );
+      throw new Error(HELP_TAKES_NO_ARGUMENTS);
     }
   }
 

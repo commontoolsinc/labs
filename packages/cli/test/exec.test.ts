@@ -521,7 +521,7 @@ describe("parseExecArgs edge cases", () => {
     // vocabulary here would send the caller looking for a name they already
     // found, so this refusal names only the field it is about.
     expect(() => parseExecArgs(spec, ["--no-query"])).toThrow(
-      /--no-query negates --query, which is not a boolean field/,
+      /"--no-query" negates "--query", which is not a boolean field/,
     );
     expect(() => parseExecArgs(spec, ["--no-query"])).not.toThrow(
       /declared fields are/,
@@ -537,14 +537,18 @@ describe("parseExecArgs edge cases", () => {
     expect(() => parseExecArgs(stringSpec, ["--value", "one", "extra"]))
       .toThrow(/Unexpected argument extra/);
     // A verb taking a single value has no fields to name, so the vocabulary
-    // is the fixed four rather than schema-derived — but the caller still
-    // gets told what it is, in the same sentence shape.
+    // is the fixed four rather than schema-derived — but a fixed vocabulary
+    // is still a vocabulary, so the near miss is owed here too.
     expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
-      /--other is not a flag this verb takes/,
+      /"--other" is not a flag this verb takes\./,
     );
     expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
-      /--value, --value-file, --json, --json-file/,
+      /"--value", "--value-file", "--json", "--json-file"/,
     );
+    expect(() => parseExecArgs(stringSpec, ["--valu", "x"]))
+      .toThrow(/Did you mean "--value"\?/);
+    expect(() => parseExecArgs(stringSpec, ["--zzzzzzzz", "x"]))
+      .not.toThrow(/Did you mean/);
     expect(() => parseExecArgs(stringSpec, ["--json", "--other"])).toThrow(
       /cannot be combined/,
     );
